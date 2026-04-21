@@ -34,11 +34,7 @@ class CollectionsService:
             .eq("is_trashed", False)
             .execute()
         )
-        return {
-            r["id"]: r["media_id"]
-            for r in result.data
-            if r.get("media_id")
-        }
+        return {r["id"]: r["media_id"] for r in result.data if r.get("media_id")}
 
     async def get_collection_media(
         self,
@@ -157,15 +153,11 @@ class CollectionsService:
 
         # Tag-based conditions
         if field == "tag":
-            return await self._match_tag_condition(
-                operator, value, resource_map
-            )
+            return await self._match_tag_condition(operator, value, resource_map)
 
         # Date-based conditions
         if field == "date":
-            return await self._match_date_condition(
-                operator, value, user_media_ids
-            )
+            return await self._match_date_condition(operator, value, user_media_ids)
 
         # Direct field conditions on parsed_media (scoped to user's media)
         query = client.table("parsed_media").select("id").in_("id", user_media_ids)
@@ -226,11 +218,13 @@ class CollectionsService:
                 .execute()
             )
             # Map resource_id back to media_id
-            return list(set(
-                resource_map[r["resource_id"]]
-                for r in result.data
-                if r["resource_id"] in resource_map
-            ))
+            return list(
+                set(
+                    resource_map[r["resource_id"]]
+                    for r in result.data
+                    if r["resource_id"] in resource_map
+                )
+            )
 
         elif operator == "has_any":
             # Media that have any of the specified tags
@@ -242,11 +236,13 @@ class CollectionsService:
                     .in_("resource_id", resource_ids)
                     .execute()
                 )
-                return list(set(
-                    resource_map[r["resource_id"]]
-                    for r in result.data
-                    if r["resource_id"] in resource_map
-                ))
+                return list(
+                    set(
+                        resource_map[r["resource_id"]]
+                        for r in result.data
+                        if r["resource_id"] in resource_map
+                    )
+                )
 
         elif operator == "has_all":
             # Media that have all of the specified tags

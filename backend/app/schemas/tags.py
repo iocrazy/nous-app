@@ -54,7 +54,9 @@ class TagResponse(TagBase):
     group_name: Optional[str] = Field(None, description="Tag group name")
     enabled: bool = Field(True, description="Whether visible in frontend API")
     created_at: datetime
-    media_count: Optional[int] = Field(0, description="Number of resources using this tag")
+    media_count: Optional[int] = Field(
+        0, description="Number of resources using this tag"
+    )
 
     model_config = {"from_attributes": True}
 

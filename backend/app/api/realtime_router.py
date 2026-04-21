@@ -58,68 +58,65 @@ class RealtimeManager:
             client = await get_async_supabase_admin()
 
             # Subscribe to parsed_media changes for this user
-            channel = client.channel(f'user_{user_id}_realtime')
+            channel = client.channel(f"user_{user_id}_realtime")
 
             async def on_video_change(payload):
                 """Handle video table changes."""
-                event_type = payload.get('eventType', 'unknown')
-                new_record = payload.get('new', {})
-                old_record = payload.get('old', {})
+                event_type = payload.get("eventType", "unknown")
+                new_record = payload.get("new", {})
+                old_record = payload.get("old", {})
 
                 # Only send events for this user's data
-                record_user_id = new_record.get('user_id') or old_record.get('user_id')
+                record_user_id = new_record.get("user_id") or old_record.get("user_id")
                 if record_user_id != user_id:
                     return
 
                 event = {
-                    'type': 'video',
-                    'event': event_type.lower(),
-                    'data': new_record if event_type != 'DELETE' else old_record
+                    "type": "video",
+                    "event": event_type.lower(),
+                    "data": new_record if event_type != "DELETE" else old_record,
                 }
                 await queue.put(event)
 
             async def on_collection_change(payload):
                 """Handle collection_videos changes."""
-                event_type = payload.get('eventType', 'unknown')
-                new_record = payload.get('new', {})
-                old_record = payload.get('old', {})
+                event_type = payload.get("eventType", "unknown")
+                new_record = payload.get("new", {})
+                old_record = payload.get("old", {})
 
                 event = {
-                    'type': 'collection_video',
-                    'event': event_type.lower(),
-                    'data': new_record if event_type != 'DELETE' else old_record
+                    "type": "collection_video",
+                    "event": event_type.lower(),
+                    "data": new_record if event_type != "DELETE" else old_record,
                 }
                 await queue.put(event)
 
             async def on_tag_change(payload):
                 """Handle video_tags changes."""
-                event_type = payload.get('eventType', 'unknown')
-                new_record = payload.get('new', {})
-                old_record = payload.get('old', {})
+                event_type = payload.get("eventType", "unknown")
+                new_record = payload.get("new", {})
+                old_record = payload.get("old", {})
 
                 event = {
-                    'type': 'video_tag',
-                    'event': event_type.lower(),
-                    'data': new_record if event_type != 'DELETE' else old_record
+                    "type": "video_tag",
+                    "event": event_type.lower(),
+                    "data": new_record if event_type != "DELETE" else old_record,
                 }
                 await queue.put(event)
 
             # Subscribe to tables
             channel.on_postgres_changes(
-                event='*',
-                schema='public',
-                table='parsed_media',
-                callback=on_video_change
+                event="*",
+                schema="public",
+                table="parsed_media",
+                callback=on_video_change,
             ).on_postgres_changes(
-                event='*',
-                schema='public',
-                table='video_collections',
-                callback=on_collection_change
+                event="*",
+                schema="public",
+                table="video_collections",
+                callback=on_collection_change,
             ).on_postgres_changes(
-                event='*',
-                schema='public',
-                table='video_tags',
-                callback=on_tag_change
+                event="*", schema="public", table="video_tags", callback=on_tag_change
             )
 
             await channel.subscribe()
@@ -127,13 +124,17 @@ class RealtimeManager:
             logger.info(f"Subscribed user {user_id} to realtime updates")
 
         except Exception as e:
-            logger.error(f"Failed to setup Supabase subscription for user {user_id}: {e}")
+            logger.error(
+                f"Failed to setup Supabase subscription for user {user_id}: {e}"
+            )
             # Send error event to client
-            await queue.put({
-                'type': 'error',
-                'event': 'subscription_failed',
-                'data': {'message': str(e)}
-            })
+            await queue.put(
+                {
+                    "type": "error",
+                    "event": "subscription_failed",
+                    "data": {"message": str(e)},
+                }
+            )
 
 
 # Global realtime manager instance
@@ -177,9 +178,7 @@ async def event_generator(user_id: str, request: Request) -> AsyncGenerator[str,
 
 @router.get("/subscribe")
 async def subscribe_to_realtime(
-    request: Request,
-    token: str = None,
-    auth: OptionalAuthDep = None
+    request: Request, token: str = None, auth: OptionalAuthDep = None
 ):
     """
     Subscribe to realtime updates via Server-Sent Events.
@@ -211,18 +210,18 @@ async def subscribe_to_realtime(
     elif token:
         # Verify token manually if passed as query param
         from app.services.supabase_auth_service import SupabaseAuthService
+
         auth_service = SupabaseAuthService()
         try:
             user = await auth_service.get_user(token)
             if user:
-                user_id = user.get('id')
+                user_id = user.get("id")
         except Exception as e:
             logger.warning(f"Token verification failed: {e}")
 
     if not user_id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
         )
 
     return StreamingResponse(
@@ -232,5 +231,5 @@ async def subscribe_to_realtime(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
+        },
     )

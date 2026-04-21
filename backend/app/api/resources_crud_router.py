@@ -18,7 +18,11 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.resources_repository import ResourcesRepository
-from app.schemas.resources import ResourceTagRequest, ResourceMoveRequest, ResourceUpdate
+from app.schemas.resources import (
+    ResourceTagRequest,
+    ResourceMoveRequest,
+    ResourceUpdate,
+)
 from app.services.resources_service import ResourcesService
 from app.services.thumbnail_service import ThumbnailService
 
@@ -93,15 +97,20 @@ async def batch_transcode(auth: AuthDep):
         versions = await repo.get_untranscoded_video_versions()
 
         from app.tasks.transcode_tasks import transcode_to_hls
+
         queued = 0
         for v in versions:
             try:
                 vid = str(v["id"])
                 await repo.update_version(vid, {"transcode_status": "pending"})
-                await asyncio.to_thread(transcode_to_hls.delay, str(v["resource_id"]), vid, auth.user_id)
+                await asyncio.to_thread(
+                    transcode_to_hls.delay, str(v["resource_id"]), vid, auth.user_id
+                )
                 queued += 1
             except Exception as e:
-                logger.warning(f"[Transcode/Batch] Failed to queue version {v['id']}: {e}")
+                logger.warning(
+                    f"[Transcode/Batch] Failed to queue version {v['id']}: {e}"
+                )
 
         logger.info(f"[Transcode/Batch] Queued {queued}/{len(versions)} versions")
         return {"success": True, "queued": queued, "total_found": len(versions)}
@@ -180,9 +189,7 @@ async def serve_resource_file(
             raise HTTPException(status_code=404, detail="No file available")
 
         # When served with ?token= in URL, prevent intermediate caching.
-        cache_headers = (
-            {"Cache-Control": "private, no-store"} if token else {}
-        )
+        cache_headers = {"Cache-Control": "private, no-store"} if token else {}
 
         # Resolve full path from DOWNLOAD_PATH base
         from app.core.config import settings
@@ -274,7 +281,9 @@ async def serve_preview_sprite(resource_id: str):
 
         from app.core.config import settings
 
-        sprite_path = Path(settings.DOWNLOAD_PATH) / Path(file_path).parent / "preview_sprite.jpg"
+        sprite_path = (
+            Path(settings.DOWNLOAD_PATH) / Path(file_path).parent / "preview_sprite.jpg"
+        )
         if not sprite_path.exists():
             raise HTTPException(status_code=404, detail="Preview sprite not found")
 
@@ -347,7 +356,10 @@ async def trash_resource_by_platform_id(
                     scope_type="team",
                     scope_id=scope_id,
                 )
-                return {"success": True, "message": "Resource removed from team library"}
+                return {
+                    "success": True,
+                    "message": "Resource removed from team library",
+                }
             except Exception:
                 # No team link found, fall through to trash
                 pass
@@ -395,7 +407,10 @@ async def trash_resource_by_media_id(
                     scope_type="team",
                     scope_id=scope_id,
                 )
-                return {"success": True, "message": "Resource removed from team library"}
+                return {
+                    "success": True,
+                    "message": "Resource removed from team library",
+                }
             except Exception:
                 pass
 
@@ -433,7 +448,9 @@ async def unlink_resource_by_platform_id(
             # Try to find & remove the resource_item in the requested scope
             target_scope_id = scope_id or auth.user_id
             item = await svc.repo.get_resource_item(
-                str(resource["id"]), scope_type, target_scope_id,
+                str(resource["id"]),
+                scope_type,
+                target_scope_id,
             )
             if item:
                 await svc.repo.delete_resource_item(item["id"])
@@ -441,6 +458,7 @@ async def unlink_resource_by_platform_id(
 
         # Fallback: no resource or no resource_item → delete video record
         from app.db.supabase_client import get_async_supabase_admin
+
         client = await get_async_supabase_admin()
         result = await (
             client.table("parsed_media")
@@ -566,9 +584,7 @@ async def list_resource_tags(resource_id: str, auth: AuthDep):
 
 
 @router.post("/{resource_id}/tags")
-async def add_resource_tag(
-    resource_id: str, data: ResourceTagRequest, auth: AuthDep
-):
+async def add_resource_tag(resource_id: str, data: ResourceTagRequest, auth: AuthDep):
     """Add a tag to a resource."""
     try:
         repo = ResourcesRepository()

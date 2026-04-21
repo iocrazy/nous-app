@@ -83,6 +83,7 @@ class OpenAIProvider(AIProvider):
 
     async def transcribe(self, audio_path: str, **kwargs) -> TranscriptResult:
         import aiofiles
+
         async with aiofiles.open(audio_path, "rb") as f:
             audio_bytes = await f.read()
         response = await self._client.audio.transcriptions.create(
@@ -219,7 +220,11 @@ class MiniMaxProvider(OpenAICompatibleProvider):
     """MiniMax - M2.5 series models."""
 
     def __init__(
-        self, api_key: str = "", base_url: str = "", model: str = "MiniMax-M2.5", **kwargs
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "MiniMax-M2.5",
+        **kwargs,
     ):
         super().__init__(
             api_key=api_key,
@@ -247,7 +252,11 @@ class QwenProvider(OpenAICompatibleProvider):
     """Qwen (Alibaba Cloud) - Qwen3 series models."""
 
     def __init__(
-        self, api_key: str = "", base_url: str = "", model: str = "qwen3.5-plus", **kwargs
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "qwen3.5-plus",
+        **kwargs,
     ):
         super().__init__(
             api_key=api_key,
@@ -357,7 +366,10 @@ class AIProviderFactory:
                         headers=test_headers,
                         json={
                             "user": {"uid": "test"},
-                            "audio": {"format": "mp3", "url": "https://example.com/test.mp3"},
+                            "audio": {
+                                "format": "mp3",
+                                "url": "https://example.com/test.mp3",
+                            },
                             "request": {"model_name": "bigmodel"},
                         },
                     )
@@ -367,11 +379,17 @@ class AIProviderFactory:
                     if status_code.startswith("20") or status_code.startswith("40"):
                         models_available.append(model_name)
                     else:
-                        last_error = resp.headers.get("X-Api-Message", f"Status: {status_code}")
+                        last_error = resp.headers.get(
+                            "X-Api-Message", f"Status: {status_code}"
+                        )
 
                 if models_available:
                     return {"success": True, "models": models_available, "error": None}
-                return {"success": False, "models": None, "error": last_error or "No model access granted"}
+                return {
+                    "success": False,
+                    "models": None,
+                    "error": last_error or "No model access granted",
+                }
         except Exception as e:
             return {"success": False, "models": None, "error": str(e)}
 

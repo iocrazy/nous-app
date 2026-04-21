@@ -5,7 +5,11 @@ from app.services.video_providers.base import (
     VideoGenResult,
     TaskStatus,
 )
-from app.services.video_providers.registry import ProviderRegistry, provider_registry, ModelInfo
+from app.services.video_providers.registry import (
+    ProviderRegistry,
+    provider_registry,
+    ModelInfo,
+)
 
 __all__ = [
     "BaseImageProvider",

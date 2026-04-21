@@ -100,6 +100,7 @@ class VisualAnalysisService:
         """Read and encode local image to base64."""
         try:
             import aiofiles
+
             async with aiofiles.open(file_path, "rb") as f:
                 data = await f.read()
             return base64.b64encode(data).decode("utf-8")

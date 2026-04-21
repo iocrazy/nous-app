@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 # ─── Resources ────────────────────────────────────────────
 
+
 class ResourceUpdate(BaseModel):
     """Request body for updating resource metadata."""
 
@@ -23,21 +24,32 @@ class ResourceUpdate(BaseModel):
     rating: Optional[int] = Field(None, ge=0, le=5)
     is_trashed: Optional[bool] = None
     # Per-user download status
-    video_download_status: Optional[str] = Field(None, description="User video download status")
-    music_download_status: Optional[str] = Field(None, description="User music download status")
-    cover_download_status: Optional[str] = Field(None, description="User cover download status")
-    image_download_status: Optional[str] = Field(None, description="User image download status")
+    video_download_status: Optional[str] = Field(
+        None, description="User video download status"
+    )
+    music_download_status: Optional[str] = Field(
+        None, description="User music download status"
+    )
+    cover_download_status: Optional[str] = Field(
+        None, description="User cover download status"
+    )
+    image_download_status: Optional[str] = Field(
+        None, description="User image download status"
+    )
 
 
 class ResourceMoveRequest(BaseModel):
     """Request body for moving a resource to a folder."""
 
-    folder_id: Optional[str] = Field(None, description="Target folder ID, null for root")
+    folder_id: Optional[str] = Field(
+        None, description="Target folder ID, null for root"
+    )
     scope_type: str = Field(..., pattern="^(personal|team)$")
     scope_id: str = Field(..., description="User ID or team ID")
 
 
 # ─── Folders ──────────────────────────────────────────────
+
 
 class FolderCreate(BaseModel):
     """Request body for creating a folder."""
@@ -62,6 +74,7 @@ class FolderUpdate(BaseModel):
 
 # ─── Tags ─────────────────────────────────────────────────
 
+
 class ResourceTagRequest(BaseModel):
     """Request body for tagging a resource."""
 
@@ -69,6 +82,7 @@ class ResourceTagRequest(BaseModel):
 
 
 # ─── Smart Folders ───────────────────────────────────────
+
 
 class SmartFolderCondition(BaseModel):
     """A single rule condition for a smart folder."""

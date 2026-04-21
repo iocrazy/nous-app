@@ -828,9 +828,7 @@ class ProjectsRepository:
         """Create a new collection."""
         try:
             client = await self._get_client()
-            result = (
-                await client.table(self.TABLE_COLLECTIONS).insert(data).execute()
-            )
+            result = await client.table(self.TABLE_COLLECTIONS).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
             logger.error(f"Failed to create collection: {e}")

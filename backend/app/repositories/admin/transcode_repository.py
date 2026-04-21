@@ -45,9 +45,7 @@ class AdminTranscodeRepository:
         return result.count or 0
 
     async def status_counts(self, statuses: list[str]) -> dict[str, int]:
-        results = await asyncio.gather(
-            *[self.count_by_status(s) for s in statuses]
-        )
+        results = await asyncio.gather(*[self.count_by_status(s) for s in statuses])
         return dict(zip(statuses, results))
 
     # ─── List ──────────────────────────────────────────────────────────
@@ -82,9 +80,7 @@ class AdminTranscodeRepository:
         if min_size_mb and min_size_mb > 0:
             query = query.gte("file_size_bytes", min_size_mb * 1024 * 1024)
 
-        sort_field = (
-            sort_by if sort_by in self.VALID_SORT_FIELDS else "created_at"
-        )
+        sort_field = sort_by if sort_by in self.VALID_SORT_FIELDS else "created_at"
         query = query.order(sort_field, desc=sort_desc)
 
         offset = (page - 1) * page_size
@@ -93,9 +89,7 @@ class AdminTranscodeRepository:
         result = await query.execute()
         return result.data or [], result.count or 0
 
-    async def resources_to_media(
-        self, resource_ids: list[str]
-    ) -> dict[str, str]:
+    async def resources_to_media(self, resource_ids: list[str]) -> dict[str, str]:
         """resource_id → media_id map for a batch."""
         if not resource_ids:
             return {}
@@ -112,9 +106,7 @@ class AdminTranscodeRepository:
             if r.get("media_id")
         }
 
-    async def media_info_bulk(
-        self, media_ids: list[str]
-    ) -> dict[str, dict[str, Any]]:
+    async def media_info_bulk(self, media_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Lookup parsed_media rows for cover/title/author display."""
         if not media_ids:
             return {}
@@ -122,8 +114,7 @@ class AdminTranscodeRepository:
         result = (
             await client.table(self.MEDIA_TABLE)
             .select(
-                "id, title, cover_urls, cover_download_path, "
-                "source_platform, author"
+                "id, title, cover_urls, cover_download_path, " "source_platform, author"
             )
             .in_("id", media_ids)
             .execute()
@@ -155,9 +146,7 @@ class AdminTranscodeRepository:
             .execute()
         )
 
-    async def list_versions_for_batch(
-        self, action: str
-    ) -> list[dict[str, Any]]:
+    async def list_versions_for_batch(self, action: str) -> list[dict[str, Any]]:
         """`retry_failed` returns failed videos; `transcode_new` returns untranscoded."""
         client = await self._client()
         query = (
@@ -185,9 +174,7 @@ class AdminTranscodeRepository:
         )
         return {row["key"]: row["value"] for row in (result.data or [])}
 
-    async def upsert_setting(
-        self, key: str, value: Any, updated_by: str
-    ) -> None:
+    async def upsert_setting(self, key: str, value: Any, updated_by: str) -> None:
         client = await self._client()
         await (
             client.table(self.SETTINGS_TABLE)

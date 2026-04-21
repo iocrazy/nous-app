@@ -25,7 +25,9 @@ router = APIRouter(prefix="/storyboard/projects")
 
 
 @router.post("")
-async def create_project(auth: AuthDep, body: StoryboardProjectCreate) -> Dict[str, Any]:
+async def create_project(
+    auth: AuthDep, body: StoryboardProjectCreate
+) -> Dict[str, Any]:
     """Create a new storyboard project for the authenticated user's team."""
     team_id = await require_team_id(auth.user_id)
     try:

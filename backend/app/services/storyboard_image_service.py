@@ -136,9 +136,7 @@ class StoryboardImageService:
         try:
             img = Image.open(src).convert("RGB")
         except Exception as exc:
-            logger.error(
-                "split_image_to_grid: cannot open %s – %s", image_path, exc
-            )
+            logger.error("split_image_to_grid: cannot open %s – %s", image_path, exc)
             raise
 
         img_w, img_h = img.size
@@ -146,9 +144,7 @@ class StoryboardImageService:
         cell_h = img_h // rows
 
         if cell_w < 1 or cell_h < 1:
-            raise ValueError(
-                f"Image {img_w}x{img_h} too small for {rows}x{cols} grid"
-            )
+            raise ValueError(f"Image {img_w}x{img_h} too small for {rows}x{cols} grid")
 
         results: list[dict] = []
         index = 0
@@ -212,9 +208,7 @@ class StoryboardImageService:
     # 2. detect_scenes
     # ------------------------------------------------------------------ #
 
-    def detect_scenes(
-        self, video_path: str, threshold: float = 30.0
-    ) -> list[dict]:
+    def detect_scenes(self, video_path: str, threshold: float = 30.0) -> list[dict]:
         """
         Detect scene changes in a video file using FFmpeg + pixel diffing.
 
@@ -246,9 +240,12 @@ class StoryboardImageService:
 
             # Extract one frame per second as PNG files
             cmd = [
-                "ffmpeg", "-y",
-                "-i", str(src),
-                "-vf", "fps=1",
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(src),
+                "-vf",
+                "fps=1",
                 str(tmp / "frame_%06d.png"),
             ]
             result = subprocess.run(
@@ -258,7 +255,9 @@ class StoryboardImageService:
             )
             if result.returncode != 0:
                 err = result.stderr.decode(errors="replace")[:500]
-                logger.error("detect_scenes: ffmpeg failed for %s – %s", video_path, err)
+                logger.error(
+                    "detect_scenes: ffmpeg failed for %s – %s", video_path, err
+                )
                 raise RuntimeError(f"FFmpeg failed: {err}")
 
             frame_files = sorted(tmp.glob("frame_*.png"))
@@ -377,7 +376,9 @@ class StoryboardImageService:
                 if cell_img.size != (cell_w, cell_h):
                     cell_img = cell_img.resize((cell_w, cell_h), Image.LANCZOS)
             except Exception as exc:
-                logger.warning("merge_frames: cannot open frame %s – %s; using blank", fp, exc)
+                logger.warning(
+                    "merge_frames: cannot open frame %s – %s; using blank", fp, exc
+                )
                 cell_img = Image.new("RGB", (cell_w, cell_h), color=(0, 0, 0))
 
             canvas.paste(cell_img, (x_off, y_off))
@@ -389,7 +390,9 @@ class StoryboardImageService:
                 ty = y_off + TEXT_PADDING
                 # Black outline
                 for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-                    draw.text((tx + dx, ty + dy), label, font=font_number, fill=(0, 0, 0))
+                    draw.text(
+                        (tx + dx, ty + dy), label, font=font_number, fill=(0, 0, 0)
+                    )
                 draw.text((tx, ty), label, font=font_number, fill=(255, 255, 255))
 
             if notes and idx < len(notes) and notes[idx]:
@@ -399,7 +402,9 @@ class StoryboardImageService:
                 tx = x_off + TEXT_PADDING
                 ty = y_off + cell_h - text_h - TEXT_PADDING
                 for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-                    draw.text((tx + dx, ty + dy), note_text, font=font_note, fill=(0, 0, 0))
+                    draw.text(
+                        (tx + dx, ty + dy), note_text, font=font_note, fill=(0, 0, 0)
+                    )
                 draw.text((tx, ty), note_text, font=font_note, fill=(255, 255, 255))
 
         out_path = first_path.parent / f"{first_path.stem}_merged.png"

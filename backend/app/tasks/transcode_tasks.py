@@ -21,7 +21,7 @@ from app.tasks.utils import run_async
 
 
 # ── Gating thresholds ──
-MIN_SIZE_MB = None      # Read from settings.TRANSCODE_MIN_SIZE_MB at runtime
+MIN_SIZE_MB = None  # Read from settings.TRANSCODE_MIN_SIZE_MB at runtime
 MIN_DURATION_SEC = 600  # ... or > 10 minutes
 
 
@@ -29,9 +29,20 @@ def _probe_codec_sync(filepath: str) -> Optional[str]:
     """Quick ffprobe for video codec name (sync, for gating context)."""
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
-             "-show_streams", "-select_streams", "v:0", filepath],
-            capture_output=True, text=True, timeout=10,
+            [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_streams",
+                "-select_streams",
+                "v:0",
+                filepath,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             info = json.loads(result.stdout)
@@ -46,8 +57,18 @@ def _probe_duration_sync(filepath: str) -> Optional[float]:
     """Quick ffprobe to get duration in seconds (sync, for Celery context)."""
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", filepath],
-            capture_output=True, text=True, timeout=10,
+            [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                filepath,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             info = json.loads(result.stdout)
@@ -58,8 +79,21 @@ def _probe_duration_sync(filepath: str) -> Optional[float]:
     return None
 
 
-@shared_task(bind=True, max_retries=2, default_retry_delay=60, soft_time_limit=7200, time_limit=7500)
-def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = None, _dedup_key: str = None, _unified_task_id: str = None):
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+    soft_time_limit=7200,
+    time_limit=7500,
+)
+def transcode_to_hls(
+    self,
+    resource_id: str,
+    version_id: str,
+    user_id: str = None,
+    _dedup_key: str = None,
+    _unified_task_id: str = None,
+):
     """
     Celery task: transcode a resource version to HLS multi-bitrate.
 
@@ -75,12 +109,15 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
     """
 
     task_id = self.request.id
-    logger.info(f"[Transcode] Starting HLS transcode: resource={resource_id}, version={version_id}")
+    logger.info(
+        f"[Transcode] Starting HLS transcode: resource={resource_id}, version={version_id}"
+    )
 
     # ── Resolve resource filename for task title ──
     resource_title = version_id[:8]
     try:
         from app.repositories.resources_repository import ResourcesRepository
+
         repo = ResourcesRepository()
         resource = run_async(repo.get_resource_by_id(resource_id))
         if resource and resource.get("filename"):
@@ -93,22 +130,25 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
     if user_id:
         try:
             from app.services.unified_task_manager import get_task_manager
+
             tracker = get_task_manager()
             if unified_task_id:
                 # Retry: reuse existing task, just mark as started
                 run_async(tracker.start(unified_task_id))
             else:
                 # New task: create unified_task record
-                unified_task_id = run_async(tracker.create(
-                    user_id=user_id,
-                    task_type="transcode",
-                    title=f"Transcode {resource_title}",
-                    subtitle="Preparing...",
-                    resource_id=resource_id,
-                    celery_task_id=task_id,
-                    metadata={"version_id": version_id},
-                    dedup_key=_dedup_key,
-                ))
+                unified_task_id = run_async(
+                    tracker.create(
+                        user_id=user_id,
+                        task_type="transcode",
+                        title=f"Transcode {resource_title}",
+                        subtitle="Preparing...",
+                        resource_id=resource_id,
+                        celery_task_id=task_id,
+                        metadata={"version_id": version_id},
+                        dedup_key=_dedup_key,
+                    )
+                )
                 run_async(tracker.start(unified_task_id))
         except Exception as e:
             logger.warning(f"[Transcode] Unified tracker create failed: {e}")
@@ -133,39 +173,53 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
                 pct = min(max(int(progress), 0), 99)
                 # Publish to Redis for WebSocket delivery (every update)
                 try:
-                    _redis.publish(_channel, _json.dumps({
-                        "unified_task_id": unified_task_id,
-                        "celery_task_id": task_id,
-                        "status": "transcoding",
-                        "percent": pct,
-                        "speed": "",
-                        "subtitle": subtitle,
-                    }))
+                    _redis.publish(
+                        _channel,
+                        _json.dumps(
+                            {
+                                "unified_task_id": unified_task_id,
+                                "celery_task_id": task_id,
+                                "status": "transcoding",
+                                "percent": pct,
+                                "speed": "",
+                                "subtitle": subtitle,
+                            }
+                        ),
+                    )
                 except Exception:
                     pass
                 _last_pct[0] = pct
 
             on_progress = _report_progress
 
-        hls_path = run_async(svc.transcode_version(resource_id, version_id, on_progress=on_progress))
+        hls_path = run_async(
+            svc.transcode_version(resource_id, version_id, on_progress=on_progress)
+        )
 
         if hls_path:
             logger.success(f"[Transcode] Completed: {resource_id} → {hls_path}")
             if unified_task_id:
                 try:
                     from app.services.unified_task_manager import get_task_manager
+
                     run_async(get_task_manager().complete(unified_task_id))
                 except Exception:
                     pass
             # Log success
             if user_id:
-                run_async(log_user_action(
-                    user_id=user_id,
-                    action="transcode",
-                    message=f"Transcode completed: {resource_title[:50]}...",
-                    status="success",
-                    details={"resource_id": resource_id, "version_id": version_id, "hls_path": hls_path},
-                ))
+                run_async(
+                    log_user_action(
+                        user_id=user_id,
+                        action="transcode",
+                        message=f"Transcode completed: {resource_title[:50]}...",
+                        status="success",
+                        details={
+                            "resource_id": resource_id,
+                            "version_id": version_id,
+                            "hls_path": hls_path,
+                        },
+                    )
+                )
             return {
                 "status": "completed",
                 "resource_id": resource_id,
@@ -173,22 +227,35 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
                 "hls_path": hls_path,
             }
         else:
-            logger.warning(f"[Transcode] Failed for resource={resource_id}, version={version_id}")
+            logger.warning(
+                f"[Transcode] Failed for resource={resource_id}, version={version_id}"
+            )
             if unified_task_id:
                 try:
                     from app.services.unified_task_manager import get_task_manager
-                    run_async(get_task_manager().fail(unified_task_id, "Transcode returned no output"))
+
+                    run_async(
+                        get_task_manager().fail(
+                            unified_task_id, "Transcode returned no output"
+                        )
+                    )
                 except Exception:
                     pass
             # Log failure
             if user_id:
-                run_async(log_user_action(
-                    user_id=user_id,
-                    action="transcode",
-                    message=f"Transcode failed: {resource_title[:50]}...",
-                    status="error",
-                    details={"resource_id": resource_id, "version_id": version_id, "error": "Transcode returned no output"},
-                ))
+                run_async(
+                    log_user_action(
+                        user_id=user_id,
+                        action="transcode",
+                        message=f"Transcode failed: {resource_title[:50]}...",
+                        status="error",
+                        details={
+                            "resource_id": resource_id,
+                            "version_id": version_id,
+                            "error": "Transcode returned no output",
+                        },
+                    )
+                )
             return {
                 "status": "failed",
                 "resource_id": resource_id,
@@ -200,13 +267,14 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
         logger.error(f"[Transcode] Error: resource={resource_id}, error={error_msg}")
 
         if self.request.retries < self.max_retries:
-            countdown = 60 * (2 ** self.request.retries)
+            countdown = 60 * (2**self.request.retries)
             logger.info(
                 f"[Transcode] Retry {self.request.retries + 1}/{self.max_retries} "
                 f"in {countdown}s for {resource_id}"
             )
             raise self.retry(
-                exc=e, countdown=countdown,
+                exc=e,
+                countdown=countdown,
                 kwargs={
                     "resource_id": resource_id,
                     "version_id": version_id,
@@ -220,12 +288,14 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
         if unified_task_id:
             try:
                 from app.services.unified_task_manager import get_task_manager
+
                 run_async(get_task_manager().fail(unified_task_id, error_msg[:500]))
             except Exception:
                 pass
 
         try:
             from app.repositories.resources_repository import ResourcesRepository
+
             repo = ResourcesRepository()
             run_async(repo.update_version(version_id, {"transcode_status": "failed"}))
         except Exception:
@@ -233,13 +303,19 @@ def transcode_to_hls(self, resource_id: str, version_id: str, user_id: str = Non
 
         # Log failure after max retries
         if user_id:
-            run_async(log_user_action(
-                user_id=user_id,
-                action="transcode",
-                message=f"Transcode failed: {resource_title[:50]}...",
-                status="error",
-                details={"resource_id": resource_id, "version_id": version_id, "error": error_msg[:200]},
-            ))
+            run_async(
+                log_user_action(
+                    user_id=user_id,
+                    action="transcode",
+                    message=f"Transcode failed: {resource_title[:50]}...",
+                    status="error",
+                    details={
+                        "resource_id": resource_id,
+                        "version_id": version_id,
+                        "error": error_msg[:200],
+                    },
+                )
+            )
 
         return {
             "status": "failed",
@@ -269,6 +345,7 @@ def maybe_trigger_transcode(
     if not force:
         try:
             from app.repositories.resources_repository import ResourcesRepository
+
             repo = ResourcesRepository()
             version = run_async(repo.get_version_by_id(version_id))
             if not version or not version.get("file_path"):
@@ -313,17 +390,22 @@ def maybe_trigger_transcode(
     if not force:
         try:
             from app.services.unified_task_manager import get_task_manager
+
             mgr = get_task_manager()
-            result = run_async(mgr.acquire_or_subscribe(
-                task_type="transcode",
-                dedup_identifier=version_id,
-                user_id=user_id or "",
-                resource_id=resource_id,
-            ))
+            result = run_async(
+                mgr.acquire_or_subscribe(
+                    task_type="transcode",
+                    dedup_identifier=version_id,
+                    user_id=user_id or "",
+                    resource_id=resource_id,
+                )
+            )
             dedup_key = result.get("dedup_key")
 
             if result["action"] in ("subscribed", "completed"):
-                logger.info(f"[Transcode] Dedup hit for version {version_id}: {result['action']}")
+                logger.info(
+                    f"[Transcode] Dedup hit for version {version_id}: {result['action']}"
+                )
                 return
         except Exception as e:
             logger.warning(f"[Transcode] Dedup check failed, proceeding normally: {e}")
@@ -331,6 +413,7 @@ def maybe_trigger_transcode(
     try:
         # Mark as pending first
         from app.repositories.resources_repository import ResourcesRepository
+
         repo = ResourcesRepository()
         run_async(repo.update_version(version_id, {"transcode_status": "pending"}))
 

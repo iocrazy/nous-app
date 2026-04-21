@@ -72,9 +72,7 @@ class AdminSearchRepository:
         client = await self._client()
         result = await (
             client.table(self.AUDIT_LOGS_TABLE)
-            .select(
-                "id,action,target_type,target_id,admin_email,details,created_at"
-            )
+            .select("id,action,target_type,target_id,admin_email,details,created_at")
             .gte("created_at", start_iso)
             .lte("created_at", end_iso)
             .order("created_at", desc=True)

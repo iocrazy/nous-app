@@ -9,12 +9,12 @@ from app.db.supabase_client import get_async_supabase_admin
 
 # Expiry time mapping in milliseconds
 EXPIRY_MAP = {
-    '30m': 30 * 60 * 1000,
-    '1h': 60 * 60 * 1000,
-    '6h': 6 * 60 * 60 * 1000,
-    '12h': 12 * 60 * 60 * 1000,
-    '1d': 24 * 60 * 60 * 1000,
-    '7d': 7 * 24 * 60 * 60 * 1000,
+    "30m": 30 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "6h": 6 * 60 * 60 * 1000,
+    "12h": 12 * 60 * 60 * 1000,
+    "1d": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
 }
 
 
@@ -26,22 +26,32 @@ class InviteRepository:
         team_id: str,
         created_by: str,
         expires_in: Optional[str] = None,
-        max_uses: Optional[int] = None
+        max_uses: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Create a new team invite."""
         client = await get_async_supabase_admin()
 
         # Calculate expiry time
         expires_at = None
-        if expires_in and expires_in != 'never' and expires_in in EXPIRY_MAP:
-            expires_at = (datetime.utcnow() + timedelta(milliseconds=EXPIRY_MAP[expires_in])).isoformat()
+        if expires_in and expires_in != "never" and expires_in in EXPIRY_MAP:
+            expires_at = (
+                datetime.utcnow() + timedelta(milliseconds=EXPIRY_MAP[expires_in])
+            ).isoformat()
 
-        result = await client.table("team_invites").insert({
-            "team_id": team_id,
-            "created_by": created_by,
-            "expires_at": expires_at,
-            "max_uses": max_uses
-        }).select().single().execute()
+        result = (
+            await client.table("team_invites")
+            .insert(
+                {
+                    "team_id": team_id,
+                    "created_by": created_by,
+                    "expires_at": expires_at,
+                    "max_uses": max_uses,
+                }
+            )
+            .select()
+            .single()
+            .execute()
+        )
 
         if not result.data:
             raise Exception("Failed to create invite")
@@ -52,7 +62,13 @@ class InviteRepository:
         """Get all invites for a team."""
         client = await get_async_supabase_admin()
 
-        result = await client.table("team_invites").select("*").eq("team_id", team_id).order("created_at", desc=True).execute()
+        result = (
+            await client.table("team_invites")
+            .select("*")
+            .eq("team_id", team_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
 
         return result.data or []
 
@@ -60,7 +76,9 @@ class InviteRepository:
         """Get an invite by ID."""
         client = await get_async_supabase_admin()
 
-        result = await client.table("team_invites").select("*").eq("id", invite_id).execute()
+        result = (
+            await client.table("team_invites").select("*").eq("id", invite_id).execute()
+        )
 
         return result.data[0] if result.data else None
 
@@ -68,7 +86,12 @@ class InviteRepository:
         """Get an invite by code with team info."""
         client = await get_async_supabase_admin()
 
-        result = await client.table("team_invites").select("*, teams(id, name)").eq("code", code).execute()
+        result = (
+            await client.table("team_invites")
+            .select("*, teams(id, name)")
+            .eq("code", code)
+            .execute()
+        )
 
         return result.data[0] if result.data else None
 
@@ -82,7 +105,13 @@ class InviteRepository:
             return False
 
         # Check if user is team owner/admin
-        membership = await client.table("team_members").select("role").eq("team_id", invite["team_id"]).eq("user_id", user_id).execute()
+        membership = (
+            await client.table("team_members")
+            .select("role")
+            .eq("team_id", invite["team_id"])
+            .eq("user_id", user_id)
+            .execute()
+        )
 
         if not membership.data or membership.data[0]["role"] not in ["owner", "admin"]:
             return False
@@ -103,7 +132,9 @@ class InviteRepository:
 
         # Check expiration
         if invite.get("expires_at"):
-            expires_at = datetime.fromisoformat(invite["expires_at"].replace("Z", "+00:00"))
+            expires_at = datetime.fromisoformat(
+                invite["expires_at"].replace("Z", "+00:00")
+            )
             if expires_at < datetime.now(expires_at.tzinfo):
                 raise Exception("Invite has expired")
 
@@ -113,31 +144,35 @@ class InviteRepository:
 
         # Add user to team
         try:
-            await client.table("team_members").insert({
-                "team_id": invite["team_id"],
-                "user_id": user_id,
-                "role": "member"
-            }).execute()
+            await client.table("team_members").insert(
+                {"team_id": invite["team_id"], "user_id": user_id, "role": "member"}
+            ).execute()
         except Exception as e:
             if "23505" in str(e):
                 raise Exception("Already a member")
             raise
 
         # Increment use count
-        await client.table("team_invites").update({
-            "use_count": invite["use_count"] + 1
-        }).eq("id", invite["id"]).execute()
+        await client.table("team_invites").update(
+            {"use_count": invite["use_count"] + 1}
+        ).eq("id", invite["id"]).execute()
 
         return {
             "team_id": invite["team_id"],
-            "team_name": invite.get("teams", {}).get("name", "Unknown Team")
+            "team_name": invite.get("teams", {}).get("name", "Unknown Team"),
         }
 
     async def check_user_can_manage_invites(self, team_id: str, user_id: str) -> bool:
         """Check if user can manage invites for a team."""
         client = await get_async_supabase_admin()
 
-        membership = await client.table("team_members").select("role").eq("team_id", team_id).eq("user_id", user_id).execute()
+        membership = (
+            await client.table("team_members")
+            .select("role")
+            .eq("team_id", team_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
 
         if not membership.data:
             return False

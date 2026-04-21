@@ -32,12 +32,12 @@ async def list_notifications(auth: AuthDep):
                 team_id=n.get("team_id"),
                 created_by=n.get("created_by"),
                 created_at=n["created_at"],
-                read=n.get("read", False)
+                read=n.get("read", False),
             )
             for n in notifications
         ],
         total=len(notifications),
-        unread_count=unread_count
+        unread_count=unread_count,
     )
 
 
@@ -50,7 +50,7 @@ async def mark_as_read(notification_id: str, auth: AuthDep):
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to mark notification as read"
+            detail="Failed to mark notification as read",
         )
 
     return MarkReadResponse(success=True, message="Notification marked as read")
@@ -63,8 +63,7 @@ async def mark_all_as_read(auth: AuthDep):
     count = await repo.mark_all_as_read(auth.user_id)
 
     return MarkReadResponse(
-        success=True,
-        message=f"Marked {count} notifications as read"
+        success=True, message=f"Marked {count} notifications as read"
     )
 
 
@@ -77,7 +76,7 @@ async def delete_notification(notification_id: str, auth: AuthDep):
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete notification"
+            detail="Failed to delete notification",
         )
 
 

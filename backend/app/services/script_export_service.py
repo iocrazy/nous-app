@@ -104,9 +104,7 @@ class ScriptExportService:
             ],
         }
 
-    def export_docx(
-        self, project: Dict[str, Any], chapters: List[Dict]
-    ) -> io.BytesIO:
+    def export_docx(self, project: Dict[str, Any], chapters: List[Dict]) -> io.BytesIO:
         """Build and return a DOCX document as a BytesIO buffer."""
         doc = Document()
 

@@ -48,9 +48,7 @@ class ReviewService:
             comment_data["parent_id"] = parent_id
 
         comment = await self.repo.create_comment(comment_data)
-        logger.info(
-            f"Created review comment {comment['id']} on resource {resource_id}"
-        )
+        logger.info(f"Created review comment {comment['id']} on resource {resource_id}")
 
         # Create annotations if provided
         if annotations:
@@ -92,8 +90,8 @@ class ReviewService:
                                 await self.repo.get_annotations_by_comment(reply["id"])
                             )
                 if include_annotations:
-                    comment["annotations"] = (
-                        await self.repo.get_annotations_by_comment(comment["id"])
+                    comment["annotations"] = await self.repo.get_annotations_by_comment(
+                        comment["id"]
                     )
 
         return comments
@@ -106,9 +104,7 @@ class ReviewService:
         if not comment:
             return None
 
-        comment["annotations"] = await self.repo.get_annotations_by_comment(
-            comment_id
-        )
+        comment["annotations"] = await self.repo.get_annotations_by_comment(comment_id)
         if include_replies:
             comment["replies"] = await self.repo.get_replies(comment_id)
             for reply in comment["replies"]:
@@ -183,7 +179,9 @@ class ReviewService:
         """Set or update the review status for a resource."""
         valid_statuses = {"pending", "approved", "needs_changes", "rejected"}
         if status not in valid_statuses:
-            raise ValueError(f"Invalid status: {status}. Must be one of {valid_statuses}")
+            raise ValueError(
+                f"Invalid status: {status}. Must be one of {valid_statuses}"
+            )
 
         data = {
             "resource_id": resource_id,

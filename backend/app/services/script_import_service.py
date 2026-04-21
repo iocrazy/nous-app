@@ -32,9 +32,7 @@ class ScriptImportService:
         if content_type not in ALLOWED_MIME_TYPES:
             raise ValueError(f"Unsupported file type: {content_type}")
 
-    def parse_file(
-        self, file_bytes: bytes, filename: str, content_type: str
-    ) -> str:
+    def parse_file(self, file_bytes: bytes, filename: str, content_type: str) -> str:
         """Parse file content to plain text. Raises ValueError on failure."""
         if content_type == "text/plain":
             return file_bytes.decode("utf-8", errors="replace")
@@ -87,8 +85,8 @@ class ScriptImportService:
                 "title": name or "Imported Content",
                 "summary": text[:300].replace("\n", " "),
                 "content": text,
-                "content_html": "<p>" + "</p><p>".join(
-                    line for line in text.splitlines() if line.strip()
-                ) + "</p>",
+                "content_html": "<p>"
+                + "</p><p>".join(line for line in text.splitlines() if line.strip())
+                + "</p>",
             }
         ]

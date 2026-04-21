@@ -29,7 +29,10 @@ class AnalysisRepository:
         """Get analysis for a video."""
         table = await self._get_table()
         result = (
-            await table.select("*").eq("resource_id", resource_id).maybe_single().execute()
+            await table.select("*")
+            .eq("resource_id", resource_id)
+            .maybe_single()
+            .execute()
         )
         return result.data
 
@@ -68,7 +71,9 @@ class AnalysisRepository:
         update_data["analyzed_at"] = datetime.utcnow().isoformat()
 
         table = await self._get_table()
-        result = await table.update(update_data).eq("resource_id", resource_id).execute()
+        result = (
+            await table.update(update_data).eq("resource_id", resource_id).execute()
+        )
         return result.data[0] if result.data else None
 
     async def upsert_analysis(self, resource_id: int, **kwargs) -> dict:

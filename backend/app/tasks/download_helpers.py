@@ -27,7 +27,9 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
         repo = ResourcesRepository()
         resource = run_async(repo.get_resource_by_platform_id(platform_id))
         if not resource:
-            logger.info(f"[Transcode/Chain] No resource found for platform_id={platform_id}")
+            logger.info(
+                f"[Transcode/Chain] No resource found for platform_id={platform_id}"
+            )
             return
 
         mime = resource.get("mime_type") or ""
@@ -38,7 +40,9 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
         resource_id = str(resource["id"])
         versions = run_async(repo.get_versions(resource_id))
         if not versions:
-            logger.info(f"[Transcode/Chain] No versions for resource {resource_id}, skip (download)")
+            logger.info(
+                f"[Transcode/Chain] No versions for resource {resource_id}, skip (download)"
+            )
             return
 
         # Transcode the latest version
@@ -50,6 +54,7 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
         )
 
         from app.tasks.transcode_tasks import maybe_trigger_transcode
+
         maybe_trigger_transcode(resource_id, version_id, mime, user_id=user_id)
     except Exception as e:
         logger.error(f"[Transcode/Chain] Failed for {platform_id}: {e}", exc_info=True)
@@ -109,7 +114,9 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
 # ─── URL availability helpers ─────────────────────────────────────────
 
 
-def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str]) -> dict:
+def ensure_download_urls(
+    platform_id: str, media: dict, needed_types: list[str]
+) -> dict:
     """Check if download URLs are available for needed types. Re-parse if missing.
 
     Returns the media dict with refreshed URLs if re-parsed.
@@ -124,8 +131,12 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
     for t in needed_types:
         field = url_fields.get(t)
         val = media.get(field)
-        has_urls = bool(val) and (isinstance(val, list) and len(val) > 0 if isinstance(val, list) else True)
-        logger.info(f"[Download/URL] Check {t}: field={field}, has_urls={has_urls}, type={type(val).__name__}")
+        has_urls = bool(val) and (
+            isinstance(val, list) and len(val) > 0 if isinstance(val, list) else True
+        )
+        logger.info(
+            f"[Download/URL] Check {t}: field={field}, has_urls={has_urls}, type={type(val).__name__}"
+        )
         if field and not has_urls:
             missing_types.append(t)
 
@@ -140,7 +151,9 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
 
     original_url = media.get("original_url")
     if not original_url:
-        logger.warning(f"[Download/URL] No original_url for {platform_id}, cannot re-parse")
+        logger.warning(
+            f"[Download/URL] No original_url for {platform_id}, cannot re-parse"
+        )
         return media
 
     try:
@@ -152,25 +165,33 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
         reparse_ua = pick_ua()
 
         # --- Attempt 1: IesDouyinParser (fast HTTP, no browser) ---
-        aweme_detail = run_async(IesDouyinParser.parse(original_url, user_agent=reparse_ua))
+        aweme_detail = run_async(
+            IesDouyinParser.parse(original_url, user_agent=reparse_ua)
+        )
         parse_method = "LightHTTP"
 
         # If short URL failed, try directly with platform_id (bypass URL redirect)
         if not aweme_detail and platform_id:
-            logger.info(f"[Download/URL] Short URL failed, trying platform_id directly: {platform_id}")
-            aweme_detail = run_async(IesDouyinParser._fetch_share_page(platform_id, user_agent=reparse_ua))
+            logger.info(
+                f"[Download/URL] Short URL failed, trying platform_id directly: {platform_id}"
+            )
+            aweme_detail = run_async(
+                IesDouyinParser._fetch_share_page(platform_id, user_agent=reparse_ua)
+            )
             if aweme_detail:
                 IesDouyinParser._process_video_urls(aweme_detail)
                 parse_method = "LightHTTP-directID"
 
         if aweme_detail:
-            new_parsed = run_async(DouyinFormatter.parse_aweme_detail(
-                aweme_detail=aweme_detail,
-                valid_url=original_url,
-                download_video=True,
-                download_music=True,
-                download_cover=True,
-            ))
+            new_parsed = run_async(
+                DouyinFormatter.parse_aweme_detail(
+                    aweme_detail=aweme_detail,
+                    valid_url=original_url,
+                    download_video=True,
+                    download_music=True,
+                    download_cover=True,
+                )
+            )
         else:
             new_parsed = None
 
@@ -191,20 +212,26 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
                 f"falling back to BrowserAuto for {platform_id}"
             )
             try:
-                from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
+                from app.services.douyin_parse.drissionpage_parser import (
+                    DrissionPageParser,
+                )
 
                 browser_detail = run_async(
-                    DrissionPageParser.fetch_one_video(original_url, user_agent=reparse_ua)
+                    DrissionPageParser.fetch_one_video(
+                        original_url, user_agent=reparse_ua
+                    )
                 )
                 if browser_detail:
                     parse_method = "BrowserAuto"
-                    browser_parsed = run_async(DouyinFormatter.parse_aweme_detail(
-                        aweme_detail=browser_detail,
-                        valid_url=original_url,
-                        download_video=True,
-                        download_music=True,
-                        download_cover=True,
-                    ))
+                    browser_parsed = run_async(
+                        DouyinFormatter.parse_aweme_detail(
+                            aweme_detail=browser_detail,
+                            valid_url=original_url,
+                            download_video=True,
+                            download_music=True,
+                            download_cover=True,
+                        )
+                    )
                     if browser_parsed:
                         # Merge browser results into new_parsed (browser data wins)
                         if new_parsed:
@@ -214,20 +241,31 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
                                     new_parsed[field] = browser_parsed[field]
                         else:
                             new_parsed = browser_parsed
-                        logger.info(f"[Download/URL] BrowserAuto re-parse succeeded for {platform_id}")
+                        logger.info(
+                            f"[Download/URL] BrowserAuto re-parse succeeded for {platform_id}"
+                        )
                     else:
-                        logger.warning(f"[Download/URL] BrowserAuto parse yielded no data for {platform_id}")
+                        logger.warning(
+                            f"[Download/URL] BrowserAuto parse yielded no data for {platform_id}"
+                        )
                 else:
-                    logger.warning(f"[Download/URL] BrowserAuto returned empty for {platform_id}")
+                    logger.warning(
+                        f"[Download/URL] BrowserAuto returned empty for {platform_id}"
+                    )
             except Exception as e:
-                logger.warning(f"[Download/URL] BrowserAuto fallback failed for {platform_id}: {e}")
+                logger.warning(
+                    f"[Download/URL] BrowserAuto fallback failed for {platform_id}: {e}"
+                )
 
         if not new_parsed:
-            logger.warning(f"[Download/URL] All re-parse attempts failed for {platform_id}")
+            logger.warning(
+                f"[Download/URL] All re-parse attempts failed for {platform_id}"
+            )
             return media
 
         # Update DB with refreshed URLs
         from app.repositories.media_repository import MediaRepository as _MR
+
         update_fields = {}
         for t in missing_types:
             field = url_fields.get(t)
@@ -251,7 +289,9 @@ def ensure_download_urls(platform_id: str, media: dict, needed_types: list[str])
         if update_fields:
             run_async(_MR().update(platform_id, update_fields))
         else:
-            logger.warning(f"[Download/URL] Re-parse found no new URLs for {missing_types}")
+            logger.warning(
+                f"[Download/URL] Re-parse found no new URLs for {missing_types}"
+            )
 
     except Exception as e:
         logger.error(f"[Download/URL] Re-parse failed for {platform_id}: {e}")
@@ -272,7 +312,9 @@ async def check_url_accessible(url: str, timeout: float = 10.0) -> tuple[bool, s
     headers = Utils.get_headers()
     try:
         async with httpx.AsyncClient(http2=True) as client:
-            resp = await client.head(url, headers=headers, follow_redirects=True, timeout=timeout)
+            resp = await client.head(
+                url, headers=headers, follow_redirects=True, timeout=timeout
+            )
             if resp.status_code == 200:
                 return True, "ok"
             reason = f"HTTP {resp.status_code}"
@@ -332,7 +374,9 @@ def validate_and_refresh_urls(
             continue
         ok, reason = run_async(check_url_accessible(url))
         if ok:
-            logger.info(f"[Download/Validate] Fresh {type_key} URLs accessible for {platform_id}")
+            logger.info(
+                f"[Download/Validate] Fresh {type_key} URLs accessible for {platform_id}"
+            )
             return media, True, "ok"
         fail_reason = reason
 
@@ -384,10 +428,13 @@ def extract_audio_from_video(platform_id: str) -> bool:
     try:
         result = subprocess.run(
             [
-                "ffmpeg", "-y",
-                "-i", video_full_path,
-                "-vn",            # No video
-                "-c:a", "copy",   # Copy audio codec (no re-encoding)
+                "ffmpeg",
+                "-y",
+                "-i",
+                video_full_path,
+                "-vn",  # No video
+                "-c:a",
+                "copy",  # Copy audio codec (no re-encoding)
                 audio_full_path,
             ],
             capture_output=True,
@@ -403,7 +450,9 @@ def extract_audio_from_video(platform_id: str) -> bool:
             return False
 
         if not os.path.exists(audio_full_path) or os.path.getsize(audio_full_path) == 0:
-            logger.warning(f"[Audio/Extract] Output file missing or empty: {audio_full_path}")
+            logger.warning(
+                f"[Audio/Extract] Output file missing or empty: {audio_full_path}"
+            )
             if os.path.exists(audio_full_path):
                 os.remove(audio_full_path)
             return False
@@ -418,9 +467,14 @@ def extract_audio_from_video(platform_id: str) -> bool:
         audio_rel_path = os.path.relpath(audio_full_path, base_path)
 
         # Update DB — extract_audio_path for AI transcription (distinct from music_download_path)
-        run_async(repo.update(platform_id, {
-            "extract_audio_path": audio_rel_path,
-        }))
+        run_async(
+            repo.update(
+                platform_id,
+                {
+                    "extract_audio_path": audio_rel_path,
+                },
+            )
+        )
 
         return True
 

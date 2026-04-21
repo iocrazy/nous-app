@@ -22,11 +22,7 @@ class AdminTasksRepository:
 
     async def count_total(self) -> int:
         client = await self._client()
-        result = (
-            await client.table(self.TABLE)
-            .select("id", count="exact")
-            .execute()
-        )
+        result = await client.table(self.TABLE).select("id", count="exact").execute()
         return result.count or 0
 
     async def count_by_status(self, status: str) -> int:
@@ -51,10 +47,7 @@ class AdminTasksRepository:
         sort_desc: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
         client = await self._client()
-        query = (
-            client.table(self.TABLE)
-            .select(self.LIST_COLUMNS, count="exact")
-        )
+        query = client.table(self.TABLE).select(self.LIST_COLUMNS, count="exact")
         if status:
             query = query.eq("status", status)
         if task_type:
@@ -97,9 +90,4 @@ class AdminTasksRepository:
 
     async def update(self, task_id: str, changes: dict[str, Any]) -> None:
         client = await self._client()
-        await (
-            client.table(self.TABLE)
-            .update(changes)
-            .eq("id", task_id)
-            .execute()
-        )
+        await client.table(self.TABLE).update(changes).eq("id", task_id).execute()

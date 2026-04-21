@@ -69,10 +69,7 @@ class AdminUsersRepository:
     ) -> Optional[dict[str, Any]]:
         client = await self._client()
         result = await (
-            client.table(self.TABLE)
-            .update(changes)
-            .eq("id", user_id)
-            .execute()
+            client.table(self.TABLE).update(changes).eq("id", user_id).execute()
         )
         return result.data[0] if result.data else None
 

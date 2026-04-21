@@ -116,12 +116,16 @@ async def _get_resource_ownership(
                         if item.get("scope_id")
                     ]
             except Exception as e:
-                logger.warning(f"Team scope lookup failed for resource {resource_id}: {e}")
+                logger.warning(
+                    f"Team scope lookup failed for resource {resource_id}: {e}"
+                )
 
             return (creator_id, team_ids)
 
         except Exception as e:
-            logger.warning(f"Resource ownership lookup ({id_column}={media_id}) failed: {e}")
+            logger.warning(
+                f"Resource ownership lookup ({id_column}={media_id}) failed: {e}"
+            )
 
     return None
 

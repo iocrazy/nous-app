@@ -16,6 +16,7 @@ def sanitize_ai_html(html: str) -> str:
     """Sanitize AI-generated HTML, only allow script-safe tags."""
     return bleach.clean(html, tags=ALLOWED_HTML_TAGS, strip=True)
 
+
 # LLM generation defaults
 DEFAULT_OUTLINE_TEMPERATURE = 0.7
 DEFAULT_EXPAND_TEMPERATURE = 0.8
@@ -233,11 +234,13 @@ OUTPUT FORMAT (mandatory):
                 branch_label = str(branch_label)[:MAX_BRANCH_LABEL_LENGTH]
             else:
                 branch_label = branch_label[:MAX_BRANCH_LABEL_LENGTH]
-            sanitized.append({
-                "title": title,
-                "summary": summary,
-                "branch_label": branch_label,
-            })
+            sanitized.append(
+                {
+                    "title": title,
+                    "summary": summary,
+                    "branch_label": branch_label,
+                }
+            )
         return sanitized
 
     async def split_chapter_to_scenes(

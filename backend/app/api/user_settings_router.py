@@ -418,6 +418,7 @@ async def delete_cookie(platform: str, auth: AuthDep):
 
 class HeadersUpsertRequest(BaseModel):
     """Request body for PUT /settings/headers/{platform}"""
+
     headers_text: str
 
 
@@ -445,7 +446,9 @@ async def set_headers(platform: str, request: HeadersUpsertRequest, auth: AuthDe
         raise HTTPException(status_code=400, detail=f"Unsupported platform")
     try:
         repo = CookiesRepository()
-        await repo.upsert(auth.user_id, platform, {"custom_headers": request.headers_text})
+        await repo.upsert(
+            auth.user_id, platform, {"custom_headers": request.headers_text}
+        )
         return {"success": True, "platform": platform}
     except Exception as e:
         logger.error(f"保存 Headers 失败: {e}")

@@ -68,7 +68,9 @@ class StoryboardService:
 
         team_id = project.get("team_id")
         if not team_id:
-            raise HTTPException(status_code=403, detail="Project has no team association")
+            raise HTTPException(
+                status_code=403, detail="Project has no team association"
+            )
 
         from app.db.supabase_client import get_async_supabase_admin
 
@@ -230,9 +232,7 @@ class StoryboardService:
                 project_id=project_id,
             )
         except Exception as exc:
-            logger.error(
-                "Failed to list projects for team %s: %s", team_id, exc
-            )
+            logger.error("Failed to list projects for team %s: %s", team_id, exc)
             raise
 
     async def update_project(
@@ -251,9 +251,7 @@ class StoryboardService:
         try:
             return await self.project_repo.update(project_id, data)
         except Exception as exc:
-            logger.error(
-                "Failed to update storyboard project %s: %s", project_id, exc
-            )
+            logger.error("Failed to update storyboard project %s: %s", project_id, exc)
             raise
 
     async def soft_delete_project(self, project_id: str) -> None:
@@ -353,9 +351,7 @@ class StoryboardService:
 
             # --- edges: add ---
             if sync_request.added_edges:
-                await self.edge_repo.bulk_upsert(
-                    project_id, sync_request.added_edges
-                )
+                await self.edge_repo.bulk_upsert(project_id, sync_request.added_edges)
                 added_edges_count = len(sync_request.added_edges)
 
             # --- edges: delete ---
@@ -386,9 +382,7 @@ class StoryboardService:
                 "deleted_edges_count": deleted_edges_count,
             }
         except Exception as exc:
-            logger.error(
-                "Canvas sync failed for project %s: %s", project_id, exc
-            )
+            logger.error("Canvas sync failed for project %s: %s", project_id, exc)
             raise
 
     # ------------------------------------------------------------------ #
@@ -425,9 +419,7 @@ class StoryboardService:
                 character_data["visual_traits"] = visual_traits
 
             character = await self.character_repo.create(character_data)
-            logger.info(
-                "Created character '%s' for project %s", name, project_id
-            )
+            logger.info("Created character '%s' for project %s", name, project_id)
             return character
         except Exception as exc:
             logger.error(
@@ -453,9 +445,7 @@ class StoryboardService:
         try:
             return await self.character_repo.update(character_id, data)
         except Exception as exc:
-            logger.error(
-                "Failed to update character %s: %s", character_id, exc
-            )
+            logger.error("Failed to update character %s: %s", character_id, exc)
             raise
 
     async def delete_character(self, character_id: str) -> None:
@@ -468,9 +458,7 @@ class StoryboardService:
         try:
             await self.character_repo.delete(character_id)
         except Exception as exc:
-            logger.error(
-                "Failed to delete character %s: %s", character_id, exc
-            )
+            logger.error("Failed to delete character %s: %s", character_id, exc)
             raise
 
     async def get_character_prompt_fragment(self, character_id: str) -> str:
@@ -709,7 +697,9 @@ class StoryboardService:
             raise HTTPException(status_code=404, detail="Source asset not found")
 
         if str(source_asset.get("project_id")) != str(project_id):
-            raise HTTPException(status_code=403, detail="Asset does not belong to this project")
+            raise HTTPException(
+                status_code=403, detail="Asset does not belong to this project"
+            )
 
         # 2. Resolve paths
         project = await self.project_repo.get_by_id(project_id)
@@ -721,7 +711,9 @@ class StoryboardService:
 
         source_file_path = Path(nas_base) / source_asset["file_path"]
         if not source_file_path.exists():
-            raise HTTPException(status_code=404, detail="Source image file not found on disk")
+            raise HTTPException(
+                status_code=404, detail="Source image file not found on disk"
+            )
 
         # Compute a hash prefix for output filenames
         source_hash = source_asset.get("file_hash", "unknown")[:12]
@@ -751,7 +743,8 @@ class StoryboardService:
         except Exception as exc:
             logger.error(
                 "split_image_asset: image processing failed for asset %s: %s",
-                asset_id, exc,
+                asset_id,
+                exc,
             )
             raise HTTPException(
                 status_code=500, detail=f"Image splitting failed: {exc}"
@@ -827,7 +820,11 @@ class StoryboardService:
 
         logger.info(
             "split_image_asset: created %d frames from asset %s in project %s (%dx%d grid)",
-            len(created_frames), asset_id, project_id, rows, cols,
+            len(created_frames),
+            asset_id,
+            project_id,
+            rows,
+            cols,
         )
 
         return {

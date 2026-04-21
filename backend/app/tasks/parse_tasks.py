@@ -29,9 +29,13 @@ def _extract_url(url: str) -> str:
     return valid_urls[0]
 
 
-def _fetch_and_parse(valid_url: str, video_bool: bool,
-                     cover_bool: bool, categories: str = None,
-                     user_agent: str | None = None) -> tuple:
+def _fetch_and_parse(
+    valid_url: str,
+    video_bool: bool,
+    cover_bool: bool,
+    categories: str = None,
+    user_agent: str | None = None,
+) -> tuple:
     """Fetch video data from platform and parse metadata.
     Returns (aweme_detail, parsed_data) tuple.
     Raises RuntimeError if fetch or parse fails.
@@ -61,8 +65,9 @@ def _fetch_and_parse(valid_url: str, video_bool: bool,
     return aweme_detail, parsed_data
 
 
-def _save_media_to_db(parsed_data: dict, platform_id: str,
-                      video_bool: bool) -> dict | None:
+def _save_media_to_db(
+    parsed_data: dict, platform_id: str, video_bool: bool
+) -> dict | None:
     """Save or update parsed media in database. Returns saved record."""
     from app.core.enums import DownloadStatus
     from app.repositories.media_repository import MediaRepository
@@ -92,8 +97,9 @@ def _save_media_to_db(parsed_data: dict, platform_id: str,
     return saved
 
 
-def _auto_tag_media(video_db_id, platform_id: str, aweme_detail: dict,
-                    title: str, description: str):
+def _auto_tag_media(
+    video_db_id, platform_id: str, aweme_detail: dict, title: str, description: str
+):
     """Apply auto-tagging based on content classification. Non-blocking."""
     try:
         original_tags = []
@@ -114,15 +120,22 @@ def _auto_tag_media(video_db_id, platform_id: str, aweme_detail: dict,
             )
         )
         if added_tags:
-            logger.info(f"[Parse] Auto-tagged {platform_id} with {len(added_tags)} tags")
+            logger.info(
+                f"[Parse] Auto-tagged {platform_id} with {len(added_tags)} tags"
+            )
     except Exception as e:
         logger.warning(f"[Parse] Auto-tagging failed for {platform_id}: {e}")
 
 
-def _dispatch_download(platform_id: str, user_id: str,
-                       video_bool: bool, cover_bool: bool,
-                       media_type: int, video_title: str,
-                       user_agent: str | None = None) -> str | None:
+def _dispatch_download(
+    platform_id: str,
+    user_id: str,
+    video_bool: bool,
+    cover_bool: bool,
+    media_type: int,
+    video_title: str,
+    user_agent: str | None = None,
+) -> str | None:
     """Dispatch download task. Returns download_task_id or None."""
     from app.services.system_monitor_service import check_worker_ready
     from app.tasks.download_tasks import download_unified_task
@@ -145,8 +158,9 @@ def _dispatch_download(platform_id: str, user_id: str,
     return download_task.id
 
 
-def _trigger_l1_analysis(video_db_id, platform_id: str,
-                         parsed_data: dict, video_title: str):
+def _trigger_l1_analysis(
+    video_db_id, platform_id: str, parsed_data: dict, video_title: str
+):
     """Trigger L1 cover analysis. Non-blocking."""
     try:
         cover_url = (
@@ -156,6 +170,7 @@ def _trigger_l1_analysis(video_db_id, platform_id: str,
         )
         if video_db_id and cover_url:
             from app.tasks.analysis_tasks import analyze_video_l1_task
+
             analyze_video_l1_task.delay(
                 media_id=video_db_id,
                 cover_url=cover_url,
@@ -194,17 +209,19 @@ def parse_single_link_task(
         # 2. Fetch + parse
         # One UA per task — used by DrissionPage parse AND later download.
         from app.services.douyin_parse.ua_pool import pick_ua
+
         legacy_ua = pick_ua()
 
         try:
             aweme_detail, parsed_data = _fetch_and_parse(
-                valid_url, video_bool, cover_bool, categories,
+                valid_url,
+                video_bool,
+                cover_bool,
+                categories,
                 user_agent=legacy_ua,
             )
         except RuntimeError as e:
-            raise self.retry(
-                exc=e, countdown=30 * (2 ** self.request.retries)
-            )
+            raise self.retry(exc=e, countdown=30 * (2**self.request.retries))
 
         platform_id = parsed_data.get("platform_id")
         media_type = parsed_data.get("media_type", 0)
@@ -214,21 +231,35 @@ def parse_single_link_task(
         # 3. Save to database
         saved_video = _save_media_to_db(parsed_data, platform_id, video_bool)
         if not saved_video:
-            return {"status": "failed", "url": valid_url, "error": "Data validation failed"}
+            return {
+                "status": "failed",
+                "url": valid_url,
+                "error": "Data validation failed",
+            }
 
         video_db_id = saved_video.get("id")
 
         # 4. Auto-tag (non-blocking)
         if video_db_id:
-            _auto_tag_media(video_db_id, platform_id, aweme_detail,
-                           video_title, parsed_data.get("description", ""))
+            _auto_tag_media(
+                video_db_id,
+                platform_id,
+                aweme_detail,
+                video_title,
+                parsed_data.get("description", ""),
+            )
 
         # 5. Dispatch download
         download_task_id = None
         if video_bool or cover_bool:
             download_task_id = _dispatch_download(
-                platform_id, user_id, video_bool, cover_bool,
-                media_type, video_title, user_agent=legacy_ua,
+                platform_id,
+                user_id,
+                video_bool,
+                cover_bool,
+                media_type,
+                video_title,
+                user_agent=legacy_ua,
             )
 
         # 6. Trigger L1 analysis (non-blocking)
@@ -236,12 +267,16 @@ def parse_single_link_task(
             _trigger_l1_analysis(video_db_id, platform_id, parsed_data, video_title)
 
         # 7. Log + respond
-        run_async(log_user_action(
-            user_id=user_id, action="fetch",
-            message=f"{video_title[:20]}...: Metadata parsed",
-            status="success", aweme_id=platform_id,
-            details={"media_type": media_type, "platform": "douyin"},
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="fetch",
+                message=f"{video_title[:20]}...: Metadata parsed",
+                status="success",
+                aweme_id=platform_id,
+                details={"media_type": media_type, "platform": "douyin"},
+            )
+        )
 
         logger.success(f"[Parse] Complete: {platform_id}")
         return {
@@ -270,12 +305,16 @@ def parse_single_link_task(
     except Exception as e:
         logger.error(f"[Parse] Task error: {url}, error: {e}")
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
-        run_async(log_user_action(
-            user_id=user_id, action="fetch",
-            message=f"Parse failed: {url[:30]}...",
-            status="error", details={"error": str(e)[:200]},
-        ))
+            raise self.retry(exc=e, countdown=30 * (2**self.request.retries))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="fetch",
+                message=f"Parse failed: {url[:30]}...",
+                status="error",
+                details={"error": str(e)[:200]},
+            )
+        )
         return {"status": "failed", "url": url, "error": str(e)}
 
 
@@ -347,6 +386,7 @@ def _get_douyin_method_flags() -> dict[str, bool]:
     flags = {short: True for short in _DOUYIN_METHOD_FLAG_KEYS.values()}
     try:
         from app.db import get_async_supabase_admin
+
         client = run_async(get_async_supabase_admin())
         result = run_async(
             client.table("system_settings")
@@ -354,7 +394,7 @@ def _get_douyin_method_flags() -> dict[str, bool]:
             .in_("key", list(_DOUYIN_METHOD_FLAG_KEYS.keys()))
             .execute()
         )
-        for row in (result.data or []):
+        for row in result.data or []:
             short_key = _DOUYIN_METHOD_FLAG_KEYS.get(row["key"])
             if short_key:
                 flags[short_key] = row["value"] is True or row["value"] == "true"
@@ -373,10 +413,15 @@ def _try_lighthttp(url: str, user_id: str, user_agent: str):
             IesDouyinParser.parse(url, user_id=user_id, user_agent=user_agent)
         )
         if aweme_detail:
-            parsed = run_async(DouyinFormatter.parse_aweme_detail(
-                aweme_detail=aweme_detail, valid_url=url,
-                download_video=True, download_music=False, download_cover=True,
-            ))
+            parsed = run_async(
+                DouyinFormatter.parse_aweme_detail(
+                    aweme_detail=aweme_detail,
+                    valid_url=url,
+                    download_video=True,
+                    download_music=False,
+                    download_cover=True,
+                )
+            )
             if parsed:
                 return parsed, "lightweight", "Lightweight"
     except Exception as e:
@@ -394,10 +439,15 @@ def _try_abogus(url: str, user_id: str, user_agent: str):
             ABogusDouyinParser.parse(url, user_id=user_id, user_agent=user_agent)
         )
         if aweme_detail:
-            parsed = run_async(DouyinFormatter.parse_aweme_detail(
-                aweme_detail=aweme_detail, valid_url=url,
-                download_video=True, download_music=False, download_cover=True,
-            ))
+            parsed = run_async(
+                DouyinFormatter.parse_aweme_detail(
+                    aweme_detail=aweme_detail,
+                    valid_url=url,
+                    download_video=True,
+                    download_music=False,
+                    download_cover=True,
+                )
+            )
             if parsed:
                 return parsed, "abogus", "ABogus"
     except Exception as e:
@@ -417,10 +467,15 @@ def _try_drissionpage(url: str, user_id: str, user_agent: str):
             )
         )
         if aweme_detail:
-            parsed = run_async(DouyinFormatter.parse_aweme_detail(
-                aweme_detail=aweme_detail, valid_url=url,
-                download_video=True, download_music=False, download_cover=True,
-            ))
+            parsed = run_async(
+                DouyinFormatter.parse_aweme_detail(
+                    aweme_detail=aweme_detail,
+                    valid_url=url,
+                    download_video=True,
+                    download_music=False,
+                    download_cover=True,
+                )
+            )
             if parsed:
                 return parsed, "drissionpage", "DrissionPage"
     except Exception as e:
@@ -428,9 +483,7 @@ def _try_drissionpage(url: str, user_id: str, user_agent: str):
     return None
 
 
-def _douyin_parse_fallback_sync(
-    url: str, user_id: str, user_agent: str
-) -> tuple:
+def _douyin_parse_fallback_sync(url: str, user_id: str, user_agent: str) -> tuple:
     """Sync Douyin fallback: LightHTTP → ABogus → DrissionPage (respects admin toggles).
 
     user_agent: 本次解析任务统一的 Douyin UA（来自 ua_pool.pick_ua()）。
@@ -502,16 +555,20 @@ def _dispatch_download_deduped(
     types_to_download = []
     for dtype in requested:
         try:
-            result = run_async(mgr.acquire_or_subscribe(
-                task_type=f"download:{dtype}",
-                dedup_identifier=platform_id,
-                user_id=user_id,
-                resource_id=resource_id or "",
-            ))
+            result = run_async(
+                mgr.acquire_or_subscribe(
+                    task_type=f"download:{dtype}",
+                    dedup_identifier=platform_id,
+                    user_id=user_id,
+                    resource_id=resource_id or "",
+                )
+            )
             if result["action"] == "created":
                 types_to_download.append(dtype)
             else:
-                logger.info(f"[Parse/Download] {dtype}={result['action']} for {platform_id}")
+                logger.info(
+                    f"[Parse/Download] {dtype}={result['action']} for {platform_id}"
+                )
         except Exception:
             types_to_download.append(dtype)
 
@@ -522,14 +579,16 @@ def _dispatch_download_deduped(
     dl_parts = [t.capitalize() for t in types_to_download]
     unified_task_id = None
     try:
-        unified_task_id = run_async(mgr.create(
-            user_id=user_id,
-            task_type="download",
-            title=f"Download {video_title[:50] or platform_id}",
-            subtitle=" + ".join(dl_parts),
-            media_id=platform_id,
-            resource_id=resource_id,
-        ))
+        unified_task_id = run_async(
+            mgr.create(
+                user_id=user_id,
+                task_type="download",
+                title=f"Download {video_title[:50] or platform_id}",
+                subtitle=" + ".join(dl_parts),
+                media_id=platform_id,
+                resource_id=resource_id,
+            )
+        )
     except Exception as e:
         logger.warning(f"[Parse/Download] Pre-create download unified_task failed: {e}")
 
@@ -552,7 +611,9 @@ def _dispatch_download_deduped(
     # Write celery_task_id back to pre-created unified_task
     if unified_task_id:
         try:
-            run_async(mgr._atomic_update(unified_task_id, {"celery_task_id": celery_task.id}))
+            run_async(
+                mgr._atomic_update(unified_task_id, {"celery_task_id": celery_task.id})
+            )
         except Exception:
             pass
 
@@ -560,14 +621,19 @@ def _dispatch_download_deduped(
     try:
         redis_client = celery_app.backend.client
         channel = f"task_progress:{user_id}"
-        redis_client.publish(channel, json.dumps({
-            "type": "download_started",
-            "unified_task_id": unified_task_id,
-            "celery_task_id": celery_task.id,
-            "media_id": platform_id,
-            "status": "pending",
-            "percent": 0,
-        }))
+        redis_client.publish(
+            channel,
+            json.dumps(
+                {
+                    "type": "download_started",
+                    "unified_task_id": unified_task_id,
+                    "celery_task_id": celery_task.id,
+                    "media_id": platform_id,
+                    "status": "pending",
+                    "percent": 0,
+                }
+            ),
+        )
     except Exception as e:
         logger.debug(f"[Parse/Download] Redis publish download_started failed: {e}")
 
@@ -606,6 +672,7 @@ def parse_media_task(
 
     # 1. UnifiedTaskManager: start pre-created task
     from app.services.unified_task_manager import get_task_manager
+
     manager = get_task_manager()
     unified_task_id = _unified_task_id
 
@@ -631,39 +698,60 @@ def parse_media_task(
         douyin_ua: str | None = None
         if platform == "douyin":
             from app.services.douyin_parse.ua_pool import pick_ua
+
             douyin_ua = pick_ua()
             logger.info(f"[Parse/Task] Douyin UA for this task: {douyin_ua[:60]}...")
 
         if unified_task_id:
             try:
-                run_async(manager.update_progress(unified_task_id, 5, subtitle="Fetching metadata..."))
+                run_async(
+                    manager.update_progress(
+                        unified_task_id, 5, subtitle="Fetching metadata..."
+                    )
+                )
             except Exception:
                 pass
 
         # Check admin toggle for yt-dlp on Douyin
         douyin_flags = _get_douyin_method_flags() if platform == "douyin" else {}
-        ytdlp_disabled_by_admin = platform == "douyin" and not douyin_flags.get("ytdlp", True)
+        ytdlp_disabled_by_admin = platform == "douyin" and not douyin_flags.get(
+            "ytdlp", True
+        )
 
         if (skip_ytdlp or ytdlp_disabled_by_admin) and platform == "douyin":
             # Douyin: skip yt-dlp (no cookie or admin disabled)
             reason = "admin disabled" if ytdlp_disabled_by_admin else "no cookie"
-            logger.info(f"[Parse/Task] Skipping yt-dlp for Douyin ({reason}): {url[:60]}")
+            logger.info(
+                f"[Parse/Task] Skipping yt-dlp for Douyin ({reason}): {url[:60]}"
+            )
             fallback_used = True
             dispatch_url = None
-            parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id, douyin_ua)
+            parsed_data, parse_method, _ = _douyin_parse_fallback_sync(
+                url, user_id, douyin_ua
+            )
             if unified_task_id:
                 try:
-                    run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
+                    run_async(
+                        manager.update_progress(
+                            unified_task_id, 20, subtitle="Parsing metadata..."
+                        )
+                    )
                 except Exception:
                     pass
         else:
             try:
                 ytdlp_info = run_async(
-                    YtdlpService.fetch_metadata(url, user_id=user_id, user_agent=douyin_ua)
+                    YtdlpService.fetch_metadata(
+                        url, user_id=user_id, user_agent=douyin_ua
+                    )
                 )
                 if unified_task_id:
                     try:
-                        run_async(manager.update_progress(unified_task_id, 20, subtitle="Parsing metadata..."))
+                        run_async(
+                            manager.update_progress(
+                                unified_task_id, 20, subtitle="Parsing metadata..."
+                            )
+                        )
                     except Exception:
                         pass
                 parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, url)
@@ -672,56 +760,101 @@ def parse_media_task(
                 # Skip for Douyin — yt-dlp cookie issues don't affect DrissionPage fallback
                 error_str = str(e)
                 if platform != "douyin":
-                    auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
+                    auth_keywords = [
+                        "login",
+                        "401",
+                        "403",
+                        "cookie",
+                        "sign in",
+                        "authenticated",
+                    ]
                     if any(kw in error_str.lower() for kw in auth_keywords):
                         try:
-                            from app.repositories.cookies_repository import CookiesRepository
+                            from app.repositories.cookies_repository import (
+                                CookiesRepository,
+                            )
+
                             cookies_repo = CookiesRepository()
-                            run_async(cookies_repo.mark_invalid(user_id, platform, error_str[:200]))
+                            run_async(
+                                cookies_repo.mark_invalid(
+                                    user_id, platform, error_str[:200]
+                                )
+                            )
                             logger.info(
                                 f"[Cookie] Marked {platform} cookie invalid for user {user_id} "
                                 f"after yt-dlp auth failure"
                             )
                         except Exception as cookie_err:
-                            logger.warning(f"[Cookie] Failed to mark cookie invalid: {cookie_err}")
+                            logger.warning(
+                                f"[Cookie] Failed to mark cookie invalid: {cookie_err}"
+                            )
 
                 if platform != "douyin":
                     raise  # Non-Douyin: yt-dlp failure is fatal
                 # Douyin fallback
-                logger.warning(f"[Parse/Task] yt-dlp failed for Douyin, falling back: {e}")
+                logger.warning(
+                    f"[Parse/Task] yt-dlp failed for Douyin, falling back: {e}"
+                )
                 fallback_used = True
                 dispatch_url = None
-                parsed_data, parse_method, _ = _douyin_parse_fallback_sync(url, user_id, douyin_ua)
+                parsed_data, parse_method, _ = _douyin_parse_fallback_sync(
+                    url, user_id, douyin_ua
+                )
 
-        _METHOD_LABELS = {"ytdlp": "yt-dlp", "lightweight": "Lightweight", "light_http": "LightHTTP", "drissionpage": "DrissionPage", "browser_auto": "DrissionPage"}
+        _METHOD_LABELS = {
+            "ytdlp": "yt-dlp",
+            "lightweight": "Lightweight",
+            "light_http": "LightHTTP",
+            "drissionpage": "DrissionPage",
+            "browser_auto": "DrissionPage",
+        }
         method_label = _METHOD_LABELS.get(parse_method, parse_method)
 
         if unified_task_id:
             try:
-                video_title = parsed_data.get("title") or parsed_data.get("description", "")[:50]
-                run_async(manager.update_progress(
-                    unified_task_id, 30,
-                    subtitle=f"via {method_label} · Enriching data...",
-                    title=f"Parse {video_title[:70]}" if video_title else None,
-                ))
+                video_title = (
+                    parsed_data.get("title") or parsed_data.get("description", "")[:50]
+                )
+                run_async(
+                    manager.update_progress(
+                        unified_task_id,
+                        30,
+                        subtitle=f"via {method_label} · Enriching data...",
+                        title=f"Parse {video_title[:70]}" if video_title else None,
+                    )
+                )
             except Exception:
                 pass
 
         # 3. Enrich Bilibili stats
         if platform == "bilibili":
-            raw_video_id = parsed_data["platform_id"].split("_", 1)[1] if "_" in parsed_data["platform_id"] else parsed_data["platform_id"]
+            raw_video_id = (
+                parsed_data["platform_id"].split("_", 1)[1]
+                if "_" in parsed_data["platform_id"]
+                else parsed_data["platform_id"]
+            )
             if raw_video_id:
                 try:
-                    extra_stats = run_async(YtdlpService._fetch_bilibili_stats(raw_video_id))
+                    extra_stats = run_async(
+                        YtdlpService._fetch_bilibili_stats(raw_video_id)
+                    )
                     if extra_stats:
                         parsed_data["favorite_count"] = extra_stats.get("favorite", 0)
                         parsed_data["share_count"] = extra_stats.get("share", 0)
                 except Exception as e:
-                    logger.warning(f"[Parse/Task] Bilibili stats enrichment failed: {e}")
+                    logger.warning(
+                        f"[Parse/Task] Bilibili stats enrichment failed: {e}"
+                    )
 
         if unified_task_id:
             try:
-                run_async(manager.update_progress(unified_task_id, 40, subtitle=f"via {method_label} · Saving metadata..."))
+                run_async(
+                    manager.update_progress(
+                        unified_task_id,
+                        40,
+                        subtitle=f"via {method_label} · Saving metadata...",
+                    )
+                )
             except Exception:
                 pass
 
@@ -732,7 +865,10 @@ def parse_media_task(
         parsed_data["need_download_cover"] = True
 
         from app.services.media_service import MediaService
-        save_result = run_async(MediaService.save_metadata_only(platform_id, parsed_data))
+
+        save_result = run_async(
+            MediaService.save_metadata_only(platform_id, parsed_data)
+        )
         if not save_result.get("success"):
             raise RuntimeError(f"Failed to save metadata: {save_result.get('message')}")
 
@@ -743,6 +879,7 @@ def parse_media_task(
         if resource_id and (tags or tag_ids):
             try:
                 from app.repositories.tags_repository import TagsRepository
+
                 tags_repo = TagsRepository()
 
                 # Resolve tag names to IDs (auto-create if missing)
@@ -754,32 +891,45 @@ def parse_media_task(
                             continue
                         tag = run_async(tags_repo.get_tag_by_name(name, user_id))
                         if not tag:
-                            tag = run_async(tags_repo.create_tag(name=name, user_id=user_id))
+                            tag = run_async(
+                                tags_repo.create_tag(name=name, user_id=user_id)
+                            )
                         resolved_ids.append(str(tag["id"]))
 
                 if resolved_ids:
-                    run_async(tags_repo.bulk_add_tags_to_resource(
-                        resource_id, resolved_ids, source="manual"
-                    ))
-                    logger.info(f"[Parse/Task] Attached {len(resolved_ids)} tags to resource {resource_id}")
+                    run_async(
+                        tags_repo.bulk_add_tags_to_resource(
+                            resource_id, resolved_ids, source="manual"
+                        )
+                    )
+                    logger.info(
+                        f"[Parse/Task] Attached {len(resolved_ids)} tags to resource {resource_id}"
+                    )
             except Exception as e:
                 logger.warning(f"[Parse/Task] Failed to attach tags: {e}")
 
         # 5. Update unified_task with media_id for frontend tracking
         if unified_task_id and platform_id:
             try:
-                run_async(manager._atomic_update(unified_task_id, {"media_id": platform_id}))
+                run_async(
+                    manager._atomic_update(unified_task_id, {"media_id": platform_id})
+                )
             except Exception:
                 pass
 
         # 6. Complete parse task
         if unified_task_id:
             try:
-                run_async(manager.complete(
-                    unified_task_id,
-                    subtitle=f"via {method_label}",
-                    metadata_patch={"parse_method": parse_method, "original_url": url},
-                ))
+                run_async(
+                    manager.complete(
+                        unified_task_id,
+                        subtitle=f"via {method_label}",
+                        metadata_patch={
+                            "parse_method": parse_method,
+                            "original_url": url,
+                        },
+                    )
+                )
             except Exception:
                 pass
 
@@ -805,12 +955,20 @@ def parse_media_task(
             )
 
         # 8. Log success
-        run_async(log_user_action(
-            user_id=user_id, action="fetch",
-            message=f"Video parsed ({parse_method}): {video_title[:30]}...",
-            status="success", aweme_id=platform_id,
-            details={"platform": platform, "parse_method": parse_method, "async": True},
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="fetch",
+                message=f"Video parsed ({parse_method}): {video_title[:30]}...",
+                status="success",
+                aweme_id=platform_id,
+                details={
+                    "platform": platform,
+                    "parse_method": parse_method,
+                    "async": True,
+                },
+            )
+        )
 
         logger.success(f"[Parse/Task] Complete: {platform_id}")
         return {
@@ -828,27 +986,37 @@ def parse_media_task(
             # Will retry — update progress with error info but don't mark as terminal
             if unified_task_id:
                 try:
-                    run_async(manager.update_progress(
-                        unified_task_id, None,
-                        subtitle=f"Retrying ({self.request.retries + 1}/{self.max_retries})...",
-                    ))
+                    run_async(
+                        manager.update_progress(
+                            unified_task_id,
+                            None,
+                            subtitle=f"Retrying ({self.request.retries + 1}/{self.max_retries})...",
+                        )
+                    )
                 except Exception:
                     pass
-            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=30 * (2**self.request.retries))
 
         # Final failure — no more retries
         if unified_task_id:
             try:
-                run_async(manager.fail(
-                    unified_task_id, error_msg,
-                    metadata_patch={"original_url": url},
-                ))
+                run_async(
+                    manager.fail(
+                        unified_task_id,
+                        error_msg,
+                        metadata_patch={"original_url": url},
+                    )
+                )
             except Exception:
                 pass
 
-        run_async(log_user_action(
-            user_id=user_id, action="fetch",
-            message=f"Parse failed: {url[:30]}...",
-            status="error", details={"error": error_msg},
-        ))
+        run_async(
+            log_user_action(
+                user_id=user_id,
+                action="fetch",
+                message=f"Parse failed: {url[:30]}...",
+                status="error",
+                details={"error": error_msg},
+            )
+        )
         return {"status": "failed", "url": url, "error": error_msg}

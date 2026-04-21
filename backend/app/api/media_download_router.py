@@ -88,6 +88,7 @@ async def retry_download(
         resource_id = None
         if media_id:
             from app.repositories.resources_repository import ResourcesRepository
+
             res_repo = ResourcesRepository()
             user_resource = await res_repo.get_resource_by_media_id_and_creator(
                 media_id, auth.user_id
@@ -100,7 +101,9 @@ async def retry_download(
                 if request.cover_bool:
                     res_status_updates["cover_download_status"] = "pending"
                 if res_status_updates:
-                    await res_repo.update_download_status(resource_id, res_status_updates)
+                    await res_repo.update_download_status(
+                        resource_id, res_status_updates
+                    )
 
         dispatch_result = await _dedup_and_dispatch(
             platform_id=platform_id,
@@ -126,7 +129,11 @@ async def retry_download(
         return {
             "success": True,
             "message": "Download task resubmitted",
-            "task_id": dispatch_result.get("unified_task_id") if isinstance(dispatch_result, dict) else download_task_id,
+            "task_id": (
+                dispatch_result.get("unified_task_id")
+                if isinstance(dispatch_result, dict)
+                else download_task_id
+            ),
         }
     except HTTPException:
         raise
@@ -290,7 +297,12 @@ async def download_music_file(platform_id: str, auth: AuthDep):
                         break
 
             if storage_dir and storage_dir.exists():
-                for name in [f"{platform_id}_audio", "music", f"{platform_id}_music", "audio"]:
+                for name in [
+                    f"{platform_id}_audio",
+                    "music",
+                    f"{platform_id}_music",
+                    "audio",
+                ]:
                     for ext in ["mp3", "m4a", "opus", "ogg", "wav", "aac"]:
                         candidate = storage_dir / f"{name}.{ext}"
                         if candidate.exists():
@@ -395,15 +407,22 @@ async def download_gallery_zip(platform_id: str, auth: AuthDep):
 
         slide_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".webm"}
         files = sorted(
-            [f for f in slides_dir.iterdir() if f.is_file() and f.suffix.lower() in slide_exts]
+            [
+                f
+                for f in slides_dir.iterdir()
+                if f.is_file() and f.suffix.lower() in slide_exts
+            ]
         )
         if not files:
             raise HTTPException(status_code=404, detail="No gallery files on disk")
 
         video_title = video.get("title", platform_id) or platform_id
-        safe_title = "".join(
-            c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
-        ).strip() or platform_id
+        safe_title = (
+            "".join(
+                c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
+            ).strip()
+            or platform_id
+        )
         zip_name = f"{safe_title[:80]}_gallery.zip"
 
         buffer = io.BytesIO()

@@ -73,19 +73,21 @@ async def list_users(
         uid = u["id"]
         video_count, team_count = user_counts.get(uid, (0, 0))
         email, last_sign_in_at = auth_info.get(uid, (None, None))
-        items.append(AdminUserResponse(
-            id=str(uid),
-            email=email,
-            username=u.get("username"),
-            avatar_url=u.get("avatar_url"),
-            role=str(u.get("role", "user")),
-            is_banned=u.get("is_banned", False),
-            created_at=u["created_at"],
-            updated_at=u.get("updated_at"),
-            last_sign_in_at=last_sign_in_at,
-            video_count=video_count,
-            team_count=team_count,
-        ))
+        items.append(
+            AdminUserResponse(
+                id=str(uid),
+                email=email,
+                username=u.get("username"),
+                avatar_url=u.get("avatar_url"),
+                role=str(u.get("role", "user")),
+                is_banned=u.get("is_banned", False),
+                created_at=u["created_at"],
+                updated_at=u.get("updated_at"),
+                last_sign_in_at=last_sign_in_at,
+                video_count=video_count,
+                team_count=team_count,
+            )
+        )
 
     return AdminUserListResponse(
         items=items,
@@ -251,7 +253,9 @@ async def ban_user(
         ip_address=client_ip,
     )
 
-    logger.info(f"User {user_id} {'banned' if ban_request.is_banned else 'unbanned'} by admin {auth.user_id}")
+    logger.info(
+        f"User {user_id} {'banned' if ban_request.is_banned else 'unbanned'} by admin {auth.user_id}"
+    )
 
     # Return updated user
     return await get_user(user_id, auth)

@@ -307,9 +307,7 @@ async def split_image(
             asset_id,
             exc,
         )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to split image: {exc}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to split image: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -377,12 +375,8 @@ async def upload_image(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(
-            "[SBCanvas] upload_image project=%s failed: %s", project_id, exc
-        )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to upload image: {exc}"
-        )
+        logger.error("[SBCanvas] upload_image project=%s failed: %s", project_id, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +388,9 @@ async def upload_image(
 async def serve_asset_file(
     auth: AuthDep,
     asset_id: str,
-    preview: bool = Query(False, description="Return preview thumbnail instead of original"),
+    preview: bool = Query(
+        False, description="Return preview thumbnail instead of original"
+    ),
 ) -> FileResponse:
     """
     Serve a storyboard asset file (original or preview thumbnail).

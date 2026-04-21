@@ -20,6 +20,7 @@ router = APIRouter(prefix="/reviews")
 
 # ─── Request Models ─────────────────────────────────
 
+
 class AnnotationInput(BaseModel):
     tool_type: str = Field(..., pattern="^(arrow|rect|freehand|text)$")
     data: Dict[str, Any]
@@ -48,6 +49,7 @@ class SetReviewStatusRequest(BaseModel):
 
 
 # ─── Comment Endpoints ──────────────────────────────
+
 
 @router.post("/comments")
 async def create_comment(body: CreateCommentRequest, auth: AuthDep):
@@ -113,9 +115,7 @@ async def get_comment(comment_id: str, auth: AuthDep):
 
 
 @router.patch("/comments/{comment_id}")
-async def update_comment(
-    comment_id: str, body: UpdateCommentRequest, auth: AuthDep
-):
+async def update_comment(comment_id: str, body: UpdateCommentRequest, auth: AuthDep):
     """Update a comment's content or status."""
     try:
         svc = ReviewService()
@@ -196,6 +196,7 @@ async def get_comment_count(
 
 
 # ─── Review Status Endpoints ────────────────────────
+
 
 @router.post("/status")
 async def set_review_status(body: SetReviewStatusRequest, auth: AuthDep):

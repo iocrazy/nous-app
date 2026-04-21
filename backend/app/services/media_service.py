@@ -409,13 +409,23 @@ class MediaService:
             data_dict = schema.model_dump(exclude_unset=True)
 
             # Remove per-user fields that don't belong in global table
-            for key in ("user_id", "need_download_video", "need_download_music",
-                        "need_download_cover", "notes", "rating"):
+            for key in (
+                "user_id",
+                "need_download_video",
+                "need_download_music",
+                "need_download_cover",
+                "notes",
+                "rating",
+            ):
                 data_dict.pop(key, None)
 
             # Don't overwrite existing download statuses from global table
-            for status_field in ("video_download_status", "music_download_status",
-                                 "cover_download_status", "image_download_status"):
+            for status_field in (
+                "video_download_status",
+                "music_download_status",
+                "cover_download_status",
+                "image_download_status",
+            ):
                 data_dict.pop(status_field, None)
 
             # ── Write to parsed_media ──
@@ -424,13 +434,19 @@ class MediaService:
                 media_id = existing.get("id")
                 # Only update metadata, never overwrite download statuses/paths
                 exclude_keys = {
-                    "video_download_status", "music_download_status",
-                    "cover_download_status", "image_download_status",
-                    "download_path", "cover_download_path", "image_download_path",
-                    "download_duration", "download_time",
+                    "video_download_status",
+                    "music_download_status",
+                    "cover_download_status",
+                    "image_download_status",
+                    "download_path",
+                    "cover_download_path",
+                    "image_download_path",
+                    "download_duration",
+                    "download_time",
                 }
                 update_data = {
-                    k: v for k, v in data_dict.items()
+                    k: v
+                    for k, v in data_dict.items()
                     if k not in exclude_keys and v is not None
                 }
                 if update_data:
@@ -439,13 +455,21 @@ class MediaService:
             else:
                 # New record: set initial global download statuses
                 if is_image_type:
-                    data_dict["image_download_status"] = "pending" if need_download_video else "skipped"
+                    data_dict["image_download_status"] = (
+                        "pending" if need_download_video else "skipped"
+                    )
                     data_dict["video_download_status"] = "skipped"
                 else:
-                    data_dict["video_download_status"] = "pending" if need_download_video else "skipped"
+                    data_dict["video_download_status"] = (
+                        "pending" if need_download_video else "skipped"
+                    )
                     data_dict["image_download_status"] = "skipped"
-                data_dict["music_download_status"] = "pending" if need_download_music else "skipped"
-                data_dict["cover_download_status"] = "pending" if need_download_cover else "skipped"
+                data_dict["music_download_status"] = (
+                    "pending" if need_download_music else "skipped"
+                )
+                data_dict["cover_download_status"] = (
+                    "pending" if need_download_cover else "skipped"
+                )
 
                 result = await repo.create(data_dict)
                 media_id = result.get("id") if result else None
@@ -505,32 +529,61 @@ class MediaService:
         # Determine per-user statuses
         # Only mark "completed" if global file actually has a valid path
         has_video_path = bool(existing_media and existing_media.get("download_path"))
-        has_cover_path = bool(existing_media and existing_media.get("cover_download_path"))
+        has_cover_path = bool(
+            existing_media and existing_media.get("cover_download_path")
+        )
         if is_image_type:
             video_status = "skipped"
-            image_status = "completed" if (dedup_hit and has_video_path) else ("pending" if need_download_video else "skipped")
+            image_status = (
+                "completed"
+                if (dedup_hit and has_video_path)
+                else ("pending" if need_download_video else "skipped")
+            )
         else:
-            video_status = "completed" if (dedup_hit and has_video_path) else ("pending" if need_download_video else "skipped")
+            video_status = (
+                "completed"
+                if (dedup_hit and has_video_path)
+                else ("pending" if need_download_video else "skipped")
+            )
             image_status = "skipped"
         music_status = "pending" if need_download_music else "skipped"
         cover_status = "pending" if need_download_cover else "skipped"
         # If cover file already exists globally with a valid path, mark completed
-        if existing_media and existing_media.get("cover_download_status") == "completed" and has_cover_path:
+        if (
+            existing_media
+            and existing_media.get("cover_download_status") == "completed"
+            and has_cover_path
+        ):
             cover_status = "completed"
 
         if existing_resource:
             # Update only the statuses for newly requested types
             update_data = {}
-            if need_download_video and existing_resource.get("video_download_status") == "skipped":
+            if (
+                need_download_video
+                and existing_resource.get("video_download_status") == "skipped"
+            ):
                 update_data["video_download_status"] = video_status
-            if need_download_video and is_image_type and existing_resource.get("image_download_status") == "skipped":
+            if (
+                need_download_video
+                and is_image_type
+                and existing_resource.get("image_download_status") == "skipped"
+            ):
                 update_data["image_download_status"] = image_status
-            if need_download_music and existing_resource.get("music_download_status") == "skipped":
+            if (
+                need_download_music
+                and existing_resource.get("music_download_status") == "skipped"
+            ):
                 update_data["music_download_status"] = music_status
-            if need_download_cover and existing_resource.get("cover_download_status") == "skipped":
+            if (
+                need_download_cover
+                and existing_resource.get("cover_download_status") == "skipped"
+            ):
                 update_data["cover_download_status"] = cover_status
             if update_data:
-                await resources_repo.update_resource(existing_resource["id"], update_data)
+                await resources_repo.update_resource(
+                    existing_resource["id"], update_data
+                )
             return existing_resource["id"]
         else:
             # Parse duration
@@ -540,7 +593,9 @@ class MediaService:
                 try:
                     parts = str(dur).split(":")
                     if len(parts) == 3:
-                        duration_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                        duration_seconds = (
+                            int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                        )
                     elif len(parts) == 2:
                         duration_seconds = int(parts[0]) * 60 + int(parts[1])
                     else:
@@ -565,8 +620,16 @@ class MediaService:
                 "file_size_bytes": parsed_data.get("datasize_bytes"),
                 "duration_seconds": duration_seconds,
                 "resolution": parsed_data.get("resolution"),
-                "cover_image_path": existing_media.get("cover_download_path") if existing_media else None,
-                "file_path": existing_media.get("download_path") if existing_media and dedup_hit else None,
+                "cover_image_path": (
+                    existing_media.get("cover_download_path")
+                    if existing_media
+                    else None
+                ),
+                "file_path": (
+                    existing_media.get("download_path")
+                    if existing_media and dedup_hit
+                    else None
+                ),
                 "video_download_status": video_status,
                 "music_download_status": music_status,
                 "cover_download_status": cover_status,
@@ -578,13 +641,17 @@ class MediaService:
             # Create resource_item for user's personal scope
             if resource_id:
                 try:
-                    await resources_repo.create_resource_item({
-                        "resource_id": resource_id,
-                        "scope_type": "personal",
-                        "scope_id": user_id,
-                        "added_by": user_id,
-                    })
+                    await resources_repo.create_resource_item(
+                        {
+                            "resource_id": resource_id,
+                            "scope_type": "personal",
+                            "scope_id": user_id,
+                            "added_by": user_id,
+                        }
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to create resource_item for resource {resource_id}: {e}")
+                    logger.warning(
+                        f"Failed to create resource_item for resource {resource_id}: {e}"
+                    )
 
             return resource_id

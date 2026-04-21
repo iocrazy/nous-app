@@ -19,7 +19,9 @@ def _update_visual_status(video_id: str, status: str):
     from app.repositories.ai_repository import AIRepository
 
     ai_repo = AIRepository()
-    run_async(ai_repo.update_video_ai_status(video_id, "visual_analysis_status", status))
+    run_async(
+        ai_repo.update_video_ai_status(video_id, "visual_analysis_status", status)
+    )
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)

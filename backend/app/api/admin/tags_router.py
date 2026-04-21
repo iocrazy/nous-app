@@ -146,7 +146,9 @@ async def list_tags(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     search: Optional[str] = Query(None),
-    group_id: Optional[str] = Query(None, description="Filter by group ID, use 'uncategorized' for NULL"),
+    group_id: Optional[str] = Query(
+        None, description="Filter by group ID, use 'uncategorized' for NULL"
+    ),
     sort_by: Optional[str] = Query(None),
     sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ):
@@ -249,9 +251,14 @@ async def batch_action(body: TagBatchAction, auth: AdminAuthDep):
 
     elif body.action == "color":
         if not body.color:
-            raise HTTPException(status_code=400, detail="Color required for color action")
+            raise HTTPException(
+                status_code=400, detail="Color required for color action"
+            )
         await repo.batch_set_color(body.tag_ids, body.color)
-        return {"success": True, "message": f"Updated color for {len(body.tag_ids)} tags"}
+        return {
+            "success": True,
+            "message": f"Updated color for {len(body.tag_ids)} tags",
+        }
 
     else:
         raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")

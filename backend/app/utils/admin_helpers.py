@@ -27,14 +27,16 @@ async def create_audit_log(
     """
     try:
         supabase = await get_async_supabase_admin()
-        await supabase.table("audit_logs").insert({
-            "admin_id": admin_id,
-            "action": action,
-            "target_type": target_type,
-            "target_id": target_id,
-            "details": details,
-            "ip_address": ip_address,
-        }).execute()
+        await supabase.table("audit_logs").insert(
+            {
+                "admin_id": admin_id,
+                "action": action,
+                "target_type": target_type,
+                "target_id": target_id,
+                "details": details,
+                "ip_address": ip_address,
+            }
+        ).execute()
     except Exception as e:
         logger.error(f"Failed to create audit log: {e}")
 
@@ -61,7 +63,13 @@ async def get_user_username_by_id(user_id: str) -> Optional[str]:
     """Get username from user_profiles."""
     try:
         supabase = await get_async_supabase_admin()
-        result = await supabase.table("user_profiles").select("username").eq("id", user_id).single().execute()
+        result = (
+            await supabase.table("user_profiles")
+            .select("username")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
         if result.data:
             return result.data.get("username")
         return None
@@ -139,7 +147,9 @@ async def batch_get_user_usernames(user_ids: list[str]) -> dict[str, Optional[st
     return dict(results)
 
 
-async def batch_get_user_info(user_ids: list[str]) -> dict[str, tuple[Optional[str], Optional[str]]]:
+async def batch_get_user_info(
+    user_ids: list[str],
+) -> dict[str, tuple[Optional[str], Optional[str]]]:
     """Get email and username for multiple users concurrently.
 
     Returns:
@@ -156,7 +166,9 @@ async def batch_get_user_info(user_ids: list[str]) -> dict[str, tuple[Optional[s
     return dict(results)
 
 
-async def batch_get_user_auth_info(user_ids: list[str]) -> dict[str, tuple[Optional[str], Optional[str]]]:
+async def batch_get_user_auth_info(
+    user_ids: list[str],
+) -> dict[str, tuple[Optional[str], Optional[str]]]:
     """Get auth info (email, last_sign_in_at) for multiple users concurrently.
 
     Returns:
@@ -182,7 +194,12 @@ async def get_user_video_count(user_id: str) -> int:
     """Get video count for a user."""
     try:
         supabase = await get_async_supabase_admin()
-        result = await supabase.table("parsed_media").select("id", count="exact").eq("user_id", user_id).execute()
+        result = (
+            await supabase.table("parsed_media")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .execute()
+        )
         return result.count or 0
     except Exception as e:
         logger.warning(f"Failed to get video count for {user_id}: {e}")
@@ -193,7 +210,12 @@ async def get_user_team_count(user_id: str) -> int:
     """Get team membership count for a user."""
     try:
         supabase = await get_async_supabase_admin()
-        result = await supabase.table("team_members").select("team_id", count="exact").eq("user_id", user_id).execute()
+        result = (
+            await supabase.table("team_members")
+            .select("team_id", count="exact")
+            .eq("user_id", user_id)
+            .execute()
+        )
         return result.count or 0
     except Exception as e:
         logger.warning(f"Failed to get team count for {user_id}: {e}")
@@ -204,7 +226,12 @@ async def get_team_member_count(team_id: str) -> int:
     """Get member count for a team."""
     try:
         supabase = await get_async_supabase_admin()
-        result = await supabase.table("team_members").select("user_id", count="exact").eq("team_id", team_id).execute()
+        result = (
+            await supabase.table("team_members")
+            .select("user_id", count="exact")
+            .eq("team_id", team_id)
+            .execute()
+        )
         return result.count or 0
     except Exception as e:
         logger.warning(f"Failed to get member count for team {team_id}: {e}")

@@ -128,7 +128,9 @@ class AgentService:
         agent = await self.load_agent(agent_id)
 
         # 2. Get or create session
-        from app.services.ai_session_service import AISessionService  # local import to avoid circular
+        from app.services.ai_session_service import (
+            AISessionService,
+        )  # local import to avoid circular
 
         session_svc = AISessionService()
         if session_id:
@@ -398,7 +400,8 @@ class AgentService:
                     supabase.table("ai_sessions")
                     .update(
                         {
-                            "total_tokens": current.get("total_tokens", 0) + total_tokens,
+                            "total_tokens": current.get("total_tokens", 0)
+                            + total_tokens,
                             "message_count": current.get("message_count", 0) + 2,
                             "updated_at": "now()",
                         }

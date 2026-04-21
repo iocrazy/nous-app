@@ -5,16 +5,16 @@ Static constants — no DB table needed.
 
 # All granular permission keys
 TEAM_PERMISSIONS = [
-    "manage_team",       # Edit team name/description, delete team
-    "manage_members",    # Invite/remove members, change roles
+    "manage_team",  # Edit team name/description, delete team
+    "manage_members",  # Invite/remove members, change roles
     "manage_collections",  # Create/edit/delete collections
-    "manage_videos",     # Add/remove videos from collections
-    "edit_tags",         # Create/edit/delete tags on videos
-    "edit_analysis",     # Edit AI analysis / notes
-    "comment",           # Add comments
-    "view_analytics",    # View team analytics
-    "export",            # Export / download data
-    "view",              # View team content
+    "manage_videos",  # Add/remove videos from collections
+    "edit_tags",  # Create/edit/delete tags on videos
+    "edit_analysis",  # Edit AI analysis / notes
+    "comment",  # Add comments
+    "view_analytics",  # View team analytics
+    "export",  # Export / download data
+    "view",  # View team content
 ]
 
 # Ordered from highest to lowest privilege

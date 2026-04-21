@@ -39,6 +39,7 @@ router = APIRouter()
 # Helper: build team name map
 # ============================================
 
+
 async def _get_team_display_name(team: dict, supabase=None) -> str:
     """Get display name for a team. Personal teams show '{Owner}'s Workspace'."""
     if not team.get("is_personal"):
@@ -59,9 +60,7 @@ async def _get_team_name_map(team_ids: list[str]) -> dict[str, str]:
         return {}
     repo = AdminCreditsRepository()
     teams = await repo.get_teams_by_ids(team_ids)
-    entries = await asyncio.gather(
-        *[_get_team_display_name(t) for t in teams]
-    )
+    entries = await asyncio.gather(*[_get_team_display_name(t) for t in teams])
     return {str(teams[i]["id"]): entries[i] for i in range(len(teams))}
 
 
@@ -85,9 +84,7 @@ async def get_credits_stats(auth: AdminAuthDep):
     total_purchased = sum((r.get("amount") or 0) for r in purchase_rows)
 
     revenue_rows = await repo.orders_by_status(payment_status="paid")
-    total_revenue_cents = sum(
-        (r.get("amount_cents") or 0) for r in revenue_rows
-    )
+    total_revenue_cents = sum((r.get("amount_cents") or 0) for r in revenue_rows)
 
     active_teams_count = await repo.teams_count()
     pending_orders_count = await repo.orders_count_by_status("pending")
@@ -97,9 +94,7 @@ async def get_credits_stats(auth: AdminAuthDep):
     monthly_rows = await repo.orders_by_status(
         payment_status="paid", since_iso=month_start.isoformat()
     )
-    monthly_revenue_cents = sum(
-        (r.get("amount_cents") or 0) for r in monthly_rows
-    )
+    monthly_revenue_cents = sum((r.get("amount_cents") or 0) for r in monthly_rows)
 
     return AdminCreditsStatsResponse(
         total_points_in_system=total_points,
@@ -145,10 +140,7 @@ async def get_revenue_chart(
         buckets[key]["revenue_cents"] += row.get("amount_cents") or 0
         buckets[key]["points_sold"] += row.get("points_amount") or 0
 
-    return [
-        AdminRevenueChartItem(date=k, **v)
-        for k, v in sorted(buckets.items())
-    ]
+    return [AdminRevenueChartItem(date=k, **v) for k, v in sorted(buckets.items())]
 
 
 @router.get("/consumption-chart", response_model=list[AdminConsumptionChartItem])
@@ -247,7 +239,11 @@ async def list_transactions(
             team_id=str(r["team_id"]),
             team_name=name_map.get(str(r["team_id"])),
             user_id=str(r["user_id"]) if r.get("user_id") else None,
-            user_email=email_map.get(str(r["user_id"]), (None,))[0] if r.get("user_id") else None,
+            user_email=(
+                email_map.get(str(r["user_id"]), (None,))[0]
+                if r.get("user_id")
+                else None
+            ),
             type=r.get("type", ""),
             amount=r.get("amount") or 0,
             balance_after=r.get("balance_after") or 0,
@@ -258,7 +254,10 @@ async def list_transactions(
     ]
 
     return AdminCreditTransactionListResponse(
-        items=items, total=total, page=page, page_size=page_size,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -281,7 +280,12 @@ async def list_orders(
     """List orders with filtering and pagination."""
     repo = AdminCreditsRepository()
 
-    valid_sort_fields = {"created_at", "amount_cents", "points_amount", "payment_status"}
+    valid_sort_fields = {
+        "created_at",
+        "amount_cents",
+        "points_amount",
+        "payment_status",
+    }
     if sort_by not in valid_sort_fields:
         sort_by = "created_at"
 
@@ -312,7 +316,11 @@ async def list_orders(
             team_id=str(r["team_id"]),
             team_name=name_map.get(str(r["team_id"])),
             user_id=str(r["user_id"]) if r.get("user_id") else None,
-            user_email=email_map.get(str(r["user_id"]), (None,))[0] if r.get("user_id") else None,
+            user_email=(
+                email_map.get(str(r["user_id"]), (None,))[0]
+                if r.get("user_id")
+                else None
+            ),
             package_name=pkg_name_map.get(str(r.get("package_id", ""))),
             points_amount=r.get("points_amount") or 0,
             amount_cents=r.get("amount_cents") or 0,
@@ -325,7 +333,10 @@ async def list_orders(
     ]
 
     return AdminOrderListResponse(
-        items=items, total=total, page=page, page_size=page_size,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -340,7 +351,9 @@ async def confirm_order(
 
     order = await repo.get_order(order_id)
     if not order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
+        )
 
     if order["payment_status"] != "pending":
         raise HTTPException(
@@ -356,6 +369,7 @@ async def confirm_order(
 
     # Add points to team
     from app.services.points_service import PointsService
+
     points_svc = PointsService()
     await points_svc.add_points(
         team_id=str(order["team_id"]),
@@ -395,7 +409,9 @@ async def refund_order(
 
     order = await repo.get_order(order_id)
     if not order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
+        )
 
     if order["payment_status"] != "paid":
         raise HTTPException(
@@ -404,12 +420,11 @@ async def refund_order(
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    await repo.update_order(
-        order_id, {"payment_status": "refunded", "updated_at": now}
-    )
+    await repo.update_order(order_id, {"payment_status": "refunded", "updated_at": now})
 
     # Deduct points from team (negative amount)
     from app.services.points_service import PointsService
+
     points_svc = PointsService()
     points_amount = order.get("points_amount") or 0
     await points_svc.add_points(
@@ -501,7 +516,9 @@ async def update_package(
     updated = await repo.update_package(package_id, payload)
 
     if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Package not found"
+        )
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -565,7 +582,9 @@ async def update_pricing(
     updated = await repo.update_pricing(action_type, payload)
 
     if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action type not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Action type not found"
+        )
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -592,6 +611,7 @@ async def batch_gift(
 ):
     """Gift points to multiple teams."""
     from app.services.points_service import PointsService
+
     points_svc = PointsService()
 
     gifted_count = 0
@@ -634,6 +654,7 @@ async def adjust_points(
 ):
     """Manually adjust points for a single team."""
     from app.services.points_service import PointsService
+
     points_svc = PointsService()
 
     result = await points_svc.add_points(
@@ -666,7 +687,9 @@ async def get_team_detail(
 
     team = await repo.get_team(team_id)
     if not team:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Team not found"
+        )
 
     team_display_name = await _get_team_display_name(team)
     quota = await repo.get_team_quota(team_id)
@@ -686,7 +709,11 @@ async def get_team_detail(
             team_id=str(r["team_id"]),
             team_name=team_display_name,
             user_id=str(r["user_id"]) if r.get("user_id") else None,
-            user_email=tx_email_map.get(str(r["user_id"]), (None,))[0] if r.get("user_id") else None,
+            user_email=(
+                tx_email_map.get(str(r["user_id"]), (None,))[0]
+                if r.get("user_id")
+                else None
+            ),
             type=r.get("type", ""),
             amount=r.get("amount") or 0,
             balance_after=r.get("balance_after") or 0,

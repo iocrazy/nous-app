@@ -20,12 +20,24 @@ from app.repositories.permission_repository import PermissionRepository
 # Role → capabilities mapping
 CAPABILITIES: Dict[str, List[str]] = {
     "admin": [
-        "view", "download", "upload", "update",
-        "copy", "move", "delete", "share", "manage",
+        "view",
+        "download",
+        "upload",
+        "update",
+        "copy",
+        "move",
+        "delete",
+        "share",
+        "manage",
     ],
     "editor": [
-        "view", "download", "upload", "update",
-        "copy", "move", "share",
+        "view",
+        "download",
+        "upload",
+        "update",
+        "copy",
+        "move",
+        "share",
     ],
     "viewer": ["view", "download"],
     "none": [],
@@ -64,9 +76,7 @@ class PermissionService:
             {"role": str, "capabilities": list[str]}
         """
         try:
-            role = await self._resolve_role(
-                user_id, object_type, object_id, team_id
-            )
+            role = await self._resolve_role(user_id, object_type, object_id, team_id)
         except Exception as e:
             logger.error(
                 f"Error resolving role for user={user_id} "
@@ -87,25 +97,17 @@ class PermissionService:
         """Core resolution logic with hierarchy walk."""
 
         # Step 1: Check direct override
-        override = await self._repo.get_access_override(
-            object_type, object_id, user_id
-        )
+        override = await self._repo.get_access_override(object_type, object_id, user_id)
         if override:
             return override["role"]
 
         # Step 2: Walk up hierarchy based on object type
         if object_type == "folder":
-            return await self._resolve_folder_role(
-                user_id, object_id, team_id
-            )
+            return await self._resolve_folder_role(user_id, object_id, team_id)
         elif object_type == "library":
-            return await self._resolve_library_role(
-                user_id, object_id, team_id
-            )
+            return await self._resolve_library_role(user_id, object_id, team_id)
         elif object_type == "resource":
-            return await self._resolve_resource_role(
-                user_id, object_id, team_id
-            )
+            return await self._resolve_resource_role(user_id, object_id, team_id)
 
         # Step 3: Fall back to team role
         return await self._get_team_effective_role(user_id, team_id)
@@ -162,15 +164,11 @@ class PermissionService:
             )
             if folder_override:
                 return folder_override["role"]
-            return await self._resolve_folder_role(
-                user_id, scope["folder_id"], team_id
-            )
+            return await self._resolve_folder_role(user_id, scope["folder_id"], team_id)
 
         return await self._get_team_effective_role(user_id, team_id)
 
-    async def _get_team_effective_role(
-        self, user_id: str, team_id: str
-    ) -> str:
+    async def _get_team_effective_role(self, user_id: str, team_id: str) -> str:
         """Map team membership role to effective object role."""
         team_role = await self._repo.get_team_member_role(user_id, team_id)
         if not team_role:

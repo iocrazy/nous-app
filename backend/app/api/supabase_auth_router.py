@@ -85,7 +85,9 @@ async def _create_team_quota_for_new_user(user_id: str) -> None:
 
         team_id = team_result.data[0]["team_id"]
         points_service = PointsService()
-        await points_service.ensure_team_quota(team_id, grant_free_points=True, user_id=user_id)
+        await points_service.ensure_team_quota(
+            team_id, grant_free_points=True, user_id=user_id
+        )
         logger.info(
             f"Created team quota with welcome points for user {user_id}, "
             f"team {team_id}"

@@ -66,9 +66,7 @@ async def get_library(library_id: str, auth: AuthDep):
 
 
 @router.patch("/{library_id}")
-async def update_library(
-    library_id: str, data: LibraryUpdate, auth: AuthDep
-):
+async def update_library(library_id: str, data: LibraryUpdate, auth: AuthDep):
     """Update a library."""
     try:
         svc = LibrariesService()

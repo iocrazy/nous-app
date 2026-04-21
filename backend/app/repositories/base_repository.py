@@ -66,18 +66,15 @@ class BaseRepository:
             )
             logger.info("Soft-deleted %s %s", self.TABLE_NAME, record_id)
         except Exception as e:
-            logger.error("Failed to soft-delete %s %s: %s", self.TABLE_NAME, record_id, e)
+            logger.error(
+                "Failed to soft-delete %s %s: %s", self.TABLE_NAME, record_id, e
+            )
             raise
 
     async def hard_delete(self, record_id: str) -> None:
         try:
             client = await self._get_client()
-            await (
-                client.table(self.TABLE_NAME)
-                .delete()
-                .eq("id", record_id)
-                .execute()
-            )
+            await client.table(self.TABLE_NAME).delete().eq("id", record_id).execute()
             logger.info("Deleted %s %s", self.TABLE_NAME, record_id)
         except Exception as e:
             logger.error("Failed to delete %s %s: %s", self.TABLE_NAME, record_id, e)

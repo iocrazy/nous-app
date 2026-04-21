@@ -34,15 +34,9 @@ class AdminCreditsRepository:
         )
         return result.data or []
 
-    async def create_package(
-        self, payload: dict[str, Any]
-    ) -> Optional[dict[str, Any]]:
+    async def create_package(self, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
         client = await self._client()
-        result = (
-            await client.table(self.PACKAGES_TABLE)
-            .insert(payload)
-            .execute()
-        )
+        result = await client.table(self.PACKAGES_TABLE).insert(payload).execute()
         return (result.data or [None])[0]
 
     async def update_package(
@@ -59,12 +53,7 @@ class AdminCreditsRepository:
 
     async def delete_package(self, package_id: str) -> None:
         client = await self._client()
-        await (
-            client.table(self.PACKAGES_TABLE)
-            .delete()
-            .eq("id", package_id)
-            .execute()
-        )
+        await client.table(self.PACKAGES_TABLE).delete().eq("id", package_id).execute()
 
     # ─── Pricing ───────────────────────────────────────────────────
 
@@ -108,9 +97,7 @@ class AdminCreditsRepository:
             query = query.eq("team_id", team_id)
         if type:
             query = query.eq("type", type)
-        query = query.order(sort_by, desc=sort_desc).range(
-            offset, offset + limit - 1
-        )
+        query = query.order(sort_by, desc=sort_desc).range(offset, offset + limit - 1)
         result = await query.execute()
         return result.data or [], result.count or 0
 
@@ -135,9 +122,7 @@ class AdminCreditsRepository:
             query = query.eq("payment_method", payment_method)
         if team_id:
             query = query.eq("team_id", team_id)
-        query = query.order(sort_by, desc=sort_desc).range(
-            offset, offset + limit - 1
-        )
+        query = query.order(sort_by, desc=sort_desc).range(offset, offset + limit - 1)
         result = await query.execute()
         return result.data or [], result.count or 0
 
@@ -154,22 +139,15 @@ class AdminCreditsRepository:
             return None
         return result.data
 
-    async def update_order(
-        self, order_id: str, payload: dict[str, Any]
-    ) -> None:
+    async def update_order(self, order_id: str, payload: dict[str, Any]) -> None:
         client = await self._client()
         await (
-            client.table(self.ORDERS_TABLE)
-            .update(payload)
-            .eq("id", order_id)
-            .execute()
+            client.table(self.ORDERS_TABLE).update(payload).eq("id", order_id).execute()
         )
 
     # ─── Enrichment helpers ────────────────────────────────────────
 
-    async def get_teams_by_ids(
-        self, team_ids: list[str]
-    ) -> list[dict[str, Any]]:
+    async def get_teams_by_ids(self, team_ids: list[str]) -> list[dict[str, Any]]:
         if not team_ids:
             return []
         client = await self._client()
@@ -181,9 +159,7 @@ class AdminCreditsRepository:
         )
         return result.data or []
 
-    async def get_package_names(
-        self, package_ids: list[str]
-    ) -> dict[str, str]:
+    async def get_package_names(self, package_ids: list[str]) -> dict[str, str]:
         if not package_ids:
             return {}
         client = await self._client()
@@ -199,9 +175,7 @@ class AdminCreditsRepository:
 
     async def all_quotas_balances(self) -> list[dict[str, Any]]:
         client = await self._client()
-        result = (
-            await client.table("team_quotas").select("points_balance").execute()
-        )
+        result = await client.table("team_quotas").select("points_balance").execute()
         return result.data or []
 
     async def transactions_by_type(
@@ -237,9 +211,7 @@ class AdminCreditsRepository:
     async def teams_count(self) -> int:
         client = await self._client()
         result = (
-            await client.table(self.TEAMS_TABLE)
-            .select("id", count="exact")
-            .execute()
+            await client.table(self.TEAMS_TABLE).select("id", count="exact").execute()
         )
         return result.count or 0
 

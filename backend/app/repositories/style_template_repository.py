@@ -38,17 +38,9 @@ class StyleTemplateRepository(BaseRepository):
                     .or_(f"team_id.eq.{team_id},is_public.eq.true")
                 )
             elif team_id:
-                query = (
-                    client.table(self.TABLE_NAME)
-                    .select("*")
-                    .eq("team_id", team_id)
-                )
+                query = client.table(self.TABLE_NAME).select("*").eq("team_id", team_id)
             else:
-                query = (
-                    client.table(self.TABLE_NAME)
-                    .select("*")
-                    .eq("is_public", True)
-                )
+                query = client.table(self.TABLE_NAME).select("*").eq("is_public", True)
 
             if category:
                 query = query.eq("category", category)

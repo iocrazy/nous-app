@@ -31,7 +31,7 @@ def download_unified_task(
     media_type: int = 0,
     video_title: str = "undefined",
     resource_id: str = None,
-    _dedup_key: str = None,       # Orchestrator dedup key
+    _dedup_key: str = None,  # Orchestrator dedup key
     _unified_task_id: str = None,  # Orchestrator task ID (for signals)
     download_music: bool = False,  # Deprecated, kept for backward compat with queued tasks
     user_agent: str = None,  # Douyin UA chosen during parse; threaded to yt-dlp / direct HTTP
@@ -60,7 +60,9 @@ def download_unified_task(
     """
     task_id = self.request.id
     strategy = "yt-dlp" if url else "douyin"
-    requested_types = [t for t, f in [("video", download_video), ("cover", download_cover)] if f]
+    requested_types = [
+        t for t, f in [("video", download_video), ("cover", download_cover)] if f
+    ]
     logger.info(
         f"[Download/Init] {platform_id}: strategy={strategy}, "
         f"types=[{','.join(requested_types)}], task_id={task_id}"
@@ -68,6 +70,7 @@ def download_unified_task(
 
     # ── UnifiedTaskManager setup (Supabase lifecycle) ──
     from app.services.unified_task_manager import get_task_manager
+
     manager = get_task_manager()
     unified_task_id = _unified_task_id  # Use pre-created task from HTTP handler
 
@@ -80,15 +83,17 @@ def download_unified_task(
             dl_parts.append("Cover")
         dl_subtitle = " + ".join(dl_parts) if dl_parts else None
         try:
-            unified_task_id = run_async(manager.create(
-                user_id=user_id,
-                task_type="download",
-                title=f"Download {video_title or platform_id}",
-                subtitle=dl_subtitle,
-                media_id=platform_id,
-                celery_task_id=task_id,
-                dedup_key=_dedup_key,
-            ))
+            unified_task_id = run_async(
+                manager.create(
+                    user_id=user_id,
+                    task_type="download",
+                    title=f"Download {video_title or platform_id}",
+                    subtitle=dl_subtitle,
+                    media_id=platform_id,
+                    celery_task_id=task_id,
+                    dedup_key=_dedup_key,
+                )
+            )
         except Exception as e:
             logger.warning(f"[TaskManager] Failed to create unified task: {e}")
 
@@ -108,6 +113,7 @@ def download_unified_task(
     try:
         # ── Progress tracker setup (Redis real-time) ──
         from app.celery_app import celery_app
+
         redis_client = celery_app.backend.client
 
         tracker = UnifiedProgressTracker(
@@ -122,6 +128,7 @@ def download_unified_task(
         if resource_id:
             from app.repositories.media_repository import MediaRepository as _MR
             from app.repositories.resources_repository import ResourcesRepository as _RR
+
             _res_repo = _RR()
             _media_repo = _MR()
             global_media = run_async(_media_repo.get_by_platform_id(platform_id))
@@ -131,28 +138,57 @@ def download_unified_task(
                 # Only mark cached "completed" if both status AND file path exist
                 has_video_path = bool(global_media.get("download_path"))
                 has_cover_path = bool(global_media.get("cover_download_path"))
-                if download_video and global_media.get("video_download_status") == "completed" and has_video_path:
+                if (
+                    download_video
+                    and global_media.get("video_download_status") == "completed"
+                    and has_video_path
+                ):
                     cache_updates["video_download_status"] = "completed"
-                if download_cover and global_media.get("cover_download_status") == "completed" and has_cover_path:
+                if (
+                    download_cover
+                    and global_media.get("cover_download_status") == "completed"
+                    and has_cover_path
+                ):
                     cache_updates["cover_download_status"] = "completed"
-                if download_video and int(media_type) in (2, 68) and global_media.get("image_download_status") == "completed" and has_video_path:
+                if (
+                    download_video
+                    and int(media_type) in (2, 68)
+                    and global_media.get("image_download_status") == "completed"
+                    and has_video_path
+                ):
                     cache_updates["image_download_status"] = "completed"
 
                 if cache_updates:
-                    run_async(_res_repo.update_download_status(resource_id, cache_updates))
+                    run_async(
+                        _res_repo.update_download_status(resource_id, cache_updates)
+                    )
 
                 # If ALL requested types are cached (status + path), skip download entirely
                 all_cached = True
                 if download_video:
                     if int(media_type) in (2, 68):
-                        all_cached = all_cached and global_media.get("image_download_status") == "completed" and has_video_path
+                        all_cached = (
+                            all_cached
+                            and global_media.get("image_download_status") == "completed"
+                            and has_video_path
+                        )
                     else:
-                        all_cached = all_cached and global_media.get("video_download_status") == "completed" and has_video_path
+                        all_cached = (
+                            all_cached
+                            and global_media.get("video_download_status") == "completed"
+                            and has_video_path
+                        )
                 if download_cover:
-                    all_cached = all_cached and global_media.get("cover_download_status") == "completed" and has_cover_path
+                    all_cached = (
+                        all_cached
+                        and global_media.get("cover_download_status") == "completed"
+                        and has_cover_path
+                    )
 
                 if all_cached:
-                    logger.info(f"[Download/Done] All requested types cached for {platform_id}, skipping download")
+                    logger.info(
+                        f"[Download/Done] All requested types cached for {platform_id}, skipping download"
+                    )
                     tracker.complete()
                     if unified_task_id:
                         try:
@@ -164,10 +200,16 @@ def download_unified_task(
                     if global_media.get("download_path"):
                         path_updates["file_path"] = global_media["download_path"]
                     if global_media.get("cover_download_path"):
-                        path_updates["cover_image_path"] = global_media["cover_download_path"]
+                        path_updates["cover_image_path"] = global_media[
+                            "cover_download_path"
+                        ]
                     if path_updates:
                         run_async(_res_repo.update_resource(resource_id, path_updates))
-                    return {"status": "success", "platform_id": platform_id, "cache_hit": True}
+                    return {
+                        "status": "success",
+                        "platform_id": platform_id,
+                        "cache_hit": True,
+                    }
 
         # ── Dispatch to strategy ──
         if url:
@@ -239,22 +281,31 @@ def download_unified_task(
         if resource_id:
             try:
                 from app.repositories.media_repository import MediaRepository as _MR2
-                from app.repositories.resources_repository import ResourcesRepository as _RR2
+                from app.repositories.resources_repository import (
+                    ResourcesRepository as _RR2,
+                )
+
                 _res_repo2 = _RR2()
 
                 if download_video:
                     video_result = results.get("video")
                     if int(media_type) in (2, 68):
-                        status_updates["image_download_status"] = video_result if video_result == "completed" else "failed"
+                        status_updates["image_download_status"] = (
+                            video_result if video_result == "completed" else "failed"
+                        )
                     else:
-                        status_updates["video_download_status"] = video_result if video_result == "completed" else "failed"
+                        status_updates["video_download_status"] = (
+                            video_result if video_result == "completed" else "failed"
+                        )
                     # Audio extraction result (auto-extracted from video)
                     music_result = results.get("music")
                     if music_result:
                         status_updates["music_download_status"] = music_result
                 if download_cover:
                     cover_result = results.get("cover")
-                    status_updates["cover_download_status"] = cover_result if cover_result == "completed" else "failed"
+                    status_updates["cover_download_status"] = (
+                        cover_result if cover_result == "completed" else "failed"
+                    )
 
                 # Also update file paths and file size on resource
                 actual_size = 0
@@ -263,9 +314,15 @@ def download_unified_task(
                     if fresh_media.get("download_path"):
                         path_updates["file_path"] = fresh_media["download_path"]
                     if fresh_media.get("cover_download_path"):
-                        path_updates["cover_image_path"] = fresh_media["cover_download_path"]
+                        path_updates["cover_image_path"] = fresh_media[
+                            "cover_download_path"
+                        ]
                     # Backfill file_size_bytes from actual downloaded size
-                    actual_size = fresh_media.get("storage_size") or fresh_media.get("datasize_bytes") or 0
+                    actual_size = (
+                        fresh_media.get("storage_size")
+                        or fresh_media.get("datasize_bytes")
+                        or 0
+                    )
                     if actual_size > 0:
                         path_updates["file_size_bytes"] = actual_size
 
@@ -273,14 +330,22 @@ def download_unified_task(
                     f"[Download/DB] resource={resource_id}: "
                     f"status={status_updates}, paths={list(path_updates.keys())}"
                 )
-                run_async(_res_repo2.update_resource(resource_id, {**status_updates, **path_updates}))
+                run_async(
+                    _res_repo2.update_resource(
+                        resource_id, {**status_updates, **path_updates}
+                    )
+                )
 
                 # Ensure resource_version v1 exists (downloads don't create it)
                 try:
                     existing_versions = run_async(_res_repo2.get_versions(resource_id))
                     if not existing_versions and path_updates.get("file_path"):
                         file_path = path_updates["file_path"]
-                        filename = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+                        filename = (
+                            file_path.rsplit("/", 1)[-1]
+                            if "/" in file_path
+                            else file_path
+                        )
                         mime_type = "video/mp4"
                         if filename.endswith(".webm"):
                             mime_type = "video/webm"
@@ -296,28 +361,36 @@ def download_unified_task(
                             "uploaded_by": user_id,
                         }
                         run_async(_res_repo2.create_version(version_data))
-                        logger.info(f"[Download/DB] Created resource_version v1 for resource={resource_id}")
+                        logger.info(
+                            f"[Download/DB] Created resource_version v1 for resource={resource_id}"
+                        )
                     elif existing_versions and actual_size > 0:
                         # Backfill file_size_bytes on existing versions
                         for ver in existing_versions:
                             if not ver.get("file_size_bytes"):
-                                run_async(_res_repo2.update_version(
-                                    ver["id"], {"file_size_bytes": actual_size}
-                                ))
+                                run_async(
+                                    _res_repo2.update_version(
+                                        ver["id"], {"file_size_bytes": actual_size}
+                                    )
+                                )
                 except Exception as ve:
-                    logger.warning(f"[Download/DB] Failed to ensure resource_version for {resource_id}: {ve}")
+                    logger.warning(
+                        f"[Download/DB] Failed to ensure resource_version for {resource_id}: {ve}"
+                    )
 
                 # Fallback: also ensure parsed_media status is in sync
                 pm_status_updates = {
-                    k: v for k, v in status_updates.items()
-                    if v == "completed"
+                    k: v for k, v in status_updates.items() if v == "completed"
                 }
                 if pm_status_updates:
                     _mr2 = _MR2()
-                    current_pm = fresh_media or run_async(_mr2.get_by_platform_id(platform_id))
+                    current_pm = fresh_media or run_async(
+                        _mr2.get_by_platform_id(platform_id)
+                    )
                     if current_pm:
                         needs_update = {
-                            k: v for k, v in pm_status_updates.items()
+                            k: v
+                            for k, v in pm_status_updates.items()
                             if current_pm.get(k) != "completed"
                         }
                         if needs_update:
@@ -326,7 +399,9 @@ def download_unified_task(
                             )
                             run_async(_mr2.update(platform_id, needs_update))
             except Exception as e:
-                logger.warning(f"[Download/DB] Failed to update resource status for {platform_id}: {e}")
+                logger.warning(
+                    f"[Download/DB] Failed to update resource status for {platform_id}: {e}"
+                )
 
         # Queue thumbnail + preview sprite generation out-of-band.
         # Reuses already-known file_path (no extra DB fetch) and avoids blocking
@@ -367,14 +442,15 @@ def download_unified_task(
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(
-            f"[Download/{strategy}] Failed: {platform_id}, error: {error_msg}"
-        )
+        logger.error(f"[Download/{strategy}] Failed: {platform_id}, error: {error_msg}")
 
         # Update user resource status to failed
         if resource_id:
             try:
-                from app.repositories.resources_repository import ResourcesRepository as _RR3
+                from app.repositories.resources_repository import (
+                    ResourcesRepository as _RR3,
+                )
+
                 _res_repo3 = _RR3()
                 fail_updates = {}
                 if download_video:
@@ -391,7 +467,7 @@ def download_unified_task(
         # Celery retry with exponential backoff — do NOT mark as failed yet
         if self.request.retries < self.max_retries:
             retry_num = self.request.retries + 1
-            countdown = 30 * (2 ** self.request.retries)
+            countdown = 30 * (2**self.request.retries)
             logger.info(
                 f"[Download/{strategy}] Retry {retry_num}/{self.max_retries} "
                 f"for {platform_id} in {countdown}s"
@@ -399,11 +475,13 @@ def download_unified_task(
             # Update unified task subtitle to show retry status (not failed)
             if unified_task_id:
                 try:
-                    run_async(manager.update_progress(
-                        unified_task_id,
-                        progress=0,
-                        subtitle=f"Retrying ({retry_num}/{self.max_retries})...",
-                    ))
+                    run_async(
+                        manager.update_progress(
+                            unified_task_id,
+                            progress=0,
+                            subtitle=f"Retrying ({retry_num}/{self.max_retries})...",
+                        )
+                    )
                 except Exception:
                     pass
             raise self.retry(exc=e, countdown=countdown)

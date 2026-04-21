@@ -123,9 +123,7 @@ class ReviewRepository:
         result = await client.table("review_annotations").insert(annotations).execute()
         return result.data or []
 
-    async def get_annotations_by_comment(
-        self, comment_id: str
-    ) -> List[Dict[str, Any]]:
+    async def get_annotations_by_comment(self, comment_id: str) -> List[Dict[str, Any]]:
         client = await self._get_client()
         result = (
             await client.table("review_annotations")

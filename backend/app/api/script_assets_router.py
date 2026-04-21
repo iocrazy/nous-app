@@ -38,9 +38,7 @@ async def create_asset(
         raise
     except Exception as exc:
         logger.error("[ScriptAssets] create_asset failed: %s", exc)
-        raise HTTPException(
-            status_code=500, detail="Failed to create asset"
-        )
+        raise HTTPException(status_code=500, detail="Failed to create asset")
 
 
 @router.get("/{script_id}/assets")
@@ -59,9 +57,7 @@ async def list_assets(
         raise
     except Exception as exc:
         logger.error("[ScriptAssets] list_assets failed: %s", exc)
-        raise HTTPException(
-            status_code=500, detail="Failed to list assets"
-        )
+        raise HTTPException(status_code=500, detail="Failed to list assets")
 
 
 @router.put("/assets/{asset_id}")
@@ -71,15 +67,11 @@ async def update_asset(
     """Update an existing script asset."""
     try:
         svc = ScriptService()
-        asset = await svc.update_asset(
-            asset_id, body.model_dump(exclude_none=True)
-        )
+        asset = await svc.update_asset(asset_id, body.model_dump(exclude_none=True))
         return {"success": True, "data": asset}
     except Exception as exc:
         logger.error("[ScriptAssets] update_asset %s failed: %s", asset_id, exc)
-        raise HTTPException(
-            status_code=500, detail="Failed to update asset"
-        )
+        raise HTTPException(status_code=500, detail="Failed to update asset")
 
 
 @router.delete("/assets/{asset_id}")
@@ -91,6 +83,4 @@ async def delete_asset(auth: AuthDep, asset_id: str) -> Dict[str, Any]:
         return {"success": True}
     except Exception as exc:
         logger.error("[ScriptAssets] delete_asset %s failed: %s", asset_id, exc)
-        raise HTTPException(
-            status_code=500, detail="Failed to delete asset"
-        )
+        raise HTTPException(status_code=500, detail="Failed to delete asset")

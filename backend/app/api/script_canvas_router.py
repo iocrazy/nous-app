@@ -6,7 +6,11 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.deps import AuthDep, get_team_id_for_user
-from app.schemas.script import ScriptCanvasSyncRequest, ScriptChapterCreate, ScriptChapterUpdate
+from app.schemas.script import (
+    ScriptCanvasSyncRequest,
+    ScriptChapterCreate,
+    ScriptChapterUpdate,
+)
 from app.services.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts/projects")
@@ -30,7 +34,9 @@ async def create_chapter(
     try:
         await _verify_script_access(script_id, auth.user_id)
         svc = ScriptService()
-        chapter = await svc.create_chapter(script_id, body.model_dump(exclude_none=True))
+        chapter = await svc.create_chapter(
+            script_id, body.model_dump(exclude_none=True)
+        )
         return {"success": True, "data": chapter}
     except Exception as exc:
         logger.error("[Scripts] create_chapter failed: %s", exc)
@@ -43,7 +49,9 @@ async def update_chapter(
 ) -> Dict[str, Any]:
     try:
         svc = ScriptService()
-        chapter = await svc.update_chapter(chapter_id, body.model_dump(exclude_none=True))
+        chapter = await svc.update_chapter(
+            chapter_id, body.model_dump(exclude_none=True)
+        )
         return {"success": True, "data": chapter}
     except Exception as exc:
         logger.error("[Scripts] update_chapter %s failed: %s", chapter_id, exc)

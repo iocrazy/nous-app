@@ -36,7 +36,9 @@ class TranscodeTier:
 TIERS = [
     TranscodeTier(name="480p", width=854, height=480, bitrate=1500, audio_bitrate=128),
     TranscodeTier(name="720p", width=1280, height=720, bitrate=4000, audio_bitrate=128),
-    TranscodeTier(name="1080p", width=1920, height=1080, bitrate=8000, audio_bitrate=192),
+    TranscodeTier(
+        name="1080p", width=1920, height=1080, bitrate=8000, audio_bitrate=192
+    ),
 ]
 
 
@@ -45,9 +47,9 @@ class TranscodeService:
 
     # GPU encoder priority order: (codec_name, hwaccel_input_args)
     _GPU_ENCODERS = [
-        ("h264_nvenc", ["-hwaccel", "cuda"]),           # NVIDIA
-        ("h264_videotoolbox", []),                       # macOS
-        ("h264_qsv", ["-hwaccel", "qsv"]),              # Intel
+        ("h264_nvenc", ["-hwaccel", "cuda"]),  # NVIDIA
+        ("h264_videotoolbox", []),  # macOS
+        ("h264_qsv", ["-hwaccel", "qsv"]),  # Intel
     ]
 
     def __init__(self):
@@ -95,7 +97,9 @@ class TranscodeService:
         """Test if ffmpeg supports the given encoder."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-hide_banner", "-encoders",
+                "ffmpeg",
+                "-hide_banner",
+                "-encoders",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -108,8 +112,12 @@ class TranscodeService:
     def _map_nvenc_preset(cpu_preset: str) -> str:
         """Map CPU preset names to NVENC p1-p7 presets."""
         mapping = {
-            "ultrafast": "p1", "veryfast": "p2", "fast": "p3",
-            "medium": "p4", "slow": "p5", "veryslow": "p6",
+            "ultrafast": "p1",
+            "veryfast": "p2",
+            "fast": "p3",
+            "medium": "p4",
+            "slow": "p5",
+            "veryslow": "p6",
         }
         return mapping.get(cpu_preset, "p4")
 
@@ -137,7 +145,11 @@ class TranscodeService:
         """
         # Master toggle check (read from DB for Celery worker compatibility)
         db_enabled = self._get_db_setting("transcode_enabled")
-        is_enabled = db_enabled.lower() in ("true", "1", "yes") if db_enabled else settings.TRANSCODE_ENABLED
+        is_enabled = (
+            db_enabled.lower() in ("true", "1", "yes")
+            if db_enabled
+            else settings.TRANSCODE_ENABLED
+        )
         if not is_enabled:
             logger.info("[Transcode] Transcoding is disabled via settings")
             return None
@@ -170,8 +182,12 @@ class TranscodeService:
             # Probe video to get resolution and duration
             width, height = await self._probe_resolution(str(source))
             if not width or not height:
-                logger.warning(f"Could not probe resolution for {source}, skipping transcode")
-                await self.repo.update_version(version_id, {"transcode_status": "failed"})
+                logger.warning(
+                    f"Could not probe resolution for {source}, skipping transcode"
+                )
+                await self.repo.update_version(
+                    version_id, {"transcode_status": "failed"}
+                )
                 return None
 
             total_duration = await self._probe_duration(str(source))
@@ -201,7 +217,9 @@ class TranscodeService:
                     await on_progress(10, "Fast segmenting (copy)...")
                 source_bitrate = await self._probe_bitrate(str(source))
                 passthrough_ok = await self._transcode_passthrough(
-                    str(source), hls_dir, audio_codec,
+                    str(source),
+                    hls_dir,
+                    audio_codec,
                 )
 
                 if not passthrough_ok:
@@ -212,9 +230,11 @@ class TranscodeService:
                 else:
                     # Write initial master.m3u8 with source-only tier
                     self._write_master_playlist(
-                        hls_dir, [],
+                        hls_dir,
+                        [],
                         passthrough=True,
-                        source_width=width, source_height=height,
+                        source_width=width,
+                        source_height=height,
                         source_bitrate=source_bitrate,
                     )
 
@@ -223,11 +243,14 @@ class TranscodeService:
                     relative_hls = str(master_path.relative_to(base))
 
                     # Mark as completed — user can play HLS immediately
-                    await self.repo.update_version(version_id, {
-                        "hls_path": relative_hls,
-                        "transcode_status": "completed",
-                        "transcode_at": datetime.now(timezone.utc).isoformat(),
-                    })
+                    await self.repo.update_version(
+                        version_id,
+                        {
+                            "hls_path": relative_hls,
+                            "transcode_status": "completed",
+                            "transcode_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
 
                     if on_progress:
                         await on_progress(50, "HLS ready, encoding quality tiers...")
@@ -245,17 +268,24 @@ class TranscodeService:
                                 (hls_dir / tier.name).mkdir(parents=True, exist_ok=True)
 
                             encoded_tiers = await self._encode_tiers(
-                                str(source), applicable, hls_dir,
-                                total_duration, on_progress, version_id,
-                                progress_base=50, progress_cap=95,
+                                str(source),
+                                applicable,
+                                hls_dir,
+                                total_duration,
+                                on_progress,
+                                version_id,
+                                progress_base=50,
+                                progress_cap=95,
                             )
 
                             if encoded_tiers:
                                 # Rewrite master.m3u8 with all tiers
                                 self._write_master_playlist(
-                                    hls_dir, encoded_tiers,
+                                    hls_dir,
+                                    encoded_tiers,
                                     passthrough=True,
-                                    source_width=width, source_height=height,
+                                    source_width=width,
+                                    source_height=height,
                                     source_bitrate=source_bitrate,
                                 )
                                 logger.info(
@@ -279,7 +309,9 @@ class TranscodeService:
             applicable = self._select_tiers(width, height)
             if not applicable:
                 logger.info(f"No applicable tiers for {width}x{height}, skipping")
-                await self.repo.update_version(version_id, {"transcode_status": "failed"})
+                await self.repo.update_version(
+                    version_id, {"transcode_status": "failed"}
+                )
                 return None
 
             # Ensure tier directories exist
@@ -287,13 +319,20 @@ class TranscodeService:
                 (hls_dir / tier.name).mkdir(parents=True, exist_ok=True)
 
             encoded_tiers = await self._encode_tiers(
-                str(source), applicable, hls_dir,
-                total_duration, on_progress, version_id,
-                progress_base=0, progress_cap=95,
+                str(source),
+                applicable,
+                hls_dir,
+                total_duration,
+                on_progress,
+                version_id,
+                progress_base=0,
+                progress_cap=95,
             )
 
             if not encoded_tiers:
-                await self.repo.update_version(version_id, {"transcode_status": "failed"})
+                await self.repo.update_version(
+                    version_id, {"transcode_status": "failed"}
+                )
                 return None
 
             # Add passthrough "Original" tier (copy codec, no re-encoding)
@@ -301,7 +340,9 @@ class TranscodeService:
                 await on_progress(95, "Remuxing original...")
             source_bitrate = await self._probe_bitrate(str(source))
             passthrough_ok = await self._transcode_passthrough(
-                str(source), hls_dir, audio_codec,
+                str(source),
+                hls_dir,
+                audio_codec,
             )
 
             # Generate master playlist
@@ -321,11 +362,14 @@ class TranscodeService:
             relative_hls = str(master_path.relative_to(base))
 
             # Update DB
-            await self.repo.update_version(version_id, {
-                "hls_path": relative_hls,
-                "transcode_status": "completed",
-                "transcode_at": datetime.now(timezone.utc).isoformat(),
-            })
+            await self.repo.update_version(
+                version_id,
+                {
+                    "hls_path": relative_hls,
+                    "transcode_status": "completed",
+                    "transcode_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
 
             if on_progress:
                 await on_progress(100, "Done")
@@ -373,13 +417,18 @@ class TranscodeService:
                         f"{k} {int(v)}%" for k, v in sorted(tier_progress_map.items())
                     )
                     if on_progress:
-                        await on_progress(min(overall, progress_cap), f"Encoding {active}")
+                        await on_progress(
+                            min(overall, progress_cap), f"Encoding {active}"
+                        )
+
                 return _progress
 
             results = await asyncio.gather(
                 *[
                     self._transcode_tier(
-                        source, tier, str(hls_dir / tier.name),
+                        source,
+                        tier,
+                        str(hls_dir / tier.name),
                         total_duration=total_duration,
                         on_progress=_make_tier_progress(tier),
                     )
@@ -394,9 +443,7 @@ class TranscodeService:
                 elif result is False:
                     logger.error(f"Tier {tier.name} failed")
 
-            successful = [
-                tier for tier, r in zip(applicable, results) if r is True
-            ]
+            successful = [tier for tier, r in zip(applicable, results) if r is True]
             if not successful:
                 logger.error(f"All tiers failed for version {version_id}")
                 return None
@@ -409,18 +456,26 @@ class TranscodeService:
             for i, tier in enumerate(applicable):
                 bp = progress_base + int(i * encode_weight)
 
-                async def tier_progress(pct: float, _ew=encode_weight, _bp=bp, _tier=tier):
+                async def tier_progress(
+                    pct: float, _ew=encode_weight, _bp=bp, _tier=tier
+                ):
                     overall = _bp + int(pct * _ew / 100)
                     if on_progress:
-                        await on_progress(min(overall, progress_cap), f"Encoding {_tier.name}")
+                        await on_progress(
+                            min(overall, progress_cap), f"Encoding {_tier.name}"
+                        )
 
                 success = await self._transcode_tier(
-                    source, tier, str(hls_dir / tier.name),
+                    source,
+                    tier,
+                    str(hls_dir / tier.name),
                     total_duration=total_duration,
                     on_progress=tier_progress,
                 )
                 if not success:
-                    logger.error(f"Failed to transcode tier {tier.name} for version {version_id}")
+                    logger.error(
+                        f"Failed to transcode tier {tier.name} for version {version_id}"
+                    )
                     return None
             return applicable
 
@@ -428,15 +483,20 @@ class TranscodeService:
     # ffprobe
     # ------------------------------------------------------------------ #
 
-    async def _probe_resolution(self, filepath: str) -> Tuple[Optional[int], Optional[int]]:
+    async def _probe_resolution(
+        self, filepath: str
+    ) -> Tuple[Optional[int], Optional[int]]:
         """Probe video file for width and height."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffprobe",
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_streams",
-                "-select_streams", "v:0",
+                "-select_streams",
+                "v:0",
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -461,8 +521,10 @@ class TranscodeService:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffprobe",
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_format",
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
@@ -482,9 +544,15 @@ class TranscodeService:
         """Probe video and audio codec names. Returns (video_codec, audio_codec)."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffprobe", "-v", "quiet", "-print_format", "json",
-                "-show_streams", filepath,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_streams",
+                filepath,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -507,8 +575,10 @@ class TranscodeService:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffprobe",
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_format",
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
@@ -535,11 +605,7 @@ class TranscodeService:
         workers pick up admin changes without restart.
         """
         tiers_csv = self._get_db_setting("transcode_tiers") or settings.TRANSCODE_TIERS
-        enabled_names = {
-            t.strip().lower()
-            for t in tiers_csv.split(",")
-            if t.strip()
-        }
+        enabled_names = {t.strip().lower() for t in tiers_csv.split(",") if t.strip()}
         applicable = []
         for tier in TIERS:
             if tier.height <= height and tier.name.lower() in enabled_names:
@@ -584,8 +650,14 @@ class TranscodeService:
         """Transcode source video to a single HLS tier with progress tracking."""
         encoder, hwaccel_args, preset = await self._detect_encoder()
         success = await self._run_ffmpeg_tier(
-            source, tier, output_dir, encoder, hwaccel_args, preset,
-            total_duration=total_duration, on_progress=on_progress,
+            source,
+            tier,
+            output_dir,
+            encoder,
+            hwaccel_args,
+            preset,
+            total_duration=total_duration,
+            on_progress=on_progress,
         )
 
         # GPU fallback: if GPU encoder failed, retry with libx264
@@ -595,8 +667,14 @@ class TranscodeService:
                 f"falling back to libx264"
             )
             success = await self._run_ffmpeg_tier(
-                source, tier, output_dir, "libx264", [], "medium",
-                total_duration=total_duration, on_progress=on_progress,
+                source,
+                tier,
+                output_dir,
+                "libx264",
+                [],
+                "medium",
+                total_duration=total_duration,
+                on_progress=on_progress,
             )
 
         return success
@@ -628,25 +706,43 @@ class TranscodeService:
             f"pad={tier.width}:{tier.height}:(ow-iw)/2:(oh-ih)/2"
         )
 
-        cmd.extend([
-            "-i", source,
-            "-vf", scale_filter,
-            "-c:v", encoder,
-            "-preset", preset,
-            "-b:v", f"{tier.bitrate}k",
-            "-maxrate", f"{int(tier.bitrate * 1.2)}k",
-            "-bufsize", f"{tier.bitrate * 2}k",
-            "-c:a", "aac",
-            "-b:a", f"{tier.audio_bitrate}k",
-            "-ac", "2",
-            "-ar", "44100",
-            "-f", "hls",
-            "-hls_time", "6",
-            "-hls_list_size", "0",
-            "-hls_segment_filename", segment_path,
-            "-hls_playlist_type", "vod",
-            playlist_path,
-        ])
+        cmd.extend(
+            [
+                "-i",
+                source,
+                "-vf",
+                scale_filter,
+                "-c:v",
+                encoder,
+                "-preset",
+                preset,
+                "-b:v",
+                f"{tier.bitrate}k",
+                "-maxrate",
+                f"{int(tier.bitrate * 1.2)}k",
+                "-bufsize",
+                f"{tier.bitrate * 2}k",
+                "-c:a",
+                "aac",
+                "-b:a",
+                f"{tier.audio_bitrate}k",
+                "-ac",
+                "2",
+                "-ar",
+                "44100",
+                "-f",
+                "hls",
+                "-hls_time",
+                "6",
+                "-hls_list_size",
+                "0",
+                "-hls_segment_filename",
+                segment_path,
+                "-hls_playlist_type",
+                "vod",
+                playlist_path,
+            ]
+        )
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -661,7 +757,9 @@ class TranscodeService:
                 chunk = await proc.stderr.read(512)
                 if not chunk:
                     break
-                stderr_tail = (stderr_tail + chunk)[-2048:]  # keep last 2KB for error msg
+                stderr_tail = (stderr_tail + chunk)[
+                    -2048:
+                ]  # keep last 2KB for error msg
 
                 if on_progress and total_duration and total_duration > 0:
                     # Parse time= from ffmpeg output
@@ -685,7 +783,9 @@ class TranscodeService:
             logger.info(f"Tier {tier.name} transcoded [{encoder}] → {playlist_path}")
             return True
         except Exception as e:
-            logger.error(f"ffmpeg [{encoder}] execution error for tier {tier.name}: {e}")
+            logger.error(
+                f"ffmpeg [{encoder}] execution error for tier {tier.name}: {e}"
+            )
             return False
 
     # ------------------------------------------------------------------ #
@@ -693,7 +793,10 @@ class TranscodeService:
     # ------------------------------------------------------------------ #
 
     async def _transcode_passthrough(
-        self, source: str, hls_dir: Path, audio_codec: Optional[str] = None,
+        self,
+        source: str,
+        hls_dir: Path,
+        audio_codec: Optional[str] = None,
     ) -> bool:
         """Remux source into HLS segments without re-encoding (preserves original quality).
 
@@ -713,14 +816,21 @@ class TranscodeService:
         cmd = [
             "ffmpeg",
             "-y",
-            "-i", source,
-            "-c:v", "copy",
+            "-i",
+            source,
+            "-c:v",
+            "copy",
             *audio_args,
-            "-f", "hls",
-            "-hls_time", "6",
-            "-hls_list_size", "0",
-            "-hls_segment_filename", segment_path,
-            "-hls_playlist_type", "vod",
+            "-f",
+            "hls",
+            "-hls_time",
+            "6",
+            "-hls_list_size",
+            "0",
+            "-hls_segment_filename",
+            segment_path,
+            "-hls_playlist_type",
+            "vod",
             playlist_path,
         ]
 
@@ -768,7 +878,7 @@ class TranscodeService:
             lines.append(
                 f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},"
                 f"RESOLUTION={tier.width}x{tier.height},"
-                f"NAME=\"{tier.name}\""
+                f'NAME="{tier.name}"'
             )
             lines.append(f"{tier.name}/stream.m3u8")
 
@@ -779,7 +889,7 @@ class TranscodeService:
             lines.append(
                 f"#EXT-X-STREAM-INF:BANDWIDTH={bw},"
                 f"RESOLUTION={source_width}x{source_height},"
-                f"NAME=\"Original\""
+                f'NAME="Original"'
             )
             lines.append("source/stream.m3u8")
 

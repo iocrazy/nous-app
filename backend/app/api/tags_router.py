@@ -57,17 +57,31 @@ class TagGroupCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50)
 
 
-@router.post("/groups", response_model=TagGroupItem, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/groups", response_model=TagGroupItem, status_code=status.HTTP_201_CREATED
+)
 async def create_tag_group(auth: AuthDep, body: TagGroupCreate):
     """Create a new tag group."""
     client = await get_async_supabase_admin()
     # Get max sort_order
-    existing = await client.table("tag_groups").select("sort_order").order("sort_order", desc=True).limit(1).execute()
+    existing = (
+        await client.table("tag_groups")
+        .select("sort_order")
+        .order("sort_order", desc=True)
+        .limit(1)
+        .execute()
+    )
     max_order = existing.data[0]["sort_order"] if existing.data else 0
-    result = await client.table("tag_groups").insert({
-        "name": body.name,
-        "sort_order": max_order + 1,
-    }).execute()
+    result = (
+        await client.table("tag_groups")
+        .insert(
+            {
+                "name": body.name,
+                "sort_order": max_order + 1,
+            }
+        )
+        .execute()
+    )
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create tag group")
     g = result.data[0]
@@ -79,7 +93,9 @@ async def delete_tag_group(auth: AuthDep, group_id: str):
     """Delete a tag group. Tags in this group become uncategorized."""
     client = await get_async_supabase_admin()
     # Move tags to uncategorized (set group_id to NULL)
-    await client.table("tags").update({"group_id": None}).eq("group_id", group_id).execute()
+    await client.table("tags").update({"group_id": None}).eq(
+        "group_id", group_id
+    ).execute()
     # Delete the group
     await client.table("tag_groups").delete().eq("id", group_id).execute()
     return {"success": True}
@@ -94,7 +110,9 @@ async def reorder_tag_groups(auth: AuthDep, body: TagGroupReorderRequest):
     """Update sort_order for all groups based on the provided order."""
     client = await get_async_supabase_admin()
     for idx, group_id in enumerate(body.group_ids):
-        await client.table("tag_groups").update({"sort_order": idx}).eq("id", group_id).execute()
+        await client.table("tag_groups").update({"sort_order": idx}).eq(
+            "id", group_id
+        ).execute()
     return {"success": True}
 
 
@@ -105,7 +123,8 @@ async def list_tags(
         None, description="Filter by tag type: system, user, time"
     ),
     enabled_only: bool = Query(
-        False, description="If true, only return enabled tags (for Shortcuts/public API)"
+        False,
+        description="If true, only return enabled tags (for Shortcuts/public API)",
     ),
 ):
     """

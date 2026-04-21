@@ -13,21 +13,23 @@ from loguru import logger
 from app.core.config import settings
 
 # Default domain allowlist for URL extraction (SSRF prevention)
-_DEFAULT_ALLOWED_DOMAINS: frozenset[str] = frozenset({
-    "douyin.com",
-    "iesdouyin.com",
-    "tiktok.com",
-    "xiaohongshu.com",
-    "xhslink.com",
-    "weibo.com",
-    "bilibili.com",
-    "b23.tv",
-    "youtube.com",
-    "youtu.be",
-    "instagram.com",
-    "twitter.com",
-    "x.com",
-})
+_DEFAULT_ALLOWED_DOMAINS: frozenset[str] = frozenset(
+    {
+        "douyin.com",
+        "iesdouyin.com",
+        "tiktok.com",
+        "xiaohongshu.com",
+        "xhslink.com",
+        "weibo.com",
+        "bilibili.com",
+        "b23.tv",
+        "youtube.com",
+        "youtu.be",
+        "instagram.com",
+        "twitter.com",
+        "x.com",
+    }
+)
 
 
 def _load_allowed_domains() -> frozenset[str]:
@@ -73,9 +75,9 @@ class InterceptHandler(logging.Handler):
         # with the actual stdlib logger name (e.g. "uvicorn.access", "celery.beat").
         # Bind _from_stdlib so console handler can filter these out.
         stdlib_name = record.name
-        logger.patch(lambda r: r.update(name=stdlib_name)).bind(
-            _from_stdlib=True
-        ).opt(exception=record.exc_info).log(level, record.getMessage())
+        logger.patch(lambda r: r.update(name=stdlib_name)).bind(_from_stdlib=True).opt(
+            exception=record.exc_info
+        ).log(level, record.getMessage())
 
 
 class SingletonMeta(type):
@@ -176,15 +178,23 @@ class Utils:
         # Database handler (async batch-insert to application_logs table)
         try:
             from app.services.db_log_sink import db_log_sink
+
             logger.add(db_log_sink, level="INFO", format="{message}", catch=True)
         except Exception:
             pass  # Skip if Supabase not configured
 
         # Bridge stdlib logging → loguru (captures uvicorn, httpx, celery, etc.)
         intercept = InterceptHandler()
-        for name in ("uvicorn", "uvicorn.access", "uvicorn.error",
-                      "celery", "celery.worker", "celery.beat",
-                      "httpx", "httpcore"):
+        for name in (
+            "uvicorn",
+            "uvicorn.access",
+            "uvicorn.error",
+            "celery",
+            "celery.worker",
+            "celery.beat",
+            "httpx",
+            "httpcore",
+        ):
             lib_logger = logging.getLogger(name)
             lib_logger.handlers = [intercept]
             lib_logger.setLevel(logging.INFO)
@@ -291,7 +301,9 @@ class Utils:
             raise ValueError(f"创建下载文件夹失败: {e}") from e
 
     @classmethod
-    def create_web_resource_path(cls, platform: str, identifier: str) -> tuple[Path, str]:
+    def create_web_resource_path(
+        cls, platform: str, identifier: str
+    ) -> tuple[Path, str]:
         """
         Create storage path for Parser downloads.
 

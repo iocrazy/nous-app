@@ -274,11 +274,13 @@ def reset_monthly_quotas():
 
             response = (
                 await supabase.table("member_quotas")
-                .update({
-                    "points_used_this_month": 0,
-                    "reset_at": next_reset.isoformat(),
-                    "updated_at": now.isoformat(),
-                })
+                .update(
+                    {
+                        "points_used_this_month": 0,
+                        "reset_at": next_reset.isoformat(),
+                        "updated_at": now.isoformat(),
+                    }
+                )
                 .gte("points_used_this_month", 0)  # match all rows
                 .execute()
             )
@@ -287,7 +289,9 @@ def reset_monthly_quotas():
         rows = run_async(_reset())
         count = len(rows) if rows else 0
 
-        logger.success(f"[Celery Beat] Monthly quota reset complete: {count} rows reset")
+        logger.success(
+            f"[Celery Beat] Monthly quota reset complete: {count} rows reset"
+        )
         return {"status": "success", "count": count}
 
     except Exception as e:
@@ -325,17 +329,19 @@ def reap_stuck_pending_tasks():
             # Pass 1: unified_tasks zombie rows
             result = (
                 await supabase.table("unified_tasks")
-                .update({
-                    "status": "failed",
-                    "phase": "failed",
-                    "error_msg": (
-                        "Worker never claimed this task — Celery message "
-                        "was lost (worker crash / broker restart). "
-                        "Use Retry to re-queue."
-                    ),
-                    "error_code": "WORKER_LOST",
-                    "updated_at": now_iso,
-                })
+                .update(
+                    {
+                        "status": "failed",
+                        "phase": "failed",
+                        "error_msg": (
+                            "Worker never claimed this task — Celery message "
+                            "was lost (worker crash / broker restart). "
+                            "Use Retry to re-queue."
+                        ),
+                        "error_code": "WORKER_LOST",
+                        "updated_at": now_iso,
+                    }
+                )
                 .eq("status", "pending")
                 .eq("phase", "queued")
                 .is_("started_at", "null")
@@ -349,7 +355,11 @@ def reap_stuck_pending_tasks():
             # avoid a per-row NOT-IN join; the predicate is identical to
             # the bulk UPDATE in migration 128.
             resources_reaped = 0
-            for field in ("transcript_status", "summary_status", "visual_analysis_status"):
+            for field in (
+                "transcript_status",
+                "summary_status",
+                "visual_analysis_status",
+            ):
                 sql = f"""
                 WITH live AS (
                   SELECT DISTINCT resource_id::text AS rid
@@ -384,8 +394,11 @@ def reap_stuck_pending_tasks():
             )
         else:
             logger.info("[Celery Beat] Reaper found no stuck records")
-        return {"status": "success", "tasks_reaped": tasks_reaped,
-                "resources_reaped": resources_reaped}
+        return {
+            "status": "success",
+            "tasks_reaped": tasks_reaped,
+            "resources_reaped": resources_reaped,
+        }
 
     except Exception as e:
         logger.error(f"[Celery Beat] Reaper failed: {e}")
@@ -418,7 +431,9 @@ def cleanup_old_unified_tasks():
             return len(result.data) if result.data else 0
 
         deleted = run_async(_cleanup())
-        logger.success(f"[Celery Beat] Unified tasks cleanup: {deleted} old tasks removed")
+        logger.success(
+            f"[Celery Beat] Unified tasks cleanup: {deleted} old tasks removed"
+        )
         return {"status": "success", "deleted": deleted}
 
     except Exception as e:
@@ -525,20 +540,26 @@ def recover_stale_orchestrator_locks():
             )
 
             recovered = 0
-            for task in (stale.data or []):
+            for task in stale.data or []:
                 try:
-                    await mgr.fail(task["id"], "Stale task timeout", error_code="NETWORK_TIMEOUT")
+                    await mgr.fail(
+                        task["id"], "Stale task timeout", error_code="NETWORK_TIMEOUT"
+                    )
                     if task.get("dedup_key"):
                         mgr.release_lock(task["dedup_key"])
                     recovered += 1
                     logger.info(f"[Recovery] Marked stale task {task['id']} as failed")
                 except Exception as e:
-                    logger.warning(f"[Recovery] Failed to recover task {task['id']}: {e}")
+                    logger.warning(
+                        f"[Recovery] Failed to recover task {task['id']}: {e}"
+                    )
 
             return recovered
 
         count = run_async(_recover())
-        logger.success(f"[Celery Beat] Stale lock recovery complete: {count} tasks recovered")
+        logger.success(
+            f"[Celery Beat] Stale lock recovery complete: {count} tasks recovered"
+        )
         return {"status": "success", "recovered": count}
 
     except Exception as e:
@@ -604,21 +625,21 @@ def grant_daily_free_points():
                 )
 
                 if result.get("success"):
-                    await supabase.table("daily_point_gifts").insert({
-                        "user_id": user_id,
-                        "team_id": team_id,
-                        "gift_date": today,
-                        "amount_granted": amount,
-                        "status": "granted",
-                    }).execute()
+                    await supabase.table("daily_point_gifts").insert(
+                        {
+                            "user_id": user_id,
+                            "team_id": team_id,
+                            "gift_date": today,
+                            "amount_granted": amount,
+                            "status": "granted",
+                        }
+                    ).execute()
                     granted += 1
 
             return {"status": "success", "granted": granted, "skipped": skipped}
 
         result = run_async(_grant())
-        logger.success(
-            f"[Celery Beat] Daily free points grant complete: {result}"
-        )
+        logger.success(f"[Celery Beat] Daily free points grant complete: {result}")
         return result
 
     except Exception as e:
@@ -672,9 +693,7 @@ def reclaim_daily_free_points():
                     .gte("created_at", granted_at)
                     .execute()
                 )
-                consumed = sum(
-                    abs(t["amount"]) for t in (txns_resp.data or [])
-                )
+                consumed = sum(abs(t["amount"]) for t in (txns_resp.data or []))
 
                 # Calculate unused portion
                 used = min(amount_granted, consumed)
@@ -694,12 +713,14 @@ def reclaim_daily_free_points():
                 # Update gift record
                 await (
                     supabase.table("daily_point_gifts")
-                    .update({
-                        "status": "reclaimed",
-                        "amount_consumed": used,
-                        "amount_reclaimed": actual_reclaimed,
-                        "reclaimed_at": datetime.now().isoformat(),
-                    })
+                    .update(
+                        {
+                            "status": "reclaimed",
+                            "amount_consumed": used,
+                            "amount_reclaimed": actual_reclaimed,
+                            "reclaimed_at": datetime.now().isoformat(),
+                        }
+                    )
                     .eq("id", gift["id"])
                     .execute()
                 )
@@ -714,9 +735,7 @@ def reclaim_daily_free_points():
             }
 
         result = run_async(_reclaim())
-        logger.success(
-            f"[Celery Beat] Daily free points reclaim complete: {result}"
-        )
+        logger.success(f"[Celery Beat] Daily free points reclaim complete: {result}")
         return result
 
     except Exception as e:

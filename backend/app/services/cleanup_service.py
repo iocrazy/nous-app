@@ -471,9 +471,12 @@ class CleanupService:
         media_ids = await self._get_user_media_ids(user_id)
         if not media_ids:
             return {
-                "total_videos": 0, "total_storage_bytes": 0,
-                "videos_never_viewed": 0, "videos_not_viewed_30_days": 0,
-                "potential_duplicates": 0, "videos_marked_keep": 0,
+                "total_videos": 0,
+                "total_storage_bytes": 0,
+                "videos_never_viewed": 0,
+                "videos_not_viewed_30_days": 0,
+                "potential_duplicates": 0,
+                "videos_marked_keep": 0,
                 "reclaimable_bytes": 0,
             }
         total_result = (

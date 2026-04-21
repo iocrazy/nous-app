@@ -48,7 +48,9 @@ async def list_projects(
     auth: AuthDep,
     project_type: Optional[str] = Query(None, description="Filter by project type"),
     starred: Optional[bool] = Query(None, description="Filter starred projects only"),
-    team_id: Optional[str] = Query(None, description="Filter by team ID (null = personal)"),
+    team_id: Optional[str] = Query(
+        None, description="Filter by team ID (null = personal)"
+    ),
 ):
     """
     List all projects accessible to the current user.
@@ -60,9 +62,7 @@ async def list_projects(
     """
     try:
         svc = ProjectsService()
-        projects = await svc.get_projects_with_counts(
-            auth.user_id, team_id=team_id
-        )
+        projects = await svc.get_projects_with_counts(auth.user_id, team_id=team_id)
 
         if project_type:
             projects = [p for p in projects if p.get("project_type") == project_type]
@@ -491,9 +491,7 @@ async def add_comment(
 
 
 @router.delete("/{project_id}/files/{file_id}/comments/{comment_id}")
-async def delete_comment(
-    project_id: str, file_id: str, comment_id: str, auth: AuthDep
-):
+async def delete_comment(project_id: str, file_id: str, comment_id: str, auth: AuthDep):
     """Delete a comment. Only the author can delete their own comment."""
     try:
         svc = ProjectsService()
@@ -618,9 +616,7 @@ async def add_member(project_id: str, data: AddMemberRequest, auth: AuthDep):
     """Add a member to a project."""
     try:
         svc = ProjectsService()
-        member = await svc.add_member(
-            project_id, data.user_id, data.role, auth.user_id
-        )
+        member = await svc.add_member(project_id, data.user_id, data.role, auth.user_id)
         return {"success": True, "data": member}
     except Exception as e:
         error_msg = str(e)

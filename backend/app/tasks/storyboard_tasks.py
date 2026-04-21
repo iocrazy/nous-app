@@ -21,12 +21,14 @@ logger = logging.getLogger(__name__)
 # Internal helpers — unified task lifecycle (best-effort, never raises)
 # ---------------------------------------------------------------------------
 
+
 def _start_unified(task_id: str) -> None:
     """Transition a unified task to PROCESSING."""
     if not task_id:
         return
     try:
         from app.services.unified_task_manager import get_task_manager
+
         run_async(get_task_manager().start(task_id))
     except Exception as exc:
         logger.debug("[Storyboard] _start_unified failed: %s", exc)
@@ -38,6 +40,7 @@ def _complete_unified(task_id: str, result_data: dict | None = None) -> None:
         return
     try:
         from app.services.unified_task_manager import get_task_manager
+
         mgr = get_task_manager()
         if result_data:
             run_async(mgr.update_progress(task_id, progress=100, subtitle="Completed"))
@@ -52,6 +55,7 @@ def _fail_unified(task_id: str, error_msg: str) -> None:
         return
     try:
         from app.services.unified_task_manager import get_task_manager
+
         run_async(get_task_manager().fail(task_id, error_msg[:500]))
     except Exception as exc:
         logger.debug("[Storyboard] _fail_unified failed: %s", exc)
@@ -63,7 +67,12 @@ def _update_unified_progress(task_id: str, progress: int, subtitle: str = "") ->
         return
     try:
         from app.services.unified_task_manager import get_task_manager
-        run_async(get_task_manager().update_progress(task_id, progress=progress, subtitle=subtitle))
+
+        run_async(
+            get_task_manager().update_progress(
+                task_id, progress=progress, subtitle=subtitle
+            )
+        )
     except Exception as exc:
         logger.debug("[Storyboard] _update_unified_progress failed: %s", exc)
 
@@ -71,6 +80,7 @@ def _update_unified_progress(task_id: str, progress: int, subtitle: str = "") ->
 # ---------------------------------------------------------------------------
 # Task 1: generate_storyboard_image
 # ---------------------------------------------------------------------------
+
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def generate_storyboard_image(
@@ -100,7 +110,8 @@ def generate_storyboard_image(
     """
     logger.info(
         "[Storyboard] generate_storyboard_image start — task=%s node=%s",
-        task_id, node_id,
+        task_id,
+        node_id,
     )
     _start_unified(task_id)
     _update_unified_progress(task_id, 5, "Generating image…")
@@ -124,7 +135,8 @@ def generate_storyboard_image(
 
         logger.info(
             "[Storyboard] generate_storyboard_image done — task=%s node=%s",
-            task_id, node_id,
+            task_id,
+            node_id,
         )
         _complete_unified(task_id, result_data=result)
         return {"status": "success", "node_id": node_id, "result": result}
@@ -132,7 +144,8 @@ def generate_storyboard_image(
     except Exception as exc:
         logger.error(
             "[Storyboard] generate_storyboard_image failed — task=%s: %s",
-            task_id, exc,
+            task_id,
+            exc,
         )
         _fail_unified(task_id, f"Image generation failed: {exc}")
         raise self.retry(exc=exc, countdown=30)
@@ -141,6 +154,7 @@ def generate_storyboard_image(
 # ---------------------------------------------------------------------------
 # Task 2: generate_storyboard_image_batch
 # ---------------------------------------------------------------------------
+
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def generate_storyboard_image_batch(
@@ -163,7 +177,8 @@ def generate_storyboard_image_batch(
     """
     logger.info(
         "[Storyboard] generate_storyboard_image_batch start — task=%s count=%d",
-        task_id, len(requests),
+        task_id,
+        len(requests),
     )
     _start_unified(task_id)
     _update_unified_progress(task_id, 5, "Starting batch image generation…")
@@ -186,7 +201,9 @@ def generate_storyboard_image_batch(
             logger.warning(
                 "[Storyboard] generate_storyboard_image_batch partial failure — "
                 "task=%s succeeded=%d failed=%d",
-                task_id, len(succeeded), len(failed),
+                task_id,
+                len(succeeded),
+                len(failed),
             )
 
         _complete_unified(
@@ -204,7 +221,8 @@ def generate_storyboard_image_batch(
     except Exception as exc:
         logger.error(
             "[Storyboard] generate_storyboard_image_batch failed — task=%s: %s",
-            task_id, exc,
+            task_id,
+            exc,
         )
         _fail_unified(task_id, f"Batch image generation failed: {exc}")
         raise self.retry(exc=exc, countdown=30)
@@ -213,6 +231,7 @@ def generate_storyboard_image_batch(
 # ---------------------------------------------------------------------------
 # Task 3: generate_storyboard_video
 # ---------------------------------------------------------------------------
+
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def generate_storyboard_video(
@@ -240,7 +259,8 @@ def generate_storyboard_video(
     """
     logger.info(
         "[Storyboard] generate_storyboard_video start — task=%s node=%s",
-        task_id, node_id,
+        task_id,
+        node_id,
     )
     _start_unified(task_id)
     _update_unified_progress(task_id, 5, "Generating video…")
@@ -263,7 +283,8 @@ def generate_storyboard_video(
 
         logger.info(
             "[Storyboard] generate_storyboard_video done — task=%s node=%s",
-            task_id, node_id,
+            task_id,
+            node_id,
         )
         _complete_unified(task_id, result_data=result)
         return {"status": "success", "node_id": node_id, "result": result}
@@ -271,7 +292,8 @@ def generate_storyboard_video(
     except Exception as exc:
         logger.error(
             "[Storyboard] generate_storyboard_video failed — task=%s: %s",
-            task_id, exc,
+            task_id,
+            exc,
         )
         _fail_unified(task_id, f"Video generation failed: {exc}")
         raise self.retry(exc=exc, countdown=60)
@@ -322,7 +344,8 @@ def split_script_to_storyboard(
     """
     logger.info(
         "[Storyboard] split_script_to_storyboard start — task=%s project=%s",
-        task_id, project_id,
+        task_id,
+        project_id,
     )
     _start_unified(task_id)
     _update_unified_progress(task_id, 5, "Analysing script…")
@@ -381,7 +404,8 @@ def split_script_to_storyboard(
 
         logger.info(
             "[Storyboard] split_script_to_storyboard done — task=%s scenes=%d",
-            task_id, len(created_nodes),
+            task_id,
+            len(created_nodes),
         )
         _complete_unified(
             task_id,
@@ -397,7 +421,8 @@ def split_script_to_storyboard(
     except Exception as exc:
         logger.error(
             "[Storyboard] split_script_to_storyboard failed — task=%s: %s",
-            task_id, exc,
+            task_id,
+            exc,
         )
         _fail_unified(task_id, f"Script split failed: {exc}")
         raise self.retry(exc=exc, countdown=30)
@@ -406,6 +431,7 @@ def split_script_to_storyboard(
 # ---------------------------------------------------------------------------
 # Task 5: analyze_video_scenes
 # ---------------------------------------------------------------------------
+
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=30)
 def analyze_video_scenes(
@@ -423,7 +449,8 @@ def analyze_video_scenes(
     """
     logger.info(
         "[Storyboard] analyze_video_scenes start — task=%s project=%s",
-        task_id, project_id,
+        task_id,
+        project_id,
     )
     _start_unified(task_id)
     _update_unified_progress(task_id, 5, "Analysing video scenes…")
@@ -479,7 +506,8 @@ def analyze_video_scenes(
 
         logger.info(
             "[Storyboard] analyze_video_scenes done — task=%s scenes=%d",
-            task_id, len(created_nodes),
+            task_id,
+            len(created_nodes),
         )
         _complete_unified(
             task_id,
@@ -495,7 +523,8 @@ def analyze_video_scenes(
     except Exception as exc:
         logger.error(
             "[Storyboard] analyze_video_scenes failed — task=%s: %s",
-            task_id, exc,
+            task_id,
+            exc,
         )
         _fail_unified(task_id, f"Video analysis failed: {exc}")
         raise self.retry(exc=exc, countdown=30)
@@ -529,13 +558,19 @@ def export_storyboard(
     """
     if format not in _EXPORT_FORMATS:
         error_msg = f"Unsupported export format '{format}'. Must be one of: {sorted(_EXPORT_FORMATS)}"
-        logger.error("[Storyboard] export_storyboard invalid format — task=%s: %s", task_id, error_msg)
+        logger.error(
+            "[Storyboard] export_storyboard invalid format — task=%s: %s",
+            task_id,
+            error_msg,
+        )
         _fail_unified(task_id, error_msg)
         return {"status": "failed", "error": error_msg}
 
     logger.info(
         "[Storyboard] export_storyboard start — task=%s project=%s format=%s",
-        task_id, project_id, format,
+        task_id,
+        project_id,
+        format,
     )
     _start_unified(task_id)
     _update_unified_progress(task_id, 5, f"Exporting as {format.upper()}…")
@@ -552,9 +587,7 @@ def export_storyboard(
                 service.export_pdf(project_id=project_id, options=resolved_options)
             )
         elif format == "zip":
-            result = run_async(
-                service.export_zip(project_id=project_id)
-            )
+            result = run_async(service.export_zip(project_id=project_id))
         else:  # png
             result = run_async(
                 service.export_png(project_id=project_id, options=resolved_options)
@@ -562,15 +595,23 @@ def export_storyboard(
 
         logger.info(
             "[Storyboard] export_storyboard done — task=%s project=%s format=%s",
-            task_id, project_id, format,
+            task_id,
+            project_id,
+            format,
         )
         _complete_unified(task_id, result_data=result)
-        return {"status": "success", "project_id": project_id, "format": format, "result": result}
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "format": format,
+            "result": result,
+        }
 
     except Exception as exc:
         logger.error(
             "[Storyboard] export_storyboard failed — task=%s: %s",
-            task_id, exc,
+            task_id,
+            exc,
         )
         _fail_unified(task_id, f"Export failed: {exc}")
         raise self.retry(exc=exc, countdown=30)
@@ -579,6 +620,7 @@ def export_storyboard(
 # ---------------------------------------------------------------------------
 # Task 7: split_image_grid
 # ---------------------------------------------------------------------------
+
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=15)
 def split_image_grid(
@@ -603,14 +645,21 @@ def split_image_grid(
     """
     logger.info(
         "[Storyboard] split_image_grid start — task=%s project=%s rows=%d cols=%d",
-        task_id, project_id, rows, cols,
+        task_id,
+        project_id,
+        rows,
+        cols,
     )
     _start_unified(task_id)
     _update_unified_progress(task_id, 5, f"Splitting image into {rows}×{cols} frames…")
 
     if rows < 1 or cols < 1:
         error_msg = f"rows and cols must be ≥ 1, got rows={rows} cols={cols}"
-        logger.error("[Storyboard] split_image_grid invalid params — task=%s: %s", task_id, error_msg)
+        logger.error(
+            "[Storyboard] split_image_grid invalid params — task=%s: %s",
+            task_id,
+            error_msg,
+        )
         _fail_unified(task_id, error_msg)
         return {"status": "failed", "error": error_msg}
 
@@ -622,7 +671,8 @@ def split_image_grid(
 
         logger.info(
             "[Storyboard] split_image_grid done — task=%s frames=%d",
-            task_id, len(frame_paths),
+            task_id,
+            len(frame_paths),
         )
         _complete_unified(
             task_id,
@@ -638,7 +688,8 @@ def split_image_grid(
     except Exception as exc:
         logger.error(
             "[Storyboard] split_image_grid failed — task=%s: %s",
-            task_id, exc,
+            task_id,
+            exc,
         )
         _fail_unified(task_id, f"Image split failed: {exc}")
         raise self.retry(exc=exc, countdown=15)
@@ -647,6 +698,7 @@ def split_image_grid(
 # ---------------------------------------------------------------------------
 # Task 8: process_annotation
 # ---------------------------------------------------------------------------
+
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=10)
 def process_annotation(
@@ -668,14 +720,18 @@ def process_annotation(
     """
     logger.info(
         "[Storyboard] process_annotation start — task=%s node=%s type=%s",
-        task_id, node_id, annotation_data.get("type", "unknown"),
+        task_id,
+        node_id,
+        annotation_data.get("type", "unknown"),
     )
     _start_unified(task_id)
 
     try:
         # Validate that annotation_data is a non-empty mapping
         if not isinstance(annotation_data, dict):
-            raise ValueError(f"annotation_data must be a dict, got {type(annotation_data).__name__}")
+            raise ValueError(
+                f"annotation_data must be a dict, got {type(annotation_data).__name__}"
+            )
 
         annotation_type = annotation_data.get("type", "unknown")
         logger.info(
@@ -701,7 +757,8 @@ def process_annotation(
     except Exception as exc:
         logger.error(
             "[Storyboard] process_annotation failed — task=%s: %s",
-            task_id, exc,
+            task_id,
+            exc,
         )
         _fail_unified(task_id, f"Annotation processing failed: {exc}")
         raise self.retry(exc=exc, countdown=10)

@@ -645,7 +645,7 @@ class ABogus:
         self.array2 = []  # 加密请求头 为空
         self.array3 = []  # 加密UA
         self.options = options  # GET [0, 1, 8] POST [0, 1, 14]
-        self.ua_key = b"\x00\x01\x0E"  # ua加密key
+        self.ua_key = b"\x00\x01\x0e"  # ua加密key
 
         self.character = (
             "Dkdpgh2ZmsQB80/MfvV36XI1R45-WUAlEixNLwoqYTOPuzKFjJnry79HbGcaStCe"

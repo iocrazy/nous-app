@@ -85,9 +85,7 @@ async def list_transcode_versions(
 ):
     """List video resource versions with transcode info."""
     # Route status_filter through the repo's validator set
-    resolved_status = (
-        status_filter if status_filter in VALID_STATUSES else None
-    )
+    resolved_status = status_filter if status_filter in VALID_STATUSES else None
 
     repo = AdminTranscodeRepository()
     rows, total = await repo.list_video_versions(
@@ -113,9 +111,11 @@ async def list_transcode_versions(
     if search:
         search_lower = search.lower()
         rows = [
-            r for r in rows
+            r
+            for r in rows
             if search_lower in (r.get("filename") or "").lower()
-            or search_lower in (
+            or search_lower
+            in (
                 media_info_map.get(str(r["resource_id"]), {}).get("title") or ""
             ).lower()
         ]
@@ -167,7 +167,9 @@ async def retry_transcode(
 
     version = await repo.get_version(version_id)
     if not version:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Version not found"
+        )
 
     mime_type = version.get("mime_type") or ""
     if not mime_type.startswith("video/"):
@@ -185,7 +187,10 @@ async def retry_transcode(
     await repo.mark_pending(version_id)
 
     from app.tasks.transcode_tasks import transcode_to_hls
-    await asyncio.to_thread(transcode_to_hls.delay, resource_id, version_id, auth.user_id)
+
+    await asyncio.to_thread(
+        transcode_to_hls.delay, resource_id, version_id, auth.user_id
+    )
 
     # Audit log
     await create_audit_log(
@@ -197,7 +202,9 @@ async def retry_transcode(
         ip_address=request.client.host if request.client else None,
     )
 
-    logger.info(f"[Admin] Transcode retry queued: version={version_id} by admin={auth.user_id}")
+    logger.info(
+        f"[Admin] Transcode retry queued: version={version_id} by admin={auth.user_id}"
+    )
     return {"message": "Transcode retry queued", "version_id": version_id}
 
 
@@ -249,7 +256,21 @@ async def batch_transcode(
 # Valid values for settings validation
 VALID_TIERS = {"480p", "720p", "1080p"}
 VALID_ENCODERS = {"auto", "libx264", "h264_nvenc", "h264_videotoolbox", "h264_qsv"}
-VALID_PRESETS = {"ultrafast", "veryfast", "fast", "medium", "slow", "veryslow", "p1", "p2", "p3", "p4", "p5", "p6", "p7"}
+VALID_PRESETS = {
+    "ultrafast",
+    "veryfast",
+    "fast",
+    "medium",
+    "slow",
+    "veryslow",
+    "p1",
+    "p2",
+    "p3",
+    "p4",
+    "p5",
+    "p6",
+    "p7",
+}
 
 
 async def _load_transcode_settings_from_db() -> dict:
@@ -257,12 +278,18 @@ async def _load_transcode_settings_from_db() -> dict:
     repo = AdminTranscodeRepository()
     db_map = await repo.load_settings()
     return {
-        "transcode_enabled": db_map.get("transcode_enabled", settings.TRANSCODE_ENABLED),
+        "transcode_enabled": db_map.get(
+            "transcode_enabled", settings.TRANSCODE_ENABLED
+        ),
         "transcode_tiers": db_map.get("transcode_tiers", settings.TRANSCODE_TIERS),
         "ffmpeg_encoder": db_map.get("transcode_encoder", settings.FFMPEG_ENCODER),
         "ffmpeg_preset": db_map.get("transcode_preset", settings.FFMPEG_PRESET),
-        "transcode_parallel_tiers": db_map.get("transcode_parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS),
-        "transcode_min_size_mb": db_map.get("transcode_min_size_mb", settings.TRANSCODE_MIN_SIZE_MB),
+        "transcode_parallel_tiers": db_map.get(
+            "transcode_parallel_tiers", settings.TRANSCODE_PARALLEL_TIERS
+        ),
+        "transcode_min_size_mb": db_map.get(
+            "transcode_min_size_mb", settings.TRANSCODE_MIN_SIZE_MB
+        ),
     }
 
 
@@ -356,7 +383,9 @@ async def update_transcode_settings(
         ip_address=request.client.host if request.client else None,
     )
 
-    logger.info(f"[Admin] Transcode settings updated: {changes} by admin={auth.user_id}")
+    logger.info(
+        f"[Admin] Transcode settings updated: {changes} by admin={auth.user_id}"
+    )
 
     vals = await _load_transcode_settings_from_db()
     return AdminTranscodeSettingsResponse(**vals)

@@ -31,16 +31,18 @@ async def report_frontend_error(
     """Accept frontend error reports. Always returns 204 — error reporting should never fail."""
     try:
         supabase = await get_async_supabase_admin()
-        await supabase.table("frontend_error_logs").insert({
-            "user_id": auth.user_id if auth else None,
-            "session_id": report.session_id,
-            "error_type": report.error_type,
-            "message": report.message,
-            "stack": report.stack,
-            "url": report.url,
-            "component": report.component,
-            "user_agent": report.user_agent,
-            "metadata": report.metadata,
-        }).execute()
+        await supabase.table("frontend_error_logs").insert(
+            {
+                "user_id": auth.user_id if auth else None,
+                "session_id": report.session_id,
+                "error_type": report.error_type,
+                "message": report.message,
+                "stack": report.stack,
+                "url": report.url,
+                "component": report.component,
+                "user_agent": report.user_agent,
+                "metadata": report.metadata,
+            }
+        ).execute()
     except Exception as e:
         logger.warning(f"Failed to write frontend error log: {e}")

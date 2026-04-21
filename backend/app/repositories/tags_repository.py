@@ -46,7 +46,9 @@ class TagsRepository:
         query = table.select(select_fields)
 
         if user_id:
-            query = query.or_(f"type.eq.system,type.eq.time,and(type.eq.user,user_id.eq.{user_id})")
+            query = query.or_(
+                f"type.eq.system,type.eq.time,and(type.eq.user,user_id.eq.{user_id})"
+            )
         else:
             query = query.or_("type.eq.system,type.eq.time")
 
@@ -67,12 +69,14 @@ class TagsRepository:
                 count_result = await client.rpc(
                     "get_tag_counts_by_ids", {"p_tag_ids": tag_ids}
                 ).execute()
-                for row in (count_result.data or []):
+                for row in count_result.data or []:
                     count_map[str(row["tag_id"])] = row["count"]
             except Exception:
                 # Fallback: pull rows and count client-side
                 rt_table = client.table("resource_tags")
-                count_result = await rt_table.select("tag_id").in_("tag_id", tag_ids).execute()
+                count_result = (
+                    await rt_table.select("tag_id").in_("tag_id", tag_ids).execute()
+                )
                 for row in count_result.data:
                     tid = str(row["tag_id"])
                     count_map[tid] = count_map.get(tid, 0) + 1
@@ -191,11 +195,7 @@ class TagsRepository:
             return await self.get_tag_by_id(tag_id)
 
         table = await self._get_table()
-        result = (
-            await table.update(update_data)
-            .eq("id", tag_id)
-            .execute()
-        )
+        result = await table.update(update_data).eq("id", tag_id).execute()
         return result.data[0] if result.data else None
 
     async def delete_tag(self, tag_id: str, user_id: str) -> bool:
@@ -333,7 +333,10 @@ class TagsRepository:
 
         # Get all resource IDs for this user
         resource_result = (
-            await client.table("resources").select("id").eq("user_id", user_id).execute()
+            await client.table("resources")
+            .select("id")
+            .eq("user_id", user_id)
+            .execute()
         )
         if not resource_result.data:
             return []

@@ -26,9 +26,7 @@ class SystemSettingsRepository:
     async def list_non_transcode(self) -> list[dict[str, Any]]:
         """Return settings rows, excluding transcode_* (managed elsewhere)."""
         client = await self._client()
-        result = await (
-            client.table(self.TABLE).select("*").order("key").execute()
-        )
+        result = await client.table(self.TABLE).select("*").order("key").execute()
         return [
             row
             for row in (result.data or [])

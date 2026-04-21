@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 # ─── Create / Update ─────────────────────────────────────
 
+
 class ShareCreate(BaseModel):
     """Request body for creating a new share."""
 
@@ -27,35 +28,59 @@ class ShareCreate(BaseModel):
         pattern="^(link|review|presentation|delivery)$",
         description="Type of share: link, review, presentation, or delivery",
     )
-    share_name: str = Field(..., min_length=1, max_length=200, description="Display name for the share")
-    password: Optional[str] = Field(None, max_length=100, description="Optional access password")
-    allow_download: bool = Field(True, description="Whether viewers can download the content")
-    expires_at: Optional[datetime] = Field(None, description="Expiration timestamp (UTC)")
-    max_views: Optional[int] = Field(None, ge=1, description="Maximum number of views allowed")
-    watermark: bool = Field(False, description="Whether to apply watermark on shared content")
+    share_name: str = Field(
+        ..., min_length=1, max_length=200, description="Display name for the share"
+    )
+    password: Optional[str] = Field(
+        None, max_length=100, description="Optional access password"
+    )
+    allow_download: bool = Field(
+        True, description="Whether viewers can download the content"
+    )
+    expires_at: Optional[datetime] = Field(
+        None, description="Expiration timestamp (UTC)"
+    )
+    max_views: Optional[int] = Field(
+        None, ge=1, description="Maximum number of views allowed"
+    )
+    watermark: bool = Field(
+        False, description="Whether to apply watermark on shared content"
+    )
     team_id: Optional[str] = Field(None, description="Team ID for team-scoped shares")
 
 
 class ShareUpdate(BaseModel):
     """Request body for updating share settings."""
 
-    share_name: Optional[str] = Field(None, min_length=1, max_length=200, description="Display name")
-    password: Optional[str] = Field(None, max_length=100, description="Access password (empty string to remove)")
-    allow_download: Optional[bool] = Field(None, description="Whether viewers can download")
-    expires_at: Optional[datetime] = Field(None, description="Expiration timestamp (UTC)")
+    share_name: Optional[str] = Field(
+        None, min_length=1, max_length=200, description="Display name"
+    )
+    password: Optional[str] = Field(
+        None, max_length=100, description="Access password (empty string to remove)"
+    )
+    allow_download: Optional[bool] = Field(
+        None, description="Whether viewers can download"
+    )
+    expires_at: Optional[datetime] = Field(
+        None, description="Expiration timestamp (UTC)"
+    )
     max_views: Optional[int] = Field(None, ge=1, description="Maximum views allowed")
     watermark: Optional[bool] = Field(None, description="Whether to apply watermark")
 
 
 # ─── Public Access ────────────────────────────────────────
 
+
 class ShareAccessRequest(BaseModel):
     """Request body for accessing a share by code (password verification)."""
 
-    password: Optional[str] = Field(None, description="Password if the share is protected")
+    password: Optional[str] = Field(
+        None, description="Password if the share is protected"
+    )
 
 
 # ─── Responses ────────────────────────────────────────────
+
 
 class ShareResponse(BaseModel):
     """Share record returned from the API."""

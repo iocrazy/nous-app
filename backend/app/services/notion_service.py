@@ -457,4 +457,6 @@ async def check_media_exists_service(platform_id, log_info=True):
         check_result = await NotionService.check_media_exists(platform_id)
         return check_result
     except Exception as e:
-        raise NotionError(f"检查媒体是否存在时出错: {str(e)}", {"platform_id": platform_id})
+        raise NotionError(
+            f"检查媒体是否存在时出错: {str(e)}", {"platform_id": platform_id}
+        )

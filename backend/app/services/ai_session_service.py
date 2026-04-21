@@ -178,10 +178,7 @@ class AISessionService:
 
         supabase = await get_async_supabase_admin()
         resp = (
-            await supabase.table("ai_sessions")
-            .delete()
-            .eq("id", session_id)
-            .execute()
+            await supabase.table("ai_sessions").delete().eq("id", session_id).execute()
         )
         if resp.data is None:
             logger.error(f"Unexpected error deleting session {session_id}")

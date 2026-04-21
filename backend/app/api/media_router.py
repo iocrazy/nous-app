@@ -129,14 +129,19 @@ async def get_video(platform_id: str, auth: AuthDep):
         media_id = video.get("id")
         if media_id:
             from app.repositories.resources_repository import ResourcesRepository
+
             res_repo = ResourcesRepository()
             user_resource = await res_repo.get_resource_by_media_id_and_creator(
                 media_id, auth.user_id
             )
             if user_resource:
                 video["resource_id"] = user_resource["id"]
-                for field in ("video_download_status", "music_download_status",
-                              "cover_download_status", "image_download_status"):
+                for field in (
+                    "video_download_status",
+                    "music_download_status",
+                    "cover_download_status",
+                    "image_download_status",
+                ):
                     user_status = user_resource.get(field)
                     if user_status is not None:
                         video[field] = user_status
@@ -292,7 +297,9 @@ async def get_user_logs(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     level: Optional[str] = Query(None, description="Filter by status level"),
-    date_range: Optional[str] = Query(None, description="Preset date range: 24h, 7days, 30days, 90days"),
+    date_range: Optional[str] = Query(
+        None, description="Preset date range: 24h, 7days, 30days, 90days"
+    ),
     start_date: Optional[str] = Query(None, description="Custom start date (ISO)"),
     end_date: Optional[str] = Query(None, description="Custom end date (ISO)"),
     search: Optional[str] = Query(None, description="Search in message"),

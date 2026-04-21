@@ -31,12 +31,8 @@ def generate_thumbnail_task(resource_id: str, file_path: str, mime_type: str) ->
                 mime_type=mime_type,
             )
         )
-        logger.info(
-            f"[Thumbnail] resource={resource_id} generated"
-        )
+        logger.info(f"[Thumbnail] resource={resource_id} generated")
         return True
     except Exception as e:
-        logger.warning(
-            f"[Thumbnail] resource={resource_id} failed: {e}"
-        )
+        logger.warning(f"[Thumbnail] resource={resource_id} failed: {e}")
         return False

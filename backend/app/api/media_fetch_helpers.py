@@ -165,7 +165,12 @@ async def dedup_and_dispatch(
         requested["cover"] = True
 
     if not requested:
-        return {"task_id": None, "types_submitted": [], "types_skipped": [], "types_subscribed": []}
+        return {
+            "task_id": None,
+            "types_submitted": [],
+            "types_skipped": [],
+            "types_subscribed": [],
+        }
 
     types_to_download: list[str] = []
     types_subscribed: list[str] = []
@@ -217,7 +222,8 @@ async def dedup_and_dispatch(
                 f"[Download/Init] Celery dispatch: platform_id={platform_id}, "
                 f"types={types_to_download}, user={user_id}"
             )
-            celery_task = await asyncio.to_thread(download_unified_task.delay,
+            celery_task = await asyncio.to_thread(
+                download_unified_task.delay,
                 platform_id=platform_id,
                 user_id=user_id,
                 url=url,
@@ -231,20 +237,35 @@ async def dedup_and_dispatch(
             task_id = celery_task.id
             if unified_task_id:
                 try:
-                    await orchestrator._atomic_update(unified_task_id, {"celery_task_id": task_id})
+                    await orchestrator._atomic_update(
+                        unified_task_id, {"celery_task_id": task_id}
+                    )
                 except Exception:
                     pass
         except Exception as celery_err:
             logger.warning(f"[Download/Init] Celery unavailable: {celery_err}")
             if background_tasks:
                 from app.services.downloader import DownloaderService
+
                 if dl_video:
                     if is_image_type:
-                        background_tasks.add_task(DownloaderService.download_images_by_platform_id, platform_id, user_id=user_id)
+                        background_tasks.add_task(
+                            DownloaderService.download_images_by_platform_id,
+                            platform_id,
+                            user_id=user_id,
+                        )
                     else:
-                        background_tasks.add_task(DownloaderService.download_video_by_platform_id, platform_id, user_id=user_id)
+                        background_tasks.add_task(
+                            DownloaderService.download_video_by_platform_id,
+                            platform_id,
+                            user_id=user_id,
+                        )
                 if dl_cover:
-                    background_tasks.add_task(DownloaderService.download_cover_by_platform_id, platform_id, user_id=user_id)
+                    background_tasks.add_task(
+                        DownloaderService.download_cover_by_platform_id,
+                        platform_id,
+                        user_id=user_id,
+                    )
                 task_id = "background"
 
     return {
@@ -272,13 +293,16 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
         settings_repo = UserSettingsRepository()
         user_settings = await settings_repo.get_by_user_id(user_id)
         if user_settings and user_settings.get("settings_json"):
-            user_parse_mode = user_settings["settings_json"].get("parse_mode", "lighthttp")
+            user_parse_mode = user_settings["settings_json"].get(
+                "parse_mode", "lighthttp"
+            )
         logger.info(f"[Douyin Fallback] User {user_id} parse_mode: {user_parse_mode}")
     except Exception as e:
         logger.warning(f"Failed to read user parse mode, using default: {e}")
 
     # Pick a Douyin UA once per request so LightHTTP + BrowserAuto share it.
     from app.services.douyin_parse.ua_pool import pick_ua
+
     douyin_ua = pick_ua()
 
     if user_parse_mode == "drissionpage":
@@ -346,6 +370,7 @@ async def mark_cookie_if_auth_failure(user_id: str, platform: str, error: str) -
     if any(kw in error.lower() for kw in auth_keywords):
         try:
             from app.repositories.cookies_repository import CookiesRepository
+
             repo = CookiesRepository()
             await repo.mark_invalid(user_id, platform, error[:200])
             logger.info(
@@ -436,7 +461,9 @@ async def handle_ytdlp_fetch(
 
     if unified_task_id:
         try:
-            await mgr._atomic_update(unified_task_id, {"celery_task_id": celery_task.id})
+            await mgr._atomic_update(
+                unified_task_id, {"celery_task_id": celery_task.id}
+            )
         except Exception:
             pass
 

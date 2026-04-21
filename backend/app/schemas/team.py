@@ -7,28 +7,33 @@ from pydantic import BaseModel
 
 class TeamCreate(BaseModel):
     """Request to create a team."""
+
     name: str
 
 
 class TeamUpdate(BaseModel):
     """Request to update a team."""
+
     name: Optional[str] = None
     description: Optional[str] = None
 
 
 class TeamMemberAdd(BaseModel):
     """Request to add a member to a team."""
+
     user_id: str
     role: str = "member"
 
 
 class TeamMemberUpdate(BaseModel):
     """Request to update a team member's role."""
+
     role: str  # "admin", "editor", "reviewer", or "viewer"
 
 
 class TeamMemberResponse(BaseModel):
     """Team member response."""
+
     team_id: str
     user_id: str
     role: str
@@ -39,6 +44,7 @@ class TeamMemberResponse(BaseModel):
 
 class TeamResponse(BaseModel):
     """Team response."""
+
     id: str
     name: str
     owner_id: str
@@ -49,16 +55,19 @@ class TeamResponse(BaseModel):
 
 class TeamListResponse(BaseModel):
     """List of teams response."""
+
     teams: List[TeamResponse]
     total: int
 
 
 class TeamMemberListResponse(BaseModel):
     """List of team members response."""
+
     members: List[TeamMemberResponse]
     total: int
 
 
 class JoinTeamRequest(BaseModel):
     """Request to join a team by invite code."""
+
     invite_code: str

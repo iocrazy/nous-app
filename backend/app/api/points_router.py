@@ -138,9 +138,7 @@ async def _auto_create_personal_team(user_id: str) -> str:
         logger.warning(f"Failed to resolve username for {user_id}: {e}")
 
     # Generate a random invite code
-    invite_code = "".join(
-        random.choices(string.ascii_uppercase + string.digits, k=8)
-    )
+    invite_code = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
     # Insert team — id uses DEFAULT generate_snowflake_id()
     team_result = (
@@ -241,9 +239,13 @@ async def get_transactions(
     limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     type: Optional[str] = Query(None, description="Filter by transaction type"),
-    reference_type: Optional[str] = Query(None, description="Filter by reference_type (action type)"),
+    reference_type: Optional[str] = Query(
+        None, description="Filter by reference_type (action type)"
+    ),
     search: Optional[str] = Query(None, description="Search in description text"),
-    days: Optional[int] = Query(None, ge=1, le=365, description="Filter to last N days"),
+    days: Optional[int] = Query(
+        None, ge=1, le=365, description="Filter to last N days"
+    ),
 ):
     """
     Get points transaction history.

@@ -25,24 +25,28 @@ router = APIRouter()
 
 class AuditActionCount(BaseModel):
     """Count of audit logs by action."""
+
     action: str
     count: int
 
 
 class AuditTargetCount(BaseModel):
     """Count of audit logs by target type."""
+
     target_type: str
     count: int
 
 
 class AuditDayCount(BaseModel):
     """Count of audit logs by day."""
+
     date: str
     count: int
 
 
 class AuditStatsResponse(BaseModel):
     """Audit log statistics response."""
+
     by_action: List[AuditActionCount]
     by_target: List[AuditTargetCount]
     by_day: List[AuditDayCount]
@@ -62,8 +66,12 @@ async def list_audit_logs(
     admin_id: Optional[str] = Query(None, description="Filter by admin ID"),
     action: Optional[str] = Query(None, description="Filter by action type"),
     target_type: Optional[str] = Query(None, description="Filter by target type"),
-    start_date: Optional[datetime] = Query(None, description="Filter by start date (ISO format)"),
-    end_date: Optional[datetime] = Query(None, description="Filter by end date (ISO format)"),
+    start_date: Optional[datetime] = Query(
+        None, description="Filter by start date (ISO format)"
+    ),
+    end_date: Optional[datetime] = Query(
+        None, description="Filter by end date (ISO format)"
+    ),
 ):
     """
     List audit logs with filtering and pagination.
@@ -98,18 +106,20 @@ async def list_audit_logs(
     for log in rows:
         aid = log["admin_id"]
         admin_email, admin_username = admin_info.get(aid, (None, None))
-        items.append(AuditLogResponse(
-            id=str(log["id"]),
-            admin_id=aid,
-            admin_email=admin_email,
-            admin_username=admin_username,
-            action=log["action"],
-            target_type=log["target_type"],
-            target_id=log["target_id"],
-            details=log.get("details"),
-            ip_address=log.get("ip_address"),
-            created_at=log["created_at"],
-        ))
+        items.append(
+            AuditLogResponse(
+                id=str(log["id"]),
+                admin_id=aid,
+                admin_email=admin_email,
+                admin_username=admin_username,
+                action=log["action"],
+                target_type=log["target_type"],
+                target_id=log["target_id"],
+                details=log.get("details"),
+                ip_address=log.get("ip_address"),
+                created_at=log["created_at"],
+            )
+        )
 
     return AuditLogListResponse(
         items=items,
@@ -135,7 +145,9 @@ async def get_audit_actions(
 @router.get("/stats", response_model=AuditStatsResponse)
 async def get_audit_stats(
     auth: AdminAuthDep,
-    days: int = Query(30, ge=1, le=365, description="Number of days to include in stats"),
+    days: int = Query(
+        30, ge=1, le=365, description="Number of days to include in stats"
+    ),
 ):
     """
     Get audit log statistics for the specified time period.

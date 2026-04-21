@@ -59,12 +59,16 @@ def _map_video_response(v: dict) -> AdminVideoResponse:
         video_title=v.get("title"),
         video_desc=v.get("description"),
         author=v.get("author"),
-        aweme_type=str(v.get("media_type")) if v.get("media_type") is not None else None,
+        aweme_type=(
+            str(v.get("media_type")) if v.get("media_type") is not None else None
+        ),
         video_download_status=v.get("video_download_status", "pending"),
         cover_url=(v.get("cover_urls") or [None])[0],
         cover_download_path=v.get("cover_download_path"),
         source_platform=v.get("source_platform"),
-        video_duration=str(v.get("duration")) if v.get("duration") is not None else None,
+        video_duration=(
+            str(v.get("duration")) if v.get("duration") is not None else None
+        ),
         video_datasize=v.get("datasize"),
         video_datasize_bytes=v.get("datasize_bytes") or 0,
         video_digg_count=v.get("like_count") or 0,
@@ -85,12 +89,16 @@ def _map_video_detail_response(v: dict) -> AdminVideoDetailResponse:
         video_title=v.get("title"),
         video_desc=v.get("description"),
         author=v.get("author"),
-        aweme_type=str(v.get("media_type")) if v.get("media_type") is not None else None,
+        aweme_type=(
+            str(v.get("media_type")) if v.get("media_type") is not None else None
+        ),
         video_download_status=v.get("video_download_status", "pending"),
         cover_url=(v.get("cover_urls") or [None])[0],
         cover_download_path=v.get("cover_download_path"),
         source_platform=v.get("source_platform"),
-        video_duration=str(v.get("duration")) if v.get("duration") is not None else None,
+        video_duration=(
+            str(v.get("duration")) if v.get("duration") is not None else None
+        ),
         video_datasize=v.get("datasize"),
         video_datasize_bytes=v.get("datasize_bytes") or 0,
         video_digg_count=v.get("like_count") or 0,
@@ -120,8 +128,12 @@ async def list_videos(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search by title or platform_id"),
-    video_download_status: Optional[str] = Query(None, alias="status", description="Filter by download status"),
-    source_platform: Optional[str] = Query(None, alias="platform", description="Filter by source platform"),
+    video_download_status: Optional[str] = Query(
+        None, alias="status", description="Filter by download status"
+    ),
+    source_platform: Optional[str] = Query(
+        None, alias="platform", description="Filter by source platform"
+    ),
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
 ):
@@ -199,7 +211,9 @@ async def delete_video(
         ip_address=client_ip,
     )
 
-    logger.info(f"Video {video_id} (platform_id={platform_id}) deleted by admin {auth.user_id}")
+    logger.info(
+        f"Video {video_id} (platform_id={platform_id}) deleted by admin {auth.user_id}"
+    )
 
 
 @router.post("/{video_id}/retry", response_model=AdminVideoDetailResponse)

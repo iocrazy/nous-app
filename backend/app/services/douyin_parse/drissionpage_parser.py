@@ -180,6 +180,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
             return ""
         try:
             from app.repositories.cookies_repository import CookiesRepository
+
             repo = CookiesRepository()
             row = await repo.get_by_user_and_platform(user_id, "douyin")
             if row:
@@ -237,6 +238,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
 
         if not user_agent:
             from app.services.douyin_parse.ua_pool import pick_ua
+
             user_agent = pick_ua()
 
         # Pre-fetch cookie (async) before entering sync thread
@@ -323,8 +325,8 @@ class DrissionPageParser(metaclass=SingletonMeta):
                         (".captcha_verify_container", "css"),
                         (".secsdk-captcha-wrapper", "css"),
                         (".captcha_wrapper", "css"),
-                        ("xpath://iframe[contains(@src,\"verifycenter\")]", "xpath"),
-                        ("xpath://iframe[contains(@src,\"captcha\")]", "xpath"),
+                        ('xpath://iframe[contains(@src,"verifycenter")]', "xpath"),
+                        ('xpath://iframe[contains(@src,"captcha")]', "xpath"),
                     ]
                     # First pass: wait up to 1.5s for ANY captcha indicator
                     for sel, _ in selectors:
@@ -352,7 +354,10 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     # URL-based detection (redirected to captcha/verify page)
                     if not captcha_detected:
                         cur_url = (instance.page.url or "").lower()
-                        if any(k in cur_url for k in ("/captcha/", "verifycenter", "verify.snssdk")):
+                        if any(
+                            k in cur_url
+                            for k in ("/captcha/", "verifycenter", "verify.snssdk")
+                        ):
                             captcha_detected = True
                             detection_method = f"url:{cur_url[:80]}"
 
@@ -372,7 +377,9 @@ class DrissionPageParser(metaclass=SingletonMeta):
                                 f"[DrissionPage] ✅ No captcha detected: {instance.page.url}"
                             )
                 except Exception as det_err:
-                    logger.warning(f"[DrissionPage] Captcha detection check failed: {det_err}")
+                    logger.warning(
+                        f"[DrissionPage] Captcha detection check failed: {det_err}"
+                    )
                     captcha_detected = False
 
                 # If captcha present we can't extract the aweme API — bail early
@@ -455,14 +462,21 @@ class DrissionPageParser(metaclass=SingletonMeta):
                                 for c in instance.page.cookies():
                                     domain = (c.get("domain") or "").lower()
                                     if "douyin" in domain:
-                                        cookie_parts.append(f"{c['name']}={c.get('value', '')}")
+                                        cookie_parts.append(
+                                            f"{c['name']}={c.get('value', '')}"
+                                        )
                                 if cookie_parts:
                                     cookie_header = "; ".join(cookie_parts)
                                     try:
                                         from app.core.redis import get_sync_redis
+
                                         r = get_sync_redis()
-                                        redis_key = f"douyin_browser_cookies:{target_aweme_id}"
-                                        r.setex(redis_key, 600, cookie_header)  # 10 min TTL
+                                        redis_key = (
+                                            f"douyin_browser_cookies:{target_aweme_id}"
+                                        )
+                                        r.setex(
+                                            redis_key, 600, cookie_header
+                                        )  # 10 min TTL
                                         logger.info(
                                             f"[DrissionPage] Cached {len(cookie_parts)} cookies to Redis "
                                             f"(key={redis_key})"
@@ -472,7 +486,9 @@ class DrissionPageParser(metaclass=SingletonMeta):
                                             f"[DrissionPage] Failed to cache cookies to Redis: {redis_err}"
                                         )
                             except Exception as cookie_err:
-                                logger.warning(f"[DrissionPage] Failed to export cookies: {cookie_err}")
+                                logger.warning(
+                                    f"[DrissionPage] Failed to export cookies: {cookie_err}"
+                                )
                             return aweme_response
 
                         else:

@@ -33,6 +33,7 @@ async def admin_health():
     # Check Supabase admin client
     try:
         from app.db import get_async_supabase_admin
+
         supabase = await get_async_supabase_admin()
         checks["supabase_admin"] = "ok"
     except Exception as e:
@@ -68,6 +69,7 @@ async def admin_health():
     # Check JWT validation capability
     try:
         from app.db import get_async_supabase
+
         anon_client = await get_async_supabase()
         checks["supabase_anon"] = "ok"
     except Exception as e:
@@ -77,20 +79,37 @@ async def admin_health():
     logger.info(f"[Admin Health] {checks}")
     return checks
 
+
 admin_router.include_router(users_router, prefix="/users", tags=["Admin - Users"])
 admin_router.include_router(teams_router, prefix="/teams", tags=["Admin - Teams"])
 admin_router.include_router(videos_router, prefix="/videos", tags=["Admin - Videos"])
-admin_router.include_router(audit_logs_router, prefix="/audit-logs", tags=["Admin - Audit Logs"])
+admin_router.include_router(
+    audit_logs_router, prefix="/audit-logs", tags=["Admin - Audit Logs"]
+)
 admin_router.include_router(stats_router, prefix="/stats", tags=["Admin - Stats"])
-admin_router.include_router(settings_router, prefix="/settings", tags=["Admin - Settings"])
+admin_router.include_router(
+    settings_router, prefix="/settings", tags=["Admin - Settings"]
+)
 admin_router.include_router(request_logs_router, prefix="/logs", tags=["Admin - Logs"])
-admin_router.include_router(monitoring_router, prefix="/monitoring", tags=["Admin - Monitoring"])
+admin_router.include_router(
+    monitoring_router, prefix="/monitoring", tags=["Admin - Monitoring"]
+)
 admin_router.include_router(search_router, prefix="/search", tags=["Admin - Search"])
-admin_router.include_router(alert_rules_router, prefix="/alerts", tags=["Admin - Alerts"])
-admin_router.include_router(transcode_router, prefix="/transcode", tags=["Admin - Transcode"])
+admin_router.include_router(
+    alert_rules_router, prefix="/alerts", tags=["Admin - Alerts"]
+)
+admin_router.include_router(
+    transcode_router, prefix="/transcode", tags=["Admin - Transcode"]
+)
 admin_router.include_router(tasks_router, prefix="/tasks", tags=["Admin - Tasks"])
-admin_router.include_router(table_preferences_router, prefix="/table-preferences", tags=["Admin - Table Preferences"])
+admin_router.include_router(
+    table_preferences_router,
+    prefix="/table-preferences",
+    tags=["Admin - Table Preferences"],
+)
 admin_router.include_router(credits_router, prefix="/credits", tags=["Admin - Credits"])
 admin_router.include_router(tags_router, prefix="/tags", tags=["Admin - Tags"])
 admin_router.include_router(celery_router, prefix="/celery", tags=["Admin - Celery"])
-admin_router.include_router(nous_router, prefix="/nous-models", tags=["Admin - Nous Models"])
+admin_router.include_router(
+    nous_router, prefix="/nous-models", tags=["Admin - Nous Models"]
+)

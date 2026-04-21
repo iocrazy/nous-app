@@ -76,9 +76,7 @@ class MediaRepository:
             logger.error(f"创建视频记录失败: {e}")
             raise
 
-    async def get_by_platform_id(
-        self, platform_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_by_platform_id(self, platform_id: str) -> Optional[Dict[str, Any]]:
         """Get parsed_media record by platform_id (global, no user filtering).
 
         Args:
@@ -136,8 +134,12 @@ class MediaRepository:
         """
         try:
             # Handle enums
-            for field in ("video_download_status", "music_download_status",
-                          "cover_download_status", "image_download_status"):
+            for field in (
+                "video_download_status",
+                "music_download_status",
+                "cover_download_status",
+                "image_download_status",
+            ):
                 if field in data and isinstance(data[field], DownloadStatus):
                     data[field] = data[field].value
 
@@ -156,9 +158,7 @@ class MediaRepository:
             logger.error(f"Failed to update parsed_media: {e}")
             raise
 
-    async def mark_stale_downloads_failed(
-        self, timeout_minutes: int = 30
-    ) -> int:
+    async def mark_stale_downloads_failed(self, timeout_minutes: int = 30) -> int:
         """Mark downloads stuck in 'downloading' state as 'failed'.
 
         Scans both parsed_media (global file state) and resources
@@ -172,8 +172,10 @@ class MediaRepository:
         client = await self._get_client()
         count = 0
         status_fields = (
-            "video_download_status", "music_download_status",
-            "cover_download_status", "image_download_status",
+            "video_download_status",
+            "music_download_status",
+            "cover_download_status",
+            "image_download_status",
         )
 
         for field in status_fields:
@@ -181,11 +183,13 @@ class MediaRepository:
             try:
                 result = await (
                     client.table("parsed_media")
-                    .update({
-                        field: "failed",
-                        "error_message": f"Download timed out (>{timeout_minutes}min)",
-                        "updated_at": now,
-                    })
+                    .update(
+                        {
+                            field: "failed",
+                            "error_message": f"Download timed out (>{timeout_minutes}min)",
+                            "updated_at": now,
+                        }
+                    )
                     .eq(field, "downloading")
                     .lt("updated_at", cutoff)
                     .execute()
@@ -198,10 +202,12 @@ class MediaRepository:
             try:
                 result = await (
                     client.table("resources")
-                    .update({
-                        field: "failed",
-                        "updated_at": now,
-                    })
+                    .update(
+                        {
+                            field: "failed",
+                            "updated_at": now,
+                        }
+                    )
                     .eq(field, "downloading")
                     .lt("updated_at", cutoff)
                     .execute()
@@ -211,7 +217,9 @@ class MediaRepository:
                 logger.debug(f"Stale cleanup resources.{field}: {e}")
 
         if count > 0:
-            logger.info(f"Marked {count} stale download(s) as failed (timeout={timeout_minutes}min)")
+            logger.info(
+                f"Marked {count} stale download(s) as failed (timeout={timeout_minutes}min)"
+            )
         return count
 
     async def delete(self, platform_id: str) -> bool:
@@ -444,11 +452,15 @@ class MediaRepository:
 
             # Flatten: merge parsed_media into top-level, overlay user statuses
             videos = []
-            for row in (result.data or []):
+            for row in result.data or []:
                 media = dict(row.get("parsed_media", {}))
                 media["resource_id"] = row["id"]
-                for field in ("video_download_status", "music_download_status",
-                              "cover_download_status", "image_download_status"):
+                for field in (
+                    "video_download_status",
+                    "music_download_status",
+                    "cover_download_status",
+                    "image_download_status",
+                ):
                     user_status = row.get(field)
                     if user_status is not None:
                         media[field] = user_status
@@ -515,11 +527,15 @@ class MediaRepository:
 
             # Flatten: merge parsed_media into top-level, overlay user statuses
             videos = []
-            for row in (result.data or []):
+            for row in result.data or []:
                 media = dict(row.get("parsed_media", {}))
                 media["resource_id"] = row["id"]
-                for field in ("video_download_status", "music_download_status",
-                              "cover_download_status", "image_download_status"):
+                for field in (
+                    "video_download_status",
+                    "music_download_status",
+                    "cover_download_status",
+                    "image_download_status",
+                ):
                     user_status = row.get(field)
                     if user_status is not None:
                         media[field] = user_status
@@ -537,7 +553,10 @@ class MediaRepository:
             client = await self._get_client()
             base = (
                 client.table("resources")
-                .select("video_download_status, parsed_media(datasize_bytes, author)", count="exact")
+                .select(
+                    "video_download_status, parsed_media(datasize_bytes, author)",
+                    count="exact",
+                )
                 .eq("creator_id", user_id)
                 .eq("source_type", "web")
                 .eq("is_trashed", False)
@@ -549,9 +568,21 @@ class MediaRepository:
             rows = total_result.data or []
 
             # Count statuses from result data
-            pending = sum(1 for r in rows if r.get("video_download_status") == DownloadStatus.PENDING.value)
-            completed = sum(1 for r in rows if r.get("video_download_status") == DownloadStatus.COMPLETED.value)
-            failed = sum(1 for r in rows if r.get("video_download_status") == DownloadStatus.FAILED.value)
+            pending = sum(
+                1
+                for r in rows
+                if r.get("video_download_status") == DownloadStatus.PENDING.value
+            )
+            completed = sum(
+                1
+                for r in rows
+                if r.get("video_download_status") == DownloadStatus.COMPLETED.value
+            )
+            failed = sum(
+                1
+                for r in rows
+                if r.get("video_download_status") == DownloadStatus.FAILED.value
+            )
 
             # Calculate total storage bytes and unique authors from joined parsed_media
             total_storage_bytes = 0

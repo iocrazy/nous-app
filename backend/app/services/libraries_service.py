@@ -43,9 +43,7 @@ class LibrariesService:
     async def get_library(self, library_id: str) -> dict | None:
         return await self.repo.get_by_id(library_id)
 
-    async def update_library(
-        self, library_id: str, data: dict
-    ) -> dict:
+    async def update_library(self, library_id: str, data: dict) -> dict:
         return await self.repo.update(library_id, data)
 
     async def delete_library(self, library_id: str) -> bool:
