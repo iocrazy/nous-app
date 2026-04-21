@@ -659,6 +659,71 @@ async def update_skill(
     return enriched[0]
 
 
+async def _user_is_admin(user_id: UUID) -> bool:
+    """Return True iff the user has role='admin' in user_profiles.
+
+    Mirrors ``AdminAuthDep`` but as an inline check so we can combine
+    owner-OR-admin authorization in a single route without double-dep.
+    """
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("user_profiles")
+        .select("role")
+        .eq("id", str(user_id))
+        .maybe_single()
+        .execute()
+    )
+    if not result or not result.data:
+        return False
+    return result.data.get("role") == "admin"
+
+
+@router.delete(
+    "/skills/{slug}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a skill",
+)
+async def delete_skill(slug: str, auth: AuthDep) -> None:
+    """Hard-delete a skill by slug.
+
+    Authorization:
+      * User-owned skills: only the ``created_by`` user can delete.
+      * System-preset skills (``is_public`` + no team + no project):
+        admin-only.
+
+    Cascade: migration 138's FK constraints (``skill_files.skill_id``,
+    ``agent_skills.skill_id``) both declare ``ON DELETE CASCADE`` — no
+    manual cleanup needed.
+    """
+    _, skill_repo = _repos()
+    skill = await skill_repo.get_by_slug(slug)
+    if not skill:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
+        )
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    is_preset = _is_system_skill(skill)
+    created_by = skill.get("created_by")
+
+    if is_preset:
+        # System presets: admin-only.
+        if not await _user_is_admin(user_uuid):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="only admins can delete system preset skills",
+            )
+    else:
+        # User-owned: only the creator can delete.
+        if created_by is None or str(created_by) != str(user_uuid):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="only the owner can delete this skill",
+            )
+
+    await skill_repo.delete(int(skill["id"]))
+
+
 # ---------------------------------------------------------------------------
 # Skill files
 # ---------------------------------------------------------------------------

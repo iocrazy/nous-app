@@ -319,6 +319,21 @@ class SkillRepository(BaseRepository):
             logger.error(f"Failed to insert skill: {e}")
             raise
 
+    async def delete(self, skill_id: int) -> None:
+        """Hard-delete a ``skills`` row by BIGINT id.
+
+        FK cascades (migration 138) handle the cleanup of ``agent_skills``
+        bindings and ``skill_files`` rows for this skill — no manual work
+        needed here. Raises on DB error.
+        """
+        try:
+            client = await self._get_client()
+            await client.table(self.TABLE).delete().eq("id", skill_id).execute()
+            logger.info("Deleted skill id=%s", skill_id)
+        except Exception as e:
+            logger.error(f"Failed to delete skill {skill_id}: {e}")
+            raise
+
     async def update_fields(
         self, skill_id: int, updates: Dict[str, Any]
     ) -> Dict[str, Any]:

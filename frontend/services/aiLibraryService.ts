@@ -133,6 +133,24 @@ export const aiLibraryService = {
     return handle<AILibrarySkill>(resp);
   },
 
+  /**
+   * Delete a skill by slug. Returns void on 204 success.
+   *
+   * Authorization is enforced server-side: user-owned skills can only be
+   * deleted by their creator; system-preset skills require admin. A
+   * non-authorized request will reject with a 403 error message.
+   */
+  async deleteSkill(slug: string): Promise<void> {
+    const resp = await fetch(`${base()}/skills/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+      headers: await getAuthHeaders(),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
+  },
+
   // ─── Skill files ───────────────────────────────────────────────────────────
 
   async upsertSkillFile(

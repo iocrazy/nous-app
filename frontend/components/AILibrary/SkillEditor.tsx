@@ -10,6 +10,8 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AILibrarySkill } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../Toast';
 import { MarkdownEditor } from './MarkdownEditor';
 
 interface SkillEditorProps {
@@ -21,10 +23,14 @@ const SKILL_MD = 'SKILL.md';
 
 export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
   const { t } = useTranslation();
+  const { userProfile } = useAuth();
+  const { addToast } = useToast();
+  const isAdmin = userProfile.role === 'admin';
   const [skill, setSkill] = useState<AILibrarySkill | null>(null);
   const [activeTab, setActiveTab] = useState<string>(SKILL_MD);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async (): Promise<void> => {
@@ -72,6 +78,9 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
 
   // System preset skills in Phase 1 = is_public=true AND project_id is null.
   const isPreset = skill.is_public && !skill.project_id;
+  // Delete button visibility: owner can delete their skill. For presets,
+  // only admin can delete. The server re-enforces this.
+  const canDelete = isPreset ? isAdmin : !isPreset;
 
   const save = async (): Promise<void> => {
     if (isPreset) return;
@@ -95,6 +104,37 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (): Promise<void> => {
+    if (!canDelete) return;
+    const label = t('aiLibrary.skills.deleteSkill', 'Delete Skill');
+    const prompt =
+      t(
+        'aiLibrary.skills.deleteSkillConfirm',
+        'Delete skill "{{name}}"? This cannot be undone.',
+        { name: skill.name },
+      );
+    if (!window.confirm(prompt)) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await aiLibraryService.deleteSkill(slug);
+      addToast(
+        t('aiLibrary.skills.deletedToast', 'Skill deleted: {{name}}', {
+          name: skill.name,
+        }),
+        'success',
+      );
+      onBack();
+    } catch (err) {
+      console.error('[SkillEditor] deleteSkill failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      addToast(`${label}: ${msg}`, 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -152,13 +192,28 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({ slug, onBack }) => {
           </h2>
           <SkillScopeBadge skill={skill} isPreset={isPreset} />
         </div>
-        <button
-          onClick={save}
-          disabled={saving || isPreset}
-          className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-        >
-          {saving ? 'Saving...' : t('aiLibrary.agents.saveChanges')}
-        </button>
+        <div className="flex items-center gap-2">
+          {canDelete && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting || saving}
+              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              title={t('aiLibrary.skills.deleteSkill', 'Delete Skill')}
+            >
+              {deleting
+                ? t('common.deleting', 'Deleting...')
+                : `🗑️ ${t('aiLibrary.skills.deleteSkill', 'Delete Skill')}`}
+            </button>
+          )}
+          <button
+            onClick={save}
+            disabled={saving || isPreset}
+            className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+          >
+            {saving ? 'Saving...' : t('aiLibrary.agents.saveChanges')}
+          </button>
+        </div>
       </header>
 
       <div className="grid flex-1 grid-cols-[260px_1fr] overflow-hidden">
