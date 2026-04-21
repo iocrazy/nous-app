@@ -55,30 +55,38 @@ class SeedLoader:
         self.skill_repo = skill_repo
         self.seeds_root = seeds_root
 
-    async def load_all(self) -> dict[str, int]:
-        agents_loaded = await self._load_agents()
-        skills_loaded = await self._load_skills()
-        bindings_set = await self._bind_script_ai_skills()
+    async def load_all(self) -> dict[str, Any]:
+        errors: list[dict[str, Any]] = []
+        agents_loaded = await self._load_agents(errors)
+        skills_loaded = await self._load_skills(errors)
+        bindings_set = await self._bind_script_ai_skills(errors)
         return {
             "agents": agents_loaded,
             "skills": skills_loaded,
             "agent_skill_bindings": bindings_set,
+            "errors": errors,
         }
 
     # ---------- agents ----------
 
-    async def _load_agents(self) -> int:
+    async def _load_agents(self, errors: list[dict[str, Any]]) -> int:
         agents_dir = self.seeds_root / "agents"
         if not agents_dir.exists():
+            logger.warning(f"seed_loader: agents dir missing ({agents_dir})")
             return 0
         count = 0
         for agent_dir in sorted(agents_dir.iterdir()):
             if not agent_dir.is_dir():
                 continue
             slug = agent_dir.name
-            fields = self._read_agent_fields(agent_dir, slug)
-            await self._upsert_agent(slug, fields)
-            count += 1
+            try:
+                fields = self._read_agent_fields(agent_dir, slug)
+                await self._upsert_agent(slug, fields)
+                count += 1
+            except Exception as e:
+                err = {"scope": "agent", "slug": slug, "error": _format_error(e)}
+                errors.append(err)
+                logger.exception(f"seed_loader: agent '{slug}' failed: {err['error']}")
         return count
 
     def _read_agent_fields(self, agent_dir: Path, slug: str) -> dict[str, Any]:
@@ -116,38 +124,44 @@ class SeedLoader:
 
     # ---------- skills ----------
 
-    async def _load_skills(self) -> int:
+    async def _load_skills(self, errors: list[dict[str, Any]]) -> int:
         skills_dir = self.seeds_root / "skills"
         if not skills_dir.exists():
+            logger.warning(f"seed_loader: skills dir missing ({skills_dir})")
             return 0
         count = 0
         for skill_dir in sorted(skills_dir.iterdir()):
             if not skill_dir.is_dir():
                 continue
             slug = skill_dir.name
-            skill_md_path = skill_dir / "SKILL.md"
-            if not skill_md_path.exists():
-                logger.warning(f"seed_loader: skipping {slug} (no SKILL.md)")
-                continue
-            parsed = frontmatter.load(skill_md_path)
-            fm = dict(parsed.metadata)
-            body = parsed.content
+            try:
+                skill_md_path = skill_dir / "SKILL.md"
+                if not skill_md_path.exists():
+                    logger.warning(f"seed_loader: skipping {slug} (no SKILL.md)")
+                    continue
+                parsed = frontmatter.load(skill_md_path)
+                fm = dict(parsed.metadata)
+                body = parsed.content
 
-            fields = {
-                "slug": slug,
-                "name": fm.get("name", slug),
-                "description": fm.get("description"),
-                "body_md": body,
-                "category": fm.get("category"),
-                "icon": fm.get("icon", "✨"),
-                "is_public": fm.get("is_public", True),
-                "frontmatter_json": fm,
-                "status": "active",
-            }
+                fields = {
+                    "slug": slug,
+                    "name": fm.get("name", slug),
+                    "description": fm.get("description"),
+                    "body_md": body,
+                    "category": fm.get("category"),
+                    "icon": fm.get("icon", "✨"),
+                    "is_public": fm.get("is_public", True),
+                    "frontmatter_json": fm,
+                    "status": "active",
+                }
 
-            skill_id = await self._upsert_skill(slug, fields)
-            await self._load_skill_subfiles(skill_id, skill_dir)
-            count += 1
+                skill_id = await self._upsert_skill(slug, fields)
+                await self._load_skill_subfiles(skill_id, skill_dir)
+                count += 1
+            except Exception as e:
+                err = {"scope": "skill", "slug": slug, "error": _format_error(e)}
+                errors.append(err)
+                logger.exception(f"seed_loader: skill '{slug}' failed: {err['error']}")
         return count
 
     async def _upsert_skill(self, slug: str, fields: dict[str, Any]) -> int:
@@ -194,16 +208,22 @@ class SeedLoader:
 
     # ---------- bindings ----------
 
-    async def _bind_script_ai_skills(self) -> int:
-        agent = await self.agent_repo.get_by_slug("script_ai")
-        if not agent:
-            logger.info("seed_loader: script_ai agent not found, skipping bindings")
+    async def _bind_script_ai_skills(self, errors: list[dict[str, Any]]) -> int:
+        try:
+            agent = await self.agent_repo.get_by_slug("script_ai")
+            if not agent:
+                logger.info("seed_loader: script_ai agent not found, skipping bindings")
+                return 0
+            skill_ids: list[int] = []
+            for slug in SCRIPT_AI_SKILL_SLUGS:
+                sk = await self.skill_repo.get_by_slug(slug)
+                if sk:
+                    skill_ids.append(int(sk["id"]))
+            await self.agent_repo.update_skill_bindings(UUID(agent["id"]), skill_ids)
+            logger.info(f"seed_loader: bound {len(skill_ids)} skills to script_ai")
+            return len(skill_ids)
+        except Exception as e:
+            err = {"scope": "binding", "slug": "script_ai", "error": _format_error(e)}
+            errors.append(err)
+            logger.exception(f"seed_loader: script_ai binding failed: {err['error']}")
             return 0
-        skill_ids: list[int] = []
-        for slug in SCRIPT_AI_SKILL_SLUGS:
-            sk = await self.skill_repo.get_by_slug(slug)
-            if sk:
-                skill_ids.append(int(sk["id"]))
-        await self.agent_repo.update_skill_bindings(UUID(agent["id"]), skill_ids)
-        logger.info(f"seed_loader: bound {len(skill_ids)} skills to script_ai")
-        return len(skill_ids)
