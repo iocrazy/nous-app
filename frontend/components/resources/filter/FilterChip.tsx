@@ -10,7 +10,7 @@
 // dropdowns never cover sibling chips.
 
 import React, { useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { X, type LucideIcon } from 'lucide-react';
 
 export interface FilterChipProps {
   /** Machine id, surfaced as data attribute for tests. */
@@ -29,6 +29,8 @@ export interface FilterChipProps {
   onClose: () => void;
   /** Clear this chip's value. Omit to hide the clear X. */
   onClear?: () => void;
+  /** Optional lucide icon rendered inside the chip ahead of the label. */
+  icon?: LucideIcon;
   /** Dropdown content rendered when open. */
   children: React.ReactNode;
 }
@@ -42,6 +44,7 @@ export const FilterChip: React.FC<FilterChipProps> = ({
   onToggle,
   onClose,
   onClear,
+  icon: Icon,
   children,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -79,11 +82,12 @@ export const FilterChip: React.FC<FilterChipProps> = ({
         <button
           type="button"
           onClick={onToggle}
-          className="px-2.5 py-1 text-xs font-medium whitespace-nowrap focus:outline-none"
+          className="px-2.5 py-1 text-xs font-medium whitespace-nowrap focus:outline-none inline-flex items-center gap-1.5"
           aria-haspopup="menu"
           aria-expanded={isOpen}
         >
-          {displayLabel}
+          {Icon && <Icon size={12} aria-hidden="true" />}
+          <span>{displayLabel}</span>
         </button>
         {isActive && onClear && (
           <button

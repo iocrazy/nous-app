@@ -436,6 +436,9 @@
       },
       "duration": "Duration",
       "aspect": "Aspect",
+      "socialLabel": "Social",
+      "hideFilterBar": "Hide filter bar",
+      "showFilterBar": "Show filter bar",
       "durationPresets": {
         "short60s": "≤ 60 seconds",
         "medium": "1-5 minutes",
@@ -451,6 +454,22 @@
         "square": "1:1 (Square)",
         "fourThree": "4:3",
         "other": "Other"
+      },
+      "social": {
+        "likes": "Likes",
+        "comments": "Comments",
+        "favorites": "Favorites",
+        "shares": "Shares",
+        "likesShort": "likes",
+        "commentsShort": "comments",
+        "favoritesShort": "favs",
+        "sharesShort": "shares",
+        "combineLabel": "Combine mode",
+        "combineAnd": "All must match (AND)",
+        "combineOr": "Any matches (OR)",
+        "hasComments": "Has comments",
+        "hasCommentsShort": "has comments",
+        "threshold": "≥"
       }
     },
     "modifiedAt": "Modified",

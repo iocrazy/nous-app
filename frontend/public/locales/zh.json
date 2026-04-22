@@ -436,6 +436,9 @@
       },
       "duration": "时长",
       "aspect": "画面比例",
+      "socialLabel": "互动数据",
+      "hideFilterBar": "隐藏筛选栏",
+      "showFilterBar": "显示筛选栏",
       "durationPresets": {
         "short60s": "≤ 60 秒",
         "medium": "1-5 分钟",
@@ -451,6 +454,22 @@
         "square": "1:1（方形）",
         "fourThree": "4:3",
         "other": "其他"
+      },
+      "social": {
+        "likes": "点赞",
+        "comments": "评论",
+        "favorites": "收藏",
+        "shares": "转发",
+        "likesShort": "点赞",
+        "commentsShort": "评论",
+        "favoritesShort": "收藏",
+        "sharesShort": "转发",
+        "combineLabel": "组合模式",
+        "combineAnd": "全部满足 (且)",
+        "combineOr": "任一满足 (或)",
+        "hasComments": "有评论",
+        "hasCommentsShort": "有评论",
+        "threshold": "≥"
       }
     },
     "modifiedAt": "修改时间",

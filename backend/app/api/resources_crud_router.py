@@ -43,6 +43,7 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 
 _ALLOWED_TYPE_CATEGORIES = {"video", "image", "audio", "document", "other"}
 _ALLOWED_ASPECT_RATIOS = {"9:16", "16:9", "1:1", "4:3", "other"}
+_ALLOWED_SOCIAL_COMBINE = {"and", "or"}
 
 
 @router.get("")
@@ -121,6 +122,54 @@ async def list_resources(
             "currently applied client-side."
         ),
     ),
+    min_likes: Optional[int] = Query(
+        None,
+        ge=0,
+        description=(
+            "Inclusive lower bound on parsed_media.like_count. "
+            "Combined with the other social metrics via ``social_combine``."
+        ),
+    ),
+    min_comments: Optional[int] = Query(
+        None,
+        ge=0,
+        description=(
+            "Inclusive lower bound on parsed_media.comment_count. "
+            "Combined with the other social metrics via ``social_combine``."
+        ),
+    ),
+    min_favorites: Optional[int] = Query(
+        None,
+        ge=0,
+        description=(
+            "Inclusive lower bound on parsed_media.favorite_count. "
+            "Combined with the other social metrics via ``social_combine``."
+        ),
+    ),
+    min_shares: Optional[int] = Query(
+        None,
+        ge=0,
+        description=(
+            "Inclusive lower bound on parsed_media.share_count. "
+            "Combined with the other social metrics via ``social_combine``."
+        ),
+    ),
+    social_combine: Optional[str] = Query(
+        "and",
+        description=(
+            "Combine semantics across the four social >= thresholds. "
+            '"and" requires every enabled threshold to match (default); '
+            '"or" requires any one to match.'
+        ),
+    ),
+    has_comments: Optional[bool] = Query(
+        None,
+        description=(
+            "If true, only resources whose linked parsed_media has at "
+            "least one comment (comment_count > 0). Applied on top of "
+            "any ``min_comments`` threshold."
+        ),
+    ),
 ):
     """List resources in a scope, optionally filtered by folder/tag/rating/type/source/ai/date/duration/aspect."""
     # Validate and normalise `types` here so the repository can stay
@@ -181,6 +230,19 @@ async def list_resources(
         if not normalised_aspect_ratios:
             normalised_aspect_ratios = None
 
+    normalised_social_combine: str = "and"
+    if social_combine is not None:
+        candidate = social_combine.strip().lower()
+        if candidate not in _ALLOWED_SOCIAL_COMBINE:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Invalid social_combine: {social_combine!r}. "
+                    f"Allowed: {sorted(_ALLOWED_SOCIAL_COMBINE)}."
+                ),
+            )
+        normalised_social_combine = candidate
+
     try:
         repo = ResourcesRepository()
         items = await repo.get_resource_items(
@@ -199,6 +261,12 @@ async def list_resources(
             duration_min=duration_min,
             duration_max=duration_max,
             aspect_ratios=normalised_aspect_ratios,
+            min_likes=min_likes,
+            min_comments=min_comments,
+            min_favorites=min_favorites,
+            min_shares=min_shares,
+            social_combine=normalised_social_combine,
+            has_comments=has_comments,
         )
         return {"success": True, "data": items}
     except HTTPException:

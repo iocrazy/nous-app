@@ -10,12 +10,26 @@
 
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Filter, X } from 'lucide-react';
+import {
+  Calendar,
+  Clock,
+  Globe,
+  Heart,
+  Layers,
+  ListFilterPlus,
+  RectangleHorizontal,
+  Sparkles,
+  Star,
+  Tag as TagIcon,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 
 import type { Tag } from '../../../types';
 import type { UseFilterBarConfigReturn } from '../../../hooks/useFilterBarConfig';
 import type { ResourceFilterType } from '../resourceFilters';
-import type { ChipId, DatePresetId, DurationPresetId } from './types';
+import type { ChipId, DatePresetId, DurationPresetId, SocialMetric } from './types';
+import { SOCIAL_METRICS } from './types';
 import { FilterChip } from './FilterChip';
 import { FilterConfigPanel } from './FilterConfigPanel';
 import { RatingFilterDropdown } from './RatingFilterDropdown';
@@ -26,6 +40,7 @@ import { AIStatusFilterDropdown } from './AIStatusFilterDropdown';
 import { DateAddedFilterDropdown } from './DateAddedFilterDropdown';
 import { DurationFilterDropdown } from './DurationFilterDropdown';
 import { AspectFilterDropdown } from './AspectFilterDropdown';
+import { SocialFilterDropdown } from './SocialFilterDropdown';
 import { datePresetSummary } from './dateUtils';
 import { durationPresetSummary } from './durationUtils';
 import { aspectSummary } from './aspectUtils';
@@ -42,6 +57,56 @@ export interface FilterBarProps {
 }
 
 type OpenTarget = { kind: 'chip'; id: ChipId } | { kind: 'config' } | null;
+
+/** Compact number formatter for the Social chip summary.
+ *  1234 -> "1.2K", 150000 -> "150K", 2500000 -> "2.5M". */
+function formatCompact(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '0';
+  if (n >= 1_000_000) {
+    const v = n / 1_000_000;
+    return `${v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, '')}M`;
+  }
+  if (n >= 1_000) {
+    const v = n / 1_000;
+    return `${v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, '')}K`;
+  }
+  return String(n);
+}
+
+/** Build the summary shown after the chip label when Social is active. */
+function socialSummary(
+  value: import('./types').SocialChipValue,
+  t: (key: string, fallback?: string) => string,
+): string | null {
+  const enabled = SOCIAL_METRICS.filter((m) => value.metrics[m].enabled);
+  if (enabled.length === 0 && !value.hasComments) return null;
+
+  const shortLabels: Record<SocialMetric, string> = {
+    likes: t('resources.filter.social.likesShort', 'likes'),
+    comments: t('resources.filter.social.commentsShort', 'comments'),
+    favorites: t('resources.filter.social.favoritesShort', 'favs'),
+    shares: t('resources.filter.social.sharesShort', 'shares'),
+  };
+
+  const parts: string[] = enabled.map(
+    (m) => `${shortLabels[m]}≥${formatCompact(value.metrics[m].threshold)}`,
+  );
+  if (parts.length === 1 && !value.hasComments) return parts[0];
+
+  // Join enabled thresholds with the combine symbol. Keep it short so
+  // the chip doesn't wrap.
+  const joiner = value.combine === 'or' ? ' | ' : ' & ';
+  let out = parts.join(joiner);
+
+  if (value.hasComments) {
+    const hc = t('resources.filter.social.hasCommentsShort', 'has comments');
+    out = out ? `${out} & ${hc}` : hc;
+  }
+
+  // Cap at a reasonable length so very long thresholds don't distort layout.
+  if (out.length > 32) return `${enabled.length + (value.hasComments ? 1 : 0)}`;
+  return out;
+}
 
 export const FilterBar: React.FC<FilterBarProps> = ({
   config,
@@ -65,6 +130,20 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     isChipActive,
   } = config;
 
+  // Static icon registry — each chip carries a distinct lucide icon so the
+  // bar reads at a glance even when no chip is active.
+  const CHIP_ICONS: Record<ChipId, LucideIcon> = {
+    tags: TagIcon,
+    rating: Star,
+    type: Layers,
+    source: Globe,
+    ai_status: Sparkles,
+    date_added: Calendar,
+    duration: Clock,
+    aspect: RectangleHorizontal,
+    social: Heart,
+  };
+
   const chipLabel = useMemo(() => {
     return (id: ChipId): string => {
       switch (id) {
@@ -84,6 +163,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           return t('resources.filter.duration', 'Duration');
         case 'aspect':
           return t('resources.filter.aspect', 'Aspect');
+        case 'social':
+          return t('resources.filter.socialLabel', 'Social');
       }
     };
   }, [t]);
@@ -149,6 +230,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       }
       case 'aspect':
         return aspectSummary(chipValues.aspect);
+      case 'social':
+        return socialSummary(chipValues.social, t);
     }
   };
 
@@ -227,6 +310,14 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             onClearAll={() => clearChip('aspect')}
           />
         );
+      case 'social':
+        return (
+          <SocialFilterDropdown
+            value={chipValues.social}
+            onChange={(next) => setChipValue('social', next)}
+            onClearAll={() => clearChip('social')}
+          />
+        );
     }
   };
 
@@ -247,12 +338,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           onToggle={() => setOpenTarget(isChipOpen(id) ? null : { kind: 'chip', id })}
           onClose={() => setOpenTarget((prev) => (prev?.kind === 'chip' && prev.id === id ? null : prev))}
           onClear={() => clearChip(id)}
+          icon={CHIP_ICONS[id]}
         >
           {renderDropdown(id)}
         </FilterChip>
       ))}
 
-      {/* Filter config button */}
+      {/* Filter config button — a funnel-plus to signal "configure / add
+          filters" (vs the plain funnel in the search row, which toggles
+          the whole bar's visibility). */}
       <div className="relative">
         <button
           type="button"
@@ -269,7 +363,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           aria-haspopup="dialog"
           aria-expanded={isConfigOpen}
         >
-          <Filter size={12} />
+          <ListFilterPlus size={12} />
         </button>
         {isConfigOpen && (
           <FilterConfigPanel

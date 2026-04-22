@@ -6,7 +6,7 @@
 
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check } from 'lucide-react';
+import { Check, Tag as TagIcon } from 'lucide-react';
 
 import type { Tag } from '../../../types';
 
@@ -89,6 +89,11 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
                     }`}
                   >
                     <span className="flex items-center gap-2 truncate">
+                      <TagIcon
+                        size={11}
+                        className={checked ? 'text-indigo-300 shrink-0' : 'text-zinc-500 shrink-0'}
+                        aria-hidden="true"
+                      />
                       {tag.color && (
                         <span
                           className="inline-block w-2 h-2 rounded-full shrink-0"

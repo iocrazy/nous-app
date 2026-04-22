@@ -853,3 +853,123 @@ async def test_list_resources_duration_and_aspect_stack_with_other_filters(
     assert ("resource.duration_seconds", 60) in gte_calls
     assert ("resource.duration_seconds", 300) in lte_calls
     assert ("resource.transcript_status", "completed") in eq_values
+
+
+# ─── PR 4: social metric filters (client-side; repo must no-op) ────────
+
+
+def _no_column_match(
+    calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]], needle: str
+) -> bool:
+    """True iff no recorded call's first positional arg mentions needle.
+
+    Used to assert a filter parameter doesn't leak into any PostgREST
+    verb's column argument."""
+    for op in ("eq", "gte", "lte", "in_", "like", "ilike", "or_"):
+        for _, args, _kw in (c for c in calls if c[0] == op):
+            if args and isinstance(args[0], str) and needle in args[0]:
+                return False
+    return True
+
+
+@pytest.mark.asyncio
+async def test_list_resources_social_thresholds_are_noop_at_repository(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """Social-metric thresholds are accepted without leaking into the
+    query — filtering runs client-side in useResourcesDisplay."""
+    fake_query._data = []
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        min_likes=1000,
+        min_comments=50,
+        min_favorites=10,
+        min_shares=5,
+    )
+    for needle in ("like_count", "comment_count", "favorite_count", "share_count"):
+        assert _no_column_match(
+            fake_query.calls, needle
+        ), f"Expected no {needle} filter to leak; calls={fake_query.calls}"
+
+
+@pytest.mark.asyncio
+async def test_list_resources_social_combine_or_is_noop_at_repository(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """``social_combine="or"`` must also stay server-silent."""
+    fake_query._data = []
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        min_likes=100,
+        min_comments=100,
+        social_combine="or",
+    )
+    for needle in ("like_count", "comment_count"):
+        assert _no_column_match(fake_query.calls, needle)
+
+
+@pytest.mark.asyncio
+async def test_list_resources_has_comments_flag_is_noop_at_repository(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """``has_comments=True`` is accepted without adding a comment_count
+    clause to the PostgREST call."""
+    fake_query._data = []
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        has_comments=True,
+    )
+    assert _no_column_match(fake_query.calls, "comment_count")
+
+
+@pytest.mark.asyncio
+async def test_list_resources_social_params_stack_with_other_filters(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """Passing social thresholds alongside active PR 1/2/3 filters must
+    not disturb them."""
+
+    async def fake_tag_ids(_tag_ids: list[str]) -> list[str]:
+        return ["res-1"]
+
+    repo._resource_ids_with_all_tags = fake_tag_ids  # type: ignore[method-assign]
+    fake_query._data = []
+
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        tag_ids=["tag-a"],
+        min_rating=3,
+        duration_min=60,
+        min_likes=1000,
+        min_comments=100,
+        social_combine="and",
+        has_comments=True,
+    )
+    gte_calls = [c[1] for c in fake_query.calls if c[0] == "gte"]
+    # PR 1/3 filters still present:
+    assert ("resource.rating", 3) in gte_calls
+    assert ("resource.duration_seconds", 60) in gte_calls
+    # Social filters absent from the wire payload.
+    for needle in ("like_count", "comment_count"):
+        assert _no_column_match(fake_query.calls, needle)
+
+
+@pytest.mark.asyncio
+async def test_list_resources_social_combine_default_is_and(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """Omitting ``social_combine`` should behave the same as passing
+    ``"and"`` — i.e. a no-op at the repository without raising."""
+    fake_query._data = []
+    # No kwarg → uses default "and".
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        min_likes=10,
+    )
+    for needle in ("like_count", "comment_count"):
+        assert _no_column_match(fake_query.calls, needle)

@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check } from 'lucide-react';
+import { Check, Eye, FileText, ListTree, type LucideIcon } from 'lucide-react';
 
 import type { AIStatusChipValue } from './types';
 
@@ -36,12 +36,19 @@ export const AIStatusFilterDropdown: React.FC<AIStatusFilterDropdownProps> = ({
     analyzed: t('resources.filter.ai.analyzed', 'Analyzed'),
   };
 
+  const icons: Record<FlagKey, LucideIcon> = {
+    transcribed: FileText,
+    summarized: ListTree,
+    analyzed: Eye,
+  };
+
   const anyActive = FLAG_ORDER.some((k) => value[k]);
 
   return (
     <div className="w-48 py-1" role="menu" aria-label="AI status filter">
       {FLAG_ORDER.map((key) => {
         const active = value[key];
+        const Icon = icons[key];
         return (
           <button
             key={key}
@@ -53,7 +60,14 @@ export const AIStatusFilterDropdown: React.FC<AIStatusFilterDropdownProps> = ({
                 : 'text-zinc-300 hover:bg-zinc-800'
             }`}
           >
-            <span>{labels[key]}</span>
+            <span className="flex items-center gap-2">
+              <Icon
+                size={12}
+                className={active ? 'text-indigo-300' : 'text-zinc-500'}
+                aria-hidden="true"
+              />
+              <span>{labels[key]}</span>
+            </span>
             {active && <Check size={12} className="text-indigo-400" />}
           </button>
         );

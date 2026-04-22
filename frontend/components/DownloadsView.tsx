@@ -1,6 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  Filter,
   RefreshCw,
   LayoutGrid,
   LayoutList,
@@ -16,6 +17,17 @@ import { useNavigate } from 'react-router-dom';
 import { useLibraryContext } from '../contexts/LibraryContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { Video } from '../types';
+import { FilterBar } from './resources/filter/FilterBar';
+import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
+import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
+import { SOCIAL_METRICS } from './resources/filter/types';
+import { datePresetToRange } from './resources/filter/dateUtils';
+import {
+  durationMatches,
+  durationPresetToRange,
+} from './resources/filter/durationUtils';
+import { aspectMatches } from './resources/filter/aspectUtils';
+import { getSupabaseClient } from '../supabaseClient';
 import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
@@ -71,6 +83,69 @@ export const DownloadsView: React.FC = () => {
   const tagSearchMap = useTagSearchMap(resourceDataMap);
   const { allTags, setAllTags } = useAllTags();
 
+  // ─── Filter bar (Eagle-style chip toolbar) ─────────────
+  const filterBarConfig = useFilterBarConfig();
+  const { visible: isFilterBarVisible, toggle: toggleFilterBar } = useFilterBarVisibility();
+
+  // Platforms observed in the current library — enriches the Source
+  // chip dropdown beyond the hardcoded known list.
+  const availablePlatforms = useMemo<string[]>(() => {
+    const seen = new Set<string>();
+    for (const item of library) {
+      if (typeof item.source_platform === 'string' && item.source_platform) {
+        seen.add(item.source_platform);
+      }
+    }
+    return Array.from(seen).sort();
+  }, [library]);
+
+  // Per-resource tag id map — populated from resource_tags whenever the
+  // resource id set changes. Only needed when the Tags chip is active,
+  // but batched here so toggling the chip doesn't trigger a round-trip.
+  const [resourceTagIdsMap, setResourceTagIdsMap] = useState<Record<string, Set<string>>>({});
+  useEffect(() => {
+    const resourceIds = Object.values(resourceIdMap).filter(Boolean);
+    if (resourceIds.length === 0) {
+      setResourceTagIdsMap({});
+      return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    // Chunk to avoid hitting URL length limits (reverse the in_() into
+    // smaller batches — matches useTagSearchMap).
+    const CHUNK = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < resourceIds.length; i += CHUNK) {
+      chunks.push(resourceIds.slice(i, i + CHUNK));
+    }
+    let cancelled = false;
+    Promise.all(
+      chunks.map((ids) =>
+        supabase
+          .from('resource_tags')
+          .select('resource_id, tag_id')
+          .in('resource_id', ids),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const map: Record<string, Set<string>> = {};
+      for (const { data, error } of results) {
+        if (error || !data) continue;
+        for (const row of data as Array<{ resource_id: string | number; tag_id: string }>) {
+          const rid = String(row.resource_id);
+          if (!map[rid]) map[rid] = new Set();
+          map[rid].add(row.tag_id);
+        }
+      }
+      setResourceTagIdsMap(map);
+    }).catch((err) => {
+      if (!cancelled) console.error('[DownloadsView] Failed to load resource tag map:', err);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [Object.values(resourceIdMap).join(',')]);
+
   // ─── Local search state ───────────────────────────────
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<import('../services/searchService').SearchResult[]>([]);
@@ -115,13 +190,124 @@ export const DownloadsView: React.FC = () => {
     }
   }, [pullDistance, pullRefreshing, loadLibraryData]);
 
+  // ─── Filter bar predicate ──────────────────────────────
+  // Apply chip values to a raw Video. Resources without a linked
+  // resource row skip tag / rating / AI filters by short-circuiting
+  // to false (matches the Resources view behaviour — filters on a
+  // resource dimension require that resource to exist).
+  const matchesChipFilters = useCallback((item: Video): boolean => {
+    const chipValues = filterBarConfig.chipValues;
+
+    // Rating (resource.rating via resourceDataMap).
+    if (chipValues.rating.min_rating > 0) {
+      const rd = resourceDataMap[item.id];
+      if (!rd || (rd.rating ?? 0) < chipValues.rating.min_rating) return false;
+    }
+
+    // Tags (resource_tags via resourceTagIdsMap).
+    const selectedTagIds = chipValues.tags.tag_ids;
+    if (selectedTagIds.length > 0) {
+      const rid = resourceIdMap[item.id];
+      if (!rid) return false;
+      const tagSet = resourceTagIdsMap[rid];
+      if (!tagSet || tagSet.size === 0) return false;
+      if (!selectedTagIds.every((id) => tagSet.has(id))) return false;
+    }
+
+    // Source platform (lives on Video directly).
+    const selectedPlatforms = chipValues.source.platforms;
+    if (selectedPlatforms.length > 0) {
+      const p = item.source_platform;
+      if (typeof p !== 'string' || !selectedPlatforms.includes(p)) return false;
+    }
+
+    // AI status flags (via resourceDataMap).
+    const ai = chipValues.ai_status;
+    if (ai.transcribed || ai.summarized || ai.analyzed) {
+      const rd = resourceDataMap[item.id];
+      if (!rd) return false;
+      if (ai.transcribed && rd.transcript_status !== 'completed') return false;
+      if (ai.summarized && rd.summary_status !== 'completed') return false;
+      if (ai.analyzed && rd.visual_analysis_status !== 'completed') return false;
+    }
+
+    // Date added (Video.created_at).
+    const dateRange = datePresetToRange(chipValues.date_added);
+    if (dateRange.after || dateRange.before) {
+      const raw = item.created_at;
+      if (!raw) return false;
+      const ts = new Date(raw).getTime();
+      if (Number.isNaN(ts)) return false;
+      if (dateRange.after) {
+        const afterTs = new Date(`${dateRange.after}T00:00:00`).getTime();
+        if (ts < afterTs) return false;
+      }
+      if (dateRange.before) {
+        const beforeTs = new Date(`${dateRange.before}T23:59:59.999`).getTime();
+        if (ts > beforeTs) return false;
+      }
+    }
+
+    // Duration (Video.duration is a string of seconds).
+    const durationRange = durationPresetToRange(chipValues.duration);
+    if (durationRange.min != null || durationRange.max != null) {
+      const raw = item.duration;
+      const seconds =
+        typeof raw === 'number'
+          ? raw
+          : typeof raw === 'string' && raw.trim().length > 0
+            ? Number(raw)
+            : null;
+      if (!durationMatches(seconds, durationRange)) return false;
+    }
+
+    // Aspect (Video.resolution is "WxH").
+    const buckets = chipValues.aspect.buckets;
+    if (buckets.length > 0 && !aspectMatches(item.resolution, buckets)) return false;
+
+    // Social metrics (live on Video directly — parsed_media columns).
+    const social = chipValues.social;
+    const enabledMetrics = SOCIAL_METRICS.filter((m) => social.metrics[m].enabled);
+    if (enabledMetrics.length > 0 || social.hasComments) {
+      if (social.hasComments) {
+        const cc = typeof item.comment_count === 'number' ? item.comment_count : 0;
+        if (cc <= 0) return false;
+      }
+      if (enabledMetrics.length > 0) {
+        const metricField: Record<
+          (typeof SOCIAL_METRICS)[number],
+          'like_count' | 'comment_count' | 'favorite_count' | 'share_count'
+        > = {
+          likes: 'like_count',
+          comments: 'comment_count',
+          favorites: 'favorite_count',
+          shares: 'share_count',
+        };
+        const pass = (m: (typeof SOCIAL_METRICS)[number]) => {
+          const raw = item[metricField[m]];
+          const val = typeof raw === 'number' ? raw : 0;
+          return val >= social.metrics[m].threshold;
+        };
+        const ok =
+          social.combine === 'or'
+            ? enabledMetrics.some(pass)
+            : enabledMetrics.every(pass);
+        if (!ok) return false;
+      }
+    }
+
+    // Type chip doesn't apply to Downloads (everything here is video-ish);
+    // ignored on purpose.
+    return true;
+  }, [filterBarConfig.chipValues, resourceDataMap, resourceIdMap, resourceTagIdsMap]);
+
   // ─── Filtered library ─────────────────────────────────
   const filteredLibrary = useMemo(() => {
     if (isSearchActive) {
       if (searchResults.length === 0) return [];
       const searchIds = new Set(searchResults.map(r => r.platform_id));
       return library
-        .filter(item => searchIds.has(item.platform_id))
+        .filter(item => searchIds.has(item.platform_id) && matchesChipFilters(item))
         .sort((a, b) => {
           const aScore = searchResults.find(r => r.platform_id === a.platform_id)?.similarity_score || 0;
           const bScore = searchResults.find(r => r.platform_id === b.platform_id)?.similarity_score || 0;
@@ -130,6 +316,7 @@ export const DownloadsView: React.FC = () => {
     }
     return library
       .filter(item => {
+        if (!matchesChipFilters(item)) return false;
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
           const title = (item.title || '').toLowerCase();
@@ -145,7 +332,7 @@ export const DownloadsView: React.FC = () => {
         const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
         return bTime - aTime;
       });
-  }, [library, isSearchActive, searchResults, searchQuery, tagSearchMap]);
+  }, [library, isSearchActive, searchResults, searchQuery, tagSearchMap, matchesChipFilters]);
 
   // ─── Search handlers ──────────────────────────────────
   const handleSearchQueryChange = useCallback((query: string) => {
@@ -530,7 +717,7 @@ export const DownloadsView: React.FC = () => {
     <div className={`flex-1 min-w-0 flex flex-col ${libraryViewMode === 'feed' ? '' : 'md:h-full'}`}>
       {/* Toolbar */}
       <div
-        className="hidden md:block px-6 py-2 border-b border-zinc-800/80"
+        className="hidden md:block px-6 py-2 border-b border-zinc-800/80 space-y-2"
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
@@ -562,6 +749,31 @@ export const DownloadsView: React.FC = () => {
               className="w-52"
             />
 
+            {/* Filter bar visibility toggle — plain funnel, mirrors the
+                Resources view. Shows / hides the chip row below. */}
+            <button
+              type="button"
+              onClick={toggleFilterBar}
+              className={`p-1.5 rounded-lg transition-colors ${
+                isFilterBarVisible
+                  ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80'
+              }`}
+              title={
+                isFilterBarVisible
+                  ? t('resources.filter.hideFilterBar', 'Hide filter bar')
+                  : t('resources.filter.showFilterBar', 'Show filter bar')
+              }
+              aria-label={
+                isFilterBarVisible
+                  ? t('resources.filter.hideFilterBar', 'Hide filter bar')
+                  : t('resources.filter.showFilterBar', 'Show filter bar')
+              }
+              aria-pressed={isFilterBarVisible}
+            >
+              <Filter size={14} />
+            </button>
+
             <div className="hidden md:flex items-center">
               <button
                 onClick={() => setLibraryViewMode('list')}
@@ -587,6 +799,18 @@ export const DownloadsView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Pinnable filter bar — shared component with Resources. Type
+            chip has no meaningful target in Downloads (everything is a
+            video) but the rest (rating / tags / source / AI / date /
+            duration / aspect / social) all apply via matchesChipFilters. */}
+        {isFilterBarVisible && (
+          <FilterBar
+            config={filterBarConfig}
+            allTags={allTags}
+            availablePlatforms={availablePlatforms}
+          />
+        )}
       </div>
 
       {/* Content */}

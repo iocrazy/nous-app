@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check } from 'lucide-react';
+import { Check, Clock } from 'lucide-react';
 
 import type { DurationChipValue, DurationPresetId } from './types';
 
@@ -93,7 +93,14 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
                 : 'text-zinc-300 hover:bg-zinc-800'
             }`}
           >
-            <span>{labels[preset]}</span>
+            <span className="flex items-center gap-2">
+              <Clock
+                size={12}
+                className={active ? 'text-indigo-300' : 'text-zinc-500'}
+                aria-hidden="true"
+              />
+              <span>{labels[preset]}</span>
+            </span>
             {active && <Check size={12} className="text-indigo-400" />}
           </button>
         );

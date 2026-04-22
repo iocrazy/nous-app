@@ -15,11 +15,14 @@ import type {
   DatePresetId,
   DurationPresetId,
   FetchResourcesFilterParams,
+  SocialChipValue,
+  SocialMetric,
 } from '../components/resources/filter/types';
 import {
   CHIP_IDS,
   DEFAULT_CHIP_VALUES,
   DEFAULT_PINNED_CHIPS,
+  SOCIAL_METRICS,
 } from '../components/resources/filter/types';
 import { datePresetToRange } from '../components/resources/filter/dateUtils';
 import { durationPresetToRange } from '../components/resources/filter/durationUtils';
@@ -124,6 +127,7 @@ function loadFromStorage(): PersistedShape {
       date_added: sanitizeDateAdded(srcValues.date_added),
       duration: sanitizeDuration(srcValues.duration),
       aspect: sanitizeAspect(srcValues.aspect),
+      social: sanitizeSocial(srcValues.social),
     };
 
     return { pinnedChips, chipValues };
@@ -145,6 +149,7 @@ function cloneDefaults(): PersistedShape {
       date_added: { ...DEFAULT_CHIP_VALUES.date_added },
       duration: { ...DEFAULT_CHIP_VALUES.duration },
       aspect: { ...DEFAULT_CHIP_VALUES.aspect, buckets: [] },
+      social: sanitizeSocial(DEFAULT_CHIP_VALUES.social),
     },
   };
 }
@@ -207,6 +212,38 @@ function sanitizeAspect(
   return { buckets };
 }
 
+function sanitizeSocial(
+  v: Partial<SocialChipValue> | undefined,
+): SocialChipValue {
+  const defaults = DEFAULT_CHIP_VALUES.social;
+  const combine = v?.combine === 'or' ? 'or' : 'and';
+  const metricsSrc = (v?.metrics ?? {}) as Partial<SocialChipValue['metrics']>;
+  const metrics: SocialChipValue['metrics'] = {
+    likes: { ...defaults.metrics.likes },
+    comments: { ...defaults.metrics.comments },
+    favorites: { ...defaults.metrics.favorites },
+    shares: { ...defaults.metrics.shares },
+  };
+  for (const key of SOCIAL_METRICS) {
+    const src = metricsSrc[key];
+    if (!src) continue;
+    metrics[key] = {
+      enabled: Boolean(src.enabled),
+      threshold:
+        typeof src.threshold === 'number' &&
+        Number.isFinite(src.threshold) &&
+        src.threshold >= 0
+          ? Math.floor(src.threshold)
+          : 0,
+    };
+  }
+  return {
+    combine,
+    metrics,
+    hasComments: Boolean(v?.hasComments),
+  };
+}
+
 /** Detect whether a chip carries an active (non-default) value. */
 function isChipActiveById(id: ChipId, values: ChipValuesMap): boolean {
   switch (id) {
@@ -238,6 +275,11 @@ function isChipActiveById(id: ChipId, values: ChipValuesMap): boolean {
     }
     case 'aspect':
       return values.aspect.buckets.length > 0;
+    case 'social': {
+      const s = values.social;
+      if (s.hasComments) return true;
+      return SOCIAL_METRICS.some((m) => s.metrics[m].enabled);
+    }
     default:
       return false;
   }
@@ -380,6 +422,28 @@ export function useFilterBarConfig(): UseFilterBarConfigReturn {
     if (durationRange.max != null) out.duration_max = durationRange.max;
     if (state.chipValues.aspect.buckets.length > 0) {
       out.aspect_ratios = state.chipValues.aspect.buckets.map(bucketToApiValue);
+    }
+    const social = state.chipValues.social;
+    const paramKey: Record<SocialMetric, keyof FetchResourcesFilterParams> = {
+      likes: 'min_likes',
+      comments: 'min_comments',
+      favorites: 'min_favorites',
+      shares: 'min_shares',
+    };
+    let anyEnabled = false;
+    for (const m of SOCIAL_METRICS) {
+      const entry = social.metrics[m];
+      if (entry.enabled) {
+        anyEnabled = true;
+        // Cast is safe: every branch writes a number into the right key.
+        (out[paramKey[m]] as number | undefined) = entry.threshold;
+      }
+    }
+    if (anyEnabled) {
+      out.social_combine = social.combine;
+    }
+    if (social.hasComments) {
+      out.has_comments = true;
     }
     return out;
   }, [state.chipValues]);
