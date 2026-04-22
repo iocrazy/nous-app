@@ -7,12 +7,21 @@ Data access layer for the resource library: resources, resource_items,
 resource_versions, and folders. Uses async Supabase admin client.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+# AI status fields live on the `resources` table (migration 067). A resource
+# is considered "completed" for a step when the column equals this value.
+_AI_STATUS_COMPLETED = "completed"
+_AI_STATUS_FIELDS: Dict[str, str] = {
+    "transcribed": "transcript_status",
+    "summarized": "summary_status",
+    "analyzed": "visual_analysis_status",
+}
 
 # MIME prefixes considered "known" — anything else is the catch-all "other".
 _KNOWN_MIME_PREFIXES: tuple[str, ...] = (
@@ -325,6 +334,12 @@ class ResourcesRepository:
         tag_ids: Optional[List[str]] = None,
         min_rating: Optional[int] = None,
         types: Optional[List[str]] = None,
+        platforms: Optional[List[str]] = None,
+        ai_transcribed: Optional[bool] = None,
+        ai_summarized: Optional[bool] = None,
+        ai_analyzed: Optional[bool] = None,
+        created_after: Optional[date] = None,
+        created_before: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
         """List resource_items joined to their resources.
 
@@ -334,6 +349,17 @@ class ResourcesRepository:
         - ``min_rating``: only items whose resource has ``rating`` >= value.
         - ``types``: broad type categories — ``video``, ``image``, ``audio``,
           ``document``, ``other`` — mapped against ``resource.mime_type``.
+        - ``platforms``: restrict to resources whose linked
+          ``parsed_media.source_platform`` is in the given list (IN / OR
+          semantics).  Resources without a linked parsed_media are
+          excluded when this filter is applied.
+        - ``ai_transcribed`` / ``ai_summarized`` / ``ai_analyzed``: when
+          set to True, require the matching resource AI status column to
+          equal ``"completed"``. ``None`` / ``False`` means no filter.
+        - ``created_after`` / ``created_before``: inclusive date bounds
+          on ``resource.created_at``. Dates are interpreted in UTC and
+          expanded to full-day boundaries (after: >= 00:00:00 of the day;
+          before: <= 23:59:59.999999 of the day).
         """
         try:
             client = await self._get_client()
@@ -346,6 +372,27 @@ class ResourcesRepository:
                 matched_resource_ids = await self._resource_ids_with_all_tags(tag_ids)
                 if not matched_resource_ids:
                     return []
+
+            # Platform filter is applied by pre-resolving the set of
+            # resource ids whose linked parsed_media.source_platform
+            # matches. Done here (rather than via a nested PostgREST
+            # filter) to keep the repository independent of inner-join
+            # syntax quirks and cheap for the common small-result case.
+            if platforms:
+                platform_resource_ids = await self._resource_ids_for_platforms(
+                    platforms
+                )
+                if not platform_resource_ids:
+                    return []
+                if matched_resource_ids is None:
+                    matched_resource_ids = platform_resource_ids
+                else:
+                    platform_set = set(platform_resource_ids)
+                    matched_resource_ids = [
+                        rid for rid in matched_resource_ids if rid in platform_set
+                    ]
+                    if not matched_resource_ids:
+                        return []
 
             query = (
                 client.table(self.TABLE_ITEMS)
@@ -374,11 +421,68 @@ class ResourcesRepository:
                 # try to resolve the column against `resource_items`.
                 query = query.or_(mime_ors, reference_table="resources")
 
+            # AI status filters: each flag independently requires the
+            # associated column == "completed". Applied on the embedded
+            # resources table.
+            for flag, column in (
+                (ai_transcribed, _AI_STATUS_FIELDS["transcribed"]),
+                (ai_summarized, _AI_STATUS_FIELDS["summarized"]),
+                (ai_analyzed, _AI_STATUS_FIELDS["analyzed"]),
+            ):
+                if flag is True:
+                    query = query.eq(f"resource.{column}", _AI_STATUS_COMPLETED)
+
+            # Date-added range: inclusive, interpreted as UTC calendar
+            # days. A missing bound is simply omitted.
+            if created_after is not None:
+                start_iso = datetime.combine(
+                    created_after, datetime.min.time(), tzinfo=timezone.utc
+                ).isoformat()
+                query = query.gte("resource.created_at", start_iso)
+            if created_before is not None:
+                end_iso = datetime.combine(
+                    created_before, datetime.max.time(), tzinfo=timezone.utc
+                ).isoformat()
+                query = query.lte("resource.created_at", end_iso)
+
             query = query.order("created_at", desc=True)
             result = await query.execute()
             return result.data or []
         except Exception as e:
             logger.error(f"Failed to get resource items: {e}")
+            return []
+
+    async def _resource_ids_for_platforms(self, platforms: List[str]) -> List[str]:
+        """Return resource ids whose linked ``parsed_media.source_platform``
+        is in ``platforms``.
+
+        Two-step lookup (parsed_media -> resources) to avoid relying on
+        a PostgREST nested ``in`` filter, which depends on FK
+        relationships that are easy to break at migration time.
+        """
+        cleaned = [p.strip() for p in platforms if p and p.strip()]
+        if not cleaned:
+            return []
+        try:
+            client = await self._get_client()
+            media_rows = (
+                await client.table("parsed_media")
+                .select("id")
+                .in_("source_platform", cleaned)
+                .execute()
+            )
+            media_ids = [str(row["id"]) for row in (media_rows.data or [])]
+            if not media_ids:
+                return []
+            resource_rows = (
+                await client.table(self.TABLE_RESOURCES)
+                .select("id")
+                .in_("media_id", media_ids)
+                .execute()
+            )
+            return [str(row["id"]) for row in (resource_rows.data or [])]
+        except Exception as e:
+            logger.error(f"Failed to resolve resource ids for platforms: {e}")
             return []
 
     async def _resource_ids_with_all_tags(self, tag_ids: List[str]) -> List[str]:

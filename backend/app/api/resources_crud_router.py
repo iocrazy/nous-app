@@ -8,6 +8,7 @@ move, tags, and batch transcode.
 """
 
 import asyncio
+from datetime import date
 from pathlib import Path
 from typing import List, Optional
 
@@ -68,8 +69,37 @@ async def list_resources(
             "Allowed: video, image, audio, document, other."
         ),
     ),
+    platforms: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Filter by source platform (IN semantics) — matches "
+            "parsed_media.source_platform (e.g. douyin, youtube, bilibili)."
+        ),
+    ),
+    ai_transcribed: Optional[bool] = Query(
+        None,
+        description=("If true, only resources whose transcript_status == 'completed'."),
+    ),
+    ai_summarized: Optional[bool] = Query(
+        None,
+        description=("If true, only resources whose summary_status == 'completed'."),
+    ),
+    ai_analyzed: Optional[bool] = Query(
+        None,
+        description=(
+            "If true, only resources whose visual_analysis_status == 'completed'."
+        ),
+    ),
+    created_after: Optional[date] = Query(
+        None,
+        description="Inclusive lower bound on resource.created_at (UTC date).",
+    ),
+    created_before: Optional[date] = Query(
+        None,
+        description="Inclusive upper bound on resource.created_at (UTC date).",
+    ),
 ):
-    """List resources in a scope, optionally filtered by folder/tag/rating/type."""
+    """List resources in a scope, optionally filtered by folder/tag/rating/type/source/ai/date."""
     # Validate and normalise `types` here so the repository can stay
     # strictly about data access (fail fast at the boundary).
     normalised_types: Optional[List[str]] = None
@@ -85,6 +115,24 @@ async def list_resources(
                     ),
                 )
 
+    # Strip / drop empty strings from platforms so `?platforms=&platforms=`
+    # is treated as absent rather than "match nothing".
+    normalised_platforms: Optional[List[str]] = None
+    if platforms:
+        normalised_platforms = [p.strip() for p in platforms if p and p.strip()]
+        if not normalised_platforms:
+            normalised_platforms = None
+
+    if (
+        created_after is not None
+        and created_before is not None
+        and created_after > created_before
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="created_after must be <= created_before.",
+        )
+
     try:
         repo = ResourcesRepository()
         items = await repo.get_resource_items(
@@ -94,6 +142,12 @@ async def list_resources(
             tag_ids=tag_ids or None,
             min_rating=min_rating,
             types=normalised_types,
+            platforms=normalised_platforms,
+            ai_transcribed=ai_transcribed,
+            ai_summarized=ai_summarized,
+            ai_analyzed=ai_analyzed,
+            created_after=created_after,
+            created_before=created_before,
         )
         return {"success": True, "data": items}
     except HTTPException:
