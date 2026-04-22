@@ -153,27 +153,28 @@ const Logo: React.FC<{ collapsed?: boolean }> = ({ collapsed = false }) => (
 );
 
 // ---------------------------------------------------------------------------
-// Edge collapse button — right-edge tab, mirrors ResourcesSidebar / ProjectNavSidebar.
-// - Expanded: hover-reveal (opacity-0 group-hover:opacity-100) — keeps the sidebar clean.
-// - Collapsed: always visible (opacity-100) — without this the button is unreachable
-//   because hovering the narrow collapsed rail doesn't read as "there's a control here".
+// Bottom collapse button — sits inside the sidebar bottom-left, always visible.
+// Mirrors the Details panel's collapse affordance (always-on floating tab) so the
+// two long-lived panels feel consistent. Placed inline at the bottom of the sidebar,
+// left-aligned, no divider above it.
 // ---------------------------------------------------------------------------
 
-const EdgeCollapseButton: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({
+const BottomCollapseButton: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({
   collapsed = false,
   onToggleCollapse,
 }) => {
   if (!onToggleCollapse) return null;
   return (
-    <button
-      onClick={onToggleCollapse}
-      className={`absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors ${
-        collapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-      }`}
-      title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-    >
-      {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-    </button>
+    <div className={`pt-3 ${collapsed ? 'flex justify-center' : 'flex justify-start px-1'}`}>
+      <button
+        onClick={onToggleCollapse}
+        className="p-2 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+      </button>
+    </div>
   );
 };
 
@@ -299,7 +300,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </nav>
 
-        <EdgeCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+        <BottomCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
       </aside>
     );
   }
@@ -356,7 +357,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         </nav>
 
-        <EdgeCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+        <BottomCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
       </aside>
     );
   }
@@ -400,7 +401,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       </nav>
 
-      <EdgeCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+      <BottomCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
     </aside>
   );
 };
