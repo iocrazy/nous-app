@@ -11,6 +11,10 @@ Plus PR 2 additions:
 - ``ai_transcribed`` / ``ai_summarized`` / ``ai_analyzed`` (status == completed)
 - ``created_after`` / ``created_before`` (UTC date range on resource.created_at)
 
+Plus PR 3 additions:
+- ``duration_min`` / ``duration_max`` (gte/lte on resource.duration_seconds)
+- ``aspect_ratios`` (API-surface no-op; proved to not leak into the query)
+
 Mirrors the _FakeQuery / _FakeClient fixture style used by
 ``test_skill_repository.py`` for consistency.
 """
@@ -718,3 +722,134 @@ async def test_resource_ids_for_platforms_returns_empty_on_exception(
     repo._get_client = _get_client  # type: ignore[method-assign]
 
     assert await repo._resource_ids_for_platforms(["douyin"]) == []
+
+
+# ─── PR 3: duration / aspect filters ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_resources_duration_min_applies_gte(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    await repo.get_resource_items(
+        scope_type="personal", scope_id="user-1", duration_min=60
+    )
+    gte_calls = [c[1] for c in fake_query.calls if c[0] == "gte"]
+    assert ("resource.duration_seconds", 60) in gte_calls
+
+
+@pytest.mark.asyncio
+async def test_list_resources_duration_max_applies_lte(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    await repo.get_resource_items(
+        scope_type="personal", scope_id="user-1", duration_max=300
+    )
+    lte_calls = [c[1] for c in fake_query.calls if c[0] == "lte"]
+    assert ("resource.duration_seconds", 300) in lte_calls
+
+
+@pytest.mark.asyncio
+async def test_list_resources_duration_range_applies_both_bounds(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        duration_min=60,
+        duration_max=300,
+    )
+    gte_calls = [c[1] for c in fake_query.calls if c[0] == "gte"]
+    lte_calls = [c[1] for c in fake_query.calls if c[0] == "lte"]
+    assert ("resource.duration_seconds", 60) in gte_calls
+    assert ("resource.duration_seconds", 300) in lte_calls
+
+
+@pytest.mark.asyncio
+async def test_list_resources_duration_none_is_inactive(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """``None`` for both bounds means no duration filter at all."""
+    fake_query._data = []
+    await repo.get_resource_items(scope_type="personal", scope_id="user-1")
+    gte_calls = [c[1] for c in fake_query.calls if c[0] == "gte"]
+    lte_calls = [c[1] for c in fake_query.calls if c[0] == "lte"]
+    assert [c for c in gte_calls if c[0] == "resource.duration_seconds"] == []
+    assert [c for c in lte_calls if c[0] == "resource.duration_seconds"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_resources_duration_coerces_to_int(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """Float-ish inputs are safe: the repository casts to int before
+    passing to PostgREST so the wire payload stays predictable."""
+    fake_query._data = []
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        duration_min=60.7,  # type: ignore[arg-type]
+        duration_max=300.2,  # type: ignore[arg-type]
+    )
+    gte_calls = [c[1] for c in fake_query.calls if c[0] == "gte"]
+    lte_calls = [c[1] for c in fake_query.calls if c[0] == "lte"]
+    assert ("resource.duration_seconds", 60) in gte_calls
+    assert ("resource.duration_seconds", 300) in lte_calls
+
+
+@pytest.mark.asyncio
+async def test_list_resources_aspect_ratios_is_noop_at_repository(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """Aspect filtering is client-side for now. The parameter must be
+    accepted without leaking into any PostgREST call."""
+    fake_query._data = []
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        aspect_ratios=["9:16", "16:9"],
+    )
+    # No or_ clauses should appear (or_ is used for type / mime filters).
+    or_calls = [c for c in fake_query.calls if c[0] == "or_"]
+    assert or_calls == []
+    # No filters reference a "resolution" column either.
+    for op in ("eq", "gte", "lte", "in_", "like", "ilike"):
+        matches = [c for c in fake_query.calls if c[0] == op]
+        for _, args, _kw in matches:
+            assert not (args and isinstance(args[0], str) and "resolution" in args[0])
+
+
+@pytest.mark.asyncio
+async def test_list_resources_duration_and_aspect_stack_with_other_filters(
+    repo: ResourcesRepository, fake_query: _FakeQuery
+) -> None:
+    """Sanity: duration + aspect stack on top of the PR 1/2 filters
+    without stomping on other clauses."""
+
+    async def fake_tag_ids(_tag_ids: list[str]) -> list[str]:
+        return ["res-1"]
+
+    repo._resource_ids_with_all_tags = fake_tag_ids  # type: ignore[method-assign]
+    fake_query._data = []
+
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        tag_ids=["tag-a"],
+        min_rating=4,
+        duration_min=60,
+        duration_max=300,
+        aspect_ratios=["9:16"],
+        ai_transcribed=True,
+    )
+    gte_calls = [c[1] for c in fake_query.calls if c[0] == "gte"]
+    lte_calls = [c[1] for c in fake_query.calls if c[0] == "lte"]
+    eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
+
+    assert ("resource.rating", 4) in gte_calls
+    assert ("resource.duration_seconds", 60) in gte_calls
+    assert ("resource.duration_seconds", 300) in lte_calls
+    assert ("resource.transcript_status", "completed") in eq_values
