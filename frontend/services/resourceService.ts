@@ -230,6 +230,16 @@ export interface FetchResourcesParams {
   /** Aspect-ratio bucket ids as sent on the wire
    *  ("9:16" / "16:9" / "1:1" / "4:3" / "other"). */
   aspect_ratios?: string[];
+  /** Social metric thresholds — inclusive lower bounds matched against
+   *  the linked parsed_media.*_count columns. Applied client-side in
+   *  useResourcesDisplay for now; mirrored here for a future backend
+   *  consolidation PR. */
+  min_likes?: number;
+  min_comments?: number;
+  min_favorites?: number;
+  min_shares?: number;
+  social_combine?: 'and' | 'or';
+  has_comments?: boolean;
 }
 
 export async function fetchResources(
@@ -250,12 +260,15 @@ export async function fetchResources(
           libraryId,
         };
 
-  // Nested `media:parsed_media(source_platform)` powers the Source
-  // filter chip. LEFT JOIN (no !inner) so uploaded resources without a
-  // linked parsed_media still return.
+  // Nested `media:parsed_media(...)` powers the Source (source_platform)
+  // and Social (like/comment/favorite/share counts) filter chips. LEFT
+  // JOIN (no !inner) so uploaded resources without a linked parsed_media
+  // still return.
   let query = supabase
     .from('resource_items')
-    .select('*, resource:resources!inner(*, media:parsed_media(id, source_platform))')
+    .select(
+      '*, resource:resources!inner(*, media:parsed_media(id, source_platform, like_count, comment_count, favorite_count, share_count))',
+    )
     .eq('scope_type', params.scopeType)
     .eq('scope_id', params.scopeId)
     .eq('resources.is_trashed', false)

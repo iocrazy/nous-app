@@ -19,6 +19,7 @@ export const CHIP_IDS = [
   'date_added',
   'duration',
   'aspect',
+  'social',
 ] as const;
 export type ChipId = (typeof CHIP_IDS)[number];
 
@@ -103,6 +104,38 @@ export interface AspectChipValue {
   buckets: AspectBucketId[];
 }
 
+/** Social metric fields exposed by the chip — each tracks whether the
+ *  user has enabled the threshold plus the minimum value they chose. */
+export type SocialMetric = 'likes' | 'comments' | 'favorites' | 'shares';
+
+/** Per-metric threshold entry. ``enabled`` gates the ``threshold``;
+ *  disabled thresholds are never applied even if carrying a value. */
+export interface SocialMetricThreshold {
+  enabled: boolean;
+  /** Inclusive ``>=`` bound. ``0`` is valid and distinct from inactive. */
+  threshold: number;
+}
+
+/** Chip state for the Social (interaction-data) filter. */
+export interface SocialChipValue {
+  /** Combine semantics across *enabled* metric thresholds. */
+  combine: 'and' | 'or';
+  /** Per-metric thresholds. Order is display-only, set via SOCIAL_METRICS. */
+  metrics: Record<SocialMetric, SocialMetricThreshold>;
+  /** Independent "has at least one comment" flag — applied with AND on
+   *  top of the combined thresholds (so it's a hard floor, not a
+   *  substitute for comments >= N). */
+  hasComments: boolean;
+}
+
+/** Display order for the social metric rows. */
+export const SOCIAL_METRICS: readonly SocialMetric[] = [
+  'likes',
+  'comments',
+  'favorites',
+  'shares',
+] as const;
+
 export type ChipValue =
   | TagsChipValue
   | RatingChipValue
@@ -111,7 +144,8 @@ export type ChipValue =
   | AIStatusChipValue
   | DateAddedChipValue
   | DurationChipValue
-  | AspectChipValue;
+  | AspectChipValue
+  | SocialChipValue;
 
 /** Discriminated lookup so consumers can narrow by chip id. */
 export interface ChipValuesMap {
@@ -123,6 +157,7 @@ export interface ChipValuesMap {
   date_added: DateAddedChipValue;
   duration: DurationChipValue;
   aspect: AspectChipValue;
+  social: SocialChipValue;
 }
 
 /** The inactive state for each chip — used for reset. */
@@ -135,6 +170,16 @@ export const DEFAULT_CHIP_VALUES: ChipValuesMap = {
   date_added: { preset: null, customAfter: null, customBefore: null },
   duration: { preset: null, customMin: null, customMax: null },
   aspect: { buckets: [] },
+  social: {
+    combine: 'and',
+    metrics: {
+      likes: { enabled: false, threshold: 0 },
+      comments: { enabled: false, threshold: 0 },
+      favorites: { enabled: false, threshold: 0 },
+      shares: { enabled: false, threshold: 0 },
+    },
+    hasComments: false,
+  },
 };
 
 /** Default pin order (PR 2 baseline — 6 chips pinned). PR 3 adds
@@ -168,4 +213,10 @@ export interface FetchResourcesFilterParams {
   duration_min?: number; // seconds
   duration_max?: number; // seconds
   aspect_ratios?: string[]; // "9:16" / "16:9" / "1:1" / "4:3" / "other"
+  min_likes?: number;
+  min_comments?: number;
+  min_favorites?: number;
+  min_shares?: number;
+  social_combine?: 'and' | 'or';
+  has_comments?: boolean;
 }

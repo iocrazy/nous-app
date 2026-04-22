@@ -11,6 +11,7 @@ import type { Folder, ResourceItem, SmartCollection, Library } from '../types';
 import type { SortBy } from '../contexts/ResourcesContext';
 import type { BreadcrumbSegment } from '../components/Breadcrumb';
 import type { ChipValuesMap } from '../components/resources/filter/types';
+import { SOCIAL_METRICS } from '../components/resources/filter/types';
 import { datePresetToRange } from '../components/resources/filter/dateUtils';
 import {
   durationMatches,
@@ -248,6 +249,47 @@ export function useResourcesDisplay({
       items = items.filter((item) =>
         aspectMatches(item.resource?.resolution, selectedBuckets),
       );
+    }
+
+    // Social chip (interaction data on parsed_media). Each enabled
+    // metric carries a ``>= threshold`` test; the chip's ``combine``
+    // field decides AND / OR semantics across the enabled set. The
+    // ``hasComments`` floor is applied as an AND on top.
+    const social = chipValues.social;
+    const enabledMetrics = SOCIAL_METRICS.filter(
+      (m) => social.metrics[m].enabled,
+    );
+    if (enabledMetrics.length > 0 || social.hasComments) {
+      const metricField: Record<
+        (typeof SOCIAL_METRICS)[number],
+        'like_count' | 'comment_count' | 'favorite_count' | 'share_count'
+      > = {
+        likes: 'like_count',
+        comments: 'comment_count',
+        favorites: 'favorite_count',
+        shares: 'share_count',
+      };
+      items = items.filter((item) => {
+        const media = item.resource?.media;
+        if (!media) return false;
+        if (social.hasComments) {
+          const cc = typeof media.comment_count === 'number' ? media.comment_count : 0;
+          if (cc <= 0) return false;
+        }
+        if (enabledMetrics.length === 0) return true;
+        if (social.combine === 'and') {
+          return enabledMetrics.every((m) => {
+            const raw = media[metricField[m]];
+            const val = typeof raw === 'number' ? raw : 0;
+            return val >= social.metrics[m].threshold;
+          });
+        }
+        return enabledMetrics.some((m) => {
+          const raw = media[metricField[m]];
+          const val = typeof raw === 'number' ? raw : 0;
+          return val >= social.metrics[m].threshold;
+        });
+      });
     }
 
     if (debouncedSearch.trim()) {
