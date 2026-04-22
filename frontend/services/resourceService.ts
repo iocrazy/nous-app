@@ -224,6 +224,12 @@ export interface FetchResourcesParams {
   min_rating?: number;
   /** Broad file-type categories. */
   types?: Array<'video' | 'image' | 'audio' | 'document' | 'other'>;
+  /** Inclusive duration bounds (seconds). Video-specific. */
+  duration_min?: number;
+  duration_max?: number;
+  /** Aspect-ratio bucket ids as sent on the wire
+   *  ("9:16" / "16:9" / "1:1" / "4:3" / "other"). */
+  aspect_ratios?: string[];
 }
 
 export async function fetchResources(

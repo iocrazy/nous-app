@@ -9,9 +9,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type {
+  AspectBucketId,
   ChipId,
   ChipValuesMap,
   DatePresetId,
+  DurationPresetId,
   FetchResourcesFilterParams,
 } from '../components/resources/filter/types';
 import {
@@ -20,6 +22,8 @@ import {
   DEFAULT_PINNED_CHIPS,
 } from '../components/resources/filter/types';
 import { datePresetToRange } from '../components/resources/filter/dateUtils';
+import { durationPresetToRange } from '../components/resources/filter/durationUtils';
+import { bucketToApiValue } from '../components/resources/filter/aspectUtils';
 
 const STORAGE_KEY = 'resourceFilterConfig';
 
@@ -30,6 +34,22 @@ const DATE_PRESETS: ReadonlyArray<DatePresetId> = [
   'last30days',
   'last90days',
   'custom',
+] as const;
+
+const DURATION_PRESETS: ReadonlyArray<DurationPresetId> = [
+  'short60s',
+  'medium',
+  'long',
+  'xlong',
+  'custom',
+] as const;
+
+const ASPECT_BUCKETS: ReadonlyArray<AspectBucketId> = [
+  'portrait',
+  'landscape',
+  'square',
+  'fourThree',
+  'other',
 ] as const;
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -102,6 +122,8 @@ function loadFromStorage(): PersistedShape {
         analyzed: Boolean(srcValues.ai_status?.analyzed),
       },
       date_added: sanitizeDateAdded(srcValues.date_added),
+      duration: sanitizeDuration(srcValues.duration),
+      aspect: sanitizeAspect(srcValues.aspect),
     };
 
     return { pinnedChips, chipValues };
@@ -121,6 +143,8 @@ function cloneDefaults(): PersistedShape {
       source: { ...DEFAULT_CHIP_VALUES.source, platforms: [] },
       ai_status: { ...DEFAULT_CHIP_VALUES.ai_status },
       date_added: { ...DEFAULT_CHIP_VALUES.date_added },
+      duration: { ...DEFAULT_CHIP_VALUES.duration },
+      aspect: { ...DEFAULT_CHIP_VALUES.aspect, buckets: [] },
     },
   };
 }
@@ -151,6 +175,38 @@ function sanitizeDateAdded(
   return { preset, customAfter, customBefore };
 }
 
+function sanitizeNonNegativeInt(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return null;
+  return Math.floor(v);
+}
+
+function sanitizeDuration(
+  v: Partial<ChipValuesMap['duration']> | undefined,
+): ChipValuesMap['duration'] {
+  const preset =
+    typeof v?.preset === 'string' &&
+    (DURATION_PRESETS as ReadonlyArray<string>).includes(v.preset)
+      ? (v.preset as DurationPresetId)
+      : null;
+  return {
+    preset,
+    customMin: sanitizeNonNegativeInt(v?.customMin),
+    customMax: sanitizeNonNegativeInt(v?.customMax),
+  };
+}
+
+function sanitizeAspect(
+  v: Partial<ChipValuesMap['aspect']> | undefined,
+): ChipValuesMap['aspect'] {
+  const allowed = new Set<string>(ASPECT_BUCKETS);
+  const buckets = Array.isArray(v?.buckets)
+    ? (v!.buckets.filter(
+        (b) => typeof b === 'string' && allowed.has(b),
+      ) as AspectBucketId[])
+    : [];
+  return { buckets };
+}
+
 /** Detect whether a chip carries an active (non-default) value. */
 function isChipActiveById(id: ChipId, values: ChipValuesMap): boolean {
   switch (id) {
@@ -174,6 +230,14 @@ function isChipActiveById(id: ChipId, values: ChipValuesMap): boolean {
       if (d.preset !== 'custom') return true;
       return Boolean(d.customAfter || d.customBefore);
     }
+    case 'duration': {
+      const d = values.duration;
+      if (!d.preset) return false;
+      if (d.preset !== 'custom') return true;
+      return d.customMin != null || d.customMax != null;
+    }
+    case 'aspect':
+      return values.aspect.buckets.length > 0;
     default:
       return false;
   }
@@ -311,6 +375,12 @@ export function useFilterBarConfig(): UseFilterBarConfigReturn {
     const range = datePresetToRange(state.chipValues.date_added);
     if (range.after) out.created_after = range.after;
     if (range.before) out.created_before = range.before;
+    const durationRange = durationPresetToRange(state.chipValues.duration);
+    if (durationRange.min != null) out.duration_min = durationRange.min;
+    if (durationRange.max != null) out.duration_max = durationRange.max;
+    if (state.chipValues.aspect.buckets.length > 0) {
+      out.aspect_ratios = state.chipValues.aspect.buckets.map(bucketToApiValue);
+    }
     return out;
   }, [state.chipValues]);
 
