@@ -38,11 +38,11 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
   const { t } = useTranslation();
 
   const labels: Record<DurationPresetId, string> = {
-    short60s: t('resources.filter.duration.short60s', '≤ 60 seconds'),
-    medium: t('resources.filter.duration.medium', '1-5 minutes'),
-    long: t('resources.filter.duration.long', '5-30 minutes'),
-    xlong: t('resources.filter.duration.xlong', '30+ minutes'),
-    custom: t('resources.filter.duration.custom', 'Custom range'),
+    short60s: t('resources.filter.durationPresets.short60s', '≤ 60 seconds'),
+    medium: t('resources.filter.durationPresets.medium', '1-5 minutes'),
+    long: t('resources.filter.durationPresets.long', '5-30 minutes'),
+    xlong: t('resources.filter.durationPresets.xlong', '30+ minutes'),
+    custom: t('resources.filter.durationPresets.custom', 'Custom range'),
   };
 
   const selectPreset = (preset: DurationPresetId) => {
@@ -105,7 +105,7 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
               htmlFor="filter-duration-min"
               className="text-[10px] uppercase tracking-wider text-zinc-500 w-8 shrink-0"
             >
-              {t('resources.filter.duration.min', 'Min (seconds)')}
+              {t('resources.filter.durationPresets.min', 'Min (seconds)')}
             </label>
             <input
               id="filter-duration-min"
@@ -122,7 +122,7 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
               htmlFor="filter-duration-max"
               className="text-[10px] uppercase tracking-wider text-zinc-500 w-8 shrink-0"
             >
-              {t('resources.filter.duration.max', 'Max (seconds)')}
+              {t('resources.filter.durationPresets.max', 'Max (seconds)')}
             </label>
             <input
               id="filter-duration-max"

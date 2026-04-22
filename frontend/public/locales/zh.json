@@ -433,6 +433,24 @@
         "custom": "自定义范围",
         "from": "起",
         "to": "止"
+      },
+      "duration": "时长",
+      "aspect": "画面比例",
+      "durationPresets": {
+        "short60s": "≤ 60 秒",
+        "medium": "1-5 分钟",
+        "long": "5-30 分钟",
+        "xlong": "30 分钟以上",
+        "custom": "自定义范围",
+        "min": "最小（秒）",
+        "max": "最大（秒）"
+      },
+      "aspectBuckets": {
+        "portrait": "9:16（竖屏）",
+        "landscape": "16:9（横屏）",
+        "square": "1:1（方形）",
+        "fourThree": "4:3",
+        "other": "其他"
       }
     },
     "modifiedAt": "修改时间",

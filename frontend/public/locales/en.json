@@ -433,6 +433,24 @@
         "custom": "Custom range",
         "from": "From",
         "to": "To"
+      },
+      "duration": "Duration",
+      "aspect": "Aspect",
+      "durationPresets": {
+        "short60s": "≤ 60 seconds",
+        "medium": "1-5 minutes",
+        "long": "5-30 minutes",
+        "xlong": "30+ minutes",
+        "custom": "Custom range",
+        "min": "Min (seconds)",
+        "max": "Max (seconds)"
+      },
+      "aspectBuckets": {
+        "portrait": "9:16 (Portrait)",
+        "landscape": "16:9 (Landscape)",
+        "square": "1:1 (Square)",
+        "fourThree": "4:3",
+        "other": "Other"
       }
     },
     "modifiedAt": "Modified",

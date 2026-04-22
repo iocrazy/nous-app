@@ -37,11 +37,11 @@ export const AspectFilterDropdown: React.FC<AspectFilterDropdownProps> = ({
   );
 
   const labels: Record<AspectBucketId, string> = {
-    portrait: t('resources.filter.aspect.portrait', '9:16 (Portrait)'),
-    landscape: t('resources.filter.aspect.landscape', '16:9 (Landscape)'),
-    square: t('resources.filter.aspect.square', '1:1 (Square)'),
-    fourThree: t('resources.filter.aspect.fourThree', '4:3'),
-    other: t('resources.filter.aspect.other', 'Other'),
+    portrait: t('resources.filter.aspectBuckets.portrait', '9:16 (Portrait)'),
+    landscape: t('resources.filter.aspectBuckets.landscape', '16:9 (Landscape)'),
+    square: t('resources.filter.aspectBuckets.square', '1:1 (Square)'),
+    fourThree: t('resources.filter.aspectBuckets.fourThree', '4:3'),
+    other: t('resources.filter.aspectBuckets.other', 'Other'),
   };
 
   const toggle = (bucket: AspectBucketId) => {

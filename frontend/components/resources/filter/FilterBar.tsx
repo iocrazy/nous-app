@@ -139,11 +139,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       }
       case 'duration': {
         const presetLabels: Record<DurationPresetId, string> = {
-          short60s: t('resources.filter.duration.short60s', '≤ 60s'),
-          medium: t('resources.filter.duration.medium', '1-5 min'),
-          long: t('resources.filter.duration.long', '5-30 min'),
-          xlong: t('resources.filter.duration.xlong', '30+ min'),
-          custom: t('resources.filter.duration.custom', 'Custom'),
+          short60s: t('resources.filter.durationPresets.short60s', '≤ 60s'),
+          medium: t('resources.filter.durationPresets.medium', '1-5 min'),
+          long: t('resources.filter.durationPresets.long', '5-30 min'),
+          xlong: t('resources.filter.durationPresets.xlong', '30+ min'),
+          custom: t('resources.filter.durationPresets.custom', 'Custom'),
         };
         return durationPresetSummary(chipValues.duration, presetLabels);
       }
