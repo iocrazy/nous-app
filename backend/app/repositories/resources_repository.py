@@ -14,6 +14,66 @@ from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
 
+# MIME prefixes considered "known" — anything else is the catch-all "other".
+_KNOWN_MIME_PREFIXES: tuple[str, ...] = (
+    "video/",
+    "image/",
+    "audio/",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.",
+    "text/",
+)
+
+# Broad resource-type categories → list of PostgREST filter clauses.
+# Kept in sync with the frontend FilterType enum.
+_TYPE_CATEGORY_CLAUSES: Dict[str, List[str]] = {
+    "video": ["mime_type.like.video/*"],
+    "image": ["mime_type.like.image/*"],
+    "audio": ["mime_type.like.audio/*"],
+    "document": [
+        "mime_type.eq.application/pdf",
+        "mime_type.like.application/msword*",
+        "mime_type.like.application/vnd.*",
+        "mime_type.like.text/*",
+    ],
+}
+
+
+def _build_mime_or_expr(types: Optional[List[str]]) -> Optional[str]:
+    """Translate a list of type categories into a PostgREST ``or=`` clause.
+
+    Returns ``None`` when no filter is needed. Handles the ``other``
+    category by building an AND-of-NOT expression against each known
+    prefix; PostgREST expresses this as ``and(not.like.*, not.like.*, …)``
+    inside the top-level ``or(…)`` group.
+    """
+    if not types:
+        return None
+
+    categories = {t.strip() for t in types if t and t.strip()}
+    if not categories:
+        return None
+
+    clauses: List[str] = []
+    for category in categories:
+        if category in _TYPE_CATEGORY_CLAUSES:
+            clauses.extend(_TYPE_CATEGORY_CLAUSES[category])
+        elif category == "other":
+            not_clauses = [
+                (f"not.like.{p}*" if p.endswith("/") else f"not.like.{p}*")
+                for p in _KNOWN_MIME_PREFIXES
+            ]
+            # Require the mime to not match ANY known prefix.
+            and_expr = "and(" + ",".join(f"mime_type.{c}" for c in not_clauses) + ")"
+            clauses.append(and_expr)
+        # Silently ignore unknown categories; schema validation happens
+        # in the router layer.
+
+    if not clauses:
+        return None
+    return ",".join(clauses)
+
 
 class ResourcesRepository:
     """Resource library data access (async)"""
@@ -262,9 +322,31 @@ class ResourcesRepository:
         scope_id: str,
         folder_id: Optional[str] = None,
         include_trashed: bool = False,
+        tag_ids: Optional[List[str]] = None,
+        min_rating: Optional[int] = None,
+        types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
+        """List resource_items joined to their resources.
+
+        Optional filters:
+        - ``tag_ids``: only items whose resource carries ALL of the given
+          tag ids (AND semantics).
+        - ``min_rating``: only items whose resource has ``rating`` >= value.
+        - ``types``: broad type categories — ``video``, ``image``, ``audio``,
+          ``document``, ``other`` — mapped against ``resource.mime_type``.
+        """
         try:
             client = await self._get_client()
+
+            # AND-semantic tag filter: compute the intersection of resource
+            # ids tagged with every requested tag, then feed that set into
+            # the main query. An empty intersection short-circuits to [].
+            matched_resource_ids: Optional[List[str]] = None
+            if tag_ids:
+                matched_resource_ids = await self._resource_ids_with_all_tags(tag_ids)
+                if not matched_resource_ids:
+                    return []
+
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*, resource:resources!inner(*)")
@@ -279,11 +361,55 @@ class ResourcesRepository:
             if not include_trashed:
                 query = query.eq("resource.is_trashed", False)
 
+            if matched_resource_ids is not None:
+                query = query.in_("resource_id", matched_resource_ids)
+
+            if min_rating is not None:
+                query = query.gte("resource.rating", int(min_rating))
+
+            mime_ors = _build_mime_or_expr(types)
+            if mime_ors:
+                # PostgREST `or=` on an embedded column requires the
+                # `reference_table` kwarg so the parent parser doesn't
+                # try to resolve the column against `resource_items`.
+                query = query.or_(mime_ors, reference_table="resources")
+
             query = query.order("created_at", desc=True)
             result = await query.execute()
             return result.data or []
         except Exception as e:
             logger.error(f"Failed to get resource items: {e}")
+            return []
+
+    async def _resource_ids_with_all_tags(self, tag_ids: List[str]) -> List[str]:
+        """Return resource ids that carry every tag in ``tag_ids``.
+
+        Implemented as N separate ``resource_tags`` lookups (one per tag)
+        intersected in Python. Correct without relying on PostgREST
+        group-by/having, which would require a dedicated RPC.
+        """
+        if not tag_ids:
+            return []
+        try:
+            client = await self._get_client()
+            result_set: Optional[set[str]] = None
+            for tag_id in tag_ids:
+                rows = (
+                    await client.table(self.TABLE_RESOURCE_TAGS)
+                    .select("resource_id")
+                    .eq("tag_id", tag_id)
+                    .execute()
+                )
+                ids = {str(r["resource_id"]) for r in (rows.data or [])}
+                if result_set is None:
+                    result_set = ids
+                else:
+                    result_set &= ids
+                if not result_set:
+                    return []
+            return list(result_set or [])
+        except Exception as e:
+            logger.error(f"Failed to intersect resource tag ids: {e}")
             return []
 
     async def get_resource_item(
