@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
+
+declare const __APP_VERSION__: string;
 import {
   X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie, Library,
 } from 'lucide-react';
@@ -271,6 +273,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             ))}
           </nav>
+
+          {/* Version — bottom of settings sidebar, no divider */}
+          <div className="px-5 py-3 text-[11px] text-zinc-600">
+            v{__APP_VERSION__}
+          </div>
         </div>
 
         {/* Content */}
