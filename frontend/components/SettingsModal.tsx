@@ -274,7 +274,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             ))}
           </nav>
 
-          {/* Version — bottom of left panel, no divider */}
+          {/* Version — bottom of settings sidebar, no divider */}
           <div className="px-5 py-3 text-[11px] text-zinc-600">
             v{__APP_VERSION__}
           </div>

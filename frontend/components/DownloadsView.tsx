@@ -577,11 +577,6 @@ export const DownloadsView: React.FC = () => {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-sm text-zinc-200 font-medium truncate">{t('resources.downloads')}</span>
-            {!isLoadingLibrary && (
-              <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
-                {totalCount >= 0 ? totalCount : filteredLibrary.length} {(totalCount >= 0 ? totalCount : filteredLibrary.length) === 1 ? 'item' : 'items'}
-              </span>
-            )}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">

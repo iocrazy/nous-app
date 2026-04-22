@@ -9,6 +9,8 @@ import {
   Users,
   Sparkles,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   FolderOpen,
   ListTodo,
   ArrowLeft,
@@ -19,8 +21,6 @@ import {
   CreditCard,
   Coins,
   Share2,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -153,9 +153,10 @@ const Logo: React.FC<{ collapsed?: boolean }> = ({ collapsed = false }) => (
 );
 
 // ---------------------------------------------------------------------------
-// Edge collapse button — right-edge tab, mirrors ResourcesSidebar/ProjectNavSidebar
-// - Expanded: hover-reveal (opacity-0 group-hover:opacity-100)
-// - Collapsed: always visible so user can expand back
+// Edge collapse button — right-edge tab, mirrors ResourcesSidebar / ProjectNavSidebar.
+// - Expanded: hover-reveal (opacity-0 group-hover:opacity-100) — keeps the sidebar clean.
+// - Collapsed: always visible (opacity-100) — without this the button is unreachable
+//   because hovering the narrow collapsed rail doesn't read as "there's a control here".
 // ---------------------------------------------------------------------------
 
 const EdgeCollapseButton: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({

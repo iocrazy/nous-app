@@ -565,14 +565,37 @@ export async function fetchResourceCount(
   scopeType: 'personal' | 'team',
   scopeId: string
 ): Promise<number> {
-  const { count, error } = await supabase
-    .from('resource_items')
-    .select('*, resource:resources!inner(*)', { count: 'exact', head: true })
-    .eq('scope_type', scopeType)
-    .eq('scope_id', scopeId)
-    .eq('resources.is_trashed', false)
-    .neq('resource.source_type', 'web');
+  // Count rows in `resources` (not the resource_items junction) so a resource
+  // that appears in multiple scope buckets isn't double-counted. Mirrors the
+  // filters applied by the My Uploads view itself so the sidebar number
+  // matches what the user sees in the main area.
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return 0;
 
+  let query = supabase
+    .from('resources')
+    .select('id', { count: 'exact', head: true })
+    .eq('creator_id', userId)
+    .eq('is_trashed', false)
+    .neq('source_type', 'web');
+
+  // scope_type=personal is implicit (creator_id already filters to current
+  // user). For team scope, resources need to be explicitly linked to the
+  // team via resource_items — fall back to the old junction query in that
+  // case since resources themselves don't carry a team_id column.
+  if (scopeType === 'team') {
+    const { data: items } = await supabase
+      .from('resource_items')
+      .select('resource_id')
+      .eq('scope_type', 'team')
+      .eq('scope_id', scopeId);
+    const ids = (items ?? []).map((r) => r.resource_id);
+    if (ids.length === 0) return 0;
+    query = query.in('id', ids);
+  }
+
+  const { count, error } = await query;
   if (error) throw error;
   return count || 0;
 }
@@ -967,12 +990,33 @@ export async function fetchDownloadedResourceCount(
   scopeType: 'personal' | 'team',
   scopeId: string,
 ): Promise<number> {
-  const { count, error } = await supabase
-    .from('resource_items')
-    .select('*, resource:resources!inner(*)', { count: 'exact', head: true })
-    .eq('scope_type', scopeType)
-    .eq('scope_id', scopeId)
-    .eq('resource.source_type', 'web');
+  // Count `resources` (not the resource_items junction) to match the
+  // DownloadsView page query exactly. Filters: creator_id = current user,
+  // source_type = 'web', is_trashed = false. That's the same set
+  // fetchLibraryPaginated returns, so sidebar and main-area counts agree.
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return 0;
+
+  let query = supabase
+    .from('resources')
+    .select('id', { count: 'exact', head: true })
+    .eq('creator_id', userId)
+    .eq('source_type', 'web')
+    .eq('is_trashed', false);
+
+  if (scopeType === 'team') {
+    const { data: items } = await supabase
+      .from('resource_items')
+      .select('resource_id')
+      .eq('scope_type', 'team')
+      .eq('scope_id', scopeId);
+    const ids = (items ?? []).map((r) => r.resource_id);
+    if (ids.length === 0) return 0;
+    query = query.in('id', ids);
+  }
+
+  const { count, error } = await query;
   if (error) throw error;
   return count || 0;
 }
