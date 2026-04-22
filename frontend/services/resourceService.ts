@@ -694,6 +694,20 @@ export async function fetchDownloadedResources(
   return data || [];
 }
 
+export async function fetchDownloadedResourceCount(
+  scopeType: 'personal' | 'team',
+  scopeId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('resource_items')
+    .select('*, resource:resources!inner(*)', { count: 'exact', head: true })
+    .eq('scope_type', scopeType)
+    .eq('scope_id', scopeId)
+    .eq('resource.source_type', 'web');
+  if (error) throw error;
+  return count || 0;
+}
+
 // ─── Smart Folders ───────────────────────────────────────
 
 export interface SmartFolderCondition {
