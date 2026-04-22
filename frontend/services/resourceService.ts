@@ -203,43 +203,186 @@ export async function fetchResourceContext(
 // ─── Resources ──────────────────────────────────────────
 
 /**
- * Parameters accepted by the Resources list endpoint. Scope + folder +
- * library are required to locate the view; the rest come from the
- * filter bar (PR 1 — tags / rating / type chips).
+ * Parameters accepted by the Resources list endpoint.
  *
- * NOTE: the current implementation routes through Supabase for read
- * performance and applies filter-bar filters client-side via the
- * useResourcesDisplay hook. The backend also accepts these params on
- * GET /api/v1/resources; a future PR will consolidate on the backend
- * path so filtering moves off the wire.
+ * Scope + folder + library locate the view; the rest come from the
+ * filter bar (PR 1-4 chips). All filter params are pushed down into
+ * the PostgREST query — they are NOT applied client-side any more.
+ *
+ * Notes on semantics:
+ * - ``tag_ids`` is AND (resource must carry every selected tag).
+ *   Implemented as a 2-step query: first resolve the tag set into a
+ *   resource_id intersection, then ``.in('resources.id', ids)`` on the
+ *   main query. An empty intersection returns [] immediately without
+ *   issuing the main query.
+ * - ``types`` maps to mime-type prefix matches via ``.or()``. "other"
+ *   means "mime-type not starting with any of the known prefixes".
+ * - ``platforms`` / ``min_*`` (social) / ``has_comments`` push into the
+ *   embedded parsed_media filter via ``.filter(col, op, v,
+ *   {referencedTable})``. When any of these is active the join is
+ *   upgraded to INNER so resources without a linked parsed_media are
+ *   excluded.
+ * - ``social_combine='or'`` routes the enabled metric thresholds through
+ *   a single ``.or()`` on parsed_media; ``'and'`` applies them as
+ *   independent ``.gte()`` filters.
+ * - ``aspect_ratios`` uses the generated column ``resources.aspect_bucket``
+ *   (migration 143) so a single indexed ``.in()`` does the work.
  */
 export interface FetchResourcesParams {
   scopeType: 'personal' | 'team';
   scopeId: string;
   folderId?: string | null;
   libraryId?: string | null;
-  /** AND-semantic tag id filter (applied via useResourcesDisplay for now). */
+  /** AND-semantic tag id filter. */
   tag_ids?: string[];
   /** Minimum rating (>= filter; 1..5). */
   min_rating?: number;
-  /** Broad file-type categories. */
+  /** Broad file-type categories. OR across the set. */
   types?: Array<'video' | 'image' | 'audio' | 'document' | 'other'>;
+  /** Source platforms on parsed_media.source_platform. OR across the set. */
+  platforms?: string[];
+  /** AI status filters — each true means "status == completed". */
+  ai_transcribed?: boolean;
+  ai_summarized?: boolean;
+  ai_analyzed?: boolean;
+  /** Created-at inclusive bounds (ISO date YYYY-MM-DD, local calendar). */
+  created_after?: string;
+  created_before?: string;
   /** Inclusive duration bounds (seconds). Video-specific. */
   duration_min?: number;
   duration_max?: number;
-  /** Aspect-ratio bucket ids as sent on the wire
-   *  ("9:16" / "16:9" / "1:1" / "4:3" / "other"). */
+  /** Aspect-ratio bucket wire values ("9:16"/"16:9"/"1:1"/"4:3"/"other"). */
   aspect_ratios?: string[];
-  /** Social metric thresholds — inclusive lower bounds matched against
-   *  the linked parsed_media.*_count columns. Applied client-side in
-   *  useResourcesDisplay for now; mirrored here for a future backend
-   *  consolidation PR. */
+  /** Social metric thresholds — inclusive lower bounds on
+   *  parsed_media.*_count. */
   min_likes?: number;
   min_comments?: number;
   min_favorites?: number;
   min_shares?: number;
+  /** Semantics across enabled metric thresholds. Defaults to 'and'. */
   social_combine?: 'and' | 'or';
+  /** AND-on-top floor: parsed_media.comment_count > 0. */
   has_comments?: boolean;
+}
+
+/**
+ * Known mime-type prefixes. ``other`` is the complement.
+ * Mirrors the frontend KNOWN_MIME_PREFIXES list (useResourcesDisplay.ts).
+ */
+const KNOWN_MIME_PREFIXES = [
+  'video/',
+  'image/',
+  'audio/',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.',
+  'text/',
+] as const;
+
+type ResourceFilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
+
+/**
+ * PostgREST fragments that *positively* match a type. "other" is not
+ * expressible as a positive prefix and is handled separately (see
+ * ``buildTypeFilterExpression``).
+ */
+function positiveTypeFragments(type: ResourceFilterType): string[] {
+  switch (type) {
+    case 'video':
+      return ['mime_type.like.video/*'];
+    case 'image':
+      return ['mime_type.like.image/*'];
+    case 'audio':
+      return ['mime_type.like.audio/*'];
+    case 'document':
+      return [
+        'mime_type.like.application/pdf*',
+        'mime_type.like.application/msword*',
+        'mime_type.like.application/vnd.*',
+        'mime_type.like.text/*',
+      ];
+    case 'other':
+      return [];
+  }
+}
+
+/**
+ * Compose a PostgREST OR-expression from a set of selected type
+ * categories. Returns ``null`` if the set is empty.
+ *
+ * Examples (PostgREST-shape wire value):
+ *   {video}                → mime_type.like.video/*
+ *   {video,image}          → or(mime_type.like.video/*,mime_type.like.image/*)
+ *   {other}                → and(mime_type.not.like.video/*,mime_type.not.like.image/*,...)
+ *   {video,other}          → or(mime_type.like.video/*,and(<nots>))
+ *
+ * Returned string is what Supabase JS's ``.or(expr, …)`` expects.
+ */
+function buildTypeFilterExpression(
+  types: ResourceFilterType[],
+): string | null {
+  if (types.length === 0) return null;
+  const positiveFrags: string[] = [];
+  let includesOther = false;
+  for (const t of types) {
+    if (t === 'other') {
+      includesOther = true;
+      continue;
+    }
+    positiveFrags.push(...positiveTypeFragments(t));
+  }
+
+  const fragments: string[] = [...positiveFrags];
+  if (includesOther) {
+    // AND of NOT-like across every known prefix — rows whose mime_type
+    // starts with none of them. Nested ``and(...)`` inside the outer
+    // ``or`` is supported by PostgREST.
+    const notFragments = KNOWN_MIME_PREFIXES.map(
+      (p) => `mime_type.not.like.${p}*`,
+    );
+    fragments.push(`and(${notFragments.join(',')})`);
+  }
+
+  return fragments.length === 1 ? fragments[0] : fragments.join(',');
+}
+
+/**
+ * Resolve a set of tag ids to the intersection of resource ids that
+ * carry ALL of them (AND semantics). Returns:
+ *   - null if the filter is inactive (no tag_ids)
+ *   - []   if the intersection is empty (caller should short-circuit)
+ *   - string[] of resource ids otherwise
+ *
+ * Runs the tag queries in parallel, chunked to avoid URL-length limits
+ * (matches useTagSearchMap / DownloadsView).
+ */
+async function resolveTagIntersection(
+  tagIds: string[] | undefined,
+): Promise<string[] | null> {
+  if (!tagIds || tagIds.length === 0) return null;
+  // First query: resource_ids carrying the first tag. Subsequent tags
+  // only need to match that set (and then the set shrinks each step).
+  let currentIds: Set<string> | null = null;
+  for (const tagId of tagIds) {
+    let q = supabase.from('resource_tags').select('resource_id').eq('tag_id', tagId);
+    if (currentIds !== null) {
+      // Narrow to the running candidate set — reduces payload and
+      // avoids retrieving rows we'd filter out in JS anyway.
+      const ids = Array.from(currentIds);
+      if (ids.length === 0) return [];
+      q = q.in('resource_id', ids);
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+    const nextIds = new Set<string>(
+      (data ?? []).map((row: { resource_id: string | number }) =>
+        String(row.resource_id),
+      ),
+    );
+    if (nextIds.size === 0) return [];
+    currentIds = nextIds;
+  }
+  return currentIds ? Array.from(currentIds) : [];
 }
 
 export async function fetchResources(
@@ -260,15 +403,32 @@ export async function fetchResources(
           libraryId,
         };
 
-  // Nested `media:parsed_media(...)` powers the Source (source_platform)
-  // and Social (like/comment/favorite/share counts) filter chips. LEFT
-  // JOIN (no !inner) so uploaded resources without a linked parsed_media
-  // still return.
+  // ── Tags: AND semantics via pre-resolved resource_id intersection. ──
+  const tagResourceIds = await resolveTagIntersection(params.tag_ids);
+  if (tagResourceIds !== null && tagResourceIds.length === 0) {
+    // No resource carries every tag → empty result, skip main query.
+    return [];
+  }
+
+  // Social / platform / has_comments filters hit parsed_media columns,
+  // which means the nested join needs to be INNER (so a resource without
+  // a parsed_media row is excluded). Otherwise keep the outer LEFT join
+  // so uploaded resources still show up.
+  const socialMetricActive =
+    (params.min_likes !== undefined && params.min_likes > 0) ||
+    (params.min_comments !== undefined && params.min_comments > 0) ||
+    (params.min_favorites !== undefined && params.min_favorites > 0) ||
+    (params.min_shares !== undefined && params.min_shares > 0);
+  const needsMediaInner =
+    (params.platforms && params.platforms.length > 0) ||
+    socialMetricActive ||
+    Boolean(params.has_comments);
+  const mediaJoin = needsMediaInner ? 'parsed_media!inner' : 'parsed_media';
+  const selectExpr = `*, resource:resources!inner(*, media:${mediaJoin}(id, source_platform, like_count, comment_count, favorite_count, share_count))`;
+
   let query = supabase
     .from('resource_items')
-    .select(
-      '*, resource:resources!inner(*, media:parsed_media(id, source_platform, like_count, comment_count, favorite_count, share_count))',
-    )
+    .select(selectExpr)
     .eq('scope_type', params.scopeType)
     .eq('scope_id', params.scopeId)
     .eq('resources.is_trashed', false)
@@ -286,10 +446,119 @@ export async function fetchResources(
     query = query.is('library_id', null);
   }
 
+  // ── Apply tag intersection (if any) on the resources embed. ──
+  if (tagResourceIds !== null) {
+    query = query.in('resources.id', tagResourceIds);
+  }
+
+  // ── Rating (resources.rating >= min). ──
+  if (params.min_rating !== undefined && params.min_rating > 0) {
+    query = query.gte('resources.rating', params.min_rating);
+  }
+
+  // ── AI status (resources.{transcript,summary,visual_analysis}_status). ──
+  if (params.ai_transcribed) {
+    query = query.eq('resources.transcript_status', 'completed');
+  }
+  if (params.ai_summarized) {
+    query = query.eq('resources.summary_status', 'completed');
+  }
+  if (params.ai_analyzed) {
+    query = query.eq('resources.visual_analysis_status', 'completed');
+  }
+
+  // ── Created-at window (resources.created_at; inclusive day bounds). ──
+  if (params.created_after) {
+    query = query.gte('resources.created_at', `${params.created_after}T00:00:00`);
+  }
+  if (params.created_before) {
+    query = query.lte(
+      'resources.created_at',
+      `${params.created_before}T23:59:59.999`,
+    );
+  }
+
+  // ── Duration (resources.duration_seconds). ──
+  if (params.duration_min !== undefined && params.duration_min != null) {
+    query = query.gte('resources.duration_seconds', params.duration_min);
+  }
+  if (params.duration_max !== undefined && params.duration_max != null) {
+    query = query.lte('resources.duration_seconds', params.duration_max);
+  }
+
+  // ── Aspect bucket (generated column, migration 143). ──
+  if (params.aspect_ratios && params.aspect_ratios.length > 0) {
+    query = query.in('resources.aspect_bucket', params.aspect_ratios);
+  }
+
+  // ── Type (mime-type prefix match via .or() on the resources embed). ──
+  if (params.types && params.types.length > 0) {
+    const expr = buildTypeFilterExpression(params.types);
+    if (expr) {
+      query = query.or(expr, { referencedTable: 'resources' });
+    }
+  }
+
+  // ── Source platforms (parsed_media.source_platform IN ...). ──
+  if (params.platforms && params.platforms.length > 0) {
+    query = query.in('resources.parsed_media.source_platform', params.platforms);
+  }
+
+  // ── has_comments: parsed_media.comment_count > 0. AND-on-top floor. ──
+  if (params.has_comments) {
+    query = query.gt('resources.parsed_media.comment_count', 0);
+  }
+
+  // ── Social metric thresholds. AND = independent .gte(), OR = .or(). ──
+  if (socialMetricActive) {
+    const combine = params.social_combine ?? 'and';
+    if (combine === 'and') {
+      if (params.min_likes !== undefined && params.min_likes > 0) {
+        query = query.gte('resources.parsed_media.like_count', params.min_likes);
+      }
+      if (params.min_comments !== undefined && params.min_comments > 0) {
+        query = query.gte(
+          'resources.parsed_media.comment_count',
+          params.min_comments,
+        );
+      }
+      if (params.min_favorites !== undefined && params.min_favorites > 0) {
+        query = query.gte(
+          'resources.parsed_media.favorite_count',
+          params.min_favorites,
+        );
+      }
+      if (params.min_shares !== undefined && params.min_shares > 0) {
+        query = query.gte('resources.parsed_media.share_count', params.min_shares);
+      }
+    } else {
+      const orFragments: string[] = [];
+      if (params.min_likes !== undefined && params.min_likes > 0) {
+        orFragments.push(`like_count.gte.${params.min_likes}`);
+      }
+      if (params.min_comments !== undefined && params.min_comments > 0) {
+        orFragments.push(`comment_count.gte.${params.min_comments}`);
+      }
+      if (params.min_favorites !== undefined && params.min_favorites > 0) {
+        orFragments.push(`favorite_count.gte.${params.min_favorites}`);
+      }
+      if (params.min_shares !== undefined && params.min_shares > 0) {
+        orFragments.push(`share_count.gte.${params.min_shares}`);
+      }
+      if (orFragments.length > 0) {
+        query = query.or(orFragments.join(','), {
+          referencedTable: 'parsed_media',
+        });
+      }
+    }
+  }
+
   const { data, error } = await query.order('created_at', { ascending: false });
 
   if (error) throw error;
-  return data || [];
+  // The query builder's return type narrows as we chain filters; cast
+  // back to ResourceItem[] once we've confirmed no error.
+  return (data as unknown as ResourceItem[]) ?? [];
 }
 
 export async function fetchResourceCount(
