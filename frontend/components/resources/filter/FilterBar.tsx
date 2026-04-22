@@ -13,9 +13,9 @@ import { useTranslation } from 'react-i18next';
 import {
   Calendar,
   Clock,
-  Filter,
   Globe,
   Layers,
+  ListFilterPlus,
   RectangleHorizontal,
   Sparkles,
   Star,
@@ -278,7 +278,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         </FilterChip>
       ))}
 
-      {/* Filter config button */}
+      {/* Filter config button — a funnel-plus to signal "configure / add
+          filters" (vs the plain funnel in the search row, which toggles
+          the whole bar's visibility). */}
       <div className="relative">
         <button
           type="button"
@@ -295,7 +297,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           aria-haspopup="dialog"
           aria-expanded={isConfigOpen}
         >
-          <Filter size={12} />
+          <ListFilterPlus size={12} />
         </button>
         {isConfigOpen && (
           <FilterConfigPanel
