@@ -10,10 +10,17 @@ import { useTranslation } from 'react-i18next';
 import { ArrowDown, ArrowUp, Minus, Plus } from 'lucide-react';
 
 import type { ChipId } from './types';
+import { filterVisibleChips } from './chipVisibility';
 
 export interface FilterConfigPanelProps {
   pinnedChips: ChipId[];
   availableChips: ChipId[];
+  /** Optional per-scope allowlist. When provided, the AVAILABLE section
+   *  only lists chips that appear in this set — chips outside the
+   *  allowlist are hidden from discovery. A user's persisted pin state
+   *  for a hidden chip is preserved untouched in localStorage; the chip
+   *  simply isn't rendered in this scope. Undefined = no filtering. */
+  allowedChips?: ReadonlyArray<ChipId>;
   chipLabel: (id: ChipId) => string;
   onPin: (id: ChipId) => void;
   onUnpin: (id: ChipId) => void;
@@ -24,6 +31,7 @@ export interface FilterConfigPanelProps {
 export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
   pinnedChips,
   availableChips,
+  allowedChips,
   chipLabel,
   onPin,
   onUnpin,
@@ -32,6 +40,13 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
 }) => {
   const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Apply scope allowlist. When provided, hide any chip outside the set
+  // from both Pinned (a chip the user pinned in another scope is still
+  // remembered in localStorage but not shown here) and Available (so
+  // the scope doesn't advertise irrelevant filters).
+  const visiblePinned = filterVisibleChips(pinnedChips, allowedChips);
+  const visibleAvailable = filterVisibleChips(availableChips, allowedChips);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -60,14 +75,14 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
       <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
         {t('resources.filter.pinned', 'Pinned')}
       </div>
-      {pinnedChips.length === 0 && (
+      {visiblePinned.length === 0 && (
         <div className="px-3 py-2 text-xs text-zinc-500">
           {t('resources.filter.noneYet', 'None yet')}
         </div>
       )}
-      {pinnedChips.map((id, idx) => {
+      {visiblePinned.map((id, idx) => {
         const canMoveUp = idx > 0;
-        const canMoveDown = idx < pinnedChips.length - 1;
+        const canMoveDown = idx < visiblePinned.length - 1;
         return (
           <div
             key={id}
@@ -110,12 +125,12 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
       <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
         {t('resources.filter.available', 'Available')}
       </div>
-      {availableChips.length === 0 && (
+      {visibleAvailable.length === 0 && (
         <div className="px-3 py-2 text-xs text-zinc-500">
           {t('resources.filter.allPinned', 'All filters pinned')}
         </div>
       )}
-      {availableChips.map((id) => (
+      {visibleAvailable.map((id) => (
         <div
           key={id}
           className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800/60 rounded-md mx-1"

@@ -241,6 +241,19 @@ export const ResourcesViewInner: React.FC = () => {
   // ─── Filter bar (pinnable chip toolbar) ───────────────
   const filterBarConfig = useFilterBarConfig();
 
+  // Scope-aware chip allowlist. Uploaded files have no download
+  // `source_platform` and no social-graph counts (likes / comments /
+  // favorites / shares), so those two chips would be permanently empty
+  // in this scope. Hide them to avoid dead controls. Downloads view is
+  // rendered by DownloadsView which owns its own FilterBar and does
+  // not pass an allowlist — it sees the full chip set.
+  const uploadsAllowedChips = useMemo<ReadonlyArray<
+    import('./resources/filter/types').ChipId
+  >>(
+    () => ['tags', 'rating', 'type', 'ai_status', 'date_added', 'duration', 'aspect'],
+    [],
+  );
+
   // Distinct source platforms observed across the currently-loaded
   // resource set. Feeds the Source chip's option list so rare
   // platforms still appear even if absent from the hardcoded known list.
@@ -380,6 +393,7 @@ export const ResourcesViewInner: React.FC = () => {
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
     allSelectableIds, sortOptions,
     filterBarConfig, allTags, availablePlatforms,
+    allowedChips: uploadsAllowedChips,
     currentSortLabel,
     onQueryChange: handleResourceQueryChange, onAISearch: handleResourceAISearch,
     onSearchClear: handleResourceSearchClear, isAISearching, uploading,
@@ -410,6 +424,7 @@ export const ResourcesViewInner: React.FC = () => {
   }), [
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
     allSelectableIds, sortOptions, filterBarConfig, allTags, availablePlatforms,
+    uploadsAllowedChips,
     currentSortLabel, handleResourceQueryChange, handleResourceAISearch, handleResourceSearchClear,
     isAISearching, uploading, upload.overallProgress, fileInputRef, folderInputRef, canUpload,
     dragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop,

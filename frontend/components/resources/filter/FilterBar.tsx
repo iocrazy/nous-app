@@ -30,6 +30,7 @@ import type { UseFilterBarConfigReturn } from '../../../hooks/useFilterBarConfig
 import type { ResourceFilterType } from '../resourceFilters';
 import type { ChipId, DatePresetId, DurationPresetId, SocialMetric } from './types';
 import { SOCIAL_METRICS } from './types';
+import { filterVisibleChips } from './chipVisibility';
 import { FilterChip } from './FilterChip';
 import { FilterConfigPanel } from './FilterConfigPanel';
 import { RatingFilterDropdown } from './RatingFilterDropdown';
@@ -54,6 +55,15 @@ export interface FilterBarProps {
    *  enrich the Source chip's option list beyond the hardcoded known
    *  platforms. Optional — defaults to empty. */
   availablePlatforms?: string[];
+  /** Optional per-scope allowlist. When provided, chips outside this
+   *  set are hidden from the toolbar and from the filter-settings
+   *  popover's AVAILABLE section. A user's persisted pin state for a
+   *  hidden chip is preserved in localStorage — the chip just isn't
+   *  rendered in scopes that disallow it (e.g. Source + Social are
+   *  hidden in "My Uploads" because uploaded files have no download
+   *  platform or like counts). Undefined = no filtering (all chips
+   *  visible). */
+  allowedChips?: ReadonlyArray<ChipId>;
 }
 
 type OpenTarget = { kind: 'chip'; id: ChipId } | { kind: 'config' } | null;
@@ -112,6 +122,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   config,
   allTags,
   availablePlatforms = [],
+  allowedChips,
 }) => {
   const { t } = useTranslation();
   const [openTarget, setOpenTarget] = useState<OpenTarget>(null);
@@ -129,6 +140,13 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     clearAll,
     isChipActive,
   } = config;
+
+  // Subset of pinnedChips that's actually rendered in the toolbar.
+  // Disallowed chips stay pinned in localStorage but don't show here.
+  const visiblePinnedChips = useMemo(
+    () => filterVisibleChips(pinnedChips, allowedChips),
+    [pinnedChips, allowedChips],
+  );
 
   // Static icon registry — each chip carries a distinct lucide icon so the
   // bar reads at a glance even when no chip is active.
@@ -327,7 +345,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap" data-testid="resources-filter-bar">
-      {pinnedChips.map((id) => (
+      {visiblePinnedChips.map((id) => (
         <FilterChip
           key={id}
           chipId={id}
@@ -369,6 +387,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           <FilterConfigPanel
             pinnedChips={pinnedChips}
             availableChips={availableChips}
+            allowedChips={allowedChips}
             chipLabel={chipLabel}
             onPin={pinChip}
             onUnpin={unpinChip}

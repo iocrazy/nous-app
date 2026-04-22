@@ -21,17 +21,19 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
 }) => {
   const { t } = useTranslation();
 
+  // Width hugs the widest option (≥ plus 5 stars + Check); previously
+  // a fixed w-44 left a big empty strip on the right of each row.
   return (
-    <div className="w-44 py-1" role="menu" aria-label="Rating filter">
+    <div className="py-1 w-max min-w-[9rem]" role="menu" aria-label="Rating filter">
       <button
         type="button"
         onClick={() => onChange(0)}
-        className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
+        className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-3 transition-colors ${
           minRating === 0 ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800'
         }`}
       >
-        <span>{t('resources.filter.anyRating', 'Any rating')}</span>
-        {minRating === 0 && <Check size={12} className="text-indigo-400" />}
+        <span className="flex-1">{t('resources.filter.anyRating', 'Any rating')}</span>
+        {minRating === 0 && <Check size={12} className="text-indigo-400 shrink-0" />}
       </button>
       <div className="mx-2.5 my-1 border-t border-zinc-700/60" />
       {CHOICES.map((value) => {
@@ -41,7 +43,7 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
             key={value}
             type="button"
             onClick={() => onChange(value)}
-            className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
+            className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-3 transition-colors ${
               active ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800'
             }`}
           >
@@ -56,7 +58,7 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
                 />
               ))}
             </span>
-            {active && <Check size={12} className="text-indigo-400" />}
+            {active && <Check size={12} className="text-indigo-400 shrink-0 ml-auto" />}
           </button>
         );
       })}
