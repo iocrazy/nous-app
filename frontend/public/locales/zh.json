@@ -396,6 +396,9 @@
       "tags": "标签",
       "rating": "评分",
       "type": "类型",
+      "source": "来源",
+      "aiStatus": "AI",
+      "dateAdded": "日期",
       "filterConfig": "筛选设置",
       "pinned": "已固定",
       "available": "可用",
@@ -407,6 +410,7 @@
       "clearSelection": "清除选择",
       "noFilters": "未应用筛选",
       "noTags": "暂无标签",
+      "noSources": "暂无来源",
       "noneYet": "暂无",
       "allPinned": "所有筛选已固定",
       "anyRating": "任意评分",
@@ -414,6 +418,21 @@
         "system": "系统",
         "user": "用户",
         "time": "时间"
+      },
+      "ai": {
+        "transcribed": "已转录",
+        "summarized": "已摘要",
+        "analyzed": "已分析"
+      },
+      "date": {
+        "today": "今天",
+        "thisWeek": "本周",
+        "thisMonth": "本月",
+        "last30days": "最近 30 天",
+        "last90days": "最近 90 天",
+        "custom": "自定义范围",
+        "from": "起",
+        "to": "止"
       }
     },
     "modifiedAt": "修改时间",

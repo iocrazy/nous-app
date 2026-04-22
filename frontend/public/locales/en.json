@@ -396,6 +396,9 @@
       "tags": "Tags",
       "rating": "Rating",
       "type": "Type",
+      "source": "Source",
+      "aiStatus": "AI",
+      "dateAdded": "Date",
       "filterConfig": "Filter Settings",
       "pinned": "Pinned",
       "available": "Available",
@@ -407,6 +410,7 @@
       "clearSelection": "Clear selection",
       "noFilters": "No filters applied",
       "noTags": "No tags yet",
+      "noSources": "No sources yet",
       "noneYet": "None yet",
       "allPinned": "All filters pinned",
       "anyRating": "Any rating",
@@ -414,6 +418,21 @@
         "system": "System",
         "user": "User",
         "time": "Time"
+      },
+      "ai": {
+        "transcribed": "Transcribed",
+        "summarized": "Summarized",
+        "analyzed": "Analyzed"
+      },
+      "date": {
+        "today": "Today",
+        "thisWeek": "This week",
+        "thisMonth": "This month",
+        "last30days": "Last 30 days",
+        "last90days": "Last 90 days",
+        "custom": "Custom range",
+        "from": "From",
+        "to": "To"
       }
     },
     "modifiedAt": "Modified",
