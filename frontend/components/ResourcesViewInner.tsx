@@ -241,6 +241,18 @@ export const ResourcesViewInner: React.FC = () => {
   // ─── Filter bar (pinnable chip toolbar) ───────────────
   const filterBarConfig = useFilterBarConfig();
 
+  // Distinct source platforms observed across the currently-loaded
+  // resource set. Feeds the Source chip's option list so rare
+  // platforms still appear even if absent from the hardcoded known list.
+  const availablePlatforms = useMemo<string[]>(() => {
+    const seen = new Set<string>();
+    for (const item of resources) {
+      const p = item.resource?.media?.source_platform;
+      if (typeof p === 'string' && p) seen.add(p);
+    }
+    return Array.from(seen).sort();
+  }, [resources]);
+
   // ─── Display computations (filter/sort/breadcrumb/recycle) ──────────
   const {
     recycleItems, recycleSubFolders, trashedFolderPreviews,
@@ -367,7 +379,7 @@ export const ResourcesViewInner: React.FC = () => {
   const gridProps = useMemo(() => ({
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
     allSelectableIds, sortOptions,
-    filterBarConfig, allTags,
+    filterBarConfig, allTags, availablePlatforms,
     currentSortLabel,
     onQueryChange: handleResourceQueryChange, onAISearch: handleResourceAISearch,
     onSearchClear: handleResourceSearchClear, isAISearching, uploading,
@@ -397,7 +409,7 @@ export const ResourcesViewInner: React.FC = () => {
     onTouchDragEnd: handleTouchDragEnd,
   }), [
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
-    allSelectableIds, sortOptions, filterBarConfig, allTags,
+    allSelectableIds, sortOptions, filterBarConfig, allTags, availablePlatforms,
     currentSortLabel, handleResourceQueryChange, handleResourceAISearch, handleResourceSearchClear,
     isAISearching, uploading, upload.overallProgress, fileInputRef, folderInputRef, canUpload,
     dragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop,

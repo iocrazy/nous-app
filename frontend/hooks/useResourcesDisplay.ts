@@ -11,6 +11,7 @@ import type { Folder, ResourceItem, SmartCollection, Library } from '../types';
 import type { SortBy } from '../contexts/ResourcesContext';
 import type { BreadcrumbSegment } from '../components/Breadcrumb';
 import type { ChipValuesMap } from '../components/resources/filter/types';
+import { datePresetToRange } from '../components/resources/filter/dateUtils';
 
 export type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
 
@@ -179,6 +180,50 @@ export function useResourcesDisplay({
         const tagSet = resourceTagIdsMap[rid];
         if (!tagSet || tagSet.size === 0) return false;
         return selectedTagIds.every((id) => tagSet.has(id));
+      });
+    }
+
+    // Source chip (OR semantics across platforms; join via resource.media).
+    const selectedPlatforms = chipValues.source.platforms;
+    if (selectedPlatforms.length > 0) {
+      const platformSet = new Set(selectedPlatforms);
+      items = items.filter((item) => {
+        const platform = item.resource?.media?.source_platform;
+        return typeof platform === 'string' && platformSet.has(platform);
+      });
+    }
+
+    // AI status chip (AND semantics — every checked flag must equal
+    // 'completed' on the resource).
+    const aiFlags = chipValues.ai_status;
+    if (aiFlags.transcribed || aiFlags.summarized || aiFlags.analyzed) {
+      items = items.filter((item) => {
+        const r = item.resource;
+        if (!r) return false;
+        if (aiFlags.transcribed && r.transcript_status !== 'completed') return false;
+        if (aiFlags.summarized && r.summary_status !== 'completed') return false;
+        if (aiFlags.analyzed && r.visual_analysis_status !== 'completed') return false;
+        return true;
+      });
+    }
+
+    // Date added chip (inclusive, local-calendar comparison).
+    const dateRange = datePresetToRange(chipValues.date_added);
+    if (dateRange.after || dateRange.before) {
+      const afterTs = dateRange.after
+        ? new Date(`${dateRange.after}T00:00:00`).getTime()
+        : null;
+      const beforeTs = dateRange.before
+        ? new Date(`${dateRange.before}T23:59:59.999`).getTime()
+        : null;
+      items = items.filter((item) => {
+        const raw = item.resource?.created_at ?? item.created_at;
+        if (!raw) return false;
+        const ts = new Date(raw).getTime();
+        if (Number.isNaN(ts)) return false;
+        if (afterTs !== null && ts < afterTs) return false;
+        if (beforeTs !== null && ts > beforeTs) return false;
+        return true;
       });
     }
 

@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   ChipId,
   ChipValuesMap,
+  DatePresetId,
   FetchResourcesFilterParams,
 } from '../components/resources/filter/types';
 import {
@@ -18,8 +19,20 @@ import {
   DEFAULT_CHIP_VALUES,
   DEFAULT_PINNED_CHIPS,
 } from '../components/resources/filter/types';
+import { datePresetToRange } from '../components/resources/filter/dateUtils';
 
 const STORAGE_KEY = 'resourceFilterConfig';
+
+const DATE_PRESETS: ReadonlyArray<DatePresetId> = [
+  'today',
+  'thisWeek',
+  'thisMonth',
+  'last30days',
+  'last90days',
+  'custom',
+] as const;
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface PersistedShape {
   pinnedChips: ChipId[];
@@ -37,12 +50,12 @@ const DEFAULT_STATE: PersistedShape = {
  * release doesn't leave users with a broken toolbar.
  */
 function loadFromStorage(): PersistedShape {
-  if (typeof window === 'undefined') return { ...DEFAULT_STATE };
+  if (typeof window === 'undefined') return cloneDefaults();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_STATE };
+    if (!raw) return cloneDefaults();
     const parsed = JSON.parse(raw) as Partial<PersistedShape> | null;
-    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_STATE };
+    if (!parsed || typeof parsed !== 'object') return cloneDefaults();
 
     const validIds = new Set<ChipId>(CHIP_IDS);
     const pinnedChips = Array.isArray(parsed.pinnedChips)
@@ -51,20 +64,22 @@ function loadFromStorage(): PersistedShape {
         ) as ChipId[])
       : [...DEFAULT_PINNED_CHIPS];
 
+    const srcValues = (parsed.chipValues ?? {}) as Partial<ChipValuesMap>;
+
     const chipValues: ChipValuesMap = {
       tags: {
-        tag_ids: Array.isArray(parsed.chipValues?.tags?.tag_ids)
-          ? (parsed.chipValues!.tags!.tag_ids.filter(
+        tag_ids: Array.isArray(srcValues.tags?.tag_ids)
+          ? (srcValues.tags!.tag_ids.filter(
               (id) => typeof id === 'string',
             ) as string[])
           : [],
       },
       rating: {
-        min_rating: clampRating(parsed.chipValues?.rating?.min_rating),
+        min_rating: clampRating(srcValues.rating?.min_rating),
       },
       type: {
-        types: Array.isArray(parsed.chipValues?.type?.types)
-          ? (parsed.chipValues!.type!.types.filter(
+        types: Array.isArray(srcValues.type?.types)
+          ? (srcValues.type!.types.filter(
               (t) =>
                 t === 'video' ||
                 t === 'image' ||
@@ -74,13 +89,40 @@ function loadFromStorage(): PersistedShape {
             ) as ChipValuesMap['type']['types'])
           : [],
       },
+      source: {
+        platforms: Array.isArray(srcValues.source?.platforms)
+          ? (srcValues.source!.platforms.filter(
+              (p) => typeof p === 'string' && p.length > 0,
+            ) as string[])
+          : [],
+      },
+      ai_status: {
+        transcribed: Boolean(srcValues.ai_status?.transcribed),
+        summarized: Boolean(srcValues.ai_status?.summarized),
+        analyzed: Boolean(srcValues.ai_status?.analyzed),
+      },
+      date_added: sanitizeDateAdded(srcValues.date_added),
     };
 
     return { pinnedChips, chipValues };
   } catch (err) {
     console.error('[useFilterBarConfig] Failed to parse persisted state:', err);
-    return { ...DEFAULT_STATE };
+    return cloneDefaults();
   }
+}
+
+function cloneDefaults(): PersistedShape {
+  return {
+    pinnedChips: [...DEFAULT_PINNED_CHIPS],
+    chipValues: {
+      tags: { ...DEFAULT_CHIP_VALUES.tags },
+      rating: { ...DEFAULT_CHIP_VALUES.rating },
+      type: { ...DEFAULT_CHIP_VALUES.type },
+      source: { ...DEFAULT_CHIP_VALUES.source, platforms: [] },
+      ai_status: { ...DEFAULT_CHIP_VALUES.ai_status },
+      date_added: { ...DEFAULT_CHIP_VALUES.date_added },
+    },
+  };
 }
 
 function clampRating(v: unknown): number {
@@ -88,6 +130,25 @@ function clampRating(v: unknown): number {
   if (v < 0) return 0;
   if (v > 5) return 5;
   return Math.floor(v);
+}
+
+function sanitizeDateAdded(
+  v: Partial<ChipValuesMap['date_added']> | undefined,
+): ChipValuesMap['date_added'] {
+  const preset =
+    typeof v?.preset === 'string' &&
+    (DATE_PRESETS as ReadonlyArray<string>).includes(v.preset)
+      ? (v.preset as DatePresetId)
+      : null;
+  const customAfter =
+    typeof v?.customAfter === 'string' && ISO_DATE_RE.test(v.customAfter)
+      ? v.customAfter
+      : null;
+  const customBefore =
+    typeof v?.customBefore === 'string' && ISO_DATE_RE.test(v.customBefore)
+      ? v.customBefore
+      : null;
+  return { preset, customAfter, customBefore };
 }
 
 /** Detect whether a chip carries an active (non-default) value. */
@@ -99,6 +160,20 @@ function isChipActiveById(id: ChipId, values: ChipValuesMap): boolean {
       return values.rating.min_rating > 0;
     case 'type':
       return values.type.types.length > 0;
+    case 'source':
+      return values.source.platforms.length > 0;
+    case 'ai_status':
+      return (
+        values.ai_status.transcribed ||
+        values.ai_status.summarized ||
+        values.ai_status.analyzed
+      );
+    case 'date_added': {
+      const d = values.date_added;
+      if (!d.preset) return false;
+      if (d.preset !== 'custom') return true;
+      return Boolean(d.customAfter || d.customBefore);
+    }
     default:
       return false;
   }
@@ -155,7 +230,11 @@ export function useFilterBarConfig(): UseFilterBarConfigReturn {
   );
 
   const activeFilterCount = useMemo(
-    () => CHIP_IDS.reduce((sum, id) => sum + (isChipActiveById(id, state.chipValues) ? 1 : 0), 0),
+    () =>
+      CHIP_IDS.reduce(
+        (sum, id) => sum + (isChipActiveById(id, state.chipValues) ? 1 : 0),
+        0,
+      ),
     [state.chipValues],
   );
 
@@ -223,6 +302,15 @@ export function useFilterBarConfig(): UseFilterBarConfigReturn {
     if (state.chipValues.type.types.length > 0) {
       out.types = [...state.chipValues.type.types];
     }
+    if (state.chipValues.source.platforms.length > 0) {
+      out.platforms = [...state.chipValues.source.platforms];
+    }
+    if (state.chipValues.ai_status.transcribed) out.ai_transcribed = true;
+    if (state.chipValues.ai_status.summarized) out.ai_summarized = true;
+    if (state.chipValues.ai_status.analyzed) out.ai_analyzed = true;
+    const range = datePresetToRange(state.chipValues.date_added);
+    if (range.after) out.created_after = range.after;
+    if (range.before) out.created_before = range.before;
     return out;
   }, [state.chipValues]);
 
