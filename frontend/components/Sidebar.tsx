@@ -153,28 +153,31 @@ const Logo: React.FC<{ collapsed?: boolean }> = ({ collapsed = false }) => (
 );
 
 // ---------------------------------------------------------------------------
-// Bottom collapse button — sits inside the sidebar bottom-left, always visible.
-// Mirrors the Details panel's collapse affordance (always-on floating tab) so the
-// two long-lived panels feel consistent. Placed inline at the bottom of the sidebar,
-// left-aligned, no divider above it.
+// Floating collapse tab — mirrors the Details panel's affordance (bottom, outside
+// the panel's outer edge). For the left sidebar that means sticking out to the
+// right at -right-10 bottom-8, with a right-rounded shell. Always visible so users
+// can collapse/expand without hunting.
+//
+// Details panel reference (DownloadInfoPanel.tsx:87):
+//   -left-10 bottom-8 w-10 h-12 rounded-l-xl border-l border-y
+// Main sidebar (mirrored):
+//   -right-10 bottom-8 w-10 h-12 rounded-r-xl border-r border-y
 // ---------------------------------------------------------------------------
 
-const BottomCollapseButton: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({
+const FloatingCollapseTab: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({
   collapsed = false,
   onToggleCollapse,
 }) => {
   if (!onToggleCollapse) return null;
   return (
-    <div className={`pt-3 ${collapsed ? 'flex justify-center' : 'flex justify-start px-1'}`}>
-      <button
-        onClick={onToggleCollapse}
-        className="p-2 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-      </button>
-    </div>
+    <button
+      onClick={onToggleCollapse}
+      className="absolute -right-10 bottom-8 w-10 h-12 bg-zinc-900 border-r border-y border-zinc-800 rounded-r-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-colors z-10"
+      title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+    >
+      {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+    </button>
   );
 };
 
@@ -300,7 +303,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </nav>
 
-        <BottomCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+        <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
       </aside>
     );
   }
@@ -357,7 +360,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         </nav>
 
-        <BottomCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+        <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
       </aside>
     );
   }
@@ -401,7 +404,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       </nav>
 
-      <BottomCollapseButton collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+      <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
     </aside>
   );
 };
