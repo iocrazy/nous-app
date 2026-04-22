@@ -35,6 +35,7 @@ import { Folder, ResourceItem, Tag } from '../types';
 import { useResourcesContext } from '../contexts/ResourcesContext';
 import type { SortBy } from '../contexts/ResourcesContext';
 import { FilterBar } from './resources/filter/FilterBar';
+import type { ChipId } from './resources/filter/types';
 import type { UseFilterBarConfigReturn } from '../hooks/useFilterBarConfig';
 import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
 
@@ -86,6 +87,9 @@ export interface ResourceGridProps {
   /** Distinct platforms observed in the currently-loaded resource set,
    *  used to enrich the Source filter chip's options. Optional. */
   availablePlatforms?: string[];
+  /** Optional per-scope chip allowlist forwarded to FilterBar. See
+   *  FilterBarProps for semantics. Defaults to showing every chip. */
+  allowedChips?: ReadonlyArray<ChipId>;
 
   // Sort state & callbacks
   sortOptions: Array<{ value: SortBy; label: string }>;
@@ -176,6 +180,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   filterBarConfig,
   allTags,
   availablePlatforms,
+  allowedChips,
   sortOptions,
   currentSortLabel,
   onQueryChange,
@@ -610,6 +615,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
             config={filterBarConfig}
             allTags={allTags}
             availablePlatforms={availablePlatforms}
+            allowedChips={allowedChips}
           />
         )}
       </div>
