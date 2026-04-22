@@ -10,7 +10,19 @@
 
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Filter, X } from 'lucide-react';
+import {
+  Calendar,
+  Clock,
+  Filter,
+  Globe,
+  Layers,
+  RectangleHorizontal,
+  Sparkles,
+  Star,
+  Tag as TagIcon,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 
 import type { Tag } from '../../../types';
 import type { UseFilterBarConfigReturn } from '../../../hooks/useFilterBarConfig';
@@ -64,6 +76,19 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     clearAll,
     isChipActive,
   } = config;
+
+  // Static icon registry — each chip carries a distinct lucide icon so the
+  // bar reads at a glance even when no chip is active.
+  const CHIP_ICONS: Record<ChipId, LucideIcon> = {
+    tags: TagIcon,
+    rating: Star,
+    type: Layers,
+    source: Globe,
+    ai_status: Sparkles,
+    date_added: Calendar,
+    duration: Clock,
+    aspect: RectangleHorizontal,
+  };
 
   const chipLabel = useMemo(() => {
     return (id: ChipId): string => {
@@ -247,6 +272,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           onToggle={() => setOpenTarget(isChipOpen(id) ? null : { kind: 'chip', id })}
           onClose={() => setOpenTarget((prev) => (prev?.kind === 'chip' && prev.id === id ? null : prev))}
           onClear={() => clearChip(id)}
+          icon={CHIP_ICONS[id]}
         >
           {renderDropdown(id)}
         </FilterChip>
