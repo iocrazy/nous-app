@@ -11,7 +11,6 @@ import { DownloadsView } from './DownloadsView';
 import { semanticSearch, hybridSearch } from '../services/searchService';
 import type { Folder, SmartCollection } from '../types';
 import {
-  fetchResources,
   renameFolder,
   uploadNewVersion,
 } from '../services/resourceService';
@@ -44,7 +43,7 @@ export const ResourcesViewInner: React.FC = () => {
     resources, setResources, folders, childFolders, folderPreviews,
     trashedResources, trashedFolders, downloadedResources,
     libraries, setLibraries, smartFolders, setSmartFolders,
-    resourceTagNamesMap, resourceTagIdsMap, allTags, loading, setLoading, folderChain,
+    resourceTagNamesMap, allTags, loading, setLoading, folderChain,
     recycleFolderId, setRecycleFolderId, recycleFolderItems,
     pendingPermanentDelete, setPendingPermanentDelete,
     pendingBatchPermanentDelete, setPendingBatchPermanentDelete,
@@ -56,6 +55,7 @@ export const ResourcesViewInner: React.FC = () => {
     searchQuery, setSearchQuery, debouncedSearch, setDebouncedSearch,
     showInfoPanel, setShowInfoPanel, infoPanelWidth, setInfoPanelWidth,
     loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
+    reloadResources, setFilterParams,
     handleTrashResource: handleTrash, handleRestoreResource: handleRestore,
     handlePermanentDelete, confirmPermanentDelete,
     canDo, addToast, transcodingResourceIds,
@@ -116,6 +116,7 @@ export const ResourcesViewInner: React.FC = () => {
     selectedFolderId,
     selectedLibraryId,
     setResources,
+    reloadResources,
     addToast,
   });
 
@@ -213,11 +214,10 @@ export const ResourcesViewInner: React.FC = () => {
         }
       }
       await Promise.all([loadFolders(), loadChildFolders()]);
-      const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-      setResources(items);
+      await reloadResources();
       setSelectedIds(new Set());
     } catch { /* ignore */ }
-  }, [selectedLibraryId, scopeType, scopeId, selectedFolderId, loadFolders, loadChildFolders, setResources, setSelectedIds]);
+  }, [selectedLibraryId, loadFolders, loadChildFolders, reloadResources, setSelectedIds]);
 
   // ─── Touch handlers (drag, long-press, double-tap) ────
   const {
@@ -266,7 +266,21 @@ export const ResourcesViewInner: React.FC = () => {
     return Array.from(seen).sort();
   }, [resources]);
 
-  // ─── Display computations (filter/sort/breadcrumb/recycle) ──────────
+  // ─── Push filter bar params down to the server-side query. ──────────
+  // The context fetch effect re-runs whenever these change.
+  const filterParams = filterBarConfig.toFilterParams();
+  const filterParamsKey = useMemo(
+    () => JSON.stringify(filterParams),
+    [filterParams],
+  );
+  useEffect(() => {
+    setFilterParams(filterParams);
+    // filterParamsKey is the JSON fingerprint — carrying filterParams
+    // directly in the dep array would re-run every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterParamsKey, setFilterParams]);
+
+  // ─── Display computations (sort/breadcrumb/recycle; no filter) ──────
   const {
     recycleItems, recycleSubFolders, trashedFolderPreviews,
     currentItems, filteredItems, sortedItems,
@@ -276,7 +290,6 @@ export const ResourcesViewInner: React.FC = () => {
     sidebarView, resources, downloadedResources, trashedResources,
     trashedFolders, recycleFolderItems, recycleFolderId,
     childFolders, sortBy, debouncedSearch, resourceTagNamesMap,
-    resourceTagIdsMap, chipValues: filterBarConfig.chipValues,
     aiSearchMatchedMediaIds, scopeType, selectedFolderId, selectedLibraryId,
     selectedSmartFolderId, isSharedView, isRecycleView, isDownloadsView,
     smartFolders, libraries, folderChain, navigate, resPath, setRecycleFolderId,
@@ -288,7 +301,7 @@ export const ResourcesViewInner: React.FC = () => {
     resources, childFolders, sortedItems, selectedIds, allSelectableIds,
     isResourcesView, navigate, resPath,
     setResources, setSmartFolders, setSelectedIds,
-    loadFolders, loadChildFolders, addToast,
+    loadFolders, loadChildFolders, reloadResources, addToast,
   });
 
   const versionInputRef = useRef<HTMLInputElement>(null);
@@ -347,7 +360,7 @@ export const ResourcesViewInner: React.FC = () => {
     navigate, resPath, canDo,
     fileInputRef, setCreatingFolder, setLoading,
     setSelectedResource, setSelectedFolder, setShowInfoPanel,
-    setResources, addToast, loadFolders, loadChildFolders,
+    setResources, addToast, loadFolders, loadChildFolders, reloadResources,
     handleTrash, ops, versionInputRef,
   });
 
@@ -484,6 +497,7 @@ export const ResourcesViewInner: React.FC = () => {
         loadFolders={loadFolders}
         loadChildFolders={loadChildFolders}
         loadTrashedResources={loadTrashedResources}
+        reloadResources={reloadResources}
       />
 
       {/* Context Menu */}

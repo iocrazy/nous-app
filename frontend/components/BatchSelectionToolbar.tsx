@@ -10,7 +10,6 @@ import { Trash2, Move, Copy, RefreshCw, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Folder, ResourceItem } from '../types';
 import {
-  fetchResources,
   trashResources,
   restoreFolder,
   restoreResource,
@@ -38,6 +37,8 @@ interface BatchSelectionToolbarProps {
   loadFolders: () => Promise<void>;
   loadChildFolders: () => Promise<void>;
   loadTrashedResources: () => Promise<void>;
+  /** Re-fetch the current resource list honouring active filter params. */
+  reloadResources: () => Promise<void>;
 }
 
 export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
@@ -62,6 +63,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
   loadFolders,
   loadChildFolders,
   loadTrashedResources,
+  reloadResources,
 }) => {
   const { t } = useTranslation();
 
@@ -154,8 +156,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
                   await trashFolder(fid);
                 }
                 if (resourceIds.length > 0 || folderIds.length > 0) {
-                  const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-                  setResources(items);
+                  await reloadResources();
                   await Promise.all([loadFolders(), loadChildFolders()]);
                   setSelectedIds(new Set());
                 }

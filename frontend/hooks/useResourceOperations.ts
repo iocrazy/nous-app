@@ -9,7 +9,6 @@
 import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  fetchResources,
   createSmartFolder,
   updateSmartFolder,
   deleteSmartFolder,
@@ -44,6 +43,8 @@ interface UseResourceOperationsOptions {
   setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   loadFolders: () => Promise<void>;
   loadChildFolders: () => Promise<void>;
+  /** Re-fetch the current resource list honouring active filter params. */
+  reloadResources: () => Promise<void>;
   addToast: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -65,6 +66,7 @@ export function useResourceOperations({
   setSelectedIds,
   loadFolders,
   loadChildFolders,
+  reloadResources,
   addToast,
 }: UseResourceOperationsOptions) {
   const { t } = useTranslation();
@@ -151,8 +153,7 @@ export function useResourceOperations({
           await moveResourceItems(operationTargetItems.map((i) => i.id), targetFolderId, targetLibraryId);
         }
         await Promise.all([loadFolders(), loadChildFolders()]);
-        const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-        setResources(items);
+        await reloadResources();
         const totalMoved = operationTargetItems.length + operationTargetFolders.length;
         addToast(t('resources.moveSuccess', { count: totalMoved }), 'success');
       } else if (folderPickerMode === 'copy') {
@@ -167,7 +168,7 @@ export function useResourceOperations({
     setFolderPickerMode(null);
     setOperationTargetItems([]);
     setOperationTargetFolders([]);
-  }, [folderPickerMode, operationTargetItems, operationTargetFolders, scopeType, scopeId, selectedFolderId, selectedLibraryId, loadFolders, loadChildFolders, addToast, t, setResources]);
+  }, [folderPickerMode, operationTargetItems, operationTargetFolders, scopeType, scopeId, loadFolders, loadChildFolders, reloadResources, addToast, t]);
 
   // ─── Smart Folder CRUD ─────────────────────────────
 
@@ -208,13 +209,12 @@ export function useResourceOperations({
         .map((i) => String(i.resource!.id));
       if (resourceIds.length > 0) {
         trashResources(resourceIds, scopeType, scopeId, selectedFolderId).then(async () => {
-          const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-          setResources(items);
+          await reloadResources();
           setSelectedIds(new Set());
           addToast(t('resources.trashedNotification', { name: `${resourceIds.length} items` }), 'success');
         }).catch((err) => { console.error('Failed to trash resources:', err); });
       }
-    }, [sortedItems, selectedIds, scopeType, scopeId, selectedFolderId, selectedLibraryId, addToast, t, setResources, setSelectedIds]),
+    }, [sortedItems, selectedIds, scopeType, scopeId, selectedFolderId, reloadResources, addToast, t, setSelectedIds]),
     onRename: useCallback((compositeId: string) => {
       if (compositeId.startsWith('folder:')) {
         const fId = compositeId.replace('folder:', '');
@@ -277,10 +277,9 @@ export function useResourceOperations({
           setClipboardItems([]);
           setClipboardMode(null);
         }
-        const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-        setResources(items);
+        await reloadResources();
       } catch { /* ignore */ }
-    }, [clipboardItems, clipboardMode, scopeType, scopeId, selectedFolderId, selectedLibraryId, addToast, t, setResources]),
+    }, [clipboardItems, clipboardMode, scopeType, scopeId, selectedFolderId, selectedLibraryId, reloadResources, addToast, t]),
   });
 
   return {

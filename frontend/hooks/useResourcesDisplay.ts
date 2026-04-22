@@ -2,7 +2,17 @@
 
 /**
  * Display-layer computations for ResourcesViewInner.
- * Handles filter/sort/breadcrumb/recycled item derivation.
+ *
+ * Handles sort / breadcrumb / recycled item derivation. Filter bar
+ * filters (tags / rating / type / source / AI / date / duration /
+ * aspect / social) are pushed to the server via fetchResources — this
+ * hook no longer re-applies them in memory. The only remaining
+ * "filters" are:
+ *   - debounced keyword search (across filename / notes / tag names;
+ *     client-side because it's fuzzy and the server doesn't yet
+ *     support a FTS column for resources)
+ *   - the AI search matched id set (server-computed elsewhere, applied
+ *     here because it is an intersection rather than a predicate)
  */
 
 import { useMemo } from 'react';
@@ -10,49 +20,6 @@ import { useTranslation } from 'react-i18next';
 import type { Folder, ResourceItem, SmartCollection, Library } from '../types';
 import type { SortBy } from '../contexts/ResourcesContext';
 import type { BreadcrumbSegment } from '../components/Breadcrumb';
-import type { ChipValuesMap } from '../components/resources/filter/types';
-import { SOCIAL_METRICS } from '../components/resources/filter/types';
-import { datePresetToRange } from '../components/resources/filter/dateUtils';
-import {
-  durationMatches,
-  durationPresetToRange,
-} from '../components/resources/filter/durationUtils';
-import { aspectMatches } from '../components/resources/filter/aspectUtils';
-
-export type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
-
-// Known mime-type prefixes. "Other" is everything NOT in this list.
-const KNOWN_MIME_PREFIXES = [
-  'video/',
-  'image/',
-  'audio/',
-  'application/pdf',
-  'application/msword',
-  'application/vnd.',
-  'text/',
-] as const;
-
-function mimeMatchesType(mime: string, type: FilterType): boolean {
-  switch (type) {
-    case 'video':
-      return mime.startsWith('video/');
-    case 'image':
-      return mime.startsWith('image/');
-    case 'audio':
-      return mime.startsWith('audio/');
-    case 'document':
-      return (
-        mime.startsWith('application/pdf') ||
-        mime.startsWith('application/msword') ||
-        mime.startsWith('application/vnd.') ||
-        mime.startsWith('text/')
-      );
-    case 'other':
-      return !KNOWN_MIME_PREFIXES.some((p) => mime.startsWith(p));
-    default:
-      return false;
-  }
-}
 
 interface UseResourcesDisplayOptions {
   sidebarView: string;
@@ -66,10 +33,6 @@ interface UseResourcesDisplayOptions {
   sortBy: SortBy;
   debouncedSearch: string;
   resourceTagNamesMap: Record<string, string>;
-  /** Per-resource set of tag ids used for the tags chip filter. */
-  resourceTagIdsMap: Record<string, Set<string>>;
-  /** Active filter bar values. Drives tag / rating / type filtering. */
-  chipValues: ChipValuesMap;
   aiSearchMatchedMediaIds: Set<string> | null;
   scopeType: 'personal' | 'team';
   selectedFolderId: string | null | undefined;
@@ -98,8 +61,6 @@ export function useResourcesDisplay({
   sortBy,
   debouncedSearch,
   resourceTagNamesMap,
-  resourceTagIdsMap,
-  chipValues,
   aiSearchMatchedMediaIds,
   scopeType,
   selectedFolderId,
@@ -158,140 +119,13 @@ export function useResourcesDisplay({
     return resources;
   }, [sidebarView, recycleItems, downloadedResources, resources]);
 
-  // ─── Filter & sort ─────────────────────────────────
+  // ─── Search + AI-search intersection ────────────────
+  // Chip filters (tags / rating / type / source / AI / date / duration /
+  // aspect / social) are applied server-side by fetchResources. Here we
+  // only narrow further with the fuzzy text search and the AI-search
+  // matched id set when they are active.
   const filteredItems = useMemo(() => {
     let items = currentItems;
-
-    // Type chip (IN semantics across categories).
-    const types = chipValues.type.types;
-    if (types.length > 0) {
-      items = items.filter((item) => {
-        const mime = item.resource?.mime_type || '';
-        return types.some((t) => mimeMatchesType(mime, t));
-      });
-    }
-
-    // Rating chip (>= min_rating; 0 means inactive).
-    const minRating = chipValues.rating.min_rating;
-    if (minRating > 0) {
-      items = items.filter((item) => (item.resource?.rating ?? 0) >= minRating);
-    }
-
-    // Tags chip (AND semantics — resource must carry every selected tag).
-    const selectedTagIds = chipValues.tags.tag_ids;
-    if (selectedTagIds.length > 0) {
-      items = items.filter((item) => {
-        const rid = item.resource?.id ? String(item.resource.id) : null;
-        if (!rid) return false;
-        const tagSet = resourceTagIdsMap[rid];
-        if (!tagSet || tagSet.size === 0) return false;
-        return selectedTagIds.every((id) => tagSet.has(id));
-      });
-    }
-
-    // Source chip (OR semantics across platforms; join via resource.media).
-    const selectedPlatforms = chipValues.source.platforms;
-    if (selectedPlatforms.length > 0) {
-      const platformSet = new Set(selectedPlatforms);
-      items = items.filter((item) => {
-        const platform = item.resource?.media?.source_platform;
-        return typeof platform === 'string' && platformSet.has(platform);
-      });
-    }
-
-    // AI status chip (AND semantics — every checked flag must equal
-    // 'completed' on the resource).
-    const aiFlags = chipValues.ai_status;
-    if (aiFlags.transcribed || aiFlags.summarized || aiFlags.analyzed) {
-      items = items.filter((item) => {
-        const r = item.resource;
-        if (!r) return false;
-        if (aiFlags.transcribed && r.transcript_status !== 'completed') return false;
-        if (aiFlags.summarized && r.summary_status !== 'completed') return false;
-        if (aiFlags.analyzed && r.visual_analysis_status !== 'completed') return false;
-        return true;
-      });
-    }
-
-    // Date added chip (inclusive, local-calendar comparison).
-    const dateRange = datePresetToRange(chipValues.date_added);
-    if (dateRange.after || dateRange.before) {
-      const afterTs = dateRange.after
-        ? new Date(`${dateRange.after}T00:00:00`).getTime()
-        : null;
-      const beforeTs = dateRange.before
-        ? new Date(`${dateRange.before}T23:59:59.999`).getTime()
-        : null;
-      items = items.filter((item) => {
-        const raw = item.resource?.created_at ?? item.created_at;
-        if (!raw) return false;
-        const ts = new Date(raw).getTime();
-        if (Number.isNaN(ts)) return false;
-        if (afterTs !== null && ts < afterTs) return false;
-        if (beforeTs !== null && ts > beforeTs) return false;
-        return true;
-      });
-    }
-
-    // Duration chip (video-specific; resources without a duration are
-    // excluded when any range is active).
-    const durationRange = durationPresetToRange(chipValues.duration);
-    if (durationRange.min != null || durationRange.max != null) {
-      items = items.filter((item) =>
-        durationMatches(item.resource?.duration_seconds, durationRange),
-      );
-    }
-
-    // Aspect chip (video-specific; resolution parsed into a width/height
-    // ratio and mapped to buckets).
-    const selectedBuckets = chipValues.aspect.buckets;
-    if (selectedBuckets.length > 0) {
-      items = items.filter((item) =>
-        aspectMatches(item.resource?.resolution, selectedBuckets),
-      );
-    }
-
-    // Social chip (interaction data on parsed_media). Each enabled
-    // metric carries a ``>= threshold`` test; the chip's ``combine``
-    // field decides AND / OR semantics across the enabled set. The
-    // ``hasComments`` floor is applied as an AND on top.
-    const social = chipValues.social;
-    const enabledMetrics = SOCIAL_METRICS.filter(
-      (m) => social.metrics[m].enabled,
-    );
-    if (enabledMetrics.length > 0 || social.hasComments) {
-      const metricField: Record<
-        (typeof SOCIAL_METRICS)[number],
-        'like_count' | 'comment_count' | 'favorite_count' | 'share_count'
-      > = {
-        likes: 'like_count',
-        comments: 'comment_count',
-        favorites: 'favorite_count',
-        shares: 'share_count',
-      };
-      items = items.filter((item) => {
-        const media = item.resource?.media;
-        if (!media) return false;
-        if (social.hasComments) {
-          const cc = typeof media.comment_count === 'number' ? media.comment_count : 0;
-          if (cc <= 0) return false;
-        }
-        if (enabledMetrics.length === 0) return true;
-        if (social.combine === 'and') {
-          return enabledMetrics.every((m) => {
-            const raw = media[metricField[m]];
-            const val = typeof raw === 'number' ? raw : 0;
-            return val >= social.metrics[m].threshold;
-          });
-        }
-        return enabledMetrics.some((m) => {
-          const raw = media[metricField[m]];
-          const val = typeof raw === 'number' ? raw : 0;
-          return val >= social.metrics[m].threshold;
-        });
-      });
-    }
-
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.trim().toLowerCase();
       items = items.filter((item) => {
@@ -310,11 +144,9 @@ export function useResourcesDisplay({
     return items;
   }, [
     currentItems,
-    chipValues,
     debouncedSearch,
     aiSearchMatchedMediaIds,
     resourceTagNamesMap,
-    resourceTagIdsMap,
   ]);
 
   const sortedItems = useMemo(() => {

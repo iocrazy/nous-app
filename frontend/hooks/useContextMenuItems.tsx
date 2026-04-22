@@ -14,7 +14,6 @@ import { useTranslation } from 'react-i18next';
 import type { ContextMenuItem } from '../components/ContextMenu';
 import type { Folder, SmartCollection, ResourceItem } from '../types';
 import {
-  fetchResources,
   getFolderContentCount,
   getResourceFileUrl,
   copyResourceItem,
@@ -47,6 +46,8 @@ interface UseContextMenuItemsOptions {
   addToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   loadFolders: () => Promise<void>;
   loadChildFolders: () => Promise<void>;
+  /** Re-fetch the current resource list honouring active filter params. */
+  reloadResources: () => Promise<void>;
   handleTrash: (resourceId: string) => void;
   ops: {
     setRenamingResourceId: (id: string | null) => void;
@@ -85,6 +86,7 @@ export function useContextMenuItems({
   addToast,
   loadFolders,
   loadChildFolders,
+  reloadResources,
   handleTrash,
   ops,
   versionInputRef,
@@ -146,8 +148,7 @@ export function useContextMenuItems({
               await trashFolder(folder.id);
               await loadFolders();
               await loadChildFolders();
-              const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-              setResources(items);
+              await reloadResources();
             } catch (err) {
               console.error('Failed to trash folder:', err);
               addToast(t('resources.trashFolderFailed', 'Failed to move folder to trash'), 'error');
@@ -181,8 +182,7 @@ export function useContextMenuItems({
         setLoading(true);
         try {
           await Promise.all([loadChildFolders()]);
-          const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-          setResources(items);
+          await reloadResources();
         } catch { /* ignore */ }
         setLoading(false);
       },
@@ -196,13 +196,12 @@ export function useContextMenuItems({
             for (const item of ops.operationTargetItems) {
               if (item.resource?.id) await copyResourceItem(String(item.resource.id), scopeType, scopeId, selectedFolderId, selectedLibraryId);
             }
-            const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-            setResources(items);
+            await reloadResources();
             ops.setOperationTargetItems([]);
           } catch { /* ignore */ }
         },
       });
     }
     return emptyItems;
-  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, scopeType, scopeId, selectedFolderId, loadFolders, loadChildFolders, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, versionInputRef]);
+  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, scopeType, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, versionInputRef]);
 }

@@ -199,12 +199,89 @@ export interface PaginatedResult<T> {
 }
 
 /**
- * Fetch video library (paginated) — queries through resources table
+ * Filter params accepted by fetchLibraryPaginated. Mirrors the subset
+ * of the Resources filter bar chips that make sense for the Downloads
+ * view (all of them except ``type``, since every row here is web-
+ * downloaded media).
+ *
+ * Semantics match FetchResourcesParams (resourceService.ts): the base
+ * table is ``resources`` (not ``resource_items``), so filters address
+ * resources.* directly and parsed_media columns via the embedded join.
+ */
+export interface FetchLibraryFilterParams {
+  /** AND-semantic tag ids. Applied via a 2-step resource_id
+   *  intersection. */
+  tag_ids?: string[];
+  /** resources.rating >= min. */
+  min_rating?: number;
+  /** parsed_media.source_platform IN (...). Requires inner join. */
+  platforms?: string[];
+  /** ai status flags. */
+  ai_transcribed?: boolean;
+  ai_summarized?: boolean;
+  ai_analyzed?: boolean;
+  /** resources.created_at inclusive bounds (YYYY-MM-DD). */
+  created_after?: string;
+  created_before?: string;
+  /** resources.duration_seconds inclusive bounds. */
+  duration_min?: number;
+  duration_max?: number;
+  /** aspect_bucket IN (wire values: "9:16"/"16:9"/"1:1"/"4:3"/"other"). */
+  aspect_ratios?: string[];
+  /** parsed_media.*_count thresholds. Requires inner join. */
+  min_likes?: number;
+  min_comments?: number;
+  min_favorites?: number;
+  min_shares?: number;
+  social_combine?: 'and' | 'or';
+  /** parsed_media.comment_count > 0. AND-on-top floor. */
+  has_comments?: boolean;
+}
+
+/**
+ * Resolve a set of tag ids to the intersection of resource ids that
+ * carry ALL of them. See resourceService.resolveTagIntersection for
+ * the full rationale — this is a local copy to keep dataService
+ * self-contained (both live in frontend/services so a single shared
+ * helper would be easy but the contexts differ slightly).
+ */
+async function resolveLibraryTagIntersection(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  tagIds: string[] | undefined,
+): Promise<string[] | null> {
+  if (!supabase || !tagIds || tagIds.length === 0) return null;
+  let currentIds: Set<string> | null = null;
+  for (const tagId of tagIds) {
+    let q = supabase.from('resource_tags').select('resource_id').eq('tag_id', tagId);
+    if (currentIds !== null) {
+      const ids = Array.from(currentIds);
+      if (ids.length === 0) return [];
+      q = q.in('resource_id', ids);
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+    const nextIds = new Set<string>(
+      (data ?? []).map((row: { resource_id: string | number }) =>
+        String(row.resource_id),
+      ),
+    );
+    if (nextIds.size === 0) return [];
+    currentIds = nextIds;
+  }
+  return currentIds ? Array.from(currentIds) : [];
+}
+
+/**
+ * Fetch video library (paginated) — queries through resources table.
+ * Accepts server-side filter params; filters are pushed to PostgREST,
+ * never applied client-side (the Downloads view relies on this for
+ * correct pagination + totalCount).
  */
 export const fetchLibraryPaginated = async (
   page: number = 0,
   pageSize: number = PAGE_SIZE,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  filters?: FetchLibraryFilterParams,
 ): Promise<PaginatedResult<ParsedMedia>> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
@@ -220,16 +297,40 @@ export const fetchLibraryPaginated = async (
     const userId = session.user.id;
 
     const from = page * pageSize;
+    const f = filters ?? {};
 
-    // Fetch pageSize + 1 to detect if more data exists (avoids slow count: 'exact')
+    // Tag intersection first — an empty set short-circuits the paginated
+    // query (no rows, no count, no round-trip).
+    const tagResourceIds = await resolveLibraryTagIntersection(supabase, f.tag_ids);
+    if (tagResourceIds !== null && tagResourceIds.length === 0) {
+      return { data: [], totalCount: 0, hasMore: false, page };
+    }
+
+    const socialMetricActive =
+      (f.min_likes !== undefined && f.min_likes > 0) ||
+      (f.min_comments !== undefined && f.min_comments > 0) ||
+      (f.min_favorites !== undefined && f.min_favorites > 0) ||
+      (f.min_shares !== undefined && f.min_shares > 0);
+    const needsMediaInner =
+      (f.platforms && f.platforms.length > 0) ||
+      socialMetricActive ||
+      Boolean(f.has_comments);
+    const mediaJoinToken = needsMediaInner ? 'parsed_media!inner' : 'parsed_media!inner';
+    // NOTE: DownloadsView always requires a parsed_media row (source_type='web'
+    // means the resource was parsed from a URL), so the join is !inner
+    // unconditionally. Kept the token name for parity with resourceService.
+    const select = `id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, ${mediaJoinToken}(*)`;
+
+    // Build the paged data query.
     let query = supabase
       .from('resources')
-      .select(RESOURCE_LIST_SELECT)
+      .select(select)
       .eq('creator_id', userId)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
       .order('created_at', { ascending: false })
       .range(from, from + pageSize);
+    query = applyLibraryFilters(query, f, tagResourceIds);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
 
@@ -239,15 +340,18 @@ export const fetchLibraryPaginated = async (
     const hasMore = rows.length > pageSize;
     const pageData = hasMore ? rows.slice(0, pageSize) : rows;
 
-    // Fast total count (only on first page to avoid repeated queries)
+    // Fast total count (only on first page). Duplicate the filter set
+    // so the count reflects what the user is seeing.
     let totalCount = -1;
     if (page === 0) {
-      const { count } = await supabase
+      let countQuery = supabase
         .from('resources')
-        .select('id', { count: 'exact', head: true })
+        .select(`id, ${mediaJoinToken}()`, { count: 'exact', head: true })
         .eq('creator_id', userId)
         .eq('source_type', 'web')
         .eq('is_trashed', false);
+      countQuery = applyLibraryFilters(countQuery, f, tagResourceIds);
+      const { count } = await countQuery;
       totalCount = count ?? -1;
     }
 
@@ -262,6 +366,91 @@ export const fetchLibraryPaginated = async (
     throw err;
   }
 };
+
+/**
+ * Apply the filter-bar-derived WHERE clauses to a resources query.
+ * Shared by the data + count queries above so the reported totalCount
+ * never disagrees with the list.
+ */
+function applyLibraryFilters<T extends { [k: string]: any }>(
+  q: T,
+  f: FetchLibraryFilterParams,
+  tagResourceIds: string[] | null,
+): T {
+  let query = q;
+  if (tagResourceIds !== null) {
+    query = query.in('id', tagResourceIds);
+  }
+  if (f.min_rating !== undefined && f.min_rating > 0) {
+    query = query.gte('rating', f.min_rating);
+  }
+  if (f.ai_transcribed) query = query.eq('transcript_status', 'completed');
+  if (f.ai_summarized) query = query.eq('summary_status', 'completed');
+  if (f.ai_analyzed) query = query.eq('visual_analysis_status', 'completed');
+  if (f.created_after) {
+    query = query.gte('created_at', `${f.created_after}T00:00:00`);
+  }
+  if (f.created_before) {
+    query = query.lte('created_at', `${f.created_before}T23:59:59.999`);
+  }
+  if (f.duration_min !== undefined && f.duration_min != null) {
+    query = query.gte('duration_seconds', f.duration_min);
+  }
+  if (f.duration_max !== undefined && f.duration_max != null) {
+    query = query.lte('duration_seconds', f.duration_max);
+  }
+  if (f.aspect_ratios && f.aspect_ratios.length > 0) {
+    query = query.in('aspect_bucket', f.aspect_ratios);
+  }
+  if (f.platforms && f.platforms.length > 0) {
+    query = query.in('parsed_media.source_platform', f.platforms);
+  }
+  if (f.has_comments) {
+    query = query.gt('parsed_media.comment_count', 0);
+  }
+  const socialMetricActive =
+    (f.min_likes !== undefined && f.min_likes > 0) ||
+    (f.min_comments !== undefined && f.min_comments > 0) ||
+    (f.min_favorites !== undefined && f.min_favorites > 0) ||
+    (f.min_shares !== undefined && f.min_shares > 0);
+  if (socialMetricActive) {
+    const combine = f.social_combine ?? 'and';
+    if (combine === 'and') {
+      if (f.min_likes !== undefined && f.min_likes > 0) {
+        query = query.gte('parsed_media.like_count', f.min_likes);
+      }
+      if (f.min_comments !== undefined && f.min_comments > 0) {
+        query = query.gte('parsed_media.comment_count', f.min_comments);
+      }
+      if (f.min_favorites !== undefined && f.min_favorites > 0) {
+        query = query.gte('parsed_media.favorite_count', f.min_favorites);
+      }
+      if (f.min_shares !== undefined && f.min_shares > 0) {
+        query = query.gte('parsed_media.share_count', f.min_shares);
+      }
+    } else {
+      const orFragments: string[] = [];
+      if (f.min_likes !== undefined && f.min_likes > 0) {
+        orFragments.push(`like_count.gte.${f.min_likes}`);
+      }
+      if (f.min_comments !== undefined && f.min_comments > 0) {
+        orFragments.push(`comment_count.gte.${f.min_comments}`);
+      }
+      if (f.min_favorites !== undefined && f.min_favorites > 0) {
+        orFragments.push(`favorite_count.gte.${f.min_favorites}`);
+      }
+      if (f.min_shares !== undefined && f.min_shares > 0) {
+        orFragments.push(`share_count.gte.${f.min_shares}`);
+      }
+      if (orFragments.length > 0) {
+        query = query.or(orFragments.join(','), {
+          referencedTable: 'parsed_media',
+        });
+      }
+    }
+  }
+  return query;
+}
 
 /**
  * Fetch video library (loads first LOCAL_CACHE_SIZE for local search)

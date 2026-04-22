@@ -25,6 +25,7 @@ import {
   fetchTrashedFolders,
   restoreFolder,
   fetchFolderContents,
+  type FetchResourcesParams,
 } from '../services/resourceService';
 import { fetchLibraries } from '../services/libraryService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
@@ -39,6 +40,16 @@ import type { Resource } from '../types';
 
 export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads';
 export type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
+
+/** Subset of fetchResources params that the filter bar contributes.
+ *  Kept separate from the FetchResourcesParams type so consumers don't
+ *  accidentally override scope / folder / library. */
+export type ResourcesFilterParams = Omit<
+  FetchResourcesParams,
+  'scopeType' | 'scopeId' | 'folderId' | 'libraryId'
+>;
+
+const EMPTY_FILTER_PARAMS: ResourcesFilterParams = {};
 
 export interface ResourcesContextType {
   // ── Scope / URL-derived state ──
@@ -134,6 +145,17 @@ export interface ResourcesContextType {
   setShowInfoPanel: React.Dispatch<React.SetStateAction<boolean>>;
   infoPanelWidth: number;
   setInfoPanelWidth: React.Dispatch<React.SetStateAction<number>>;
+
+  // ── Server-side filter params (contributed by the filter bar) ──
+  /** Current server-side filter params. Changes trigger a resource
+   *  re-fetch. Immutable — always replace, never mutate. */
+  filterParams: ResourcesFilterParams;
+  /** Replace the active filter params. Passing an empty object clears. */
+  setFilterParams: (p: ResourcesFilterParams) => void;
+  /** Re-fetch resources respecting the active scope, folder, library,
+   *  and filter params. Use after mutations (move/copy/trash) to pull
+   *  a fresh server-filtered list. */
+  reloadResources: () => Promise<void>;
 
   // ── Actions ──
   loadFolders: () => Promise<void>;
@@ -236,6 +258,26 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [showInfoPanel, setShowInfoPanel] = useState(true);
   const [infoPanelWidth, setInfoPanelWidth] = useState(320);
 
+  // ── Server-side filter params (from the filter bar) ──
+  // We JSON.stringify in the effect dep array, not this value directly,
+  // so children can pass fresh objects per render without thrashing.
+  const [filterParams, setFilterParamsState] =
+    useState<ResourcesFilterParams>(EMPTY_FILTER_PARAMS);
+  const setFilterParams = useCallback((p: ResourcesFilterParams) => {
+    setFilterParamsState(p);
+  }, []);
+  // Stable key for the effect dep array — the object identity shifts
+  // every render in practice (toFilterParams returns a fresh object).
+  const filterParamsKey = useMemo(
+    () => JSON.stringify(filterParams),
+    [filterParams],
+  );
+
+  // Ref mirror so post-mutation reload helpers can see the latest params
+  // without recreating on every filter tweak.
+  const filterParamsRef = useRef(filterParams);
+  filterParamsRef.current = filterParams;
+
   // ── Derived view flags ──
   const isResourcesView = sidebarView === 'resources';
   const isRecycleView = sidebarView === 'recycle';
@@ -289,6 +331,27 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       setChildFolders([]);
     }
   }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, isResourcesView]);
+
+  /**
+   * Re-fetch the current resource list honouring the active filter
+   * params. Used by post-mutation handlers (move/copy/trash/rename) so
+   * their explicit refresh respects server-side filtering instead of
+   * silently bypassing it.
+   */
+  const reloadResources = useCallback(async () => {
+    try {
+      const items = await fetchResources({
+        scopeType,
+        scopeId,
+        folderId: selectedFolderId,
+        libraryId: selectedLibraryId,
+        ...filterParamsRef.current,
+      });
+      setResources(items);
+    } catch (err) {
+      console.error('[ResourcesContext] reloadResources failed:', err);
+    }
+  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId]);
 
   // Initial data load on scope change
   useEffect(() => {
@@ -421,7 +484,13 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
         const [items, flds] = await Promise.all([
           selectedSmartFolderId
             ? fetchSmartFolderResults(selectedSmartFolderId, scopeType, scopeId)
-            : fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId),
+            : fetchResources({
+                scopeType,
+                scopeId,
+                folderId: selectedFolderId,
+                libraryId: selectedLibraryId,
+                ...filterParams,
+              }),
           fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId),
         ]);
         if (!cancelled) {
@@ -441,7 +510,10 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
     loadAll();
     return () => { cancelled = true; };
-  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView]);
+    // filterParamsKey is a JSON fingerprint of filterParams — using it
+    // directly in the dep array would trigger on every object re-create.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView, filterParamsKey]);
 
   // Bulk load tag names for search
   useEffect(() => {
@@ -810,6 +882,10 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     infoPanelWidth,
     setInfoPanelWidth,
 
+    filterParams,
+    setFilterParams,
+    reloadResources,
+
     loadFolders,
     loadChildFolders,
     loadTrashedResources,
@@ -836,6 +912,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,
     viewMode, sortBy, searchQuery, debouncedSearch, showInfoPanel, infoPanelWidth,
+    filterParams, setFilterParams, reloadResources,
     loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
     handleTrashResource, handleRestoreResource, handlePermanentDelete, confirmPermanentDelete,
     handleAddTag, handleRemoveTag, handleCreateTag, handleResourceUpdate,

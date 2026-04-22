@@ -13,7 +13,6 @@ import {
   uploadResource,
   checkDuplicate,
   linkExistingResource,
-  fetchResources,
 } from '../services/resourceService';
 import type { Resource, ResourceItem } from '../types';
 
@@ -48,6 +47,8 @@ interface UseResourceUploadOptions {
   selectedFolderId: string | null | undefined;
   selectedLibraryId: string | null | undefined;
   setResources: React.Dispatch<React.SetStateAction<ResourceItem[]>>;
+  /** Re-fetch the current resource list honouring active filter params. */
+  reloadResources: () => Promise<void>;
   addToast: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -59,6 +60,7 @@ export function useResourceUpload({
   selectedFolderId,
   selectedLibraryId,
   setResources,
+  reloadResources,
   addToast,
 }: UseResourceUploadOptions) {
   const { t } = useTranslation();
@@ -236,13 +238,12 @@ export function useResourceUpload({
     }
 
     try {
-      const items = await fetchResources(scopeType, scopeId, selectedFolderId, selectedLibraryId);
-      setResources(items);
+      await reloadResources();
     } catch { /* ignore */ }
 
     upload.setIsUploading(false);
     upload.setOverallProgress(0);
-  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, uploading, t, upload, addToast, setResources]);
+  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, uploading, t, upload, addToast, reloadResources]);
 
   // ─── Drag & drop handlers ──────────────────────────
 
