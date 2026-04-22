@@ -7,7 +7,14 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check } from 'lucide-react';
+import {
+  Check,
+  Frame,
+  RectangleHorizontal,
+  RectangleVertical,
+  Square,
+  type LucideIcon,
+} from 'lucide-react';
 
 import type { AspectBucketId } from './types';
 
@@ -44,6 +51,15 @@ export const AspectFilterDropdown: React.FC<AspectFilterDropdownProps> = ({
     other: t('resources.filter.aspectBuckets.other', 'Other'),
   };
 
+  const icons: Record<AspectBucketId, LucideIcon> = {
+    portrait: RectangleVertical,
+    landscape: RectangleHorizontal,
+    square: Square,
+    // 4:3 is landscape-ish in shape; reuse horizontal rectangle.
+    fourThree: RectangleHorizontal,
+    other: Frame,
+  };
+
   const toggle = (bucket: AspectBucketId) => {
     if (selectedSet.has(bucket)) {
       onChange(selectedBuckets.filter((b) => b !== bucket));
@@ -56,6 +72,7 @@ export const AspectFilterDropdown: React.FC<AspectFilterDropdownProps> = ({
     <div className="w-56 py-1" role="menu" aria-label="Aspect filter">
       {BUCKET_ORDER.map((bucket) => {
         const active = selectedSet.has(bucket);
+        const Icon = icons[bucket];
         return (
           <button
             key={bucket}
@@ -67,7 +84,14 @@ export const AspectFilterDropdown: React.FC<AspectFilterDropdownProps> = ({
                 : 'text-zinc-300 hover:bg-zinc-800'
             }`}
           >
-            <span>{labels[bucket]}</span>
+            <span className="flex items-center gap-2">
+              <Icon
+                size={12}
+                className={active ? 'text-indigo-300' : 'text-zinc-500'}
+                aria-hidden="true"
+              />
+              <span>{labels[bucket]}</span>
+            </span>
             {active && <Check size={12} className="text-indigo-400" />}
           </button>
         );

@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check } from 'lucide-react';
+import { Calendar, CalendarRange, Check, Clock, type LucideIcon } from 'lucide-react';
 
 import type { DateAddedChipValue, DatePresetId } from './types';
 
@@ -40,6 +40,15 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
     last30days: t('resources.filter.date.last30days', 'Last 30 days'),
     last90days: t('resources.filter.date.last90days', 'Last 90 days'),
     custom: t('resources.filter.date.custom', 'Custom range'),
+  };
+
+  const icons: Record<DatePresetId, LucideIcon> = {
+    today: Clock,
+    thisWeek: Calendar,
+    thisMonth: Calendar,
+    last30days: Calendar,
+    last90days: Calendar,
+    custom: CalendarRange,
   };
 
   const selectPreset = (preset: DatePresetId) => {
@@ -75,6 +84,7 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
     <div className="w-56 py-1" role="menu" aria-label="Date added filter">
       {PRESETS.map((preset) => {
         const active = isActive(preset);
+        const Icon = icons[preset];
         return (
           <button
             key={preset}
@@ -86,7 +96,14 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
                 : 'text-zinc-300 hover:bg-zinc-800'
             }`}
           >
-            <span>{labels[preset]}</span>
+            <span className="flex items-center gap-2">
+              <Icon
+                size={12}
+                className={active ? 'text-indigo-300' : 'text-zinc-500'}
+                aria-hidden="true"
+              />
+              <span>{labels[preset]}</span>
+            </span>
             {active && <Check size={12} className="text-indigo-400" />}
           </button>
         );

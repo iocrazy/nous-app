@@ -4,7 +4,15 @@
 
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check } from 'lucide-react';
+import {
+  Check,
+  File,
+  FileText,
+  Image as ImageIcon,
+  Music,
+  Video,
+  type LucideIcon,
+} from 'lucide-react';
 
 import { FILTER_VALUES, type ResourceFilterType } from '../resourceFilters';
 
@@ -30,18 +38,19 @@ export const TypeFilterDropdown: React.FC<TypeFilterDropdownProps> = ({
     }
   };
 
-  const options: { value: ResourceFilterType; label: string }[] = [
-    { value: 'video', label: t('smartFolder.fileTypes.video') },
-    { value: 'image', label: t('smartFolder.fileTypes.image') },
-    { value: 'audio', label: t('smartFolder.fileTypes.audio') },
-    { value: 'document', label: t('smartFolder.fileTypes.document') },
-    { value: 'other', label: t('smartFolder.fileTypes.other') },
+  const options: { value: ResourceFilterType; label: string; Icon: LucideIcon }[] = [
+    { value: 'video', label: t('smartFolder.fileTypes.video'), Icon: Video },
+    { value: 'image', label: t('smartFolder.fileTypes.image'), Icon: ImageIcon },
+    { value: 'audio', label: t('smartFolder.fileTypes.audio'), Icon: Music },
+    { value: 'document', label: t('smartFolder.fileTypes.document'), Icon: FileText },
+    { value: 'other', label: t('smartFolder.fileTypes.other'), Icon: File },
   ];
 
   return (
     <div className="w-44 py-1" role="menu" aria-label="Type filter">
       {options.map((opt) => {
         const active = selectedSet.has(opt.value);
+        const Icon = opt.Icon;
         return (
           <button
             key={opt.value}
@@ -51,7 +60,14 @@ export const TypeFilterDropdown: React.FC<TypeFilterDropdownProps> = ({
               active ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800'
             }`}
           >
-            <span>{opt.label}</span>
+            <span className="flex items-center gap-2">
+              <Icon
+                size={12}
+                className={active ? 'text-indigo-300' : 'text-zinc-500'}
+                aria-hidden="true"
+              />
+              <span>{opt.label}</span>
+            </span>
             {active && <Check size={12} className="text-indigo-400" />}
           </button>
         );
