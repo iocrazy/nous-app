@@ -323,7 +323,7 @@ function AppLayoutInner() {
                       }`}
                     >
                       <FolderOpen size={16} className="shrink-0" />
-                      <span className="text-sm">My Resources</span>
+                      <span className="text-sm">My Uploads</span>
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/shared')); setIsResourcesMenuOpen(false); }}

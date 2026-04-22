@@ -234,7 +234,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
           </>
         ) : (
           <>
-            {/* Personal mode: My Downloads + My Resources */}
+            {/* Personal mode: My Downloads + My Uploads */}
             <button
               onClick={() => navigate(resPath('/resources/downloads'))}
               className={sidebarItemClass(isDownloadsView)}
@@ -246,7 +246,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               )}
             </button>
 
-            {/* My Resources with + */}
+            {/* My Uploads with + */}
             <div className="flex items-center justify-between pr-1">
               <button
                 onClick={() => navigate(resPath('/resources'))}

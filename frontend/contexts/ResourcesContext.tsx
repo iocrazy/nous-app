@@ -74,8 +74,9 @@ export interface ResourcesContextType {
   setSmartFolders: React.Dispatch<React.SetStateAction<SmartCollection[]>>;
   allTags: Tag[];
   setAllTags: React.Dispatch<React.SetStateAction<Tag[]>>;
-  /** Total count of "My Resources" (non-web resources, across all folders) for the current scope.
-   *  Used by the sidebar to render a count badge on the "My Resources" entry.
+  /** Total count of user-uploaded resources (non-web, across all folders) for the current scope.
+   *  Used by the sidebar to render a count badge on the "My Uploads" entry.
+   *  (Variable name retained for historical reasons; UI label is "My Uploads".)
    *  Null while loading. */
   myResourcesCount: number | null;
   /** Total count of "My Downloads" (web-sourced resources) for the current scope.
@@ -208,7 +209,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [smartFolders, setSmartFolders] = useState<SmartCollection[]>([]);
   const [folderChain, setFolderChain] = useState<Folder[]>([]);
 
-  // ── Sidebar counts (for "My Downloads" / "My Resources" menu badges) ──
+  // ── Sidebar counts (for "My Downloads" / "My Uploads" menu badges) ──
+  // Note: variable name `myResourcesCount` is retained to avoid churn; it
+  // corresponds to the "My Uploads" entry in the UI.
   const [myResourcesCount, setMyResourcesCount] = useState<number | null>(null);
   const [downloadsCount, setDownloadsCount] = useState<number | null>(null);
   const [countsRefreshTick, setCountsRefreshTick] = useState(0);
