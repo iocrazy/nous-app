@@ -15,23 +15,35 @@ import { Filter, X } from 'lucide-react';
 import type { Tag } from '../../../types';
 import type { UseFilterBarConfigReturn } from '../../../hooks/useFilterBarConfig';
 import type { ResourceFilterType } from '../resourceFilters';
-import type { ChipId } from './types';
+import type { ChipId, DatePresetId } from './types';
 import { FilterChip } from './FilterChip';
 import { FilterConfigPanel } from './FilterConfigPanel';
 import { RatingFilterDropdown } from './RatingFilterDropdown';
 import { TagsFilterDropdown } from './TagsFilterDropdown';
 import { TypeFilterDropdown } from './TypeFilterDropdown';
+import { SourceFilterDropdown } from './SourceFilterDropdown';
+import { AIStatusFilterDropdown } from './AIStatusFilterDropdown';
+import { DateAddedFilterDropdown } from './DateAddedFilterDropdown';
+import { datePresetSummary } from './dateUtils';
 
 export interface FilterBarProps {
   /** Config hook instance — FilterBar is controlled via this. */
   config: UseFilterBarConfigReturn;
   /** All tags available for selection in the Tags chip. */
   allTags: Tag[];
+  /** Platforms observed in the currently-loaded resource set. Used to
+   *  enrich the Source chip's option list beyond the hardcoded known
+   *  platforms. Optional — defaults to empty. */
+  availablePlatforms?: string[];
 }
 
 type OpenTarget = { kind: 'chip'; id: ChipId } | { kind: 'config' } | null;
 
-export const FilterBar: React.FC<FilterBarProps> = ({ config, allTags }) => {
+export const FilterBar: React.FC<FilterBarProps> = ({
+  config,
+  allTags,
+  availablePlatforms = [],
+}) => {
   const { t } = useTranslation();
   const [openTarget, setOpenTarget] = useState<OpenTarget>(null);
 
@@ -58,6 +70,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({ config, allTags }) => {
           return t('resources.filter.rating', 'Rating');
         case 'type':
           return t('resources.filter.type', 'Type');
+        case 'source':
+          return t('resources.filter.source', 'Source');
+        case 'ai_status':
+          return t('resources.filter.aiStatus', 'AI');
+        case 'date_added':
+          return t('resources.filter.dateAdded', 'Date');
       }
     };
   }, [t]);
@@ -80,6 +98,36 @@ export const FilterBar: React.FC<FilterBarProps> = ({ config, allTags }) => {
           return t(key, types[0]);
         }
         return String(types.length);
+      }
+      case 'source': {
+        const platforms = chipValues.source.platforms;
+        if (platforms.length === 0) return null;
+        if (platforms.length === 1) {
+          const p = platforms[0];
+          return p.charAt(0).toUpperCase() + p.slice(1);
+        }
+        return String(platforms.length);
+      }
+      case 'ai_status': {
+        const ai = chipValues.ai_status;
+        const parts: string[] = [];
+        if (ai.transcribed) parts.push(t('resources.filter.ai.transcribed', 'Transcribed'));
+        if (ai.summarized) parts.push(t('resources.filter.ai.summarized', 'Summarized'));
+        if (ai.analyzed) parts.push(t('resources.filter.ai.analyzed', 'Analyzed'));
+        if (parts.length === 0) return null;
+        if (parts.length <= 2) return parts.join(', ');
+        return String(parts.length);
+      }
+      case 'date_added': {
+        const presetLabels: Record<DatePresetId, string> = {
+          today: t('resources.filter.date.today', 'Today'),
+          thisWeek: t('resources.filter.date.thisWeek', 'This week'),
+          thisMonth: t('resources.filter.date.thisMonth', 'This month'),
+          last30days: t('resources.filter.date.last30days', 'Last 30 days'),
+          last90days: t('resources.filter.date.last90days', 'Last 90 days'),
+          custom: t('resources.filter.date.custom', 'Custom range'),
+        };
+        return datePresetSummary(chipValues.date_added, presetLabels);
       }
     }
   };
@@ -116,6 +164,31 @@ export const FilterBar: React.FC<FilterBarProps> = ({ config, allTags }) => {
               setChipValue('type', { types: next })
             }
             onClearAll={() => clearChip('type')}
+          />
+        );
+      case 'source':
+        return (
+          <SourceFilterDropdown
+            selectedPlatforms={chipValues.source.platforms}
+            availablePlatforms={availablePlatforms}
+            onChange={(next) => setChipValue('source', { platforms: next })}
+            onClearAll={() => clearChip('source')}
+          />
+        );
+      case 'ai_status':
+        return (
+          <AIStatusFilterDropdown
+            value={chipValues.ai_status}
+            onChange={(next) => setChipValue('ai_status', next)}
+            onClearAll={() => clearChip('ai_status')}
+          />
+        );
+      case 'date_added':
+        return (
+          <DateAddedFilterDropdown
+            value={chipValues.date_added}
+            onChange={(next) => setChipValue('date_added', next)}
+            onClearAll={() => clearChip('date_added')}
           />
         );
     }

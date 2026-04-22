@@ -244,9 +244,12 @@ export async function fetchResources(
           libraryId,
         };
 
+  // Nested `media:parsed_media(source_platform)` powers the Source
+  // filter chip. LEFT JOIN (no !inner) so uploaded resources without a
+  // linked parsed_media still return.
   let query = supabase
     .from('resource_items')
-    .select('*, resource:resources!inner(*)')
+    .select('*, resource:resources!inner(*, media:parsed_media(id, source_platform))')
     .eq('scope_type', params.scopeType)
     .eq('scope_id', params.scopeId)
     .eq('resources.is_trashed', false)

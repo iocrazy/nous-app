@@ -333,6 +333,12 @@ export interface Resource {
   // Joined
   tags?: Tag[];
   folder_name?: string;
+  /** Optional join to parsed_media for Source filter chip. Only the
+   *  fields needed client-side are projected; expand as needed. */
+  media?: {
+    id: string | number;
+    source_platform?: string | null;
+  } | null;
 }
 
 // Resource item (resource <-> workspace mapping)

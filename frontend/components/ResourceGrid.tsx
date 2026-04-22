@@ -81,6 +81,9 @@ export interface ResourceGridProps {
   // Filter bar state (Eagle-style chip toolbar)
   filterBarConfig: UseFilterBarConfigReturn;
   allTags: Tag[];
+  /** Distinct platforms observed in the currently-loaded resource set,
+   *  used to enrich the Source filter chip's options. Optional. */
+  availablePlatforms?: string[];
 
   // Sort state & callbacks
   sortOptions: Array<{ value: SortBy; label: string }>;
@@ -170,6 +173,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   allSelectableIds,
   filterBarConfig,
   allTags,
+  availablePlatforms,
   sortOptions,
   currentSortLabel,
   onQueryChange,
@@ -575,7 +579,11 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
         {/* Pinnable filter bar — hidden in shared/recycle views where filters don't apply */}
         {!isRecycleView && !isSharedView && (
-          <FilterBar config={filterBarConfig} allTags={allTags} />
+          <FilterBar
+            config={filterBarConfig}
+            allTags={allTags}
+            availablePlatforms={availablePlatforms}
+          />
         )}
       </div>
 
