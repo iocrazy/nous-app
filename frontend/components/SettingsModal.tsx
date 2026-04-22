@@ -9,6 +9,8 @@ import { TeamSettings } from './TeamSettings';
 import { AILibraryPanel } from './AILibrary/AILibraryPanel';
 import { UserSettings, AISettings as AISettingsType, Team } from '../types';
 
+declare const __APP_VERSION__: string;
+
 type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'aiLibrary' | 'docs' | 'cookies';
 
 interface SettingsModalProps {
@@ -271,6 +273,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             ))}
           </nav>
+
+          {/* Version — bottom of left panel, no divider */}
+          <div className="px-5 py-3 text-[11px] text-zinc-600">
+            v{__APP_VERSION__}
+          </div>
         </div>
 
         {/* Content */}
