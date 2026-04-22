@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Clock,
+  Filter,
   FolderOpen,
   Loader2,
   Upload,
@@ -35,6 +36,7 @@ import { useResourcesContext } from '../contexts/ResourcesContext';
 import type { SortBy } from '../contexts/ResourcesContext';
 import { FilterBar } from './resources/filter/FilterBar';
 import type { UseFilterBarConfigReturn } from '../hooks/useFilterBarConfig';
+import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
 
 // ─── Skeleton components ────────────────────────────────
 
@@ -251,6 +253,13 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   // Mobile detection (matches Tailwind md: breakpoint at 768px)
   const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
 
+  // Filter bar visibility — search-row toggle remembers the choice in
+  // localStorage. Hidden in shared / recycle views where filters don't
+  // apply anyway.
+  const { visible: isFilterBarVisible, toggle: toggleFilterBar } = useFilterBarVisibility();
+  const filterBarEligible = !isRecycleView && !isSharedView;
+  const shouldRenderFilterBar = filterBarEligible && isFilterBarVisible;
+
   // Mobile search state
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
 
@@ -404,6 +413,34 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               placeholder={t('resources.searchFiles')}
               className="w-48"
             />
+
+            {/* Filter bar visibility toggle — plain funnel. Shows / hides
+                the chip row below. Only visible when the bar itself is
+                eligible (hidden in shared / recycle). */}
+            {filterBarEligible && (
+              <button
+                type="button"
+                onClick={toggleFilterBar}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  isFilterBarVisible
+                    ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                }`}
+                title={
+                  isFilterBarVisible
+                    ? t('resources.filter.hideFilterBar', 'Hide filter bar')
+                    : t('resources.filter.showFilterBar', 'Show filter bar')
+                }
+                aria-label={
+                  isFilterBarVisible
+                    ? t('resources.filter.hideFilterBar', 'Hide filter bar')
+                    : t('resources.filter.showFilterBar', 'Show filter bar')
+                }
+                aria-pressed={isFilterBarVisible}
+              >
+                <Filter size={14} />
+              </button>
+            )}
 
             {/* Sort dropdown */}
             <div className="relative">
@@ -577,8 +614,10 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
           </div>
         </div>
 
-        {/* Pinnable filter bar — hidden in shared/recycle views where filters don't apply */}
-        {!isRecycleView && !isSharedView && (
+        {/* Pinnable filter bar — hidden in shared/recycle views where
+            filters don't apply, and togglable via the funnel icon in
+            the search row. */}
+        {shouldRenderFilterBar && (
           <FilterBar
             config={filterBarConfig}
             allTags={allTags}
