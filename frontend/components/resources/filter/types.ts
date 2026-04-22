@@ -1,9 +1,9 @@
 // frontend/components/resources/filter/types.ts
 //
-// Type contracts for the Eagle-style pinnable filter bar (PR 2 — tags /
-// rating / type / source / ai_status / date_added). Adding a new chip
-// means: (1) add its id to ChipId, (2) add its default value to
-// DEFAULT_CHIP_VALUES, (3) add a reducer case in
+// Type contracts for the Eagle-style pinnable filter bar (PR 3 — tags /
+// rating / type / source / ai_status / date_added / duration / aspect).
+// Adding a new chip means: (1) add its id to ChipId, (2) add its default
+// value to DEFAULT_CHIP_VALUES, (3) add a reducer case in
 // useFilterBarConfig.isChipActive, (4) write a dropdown, (5) register
 // it in FilterBar's renderDropdown + chipLabel + chipSummary.
 
@@ -17,6 +17,8 @@ export const CHIP_IDS = [
   'source',
   'ai_status',
   'date_added',
+  'duration',
+  'aspect',
 ] as const;
 export type ChipId = (typeof CHIP_IDS)[number];
 
@@ -70,13 +72,46 @@ export interface DateAddedChipValue {
   customBefore: string | null;
 }
 
+/** Video-specific duration bucket presets + custom absolute window. */
+export type DurationPresetId =
+  | 'short60s' // ≤ 60 seconds
+  | 'medium' // 1-5 minutes (60..300)
+  | 'long' // 5-30 minutes (300..1800)
+  | 'xlong' // 30+ minutes (1800..Infinity)
+  | 'custom';
+
+export interface DurationChipValue {
+  /** null = inactive. */
+  preset: DurationPresetId | null;
+  /** Only consulted when preset === 'custom'. Seconds, non-negative ints. */
+  customMin: number | null;
+  customMax: number | null;
+}
+
+/** Aspect-ratio bucket ids. ``other`` catches anything that doesn't
+ *  fall into the four named buckets (or has no parseable resolution). */
+export type AspectBucketId =
+  | 'portrait' // 9:16-ish (ratio ∈ (0.5, 0.6))
+  | 'landscape' // 16:9-ish (ratio ∈ (1.7, 1.85))
+  | 'square' // 1:1-ish  (ratio ∈ (0.95, 1.05))
+  | 'fourThree' // 4:3-ish  (ratio ∈ (1.28, 1.4))
+  | 'other';
+
+/** Multi-select aspect buckets (OR semantics — match any). */
+export interface AspectChipValue {
+  /** Empty array means "no aspect filter applied". */
+  buckets: AspectBucketId[];
+}
+
 export type ChipValue =
   | TagsChipValue
   | RatingChipValue
   | TypeChipValue
   | SourceChipValue
   | AIStatusChipValue
-  | DateAddedChipValue;
+  | DateAddedChipValue
+  | DurationChipValue
+  | AspectChipValue;
 
 /** Discriminated lookup so consumers can narrow by chip id. */
 export interface ChipValuesMap {
@@ -86,6 +121,8 @@ export interface ChipValuesMap {
   source: SourceChipValue;
   ai_status: AIStatusChipValue;
   date_added: DateAddedChipValue;
+  duration: DurationChipValue;
+  aspect: AspectChipValue;
 }
 
 /** The inactive state for each chip — used for reset. */
@@ -96,9 +133,13 @@ export const DEFAULT_CHIP_VALUES: ChipValuesMap = {
   source: { platforms: [] },
   ai_status: { transcribed: false, summarized: false, analyzed: false },
   date_added: { preset: null, customAfter: null, customBefore: null },
+  duration: { preset: null, customMin: null, customMax: null },
+  aspect: { buckets: [] },
 };
 
-/** Default pin order (Eagle-style PR 2 baseline — all 6 chips pinned). */
+/** Default pin order (PR 2 baseline — 6 chips pinned). PR 3 adds
+ *  ``duration`` and ``aspect`` to the catalog but leaves them unpinned;
+ *  users opt in via the Filter config panel. */
 export const DEFAULT_PINNED_CHIPS: ChipId[] = [
   'tags',
   'rating',
@@ -112,7 +153,7 @@ export const DEFAULT_PINNED_CHIPS: ChipId[] = [
  * Parameters the filter bar contributes to a resource-list API call.
  * Kept separate from internal chip state so the backend contract and
  * the UI can evolve independently. Mirrors the new /resources query
- * params added in PR 2.
+ * params added in PR 2 + PR 3.
  */
 export interface FetchResourcesFilterParams {
   tag_ids?: string[];
@@ -124,4 +165,7 @@ export interface FetchResourcesFilterParams {
   ai_analyzed?: boolean;
   created_after?: string; // YYYY-MM-DD
   created_before?: string; // YYYY-MM-DD
+  duration_min?: number; // seconds
+  duration_max?: number; // seconds
+  aspect_ratios?: string[]; // "9:16" / "16:9" / "1:1" / "4:3" / "other"
 }
