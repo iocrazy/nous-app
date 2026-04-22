@@ -19,7 +19,6 @@ import {
   Check,
   X,
   UploadCloud,
-  Filter,
   FileText,
   Table2,
   Presentation,
@@ -31,9 +30,11 @@ import { ToolbarSearch } from './ToolbarSearch';
 import { ResourceCard } from './ResourceCard';
 import { FolderCard } from './FolderCard';
 import { Breadcrumb, BreadcrumbSegment } from './Breadcrumb';
-import { Folder, ResourceItem } from '../types';
+import { Folder, ResourceItem, Tag } from '../types';
 import { useResourcesContext } from '../contexts/ResourcesContext';
 import type { SortBy } from '../contexts/ResourcesContext';
+import { FilterBar } from './resources/filter/FilterBar';
+import type { UseFilterBarConfigReturn } from '../hooks/useFilterBarConfig';
 
 // ─── Skeleton components ────────────────────────────────
 
@@ -77,12 +78,12 @@ export interface ResourceGridProps {
   trashedFolderPreviews: Record<string, Array<{ resource_id?: string | null; thumbnail_path?: string | null; cover_image_path?: string | null; mime_type?: string | null }>>;
   allSelectableIds: string[];
 
-  // Filter / sort state & callbacks
-  filterOptions: Array<{ value: string; label: string }>;
+  // Filter bar state (Eagle-style chip toolbar)
+  filterBarConfig: UseFilterBarConfigReturn;
+  allTags: Tag[];
+
+  // Sort state & callbacks
   sortOptions: Array<{ value: SortBy; label: string }>;
-  activeFilters: Set<string>;
-  toggleFilter: (type: string) => void;
-  clearFilters: () => void;
   currentSortLabel: string;
 
   // Search callbacks
@@ -167,11 +168,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   recycleSubFolders,
   trashedFolderPreviews,
   allSelectableIds,
-  filterOptions,
+  filterBarConfig,
+  allTags,
   sortOptions,
-  activeFilters,
-  toggleFilter,
-  clearFilters,
   currentSortLabel,
   onQueryChange,
   onAISearch,
@@ -259,9 +258,8 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   const [showNewDropdown, setShowNewDropdown] = useState(false);
   const newDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Sort / filter panel
+  // Sort panel
   const [showSortMenu, setShowSortMenu] = useState(false);
-  const [showFilterPanel, setShowFilterPanel] = useState(false);
 
   // Click outside to close upload dropdown
   useEffect(() => {
@@ -366,7 +364,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
       {/* Toolbar -- desktop only */}
       <div
-        className="hidden md:block px-3 md:px-6 py-3 border-b border-zinc-800/80"
+        className="hidden md:block px-3 md:px-6 pt-3 pb-2 border-b border-zinc-800/80 space-y-2"
         style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
@@ -402,60 +400,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               placeholder={t('resources.searchFiles')}
               className="w-48"
             />
-
-            {/* Filter button */}
-            <div className="relative">
-              <button
-                onClick={() => setShowFilterPanel(!showFilterPanel)}
-                className={`relative p-1.5 rounded-lg transition-colors ${
-                  activeFilters.size > 0
-                    ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                }`}
-                title={t('resources.filter')}
-              >
-                <Filter size={14} />
-                {activeFilters.size > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center text-[9px] font-bold bg-indigo-500 text-white rounded-full px-0.5">
-                    {activeFilters.size}
-                  </span>
-                )}
-              </button>
-              {showFilterPanel && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowFilterPanel(false)} />
-                  <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
-                    {filterOptions.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => toggleFilter(opt.value)}
-                        className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
-                          activeFilters.has(opt.value)
-                            ? 'bg-indigo-500/10 text-indigo-400'
-                            : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                        }`}
-                      >
-                        <span>{opt.label}</span>
-                        {activeFilters.has(opt.value) && (
-                          <Check size={12} className="text-indigo-400" />
-                        )}
-                      </button>
-                    ))}
-                    {activeFilters.size > 0 && (
-                      <>
-                        <div className="mx-2.5 my-1.5 border-t border-zinc-700/60" />
-                        <button
-                          onClick={() => { clearFilters(); setShowFilterPanel(false); }}
-                          className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                        >
-                          {t('resources.clearFilters')}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
 
             {/* Sort dropdown */}
             <div className="relative">
@@ -628,6 +572,11 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
             )}
           </div>
         </div>
+
+        {/* Pinnable filter bar — hidden in shared/recycle views where filters don't apply */}
+        {!isRecycleView && !isSharedView && (
+          <FilterBar config={filterBarConfig} allTags={allTags} />
+        )}
       </div>
 
       {/* Multi-select mode toolbar */}
