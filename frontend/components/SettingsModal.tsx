@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-
-declare const __APP_VERSION__: string;
 import {
   X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie, Library,
 } from 'lucide-react';
@@ -10,6 +8,8 @@ import { SettingsView } from './SettingsView';
 import { TeamSettings } from './TeamSettings';
 import { AILibraryPanel } from './AILibrary/AILibraryPanel';
 import { UserSettings, AISettings as AISettingsType, Team } from '../types';
+
+declare const __APP_VERSION__: string;
 
 type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'aiLibrary' | 'docs' | 'cookies';
 

@@ -153,17 +153,23 @@ const Logo: React.FC<{ collapsed?: boolean }> = ({ collapsed = false }) => (
 );
 
 // ---------------------------------------------------------------------------
-// Edge collapse button — floats on the right edge of the sidebar, visible on
-// hover. Mirrors the ResourcesSidebar treatment so the whole app has one
-// consistent sidebar-collapse entry point.
+// Edge collapse button — right-edge tab, mirrors ResourcesSidebar / ProjectNavSidebar.
+// - Expanded: hover-reveal (opacity-0 group-hover:opacity-100) — keeps the sidebar clean.
+// - Collapsed: always visible (opacity-100) — without this the button is unreachable
+//   because hovering the narrow collapsed rail doesn't read as "there's a control here".
 // ---------------------------------------------------------------------------
 
-const EdgeCollapseButton: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({ collapsed = false, onToggleCollapse }) => {
+const EdgeCollapseButton: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({
+  collapsed = false,
+  onToggleCollapse,
+}) => {
   if (!onToggleCollapse) return null;
   return (
     <button
       onClick={onToggleCollapse}
-      className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
+      className={`absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors ${
+        collapsed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+      }`}
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
     >
       {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
@@ -359,7 +365,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // PERSONAL MODE (default)
   // ===================================================================
   return (
-    <aside className={`hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-zinc-800 bg-zinc-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`}>
+    <aside className={`group hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-zinc-800 bg-zinc-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`}>
       <Logo collapsed={collapsed} />
 
       <div className="mb-2">
