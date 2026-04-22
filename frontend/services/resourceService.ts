@@ -202,29 +202,65 @@ export async function fetchResourceContext(
 
 // ─── Resources ──────────────────────────────────────────
 
+/**
+ * Parameters accepted by the Resources list endpoint. Scope + folder +
+ * library are required to locate the view; the rest come from the
+ * filter bar (PR 1 — tags / rating / type chips).
+ *
+ * NOTE: the current implementation routes through Supabase for read
+ * performance and applies filter-bar filters client-side via the
+ * useResourcesDisplay hook. The backend also accepts these params on
+ * GET /api/v1/resources; a future PR will consolidate on the backend
+ * path so filtering moves off the wire.
+ */
+export interface FetchResourcesParams {
+  scopeType: 'personal' | 'team';
+  scopeId: string;
+  folderId?: string | null;
+  libraryId?: string | null;
+  /** AND-semantic tag id filter (applied via useResourcesDisplay for now). */
+  tag_ids?: string[];
+  /** Minimum rating (>= filter; 1..5). */
+  min_rating?: number;
+  /** Broad file-type categories. */
+  types?: Array<'video' | 'image' | 'audio' | 'document' | 'other'>;
+}
+
 export async function fetchResources(
-  scopeType: 'personal' | 'team',
-  scopeId: string,
+  scopeTypeOrParams: 'personal' | 'team' | FetchResourcesParams,
+  scopeId?: string,
   folderId?: string | null,
-  libraryId?: string | null
+  libraryId?: string | null,
 ): Promise<ResourceItem[]> {
+  // Backwards-compatible overload: existing callers still pass positional
+  // arguments. New callers should pass a FetchResourcesParams object.
+  const params: FetchResourcesParams =
+    typeof scopeTypeOrParams === 'object'
+      ? scopeTypeOrParams
+      : {
+          scopeType: scopeTypeOrParams,
+          scopeId: scopeId as string,
+          folderId,
+          libraryId,
+        };
+
   let query = supabase
     .from('resource_items')
     .select('*, resource:resources!inner(*)')
-    .eq('scope_type', scopeType)
-    .eq('scope_id', scopeId)
+    .eq('scope_type', params.scopeType)
+    .eq('scope_id', params.scopeId)
     .eq('resources.is_trashed', false)
     .neq('resource.source_type', 'web');
 
-  if (folderId) {
-    query = query.eq('folder_id', folderId);
+  if (params.folderId) {
+    query = query.eq('folder_id', params.folderId);
   } else {
     query = query.is('folder_id', null);
   }
 
-  if (libraryId) {
-    query = query.eq('library_id', libraryId);
-  } else if (scopeType === 'team') {
+  if (params.libraryId) {
+    query = query.eq('library_id', params.libraryId);
+  } else if (params.scopeType === 'team') {
     query = query.is('library_id', null);
   }
 

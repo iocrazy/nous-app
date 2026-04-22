@@ -73,6 +73,12 @@ export interface ResourcesContextType {
   allTags: Tag[];
   setAllTags: React.Dispatch<React.SetStateAction<Tag[]>>;
   resourceTagNamesMap: Record<string, string>;
+  /**
+   * Per-resource set of tag ids. Populated alongside resourceTagNamesMap
+   * so the filter bar can match by id without refetching. Values are
+   * Sets (stable identity per rebuild) — iterate, don't mutate.
+   */
+  resourceTagIdsMap: Record<string, Set<string>>;
   loading: boolean;
   setLoading: React.Dispatch<React.SetStateAction<boolean>>;
   folderChain: Folder[];
@@ -185,6 +191,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [downloadedResources, setDownloadedResources] = useState<ResourceItem[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [resourceTagNamesMap, setResourceTagNamesMap] = useState<Record<string, string>>({});
+  const [resourceTagIdsMap, setResourceTagIdsMap] = useState<Record<string, Set<string>>>({});
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [smartFolders, setSmartFolders] = useState<SmartCollection[]>([]);
   const [folderChain, setFolderChain] = useState<Folder[]>([]);
@@ -397,6 +404,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       .map(String);
     if (resourceIds.length === 0) {
       setResourceTagNamesMap({});
+      setResourceTagIdsMap({});
       return;
     }
     const supabase = getSupabaseClient();
@@ -412,11 +420,12 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       chunks.map(ids =>
         supabase
           .from('resource_tags')
-          .select('resource_id, tag:tags(name)')
+          .select('resource_id, tag_id, tag:tags(name)')
           .in('resource_id', ids)
       ),
     ).then((results) => {
-      const map: Record<string, string> = {};
+      const namesMap: Record<string, string> = {};
+      const idsMap: Record<string, Set<string>> = {};
       for (const { data, error } of results) {
         if (error || !data) continue;
         for (const row of data) {
@@ -424,11 +433,17 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
           const tag = row.tag as { name: string } | { name: string }[] | null;
           const tagName = Array.isArray(tag) ? tag[0]?.name : tag?.name;
           if (tagName) {
-            map[rid] = map[rid] ? `${map[rid]} ${tagName}` : tagName;
+            namesMap[rid] = namesMap[rid] ? `${namesMap[rid]} ${tagName}` : tagName;
+          }
+          const tagId = row.tag_id ? String(row.tag_id) : null;
+          if (tagId) {
+            if (!idsMap[rid]) idsMap[rid] = new Set<string>();
+            idsMap[rid].add(tagId);
           }
         }
       }
-      setResourceTagNamesMap(map);
+      setResourceTagNamesMap(namesMap);
+      setResourceTagIdsMap(idsMap);
     });
   }, [resources, downloadedResources]);
 
@@ -700,6 +715,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     allTags,
     setAllTags,
     resourceTagNamesMap,
+    resourceTagIdsMap,
     loading,
     setLoading,
     folderChain,
@@ -761,7 +777,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     scopeType, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
     isResourcesView, isRecycleView, isSharedView, isDownloadsView, canUpload,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
-    libraries, smartFolders, allTags, resourceTagNamesMap, loading, folderChain,
+    libraries, smartFolders, allTags, resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,
     viewMode, sortBy, searchQuery, debouncedSearch, showInfoPanel, infoPanelWidth,

@@ -26,6 +26,7 @@ import { useResourceOperations } from '../hooks/useResourceOperations';
 import { useContextMenuItems } from '../hooks/useContextMenuItems';
 import { useResourcesDisplay } from '../hooks/useResourcesDisplay';
 import { useResourceTouch } from '../hooks/useResourceTouch';
+import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
 import {
   moveResourceItem,
@@ -43,7 +44,7 @@ export const ResourcesViewInner: React.FC = () => {
     resources, setResources, folders, childFolders, folderPreviews,
     trashedResources, trashedFolders, downloadedResources,
     libraries, setLibraries, smartFolders, setSmartFolders,
-    resourceTagNamesMap, loading, setLoading, folderChain,
+    resourceTagNamesMap, resourceTagIdsMap, allTags, loading, setLoading, folderChain,
     recycleFolderId, setRecycleFolderId, recycleFolderItems,
     pendingPermanentDelete, setPendingPermanentDelete,
     pendingBatchPermanentDelete, setPendingBatchPermanentDelete,
@@ -237,17 +238,20 @@ export const ResourcesViewInner: React.FC = () => {
     onEmptyAreaContextMenu: handleEmptyAreaContextMenu,
   });
 
+  // ─── Filter bar (pinnable chip toolbar) ───────────────
+  const filterBarConfig = useFilterBarConfig();
+
   // ─── Display computations (filter/sort/breadcrumb/recycle) ──────────
   const {
-    activeFilters, setActiveFilters, toggleFilter,
     recycleItems, recycleSubFolders, trashedFolderPreviews,
     currentItems, filteredItems, sortedItems,
     filteredFolders, allSelectableIds,
-    breadcrumbSegments, filterOptions, sortOptions,
+    breadcrumbSegments, sortOptions,
   } = useResourcesDisplay({
     sidebarView, resources, downloadedResources, trashedResources,
     trashedFolders, recycleFolderItems, recycleFolderId,
     childFolders, sortBy, debouncedSearch, resourceTagNamesMap,
+    resourceTagIdsMap, chipValues: filterBarConfig.chipValues,
     aiSearchMatchedMediaIds, scopeType, selectedFolderId, selectedLibraryId,
     selectedSmartFolderId, isSharedView, isRecycleView, isDownloadsView,
     smartFolders, libraries, folderChain, navigate, resPath, setRecycleFolderId,
@@ -362,8 +366,9 @@ export const ResourcesViewInner: React.FC = () => {
   // ─── ResourceGrid props ───────────────────────────────
   const gridProps = useMemo(() => ({
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
-    allSelectableIds, filterOptions, sortOptions, activeFilters, toggleFilter,
-    clearFilters: () => setActiveFilters(new Set()), currentSortLabel,
+    allSelectableIds, sortOptions,
+    filterBarConfig, allTags,
+    currentSortLabel,
     onQueryChange: handleResourceQueryChange, onAISearch: handleResourceAISearch,
     onSearchClear: handleResourceSearchClear, isAISearching, uploading,
     overallProgress: upload.overallProgress, fileInputRef, folderInputRef,
@@ -392,7 +397,7 @@ export const ResourcesViewInner: React.FC = () => {
     onTouchDragEnd: handleTouchDragEnd,
   }), [
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
-    allSelectableIds, filterOptions, sortOptions, activeFilters, toggleFilter, setActiveFilters,
+    allSelectableIds, sortOptions, filterBarConfig, allTags,
     currentSortLabel, handleResourceQueryChange, handleResourceAISearch, handleResourceSearchClear,
     isAISearching, uploading, upload.overallProgress, fileInputRef, folderInputRef, canUpload,
     dragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop,

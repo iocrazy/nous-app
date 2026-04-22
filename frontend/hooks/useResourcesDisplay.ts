@@ -5,13 +5,47 @@
  * Handles filter/sort/breadcrumb/recycled item derivation.
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Folder, ResourceItem, SmartCollection, Library } from '../types';
 import type { SortBy } from '../contexts/ResourcesContext';
 import type { BreadcrumbSegment } from '../components/Breadcrumb';
+import type { ChipValuesMap } from '../components/resources/filter/types';
 
 export type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
+
+// Known mime-type prefixes. "Other" is everything NOT in this list.
+const KNOWN_MIME_PREFIXES = [
+  'video/',
+  'image/',
+  'audio/',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.',
+  'text/',
+] as const;
+
+function mimeMatchesType(mime: string, type: FilterType): boolean {
+  switch (type) {
+    case 'video':
+      return mime.startsWith('video/');
+    case 'image':
+      return mime.startsWith('image/');
+    case 'audio':
+      return mime.startsWith('audio/');
+    case 'document':
+      return (
+        mime.startsWith('application/pdf') ||
+        mime.startsWith('application/msword') ||
+        mime.startsWith('application/vnd.') ||
+        mime.startsWith('text/')
+      );
+    case 'other':
+      return !KNOWN_MIME_PREFIXES.some((p) => mime.startsWith(p));
+    default:
+      return false;
+  }
+}
 
 interface UseResourcesDisplayOptions {
   sidebarView: string;
@@ -25,6 +59,10 @@ interface UseResourcesDisplayOptions {
   sortBy: SortBy;
   debouncedSearch: string;
   resourceTagNamesMap: Record<string, string>;
+  /** Per-resource set of tag ids used for the tags chip filter. */
+  resourceTagIdsMap: Record<string, Set<string>>;
+  /** Active filter bar values. Drives tag / rating / type filtering. */
+  chipValues: ChipValuesMap;
   aiSearchMatchedMediaIds: Set<string> | null;
   scopeType: 'personal' | 'team';
   selectedFolderId: string | null | undefined;
@@ -53,6 +91,8 @@ export function useResourcesDisplay({
   sortBy,
   debouncedSearch,
   resourceTagNamesMap,
+  resourceTagIdsMap,
+  chipValues,
   aiSearchMatchedMediaIds,
   scopeType,
   selectedFolderId,
@@ -69,8 +109,6 @@ export function useResourcesDisplay({
   setRecycleFolderId,
 }: UseResourcesDisplayOptions) {
   const { t } = useTranslation();
-
-  const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set());
 
   // ─── Recycle bin items ─────────────────────────────
   const recycleItems = useMemo(() => {
@@ -116,20 +154,34 @@ export function useResourcesDisplay({
   // ─── Filter & sort ─────────────────────────────────
   const filteredItems = useMemo(() => {
     let items = currentItems;
-    if (activeFilters.size > 0) {
+
+    // Type chip (IN semantics across categories).
+    const types = chipValues.type.types;
+    if (types.length > 0) {
       items = items.filter((item) => {
         const mime = item.resource?.mime_type || '';
-        if (activeFilters.has('video') && mime.startsWith('video/')) return true;
-        if (activeFilters.has('image') && mime.startsWith('image/')) return true;
-        if (activeFilters.has('audio') && mime.startsWith('audio/')) return true;
-        if (activeFilters.has('document') && (mime.startsWith('application/pdf') || mime.startsWith('application/msword') || mime.startsWith('application/vnd.') || mime.startsWith('text/'))) return true;
-        if (activeFilters.has('other')) {
-          const isKnown = mime.startsWith('video/') || mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('application/pdf') || mime.startsWith('application/msword') || mime.startsWith('application/vnd.') || mime.startsWith('text/');
-          if (!isKnown) return true;
-        }
-        return false;
+        return types.some((t) => mimeMatchesType(mime, t));
       });
     }
+
+    // Rating chip (>= min_rating; 0 means inactive).
+    const minRating = chipValues.rating.min_rating;
+    if (minRating > 0) {
+      items = items.filter((item) => (item.resource?.rating ?? 0) >= minRating);
+    }
+
+    // Tags chip (AND semantics — resource must carry every selected tag).
+    const selectedTagIds = chipValues.tags.tag_ids;
+    if (selectedTagIds.length > 0) {
+      items = items.filter((item) => {
+        const rid = item.resource?.id ? String(item.resource.id) : null;
+        if (!rid) return false;
+        const tagSet = resourceTagIdsMap[rid];
+        if (!tagSet || tagSet.size === 0) return false;
+        return selectedTagIds.every((id) => tagSet.has(id));
+      });
+    }
+
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.trim().toLowerCase();
       items = items.filter((item) => {
@@ -146,7 +198,14 @@ export function useResourcesDisplay({
       });
     }
     return items;
-  }, [currentItems, activeFilters, debouncedSearch, aiSearchMatchedMediaIds, resourceTagNamesMap]);
+  }, [
+    currentItems,
+    chipValues,
+    debouncedSearch,
+    aiSearchMatchedMediaIds,
+    resourceTagNamesMap,
+    resourceTagIdsMap,
+  ]);
 
   const sortedItems = useMemo(() => {
     const items = [...filteredItems];
@@ -220,24 +279,6 @@ export function useResourcesDisplay({
     return segs;
   }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folderChain, t, navigate, resPath, recycleFolderId, trashedFolders, setRecycleFolderId]);
 
-  // ─── Filter toggle + options ───────────────────────
-  const toggleFilter = useCallback((type: FilterType) => {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
-  }, []);
-
-  const filterOptions: { value: FilterType; label: string }[] = [
-    { value: 'video', label: t('smartFolder.fileTypes.video') },
-    { value: 'image', label: t('smartFolder.fileTypes.image') },
-    { value: 'audio', label: t('smartFolder.fileTypes.audio') },
-    { value: 'document', label: t('smartFolder.fileTypes.document') },
-    { value: 'other', label: t('smartFolder.fileTypes.other') },
-  ];
-
   const sortOptions: { value: SortBy; label: string }[] = [
     { value: 'newest', label: t('resources.sortNewest') },
     { value: 'oldest', label: t('resources.sortOldest') },
@@ -248,10 +289,9 @@ export function useResourcesDisplay({
   ];
 
   return {
-    activeFilters, setActiveFilters, toggleFilter,
     recycleItems, recycleSubFolders, trashedFolderPreviews,
     currentItems, filteredItems, sortedItems,
     filteredFolders, allSelectableIds,
-    breadcrumbSegments, filterOptions, sortOptions,
+    breadcrumbSegments, sortOptions,
   };
 }

@@ -9,7 +9,7 @@ move, tags, and batch transcode.
 
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -40,22 +40,64 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 # ============================================
 
 
+_ALLOWED_TYPE_CATEGORIES = {"video", "image", "audio", "document", "other"}
+
+
 @router.get("")
 async def list_resources(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
     folder_id: Optional[str] = Query(None),
+    tag_ids: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Filter by tag ids (AND semantics — resource must carry every tag)."
+        ),
+    ),
+    min_rating: Optional[int] = Query(
+        None,
+        ge=0,
+        le=5,
+        description="Return only resources with rating >= this value (0-5).",
+    ),
+    types: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Filter by resource type category (IN semantics). "
+            "Allowed: video, image, audio, document, other."
+        ),
+    ),
 ):
-    """List resources in a scope, optionally filtered by folder."""
+    """List resources in a scope, optionally filtered by folder/tag/rating/type."""
+    # Validate and normalise `types` here so the repository can stay
+    # strictly about data access (fail fast at the boundary).
+    normalised_types: Optional[List[str]] = None
+    if types:
+        normalised_types = [t for t in types if t]
+        for t in normalised_types:
+            if t not in _ALLOWED_TYPE_CATEGORIES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Invalid type category: {t!r}. "
+                        f"Allowed: {sorted(_ALLOWED_TYPE_CATEGORIES)}."
+                    ),
+                )
+
     try:
         repo = ResourcesRepository()
         items = await repo.get_resource_items(
             scope_type=scope_type,
             scope_id=scope_id,
             folder_id=folder_id,
+            tag_ids=tag_ids or None,
+            min_rating=min_rating,
+            types=normalised_types,
         )
         return {"success": True, "data": items}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to list resources: {e}")
         raise HTTPException(status_code=500, detail="Failed to list resources")
