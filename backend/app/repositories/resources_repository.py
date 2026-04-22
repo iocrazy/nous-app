@@ -343,6 +343,12 @@ class ResourcesRepository:
         duration_min: Optional[int] = None,
         duration_max: Optional[int] = None,
         aspect_ratios: Optional[List[str]] = None,
+        min_likes: Optional[int] = None,
+        min_comments: Optional[int] = None,
+        min_favorites: Optional[int] = None,
+        min_shares: Optional[int] = None,
+        social_combine: str = "and",
+        has_comments: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """List resource_items joined to their resources.
 
@@ -372,6 +378,19 @@ class ResourcesRepository:
           that would need parsing on every row), so this parameter is
           a no-op at the repository layer — left here so the router /
           service contract is stable.
+        - ``min_likes`` / ``min_comments`` / ``min_favorites`` /
+          ``min_shares``: inclusive lower bounds on the matching
+          ``parsed_media.*_count`` columns. Semantics across the four
+          thresholds follow ``social_combine`` (``"and"`` — default — or
+          ``"or"``). ``has_comments`` additionally forces
+          ``comment_count > 0`` (applied with AND on top of the combined
+          thresholds). These parameters are accepted at the API surface
+          for parity with the frontend chip; like ``aspect_ratios`` they
+          are a no-op at the repository layer for now — social-metric
+          filtering runs client-side in ``useResourcesDisplay`` because
+          the values live on the sibling ``parsed_media`` table and
+          pushing the filter down would require either an RPC or a more
+          invasive two-step lookup.
         """
         try:
             client = await self._get_client()
@@ -469,6 +488,18 @@ class ResourcesRepository:
             # ``aspect_ratios``: accepted at the API surface but not
             # filtered server-side in this PR. See the docstring above.
             _ = aspect_ratios
+
+            # Social metric filters are accepted for API parity but
+            # applied client-side in ``useResourcesDisplay``. See the
+            # docstring for the rationale.
+            _ = (
+                min_likes,
+                min_comments,
+                min_favorites,
+                min_shares,
+                social_combine,
+                has_comments,
+            )
 
             query = query.order("created_at", desc=True)
             result = await query.execute()
