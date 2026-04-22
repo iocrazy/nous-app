@@ -42,6 +42,7 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 
 
 _ALLOWED_TYPE_CATEGORIES = {"video", "image", "audio", "document", "other"}
+_ALLOWED_ASPECT_RATIOS = {"9:16", "16:9", "1:1", "4:3", "other"}
 
 
 @router.get("")
@@ -98,8 +99,30 @@ async def list_resources(
         None,
         description="Inclusive upper bound on resource.created_at (UTC date).",
     ),
+    duration_min: Optional[int] = Query(
+        None,
+        ge=0,
+        description=(
+            "Inclusive lower bound on resource.duration_seconds (in seconds)."
+        ),
+    ),
+    duration_max: Optional[int] = Query(
+        None,
+        ge=0,
+        description=(
+            "Inclusive upper bound on resource.duration_seconds (in seconds)."
+        ),
+    ),
+    aspect_ratios: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Filter by aspect-ratio bucket. Allowed: 9:16, 16:9, 1:1, 4:3, "
+            "other. Accepted at the API surface; aspect filtering is "
+            "currently applied client-side."
+        ),
+    ),
 ):
-    """List resources in a scope, optionally filtered by folder/tag/rating/type/source/ai/date."""
+    """List resources in a scope, optionally filtered by folder/tag/rating/type/source/ai/date/duration/aspect."""
     # Validate and normalise `types` here so the repository can stay
     # strictly about data access (fail fast at the boundary).
     normalised_types: Optional[List[str]] = None
@@ -133,6 +156,31 @@ async def list_resources(
             detail="created_after must be <= created_before.",
         )
 
+    if (
+        duration_min is not None
+        and duration_max is not None
+        and duration_min > duration_max
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="duration_min must be <= duration_max.",
+        )
+
+    normalised_aspect_ratios: Optional[List[str]] = None
+    if aspect_ratios:
+        normalised_aspect_ratios = [a.strip() for a in aspect_ratios if a and a.strip()]
+        for a in normalised_aspect_ratios:
+            if a not in _ALLOWED_ASPECT_RATIOS:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Invalid aspect ratio: {a!r}. "
+                        f"Allowed: {sorted(_ALLOWED_ASPECT_RATIOS)}."
+                    ),
+                )
+        if not normalised_aspect_ratios:
+            normalised_aspect_ratios = None
+
     try:
         repo = ResourcesRepository()
         items = await repo.get_resource_items(
@@ -148,6 +196,9 @@ async def list_resources(
             ai_analyzed=ai_analyzed,
             created_after=created_after,
             created_before=created_before,
+            duration_min=duration_min,
+            duration_max=duration_max,
+            aspect_ratios=normalised_aspect_ratios,
         )
         return {"success": True, "data": items}
     except HTTPException:

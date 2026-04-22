@@ -12,6 +12,11 @@ import type { SortBy } from '../contexts/ResourcesContext';
 import type { BreadcrumbSegment } from '../components/Breadcrumb';
 import type { ChipValuesMap } from '../components/resources/filter/types';
 import { datePresetToRange } from '../components/resources/filter/dateUtils';
+import {
+  durationMatches,
+  durationPresetToRange,
+} from '../components/resources/filter/durationUtils';
+import { aspectMatches } from '../components/resources/filter/aspectUtils';
 
 export type FilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
 
@@ -225,6 +230,24 @@ export function useResourcesDisplay({
         if (beforeTs !== null && ts > beforeTs) return false;
         return true;
       });
+    }
+
+    // Duration chip (video-specific; resources without a duration are
+    // excluded when any range is active).
+    const durationRange = durationPresetToRange(chipValues.duration);
+    if (durationRange.min != null || durationRange.max != null) {
+      items = items.filter((item) =>
+        durationMatches(item.resource?.duration_seconds, durationRange),
+      );
+    }
+
+    // Aspect chip (video-specific; resolution parsed into a width/height
+    // ratio and mapped to buckets).
+    const selectedBuckets = chipValues.aspect.buckets;
+    if (selectedBuckets.length > 0) {
+      items = items.filter((item) =>
+        aspectMatches(item.resource?.resolution, selectedBuckets),
+      );
     }
 
     if (debouncedSearch.trim()) {

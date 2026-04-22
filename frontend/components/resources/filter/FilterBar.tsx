@@ -15,7 +15,7 @@ import { Filter, X } from 'lucide-react';
 import type { Tag } from '../../../types';
 import type { UseFilterBarConfigReturn } from '../../../hooks/useFilterBarConfig';
 import type { ResourceFilterType } from '../resourceFilters';
-import type { ChipId, DatePresetId } from './types';
+import type { ChipId, DatePresetId, DurationPresetId } from './types';
 import { FilterChip } from './FilterChip';
 import { FilterConfigPanel } from './FilterConfigPanel';
 import { RatingFilterDropdown } from './RatingFilterDropdown';
@@ -24,7 +24,11 @@ import { TypeFilterDropdown } from './TypeFilterDropdown';
 import { SourceFilterDropdown } from './SourceFilterDropdown';
 import { AIStatusFilterDropdown } from './AIStatusFilterDropdown';
 import { DateAddedFilterDropdown } from './DateAddedFilterDropdown';
+import { DurationFilterDropdown } from './DurationFilterDropdown';
+import { AspectFilterDropdown } from './AspectFilterDropdown';
 import { datePresetSummary } from './dateUtils';
+import { durationPresetSummary } from './durationUtils';
+import { aspectSummary } from './aspectUtils';
 
 export interface FilterBarProps {
   /** Config hook instance — FilterBar is controlled via this. */
@@ -76,6 +80,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           return t('resources.filter.aiStatus', 'AI');
         case 'date_added':
           return t('resources.filter.dateAdded', 'Date');
+        case 'duration':
+          return t('resources.filter.duration', 'Duration');
+        case 'aspect':
+          return t('resources.filter.aspect', 'Aspect');
       }
     };
   }, [t]);
@@ -129,6 +137,18 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         };
         return datePresetSummary(chipValues.date_added, presetLabels);
       }
+      case 'duration': {
+        const presetLabels: Record<DurationPresetId, string> = {
+          short60s: t('resources.filter.durationPresets.short60s', '≤ 60s'),
+          medium: t('resources.filter.durationPresets.medium', '1-5 min'),
+          long: t('resources.filter.durationPresets.long', '5-30 min'),
+          xlong: t('resources.filter.durationPresets.xlong', '30+ min'),
+          custom: t('resources.filter.durationPresets.custom', 'Custom'),
+        };
+        return durationPresetSummary(chipValues.duration, presetLabels);
+      }
+      case 'aspect':
+        return aspectSummary(chipValues.aspect);
     }
   };
 
@@ -189,6 +209,22 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             value={chipValues.date_added}
             onChange={(next) => setChipValue('date_added', next)}
             onClearAll={() => clearChip('date_added')}
+          />
+        );
+      case 'duration':
+        return (
+          <DurationFilterDropdown
+            value={chipValues.duration}
+            onChange={(next) => setChipValue('duration', next)}
+            onClearAll={() => clearChip('duration')}
+          />
+        );
+      case 'aspect':
+        return (
+          <AspectFilterDropdown
+            selectedBuckets={chipValues.aspect.buckets}
+            onChange={(next) => setChipValue('aspect', { buckets: next })}
+            onClearAll={() => clearChip('aspect')}
           />
         );
     }

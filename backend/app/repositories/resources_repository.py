@@ -340,6 +340,9 @@ class ResourcesRepository:
         ai_analyzed: Optional[bool] = None,
         created_after: Optional[date] = None,
         created_before: Optional[date] = None,
+        duration_min: Optional[int] = None,
+        duration_max: Optional[int] = None,
+        aspect_ratios: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """List resource_items joined to their resources.
 
@@ -360,6 +363,15 @@ class ResourcesRepository:
           on ``resource.created_at``. Dates are interpreted in UTC and
           expanded to full-day boundaries (after: >= 00:00:00 of the day;
           before: <= 23:59:59.999999 of the day).
+        - ``duration_min`` / ``duration_max``: inclusive bounds (in
+          seconds) on ``resource.duration_seconds``.
+        - ``aspect_ratios``: accepted for API-surface parity with the
+          frontend chip (e.g. ``"9:16"``, ``"16:9"``, ``"1:1"``,
+          ``"4:3"``, ``"other"``). The current PR keeps aspect filtering
+          client-side (the ``resolution`` column is a ``"WxH"`` string
+          that would need parsing on every row), so this parameter is
+          a no-op at the repository layer — left here so the router /
+          service contract is stable.
         """
         try:
             client = await self._get_client()
@@ -444,6 +456,19 @@ class ResourcesRepository:
                     created_before, datetime.max.time(), tzinfo=timezone.utc
                 ).isoformat()
                 query = query.lte("resource.created_at", end_iso)
+
+            # Duration range (seconds): inclusive gte/lte on
+            # ``resource.duration_seconds``. Non-video rows will be NULL
+            # here — PostgREST drops them from the result, which matches
+            # the intent of the chip (duration is video-specific).
+            if duration_min is not None:
+                query = query.gte("resource.duration_seconds", int(duration_min))
+            if duration_max is not None:
+                query = query.lte("resource.duration_seconds", int(duration_max))
+
+            # ``aspect_ratios``: accepted at the API surface but not
+            # filtered server-side in this PR. See the docstring above.
+            _ = aspect_ratios
 
             query = query.order("created_at", desc=True)
             result = await query.execute()
