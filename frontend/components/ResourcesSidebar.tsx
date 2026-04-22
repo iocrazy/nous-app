@@ -242,7 +242,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               <Download size={15} className="shrink-0 opacity-70" />
               <span className="flex-1 truncate">{t('resources.downloads')}</span>
               {downloadsCount !== null && downloadsCount > 0 && (
-                <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 font-medium">{downloadsCount}</span>
+                <span className="text-[11px] text-zinc-500 tabular-nums">{downloadsCount}</span>
               )}
             </button>
 
@@ -257,7 +257,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                 <FolderOpen size={15} className="shrink-0 opacity-70" />
                 <span className="flex-1 truncate">{t('resources.myResources')}</span>
                 {myResourcesCount !== null && myResourcesCount > 0 && (
-                  <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 font-medium">{myResourcesCount}</span>
+                  <span className="text-[11px] text-zinc-500 tabular-nums">{myResourcesCount}</span>
                 )}
               </button>
               <button
