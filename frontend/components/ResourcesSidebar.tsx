@@ -69,6 +69,8 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
     isDownloadsView,
     resPath,
     navigate,
+    myResourcesCount,
+    downloadsCount,
   } = useResourcesContext();
 
   // ── Local UI state ──
@@ -238,7 +240,10 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               className={sidebarItemClass(isDownloadsView)}
             >
               <Download size={15} className="shrink-0 opacity-70" />
-              <span>{t('resources.downloads')}</span>
+              <span className="flex-1 truncate">{t('resources.downloads')}</span>
+              {downloadsCount !== null && downloadsCount > 0 && (
+                <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 font-medium">{downloadsCount}</span>
+              )}
             </button>
 
             {/* My Resources with + */}
@@ -250,7 +255,10 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                 className={sidebarItemClass(isResourcesView && selectedFolderId === null && !selectedSmartFolderId)}
               >
                 <FolderOpen size={15} className="shrink-0 opacity-70" />
-                <span>{t('resources.myResources')}</span>
+                <span className="flex-1 truncate">{t('resources.myResources')}</span>
+                {myResourcesCount !== null && myResourcesCount > 0 && (
+                  <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500 font-medium">{myResourcesCount}</span>
+                )}
               </button>
               <button
                 onClick={() => {

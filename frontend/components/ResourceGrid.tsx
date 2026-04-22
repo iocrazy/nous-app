@@ -385,21 +385,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
             {breadcrumbSegments.length <= 1 ? (
               <div>
                 <h2 className="text-lg font-semibold text-zinc-100">{breadcrumbSegments[0]?.label}</h2>
-                {!loading && (
-                  <p className="text-xs text-zinc-500 mt-0.5">
-                    {filteredFolders.length + sortedItems.length} {t('resources.items')}
-                  </p>
-                )}
               </div>
             ) : (
-              <>
-                <Breadcrumb segments={breadcrumbSegments} />
-                {!loading && (
-                  <span className="text-[11px] text-zinc-600 shrink-0 tabular-nums">
-                    {filteredFolders.length + sortedItems.length} {t('resources.items')}
-                  </span>
-                )}
-              </>
+              <Breadcrumb segments={breadcrumbSegments} />
             )}
           </div>
 

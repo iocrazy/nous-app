@@ -12,6 +12,8 @@ import {
   permanentDeleteFolder,
   fetchTrashedResources,
   fetchDownloadedResources,
+  fetchDownloadedResourceCount,
+  fetchResourceCount,
   fetchResourceTags,
   addResourceTag,
   removeResourceTag,
@@ -72,6 +74,16 @@ export interface ResourcesContextType {
   setSmartFolders: React.Dispatch<React.SetStateAction<SmartCollection[]>>;
   allTags: Tag[];
   setAllTags: React.Dispatch<React.SetStateAction<Tag[]>>;
+  /** Total count of "My Resources" (non-web resources, across all folders) for the current scope.
+   *  Used by the sidebar to render a count badge on the "My Resources" entry.
+   *  Null while loading. */
+  myResourcesCount: number | null;
+  /** Total count of "My Downloads" (web-sourced resources) for the current scope.
+   *  Used by the sidebar to render a count badge on the "My Downloads" entry.
+   *  Null while loading. */
+  downloadsCount: number | null;
+  /** Trigger a refresh of both sidebar counts (e.g. after trash/restore/upload). */
+  refreshSidebarCounts: () => void;
   resourceTagNamesMap: Record<string, string>;
   /**
    * Per-resource set of tag ids. Populated alongside resourceTagNamesMap
@@ -196,6 +208,14 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [smartFolders, setSmartFolders] = useState<SmartCollection[]>([]);
   const [folderChain, setFolderChain] = useState<Folder[]>([]);
 
+  // ── Sidebar counts (for "My Downloads" / "My Resources" menu badges) ──
+  const [myResourcesCount, setMyResourcesCount] = useState<number | null>(null);
+  const [downloadsCount, setDownloadsCount] = useState<number | null>(null);
+  const [countsRefreshTick, setCountsRefreshTick] = useState(0);
+  const refreshSidebarCounts = useCallback(() => {
+    setCountsRefreshTick((v) => v + 1);
+  }, []);
+
   // ── Selection state ──
   const [selectedResource, setSelectedResource] = useState<ResourceItem | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<Folder | null>(null);
@@ -285,6 +305,31 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       setLibraries([]);
     }
   }, [loadFolders, scopeType, scopeId]);
+
+  // Sidebar counts — refetch on scope change and on explicit refresh.
+  // Kept in its own effect so count queries don't block the primary list load.
+  useEffect(() => {
+    let cancelled = false;
+    setMyResourcesCount(null);
+    setDownloadsCount(null);
+    Promise.all([
+      fetchResourceCount(scopeType, scopeId).catch((err) => {
+        console.error('Failed to load resource count:', err);
+        return 0;
+      }),
+      fetchDownloadedResourceCount(scopeType, scopeId).catch((err) => {
+        console.error('Failed to load download count:', err);
+        return 0;
+      }),
+    ]).then(([resCount, dlCount]) => {
+      if (cancelled) return;
+      setMyResourcesCount(resCount);
+      setDownloadsCount(dlCount);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [scopeType, scopeId, countsRefreshTick]);
 
   // Load folder previews when child folders change
   useEffect(() => {
@@ -580,16 +625,18 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       if (String(selectedResource?.resource?.id) === rid) setSelectedResource(null);
       const filename = item?.resource?.filename || '';
       addToast(t('resources.trashedNotification', { name: filename }), 'success');
+      refreshSidebarCounts();
     } catch (err) { console.error('Failed to trash resource:', err); }
-  }, [selectedResource, scopeType, scopeId, selectedFolderId, resources, addToast, t]);
+  }, [selectedResource, scopeType, scopeId, selectedFolderId, resources, addToast, t, refreshSidebarCounts]);
 
   const handleRestoreResource = useCallback(async (resourceId: string) => {
     try {
       const rid = String(resourceId);
       await restoreResource(rid);
       setTrashedResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
+      refreshSidebarCounts();
     } catch { /* ignore */ }
-  }, []);
+  }, [refreshSidebarCounts]);
 
   const handlePermanentDelete = useCallback((resourceId: string) => {
     setPendingPermanentDelete(resourceId);
@@ -613,6 +660,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       }
       setSelectedIds(new Set());
       addToast(t('resources.permanentDeleteSuccess'), 'success');
+      refreshSidebarCounts();
     } catch (err) {
       console.error('Permanent delete failed:', err);
       addToast(t('resources.permanentDeleteFailed'), 'error');
@@ -620,7 +668,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setPendingPermanentDelete(null);
     setPendingBatchPermanentDelete(null);
     setPendingBatchPermanentDeleteFolders(null);
-  }, [pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders, loadTrashedResources, addToast, t]);
+  }, [pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders, loadTrashedResources, addToast, t, refreshSidebarCounts]);
 
   const handleAddTag = useCallback(async (tagId: string) => {
     if (!selectedResource?.resource?.id) return;
@@ -714,6 +762,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setSmartFolders,
     allTags,
     setAllTags,
+    myResourcesCount,
+    downloadsCount,
+    refreshSidebarCounts,
     resourceTagNamesMap,
     resourceTagIdsMap,
     loading,
@@ -777,7 +828,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     scopeType, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
     isResourcesView, isRecycleView, isSharedView, isDownloadsView, canUpload,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
-    libraries, smartFolders, allTags, resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
+    libraries, smartFolders, allTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
+    resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,
     viewMode, sortBy, searchQuery, debouncedSearch, showInfoPanel, infoPanelWidth,
