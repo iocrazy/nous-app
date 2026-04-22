@@ -284,11 +284,37 @@ async def test_list_skills_includes_script_outline(client: AsyncClient) -> None:
         list_files=AsyncMock(return_value=[]),
     )
     agent_patches = _patch_agent_repo()
+
+    # list_skills → _fetch_user_team_ids / _fetch_user_project_ids (scope
+    # filter) + _enrich_* → _fetch_team_names / _fetch_project_names.
+    # All four touch Supabase; stub them so CI doesn't need a live DB.
+    enrich_patches = [
+        patch(
+            "app.api.ai_library_router._fetch_user_team_ids",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.api.ai_library_router._fetch_user_project_ids",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.api.ai_library_router._fetch_team_names",
+            AsyncMock(return_value={}),
+        ),
+        patch(
+            "app.api.ai_library_router._fetch_project_names",
+            AsyncMock(return_value={}),
+        ),
+    ]
     _apply(agent_patches)
     _apply(skill_patches)
+    for p in enrich_patches:
+        p.start()
     try:
         resp = await client.get(f"{BASE}/skills")
     finally:
+        for p in enrich_patches:
+            p.stop()
         _cleanup(agent_patches)
         _cleanup(skill_patches)
 

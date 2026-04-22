@@ -95,11 +95,19 @@ def _patch_scope_helpers(
     is_team_member: bool = True,
     can_write_project: bool = True,
 ):
-    """Patch the scope-membership helpers in ai_library_router."""
+    """Patch the scope-membership helpers in ai_library_router.
+
+    Also stubs the Supabase-touching name lookups (``_fetch_team_names`` /
+    ``_fetch_project_names``) so ``_enrich_rows_with_scope_names`` runs its
+    code path but never actually hits the DB. Required in CI where Supabase
+    is not reachable.
+    """
     return patch.multiple(
         "app.api.ai_library_router",
         _user_is_team_member=AsyncMock(return_value=is_team_member),
         _user_can_write_project=AsyncMock(return_value=can_write_project),
+        _fetch_team_names=AsyncMock(return_value={}),
+        _fetch_project_names=AsyncMock(return_value={}),
     )
 
 
