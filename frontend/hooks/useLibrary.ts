@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ParsedMedia, Video, Collection } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
-import { fetchLibraryPaginated, updateItem, deleteItem, cleanupStaleDownloads } from '../services/dataService';
+import {
+  fetchLibraryPaginated,
+  updateItem,
+  deleteItem,
+  cleanupStaleDownloads,
+  type FetchLibraryFilterParams,
+} from '../services/dataService';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from '../services/collectionService';
 import { MOCK_LIBRARY } from '../constants';
 import { LibraryTab } from '../components/LibraryTabs';
@@ -16,6 +22,17 @@ interface UseLibraryParams {
 }
 
 export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpdate, extraSearchMap }: UseLibraryParams) {
+  // Active server-side filter params. Default empty = no filter. The
+  // DownloadsView pushes its filter bar state through setFilterParams.
+  const [filterParams, setFilterParams] = useState<FetchLibraryFilterParams>({});
+  // Stable JSON fingerprint so effect deps don't churn on object identity.
+  const filterParamsKey = useMemo(
+    () => JSON.stringify(filterParams),
+    [filterParams],
+  );
+  const filterParamsRef = useRef<FetchLibraryFilterParams>(filterParams);
+  filterParamsRef.current = filterParams;
+
   // Core library state
   const [library, setLibrary] = useState<Video[]>([]);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
@@ -112,7 +129,12 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     try {
       if (isSupabaseConfigured()) {
         const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-        const result = await fetchLibraryPaginated(0, isMobile ? 10 : 20, controller.signal);
+        const result = await fetchLibraryPaginated(
+          0,
+          isMobile ? 10 : 20,
+          controller.signal,
+          filterParamsRef.current,
+        );
         if (controller.signal.aborted) return;
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
@@ -143,7 +165,12 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       const controller = new AbortController();
       libraryAbortRef.current?.abort();
       libraryAbortRef.current = controller;
-      const result = await fetchLibraryPaginated(nextPage, isMobile ? 10 : 20, controller.signal);
+      const result = await fetchLibraryPaginated(
+        nextPage,
+        isMobile ? 10 : 20,
+        controller.signal,
+        filterParamsRef.current,
+      );
       if (controller.signal.aborted) return;
       if (result.data.length > 0) {
         setLibrary(prev => [...prev, ...result.data]);
@@ -164,7 +191,19 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     if (isAuthenticated) {
       loadLibraryData();
     }
+    // loadLibraryData is intentionally omitted — it reads state refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
+
+  // Re-fetch when filter params change (server-side filter, paginated
+  // so totalCount + hasMore refresh correctly).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    loadLibraryData();
+    // filterParamsKey is a JSON fingerprint; loadLibraryData reads
+    // filterParamsRef.current.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterParamsKey]);
 
   // Fetch collections + cleanup AFTER initial data load (reduce concurrent NAS requests)
   useEffect(() => {
@@ -608,5 +647,9 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     handleToggleVideoCollection,
     handleUpdateLibraryItem,
     handleDeleteLibraryItem,
+
+    // Server-side filter params (pushed to PostgREST on fetch)
+    filterParams,
+    setFilterParams,
   };
 }
