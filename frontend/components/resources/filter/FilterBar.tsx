@@ -164,7 +164,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         case 'aspect':
           return t('resources.filter.aspect', 'Aspect');
         case 'social':
-          return t('resources.filter.social', 'Social');
+          return t('resources.filter.socialLabel', 'Social');
       }
     };
   }, [t]);
