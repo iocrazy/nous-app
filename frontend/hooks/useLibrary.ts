@@ -145,14 +145,28 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         setHasMoreData(false);
       }
     } catch (err: any) {
+      // Swallow AbortError — it means a newer load/filter change took over
+      // and the previous fetch was intentionally cancelled. Showing a red
+      // "Could not fetch real data" banner in that case is user-confusing
+      // because the next fetch is already in flight.
+      if (
+        err?.name === 'AbortError' ||
+        controller.signal.aborted ||
+        err?.message?.includes('aborted')
+      ) {
+        return;
+      }
       console.error("Failed to load library:", err);
       setLibrary(MOCK_LIBRARY);
       setHasMoreData(false);
       const errorMessage = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
       setLibraryError(`Could not fetch real data (${errorMessage}). Using local cache.`);
     } finally {
-      setIsLoadingLibrary(false);
-      setInitialLoadComplete(true);
+      // Only clear loading if this request wasn't superseded by a newer one.
+      if (!controller.signal.aborted) {
+        setIsLoadingLibrary(false);
+        setInitialLoadComplete(true);
+      }
     }
   };
 
@@ -179,7 +193,10 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       } else {
         setHasMoreData(false);
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+        return;
+      }
       console.error("Failed to load more library data:", err);
     } finally {
       setIsLoadingMore(false);
