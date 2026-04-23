@@ -9,7 +9,7 @@ Layout:
 
     # Identity            ← agent.identity_md (若非空)
     # Soul                ← agent.soul_md (若非空) + persona instruction
-    # Agent Instructions  ← agent.agent_md (or persona fallback)
+    # Agent Instructions  ← agent.agent_md
 
     ## Available Skills + <available_skills> XML manifest
 
@@ -136,7 +136,7 @@ class PromptComposer:
                 "override it."
             )
 
-        instruction = (agent.get("agent_md") or agent.get("persona") or "").strip()
+        instruction = (agent.get("agent_md") or "").strip()
         if instruction:
             parts.append(f"# Agent Instructions\n{instruction}")
 
@@ -239,7 +239,7 @@ class PromptComposer:
         h.update(str(agent.get("updated_at", "")).encode())
         h.update((agent.get("identity_md") or "").encode())
         h.update((agent.get("soul_md") or "").encode())
-        h.update((agent.get("agent_md") or agent.get("persona") or "").encode())
+        h.update((agent.get("agent_md") or "").encode())
         for s in sorted(skills, key=lambda x: str(x.get("id"))):
             h.update(str(s.get("id", "")).encode())
             h.update(str(s.get("updated_at", "")).encode())

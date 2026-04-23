@@ -182,8 +182,7 @@ class AgentRepository:
         """Create a new ai_agents row.
 
         The caller is responsible for setting ``is_system_preset`` (false for
-        user-created agents). ``persona`` is required by the schema — caller
-        should set a sensible default if unknown. Returns the inserted row.
+        user-created agents). Returns the inserted row.
         """
         client = await self._get_client()
         result = await client.table(self.TABLE).insert(fields).execute()

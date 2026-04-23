@@ -363,7 +363,6 @@ async def create_agent(
         "slug": payload.slug,
         "name": payload.name,
         "description": payload.description,
-        "persona": payload.description or f"{payload.name} (user-created)",
         "is_system_preset": False,
         "user_id": str(user_uuid),
         "team_id": payload.team_id,
