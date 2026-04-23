@@ -102,12 +102,6 @@ class SeedLoader:
         return {
             "slug": slug,
             "name": name,
-            # `persona` is NOT NULL in the ai_agents schema (migration 140 didn't
-            # drop the constraint, just made the field optional in the Python
-            # model). Provide a sensible default so seeding new agents doesn't
-            # fail with a constraint violation. The real identity lives in
-            # identity_md / soul_md / agent_md.
-            "persona": f"{name} agent for MediaHub",
             "identity_md": read_if_exists("IDENTITY.md"),
             "soul_md": read_if_exists("SOUL.md"),
             "agent_md": read_if_exists("AGENT.md"),
