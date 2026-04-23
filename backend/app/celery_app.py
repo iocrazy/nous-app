@@ -124,6 +124,10 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.reclaim_daily_free_points",
             "schedule": crontab(minute=20, hour=0),  # 每天 00:20
         },
+        "agent-runs-sweeper-60s": {
+            "task": "app.tasks.agent_runs_sweeper.sweep",
+            "schedule": 60.0,  # Heartbeat 清理 + 预算重算（pg_try_advisory_lock 保护）
+        },
     },
 )
 
