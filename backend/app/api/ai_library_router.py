@@ -32,7 +32,15 @@ from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_runs_repository import AgentRunsRepository
 from app.repositories.skill_repository import SkillRepository
+from app.schemas.agent_runs import (
+    RunDetail,
+    RunListItem,
+    RunListResponse,
+    UsageAggregate,
+    UsagePerAgent,
+)
 from app.schemas.ai_library import (
     AgentCreate,
     AgentOut,
@@ -839,3 +847,216 @@ async def reload_seeds(auth: AdminAuthDep) -> Dict[str, Any]:
     results = await loader.load_all()
     logger.info(f"reload_seeds: completed, {results}")
     return results
+
+
+# ---------------------------------------------------------------------------
+# Agent Runs (telemetry read paths — writes go through RunRecorder)
+# ---------------------------------------------------------------------------
+
+
+def _row_to_run_list_item(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim projection for list endpoints — drops heavy metadata_json."""
+    return {
+        "id": row["id"],
+        "agent_id": row["agent_id"],
+        "status": row["status"],
+        "trigger": row["trigger"],
+        "model": row.get("model"),
+        "provider": row.get("provider"),
+        "prompt_tokens": row.get("prompt_tokens", 0),
+        "completion_tokens": row.get("completion_tokens", 0),
+        "total_tokens": row.get("total_tokens", 0),
+        "cost_cents": float(row["cost_cents"]) if row.get("cost_cents") is not None else None,
+        "started_at": row["started_at"],
+        "ended_at": row.get("ended_at"),
+        "error_code": row.get("error_code"),
+        "skill_slugs_used": row.get("skill_slugs_used") or [],
+    }
+
+
+def _month_bounds(month: str) -> tuple[str, str]:
+    """Parse 'YYYY-MM' into (month_start_iso, next_month_start_iso)."""
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    try:
+        parsed = _dt.strptime(month, "%Y-%m").replace(tzinfo=_tz.utc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="month must be YYYY-MM"
+        ) from exc
+    if parsed.month == 12:
+        next_month = parsed.replace(year=parsed.year + 1, month=1)
+    else:
+        next_month = parsed.replace(month=parsed.month + 1)
+    return parsed.isoformat(), next_month.isoformat()
+
+
+@router.get(
+    "/agents/{slug}/runs",
+    response_model=RunListResponse,
+    summary="List runs for a single agent (paginated)",
+)
+async def list_agent_runs(
+    slug: str,
+    auth: AuthDep,
+    limit: int = 50,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Runs for this agent, scoped to the authenticated user. Newest first."""
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
+
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+
+    runs_repo = AgentRunsRepository()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    agent_uuid = UUID(str(agent["id"]))
+    page = await runs_repo.list_by_agent(
+        agent_id=agent_uuid, user_id=user_uuid, limit=limit, offset=offset
+    )
+    return {
+        "items": [_row_to_run_list_item(r) for r in page["items"]],
+        "total": page["total"],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
+    "/runs/{run_id}",
+    response_model=RunDetail,
+    summary="Get run detail",
+)
+async def get_run(run_id: UUID, auth: AuthDep) -> Dict[str, Any]:
+    """Full run row with metadata_json. 404 if not owned by caller."""
+    runs_repo = AgentRunsRepository()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    row = await runs_repo.get_by_id(run_id, user_id=user_uuid)
+    if not row:
+        raise HTTPException(status_code=404, detail="run not found")
+    for field in (
+        "cost_cents",
+        "prompt_cents_per_1k_snapshot",
+        "completion_cents_per_1k_snapshot",
+    ):
+        if row.get(field) is not None:
+            row[field] = float(row[field])
+    return row
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request cancellation (runner observes via RunRecorder polling)",
+)
+async def cancel_run(run_id: UUID, auth: AuthDep) -> Dict[str, Any]:
+    """Flip cancel_requested=true. Idempotent; 404 if not found or not running.
+
+    The cancel is asynchronous. The runner polls cancel_requested between
+    tool iterations and flips status to 'cancelled' when observed. If the
+    process dies before observing, the heartbeat sweeper marks it
+    heartbeat_lost within 2 minutes.
+    """
+    runs_repo = AgentRunsRepository()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    ok = await runs_repo.request_cancel(run_id, user_id=user_uuid)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail="run not found, not running, or not owned by you",
+        )
+    return {"status": "cancel_requested", "run_id": str(run_id)}
+
+
+@router.get(
+    "/usage",
+    response_model=UsageAggregate,
+    summary="Aggregate token / cost usage per agent for a given month",
+)
+async def get_usage(
+    auth: AuthDep,
+    month: str,
+    scope: str = "user",
+    team_id: int | None = None,
+    project_id: int | None = None,
+) -> Dict[str, Any]:
+    """Monthly rollup for Settings → AI Usage.
+
+    - scope='user' (default): caller's own runs
+    - scope='team':  runs tagged team_id (caller must belong to team — RLS-enforced)
+    - scope='project': runs tagged project_id (RLS-enforced)
+    """
+    if scope not in ("user", "team", "project"):
+        raise HTTPException(status_code=400, detail="scope must be user|team|project")
+    if scope == "team" and team_id is None:
+        raise HTTPException(status_code=400, detail="team scope requires team_id")
+    if scope == "project" and project_id is None:
+        raise HTTPException(status_code=400, detail="project scope requires project_id")
+
+    start_iso, end_iso = _month_bounds(month)
+    from datetime import datetime as _dt
+
+    runs_repo = AgentRunsRepository()
+    rows = await runs_repo.monthly_usage_by_agent(
+        month_start=_dt.fromisoformat(start_iso),
+        month_end=_dt.fromisoformat(end_iso),
+    )
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    if scope == "user":
+        rows = [r for r in rows if r.get("user_id") == str(user_uuid)]
+    elif scope == "team":
+        rows = [r for r in rows if r.get("team_id") == team_id]
+    else:
+        rows = [r for r in rows if r.get("project_id") == project_id]
+
+    per_agent: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        aid = r["agent_id"]
+        bucket = per_agent.setdefault(
+            aid,
+            {
+                "agent_id": aid,
+                "run_count": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cost_cents": 0.0,
+                "failed_count": 0,
+            },
+        )
+        bucket["run_count"] += 1
+        bucket["prompt_tokens"] += int(r.get("prompt_tokens") or 0)
+        bucket["completion_tokens"] += int(r.get("completion_tokens") or 0)
+        bucket["total_tokens"] += int(r.get("total_tokens") or 0)
+        if r.get("cost_cents") is not None:
+            bucket["cost_cents"] += float(r["cost_cents"])
+        if r.get("status") in ("failed", "heartbeat_lost"):
+            bucket["failed_count"] += 1
+
+    agent_repo, _ = _repos()
+    enriched: list[Dict[str, Any]] = []
+    for aid, bucket in per_agent.items():
+        try:
+            agent = await agent_repo.get_by_id(UUID(aid))
+            if agent:
+                bucket["agent_slug"] = agent.get("slug")
+                bucket["agent_name"] = agent.get("name")
+        except Exception as exc:
+            logger.warning(f"[usage] failed to enrich agent {aid}: {exc}")
+        enriched.append(bucket)
+
+    return {
+        "scope": scope,
+        "month": month,
+        "total_runs": sum(b["run_count"] for b in enriched),
+        "total_tokens": sum(b["total_tokens"] for b in enriched),
+        "total_cost_cents": sum(b["cost_cents"] for b in enriched),
+        "per_agent": enriched,
+    }
