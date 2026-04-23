@@ -13,8 +13,9 @@ import pytest
 async def test_sweep_skips_when_lock_held() -> None:
     """If another worker holds the advisory lock, sweep is a no-op.
 
-    The test forces pg_try_advisory_lock → False and asserts the task
-    returns skipped=1 without touching any other tables.
+    The test forces try_advisory_lock → False and asserts the task
+    returns skipped=1 without touching any other tables. (The wrapper
+    name is per migration 149 — see agent_runs_sweeper docstring.)
     """
     from app.tasks import agent_runs_sweeper
 
@@ -39,7 +40,7 @@ async def test_sweep_marks_heartbeat_lost_and_recomputes_budgets() -> None:
     from app.tasks import agent_runs_sweeper
 
     client = MagicMock()
-    # pg_try_advisory_lock → True, pg_advisory_unlock → None
+    # try_advisory_lock → True, advisory_unlock → None (migration 149 wrappers)
     exec_mock = AsyncMock()
     exec_mock.side_effect = [
         MagicMock(data=True),   # lock acquired
@@ -67,6 +68,29 @@ async def test_sweep_marks_heartbeat_lost_and_recomputes_budgets() -> None:
 
     assert result["skipped"] == 0
     assert result["heartbeat_lost"] == 3
+
+
+@pytest.mark.asyncio
+async def test_sweep_calls_correct_rpc_wrapper_names() -> None:
+    """Regression: prod hotfix confirmed PostgREST can't route
+    pg_try_advisory_lock / pg_advisory_unlock (pg_catalog built-ins),
+    only public-schema wrappers with named params. If someone renames
+    the migration-149 wrappers or reverts to the raw pg_* names, this
+    test catches it before prod does.
+    """
+    from app.tasks import agent_runs_sweeper
+
+    client = MagicMock()
+    client.rpc.return_value.execute = AsyncMock(return_value=MagicMock(data=False))
+    with patch(
+        "app.tasks.agent_runs_sweeper.get_async_supabase_admin",
+        AsyncMock(return_value=client),
+    ):
+        await agent_runs_sweeper._sweep_async()
+
+    # Assert the exact RPC name + parameter shape the wrappers expect.
+    call_args_list = [call.args for call in client.rpc.call_args_list]
+    assert ("try_advisory_lock", {"lock_key": agent_runs_sweeper.SWEEPER_LOCK_KEY}) in call_args_list
 
 
 @pytest.mark.asyncio
