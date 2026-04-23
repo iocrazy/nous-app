@@ -19,6 +19,8 @@ import type {
   AILibrarySkillFile,
   CreateAgentPayload,
   CreateSkillPayload,
+  UsageAggregate,
+  UsageScope,
 } from '../types';
 
 const base = (): string => `${getApiUrl()}/api/v1/ai-library`;
@@ -185,5 +187,32 @@ export const aiLibraryService = {
       const text = await resp.text().catch(() => '');
       throw new Error(`${resp.status}: ${text}`);
     }
+  },
+
+  // ─── AI Usage aggregates ───────────────────────────────────────────────────
+
+  /**
+   * Monthly rollup per agent for the Usage dashboard. Scope defaults to 'user'
+   * (caller's own runs). Team / project scopes require a numeric id and are
+   * enforced server-side via RLS on agent_runs.
+   *
+   * `month` is the calendar month in YYYY-MM format. Aggregation runs in UTC
+   * server-side; the backend's _month_bounds() does the parsing.
+   */
+  async getUsage(
+    month: string,
+    scope: UsageScope = 'user',
+    teamId?: number,
+    projectId?: number,
+  ): Promise<UsageAggregate> {
+    const qs = new URLSearchParams({ month, scope });
+    if (scope === 'team' && teamId != null) qs.set('team_id', String(teamId));
+    if (scope === 'project' && projectId != null) {
+      qs.set('project_id', String(projectId));
+    }
+    const resp = await fetch(`${base()}/usage?${qs.toString()}`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle<UsageAggregate>(resp);
   },
 };

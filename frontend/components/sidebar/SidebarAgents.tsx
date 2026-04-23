@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Library, Plus } from 'lucide-react';
+import { AlertTriangle, BarChart3, Library, Plus } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -47,6 +47,7 @@ export const SidebarAgentsSection: React.FC<SidebarAgentsSectionProps> = ({
     return match ? match[1] : null;
   })();
   const skillsActive = location.pathname.match(/\/skills(\/|$)/) !== null;
+  const usageActive = location.pathname.match(/\/usage(\/|$)/) !== null;
 
   const loadAgents = useCallback(async () => {
     try {
@@ -185,6 +186,23 @@ export const SidebarAgentsSection: React.FC<SidebarAgentsSectionProps> = ({
             className={`flex-shrink-0 ${skillsActive ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`}
           />
           {!collapsed && <span>{t('sidebar.skills')}</span>}
+        </button>
+
+        {/* Usage sub-link (monthly spend dashboard) */}
+        <button
+          onClick={() => navigate(`${urlPrefix}/usage`)}
+          title={collapsed ? t('sidebar.aiUsage', 'AI Usage') : undefined}
+          className={`w-full flex items-center ${collapsed ? 'justify-center px-0 py-2' : 'gap-3 px-3 py-2'} rounded-xl text-sm font-medium transition-colors group ${
+            usageActive
+              ? 'bg-indigo-500/10 text-indigo-400'
+              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+          }`}
+        >
+          <BarChart3
+            size={collapsed ? 20 : 18}
+            className={`flex-shrink-0 ${usageActive ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`}
+          />
+          {!collapsed && <span>{t('sidebar.aiUsage', 'AI Usage')}</span>}
         </button>
       </SidebarSection>
 

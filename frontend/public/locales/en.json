@@ -33,6 +33,7 @@
     "aiLibrary": "AI Library",
     "agents": "Agents",
     "skills": "Skills",
+    "aiUsage": "AI Usage",
     "newAgent": "New agent",
     "agentRunning": "Running...",
     "agentPausedBudget": "Paused: monthly budget exceeded",
@@ -1317,5 +1318,29 @@
       "forkSkill": "Fork to My Skills",
       "forkedToast": "Forked as {{slug}}"
     }
+  },
+  "aiUsage": {
+    "title": "AI Usage",
+    "subtitle": "Monthly rollup of token spend and cost across your agents. Data is aggregated server-side from agent_runs.",
+    "loading": "Loading usage...",
+    "errorTitle": "Failed to load usage",
+    "empty": "No agent activity this month. Invocation history will show up here as runs land.",
+    "refresh": "Refresh",
+    "prevMonth": "Previous month",
+    "nextMonth": "Next month",
+    "scopeUser": "My usage",
+    "scopeTeam": "Team usage",
+    "totalRuns": "Total runs",
+    "totalTokens": "Total tokens",
+    "totalCost": "Total cost",
+    "chartTitle": "Spend by agent (top 10)",
+    "tableTitle": "Per-agent breakdown",
+    "colAgent": "Agent",
+    "colRuns": "Runs",
+    "colPromptTokens": "Prompt tokens",
+    "colCompletionTokens": "Completion tokens",
+    "colTotalTokens": "Total tokens",
+    "colCost": "Cost",
+    "colFailed": "Failed"
   }
 }
