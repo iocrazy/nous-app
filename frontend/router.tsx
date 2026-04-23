@@ -26,6 +26,8 @@ const ShortcutsTagsPage = lazy(() => import('./pages/ShortcutsTagsPage').then(m 
 const StoryboardWorkbench = lazy(() => import('./pages/StoryboardWorkbench').then(m => ({ default: m.StoryboardWorkbench })));
 const ScriptEditor = lazy(() => import('./pages/ScriptEditor').then(m => ({ default: m.ScriptEditor })));
 const DownloadDetailPage = lazy(() => import('./pages/DownloadDetailPage').then(m => ({ default: m.DownloadDetailPage })));
+const AgentsPage = lazy(() => import('./pages/AgentsPage').then(m => ({ default: m.AgentsPage })));
+const SkillsPage = lazy(() => import('./pages/SkillsPage').then(m => ({ default: m.SkillsPage })));
 
 function PageLoader() {
   return (
@@ -77,6 +79,10 @@ export const router = createBrowserRouter([
       { path: 'todolist', element: <RedirectToTeam view="todolist" /> },
       { path: 'cleanup', element: <RedirectToTeam view="cleanup" /> },
       { path: 'shared', element: <RedirectToTeam view="shared" /> },
+      { path: 'agents', element: <RedirectToTeam view="agents" /> },
+      { path: 'agents/:slug', element: <RedirectToTeam view="agents" /> },
+      { path: 'skills', element: <RedirectToTeam view="skills" /> },
+      { path: 'skills/:slug', element: <RedirectToTeam view="skills" /> },
 
       // Settings is account-level (no team scope)
       { path: 'settings', element: <AppLayout />, children: [
@@ -109,6 +115,10 @@ export const router = createBrowserRouter([
           { path: 'billing', element: <SuspenseWrap><BillingPage /></SuspenseWrap> },
           { path: 'todolist', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
           { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },
+          { path: 'agents', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
+          { path: 'agents/:slug', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
+          { path: 'skills', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
+          { path: 'skills/:slug', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
           // Script & Storyboard editors handled by fullscreen routes below
         ],

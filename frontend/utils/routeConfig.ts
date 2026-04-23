@@ -20,6 +20,8 @@ export const VIEW_PATH_MAP: Record<ViewState, string> = {
   resources: '/resources',
   todolist: '/todolist',
   shared: '/shared',
+  agents: '/agents',
+  skills: '/skills',
 };
 
 /**
@@ -46,6 +48,8 @@ export function pathnameToView(pathname: string): ViewState {
   if (stripped.startsWith('/resources')) return 'resources';
   if (stripped.startsWith('/todolist')) return 'todolist';
   if (stripped.startsWith('/shared')) return 'shared';
+  if (stripped.startsWith('/agents')) return 'agents';
+  if (stripped.startsWith('/skills')) return 'skills';
 
   return 'parser';
 }

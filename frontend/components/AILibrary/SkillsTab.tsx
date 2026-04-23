@@ -27,13 +27,27 @@ export function groupSkillsByScope(
   return groupByScope(skills, skillIsSystemPreset, labels);
 }
 
-export const SkillsTab: React.FC = () => {
+interface SkillsTabProps {
+  /** Controlled selected slug (e.g., from URL). If omitted, falls back to internal state. */
+  slug?: string | null;
+  /** Called when user picks a skill. When provided, parent controls selection. */
+  onSlugChange?: (slug: string) => void;
+}
+
+export const SkillsTab: React.FC<SkillsTabProps> = ({ slug, onSlugChange }) => {
   const { t } = useTranslation();
   const [skills, setSkills] = useState<AILibrarySkill[]>([]);
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [internalSlug, setInternalSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showNewSkillModal, setShowNewSkillModal] = useState(false);
+
+  const isControlled = slug !== undefined;
+  const selectedSlug = isControlled ? (slug ?? null) : internalSlug;
+  const setSelectedSlug = (next: string | null) => {
+    if (next && onSlugChange) onSlugChange(next);
+    if (!isControlled) setInternalSlug(next);
+  };
 
   const loadSkills = React.useCallback(async () => {
     try {
