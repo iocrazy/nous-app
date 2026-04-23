@@ -21,10 +21,13 @@ import {
   CreditCard,
   Coins,
   Share2,
+  Library,
+  Bot,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { SidebarSection } from './sidebar/SidebarSection';
 import { hasPermission } from '../utils/permissions';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 
@@ -329,17 +332,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
         </div>
 
-        <nav className="flex-1 space-y-3">
-          {isViewEnabled('resources') && (
-            <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
-          )}
-          {isViewEnabled('mediatrack') && (
-            <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
-          )}
-          <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
-          <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+        <nav className="flex-1 flex flex-col gap-4">
+          <SidebarSection label={t('sidebar.workspace')} hideLabel={collapsed}>
+            {isViewEnabled('resources') && (
+              <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
+            )}
+            {isViewEnabled('mediatrack') && (
+              <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
+            )}
+            <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
+            <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+          </SidebarSection>
+
+          <SidebarSection label={t('sidebar.aiLibrary')} hideLabel={collapsed}>
+            <SidebarItem icon={Bot} label={t('sidebar.agents')} active={currentView === 'agents'} onClick={() => handleNav('agents')} collapsed={collapsed} />
+            <SidebarItem icon={Library} label={t('sidebar.skills')} active={currentView === 'skills'} onClick={() => handleNav('skills')} collapsed={collapsed} />
+          </SidebarSection>
+
           {hasPermission(permissions, 'member.view') && (
-            <>
+            <SidebarSection label={t('sidebar.management')} hideLabel={collapsed}>
               <SidebarItem
                 icon={Settings}
                 label={t('sidebar.management')}
@@ -355,9 +366,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <SidebarSubItem icon={CreditCard} label={t('sidebar.billing')} active={currentView === 'billing'} onClick={() => handleNav('billing')} />
                 </div>
               )}
-            </>
+            </SidebarSection>
           )}
-
         </nav>
 
         <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
@@ -385,23 +395,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       </div>
 
-      <nav className="flex-1 space-y-3">
-        {isViewEnabled('parser') && (
-          <SidebarItem icon={Search} label={t('nav.linkParser')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} />
-        )}
-        {isViewEnabled('resources') && (
-          <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
-        )}
-        {isViewEnabled('mediatrack') && (
-          <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
-        )}
-        <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
-        <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+      <nav className="flex-1 flex flex-col gap-4">
+        <SidebarSection label={t('sidebar.workspace')} hideLabel={collapsed}>
+          {isViewEnabled('parser') && (
+            <SidebarItem icon={Search} label={t('nav.linkParser')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} />
+          )}
+          {isViewEnabled('resources') && (
+            <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
+          )}
+          {isViewEnabled('mediatrack') && (
+            <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
+          )}
+          <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
+          <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+          <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
+        </SidebarSection>
 
-        <Divider />
-
-        <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
-
+        <SidebarSection label={t('sidebar.aiLibrary')} hideLabel={collapsed}>
+          <SidebarItem icon={Bot} label={t('sidebar.agents')} active={currentView === 'agents'} onClick={() => handleNav('agents')} collapsed={collapsed} />
+          <SidebarItem icon={Library} label={t('sidebar.skills')} active={currentView === 'skills'} onClick={() => handleNav('skills')} collapsed={collapsed} />
+        </SidebarSection>
       </nav>
 
       <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />

@@ -28,7 +28,11 @@
     "backToProjects": "Projects",
     "projectSettings": "Project Settings",
     "points": "Points",
-    "shared": "Shared"
+    "shared": "Shared",
+    "workspace": "Workspace",
+    "aiLibrary": "AI Library",
+    "agents": "Agents",
+    "skills": "Skills"
   },
   "user": {
     "profile": "Profile",

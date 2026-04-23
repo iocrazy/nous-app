@@ -28,13 +28,28 @@ export function groupAgentsByScope(
   return groupByScope(agents, (a) => a.is_system_preset, labels);
 }
 
-export const AgentsTab: React.FC = () => {
+interface AgentsTabProps {
+  /** Controlled selected slug (e.g., from URL). If omitted, falls back to internal state. */
+  slug?: string | null;
+  /** Called when user picks an agent. When provided, parent controls selection (e.g., for URL sync). */
+  onSlugChange?: (slug: string) => void;
+}
+
+export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange }) => {
   const { t } = useTranslation();
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [internalSlug, setInternalSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showNewAgentModal, setShowNewAgentModal] = useState(false);
+
+  // Controlled vs uncontrolled: if parent passes `slug`, we honor it; otherwise use internal state.
+  const isControlled = slug !== undefined;
+  const selectedSlug = isControlled ? (slug ?? null) : internalSlug;
+  const setSelectedSlug = (next: string | null) => {
+    if (next && onSlugChange) onSlugChange(next);
+    if (!isControlled) setInternalSlug(next);
+  };
 
   const loadAgents = React.useCallback(async () => {
     try {
@@ -50,6 +65,7 @@ export const AgentsTab: React.FC = () => {
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSlug]);
 
   useEffect(() => {
@@ -59,7 +75,8 @@ export const AgentsTab: React.FC = () => {
         const list = await aiLibraryService.listAgents();
         if (cancelled) return;
         setAgents(list);
-        if (list.length > 0) setSelectedSlug(list[0].slug);
+        // Only auto-select first agent when uncontrolled and nothing selected
+        if (!isControlled && list.length > 0) setInternalSlug((prev) => prev ?? list[0].slug);
       } catch (err) {
         if (cancelled) return;
         console.error('[AgentsTab] listAgents failed:', err);
@@ -71,6 +88,7 @@ export const AgentsTab: React.FC = () => {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCreated = async (newSlug: string) => {
