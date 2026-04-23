@@ -975,6 +975,11 @@ export interface AILibraryAgent {
   // Phase 2 PR 2.9 — denormalized by the backend for scope badges.
   team_name?: string | null;
   project_name?: string | null;
+  // Budget-guard columns (migration 148). Null budget = unlimited.
+  monthly_token_budget?: number | null;
+  monthly_cost_cents_budget?: number | null;
+  /** 'budget' when sweeper detects over-spend, 'manual' when admin pauses. */
+  paused_reason?: 'budget' | 'manual' | null;
 }
 
 /**

@@ -32,7 +32,11 @@
     "workspace": "Workspace",
     "aiLibrary": "AI Library",
     "agents": "Agents",
-    "skills": "Skills"
+    "skills": "Skills",
+    "newAgent": "New agent",
+    "agentRunning": "Running...",
+    "agentPausedBudget": "Paused: monthly budget exceeded",
+    "agentPausedManual": "Paused by admin"
   },
   "user": {
     "profile": "个人资料",
