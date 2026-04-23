@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Library, Plus } from 'lucide-react';
+import { AlertTriangle, Library, Plus } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { useAuth } from '../../contexts/AuthContext';
+import { useAgentRuns } from '../../hooks/useAgentRuns';
 import { NewAgentModal } from '../AILibrary/NewAgentModal';
 import { getAgentIcon } from '../AILibrary/agentIcons';
 import { SidebarSection } from './SidebarSection';
@@ -33,6 +35,8 @@ export const SidebarAgentsSection: React.FC<SidebarAgentsSectionProps> = ({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const { currentUserId } = useAuth();
+  const { runningAgentIds } = useAgentRuns(currentUserId);
 
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -108,11 +112,23 @@ export const SidebarAgentsSection: React.FC<SidebarAgentsSectionProps> = ({
           agents.map((agent) => {
             const active = activeAgentSlug === agent.slug;
             const Icon = getAgentIcon(agent.icon);
+            const isRunning = runningAgentIds.has(agent.id);
+            const isPausedByBudget = agent.paused_reason === 'budget';
+            const isPausedManual = agent.paused_reason === 'manual';
+            const pausedTitle = isPausedByBudget
+              ? t('sidebar.agentPausedBudget', 'Paused: monthly budget exceeded')
+              : isPausedManual
+              ? t('sidebar.agentPausedManual', 'Paused by admin')
+              : null;
             return (
               <button
                 key={agent.slug}
                 onClick={() => navigate(`${urlPrefix}/agents/${agent.slug}`)}
-                title={collapsed ? agent.name : undefined}
+                title={
+                  collapsed
+                    ? `${agent.name}${isRunning ? ' (running)' : ''}${pausedTitle ? ' — ' + pausedTitle : ''}`
+                    : undefined
+                }
                 className={`w-full flex items-center ${collapsed ? 'justify-center px-0 py-2' : 'gap-3 px-3 py-2'} rounded-xl text-sm font-medium transition-colors group ${
                   active
                     ? 'bg-indigo-500/10 text-indigo-400'
@@ -123,7 +139,31 @@ export const SidebarAgentsSection: React.FC<SidebarAgentsSectionProps> = ({
                   size={collapsed ? 20 : 18}
                   className={`flex-shrink-0 ${active ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`}
                 />
-                {!collapsed && <span className="truncate">{agent.name}</span>}
+                {!collapsed && <span className="truncate flex-1 text-left">{agent.name}</span>}
+                {/* Trailing status indicators: pulse (running) > budget > manual pause.
+                    Only one shows at a time to keep the row calm. */}
+                {isRunning ? (
+                  <span
+                    className="relative flex h-2 w-2 flex-shrink-0"
+                    title={t('sidebar.agentRunning', 'Running...')}
+                    aria-label={t('sidebar.agentRunning', 'Running...')}
+                  >
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  </span>
+                ) : isPausedByBudget ? (
+                  <AlertTriangle
+                    size={12}
+                    className="flex-shrink-0 text-amber-500"
+                    aria-label={pausedTitle ?? undefined}
+                  />
+                ) : isPausedManual ? (
+                  <AlertTriangle
+                    size={12}
+                    className="flex-shrink-0 text-zinc-500"
+                    aria-label={pausedTitle ?? undefined}
+                  />
+                ) : null}
               </button>
             );
           })
