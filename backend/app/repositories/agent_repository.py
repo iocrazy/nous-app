@@ -235,24 +235,33 @@ class AgentRepository:
         if current is None:
             raise ValueError(f"agent {agent_id} not found")
 
+        # A full no-op (every incoming value equals current) skips entirely —
+        # this is what silences seed-loader reruns that repost identical
+        # content. If ANY field differs, we do write; snapshots only fire
+        # for tracked-field changes so non-behavioral updates (budgets,
+        # paused_reason, etc.) don't pollute version history.
+        any_changed = any(updates[k] != current.get(k) for k in updates)
+        if not any_changed:
+            return
+
         tracked_changed = any(
             k in updates and updates[k] != current.get(k)
             for k in self._VERSIONED_AGENT_FIELDS
         )
-        if not tracked_changed:
-            return
 
-        current_version = int(current.get("current_version") or 1)
-        snapshot: Dict[str, Any] = {
-            "agent_id": str(agent_id),
-            "version_number": current_version,
-            "notes": notes,
-            "created_by": str(created_by) if created_by else None,
-        }
-        for field in self._VERSIONED_AGENT_FIELDS:
-            snapshot[field] = current.get(field)
+        patch: Dict[str, Any] = dict(updates)
+        if tracked_changed:
+            current_version = int(current.get("current_version") or 1)
+            snapshot: Dict[str, Any] = {
+                "agent_id": str(agent_id),
+                "version_number": current_version,
+                "notes": notes,
+                "created_by": str(created_by) if created_by else None,
+            }
+            for field in self._VERSIONED_AGENT_FIELDS:
+                snapshot[field] = current.get(field)
 
-        await client.table("ai_agent_versions").insert(snapshot).execute()
+            await client.table("ai_agent_versions").insert(snapshot).execute()
+            patch["current_version"] = current_version + 1
 
-        patch = {**updates, "current_version": current_version + 1}
         await client.table(self.TABLE).update(patch).eq("id", str(agent_id)).execute()

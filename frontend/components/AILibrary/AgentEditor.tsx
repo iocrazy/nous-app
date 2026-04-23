@@ -22,12 +22,14 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   GitFork,
+  Play,
   Plus,
   RefreshCw,
   X,
@@ -63,6 +65,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   const [allSkills, setAllSkills] = useState<AILibrarySkill[] | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
   const [allAgents, setAllAgents] = useState<AILibraryAgent[]>([]);
@@ -172,6 +175,34 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       addToast(`Failed to save agent: ${msg}`, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Resume from a paused state (budget or manual). Clears `paused_reason`
+   * via a dedicated endpoint so the PATCH route's exclude-null semantics
+   * stay uniform. If the agent is still over its monthly budget, the
+   * sweeper will re-pause within ~60 s — callers should bump the budget
+   * first to avoid the flap.
+   */
+  const handleResume = async (): Promise<void> => {
+    if (readOnly) return;
+    setResuming(true);
+    setError(null);
+    try {
+      const updated = await aiLibraryService.resumeAgent(slug);
+      setAgent(updated);
+      setDraft(buildDraft(updated));
+      addToast(
+        t('aiLibrary.agents.budget.resumedToast', 'Agent resumed'),
+        'success',
+      );
+    } catch (err) {
+      console.error('[AgentEditor] resumeAgent failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      addToast(`Failed to resume agent: ${msg}`, 'error');
+    } finally {
+      setResuming(false);
     }
   };
 
@@ -288,6 +319,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
 
       {sub === 'overview' && (
         <section className="space-y-4 text-sm">
+          {agent.paused_reason && (
+            <PausedBanner
+              reason={agent.paused_reason}
+              disabled={readOnly || resuming}
+              onResume={handleResume}
+              resuming={resuming}
+            />
+          )}
           {readOnly && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
               {t('aiLibrary.agents.presetReadOnly')}
@@ -410,6 +449,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
               </label>
             </div>
           </div>
+
+          <BudgetFields
+            tokenBudget={draft.monthly_token_budget ?? null}
+            costCentsBudget={draft.monthly_cost_cents_budget ?? null}
+            disabled={readOnly}
+            onTokenChange={(v) => updateDraft('monthly_token_budget', v)}
+            onCostChange={(v) => updateDraft('monthly_cost_cents_budget', v)}
+          />
 
           <div className="pt-1 text-xs text-zinc-500">
             {t('aiLibrary.agents.boundSkills')}: <span className="text-zinc-200 font-medium">{agent.skill_ids.length}</span>
@@ -872,6 +919,8 @@ function buildDraft(a: AILibraryAgent): Partial<AILibraryAgent> {
     identity_md: a.identity_md ?? '',
     soul_md: a.soul_md ?? '',
     agent_md: a.agent_md ?? '',
+    monthly_token_budget: a.monthly_token_budget ?? null,
+    monthly_cost_cents_budget: a.monthly_cost_cents_budget ?? null,
   };
 }
 
@@ -1422,5 +1471,160 @@ function formatDuration(startIso: string, endIso: string | null | undefined): st
   const h = Math.floor(m / 60);
   return `${h}h ${m % 60}m`;
 }
+
+/**
+ * Top-of-Overview banner shown when the agent has a `paused_reason` set.
+ *
+ * - `'budget'` (amber): the sweeper found spend over the cap. Resume clears
+ *   the flag, but if the budget isn't raised first, the sweeper will
+ *   re-pause within ~60 s — the copy says so.
+ * - `'manual'` (zinc): an admin / owner hit Pause. Resume re-enables.
+ *
+ * The Resume button is also disabled for preset agents (readOnly) since
+ * Phase 1 policy blocks writes on system presets.
+ */
+const PausedBanner: React.FC<{
+  reason: 'budget' | 'manual';
+  disabled: boolean;
+  resuming: boolean;
+  onResume: () => void;
+}> = ({ reason, disabled, resuming, onResume }) => {
+  const { t } = useTranslation();
+  const isBudget = reason === 'budget';
+  const wrap = isBudget
+    ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+    : 'border-zinc-700 bg-zinc-800 text-zinc-200';
+  const icon = isBudget ? 'text-amber-400' : 'text-zinc-400';
+  const title = isBudget
+    ? t('aiLibrary.agents.budget.pausedTitleBudget', 'Paused — monthly budget exceeded')
+    : t('aiLibrary.agents.budget.pausedTitleManual', 'Paused manually');
+  const body = isBudget
+    ? t(
+        'aiLibrary.agents.budget.pausedBodyBudget',
+        'The sweeper detected this agent ran over its token or cost budget this month. Raise the budget below before resuming — otherwise the sweeper will re-pause within a minute.',
+      )
+    : t(
+        'aiLibrary.agents.budget.pausedBodyManual',
+        'An owner or admin paused this agent. Click Resume to re-enable.',
+      );
+  return (
+    <div className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-xs ${wrap}`}>
+      <AlertTriangle size={16} className={`flex-shrink-0 mt-0.5 ${icon}`} />
+      <div className="flex-1 min-w-0">
+        <div className="font-medium">{title}</div>
+        <p className="mt-0.5 opacity-90">{body}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onResume}
+        disabled={disabled}
+        className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap"
+      >
+        <Play size={12} />
+        {resuming
+          ? t('aiLibrary.agents.budget.resuming', 'Resuming...')
+          : t('aiLibrary.agents.budget.resume', 'Resume')}
+      </button>
+    </div>
+  );
+};
+
+/**
+ * Budget input row. Two numeric fields: monthly token budget and monthly
+ * cost budget (in cents). Empty / 0 means unlimited (the backend normalizes
+ * 0 → NULL before persisting, so the sweeper's `is not None` cap check
+ * treats both the same way).
+ *
+ * Uses string-valued inputs internally so the user can cleanly delete all
+ * digits without React emitting spurious 0s or NaN — we parse on change and
+ * send `null` back up when the field is empty.
+ */
+const BudgetFields: React.FC<{
+  tokenBudget: number | null;
+  costCentsBudget: number | null;
+  disabled: boolean;
+  onTokenChange: (value: number | null) => void;
+  onCostChange: (value: number | null) => void;
+}> = ({ tokenBudget, costCentsBudget, disabled, onTokenChange, onCostChange }) => {
+  const { t } = useTranslation();
+  // Display dollars for the cost budget to match the Runs tab's cost column,
+  // but we still PATCH the column in cents. 500 cents ⇢ "5.00" displayed.
+  const dollarsStr = costCentsBudget != null ? (costCentsBudget / 100).toFixed(2) : '';
+  return (
+    <div className="space-y-1.5">
+      <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+        {t('aiLibrary.agents.budget.sectionLabel', 'Monthly budget')}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-zinc-400">
+            {t('aiLibrary.agents.budget.tokenBudgetLabel', 'Token budget')}
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={1000}
+            value={tokenBudget ?? ''}
+            placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === '') {
+                onTokenChange(null);
+                return;
+              }
+              const parsed = Number(raw);
+              onTokenChange(Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null);
+            }}
+            disabled={disabled}
+            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
+          />
+          <p className="mt-1 text-xs text-zinc-500">
+            {t(
+              'aiLibrary.agents.budget.tokenBudgetHint',
+              'Cap on total prompt+completion tokens this calendar month. Blank or 0 = unlimited.',
+            )}
+          </p>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-zinc-400">
+            {t('aiLibrary.agents.budget.costBudgetLabel', 'Cost budget (USD)')}
+          </label>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="text-zinc-500 text-sm">$</span>
+            <input
+              type="number"
+              min={0}
+              step={0.01}
+              value={dollarsStr}
+              placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === '') {
+                  onCostChange(null);
+                  return;
+                }
+                const dollars = Number(raw);
+                if (!Number.isFinite(dollars)) {
+                  onCostChange(null);
+                  return;
+                }
+                // cents = round(dollars * 100) — avoid float drift like 19.99 * 100 === 1998.9999...
+                onCostChange(Math.max(0, Math.round(dollars * 100)));
+              }}
+              disabled={disabled}
+              className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
+            />
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">
+            {t(
+              'aiLibrary.agents.budget.costBudgetHint',
+              'Hard cap on this month\'s spend. The sweeper pauses the agent within ~60s of crossing the cap.',
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default AgentEditor;

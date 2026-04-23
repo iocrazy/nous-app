@@ -201,6 +201,49 @@ async def test_agent_update_fields_versioned_noop_when_no_tracked_change() -> No
 
 
 @pytest.mark.asyncio
+async def test_agent_update_fields_versioned_writes_untracked_field_without_snapshot() -> None:
+    """Budget / paused_reason etc. are not in _VERSIONED_AGENT_FIELDS — they
+    still need to land in the DB, they just shouldn't bump version history."""
+    agent_id = uuid4()
+    live_row = {
+        "id": str(agent_id),
+        "identity_md": "same",
+        "soul_md": "same",
+        "agent_md": "same",
+        "model": "qwen-max",
+        "temperature": 0.7,
+        "max_tokens": 4000,
+        "monthly_token_budget": None,
+        "monthly_cost_cents_budget": None,
+        "paused_reason": None,
+        "current_version": 3,
+    }
+    inserted: list[dict] = []
+    updated: list[dict] = []
+    fake = _FakeClient(live_row, inserted, updated)
+    repo = AgentRepository()
+
+    async def _get_client():
+        return fake
+
+    repo._get_client = _get_client  # type: ignore[method-assign]
+
+    # Budget-only change: no behavioral field moved, so no snapshot, but the
+    # update MUST land so the cap takes effect.
+    await repo.update_fields_versioned(
+        agent_id,
+        {"monthly_token_budget": 100_000},
+        created_by=None,
+    )
+
+    assert inserted == []  # no version snapshot
+    assert len(updated) == 1
+    # current_version should NOT be bumped on a non-tracked-field-only change.
+    assert "current_version" not in updated[0]
+    assert updated[0]["monthly_token_budget"] == 100_000
+
+
+@pytest.mark.asyncio
 async def test_agent_update_fields_versioned_missing_row_raises() -> None:
     """Row doesn't exist → ValueError (caller should 404 in the router)."""
     fake = _FakeClient(live_row=None, inserted=[], updated=[])

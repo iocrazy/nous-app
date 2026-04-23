@@ -434,6 +434,15 @@ async def update_agent(
     agent_uuid = UUID(str(agent["id"]))
     # skill_ids is handled separately; strip from the field-level update.
     updates = payload.model_dump(exclude_none=True, exclude={"skill_ids"})
+    # Budget "unlimited" convention: 0 from the client means "clear the cap"
+    # — rewrite to explicit None so the DB stores NULL and the sweeper's
+    # ``is not None`` check keeps treating it as uncapped. The frontend
+    # can't reach "set to NULL" through the PATCH body because
+    # exclude_none=True drops nulls; this 0→None bridge keeps the wire
+    # format simple without regressing the rest of the endpoint.
+    for budget_field in ("monthly_token_budget", "monthly_cost_cents_budget"):
+        if updates.get(budget_field) == 0:
+            updates[budget_field] = None
     if updates:
         user_uuid = _coerce_user_uuid(auth.user_id)
         await agent_repo.update_fields_versioned(
@@ -447,6 +456,55 @@ async def update_agent(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="agent disappeared after update",
+        )
+    row = {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    enriched = await _enrich_agents_with_scope_names([row])
+    return enriched[0]
+
+
+@router.post(
+    "/agents/{slug}/resume",
+    response_model=AgentOut,
+    summary="Clear paused_reason (resume agent from manual or budget pause)",
+)
+async def resume_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
+    """Resume a paused agent by setting paused_reason = null.
+
+    Works for both 'manual' and 'budget' pauses. If the agent is still over
+    its monthly budget, the heartbeat sweeper will re-flip paused_reason to
+    'budget' within 60s — callers should raise the budget before resuming
+    to avoid the flap. 400 when the agent isn't paused; 403 for presets;
+    404 when not found.
+
+    Dedicated endpoint (rather than PATCH {paused_reason: null}) so the
+    router's exclude_none PATCH semantics stay uniform for every other
+    field.
+    """
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+    if agent.get("is_system_preset"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="system preset agents are read-only in phase 1",
+        )
+    if agent.get("paused_reason") is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="agent is not paused",
+        )
+
+    agent_uuid = UUID(str(agent["id"]))
+    await agent_repo.update_fields(agent_uuid, {"paused_reason": None})
+
+    refreshed = await agent_repo.get_by_slug(slug)
+    if refreshed is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="agent disappeared after resume",
         )
     row = {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
     enriched = await _enrich_agents_with_scope_names([row])
