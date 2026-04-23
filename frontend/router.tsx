@@ -28,6 +28,7 @@ const ScriptEditor = lazy(() => import('./pages/ScriptEditor').then(m => ({ defa
 const DownloadDetailPage = lazy(() => import('./pages/DownloadDetailPage').then(m => ({ default: m.DownloadDetailPage })));
 const AgentsPage = lazy(() => import('./pages/AgentsPage').then(m => ({ default: m.AgentsPage })));
 const SkillsPage = lazy(() => import('./pages/SkillsPage').then(m => ({ default: m.SkillsPage })));
+const UsagePage = lazy(() => import('./pages/UsagePage').then(m => ({ default: m.UsagePage })));
 
 function PageLoader() {
   return (
@@ -119,6 +120,7 @@ export const router = createBrowserRouter([
           { path: 'agents/:slug', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
           { path: 'skills', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
           { path: 'skills/:slug', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
+          { path: 'usage', element: <SuspenseWrap><UsagePage /></SuspenseWrap> },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
           // Script & Storyboard editors handled by fullscreen routes below
         ],

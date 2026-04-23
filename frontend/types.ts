@@ -1055,3 +1055,32 @@ export interface CreateSkillPayload {
   project_id?: number;
   fork_from?: string;
 }
+
+// ─── AI Usage aggregates ───────────────────────────────────────────────────
+// Mirror of backend/app/schemas/agent_runs.py (UsagePerAgent, UsageAggregate).
+// Fed by GET /api/v1/ai-library/usage?scope=&month=[&team_id=&project_id=].
+
+export type UsageScope = 'user' | 'team' | 'project';
+
+export interface UsagePerAgent {
+  agent_id: string; // UUID
+  agent_slug?: string | null;
+  agent_name?: string | null;
+  run_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  /** Fractional cents — same convention as agent_runs.cost_cents. */
+  cost_cents: number;
+  failed_count: number;
+}
+
+export interface UsageAggregate {
+  scope: UsageScope;
+  /** YYYY-MM (calendar month, aggregated in UTC). */
+  month: string;
+  total_runs: number;
+  total_tokens: number;
+  total_cost_cents: number;
+  per_agent: UsagePerAgent[];
+}

@@ -33,6 +33,7 @@
     "aiLibrary": "AI Library",
     "agents": "Agents",
     "skills": "Skills",
+    "aiUsage": "AI Usage",
     "newAgent": "New agent",
     "agentRunning": "Running...",
     "agentPausedBudget": "Paused: monthly budget exceeded",
@@ -1317,5 +1318,29 @@
       "forkSkill": "复制到我的技能",
       "forkedToast": "已创建 {{slug}}"
     }
+  },
+  "aiUsage": {
+    "title": "AI 使用统计",
+    "subtitle": "每月各 agent 的 token 消耗和成本汇总。数据在服务端从 agent_runs 聚合而来。",
+    "loading": "正在加载使用统计...",
+    "errorTitle": "加载使用统计失败",
+    "empty": "本月暂无 agent 活动。Agent 调用后会自动出现在这里。",
+    "refresh": "刷新",
+    "prevMonth": "上一个月",
+    "nextMonth": "下一个月",
+    "scopeUser": "我的使用",
+    "scopeTeam": "团队使用",
+    "totalRuns": "总运行次数",
+    "totalTokens": "总 Token",
+    "totalCost": "总花费",
+    "chartTitle": "按 Agent 花费分布（前 10）",
+    "tableTitle": "Agent 明细",
+    "colAgent": "Agent",
+    "colRuns": "运行次数",
+    "colPromptTokens": "输入 Tokens",
+    "colCompletionTokens": "输出 Tokens",
+    "colTotalTokens": "总 Tokens",
+    "colCost": "花费",
+    "colFailed": "失败"
   }
 }
