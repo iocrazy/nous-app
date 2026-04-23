@@ -21,13 +21,12 @@ import {
   CreditCard,
   Coins,
   Share2,
-  Library,
-  Bot,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { SidebarSection } from './sidebar/SidebarSection';
+import { SidebarAgentsSection } from './sidebar/SidebarAgents';
 import { hasPermission } from '../utils/permissions';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 
@@ -344,10 +343,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
           </SidebarSection>
 
-          <SidebarSection label={t('sidebar.aiLibrary')} hideLabel={collapsed}>
-            <SidebarItem icon={Bot} label={t('sidebar.agents')} active={currentView === 'agents'} onClick={() => handleNav('agents')} collapsed={collapsed} />
-            <SidebarItem icon={Library} label={t('sidebar.skills')} active={currentView === 'skills'} onClick={() => handleNav('skills')} collapsed={collapsed} />
-          </SidebarSection>
+          <SidebarAgentsSection
+            urlPrefix={activeTeamId ? `/team/${activeTeamId}` : ''}
+            collapsed={collapsed}
+          />
 
           {hasPermission(permissions, 'member.view') && (
             <SidebarSection label={t('sidebar.management')} hideLabel={collapsed}>
@@ -411,10 +410,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
         </SidebarSection>
 
-        <SidebarSection label={t('sidebar.aiLibrary')} hideLabel={collapsed}>
-          <SidebarItem icon={Bot} label={t('sidebar.agents')} active={currentView === 'agents'} onClick={() => handleNav('agents')} collapsed={collapsed} />
-          <SidebarItem icon={Library} label={t('sidebar.skills')} active={currentView === 'skills'} onClick={() => handleNav('skills')} collapsed={collapsed} />
-        </SidebarSection>
+        <SidebarAgentsSection
+          urlPrefix={activeTeamId ? `/team/${activeTeamId}` : ''}
+          collapsed={collapsed}
+        />
       </nav>
 
       <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
