@@ -8,10 +8,15 @@ Two jobs:
      when exceeded. Runner's pre-flight RunRecorder.start() rejects
      runs on paused agents.
 
-Guarded by a Postgres advisory lock (``pg_try_advisory_lock``) so
-that multiple beat workers or concurrent task runs never step on
-each other. Lock is released at task end; if the task crashes mid-
-way, Postgres releases the lock when the session ends.
+Guarded by a Postgres advisory lock via the migration-149 wrappers
+``public.try_advisory_lock`` / ``public.advisory_unlock``, which
+delegate to pg_try_advisory_lock / pg_advisory_unlock. We can't call
+the pg_* built-ins directly through PostgREST RPC — it only resolves
+functions declared in the public schema with matching named
+parameters. The wrappers exist exactly to bridge that so multiple
+beat workers never step on each other. Lock is released at task
+end; if the task crashes mid-way, Postgres releases the lock when
+the session ends.
 
 This module registers the Celery task and the beat schedule entry
 is wired in ``backend/app/celery_app.py``.
@@ -41,10 +46,15 @@ SWEEPER_LOCK_KEY = 93_827_412_001
 
 
 async def _acquire_lock(client: Any) -> bool:
-    """Attempt pg_try_advisory_lock. Returns True iff we got the lock."""
+    """Attempt the advisory lock via the migration-149 wrapper.
+
+    Returns True iff we got the lock. The wrapper's named ``lock_key``
+    parameter lines up with what supabase-py sends as JSON body so
+    PostgREST can route the call.
+    """
     try:
         result = await client.rpc(
-            "pg_try_advisory_lock", {"key": SWEEPER_LOCK_KEY}
+            "try_advisory_lock", {"lock_key": SWEEPER_LOCK_KEY}
         ).execute()
         locked = bool(result.data) if result.data is not None else False
         return locked
@@ -55,7 +65,7 @@ async def _acquire_lock(client: Any) -> bool:
 
 async def _release_lock(client: Any) -> None:
     try:
-        await client.rpc("pg_advisory_unlock", {"key": SWEEPER_LOCK_KEY}).execute()
+        await client.rpc("advisory_unlock", {"lock_key": SWEEPER_LOCK_KEY}).execute()
     except Exception as err:
         logger.warning(f"[sweeper] advisory_unlock failed: {err}")
 
