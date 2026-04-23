@@ -114,7 +114,9 @@
     "cancel": "取消",
     "close": "关闭",
     "delete": "删除",
-    "deleting": "删除中..."
+    "deleting": "删除中...",
+    "previous": "上一页",
+    "next": "下一页"
   },
   "parser": {
     "title": "媒体解析",
@@ -1276,7 +1278,44 @@
       "moveDown": "下移",
       "noSkillsBound": "还未绑定技能。从下方添加。",
       "noAvailableSkills": "没有可用技能。请先在技能 tab 创建。",
-      "skillsUpdatedToast": "技能已更新"
+      "skillsUpdatedToast": "技能已更新",
+      "runs": {
+        "loading": "正在加载运行记录...",
+        "loadError": "加载运行记录失败",
+        "emptyHeader": "暂无运行记录",
+        "emptyBody": "该 Agent 尚未被调用。在 Chat 或任务中触发后，运行记录会出现在此。",
+        "paginationLabel": "显示 {{start}}–{{end}} / 共 {{total}} 条",
+        "refresh": "刷新",
+        "cancel": "取消",
+        "cancelRequested": "已请求取消",
+        "cancelPendingNote": "已请求取消。Runner 会在下一次工具调用之间检测到并停止。",
+        "detailTitle": "运行详情",
+        "colStarted": "开始时间",
+        "colStatus": "状态",
+        "colTrigger": "触发来源",
+        "colTokens": "Tokens",
+        "colCost": "花费",
+        "colDuration": "耗时",
+        "fieldModel": "模型",
+        "fieldProvider": "Provider",
+        "fieldEnded": "结束时间",
+        "fieldHeartbeat": "最后心跳",
+        "fieldTokens": "Tokens（输入 / 输出 / 合计）",
+        "fieldSnapshotPrompt": "Prompt 价格快照",
+        "fieldSnapshotCompletion": "Completion 价格快照",
+        "fieldSkills": "使用的 Skills",
+        "fieldInputSummary": "输入摘要",
+        "fieldOutputSummary": "输出摘要",
+        "fieldError": "错误信息",
+        "fieldMetadata": "元数据",
+        "status": {
+          "running": "运行中",
+          "completed": "已完成",
+          "failed": "失败",
+          "cancelled": "已取消",
+          "heartbeat_lost": "心跳丢失"
+        }
+      }
     },
     "skills": {
       "addFile": "+ 添加文件",

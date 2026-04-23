@@ -114,7 +114,9 @@
     "cancel": "Cancel",
     "close": "Close",
     "delete": "Delete",
-    "deleting": "Deleting..."
+    "deleting": "Deleting...",
+    "previous": "Previous",
+    "next": "Next"
   },
   "parser": {
     "title": "Media Parser",
@@ -1276,7 +1278,44 @@
       "moveDown": "Move down",
       "noSkillsBound": "No skills bound yet. Add one below.",
       "noAvailableSkills": "No available skills. Create one in the Skills tab.",
-      "skillsUpdatedToast": "Skills updated"
+      "skillsUpdatedToast": "Skills updated",
+      "runs": {
+        "loading": "Loading runs...",
+        "loadError": "Failed to load runs",
+        "emptyHeader": "No runs yet",
+        "emptyBody": "This agent has not been invoked yet. Start a chat or task to see activity here.",
+        "paginationLabel": "Showing {{start}}–{{end}} of {{total}}",
+        "refresh": "Refresh",
+        "cancel": "Cancel",
+        "cancelRequested": "Cancel requested",
+        "cancelPendingNote": "Cancel has been requested. The runner will observe it between tool iterations.",
+        "detailTitle": "Run detail",
+        "colStarted": "Started",
+        "colStatus": "Status",
+        "colTrigger": "Trigger",
+        "colTokens": "Tokens",
+        "colCost": "Cost",
+        "colDuration": "Duration",
+        "fieldModel": "Model",
+        "fieldProvider": "Provider",
+        "fieldEnded": "Ended",
+        "fieldHeartbeat": "Heartbeat",
+        "fieldTokens": "Tokens (in / out / total)",
+        "fieldSnapshotPrompt": "Prompt price snapshot",
+        "fieldSnapshotCompletion": "Completion price snapshot",
+        "fieldSkills": "Skills used",
+        "fieldInputSummary": "Input summary",
+        "fieldOutputSummary": "Output summary",
+        "fieldError": "Error",
+        "fieldMetadata": "Metadata",
+        "status": {
+          "running": "Running",
+          "completed": "Completed",
+          "failed": "Failed",
+          "cancelled": "Cancelled",
+          "heartbeat_lost": "Heartbeat lost"
+        }
+      }
     },
     "skills": {
       "addFile": "+ Add file",

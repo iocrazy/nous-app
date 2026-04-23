@@ -1056,6 +1056,60 @@ export interface CreateSkillPayload {
   fork_from?: string;
 }
 
+// ─── Agent Runs (telemetry) ────────────────────────────────────────────────
+// Mirrors backend/app/schemas/agent_runs.py. Written by RunRecorder on every
+// agent invocation; read by the AgentEditor "Runs" sub-tab and the
+// Settings → AI Usage dashboard.
+
+export type AgentRunStatus =
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'heartbeat_lost';
+
+/** Slim row for the Runs list view — no metadata_json / full_output. */
+export interface AgentRunListItem {
+  id: string; // UUID
+  agent_id: string; // UUID
+  status: AgentRunStatus;
+  trigger: string;
+  model?: string | null;
+  provider?: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  /** Fractional cents — snapshot-priced at run start so history is immutable. */
+  cost_cents?: number | null;
+  started_at: string; // ISO timestamp
+  ended_at?: string | null;
+  error_code?: string | null;
+  skill_slugs_used: string[];
+}
+
+/** Full detail view — adds summaries, metadata, snapshots, and cancel state. */
+export interface AgentRunDetail extends AgentRunListItem {
+  session_id?: string | null;
+  team_id?: number | null;
+  project_id?: number | null;
+  heartbeat_at: string;
+  cancel_requested: boolean;
+  prompt_cents_per_1k_snapshot?: number | null;
+  completion_cents_per_1k_snapshot?: number | null;
+  input_summary?: string | null;
+  output_summary?: string | null;
+  error_message?: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AgentRunListResponse {
+  items: AgentRunListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 // ─── AI Usage aggregates ───────────────────────────────────────────────────
 // Mirror of backend/app/schemas/agent_runs.py (UsagePerAgent, UsageAggregate).
 // Fed by GET /api/v1/ai-library/usage?scope=&month=[&team_id=&project_id=].

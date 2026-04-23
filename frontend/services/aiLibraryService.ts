@@ -14,6 +14,8 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import type {
+  AgentRunDetail,
+  AgentRunListResponse,
   AILibraryAgent,
   AILibrarySkill,
   AILibrarySkillFile,
@@ -180,6 +182,55 @@ export const aiLibraryService = {
       `${base()}/skills/${encodeURIComponent(slug)}/files/${encodeSkillFilePath(path)}`,
       {
         method: 'DELETE',
+        headers: await getAuthHeaders(),
+      },
+    );
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
+  },
+
+  // ─── Agent runs (telemetry) ────────────────────────────────────────────────
+
+  /**
+   * List runs for a given agent, newest first. Scoped server-side to the
+   * authenticated user. `limit` 1..200, `offset` >= 0.
+   */
+  async listAgentRuns(
+    slug: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<AgentRunListResponse> {
+    const qs = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/runs?${qs.toString()}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle<AgentRunListResponse>(resp);
+  },
+
+  /** Full detail view of one run. 404 if not owned by the caller. */
+  async getRun(runId: string): Promise<AgentRunDetail> {
+    const resp = await fetch(`${base()}/runs/${encodeURIComponent(runId)}`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle<AgentRunDetail>(resp);
+  },
+
+  /**
+   * Request cancellation of a running agent. Server flips `cancel_requested`;
+   * the runner observes via RunRecorder polling between tool iterations.
+   * Idempotent — 404 only when the run isn't found or isn't still running.
+   */
+  async cancelRun(runId: string): Promise<void> {
+    const resp = await fetch(
+      `${base()}/runs/${encodeURIComponent(runId)}/cancel`,
+      {
+        method: 'POST',
         headers: await getAuthHeaders(),
       },
     );

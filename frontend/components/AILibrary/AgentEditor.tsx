@@ -7,18 +7,39 @@
 // - Draft state is local; `save()` PATCHes via aiLibraryService and replaces
 //   the hydrated agent immutably on success.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AILibraryAgent, AILibrarySkill, AISettings as AISettingsType } from '../../types';
+import type {
+  AgentRunDetail,
+  AgentRunListItem,
+  AgentRunListResponse,
+  AgentRunStatus,
+  AILibraryAgent,
+  AILibrarySkill,
+  AISettings as AISettingsType,
+} from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
-import { ArrowDown, ArrowUp, ChevronDown, GitFork, Plus, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  GitFork,
+  Plus,
+  RefreshCw,
+  X,
+} from 'lucide-react';
 import { MarkdownEditor } from './MarkdownEditor';
 import { NewAgentModal } from './NewAgentModal';
 import { AgentIconPicker } from './AgentIconPicker';
 
-type SubTab = 'overview' | 'files' | 'skills';
+type SubTab = 'overview' | 'files' | 'skills' | 'runs';
+
+const RUNS_PAGE_SIZE = 25;
+const RUNS_POLL_INTERVAL_MS = 10_000;
 
 interface AgentEditorProps {
   slug: string;
@@ -212,7 +233,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     onAgentForked?.(newSlug);
   };
 
-  const subTabs: SubTab[] = ['overview', 'files', 'skills'];
+  const subTabs: SubTab[] = ['overview', 'files', 'skills', 'runs'];
 
   return (
     <div>
@@ -448,6 +469,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           onMove={moveSkill}
         />
       )}
+
+      {sub === 'runs' && <RunsSection slug={slug} />}
 
       {forkModalOpen && (
         <NewAgentModal
@@ -850,6 +873,554 @@ function buildDraft(a: AILibraryAgent): Partial<AILibraryAgent> {
     soul_md: a.soul_md ?? '',
     agent_md: a.agent_md ?? '',
   };
+}
+
+/**
+ * Runs sub-tab body — lists the authenticated caller's historical invocations
+ * of this agent, newest first. Polls every 10 s so running rows advance
+ * without a page reload. Click a row → open {@link RunDetailModal} with
+ * metadata, input/output summaries, and snapshot prices.
+ */
+const RunsSection: React.FC<{ slug: string }> = ({ slug }) => {
+  const { t } = useTranslation();
+  const { addToast } = useToast();
+  const [page, setPage] = useState<AgentRunListResponse | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  // Ref so the poll callback always sees the latest offset without re-creating
+  // the interval every time it changes.
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
+
+  const fetchPage = useCallback(
+    async (targetOffset: number, mode: 'initial' | 'poll') => {
+      if (mode === 'initial') setLoading(true);
+      else setRefreshing(true);
+      try {
+        const resp = await aiLibraryService.listAgentRuns(
+          slug,
+          RUNS_PAGE_SIZE,
+          targetOffset,
+        );
+        setPage(resp);
+        setError(null);
+      } catch (err) {
+        console.error('[RunsSection] listAgentRuns failed:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        // Only surface a toast on explicit user-triggered fetches — polling
+        // errors stay silent so a brief network blip doesn't spam the UI.
+        if (mode === 'initial') {
+          addToast(`Failed to load runs: ${msg}`, 'error');
+        }
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [slug, addToast],
+  );
+
+  // Initial load + reload when slug or offset changes.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await fetchPage(offset, 'initial');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPage, offset]);
+
+  // Poll every 10 s to pick up heartbeat updates / newly completed runs.
+  // We don't use Realtime here: the runs list is bounded (25 rows) and the
+  // server-side total changes cheaply, and polling avoids a second Realtime
+  // subscription per opened agent editor.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void fetchPage(offsetRef.current, 'poll');
+    }, RUNS_POLL_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [fetchPage]);
+
+  const total = page?.total ?? 0;
+  const items = page?.items ?? [];
+  const hasPrev = offset > 0;
+  const hasNext = offset + RUNS_PAGE_SIZE < total;
+  const pageStart = total === 0 ? 0 : offset + 1;
+  const pageEnd = Math.min(offset + RUNS_PAGE_SIZE, total);
+
+  const handleRefresh = (): void => {
+    void fetchPage(offset, 'initial');
+  };
+
+  const handleCancel = async (runId: string): Promise<void> => {
+    try {
+      await aiLibraryService.cancelRun(runId);
+      addToast(
+        t('aiLibrary.agents.runs.cancelRequested', 'Cancel requested'),
+        'success',
+      );
+      await fetchPage(offset, 'poll');
+    } catch (err) {
+      console.error('[RunsSection] cancelRun failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      addToast(`Failed to cancel run: ${msg}`, 'error');
+    }
+  };
+
+  if (loading && page === null) {
+    return (
+      <p className="text-sm text-zinc-500">
+        {t('aiLibrary.agents.runs.loading', 'Loading runs...')}
+      </p>
+    );
+  }
+
+  if (error && page === null) {
+    return (
+      <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+        {t('aiLibrary.agents.runs.loadError', 'Failed to load runs')}: {error}
+      </div>
+    );
+  }
+
+  return (
+    <section className="space-y-4">
+      <header className="flex items-center justify-between gap-3">
+        <div className="text-xs text-zinc-500">
+          {total === 0
+            ? t('aiLibrary.agents.runs.emptyHeader', 'No runs yet')
+            : t('aiLibrary.agents.runs.paginationLabel', {
+                defaultValue: 'Showing {{start}}–{{end}} of {{total}}',
+                start: pageStart,
+                end: pageEnd,
+                total,
+              })}
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={loading || refreshing}
+          className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+          title={t('aiLibrary.agents.runs.refresh', 'Refresh')}
+        >
+          <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+          {t('aiLibrary.agents.runs.refresh', 'Refresh')}
+        </button>
+      </header>
+
+      {items.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-3 py-8 text-center text-sm text-zinc-500">
+          {t(
+            'aiLibrary.agents.runs.emptyBody',
+            'This agent has not been invoked yet. Start a chat or task to see activity here.',
+          )}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-zinc-800">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-900/60 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-3 py-2">
+                  {t('aiLibrary.agents.runs.colStarted', 'Started')}
+                </th>
+                <th className="px-3 py-2">
+                  {t('aiLibrary.agents.runs.colStatus', 'Status')}
+                </th>
+                <th className="px-3 py-2">
+                  {t('aiLibrary.agents.runs.colTrigger', 'Trigger')}
+                </th>
+                <th className="px-3 py-2 text-right">
+                  {t('aiLibrary.agents.runs.colTokens', 'Tokens')}
+                </th>
+                <th className="px-3 py-2 text-right">
+                  {t('aiLibrary.agents.runs.colCost', 'Cost')}
+                </th>
+                <th className="px-3 py-2 text-right">
+                  {t('aiLibrary.agents.runs.colDuration', 'Duration')}
+                </th>
+                <th className="px-3 py-2 w-8" aria-hidden />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800">
+              {items.map((run) => (
+                <RunRow
+                  key={run.id}
+                  run={run}
+                  onOpen={() => setSelectedRunId(run.id)}
+                  onCancel={() => handleCancel(run.id)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(hasPrev || hasNext) && (
+        <footer className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setOffset(Math.max(0, offset - RUNS_PAGE_SIZE))}
+            disabled={!hasPrev || loading}
+            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ChevronLeft size={14} />
+            {t('common.previous', 'Previous')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOffset(offset + RUNS_PAGE_SIZE)}
+            disabled={!hasNext || loading}
+            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {t('common.next', 'Next')}
+            <ChevronRight size={14} />
+          </button>
+        </footer>
+      )}
+
+      {selectedRunId && (
+        <RunDetailModal
+          runId={selectedRunId}
+          onClose={() => setSelectedRunId(null)}
+          onCancel={() => handleCancel(selectedRunId)}
+        />
+      )}
+    </section>
+  );
+};
+
+const RunRow: React.FC<{
+  run: AgentRunListItem;
+  onOpen: () => void;
+  onCancel: () => void;
+}> = ({ run, onOpen, onCancel }) => {
+  const { t } = useTranslation();
+  const isRunning = run.status === 'running';
+  return (
+    <tr
+      className="cursor-pointer transition-colors hover:bg-zinc-900/60"
+      onClick={onOpen}
+    >
+      <td className="px-3 py-2 whitespace-nowrap text-zinc-300">
+        {formatTimestamp(run.started_at)}
+      </td>
+      <td className="px-3 py-2">
+        <RunStatusBadge status={run.status} />
+      </td>
+      <td className="px-3 py-2 font-mono text-xs text-zinc-400">
+        {run.trigger}
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+        {formatTokens(run.total_tokens)}
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+        {formatCost(run.cost_cents)}
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+        {formatDuration(run.started_at, run.ended_at)}
+      </td>
+      <td className="px-3 py-2 text-right">
+        {isRunning && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel();
+            }}
+            className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs font-medium text-red-300 hover:bg-red-500/20"
+            title={t('aiLibrary.agents.runs.cancel', 'Cancel')}
+          >
+            {t('aiLibrary.agents.runs.cancel', 'Cancel')}
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+};
+
+const RunStatusBadge: React.FC<{ status: AgentRunStatus }> = ({ status }) => {
+  const { t } = useTranslation();
+  const styles: Record<AgentRunStatus, string> = {
+    running:
+      'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+    completed:
+      'border-zinc-700 bg-zinc-800 text-zinc-200',
+    failed: 'border-red-500/40 bg-red-500/10 text-red-300',
+    cancelled:
+      'border-amber-500/40 bg-amber-500/10 text-amber-300',
+    heartbeat_lost:
+      'border-orange-500/40 bg-orange-500/10 text-orange-300',
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium whitespace-nowrap ${styles[status]}`}
+    >
+      {status === 'running' && (
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+        </span>
+      )}
+      {t(`aiLibrary.agents.runs.status.${status}`, status)}
+    </span>
+  );
+};
+
+/**
+ * Full-detail modal for a single run. Fetches {@link AgentRunDetail} on open,
+ * renders summaries + metadata + snapshot price. Provides a Cancel button when
+ * the run is still live.
+ */
+const RunDetailModal: React.FC<{
+  runId: string;
+  onClose: () => void;
+  onCancel: () => void;
+}> = ({ runId, onClose, onCancel }) => {
+  const { t } = useTranslation();
+  const [detail, setDetail] = useState<AgentRunDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetail(null);
+    setError(null);
+    aiLibraryService
+      .getRun(runId)
+      .then((d) => {
+        if (cancelled) return;
+        setDetail(d);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[RunDetailModal] getRun failed:', err);
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 shadow-xl flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-5 py-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-zinc-100">
+              {t('aiLibrary.agents.runs.detailTitle', 'Run detail')}
+            </h3>
+            <div className="mt-0.5 truncate font-mono text-xs text-zinc-500">
+              {runId}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {detail?.status === 'running' && !detail.cancel_requested && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20"
+              >
+                {t('aiLibrary.agents.runs.cancel', 'Cancel')}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-300 hover:bg-zinc-700"
+              aria-label={t('common.close', 'Close')}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {error && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+          {!detail && !error && (
+            <p className="text-sm text-zinc-500">
+              {t('aiLibrary.agents.runs.loading', 'Loading runs...')}
+            </p>
+          )}
+          {detail && <RunDetailBody detail={detail} />}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RunDetailBody: React.FC<{ detail: AgentRunDetail }> = ({ detail }) => {
+  const { t } = useTranslation();
+
+  const fields: Array<[string, React.ReactNode]> = [
+    [t('aiLibrary.agents.runs.colStatus', 'Status'), <RunStatusBadge key="s" status={detail.status} />],
+    [t('aiLibrary.agents.runs.colTrigger', 'Trigger'), <span key="t" className="font-mono text-xs">{detail.trigger}</span>],
+    [t('aiLibrary.agents.runs.fieldModel', 'Model'), detail.model ?? '—'],
+    [t('aiLibrary.agents.runs.fieldProvider', 'Provider'), detail.provider ?? '—'],
+    [t('aiLibrary.agents.runs.colStarted', 'Started'), formatTimestamp(detail.started_at)],
+    [
+      t('aiLibrary.agents.runs.fieldEnded', 'Ended'),
+      detail.ended_at ? formatTimestamp(detail.ended_at) : '—',
+    ],
+    [t('aiLibrary.agents.runs.fieldHeartbeat', 'Heartbeat'), formatTimestamp(detail.heartbeat_at)],
+    [t('aiLibrary.agents.runs.colDuration', 'Duration'), formatDuration(detail.started_at, detail.ended_at)],
+    [
+      t('aiLibrary.agents.runs.fieldTokens', 'Tokens (in / out / total)'),
+      `${formatTokens(detail.prompt_tokens)} / ${formatTokens(detail.completion_tokens)} / ${formatTokens(detail.total_tokens)}`,
+    ],
+    [t('aiLibrary.agents.runs.colCost', 'Cost'), formatCost(detail.cost_cents)],
+    [
+      t('aiLibrary.agents.runs.fieldSnapshotPrompt', 'Prompt price snapshot'),
+      formatPriceSnapshot(detail.prompt_cents_per_1k_snapshot),
+    ],
+    [
+      t('aiLibrary.agents.runs.fieldSnapshotCompletion', 'Completion price snapshot'),
+      formatPriceSnapshot(detail.completion_cents_per_1k_snapshot),
+    ],
+    [
+      t('aiLibrary.agents.runs.fieldSkills', 'Skills used'),
+      detail.skill_slugs_used.length === 0
+        ? '—'
+        : detail.skill_slugs_used.join(', '),
+    ],
+  ];
+
+  return (
+    <div className="space-y-5 text-sm">
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+        {fields.map(([label, value]) => (
+          <div key={label} className="flex items-baseline justify-between gap-3 border-b border-zinc-800/60 py-1">
+            <dt className="text-xs font-medium text-zinc-500">{label}</dt>
+            <dd className="text-right text-zinc-200 truncate">{value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {detail.cancel_requested && detail.status === 'running' && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+          {t(
+            'aiLibrary.agents.runs.cancelPendingNote',
+            'Cancel has been requested. The runner will observe it between tool iterations.',
+          )}
+        </div>
+      )}
+
+      {detail.input_summary && (
+        <section>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            {t('aiLibrary.agents.runs.fieldInputSummary', 'Input summary')}
+          </h4>
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200">
+            {detail.input_summary}
+          </pre>
+        </section>
+      )}
+
+      {detail.output_summary && (
+        <section>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            {t('aiLibrary.agents.runs.fieldOutputSummary', 'Output summary')}
+          </h4>
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200">
+            {detail.output_summary}
+          </pre>
+        </section>
+      )}
+
+      {detail.error_message && (
+        <section>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-red-400">
+            {t('aiLibrary.agents.runs.fieldError', 'Error')}
+            {detail.error_code ? ` (${detail.error_code})` : ''}
+          </h4>
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-200">
+            {detail.error_message}
+          </pre>
+        </section>
+      )}
+
+      {Object.keys(detail.metadata_json).length > 0 && (
+        <section>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            {t('aiLibrary.agents.runs.fieldMetadata', 'Metadata')}
+          </h4>
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs font-mono text-zinc-300">
+            {JSON.stringify(detail.metadata_json, null, 2)}
+          </pre>
+        </section>
+      )}
+    </div>
+  );
+};
+
+// ─── Formatting helpers ────────────────────────────────────────────────────
+
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  // Locale-aware, short date + time. Matches the compact table layout.
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatTokens(n: number | null | undefined): string {
+  if (n == null) return '0';
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+function formatCost(centsFractional: number | null | undefined): string {
+  if (centsFractional == null) return '—';
+  // Cost is stored as fractional cents. A $0.0045 run shows as 0.45¢.
+  const cents = Number(centsFractional);
+  if (!Number.isFinite(cents)) return '—';
+  if (cents < 1) return `${cents.toFixed(3)}¢`;
+  if (cents < 100) return `${cents.toFixed(2)}¢`;
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+function formatPriceSnapshot(
+  centsPer1k: number | null | undefined,
+): string {
+  if (centsPer1k == null) return '—';
+  const v = Number(centsPer1k);
+  if (!Number.isFinite(v)) return '—';
+  return `${v.toFixed(4)}¢ / 1k`;
+}
+
+function formatDuration(startIso: string, endIso: string | null | undefined): string {
+  const start = new Date(startIso).getTime();
+  const end = endIso ? new Date(endIso).getTime() : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—';
+  const ms = end - start;
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m < 60) return `${m}m ${r}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
 }
 
 export default AgentEditor;
