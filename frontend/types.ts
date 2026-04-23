@@ -1138,3 +1138,56 @@ export interface UsageAggregate {
   total_cost_cents: number;
   per_agent: UsagePerAgent[];
 }
+
+// ─── AI Library chat ────────────────────────────────────────────────────────
+// Mirror of backend/app/schemas/ai_library_chat.py. One session = one agent
+// binding; messages + run telemetry flow through AgentRunner + RunRecorder.
+
+export type ChatMessageRole = 'user' | 'assistant' | 'system';
+
+export interface ChatMessage {
+  id: string; // UUID
+  session_id: string;
+  role: ChatMessageRole;
+  content: string;
+  agent_id?: string | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  metadata_json?: Record<string, unknown> | null;
+  created_at?: string | null;
+}
+
+export interface ChatSession {
+  id: string; // UUID
+  user_id: string;
+  agent_id?: string | null;
+  agent_slug?: string | null;
+  team_id?: number | null;
+  project_id?: number | null;
+  title?: string | null;
+  context_type?: string | null;
+  context_id?: string | null;
+  status?: string | null;
+  total_tokens?: number | null;
+  message_count?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ChatSessionWithMessages extends ChatSession {
+  messages: ChatMessage[];
+}
+
+export interface CreateChatSessionPayload {
+  title?: string;
+  project_id?: number;
+  team_id?: number;
+  context_type?: string;
+  context_id?: string;
+}
+
+export interface ChatResponse {
+  message: ChatMessage;
+  usage: { prompt_tokens?: number; completion_tokens?: number };
+  run_id?: string | null;
+}

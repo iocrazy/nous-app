@@ -1,26 +1,39 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+/**
+ * AIChatPanel — right-rail chat panel used by ScriptEditor + StoryboardWorkbench.
+ *
+ * As of U2 this talks to the unified AI Library framework:
+ *   - Agents come from ``/api/v1/ai-library/agents`` (the same list the
+ *     sidebar AI LIBRARY section renders).
+ *   - Sessions + messages flow through ``/api/v1/ai-library/sessions``
+ *     and every chat turn produces an agent_runs row, so the pulse /
+ *     Runs tab / Usage dashboard / budget guard all work for chat too.
+ *
+ * The U1 backend does NOT stream yet — responses are delivered as a
+ * single POST. We show a typing indicator during the in-flight request
+ * instead of character-by-character streaming. Streaming SSE can be
+ * added in a follow-up if the perceived latency is an issue.
+ */
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Plus } from 'lucide-react';
-import {
-  fetchAgents,
-  fetchSessions,
-  fetchSessionWithMessages,
-  createSession,
-  deleteSession,
-  sendMessage,
-  streamMessage,
-  type AIAgent,
-  type AISession,
-  type AIMessage,
-} from '../services/aiService';
+import { Plus, X } from 'lucide-react';
+
+import { aiLibraryService } from '../services/aiLibraryService';
+import type {
+  AILibraryAgent,
+  ChatMessage,
+  ChatSession,
+} from '../types';
 import { AgentSelector } from './AgentSelector';
 import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/MessageBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
 import { ChatInput } from './chat/ChatInput';
 import { EmptyState } from './chat/EmptyState';
+import { useToast } from './Toast';
 
 export interface AIChatPanelProps {
+  /** String form of the project's BIGINT id, for display + session tagging. */
   projectId: string;
   contextType?: 'script' | 'storyboard';
   contextId?: string;
@@ -28,9 +41,18 @@ export interface AIChatPanelProps {
   onClose?: () => void;
 }
 
-function formatTimestamp(isoString?: string): string {
+function formatTimestamp(isoString?: string | null): string {
   if (!isoString) return '';
-  return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(isoString).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** Coerce the string project id to a BIGINT-compatible number when possible. */
+function parseProjectId(projectId: string): number | undefined {
+  const n = Number(projectId);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 export function AIChatPanel({
@@ -41,123 +63,139 @@ export function AIChatPanel({
   onClose,
 }: AIChatPanelProps): React.ReactElement {
   const { t } = useTranslation();
-  const [agents, setAgents] = useState<AIAgent[]>([]);
-  const [sessions, setSessions] = useState<AISession[]>([]);
+  const { addToast } = useToast();
+
+  const [agents, setAgents] = useState<AILibraryAgent[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<AIMessage[]>([]);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [streaming, setStreaming] = useState(false);
-  const [streamingContent, setStreamingContent] = useState('');
+  const [sending, setSending] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
+  }, [messages, sending]);
 
-  // Initialise: load agents + sessions
+  const numericProjectId = useMemo(() => parseProjectId(projectId), [projectId]);
+
+  // Load the agent list for the selector. Sessions are loaded lazily per
+  // agent selection so switching agents doesn't drag in noise from others.
   useEffect(() => {
     let cancelled = false;
-
     void (async () => {
       try {
-        const [fetchedAgents, fetchedSessions] = await Promise.all([
-          fetchAgents(projectId).catch(() => []),
-          fetchSessions(projectId).catch(() => []),
-        ]);
-
+        const list = await aiLibraryService.listAgents();
         if (cancelled) return;
-
-        const agentList = Array.isArray(fetchedAgents) ? fetchedAgents : [];
-        const sessionList = Array.isArray(fetchedSessions) ? fetchedSessions : [];
-
-        setAgents(agentList);
-        setSessions(sessionList);
-
-        if (agentList.length > 0) {
-          setSelectedAgentId(agentList[0].id);
-        }
-
-        if (sessionList.length > 0) {
-          // Auto-select the most recent session
-          const firstSession = sessionList[0];
-          setActiveSessionId(firstSession.id);
-          await loadSessionMessages(firstSession.id, cancelled);
-        } else {
-          // No sessions — create a new one
-          try {
-            const newSession = await createSession({
-              projectId,
-              contextType,
-              contextId,
-              title: t('chat.newConversation'),
-            });
-            if (cancelled) return;
-            if (newSession?.id) {
-              setSessions([newSession]);
-              setActiveSessionId(newSession.id);
-            }
-          } catch (sessionErr) {
-            console.error('[AIChatPanel] Auto-create session failed:', sessionErr);
-          }
+        // Only enabled agents are selectable; the sidebar already surfaces
+        // disabled ones visually, but chat requires an executable agent.
+        const enabled = list.filter((a) => a.enabled);
+        setAgents(enabled);
+        if (enabled.length > 0) {
+          setSelectedAgentSlug((prev) => prev ?? enabled[0].slug);
         }
       } catch (err) {
-        console.error('[AIChatPanel] Init failed:', err);
+        console.error('[AIChatPanel] listAgents failed:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  // When the selected agent changes, (re)load that agent's sessions for
+  // this project. If there are none, auto-create one so the input isn't
+  // permanently disabled on first open.
+  useEffect(() => {
+    if (!selectedAgentSlug) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await aiLibraryService.listChatSessions(
+          selectedAgentSlug,
+          numericProjectId,
+        );
+        if (cancelled) return;
+        setSessions(list);
+        if (list.length > 0) {
+          setActiveSessionId(list[0].id);
+          await loadSessionMessages(list[0].id, () => cancelled);
+        } else {
+          const created = await aiLibraryService.createChatSession(
+            selectedAgentSlug,
+            {
+              title: t('chat.newConversation', 'New conversation'),
+              project_id: numericProjectId,
+              context_type: contextType,
+              context_id: contextId,
+            },
+          );
+          if (cancelled) return;
+          setSessions([created]);
+          setActiveSessionId(created.id);
+          setMessages([]);
+        }
+      } catch (err) {
+        console.error('[AIChatPanel] session load failed:', err);
+      }
+    })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [selectedAgentSlug, numericProjectId]);
 
-  async function loadSessionMessages(sessionId: string, cancelled = false): Promise<void> {
+  async function loadSessionMessages(
+    sessionId: string,
+    isCancelled: () => boolean = () => false,
+  ): Promise<void> {
     try {
-      const data = await fetchSessionWithMessages(sessionId);
-      if (cancelled) return;
-      setMessages(data.messages);
+      const data = await aiLibraryService.getChatSession(sessionId);
+      if (isCancelled()) return;
+      setMessages(data.messages ?? []);
     } catch (err) {
-      console.error('[AIChatPanel] Failed to load messages:', err);
+      console.error('[AIChatPanel] getChatSession failed:', err);
     }
   }
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
     setActiveSessionId(sessionId);
     setMessages([]);
-    setStreamingContent('');
     await loadSessionMessages(sessionId);
   }, []);
 
   const handleNewSession = useCallback(async () => {
+    if (!selectedAgentSlug) return;
     try {
-      const newSession = await createSession({
-        projectId,
-        contextType,
-        contextId,
-        title: t('chat.newConversation'),
-      });
-      setSessions((prev) => [newSession, ...prev]);
-      setActiveSessionId(newSession.id);
+      const created = await aiLibraryService.createChatSession(
+        selectedAgentSlug,
+        {
+          title: t('chat.newConversation', 'New conversation'),
+          project_id: numericProjectId,
+          context_type: contextType,
+          context_id: contextId,
+        },
+      );
+      setSessions((prev) => [created, ...prev]);
+      setActiveSessionId(created.id);
       setMessages([]);
-      setStreamingContent('');
     } catch (err) {
-      console.error('[AIChatPanel] Create session failed:', err);
+      console.error('[AIChatPanel] createChatSession failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      addToast(`Failed to create session: ${msg}`, 'error');
     }
-  }, [projectId, contextType, contextId]);
+  }, [selectedAgentSlug, numericProjectId, contextType, contextId, t, addToast]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       try {
-        await deleteSession(sessionId);
+        await aiLibraryService.deleteChatSession(sessionId);
         const next = sessions.filter((s) => s.id !== sessionId);
         setSessions(next);
-
         if (activeSessionId === sessionId) {
           if (next.length > 0) {
             setActiveSessionId(next[0].id);
@@ -168,89 +206,84 @@ export function AIChatPanel({
           }
         }
       } catch (err) {
-        console.error('[AIChatPanel] Delete session failed:', err);
+        console.error('[AIChatPanel] deleteChatSession failed:', err);
       }
     },
     [sessions, activeSessionId],
   );
 
   const handleSend = useCallback(
-    (text: string) => {
-      if (!activeSessionId || streaming) return;
+    async (text: string) => {
+      if (!activeSessionId || sending) return;
+      setSending(true);
 
-      // Optimistically add user message
-      const userMsg: AIMessage = {
+      // Optimistic user bubble — replaced by the authoritative row after
+      // the server responds and we reload the message list.
+      const tempUser: ChatMessage = {
         id: `tmp-user-${Date.now()}`,
         session_id: activeSessionId,
         role: 'user',
         content: text,
         created_at: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, userMsg]);
-      setStreaming(true);
-      setStreamingContent('');
+      setMessages((prev) => [...prev, tempUser]);
 
-      // Abort any previous stream
-      abortControllerRef.current?.abort();
+      try {
+        await aiLibraryService.sendChatMessage(activeSessionId, text);
+        // Refetch full history so IDs + timestamps are server-authoritative.
+        await loadSessionMessages(activeSessionId);
+      } catch (err) {
+        console.error('[AIChatPanel] sendChatMessage failed:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        addToast(`Send failed: ${msg}`, 'error');
+        // Roll back the optimistic bubble — the server didn't accept it.
+        setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
+      } finally {
+        setSending(false);
+      }
 
-      abortControllerRef.current = streamMessage(
-        activeSessionId,
-        text,
-        selectedAgentId ?? undefined,
-        (chunk) => {
-          setStreamingContent((prev) => prev + chunk);
-        },
-        (usage) => {
-          setStreaming(false);
-
-          // Commit the streamed message into the message list
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `tmp-assistant-${Date.now()}`,
-              session_id: activeSessionId,
-              role: 'assistant',
-              content: streamingContent + '', // captured via closure update below
-              agent_id: selectedAgentId ?? undefined,
-              prompt_tokens: usage.prompt_tokens,
-              completion_tokens: usage.completion_tokens,
-              created_at: new Date().toISOString(),
-            },
-          ]);
-
-          // Reload accurate messages from server to get persisted IDs/content
-          void loadSessionMessages(activeSessionId);
-          setStreamingContent('');
-
-          // Update session list to reflect new message_count / updated_at
-          void fetchSessions(projectId).then((updated) => setSessions(updated)).catch(console.error);
-        },
-        (error) => {
-          console.error('[AIChatPanel] Stream error:', error);
-          setStreaming(false);
-          setStreamingContent('');
-        },
-      );
+      // Update the session list ordering so this session bubbles to top.
+      if (selectedAgentSlug) {
+        void aiLibraryService
+          .listChatSessions(selectedAgentSlug, numericProjectId)
+          .then(setSessions)
+          .catch((err) => console.error('[AIChatPanel] refresh sessions failed:', err));
+      }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeSessionId, selectedAgentId, streaming, projectId],
+    [activeSessionId, sending, selectedAgentSlug, numericProjectId, addToast],
   );
 
-  // Fallback for suggestion clicks in EmptyState
   const handleSuggest = useCallback(
     (suggestion: string) => {
-      handleSend(suggestion);
+      void handleSend(suggestion);
     },
     [handleSend],
   );
 
-  const sessionItems: SessionItem[] = (sessions || []).filter(Boolean).map((s) => ({
-    id: s.id,
-    title: s.title ?? t('chat.untitled'),
-    updated_at: s.updated_at ?? '',
-  }));
+  const sessionItems: SessionItem[] = useMemo(
+    () =>
+      (sessions || []).filter(Boolean).map((s) => ({
+        id: s.id,
+        title: s.title ?? t('chat.untitled', 'Untitled'),
+        message_count: s.message_count ?? 0,
+        updated_at: s.updated_at ?? '',
+      })),
+    [sessions, t],
+  );
 
-  const hasMessages = messages.length > 0 || streaming;
+  // AgentOption wants {id, name, description?}. We thread agent.slug as
+  // id because selection downstream uses slug — it's the session FK.
+  const agentOptions = useMemo(
+    () =>
+      agents.map((a) => ({
+        id: a.slug,
+        name: a.name,
+        description: a.description ?? undefined,
+      })),
+    [agents],
+  );
+
+  const hasMessages = messages.length > 0 || sending;
 
   return (
     <div className="w-80 flex-shrink-0 flex flex-col bg-zinc-900 border-l border-zinc-800 h-full overflow-hidden">
@@ -259,16 +292,16 @@ export function AIChatPanel({
         <span className="text-sm font-medium text-zinc-200 flex-1">AI Chat</span>
 
         <AgentSelector
-          agents={agents}
-          selectedId={selectedAgentId}
-          onSelect={setSelectedAgentId}
+          agents={agentOptions}
+          selectedId={selectedAgentSlug}
+          onSelect={setSelectedAgentSlug}
         />
 
         <button
           type="button"
           onClick={handleNewSession}
           className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
-          title="New session"
+          title={t('chat.newSession', 'New session')}
         >
           <Plus size={15} />
         </button>
@@ -278,7 +311,7 @@ export function AIChatPanel({
             type="button"
             onClick={onClose}
             className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
-            title="Close"
+            title={t('common.close', 'Close')}
           >
             <X size={15} />
           </button>
@@ -309,10 +342,9 @@ export function AIChatPanel({
                 key={msg.id}
                 role={msg.role === 'system' ? 'assistant' : msg.role}
                 content={msg.content}
-                agentName={msg.agent_name}
                 tokens={
                   msg.prompt_tokens != null && msg.completion_tokens != null
-                    ? msg.prompt_tokens + msg.completion_tokens
+                    ? (msg.prompt_tokens ?? 0) + (msg.completion_tokens ?? 0)
                     : undefined
                 }
                 timestamp={formatTimestamp(msg.created_at)}
@@ -324,17 +356,10 @@ export function AIChatPanel({
               />
             ))}
 
-            {/* Streaming assistant bubble */}
-            {streaming && (
+            {sending && (
               <div className="flex justify-start mb-3">
                 <div className="max-w-[85%] rounded-xl bg-zinc-800 text-zinc-200 text-sm leading-relaxed overflow-hidden">
-                  {streamingContent ? (
-                    <div className="px-3 py-2 whitespace-pre-wrap break-words">
-                      {streamingContent}
-                    </div>
-                  ) : (
-                    <TypingIndicator />
-                  )}
+                  <TypingIndicator />
                 </div>
               </div>
             )}
@@ -346,9 +371,17 @@ export function AIChatPanel({
       {/* Chat input */}
       <ChatInput
         onSend={handleSend}
-        disabled={streaming || !activeSessionId}
-        placeholder={activeSessionId ? t('chat.typeMessage') : t('chat.createSessionFirst')}
+        disabled={sending || !activeSessionId || !selectedAgentSlug}
+        placeholder={
+          !selectedAgentSlug
+            ? t('chat.placeholderNoAgent', 'Select an agent to start')
+            : !activeSessionId
+              ? t('chat.placeholderNoSession', 'Create a session first')
+              : t('chat.placeholder', 'Type a message...')
+        }
       />
     </div>
   );
 }
+
+export default AIChatPanel;
