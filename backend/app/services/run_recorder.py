@@ -110,7 +110,9 @@ class RunRecorder:
             # Telemetry failures don't break agent runs. Log and continue
             # without a persisted row; methods below become no-ops because
             # self.run_id stays None.
-            logger.error(f"[RunRecorder] start failed (telemetry disabled for this run): {err}")
+            logger.error(
+                f"[RunRecorder] start failed (telemetry disabled for this run): {err}"
+            )
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
@@ -203,7 +205,9 @@ class RunRecorder:
                 self._cancelled = True
                 return True
         except Exception as err:
-            logger.warning(f"[RunRecorder] cancel check failed for {self.run_id}: {err}")
+            logger.warning(
+                f"[RunRecorder] cancel check failed for {self.run_id}: {err}"
+            )
         return False
 
     # -------- internal ---------------------------------------------------
@@ -242,9 +246,7 @@ class RunRecorder:
             )
             if self.provider:
                 query = query.eq("provider", self.provider)
-            result = (
-                await query.order("effective_at", desc=True).limit(1).execute()
-            )
+            result = await query.order("effective_at", desc=True).limit(1).execute()
             if result.data:
                 row = result.data[0]
                 self._prompt_rate = float(row["prompt_cents_per_1k"])

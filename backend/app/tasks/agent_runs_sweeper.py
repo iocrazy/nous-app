@@ -29,7 +29,9 @@ from app.celery_app import celery_app
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_runs_repository import AgentRunsRepository
 
-HEARTBEAT_STALENESS_SECONDS = 120  # 2 minutes — matches RunRecorder's 15s write cadence * 8
+HEARTBEAT_STALENESS_SECONDS = (
+    120  # 2 minutes — matches RunRecorder's 15s write cadence * 8
+)
 # Postgres advisory lock key: hashtext('agent_runs_sweeper'). We pick a
 # fixed int here to avoid depending on pg_catalog.hashtext at Python level.
 # This constant must stay stable across deployments; change it and you
@@ -99,8 +101,12 @@ async def _recompute_monthly_budgets(client: Any) -> int:
         cost_budget = agent.get("monthly_cost_cents_budget")
         paused_reason = agent.get("paused_reason")
 
-        over_tokens = token_budget is not None and totals_row["tokens"] > int(token_budget)
-        over_cost = cost_budget is not None and totals_row["cost_cents"] > float(cost_budget)
+        over_tokens = token_budget is not None and totals_row["tokens"] > int(
+            token_budget
+        )
+        over_cost = cost_budget is not None and totals_row["cost_cents"] > float(
+            cost_budget
+        )
         should_be_paused_by_budget = over_tokens or over_cost
 
         if should_be_paused_by_budget and paused_reason != "budget":
@@ -141,7 +147,9 @@ async def _sweep_async() -> dict[str, int]:
 
     try:
         runs_repo = AgentRunsRepository()
-        stale_before = datetime.now(timezone.utc).replace(microsecond=0) - _stale_delta()
+        stale_before = (
+            datetime.now(timezone.utc).replace(microsecond=0) - _stale_delta()
+        )
         heartbeat_lost = await runs_repo.mark_heartbeat_lost(stale_before=stale_before)
         transitions = await _recompute_monthly_budgets(client)
         if heartbeat_lost or transitions:

@@ -67,9 +67,7 @@ class AgentRunsRepository:
             )
             return {"items": result.data or [], "total": total}
         except Exception as e:
-            logger.error(
-                f"Failed to list runs (agent={agent_id}, user={user_id}): {e}"
-            )
+            logger.error(f"Failed to list runs (agent={agent_id}, user={user_id}): {e}")
             return {"items": [], "total": 0}
 
     async def get_by_id(
@@ -99,9 +97,7 @@ class AgentRunsRepository:
     # Cancel (flip flag; runner observes via RunRecorder.check_cancelled)
     # ------------------------------------------------------------------
 
-    async def request_cancel(
-        self, run_id: UUID, *, user_id: UUID
-    ) -> bool:
+    async def request_cancel(self, run_id: UUID, *, user_id: UUID) -> bool:
         """Set cancel_requested=true. Idempotent. Only acts on running, owned rows.
 
         Returns True when the flag was flipped (or already pending). False if
