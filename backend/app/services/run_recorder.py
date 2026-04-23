@@ -144,6 +144,16 @@ class RunRecorder:
         self._prompt_tokens += max(0, prompt_tokens or 0)
         self._completion_tokens += max(0, completion_tokens or 0)
 
+    @property
+    def prompt_tokens(self) -> int:
+        """Accumulated prompt tokens seen on this run so far."""
+        return self._prompt_tokens
+
+    @property
+    def completion_tokens(self) -> int:
+        """Accumulated completion tokens seen on this run so far."""
+        return self._completion_tokens
+
     def record_skill(self, slug: str) -> None:
         """Track which skills got invoked during this run."""
         if slug and slug not in self._skill_slugs_used:

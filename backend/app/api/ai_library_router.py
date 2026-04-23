@@ -22,7 +22,7 @@ backend (e.g. ``ai_agents_router.py``, ``skills_router.py``).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
@@ -49,6 +49,15 @@ from app.schemas.ai_library import (
     SkillOut,
     SkillUpdate,
 )
+from app.schemas.ai_library_chat import (
+    ChatRequest,
+    ChatResponse,
+    SessionCreate,
+    SessionOut,
+    SessionUpdate,
+    SessionWithMessages,
+)
+from app.services.ai_library_chat_service import AILibraryChatService
 from app.services.seed_loader import SeedLoader
 
 router = APIRouter(prefix="/ai-library", tags=["AI Library"])
@@ -1115,4 +1124,117 @@ async def get_usage(
         "total_tokens": sum(b["total_tokens"] for b in enriched),
         "total_cost_cents": sum(b["cost_cents"] for b in enriched),
         "per_agent": enriched,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Chat sessions (replaces legacy /api/v1/ai/sessions + /api/v1/ai/agents/{id}/call)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/agents/{slug}/sessions",
+    response_model=SessionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a chat session bound to this agent",
+)
+async def create_chat_session(
+    slug: str, payload: SessionCreate, auth: AuthDep
+) -> Dict[str, Any]:
+    """Open a new ai_sessions row tied to ``slug``. Every chat message
+    in this session will run through AgentRunner + RunRecorder, so
+    tokens / cost / budget / pulse all flow through the standard
+    telemetry pipeline for chat too."""
+    svc = AILibraryChatService()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    session = await svc.create_session(
+        user_id=user_uuid,
+        agent_slug=slug,
+        title=payload.title,
+        project_id=payload.project_id,
+        team_id=payload.team_id,
+        context_type=payload.context_type,
+        context_id=payload.context_id,
+    )
+    return session
+
+
+@router.get(
+    "/agents/{slug}/sessions",
+    response_model=List[SessionOut],
+    summary="List chat sessions this caller owns for the given agent",
+)
+async def list_chat_sessions(
+    slug: str,
+    auth: AuthDep,
+    project_id: Optional[int] = None,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    svc = AILibraryChatService()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    return await svc.list_sessions(
+        user_id=user_uuid, agent_slug=slug, project_id=project_id, limit=limit
+    )
+
+
+@router.get(
+    "/sessions/{session_id}",
+    response_model=SessionWithMessages,
+    summary="Get a chat session with its message history",
+)
+async def get_chat_session(session_id: UUID, auth: AuthDep) -> Dict[str, Any]:
+    svc = AILibraryChatService()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    session = await svc.get_session(session_id, user_id=user_uuid)
+    messages = await svc.get_messages(session_id, user_id=user_uuid)
+    return {**session, "messages": messages}
+
+
+@router.patch(
+    "/sessions/{session_id}",
+    response_model=SessionOut,
+    summary="Rename a chat session",
+)
+async def update_chat_session(
+    session_id: UUID, payload: SessionUpdate, auth: AuthDep
+) -> Dict[str, Any]:
+    svc = AILibraryChatService()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    return await svc.update_session(session_id, user_id=user_uuid, title=payload.title)
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft-delete a chat session (status='deleted')",
+)
+async def delete_chat_session(session_id: UUID, auth: AuthDep) -> None:
+    svc = AILibraryChatService()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    await svc.delete_session(session_id, user_id=user_uuid)
+
+
+@router.post(
+    "/sessions/{session_id}/chat",
+    response_model=ChatResponse,
+    summary="Send a user turn and get the assistant response",
+)
+async def send_chat_message(
+    session_id: UUID, payload: ChatRequest, auth: AuthDep
+) -> Dict[str, Any]:
+    """Non-streaming chat endpoint. Persists both the user and the
+    assistant message, increments session counters, and returns
+    ``{message, usage, run_id}``. The run_id links the generated
+    assistant message to the corresponding ``agent_runs`` row so the
+    UI can deep-link from chat → Runs tab.
+    """
+    svc = AILibraryChatService()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    result = await svc.chat(session_id, user_id=user_uuid, content=payload.content)
+    return {
+        "message": result["assistant_message"],
+        "usage": result["usage"],
+        "run_id": result["run_id"],
     }
