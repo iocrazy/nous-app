@@ -956,6 +956,8 @@ export interface AILibraryAgent {
   slug: string;
   name: string;
   description?: string | null;
+  /** Lucide icon slug (e.g. 'bot', 'sparkles'). Null → UI falls back to default. */
+  icon?: string | null;
   model: string;
   temperature: number;
   max_tokens: number;

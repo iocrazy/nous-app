@@ -15,6 +15,11 @@ class AgentBase(BaseModel):
     slug: str = Field(..., min_length=1, max_length=64)
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
+    icon: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Lucide icon slug (e.g. 'bot', 'sparkles'); UI falls back to default when null.",
+    )
     model: str = "qwen-max"
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -43,6 +48,7 @@ class AgentOut(AgentBase):
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    icon: Optional[str] = Field(default=None, max_length=64)
     model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None

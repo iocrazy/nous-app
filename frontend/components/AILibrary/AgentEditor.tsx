@@ -16,6 +16,7 @@ import { useToast } from '../Toast';
 import { ArrowDown, ArrowUp, ChevronDown, GitFork, Plus, X } from 'lucide-react';
 import { MarkdownEditor } from './MarkdownEditor';
 import { NewAgentModal } from './NewAgentModal';
+import { AgentIconPicker } from './AgentIconPicker';
 
 type SubTab = 'overview' | 'files' | 'skills';
 
@@ -271,6 +272,21 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
               {t('aiLibrary.agents.presetReadOnly')}
             </div>
           )}
+
+          <div className="flex items-center gap-3">
+            <AgentIconPicker
+              value={draft.icon ?? null}
+              onChange={(slug) => updateDraft('icon', slug)}
+              disabled={readOnly}
+              size={24}
+            />
+            <p className="text-xs text-zinc-500">
+              {t(
+                'aiLibrary.agents.iconHint',
+                'Icon shown in the sidebar and throughout the app.',
+              )}
+            </p>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -825,6 +841,7 @@ function buildDraft(a: AILibraryAgent): Partial<AILibraryAgent> {
   return {
     name: a.name,
     description: a.description ?? '',
+    icon: a.icon ?? null,
     model: a.model,
     temperature: a.temperature,
     max_tokens: a.max_tokens,
