@@ -19,7 +19,11 @@ import type {
   AILibraryAgent,
   AILibrarySkill,
   AILibrarySkillFile,
+  ChatResponse,
+  ChatSession,
+  ChatSessionWithMessages,
   CreateAgentPayload,
+  CreateChatSessionPayload,
   CreateSkillPayload,
   UsageAggregate,
   UsageScope,
@@ -282,5 +286,117 @@ export const aiLibraryService = {
       headers: await getAuthHeaders(),
     });
     return handle<UsageAggregate>(resp);
+  },
+
+  // ─── Chat sessions + messages ─────────────────────────────────────────────
+  // Pair with backend/app/api/ai_library_router.py chat endpoints (U1).
+  // Every chat turn writes an agent_runs row via AgentRunner + RunRecorder;
+  // these methods are plain REST wrappers, the telemetry is server-side.
+
+  /**
+   * Create a chat session bound to the given agent. Optional
+   * project / team / context fields are stored on the session so the
+   * Usage dashboard can scope aggregates later.
+   */
+  async createChatSession(
+    slug: string,
+    payload: CreateChatSessionPayload = {},
+  ): Promise<ChatSession> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/sessions`,
+      {
+        method: 'POST',
+        headers: {
+          ...(await getAuthHeaders()),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+    return handle<ChatSession>(resp);
+  },
+
+  /**
+   * List chat sessions for one agent, filtered to the caller's own.
+   * Optional ``projectId`` narrows to sessions opened from that project.
+   */
+  async listChatSessions(
+    slug: string,
+    projectId?: number,
+    limit = 50,
+  ): Promise<ChatSession[]> {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (projectId != null) qs.set('project_id', String(projectId));
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/sessions?${qs.toString()}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle<ChatSession[]>(resp);
+  },
+
+  /** Fetch session + full message history. 404 if not owned. */
+  async getChatSession(sessionId: string): Promise<ChatSessionWithMessages> {
+    const resp = await fetch(
+      `${base()}/sessions/${encodeURIComponent(sessionId)}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle<ChatSessionWithMessages>(resp);
+  },
+
+  /** Rename a session. Only the title is user-editable today. */
+  async updateChatSession(
+    sessionId: string,
+    payload: { title?: string },
+  ): Promise<ChatSession> {
+    const resp = await fetch(
+      `${base()}/sessions/${encodeURIComponent(sessionId)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          ...(await getAuthHeaders()),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+    return handle<ChatSession>(resp);
+  },
+
+  /** Soft-delete a session (status='deleted'). 204 on success. */
+  async deleteChatSession(sessionId: string): Promise<void> {
+    const resp = await fetch(
+      `${base()}/sessions/${encodeURIComponent(sessionId)}`,
+      { method: 'DELETE', headers: await getAuthHeaders() },
+    );
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
+  },
+
+  /**
+   * Send a user turn, get the assistant response.
+   *
+   * The response contains ``message`` (the persisted assistant message),
+   * ``usage`` (this turn's token counts), and ``run_id`` (the agent_runs
+   * row that backed this turn — usable to deep-link from the chat bubble
+   * to the Runs tab). Returns a 409 if the agent is paused.
+   */
+  async sendChatMessage(
+    sessionId: string,
+    content: string,
+  ): Promise<ChatResponse> {
+    const resp = await fetch(
+      `${base()}/sessions/${encodeURIComponent(sessionId)}/chat`,
+      {
+        method: 'POST',
+        headers: {
+          ...(await getAuthHeaders()),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content }),
+      },
+    );
+    return handle<ChatResponse>(resp);
   },
 };
