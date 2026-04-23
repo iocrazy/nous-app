@@ -28,12 +28,16 @@ from typing import Any, Dict, List, Optional
 import bleach
 from loguru import logger
 
+from uuid import UUID
+
 from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.services.agent_runner import AgentRunner
 from app.services.ai_adapters import get_adapter
+from app.services.ai_adapters.factory import provider_key_for_model
 from app.services.prompt_composer import ComposerInput, PromptComposer
+from app.services.run_recorder import AgentPausedError, RunRecorder
 from app.services.skill_tool_service import SkillToolService
 
 ALLOWED_HTML_TAGS = ["h2", "h3", "p", "strong", "em", "hr", "br"]
@@ -59,11 +63,14 @@ class ScriptAIService:
 
     AGENT_SLUG: str = AGENT_SLUG
 
-    def __init__(self) -> None:
+    def __init__(self, user_id: Optional[Any] = None) -> None:
         # Retained for backwards compat with legacy smoke tests that
         # inspect ``.model``. The actual model per turn comes from the
         # agent row via :class:`PromptComposer`.
         self.model = settings.LLM_MODEL
+        # Optional user_id enables RunRecorder telemetry on each _run_agent
+        # call. When None, telemetry is skipped (legacy / smoke-test path).
+        self._user_id = user_id
 
     # ------------------------------------------------------------------
     # Shared plumbing — composer / runner wiring
@@ -87,8 +94,19 @@ class ScriptAIService:
         self,
         request_instructions: str,
         user_content: str,
+        *,
+        user_id: Optional[Any] = None,
+        session_id: Optional[UUID] = None,
+        team_id: Optional[int] = None,
+        project_id: Optional[int] = None,
     ) -> str:
-        """Compose the agent prompt and run one turn. Returns raw LLM content."""
+        """Compose the agent prompt and run one turn. Returns raw LLM content.
+
+        When ``user_id`` is provided, wraps the run in :class:`RunRecorder`
+        so an ``agent_runs`` row is persisted with tokens / cost / outcome.
+        Callers without a user_id (rare — e.g. internal smoke tests) still
+        work but skip telemetry.
+        """
         composer = self._build_composer()
         composed = await composer.compose(
             ComposerInput(
@@ -97,10 +115,44 @@ class ScriptAIService:
             )
         )
         runner = self._build_runner(composed.model or "")
-        result = await runner.run_turn(
-            composed,
-            user_messages=[{"role": "user", "content": user_content}],
-        )
+        user_messages = [{"role": "user", "content": user_content}]
+
+        # Resolve user_id: explicit arg wins, else fall back to instance's
+        effective_user = user_id if user_id is not None else self._user_id
+
+        if effective_user is None:
+            # No-telemetry path (same behaviour as pre-C0).
+            result = await runner.run_turn(composed, user_messages=user_messages)
+        else:
+            uid = effective_user if isinstance(effective_user, UUID) else UUID(str(effective_user))
+            model = composed.model or ""
+            try:
+                provider = provider_key_for_model(model) if model else None
+            except ValueError:
+                provider = None
+            try:
+                async with RunRecorder(
+                    agent_id=composed.agent_id,
+                    user_id=uid,
+                    trigger="script_ai",
+                    session_id=session_id,
+                    team_id=team_id,
+                    project_id=project_id,
+                    model=model or None,
+                    provider=provider,
+                    input_summary=user_content,
+                    metadata={"full_input": user_content},
+                ) as recorder:
+                    result = await runner.run_turn(
+                        composed,
+                        user_messages=user_messages,
+                        recorder=recorder,
+                    )
+                    recorder.set_summaries(output_summary=result.get("content") or "")
+            except AgentPausedError as err:
+                logger.warning("[ScriptAI] agent paused: %s", err)
+                raise
+
         if result.get("error"):
             logger.warning(
                 "[ScriptAI] agent runner returned error: %s", result.get("error")

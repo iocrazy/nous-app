@@ -1,11 +1,19 @@
-"""Drive a single agent turn with tool-call resolution."""
+"""Drive a single agent turn with tool-call resolution.
+
+Optional ``recorder`` (:class:`RunRecorder`) — when passed, this runner
+refreshes its heartbeat between iterations, polls ``cancel_requested``,
+forwards token usage, and records skill invocations. All telemetry
+failures are swallowed inside RunRecorder so the agent run itself
+never breaks on a dead telemetry path.
+"""
 
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.run_recorder import RunRecorder
 from app.services.skill_tool_service import SkillToolService
 
 MAX_TOOL_ITERATIONS = 5
@@ -20,10 +28,25 @@ class AgentRunner:
         self,
         composed: ComposedSystemPrompt,
         user_messages: list[dict],
+        *,
+        recorder: Optional[RunRecorder] = None,
     ) -> dict[str, Any]:
         messages = list(user_messages)
         for _ in range(MAX_TOOL_ITERATIONS):
+            if recorder is not None:
+                await recorder.heartbeat()
+                if await recorder.check_cancelled():
+                    return {"content": "", "raw": None, "cancelled": True}
+
             resp = await self.adapter.call(composed, messages)
+
+            if recorder is not None:
+                usage = resp.get("usage") or {}
+                recorder.record_usage(
+                    prompt_tokens=int(usage.get("prompt_tokens") or 0),
+                    completion_tokens=int(usage.get("completion_tokens") or 0),
+                )
+
             msg = resp["choices"][0]["message"]
             tool_calls = msg.get("tool_calls") or []
             if not tool_calls:
@@ -43,6 +66,8 @@ class AgentRunner:
                     args = json.loads(fn.get("arguments", "{}"))
                 except json.JSONDecodeError:
                     args = {}
+                if recorder is not None and args.get("skill"):
+                    recorder.record_skill(str(args["skill"]))
                 result = await self.skill_tool.execute(args)
                 messages.append(
                     {
