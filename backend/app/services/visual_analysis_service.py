@@ -25,9 +25,12 @@ import httpx
 from loguru import logger
 from openai import AsyncOpenAI
 
+from uuid import UUID
+
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.services.prompt_composer import ComposerInput, PromptComposer
+from app.services.run_recorder import AgentPausedError, RunRecorder
 
 # Agent slug in the ai_agents table (seeded from backend/seeds/agents/analyze/).
 AGENT_SLUG = "analyze"
@@ -73,6 +76,17 @@ class VisualAnalysisService:
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
 
     # ── Prompt plumbing (shared) ──────────────────────────────────────
+
+    async def _resolve_agent_id(self) -> Optional[UUID]:
+        """Resolve analyze agent's UUID for telemetry. None on failure — caller no-ops."""
+        try:
+            agent_repo = AgentRepository()
+            agent = await agent_repo.get_by_slug(self.AGENT_SLUG)
+            if agent and agent.get("id"):
+                return UUID(str(agent["id"]))
+        except Exception as err:
+            logger.warning(f"[VisualAnalysis] resolve agent_id failed: {err}")
+        return None
 
     async def _compose_system_prompt(self, instruction: str) -> str:
         """Fetch the ``analyze`` agent's composed system message from DB.
@@ -139,7 +153,9 @@ class VisualAnalysisService:
 
     # ── Public API ────────────────────────────────────────────────────
 
-    async def analyze_l1(self, cover_url: str) -> Optional[VisualAnalysisResult]:
+    async def analyze_l1(
+        self, cover_url: str, *, user_id: Optional[Any] = None
+    ) -> Optional[VisualAnalysisResult]:
         """L1 Analysis: cover image only. Cost: ~$0.001 per image."""
         if not self.client:
             logger.warning("OpenAI client not initialized, skipping L1 analysis")
@@ -150,7 +166,11 @@ class VisualAnalysisService:
             logger.error(f"Failed to encode cover image: {cover_url}")
             return None
 
-        try:
+        # Telemetry wrapper — agent_id + user_id both required to persist a row.
+        # When either is missing, _run_openai runs bare (same as pre-C0 behaviour).
+        agent_id = await self._resolve_agent_id() if user_id is not None else None
+
+        async def _run_openai() -> Optional[VisualAnalysisResult]:
             system_prompt = await self._compose_system_prompt(_L1_INSTRUCTION)
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -172,14 +192,48 @@ class VisualAnalysisService:
                 max_tokens=500,
                 response_format={"type": "json_object"},
             )
+            if _recorder is not None and response.usage:
+                _recorder.record_usage(
+                    prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
+                )
             data = json.loads(response.choices[0].message.content)
             return self._result_from_json(data, self._estimate_cost(response.usage))
+
+        _recorder: Optional[RunRecorder] = None
+        if user_id is None or agent_id is None:
+            try:
+                return await _run_openai()
+            except Exception as e:
+                logger.error(f"L1 analysis failed: {e}")
+                return None
+
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        try:
+            async with RunRecorder(
+                agent_id=agent_id,
+                user_id=uid,
+                trigger="visual_analysis_l1",
+                model=self.model,
+                provider="openai",
+                input_summary=f"L1 analysis of {cover_url}",
+                metadata={"mode": "L1", "cover_url": cover_url},
+            ) as rec:
+                _recorder = rec
+                return await _run_openai()
+        except AgentPausedError as err:
+            logger.warning(f"[VisualAnalysis] L1 paused: {err}")
+            return None
         except Exception as e:
             logger.error(f"L1 analysis failed: {e}")
             return None
 
     async def analyze_l2(
-        self, cover_url: str, keyframe_paths: List[str]
+        self,
+        cover_url: str,
+        keyframe_paths: List[str],
+        *,
+        user_id: Optional[Any] = None,
     ) -> Optional[VisualAnalysisResult]:
         """L2 Analysis: cover + keyframes. Cost: ~$0.005 per video."""
         if not self.client:
@@ -200,7 +254,9 @@ class VisualAnalysisService:
             logger.error("No images available for L2 analysis")
             return None
 
-        try:
+        agent_id = await self._resolve_agent_id() if user_id is not None else None
+
+        async def _run_openai() -> Optional[VisualAnalysisResult]:
             system_prompt = await self._compose_system_prompt(_L2_INSTRUCTION)
             content: List[Dict[str, Any]] = []
             for img in images:
@@ -216,8 +272,42 @@ class VisualAnalysisService:
                 max_tokens=800,
                 response_format={"type": "json_object"},
             )
+            if _recorder is not None and response.usage:
+                _recorder.record_usage(
+                    prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
+                )
             data = json.loads(response.choices[0].message.content)
             return self._result_from_json(data, self._estimate_cost(response.usage))
+
+        _recorder: Optional[RunRecorder] = None
+        if user_id is None or agent_id is None:
+            try:
+                return await _run_openai()
+            except Exception as e:
+                logger.error(f"L2 analysis failed: {e}")
+                return None
+
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        try:
+            async with RunRecorder(
+                agent_id=agent_id,
+                user_id=uid,
+                trigger="visual_analysis_l2",
+                model=self.model,
+                provider="openai",
+                input_summary=f"L2 analysis of {cover_url} + {len(keyframe_paths)} keyframes",
+                metadata={
+                    "mode": "L2",
+                    "cover_url": cover_url,
+                    "keyframe_count": len(keyframe_paths),
+                },
+            ) as rec:
+                _recorder = rec
+                return await _run_openai()
+        except AgentPausedError as err:
+            logger.warning(f"[VisualAnalysis] L2 paused: {err}")
+            return None
         except Exception as e:
             logger.error(f"L2 analysis failed: {e}")
             return None

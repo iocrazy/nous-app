@@ -686,6 +686,7 @@ def generate_summary_task(
                 video_info=video_info,
                 model=summary_model,
                 language=language,
+                user_id=user_id,
             )
         )
 

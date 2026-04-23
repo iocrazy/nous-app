@@ -1,0 +1,101 @@
+"""Regression test: detect new LLM-adapter call-sites that bypass RunRecorder.
+
+The telemetry pipeline relies on all LLM invocations flowing through either
+AgentRunner (which accepts a RunRecorder) or VisualAnalysisService (which
+wraps its direct OpenAI call in RunRecorder). Any new code that calls an
+adapter directly without recorder plumbing creates a blind spot in the
+agent_runs table.
+
+This test greps the backend for direct LLM-call shapes and compares against
+a known-exempt allow-list. A new bypass fails the test and forces a human
+to explicitly add it to ALLOWED_BYPASS_PATHS or wire it through RunRecorder.
+
+Update ALLOWED_BYPASS_PATHS when:
+- You intentionally add a new telemetry-exempt path (and document why)
+- A file gets renamed (update the path)
+
+Do NOT update it just to make the test pass without addressing the bypass.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+BACKEND_APP = Path(__file__).resolve().parent.parent / "app"
+
+# Files that are permitted to call LLM adapters without RunRecorder,
+# with a documented reason for each. The regression test treats any
+# other occurrence as a failure.
+ALLOWED_BYPASS_PATHS: dict[str, str] = {
+    # RunRecorder is the telemetry anchor itself — no recorder to wrap.
+    "services/run_recorder.py": "telemetry implementation",
+    # AgentRunner drives the adapter — callers wrap the whole runner in
+    # a RunRecorder context, not each adapter.call inside.
+    "services/agent_runner.py": "adapter.call inside recorder-aware runner",
+    # Adapter implementations themselves call OpenAI / Anthropic SDKs.
+    "services/ai_adapters/": "adapter SDK internals",
+    "services/ai_provider.py": "adapter re-exports + legacy factory",
+    # VisualAnalysisService calls OpenAI directly for image multimodal;
+    # both analyze_l1 and analyze_l2 wrap the call in RunRecorder context.
+    "services/visual_analysis_service.py": "image multimodal, wrapped in RunRecorder",
+    # Embedding service calls OpenAI embeddings API, not chat completions
+    # — separate concern from agent telemetry.
+    "services/embedding_service.py": "embeddings API, not chat completions",
+    # ASR: speech-to-text via Volcengine, not an LLM chat completion.
+    "services/volcengine_asr_service.py": "ASR API, not an agent invocation",
+}
+
+# Patterns that indicate a direct LLM call. If any of these appear in a
+# file not in ALLOWED_BYPASS_PATHS, the test fails.
+DIRECT_LLM_CALL_PATTERNS = [
+    re.compile(r"\badapter\.call\("),
+    re.compile(r"\.chat\.completions\.create\("),
+    re.compile(r"\.messages\.create\("),  # Anthropic SDK
+]
+
+
+def _is_exempt(rel_path: str) -> bool:
+    """True if rel_path (relative to backend/app) matches an allowed bypass."""
+    for allowed in ALLOWED_BYPASS_PATHS:
+        if rel_path == allowed or rel_path.startswith(allowed.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def test_no_direct_llm_calls_outside_run_recorder() -> None:
+    """Fail if any backend .py file makes a direct LLM adapter call outside
+    the allow-list. New bypasses must be either wired through RunRecorder
+    or explicitly added to ALLOWED_BYPASS_PATHS with a justification."""
+    offenders: list[tuple[str, int, str]] = []
+
+    for py_file in BACKEND_APP.rglob("*.py"):
+        rel = py_file.relative_to(BACKEND_APP).as_posix()
+        if _is_exempt(rel):
+            continue
+        try:
+            content = py_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for line_no, line in enumerate(content.splitlines(), start=1):
+            # Skip comments — false positives for doc references.
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
+            for pattern in DIRECT_LLM_CALL_PATTERNS:
+                if pattern.search(line):
+                    offenders.append((rel, line_no, line.strip()))
+                    break
+
+    if offenders:
+        lines = [
+            f"  {path}:{lineno}  →  {text}"
+            for path, lineno, text in offenders
+        ]
+        msg = (
+            "Direct LLM adapter calls outside RunRecorder coverage:\n"
+            + "\n".join(lines)
+            + "\n\nEither route the call through AgentRunner (with a RunRecorder) "
+            "or add the file to ALLOWED_BYPASS_PATHS in this test with a justification."
+        )
+        raise AssertionError(msg)

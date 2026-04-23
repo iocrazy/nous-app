@@ -139,8 +139,17 @@ class LLMAnalysisService:
         )
 
     async def _run_agent(
-        self, request_instructions: str, user_content: str, model: Optional[str]
+        self,
+        request_instructions: str,
+        user_content: str,
+        model: Optional[str],
+        *,
+        user_id: Optional[Any] = None,
     ) -> str:
+        from uuid import UUID
+
+        from app.services.run_recorder import AgentPausedError, RunRecorder
+
         composer = self._build_composer()
         composed = await composer.compose(
             ComposerInput(
@@ -154,10 +163,32 @@ class LLMAnalysisService:
         if model:
             composed = composed.model_copy(update={"model": model})
         runner = self._build_runner()
-        result = await runner.run_turn(
-            composed,
-            user_messages=[{"role": "user", "content": user_content}],
-        )
+        user_messages = [{"role": "user", "content": user_content}]
+
+        if user_id is None:
+            result = await runner.run_turn(composed, user_messages=user_messages)
+        else:
+            uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+            try:
+                async with RunRecorder(
+                    agent_id=composed.agent_id,
+                    user_id=uid,
+                    trigger="summary",
+                    model=composed.model or None,
+                    provider=self._provider_key or None,
+                    input_summary=user_content,
+                    metadata={"full_input": user_content},
+                ) as recorder:
+                    result = await runner.run_turn(
+                        composed,
+                        user_messages=user_messages,
+                        recorder=recorder,
+                    )
+                    recorder.set_summaries(output_summary=result.get("content") or "")
+            except AgentPausedError as err:
+                logger.warning("[Summarize] agent paused: %s", err)
+                raise
+
         if result.get("error"):
             logger.warning(
                 "[Summarize] agent runner returned error: %s", result.get("error")
@@ -174,6 +205,7 @@ class LLMAnalysisService:
         video_info: Optional[Dict[str, Any]] = None,
         model: Optional[str] = None,
         language: str = "auto",
+        user_id: Optional[Any] = None,
     ) -> SummaryResult:
         """Generate a summary from a transcript."""
         context_parts: List[str] = []
@@ -205,7 +237,9 @@ class LLMAnalysisService:
             f"[Summarize] provider={self._provider_key} model={model or '(default)'} "
             f"language={language}"
         )
-        response_text = await self._run_agent(request_instructions, user_content, model)
+        response_text = await self._run_agent(
+            request_instructions, user_content, model, user_id=user_id
+        )
         return self._parse_summary_response(response_text)
 
     async def generate_summary_and_save(
@@ -215,11 +249,12 @@ class LLMAnalysisService:
         video_info: Optional[Dict[str, Any]] = None,
         model: Optional[str] = None,
         language: str = "auto",
+        user_id: Optional[Any] = None,
     ) -> Optional[SummaryResult]:
         """Generate summary and persist to database."""
         try:
             result = await self.generate_summary(
-                transcript_text, video_info, model, language=language
+                transcript_text, video_info, model, language=language, user_id=user_id
             )
             await self._repo.save_summary(
                 resource_id,

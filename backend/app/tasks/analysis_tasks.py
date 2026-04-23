@@ -45,7 +45,11 @@ def analyze_video_l1_task(
         analysis_repo = AnalysisRepository()
         tags_repo = TagsRepository()
 
-        # Run visual analysis
+        # TODO(agent-telemetry): thread user_id through this celery task so the
+        # visual analysis run is captured in agent_runs. Current caller is a
+        # system trigger without a user context; instrumenting means either
+        # adding user_id to the task signature or resolving it from the owning
+        # resource. Follow-up PR.
         result = await analysis_service.analyze_l1(cover_url)
 
         if not result:

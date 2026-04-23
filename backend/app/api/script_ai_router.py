@@ -65,7 +65,7 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
     """Synchronously expand a chapter summary into full prose."""
     try:
         await _verify_script_access(body.script_id, auth.user_id)
-        ai_svc = ScriptAIService()
+        ai_svc = ScriptAIService(user_id=auth.user_id)
         content = await ai_svc.expand_chapter(
             title=body.title,
             summary=body.summary,
@@ -87,7 +87,7 @@ async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[st
     """Synchronously generate story branches and create chapter nodes."""
     try:
         await _verify_script_access(body.script_id, auth.user_id)
-        ai_svc = ScriptAIService()
+        ai_svc = ScriptAIService(user_id=auth.user_id)
         branches = await ai_svc.create_branches(
             title=body.title,
             summary=body.summary,
@@ -147,7 +147,7 @@ async def convert_to_storyboard(
             style_guide = project["settings_json"].get("style_guide")
 
         # 3. AI: split chapter into visual scenes
-        ai_svc = ScriptAIService()
+        ai_svc = ScriptAIService(user_id=auth.user_id)
         scenes = await ai_svc.split_chapter_to_scenes(
             title=chapter.get("title", ""),
             summary=chapter.get("summary", ""),

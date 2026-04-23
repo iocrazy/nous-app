@@ -65,6 +65,9 @@ async def _generate_outline_async(
     await _start_unified(task_id)
 
     try:
+        # TODO(agent-telemetry): thread user_id through the celery task so this
+        # invocation shows up in agent_runs. Tracked for the follow-up PR that
+        # adds outline-generator as a unified-task initiator.
         ai_svc = ScriptAIService()
         await _update_progress(task_id, 10, "Generating outline...")
 
