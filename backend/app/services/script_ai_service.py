@@ -24,11 +24,10 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 import bleach
 from loguru import logger
-
-from uuid import UUID
 
 from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
@@ -124,7 +123,11 @@ class ScriptAIService:
             # No-telemetry path (same behaviour as pre-C0).
             result = await runner.run_turn(composed, user_messages=user_messages)
         else:
-            uid = effective_user if isinstance(effective_user, UUID) else UUID(str(effective_user))
+            uid = (
+                effective_user
+                if isinstance(effective_user, UUID)
+                else UUID(str(effective_user))
+            )
             model = composed.model or ""
             try:
                 provider = provider_key_for_model(model) if model else None

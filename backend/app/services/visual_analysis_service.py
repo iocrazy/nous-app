@@ -20,12 +20,11 @@ import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 import httpx
 from loguru import logger
 from openai import AsyncOpenAI
-
-from uuid import UUID
 
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
@@ -195,7 +194,8 @@ class VisualAnalysisService:
             if _recorder is not None and response.usage:
                 _recorder.record_usage(
                     prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
-                    completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
+                    completion_tokens=getattr(response.usage, "completion_tokens", 0)
+                    or 0,
                 )
             data = json.loads(response.choices[0].message.content)
             return self._result_from_json(data, self._estimate_cost(response.usage))
@@ -275,7 +275,8 @@ class VisualAnalysisService:
             if _recorder is not None and response.usage:
                 _recorder.record_usage(
                     prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
-                    completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
+                    completion_tokens=getattr(response.usage, "completion_tokens", 0)
+                    or 0,
                 )
             data = json.loads(response.choices[0].message.content)
             return self._result_from_json(data, self._estimate_cost(response.usage))

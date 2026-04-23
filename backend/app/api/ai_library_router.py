@@ -36,10 +36,8 @@ from app.repositories.agent_runs_repository import AgentRunsRepository
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.agent_runs import (
     RunDetail,
-    RunListItem,
     RunListResponse,
     UsageAggregate,
-    UsagePerAgent,
 )
 from app.schemas.ai_library import (
     AgentCreate,
@@ -866,7 +864,9 @@ def _row_to_run_list_item(row: Dict[str, Any]) -> Dict[str, Any]:
         "prompt_tokens": row.get("prompt_tokens", 0),
         "completion_tokens": row.get("completion_tokens", 0),
         "total_tokens": row.get("total_tokens", 0),
-        "cost_cents": float(row["cost_cents"]) if row.get("cost_cents") is not None else None,
+        "cost_cents": (
+            float(row["cost_cents"]) if row.get("cost_cents") is not None else None
+        ),
         "started_at": row["started_at"],
         "ended_at": row.get("ended_at"),
         "error_code": row.get("error_code"),
@@ -882,9 +882,7 @@ def _month_bounds(month: str) -> tuple[str, str]:
     try:
         parsed = _dt.strptime(month, "%Y-%m").replace(tzinfo=_tz.utc)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail="month must be YYYY-MM"
-        ) from exc
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM") from exc
     if parsed.month == 12:
         next_month = parsed.replace(year=parsed.year + 1, month=1)
     else:
