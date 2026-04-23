@@ -43,6 +43,13 @@ class AgentOut(AgentBase):
     # (absent for private agents and system presets).
     team_name: Optional[str] = None
     project_name: Optional[str] = None
+    # Budget guard (migration 148). Null budget == unlimited. paused_reason
+    # is read-through so the sidebar pulse + editor banner can both show
+    # pause state without a second fetch. 'budget' is set by the sweeper,
+    # 'manual' by admin PATCH — see AgentUpdate for write policy.
+    monthly_token_budget: Optional[int] = None
+    monthly_cost_cents_budget: Optional[int] = None
+    paused_reason: Optional[Literal["budget", "manual"]] = None
 
 
 class AgentUpdate(BaseModel):
@@ -57,6 +64,15 @@ class AgentUpdate(BaseModel):
     agent_md: Optional[str] = None
     enabled: Optional[bool] = None
     skill_ids: Optional[list[int]] = None  # replace binding
+    # Budget guard. 0 or null ⇒ unlimited. Positive int ⇒ hard cap; the
+    # heartbeat sweeper flips paused_reason='budget' when exceeded and
+    # restores it to null when spend drops below on month rollover.
+    monthly_token_budget: Optional[int] = Field(default=None, ge=0)
+    monthly_cost_cents_budget: Optional[int] = Field(default=None, ge=0)
+    # Admin can pause/resume. 'budget' is server-owned (sweeper-only) and is
+    # rejected here via the Literal so a client can't forge a fake budget
+    # pause. Pass null to resume from either a manual or a budget pause.
+    paused_reason: Optional[Literal["manual"]] = None
 
 
 class AgentCreate(BaseModel):

@@ -94,6 +94,23 @@ export const aiLibraryService = {
     return handle<AILibraryAgent>(resp);
   },
 
+  /**
+   * Resume a paused agent by clearing `paused_reason`. Works for both manual
+   * and budget pauses. If monthly spend is still over budget, the sweeper
+   * will re-pause within ~60 s — callers should raise the budget first to
+   * avoid the flap. 400 when the agent isn't paused.
+   */
+  async resumeAgent(slug: string): Promise<AILibraryAgent> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/resume`,
+      {
+        method: 'POST',
+        headers: await getAuthHeaders(),
+      },
+    );
+    return handle<AILibraryAgent>(resp);
+  },
+
   // ─── Skills ────────────────────────────────────────────────────────────────
 
   async listSkills(): Promise<AILibrarySkill[]> {

@@ -1315,6 +1315,21 @@
           "cancelled": "Cancelled",
           "heartbeat_lost": "Heartbeat lost"
         }
+      },
+      "budget": {
+        "sectionLabel": "Monthly budget",
+        "tokenBudgetLabel": "Token budget",
+        "tokenBudgetHint": "Cap on total prompt+completion tokens this calendar month. Blank or 0 = unlimited.",
+        "costBudgetLabel": "Cost budget (USD)",
+        "costBudgetHint": "Hard cap on this month's spend. The sweeper pauses the agent within ~60s of crossing the cap.",
+        "unlimitedPlaceholder": "Unlimited",
+        "pausedTitleBudget": "Paused — monthly budget exceeded",
+        "pausedBodyBudget": "The sweeper detected this agent ran over its token or cost budget this month. Raise the budget below before resuming — otherwise the sweeper will re-pause within a minute.",
+        "pausedTitleManual": "Paused manually",
+        "pausedBodyManual": "An owner or admin paused this agent. Click Resume to re-enable.",
+        "resume": "Resume",
+        "resuming": "Resuming...",
+        "resumedToast": "Agent resumed"
       }
     },
     "skills": {

@@ -1315,6 +1315,21 @@
           "cancelled": "已取消",
           "heartbeat_lost": "心跳丢失"
         }
+      },
+      "budget": {
+        "sectionLabel": "每月预算",
+        "tokenBudgetLabel": "Token 预算",
+        "tokenBudgetHint": "本自然月 prompt + completion 总 token 上限。留空或填 0 表示无限制。",
+        "costBudgetLabel": "花费预算（美元）",
+        "costBudgetHint": "本月花费硬上限。超额后 sweeper 会在 60 秒内自动暂停 agent。",
+        "unlimitedPlaceholder": "无限制",
+        "pausedTitleBudget": "已暂停 — 超出月度预算",
+        "pausedBodyBudget": "Sweeper 检测到本月 token 或花费超出预算。请先提高预算再恢复，否则 1 分钟内会被重新暂停。",
+        "pausedTitleManual": "手动暂停",
+        "pausedBodyManual": "管理员或所有者手动暂停了该 agent。点击 Resume 重新启用。",
+        "resume": "Resume",
+        "resuming": "正在恢复...",
+        "resumedToast": "Agent 已恢复"
       }
     },
     "skills": {
