@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Bot, Library, Plus } from 'lucide-react';
+import { Library, Plus } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { NewAgentModal } from '../AILibrary/NewAgentModal';
+import { getAgentIcon } from '../AILibrary/agentIcons';
 import { SidebarSection } from './SidebarSection';
 
 interface SidebarAgentsSectionProps {
@@ -106,6 +107,7 @@ export const SidebarAgentsSection: React.FC<SidebarAgentsSectionProps> = ({
         ) : (
           agents.map((agent) => {
             const active = activeAgentSlug === agent.slug;
+            const Icon = getAgentIcon(agent.icon);
             return (
               <button
                 key={agent.slug}
@@ -117,7 +119,7 @@ export const SidebarAgentsSection: React.FC<SidebarAgentsSectionProps> = ({
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
                 }`}
               >
-                <Bot
+                <Icon
                   size={collapsed ? 20 : 18}
                   className={`flex-shrink-0 ${active ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-300'}`}
                 />
