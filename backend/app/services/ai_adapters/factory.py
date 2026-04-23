@@ -8,6 +8,7 @@ Known prefixes:
 - deepseek-*                                → DeepSeekAdapter
 - doubao-* / ep-*                           → DoubaoAdapter
 - claude-*                                  → ClaudeAdapter
+- gpt-* / o1-* / o3-*                       → OpenAIAdapter (multimodal)
 Unknown prefixes raise ValueError.
 
 Two entry points:
@@ -26,9 +27,23 @@ from app.services.ai_adapters.base import AIAdapter
 from app.services.ai_adapters.claude import ClaudeAdapter
 from app.services.ai_adapters.deepseek import DeepSeekAdapter
 from app.services.ai_adapters.doubao import DoubaoAdapter
+from app.services.ai_adapters.openai import OpenAIAdapter
 from app.services.ai_adapters.qwen import QwenAdapter
 
-_KNOWN_PREFIXES = "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*"
+_KNOWN_PREFIXES = (
+    "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*, gpt-*, o1-*, o3-*"
+)
+
+
+def _is_openai(model: str) -> bool:
+    """gpt-4o / gpt-4 / gpt-3.5 / o1 / o3 — any native OpenAI model."""
+    return (
+        model.startswith("gpt-")
+        or model.startswith("o1-")
+        or model == "o1"
+        or model.startswith("o3-")
+        or model == "o3"
+    )
 
 
 def provider_key_for_model(model: str) -> str:
@@ -43,6 +58,8 @@ def provider_key_for_model(model: str) -> str:
         return "deepseek"
     if m.startswith("doubao-") or m.startswith("ep-"):
         return "doubao"
+    if _is_openai(m):
+        return "openai"
     if m == "" or m.startswith("qwen-") or m.startswith("tongyi-"):
         return "qwen"
     raise ValueError(
@@ -73,6 +90,12 @@ def get_adapter(model: str, settings: Any) -> AIAdapter:
             api_url=settings.DOUBAO_API_URL,
             api_key=settings.DOUBAO_API_KEY,
             default_model=model,
+        )
+
+    if _is_openai(m):
+        return OpenAIAdapter(
+            api_key=settings.OPENAI_API_KEY,
+            default_model=model or settings.OPENAI_MODEL,
         )
 
     if m == "" or m.startswith("qwen-") or m.startswith("tongyi-"):
@@ -127,6 +150,13 @@ def get_adapter_for_user(
             api_url=user_base or fallback_settings.DOUBAO_API_URL,
             api_key=user_key or fallback_settings.DOUBAO_API_KEY,
             default_model=model,
+        )
+
+    if provider_key == "openai":
+        return OpenAIAdapter(
+            api_key=user_key or fallback_settings.OPENAI_API_KEY,
+            default_model=model or fallback_settings.OPENAI_MODEL,
+            api_url=user_base or None,
         )
 
     # provider_key == "qwen" (default / only remaining case)

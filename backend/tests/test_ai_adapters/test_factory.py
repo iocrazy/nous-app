@@ -10,6 +10,7 @@ from app.services.ai_adapters.claude import ClaudeAdapter
 from app.services.ai_adapters.deepseek import DeepSeekAdapter
 from app.services.ai_adapters.doubao import DoubaoAdapter
 from app.services.ai_adapters.factory import get_adapter
+from app.services.ai_adapters.openai import OpenAIAdapter
 from app.services.ai_adapters.qwen import QwenAdapter
 
 
@@ -24,6 +25,8 @@ def _settings(**overrides) -> SimpleNamespace:
         "DOUBAO_API_URL": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
         "DOUBAO_API_KEY": "sk-doubao",
         "CLAUDE_API_KEY": "sk-ant",
+        "OPENAI_API_KEY": "sk-openai",
+        "OPENAI_MODEL": "gpt-4o",
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -67,6 +70,23 @@ def test_empty_model_defaults_to_qwen() -> None:
     assert isinstance(a, QwenAdapter)
 
 
+def test_gpt_prefix_returns_openai_adapter() -> None:
+    """V1 (runner-multimodal): native OpenAI family routes to OpenAIAdapter."""
+    a = get_adapter("gpt-4o", _settings())
+    assert isinstance(a, OpenAIAdapter)
+    assert a.api_key == "sk-openai"
+
+
+def test_o1_prefix_routes_to_openai() -> None:
+    a = get_adapter("o1", _settings())
+    assert isinstance(a, OpenAIAdapter)
+
+
+def test_o3_prefix_routes_to_openai() -> None:
+    a = get_adapter("o3-mini", _settings())
+    assert isinstance(a, OpenAIAdapter)
+
+
 def test_unknown_prefix_raises_value_error() -> None:
     with pytest.raises(ValueError, match="unsupported model"):
-        get_adapter("gpt-4", _settings())
+        get_adapter("totally-fictional-provider-x", _settings())
