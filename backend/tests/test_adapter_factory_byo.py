@@ -16,9 +16,11 @@ from app.services.ai_adapters.claude import ClaudeAdapter
 from app.services.ai_adapters.deepseek import DeepSeekAdapter
 from app.services.ai_adapters.doubao import DoubaoAdapter
 from app.services.ai_adapters.factory import (
+    get_adapter,
     get_adapter_for_user,
     provider_key_for_model,
 )
+from app.services.ai_adapters.openai import OpenAIAdapter
 from app.services.ai_adapters.qwen import QwenAdapter
 
 
@@ -52,6 +54,13 @@ def _settings(**overrides: Any) -> SimpleNamespace:
         ("doubao-seed-1", "doubao"),
         ("ep-20240101-abcdef", "doubao"),
         ("claude-opus-4-5", "claude"),
+        # V1: native OpenAI family for multimodal (visual_analysis agent).
+        ("gpt-4o", "openai"),
+        ("gpt-4", "openai"),
+        ("gpt-3.5-turbo", "openai"),
+        ("o1", "openai"),
+        ("o1-preview", "openai"),
+        ("o3-mini", "openai"),
     ],
 )
 def test_provider_key_for_model(model: str, expected: str) -> None:
@@ -60,7 +69,7 @@ def test_provider_key_for_model(model: str, expected: str) -> None:
 
 def test_provider_key_for_model_unknown_raises() -> None:
     with pytest.raises(ValueError, match="unsupported model"):
-        provider_key_for_model("gpt-4")
+        provider_key_for_model("some-unknown-provider-x")
 
 
 # ---------------------------------------------------------------------------
@@ -169,4 +178,44 @@ def test_ep_prefix_routes_to_doubao() -> None:
 
 def test_unknown_model_prefix_raises() -> None:
     with pytest.raises(ValueError, match="unsupported model"):
-        get_adapter_for_user("gpt-4", {}, _settings())
+        get_adapter_for_user("some-unknown-provider-x", {}, _settings())
+
+
+# ---------------------------------------------------------------------------
+# V1: OpenAI family routes to OpenAIAdapter (multimodal)
+# ---------------------------------------------------------------------------
+
+
+def _settings_with_openai() -> Any:
+    """Settings fixture with an OpenAI key set (other fields untouched)."""
+    base = _settings()
+    base.OPENAI_API_KEY = "sk-global-openai"
+    base.OPENAI_MODEL = "gpt-4o"
+    return base
+
+
+def test_gpt_prefix_returns_openai_adapter_via_get_adapter() -> None:
+    a = get_adapter("gpt-4o", _settings_with_openai())
+    assert isinstance(a, OpenAIAdapter)
+    # Points at the real OpenAI endpoint (base-class suffix normaliser
+    # appends /chat/completions).
+    assert a.api_url.endswith("/chat/completions")
+    assert a.api_key == "sk-global-openai"
+
+
+def test_o1_prefix_returns_openai_adapter_via_get_adapter() -> None:
+    a = get_adapter("o1", _settings_with_openai())
+    assert isinstance(a, OpenAIAdapter)
+
+
+def test_user_byo_openai_key_takes_precedence() -> None:
+    user_cfg = {"openai": {"api_key": "sk-user-personal"}}
+    a = get_adapter_for_user("gpt-4o", user_cfg, _settings_with_openai())
+    assert isinstance(a, OpenAIAdapter)
+    assert a.api_key == "sk-user-personal"
+
+
+def test_user_empty_falls_back_to_settings_openai() -> None:
+    a = get_adapter_for_user("gpt-4o", {}, _settings_with_openai())
+    assert isinstance(a, OpenAIAdapter)
+    assert a.api_key == "sk-global-openai"

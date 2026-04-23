@@ -1,16 +1,19 @@
-"""Tests for VisualAnalysisService — hybrid DB-prompt + native OpenAI path.
+"""Tests for VisualAnalysisService — runs through AgentRunner + RunRecorder.
 
-Phase 2 PR 2.5 moved the L1/L2 prompt text out of module-level constants
-into the ``analyze`` ai_agents row (fetched via PromptComposer). The
-multimodal OpenAI call stays direct because AgentRunner lacks image-
-content support. These tests cover the composer wiring, result parsing,
-and the disabled-client path — no network, no DB.
+V1 (runner-multimodal) migrated analyze off its native OpenAI closure;
+it now composes via PromptComposer and executes through AgentRunner
+just like every other AI service. These tests validate:
+
+- Result JSON parsing (including markdown-fence tolerance)
+- Cost estimation helper (pure function, now takes two ints)
+- L1 / L2 instruction routing
+- Image content blocks make it into user_messages that the runner sees
+- Agent slug constant matches the seeded DB row
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -48,103 +51,120 @@ def test_result_from_json_defaults_missing_fields() -> None:
 
 
 def test_estimate_cost_gpt4o_pricing() -> None:
-    usage = SimpleNamespace(prompt_tokens=1000, completion_tokens=200)
     # (1000 * 0.0025 + 200 * 0.01) / 1000 = (2.5 + 2.0) / 1000 = 0.0045
-    assert VisualAnalysisService._estimate_cost(usage) == pytest.approx(0.0045)
+    assert VisualAnalysisService._estimate_cost(1000, 200) == pytest.approx(0.0045)
 
 
-def test_estimate_cost_missing_usage_fields() -> None:
-    usage = SimpleNamespace()
-    assert VisualAnalysisService._estimate_cost(usage) == 0.0
+def test_estimate_cost_zero_tokens() -> None:
+    assert VisualAnalysisService._estimate_cost(0, 0) == 0.0
+
+
+def test_extract_json_handles_markdown_fence() -> None:
+    wrapped = '```json\n{"category":"Food"}\n```'
+    assert VisualAnalysisService._extract_json(wrapped) == {"category": "Food"}
+
+
+def test_extract_json_plain() -> None:
+    assert VisualAnalysisService._extract_json('{"a":1}') == {"a": 1}
+
+
+def test_extract_json_invalid_returns_empty() -> None:
+    assert VisualAnalysisService._extract_json("not json at all") == {}
+
+
+def test_extract_json_empty_returns_empty() -> None:
+    assert VisualAnalysisService._extract_json("") == {}
+    assert VisualAnalysisService._extract_json(None) == {}  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
-async def test_analyze_l1_returns_none_without_api_key() -> None:
-    """Without OPENAI_API_KEY the client is None and L1 returns None gracefully."""
-    with patch.dict("os.environ", {"OPENAI_API_KEY": ""}, clear=False):
-        svc = VisualAnalysisService()
-        svc.client = None  # explicit belt-and-braces for the test environment
-
-    result = await svc.analyze_l1("https://example.com/cover.jpg")
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_analyze_l1_composes_from_agent_and_parses_json() -> None:
-    """Happy path: service composes system prompt from 'analyze' agent,
-    sends image + system message to OpenAI, parses JSON response."""
+async def test_analyze_l1_routes_through_runner_with_l1_instruction() -> None:
+    """Happy path: service composes via PromptComposer (L1 instruction),
+    builds runner, passes a single image_url content block as the user
+    turn. Returns a parsed VisualAnalysisResult.
+    """
     svc = VisualAnalysisService()
-    svc.client = AsyncMock()
 
-    # Mock the OpenAI chat completion response
-    fake_message = SimpleNamespace(
-        content='{"category":"Food","visual_description":"A pizza.",'
-        '"detected_objects":["pizza"],"detected_scenes":["indoor"],'
-        '"detected_people":[],"detected_text":"","mood":"appetizing"}'
-    )
-    fake_choice = SimpleNamespace(message=fake_message)
-    fake_usage = SimpleNamespace(prompt_tokens=500, completion_tokens=100)
-    fake_response = SimpleNamespace(choices=[fake_choice], usage=fake_usage)
-    svc.client.chat = SimpleNamespace(
-        completions=SimpleNamespace(create=AsyncMock(return_value=fake_response))
+    composed = MagicMock()
+    composed.agent_id = "00000000-0000-0000-0000-000000000001"
+    composed.agent_slug = "analyze"
+    composed.model = "gpt-4o"
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(
+        return_value={
+            "content": '{"category":"Food","visual_description":"A pizza.",'
+            '"detected_objects":["pizza"],"detected_scenes":["indoor"],'
+            '"detected_people":[],"detected_text":"","mood":"appetizing"}',
+            "raw": {},
+        }
     )
 
-    # Patch image encoding + prompt composition
     with (
         patch.object(
             svc, "_encode_image_from_url", new=AsyncMock(return_value="BASE64DATA")
         ),
-        patch.object(
-            svc,
-            "_compose_system_prompt",
-            new=AsyncMock(return_value="SYSTEM PROMPT FROM AGENT"),
-        ) as mock_compose,
+        patch(
+            "app.services.visual_analysis_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch("app.services.visual_analysis_service.AgentRunner", return_value=runner),
+        patch(
+            "app.services.visual_analysis_service.get_adapter",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.visual_analysis_service.SkillToolService",
+            return_value=MagicMock(),
+        ),
     ):
+        # user_id=None → bare path (no RunRecorder wrap), cleanest to
+        # assert on runner call shape.
         result = await svc.analyze_l1("https://example.com/cover.jpg")
 
     assert isinstance(result, VisualAnalysisResult)
     assert result.category == "Food"
-    assert result.visual_description == "A pizza."
     assert result.detected_objects == ["pizza"]
-    assert result.mood == "appetizing"
-    assert result.cost > 0  # Cost was calculated from usage
 
-    # Composer was invoked with the L1 instruction (not L2)
-    mock_compose.assert_awaited_once()
-    instruction = mock_compose.await_args.args[0]
-    assert "L1" in instruction
-    assert "L2" not in instruction
+    # Composer got the L1 instruction.
+    composer.compose.assert_awaited_once()
+    composer_input = composer.compose.await_args.args[0]
+    assert "L1" in composer_input.request_instructions
+    assert "L2" not in composer_input.request_instructions
 
-    # OpenAI was called with system+user messages (system from agent, user with image)
-    svc.client.chat.completions.create.assert_awaited_once()
-    call_kwargs = svc.client.chat.completions.create.await_args.kwargs
-    messages = call_kwargs["messages"]
-    assert messages[0]["role"] == "system"
-    assert messages[0]["content"] == "SYSTEM PROMPT FROM AGENT"
-    assert messages[1]["role"] == "user"
-    # User content is a list of content blocks; first should be the image
-    assert isinstance(messages[1]["content"], list)
-    assert messages[1]["content"][0]["type"] == "image_url"
-    assert call_kwargs["response_format"] == {"type": "json_object"}
+    # Runner got the image block as the user turn's content array.
+    runner.run_turn.assert_awaited_once()
+    kw = runner.run_turn.await_args.kwargs
+    user_messages = kw["user_messages"]
+    assert user_messages[0]["role"] == "user"
+    content = user_messages[0]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "image_url"
+    assert "BASE64DATA" in content[0]["image_url"]["url"]
 
 
 @pytest.mark.asyncio
-async def test_analyze_l2_sends_multiple_images_and_uses_l2_instruction() -> None:
+async def test_analyze_l2_sends_cover_plus_keyframes() -> None:
     """L2 path: cover + 3 keyframes → 4 image content blocks, L2 instruction."""
     svc = VisualAnalysisService()
-    svc.client = AsyncMock()
 
-    fake_message = SimpleNamespace(
-        content='{"category":"Travel","visual_description":"Hiking.",'
-        '"detected_objects":["trail"],"detected_scenes":["outdoor"],'
-        '"detected_people":[],"detected_text":"","mood":"adventurous",'
-        '"content_summary":"Hiking trip through a forest."}'
-    )
-    fake_choice = SimpleNamespace(message=fake_message)
-    fake_usage = SimpleNamespace(prompt_tokens=2000, completion_tokens=300)
-    fake_response = SimpleNamespace(choices=[fake_choice], usage=fake_usage)
-    svc.client.chat = SimpleNamespace(
-        completions=SimpleNamespace(create=AsyncMock(return_value=fake_response))
+    composed = MagicMock()
+    composed.agent_id = "00000000-0000-0000-0000-000000000001"
+    composed.model = "gpt-4o"
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(
+        return_value={
+            "content": '{"category":"Travel","visual_description":"Hiking.",'
+            '"detected_objects":["trail"],"detected_scenes":["outdoor"],'
+            '"detected_people":[],"detected_text":"","mood":"adventurous",'
+            '"content_summary":"Hiking trip through a forest."}',
+            "raw": {},
+        }
     )
 
     with (
@@ -154,11 +174,19 @@ async def test_analyze_l2_sends_multiple_images_and_uses_l2_instruction() -> Non
         patch.object(
             svc, "_encode_image_from_file", new=AsyncMock(return_value="FRAME")
         ),
-        patch.object(
-            svc,
-            "_compose_system_prompt",
-            new=AsyncMock(return_value="SYSTEM L2"),
-        ) as mock_compose,
+        patch(
+            "app.services.visual_analysis_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch("app.services.visual_analysis_service.AgentRunner", return_value=runner),
+        patch(
+            "app.services.visual_analysis_service.get_adapter",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.visual_analysis_service.SkillToolService",
+            return_value=MagicMock(),
+        ),
     ):
         result = await svc.analyze_l2(
             "https://example.com/cover.jpg",
@@ -168,15 +196,25 @@ async def test_analyze_l2_sends_multiple_images_and_uses_l2_instruction() -> Non
     assert result is not None
     assert result.category == "Travel"
 
-    # L2 instruction in composer call
-    instruction = mock_compose.await_args.args[0]
-    assert "L2" in instruction
+    # L2 instruction in composer call.
+    composer_input = composer.compose.await_args.args[0]
+    assert "L2" in composer_input.request_instructions
 
-    # 4 image blocks (cover + 3 keyframes)
-    call_kwargs = svc.client.chat.completions.create.await_args.kwargs
-    user_content = call_kwargs["messages"][1]["content"]
-    assert len(user_content) == 4
-    assert all(b["type"] == "image_url" for b in user_content)
+    # 4 image blocks (cover + 3 keyframes) in the user turn.
+    kw = runner.run_turn.await_args.kwargs
+    content = kw["user_messages"][0]["content"]
+    assert len(content) == 4
+    assert all(b["type"] == "image_url" for b in content)
+
+
+@pytest.mark.asyncio
+async def test_analyze_l1_returns_none_when_image_encode_fails() -> None:
+    """No image → no LLM call, None returned gracefully."""
+    svc = VisualAnalysisService()
+
+    with patch.object(svc, "_encode_image_from_url", new=AsyncMock(return_value=None)):
+        result = await svc.analyze_l1("https://example.com/cover.jpg")
+    assert result is None
 
 
 def test_agent_slug_constant() -> None:
