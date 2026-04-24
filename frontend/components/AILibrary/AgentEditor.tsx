@@ -754,7 +754,7 @@ const SkillsSection: React.FC<{
                 className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2"
               >
                 <span className="text-xl leading-none" aria-hidden>
-                  {skill?.icon ?? '🧩'}
+                  {skill?.icon ?? ''}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium text-zinc-100">
@@ -829,7 +829,7 @@ const SkillsSection: React.FC<{
                   className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2"
                 >
                   <span className="text-xl leading-none" aria-hidden>
-                    {skill.icon ?? '🧩'}
+                    {skill.icon ?? ''}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-zinc-100">

@@ -1,46 +1,117 @@
 // frontend/components/AILibrary/SkillEditor.tsx
-// Skill editor — multi-file tabs (SKILL.md + skill.files[]) with add/delete.
 //
-// - System preset skills (is_public && !project_id) are read-only.
-// - Drafts are held locally per-tab; Save commits all changes via API.
-// - Add file prompts for a path, seeds empty markdown, switches to that tab.
-// - Delete file confirms, removes, then falls back to SKILL.md.
+// Paperclip-style SkillPane — ported 1:1 from paperclip
+// (ui/src/pages/CompanySkills.tsx::SkillPane) while keeping MediaHub's
+// existing data layer (aiLibraryService + skill_files table).
+//
+// Layout:
+//   header
+//     row 1: H1 (SourceIcon + name)           Remove | Edit / Fork
+//            description below name
+//     row 2 (border-t, pt-4): metadata strip
+//            SOURCE | KEY | MODE | USED BY
+//     (preset banner if bundled)
+//   sub-header (border-b, px-5 py-3)
+//     left: current file path (font-mono)
+//     right: View|Code toggle (preview) OR Cancel|Save (edit)
+//   content (min-h[560], px-5 py-5)
+//     edit + markdown   -> <MarkdownEditor>
+//     edit + non-md     -> <textarea>
+//     preview + markdown -> <MarkdownBody>
+//     code / non-md     -> <pre><code>
+//
+// Differences from paperclip:
+// - MediaHub has "Bundled preset" vs "User/Team/Project" scopes — no
+//   GitHub / skills.sh / URL source variants (and thus no "Check for
+//   updates" workflow).
+// - "Used by" not yet returned by GET /skills/:slug — shows a dash
+//   placeholder until the backend adds it.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { GitFork } from 'lucide-react';
+import {
+  Code2,
+  Eye,
+  GitFork,
+  Package,
+  Pencil,
+  Save,
+  Trash2,
+  User as UserIcon,
+  Users,
+} from 'lucide-react';
 import type { AILibrarySkill } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
+import { MarkdownBody } from './MarkdownBody';
 import { MarkdownEditor } from './MarkdownEditor';
 import { NewSkillModal } from './NewSkillModal';
 
 interface SkillEditorProps {
   slug: string;
   onBack: () => void;
-  /**
-   * Called after a successful fork. Parent should refresh its skill list
-   * and (ideally) select the new slug so the user lands on their fresh
-   * copy. If omitted, the editor falls back to ``onBack`` so the user
-   * returns to the list where the new skill is visible after reload.
-   */
   onSkillForked?: (newSlug: string) => void;
-  /**
-   * External control over which file tab is active (e.g. URL-driven in
-   * the V6 split-pane). When set, the editor syncs its activeTab to this
-   * value whenever it changes. Empty string / null falls back to SKILL.md.
-   */
+  /** URL-driven active file. ``''`` or null = SKILL.md. */
   filePath?: string | null;
-  /**
-   * V6 split-pane mode hides the in-editor "← Back" button because the
-   * left rail (SkillList) already handles navigation. Default false so
-   * the legacy list/detail view keeps its back button.
-   */
+  /** V6 split-pane hides the in-editor Back button. */
   hideBack?: boolean;
 }
 
 const SKILL_MD = 'SKILL.md';
+
+/**
+ * Strip a leading YAML frontmatter block so the rendered preview doesn't
+ * dump name/description/etc above the heading. Matches paperclip's helper.
+ */
+function stripFrontmatter(md: string): string {
+  const lines = md.split(/\r?\n/);
+  if (lines[0] !== '---') return md;
+  let end = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i] === '---') {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return md;
+  return lines
+    .slice(end + 1)
+    .join('\n')
+    .replace(/^\n+/, '');
+}
+
+/** Classify the skill source — bundled seed vs user-owned scope. */
+function skillSource(skill: AILibrarySkill) {
+  const bundled =
+    skill.is_public && skill.team_id == null && skill.project_id == null;
+  if (bundled) {
+    return {
+      icon: Package,
+      label: 'MediaHub bundled',
+      managedLabel: 'Bundled MediaHub preset (read-only)',
+    };
+  }
+  if (skill.team_id != null) {
+    return {
+      icon: Users,
+      label: `Team: ${skill.team_name ?? skill.team_id}`,
+      managedLabel: 'Team skill',
+    };
+  }
+  if (skill.project_id != null) {
+    return {
+      icon: Users,
+      label: `Project: ${skill.project_name ?? skill.project_id}`,
+      managedLabel: 'Project skill',
+    };
+  }
+  return {
+    icon: UserIcon,
+    label: 'Private',
+    managedLabel: 'Personal skill',
+  };
+}
 
 export const SkillEditor: React.FC<SkillEditorProps> = ({
   slug,
@@ -52,7 +123,8 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const { t } = useTranslation();
   const { userProfile } = useAuth();
   const { addToast } = useToast();
-  const isAdmin = userProfile.role === 'admin';
+  const isAdmin = userProfile?.role === 'admin';
+
   const [skill, setSkill] = useState<AILibrarySkill | null>(null);
   const [activeTab, setActiveTab] = useState<string>(SKILL_MD);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -61,12 +133,16 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
   const [allSkills, setAllSkills] = useState<AILibrarySkill[]>([]);
+  const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+  const [editMode, setEditMode] = useState(false);
 
   const load = async (): Promise<void> => {
     try {
       const s = await aiLibraryService.getSkill(slug);
       setSkill(s);
-      const nextDrafts: Record<string, string> = { [SKILL_MD]: s.body_md ?? '' };
+      const nextDrafts: Record<string, string> = {
+        [SKILL_MD]: s.body_md ?? '',
+      };
       s.files.forEach((f) => {
         nextDrafts[f.path] = f.content ?? '';
       });
@@ -81,27 +157,44 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
     setSkill(null);
     setError(null);
     setActiveTab(SKILL_MD);
+    setEditMode(false);
+    setViewMode('preview');
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  // URL-driven tab selection in split-pane mode. ``filePath`` = null/undef
-  // means "parent isn't controlling the tab"; empty string means "show the
-  // root SKILL.md".
   useEffect(() => {
     if (filePath == null) return;
     setActiveTab(filePath === '' ? SKILL_MD : filePath);
+    setEditMode(false);
   }, [filePath]);
+
+  const activeFile = useMemo(() => {
+    if (!skill) return null;
+    if (activeTab === SKILL_MD) {
+      return {
+        path: SKILL_MD,
+        file_type: 'markdown' as const,
+        content: skill.body_md ?? '',
+      };
+    }
+    return skill.files.find((f) => f.path === activeTab) ?? null;
+  }, [skill, activeTab]);
+
+  const isMarkdown =
+    activeFile?.file_type === 'markdown' || activeTab.endsWith('.md');
 
   if (error) {
     return (
       <div className="p-6">
-        <button
-          onClick={onBack}
-          className="mb-3 text-sm text-zinc-400 hover:text-zinc-100"
-        >
-          ← Back
-        </button>
+        {!hideBack && (
+          <button
+            onClick={onBack}
+            className="mb-3 text-sm text-zinc-400 hover:text-zinc-100"
+          >
+            ← Back
+          </button>
+        )}
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
           Failed to load skill: {error}
         </div>
@@ -113,42 +206,65 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
     return <div className="p-6 text-sm text-zinc-500">Loading...</div>;
   }
 
-  // System preset skills in Phase 1 = is_public=true AND project_id is null.
-  const isPreset = skill.is_public && !skill.project_id;
-  // Delete button visibility: owner can delete their skill. For presets,
-  // only admin can delete. The server re-enforces this.
-  const canDelete = isPreset ? isAdmin : !isPreset;
+  const isPreset =
+    skill.is_public && skill.team_id == null && skill.project_id == null;
+  const editable = !isPreset;
+  const editableReason = isPreset
+    ? t(
+        'aiLibrary.skills.bundledReadOnlyHint',
+        'Bundled MediaHub skills are read-only. Fork to edit.',
+      )
+    : '';
+  const canDelete = isPreset ? isAdmin : true;
+  const source = skillSource(skill);
+  const SourceIcon = source.icon;
+
+  const activeDraft = drafts[activeTab] ?? '';
+  const activeContent = activeFile?.content ?? '';
+  const activeBody = isMarkdown
+    ? activeTab === SKILL_MD
+      ? stripFrontmatter(activeContent)
+      : activeContent
+    : activeContent;
+
+  const updateActive = (v: string): void =>
+    setDrafts((d) => ({ ...d, [activeTab]: v }));
 
   const save = async (): Promise<void> => {
-    if (isPreset) return;
+    if (!editable) return;
     setSaving(true);
     setError(null);
     try {
-      // Save SKILL.md body if changed.
-      if (drafts[SKILL_MD] !== (skill.body_md ?? '')) {
-        await aiLibraryService.updateSkill(slug, { body_md: drafts[SKILL_MD] });
-      }
-      // Save file edits (existing files only — new files are created via addFile).
-      for (const f of skill.files) {
-        const draft = drafts[f.path];
-        if (draft !== undefined && draft !== (f.content ?? '')) {
-          await aiLibraryService.upsertSkillFile(slug, f.path, draft, f.file_type);
+      if (activeTab === SKILL_MD) {
+        if (drafts[SKILL_MD] !== (skill.body_md ?? '')) {
+          await aiLibraryService.updateSkill(slug, {
+            body_md: drafts[SKILL_MD],
+          });
+        }
+      } else {
+        const f = skill.files.find((x) => x.path === activeTab);
+        if (f && drafts[activeTab] !== (f.content ?? '')) {
+          await aiLibraryService.upsertSkillFile(
+            slug,
+            activeTab,
+            drafts[activeTab],
+            f.file_type,
+          );
         }
       }
       await load();
+      setEditMode(false);
+      addToast(t('aiLibrary.skills.savedToast', 'Saved'), 'success');
     } catch (err) {
       console.error('[SkillEditor] save failed:', err);
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      addToast(msg, 'error');
     } finally {
       setSaving(false);
     }
   };
 
-  /**
-   * Open the fork modal. Lazily fetch the full skill list so the Fork-from
-   * dropdown inside <NewSkillModal> has something to show if the user wants
-   * to pick a different source after opening.
-   */
   const openForkModal = async (): Promise<void> => {
     setForkModalOpen(true);
     if (allSkills.length === 0) {
@@ -164,32 +280,29 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const handleForkCreated = (newSlug: string): void => {
     setForkModalOpen(false);
     addToast(
-      t('aiLibrary.skills.forkedToast', 'Forked as {{slug}}', { slug: newSlug }),
+      t('aiLibrary.skills.forkedToast', 'Forked as {{slug}}', {
+        slug: newSlug,
+      }),
       'success',
     );
-    if (onSkillForked) {
-      onSkillForked(newSlug);
-    } else {
-      onBack();
-    }
+    if (onSkillForked) onSkillForked(newSlug);
+    else onBack();
   };
 
   const handleDelete = async (): Promise<void> => {
     if (!canDelete) return;
-    const label = t('aiLibrary.skills.deleteSkill', 'Delete Skill');
-    const prompt =
-      t(
-        'aiLibrary.skills.deleteSkillConfirm',
-        'Delete skill "{{name}}"? This cannot be undone.',
-        { name: skill.name },
-      );
+    const prompt = t(
+      'aiLibrary.skills.deleteSkillConfirm',
+      'Remove skill "{{name}}"? This cannot be undone.',
+      { name: skill.name },
+    );
     if (!window.confirm(prompt)) return;
     setDeleting(true);
     setError(null);
     try {
       await aiLibraryService.deleteSkill(slug);
       addToast(
-        t('aiLibrary.skills.deletedToast', 'Skill deleted: {{name}}', {
+        t('aiLibrary.skills.deletedToast', 'Removed: {{name}}', {
           name: skill.name,
         }),
         'success',
@@ -199,199 +312,192 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
       console.error('[SkillEditor] deleteSkill failed:', err);
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
-      addToast(`${label}: ${msg}`, 'error');
+      addToast(msg, 'error');
     } finally {
       setDeleting(false);
     }
   };
 
-  const addFile = async (): Promise<void> => {
-    if (isPreset) return;
-    const input = window.prompt(
-      t('aiLibrary.skills.pathPlaceholder') ?? 'path',
-      'references/notes.md',
-    );
-    const path = (input ?? '').trim();
-    if (!path) return;
-    try {
-      await aiLibraryService.upsertSkillFile(slug, path, '', 'markdown');
-      await load();
-      setActiveTab(path);
-    } catch (err) {
-      console.error('[SkillEditor] addFile failed:', err);
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const deleteFile = async (path: string): Promise<void> => {
-    if (isPreset) return;
-    if (path === SKILL_MD) return;
-    const confirmLabel = t('aiLibrary.skills.deleteFile') ?? 'Delete file';
-    if (!window.confirm(`${confirmLabel}: ${path}?`)) return;
-    try {
-      await aiLibraryService.deleteSkillFile(slug, path);
-      await load();
-      setActiveTab(SKILL_MD);
-    } catch (err) {
-      console.error('[SkillEditor] deleteFile failed:', err);
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const allTabs = [SKILL_MD, ...skill.files.map((f) => f.path)];
-  const activeContent = drafts[activeTab] ?? '';
-  const updateActive = (v: string): void =>
-    setDrafts((d) => ({ ...d, [activeTab]: v }));
-
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-6 py-3">
-        {hideBack ? (
-          <div className="w-[4.5rem]" aria-hidden />
-        ) : (
-          <button
-            onClick={onBack}
-            className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
-          >
-            ← Back
-          </button>
-        )}
-        <div className="min-w-0 flex-1 flex items-center justify-center gap-2">
-          <h2 className="min-w-0 truncate font-semibold text-zinc-100">
-            {skill.icon ? `${skill.icon} ` : ''}
-            {skill.name}
-          </h2>
-          <SkillScopeBadge skill={skill} isPreset={isPreset} />
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={openForkModal}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition-colors whitespace-nowrap"
-            title={t('aiLibrary.skills.forkSkill', 'Fork to My Skills')}
-          >
-            <GitFork size={14} />
-            {t('aiLibrary.skills.forkSkill', 'Fork to My Skills')}
-          </button>
-          {canDelete && (
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting || saving}
-              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-              title={t('aiLibrary.skills.deleteSkill', 'Delete Skill')}
-            >
-              {deleting
-                ? t('common.deleting', 'Deleting...')
-                : `🗑️ ${t('aiLibrary.skills.deleteSkill', 'Delete Skill')}`}
-            </button>
-          )}
-          <button
-            onClick={save}
-            disabled={saving || isPreset}
-            className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-          >
-            {saving ? 'Saving...' : t('aiLibrary.agents.saveChanges')}
-          </button>
-        </div>
-      </header>
-
-      <div className="grid flex-1 grid-cols-[260px_1fr] overflow-hidden">
-        <aside className="overflow-y-auto border-r border-zinc-800 bg-zinc-950/40 p-4 text-sm">
-          <dl className="grid grid-cols-1 gap-y-3">
-            <div>
-              <dt className="text-xs text-zinc-500">Name</dt>
-              <dd className="mt-0.5 text-zinc-200">{skill.name}</dd>
-            </div>
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
+      {/* ── Header ────────────────────────────────────────────────── */}
+      <div className="border-b border-zinc-800/80 px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2 truncate text-2xl font-semibold text-zinc-100">
+              <SourceIcon className="h-5 w-5 shrink-0 text-zinc-500" />
+              {skill.name}
+            </h1>
             {skill.description && (
-              <div>
-                <dt className="text-xs text-zinc-500">Description</dt>
-                <dd className="mt-0.5 text-zinc-300">{skill.description}</dd>
-              </div>
+              <p className="mt-2 max-w-3xl text-sm text-zinc-400">
+                {skill.description}
+              </p>
             )}
-            {skill.category && (
-              <div>
-                <dt className="text-xs text-zinc-500">Category</dt>
-                <dd className="mt-0.5 text-zinc-300">{skill.category}</dd>
-              </div>
-            )}
-            <div>
-              <dt className="text-xs text-zinc-500">Icon</dt>
-              <dd className="mt-0.5 text-zinc-300">{skill.icon ?? '—'}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-zinc-500">Scope</dt>
-              <dd className="mt-0.5 text-zinc-300">
-                {isPreset
-                  ? t('aiLibrary.agents.systemPreset')
-                  : skill.project_id
-                    ? 'Project'
-                    : skill.team_id
-                      ? 'Team'
-                      : 'Personal'}
-              </dd>
-            </div>
-            {skill.slug && (
-              <div>
-                <dt className="text-xs text-zinc-500">Slug</dt>
-                <dd className="mt-0.5 font-mono text-xs text-zinc-400">{skill.slug}</dd>
-              </div>
-            )}
-          </dl>
-        </aside>
-
-        <section className="flex flex-col overflow-hidden">
-          <nav className="flex items-center gap-1 overflow-x-auto border-b border-zinc-800 bg-zinc-950/40 px-4 py-2">
-            {allTabs.map((p) => {
-              const active = activeTab === p;
-              return (
-                <div key={p} className="group relative flex items-center">
-                  <button
-                    onClick={() => setActiveTab(p)}
-                    className={`whitespace-nowrap rounded px-3 py-1 text-sm transition-colors ${
-                      active
-                        ? 'bg-zinc-800 text-zinc-100'
-                        : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
-                    }`}
-                  >
-                    {p}
-                  </button>
-                  {!isPreset && p !== SKILL_MD && (
-                    <button
-                      onClick={() => deleteFile(p)}
-                      title={t('aiLibrary.skills.deleteFile') ?? 'Delete'}
-                      className="ml-1 hidden rounded px-1 text-zinc-500 hover:bg-red-500/20 hover:text-red-300 group-hover:block"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-            {!isPreset && (
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canDelete && (
               <button
-                onClick={addFile}
-                className="ml-2 rounded px-3 py-1 text-sm text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting || saving}
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {t('aiLibrary.skills.addFile')}
+                <Trash2 className="h-3.5 w-3.5" />
+                {deleting
+                  ? t('common.removing', 'Removing...')
+                  : t('aiLibrary.skills.remove', 'Remove')}
               </button>
             )}
-          </nav>
-
-          <div className="flex-1 overflow-auto p-6">
-            {isPreset && (
-              <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                {t('aiLibrary.agents.presetReadOnly')}
-              </div>
+            {editable ? (
+              <button
+                type="button"
+                onClick={() => setEditMode((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                {editMode
+                  ? t('aiLibrary.skills.stopEditing', 'Stop editing')
+                  : t('aiLibrary.skills.edit', 'Edit')}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={openForkModal}
+                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-500/10 px-2.5 py-1.5 text-sm text-indigo-300 transition-colors hover:bg-indigo-500/20"
+                title={editableReason}
+              >
+                <GitFork className="h-3.5 w-3.5" />
+                {t('aiLibrary.skills.forkToEdit', 'Fork to edit')}
+              </button>
             )}
-            <MarkdownEditor
-              value={activeContent}
-              onChange={updateActive}
-              disabled={isPreset}
-              rows={24}
+          </div>
+        </div>
+
+        {/* Metadata strip */}
+        <div className="mt-4 space-y-3 border-t border-zinc-800/60 pt-4 text-sm">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <MetaLabel
+              label={t('aiLibrary.skills.metaSource', 'Source')}
+              icon={SourceIcon}
+              value={source.label}
+            />
+            <MetaLabel
+              label={t('aiLibrary.skills.metaKey', 'Key')}
+              mono
+              value={skill.slug ?? String(skill.id)}
+            />
+            <MetaLabel
+              label={t('aiLibrary.skills.metaMode', 'Mode')}
+              value={editable ? 'Editable' : 'Read only'}
             />
           </div>
-        </section>
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+            <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+              {t('aiLibrary.skills.metaUsedBy', 'Used by')}
+            </span>
+            <span className="text-zinc-500">
+              {t('aiLibrary.skills.usedByPlaceholder', 'No agents attached')}
+            </span>
+          </div>
+        </div>
+
+        {!editable && (
+          <div className="mt-3 rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-300/90">
+            {editableReason}
+          </div>
+        )}
+      </div>
+
+      {/* ── Sub-header: file path + toggle ────────────────────────── */}
+      <div className="border-b border-zinc-800/80 px-5 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate font-mono text-sm text-zinc-300">
+              {activeTab}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {editMode && editable ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditMode(false);
+                    setDrafts((d) => ({ ...d, [activeTab]: activeContent }));
+                  }}
+                  disabled={saving}
+                  className="rounded-md px-2.5 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100 disabled:opacity-50"
+                >
+                  {t('common.cancel', 'Cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-indigo-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-400 disabled:opacity-50"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  {saving
+                    ? t('common.saving', 'Saving...')
+                    : t('common.save', 'Save')}
+                </button>
+              </>
+            ) : isMarkdown ? (
+              <div className="flex items-center overflow-hidden rounded border border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('preview')}
+                  className={`flex items-center gap-1.5 px-3 py-1 text-sm transition-colors ${
+                    viewMode === 'preview'
+                      ? 'bg-zinc-800 text-zinc-100'
+                      : 'text-zinc-500 hover:text-zinc-200'
+                  }`}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  {t('aiLibrary.skills.viewTab', 'View')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('code')}
+                  className={`flex items-center gap-1.5 border-l border-zinc-800 px-3 py-1 text-sm transition-colors ${
+                    viewMode === 'code'
+                      ? 'bg-zinc-800 text-zinc-100'
+                      : 'text-zinc-500 hover:text-zinc-200'
+                  }`}
+                >
+                  <Code2 className="h-3.5 w-3.5" />
+                  {t('aiLibrary.skills.codeTab', 'Code')}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Content ───────────────────────────────────────────────── */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        {editMode && editable ? (
+          isMarkdown ? (
+            <MarkdownEditor
+              value={activeDraft}
+              onChange={updateActive}
+              rows={24}
+            />
+          ) : (
+            <textarea
+              value={activeDraft}
+              onChange={(e) => updateActive(e.target.value)}
+              className="h-[560px] w-full border-0 bg-transparent p-0 font-mono text-sm text-zinc-200 focus:outline-none"
+              spellCheck={false}
+            />
+          )
+        ) : isMarkdown && viewMode === 'preview' ? (
+          <MarkdownBody source={activeBody} />
+        ) : (
+          <pre className="whitespace-pre-wrap break-words font-mono text-sm text-zinc-200">
+            <code>{activeContent}</code>
+          </pre>
+        )}
       </div>
 
       {forkModalOpen && (
@@ -406,49 +512,22 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   );
 };
 
-/**
- * Tiny presentational badge showing the skill's scope: system preset,
- * team-scoped, project-scoped, or private. Mirrors ScopeBadge from
- * AgentEditor.tsx — kept inline here to avoid cross-file imports while
- * the pattern is still settling.
- */
-const SkillScopeBadge: React.FC<{
-  skill: AILibrarySkill;
-  isPreset: boolean;
-}> = ({ skill, isPreset }) => {
-  const { t } = useTranslation();
-  const base = 'ml-1 rounded border px-2 py-0.5 text-xs whitespace-nowrap';
-
-  if (isPreset) {
-    return (
-      <span className={`${base} border-zinc-700 bg-zinc-800 text-zinc-300`}>
-        {t('aiLibrary.agents.systemPreset', 'System Preset')}
-      </span>
-    );
-  }
-  if (skill.team_id != null) {
-    return (
-      <span className={`${base} border-indigo-500/40 bg-indigo-500/10 text-indigo-300`}>
-        {t('aiLibrary.skills.scopeBadgeTeam', 'Team: {{name}}', {
-          name: skill.team_name ?? skill.team_id,
-        })}
-      </span>
-    );
-  }
-  if (skill.project_id != null) {
-    return (
-      <span className={`${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`}>
-        {t('aiLibrary.skills.scopeBadgeProject', 'Project: {{name}}', {
-          name: skill.project_name ?? skill.project_id,
-        })}
-      </span>
-    );
-  }
-  return (
-    <span className={`${base} border-zinc-700 bg-zinc-900 text-zinc-400`}>
-      {t('aiLibrary.skills.scopeBadgePrivate', 'Private')}
+// ─── Inline metadata cell ──────────────────────────────────────
+const MetaLabel: React.FC<{
+  label: string;
+  value: string;
+  icon?: React.ElementType;
+  mono?: boolean;
+}> = ({ label, value, icon: Icon, mono = false }) => (
+  <div className="flex items-center gap-2">
+    <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+      {label}
     </span>
-  );
-};
+    <span className="flex items-center gap-1.5 text-zinc-300">
+      {Icon && <Icon className="h-3.5 w-3.5 text-zinc-500" />}
+      <span className={mono ? 'font-mono text-xs' : ''}>{value}</span>
+    </span>
+  </div>
+);
 
 export default SkillEditor;
