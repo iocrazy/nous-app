@@ -1,6 +1,6 @@
 """Pydantic schemas for Search API."""
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -56,6 +56,12 @@ class SearchResponse(BaseModel):
     """Response schema for search results."""
 
     results: List[SearchResultItem]
+    # Full ``parsed_media`` rows for every hit in ``results``, sorted by the
+    # same ranking. Lets the frontend render AI-status icons / counts /
+    # audio paths for search hits that are NOT already in the paginated
+    # library. Without this, cards rendered minimal projections of
+    # SearchResultItem and their status icons stayed empty.
+    videos: List[Dict[str, Any]] = Field(default_factory=list)
     total: int
     query: str
     search_type: str  # "semantic", "hybrid", "similar"
