@@ -22,26 +22,31 @@ class MediaRepository:
     TABLE_NAME = "parsed_media"
 
     # Card-view projection. Everything the library grid / feed / search cards
-    # need, MINUS the heavyweight text blobs (AI transcripts / rewrites /
-    # analyses) that can run thousands of characters each. Detail endpoints
-    # (``get_by_platform_id`` / ``get_by_id``) still return ``SELECT *`` so
-    # the PlayerPage sees the full record when the user actually opens an
-    # item. This shaved 60-80% off the library-list payload in production
-    # (before: ~80 KB/row for items with AI text; after: ~6 KB/row).
+    # need, MINUS the heavyweight text blobs (``ai_extract_text`` /
+    # ``ai_rewrite_text`` / ``ai_analyze_text`` / ``ai_generated_at``).
+    # Detail endpoints (``get_by_platform_id`` / ``get_by_id``) still return
+    # ``SELECT *`` so the PlayerPage sees the full record when the user
+    # actually opens an item.
+    #
+    # CRITICAL: every column name here MUST exist on ``parsed_media``
+    # verbatim. If a column is misspelled or belongs to another table
+    # (e.g. AI statuses live on ``resources``, tags live on a join table),
+    # PostgREST rejects the whole query with a 400 and the list / search
+    # endpoints return empty. Verified against information_schema on
+    # 2026-04-24.
     CARD_SELECT = (
         "id, platform_id, source_platform, "
         "title, author, description, "
         "original_url, "
         "cover_urls, dynamic_cover_url, cover_download_status, cover_download_path, "
-        "like_count, comment_count, share_count, favorite_count, "
-        "transcript_status, summary_status, visual_analysis_status, "
-        "extract_audio_path, music_download_path, music_download_status, music_name, "
+        "like_count, comment_count, share_count, favorite_count, view_count, "
+        "extract_audio_path, music_download_path, music_download_status, music_name, music_play_urls, "
         "video_download_status, video_download_urls, "
         "image_download_status, image_download_urls, image_download_path, "
-        "tags, hashtags, "
-        "created_at, updated_at, published_at, "
+        "hashtags, error_message, "
+        "created_at, updated_at, published_at, last_viewed_at, "
         "media_type, media_format, duration, resolution, "
-        "datasize, datasize_bytes, "
+        "datasize, datasize_bytes, storage_size, keep_forever, "
         "hls_path, download_path, download_time, download_duration"
     )
 
