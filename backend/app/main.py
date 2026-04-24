@@ -5,7 +5,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -262,26 +262,12 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global fallback for unhandled exceptions."""
-    logger.error(
-        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
-        exc_info=True,
-    )
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
-    )
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """Ensure consistent error response format."""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail},
-    )
+# Exception handlers for Exception/HTTPException/RequestValidationError/AppError
+# are registered below via ``register_exception_handlers(app)`` (see
+# ``app/core/exceptions.py``). Those handlers emit a unified ErrorResponse
+# envelope AND attach CORS headers on cross-origin error responses — something
+# CORSMiddleware cannot do because FastAPI exception handlers bypass the
+# user middleware stack.
 
 
 # 添加CORS中间件
