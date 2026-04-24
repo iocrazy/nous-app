@@ -21,8 +21,11 @@ import {
   FileText,
   FolderOpen,
   Folder,
+  Package,
   Plus,
   Search,
+  User as UserIcon,
+  Users,
   Wrench,
   FileArchive,
 } from 'lucide-react';
@@ -40,6 +43,13 @@ interface SkillListProps {
 /** Preset = system-seed: is_public && no team/project owner. */
 const isPreset = (s: AILibrarySkill): boolean =>
   s.is_public && s.team_id == null && s.project_id == null;
+
+/** Source icon driven by scope — matches SkillEditor's ``skillSource``. */
+function sourceIcon(s: AILibrarySkill): React.ElementType {
+  if (s.is_public && s.team_id == null && s.project_id == null) return Package;
+  if (s.team_id != null || s.project_id != null) return Users;
+  return UserIcon;
+}
 
 interface TreeNode {
   name: string;
@@ -255,22 +265,26 @@ export const SkillList: React.FC<SkillListProps> = ({
 
   return (
     <div className="flex h-full w-[19rem] flex-col border-r border-zinc-800/60 bg-zinc-950/40">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold text-zinc-200">
+      {/* Header — Paperclip: "Skills" title + count; + button to the right */}
+      <div className="flex items-start justify-between border-b border-zinc-800/60 px-4 py-3">
+        <div className="flex flex-col">
+          <span className="text-[15px] font-semibold text-zinc-100">
             {t('aiLibrary.skills.listTitle', 'Skills')}
           </span>
-          <span className="text-[11px] text-zinc-600">{skills.length}</span>
+          <span className="text-[11px] text-zinc-500">
+            {t('aiLibrary.skills.countAvailable', '{{count}} available', {
+              count: skills.length,
+            })}
+          </span>
         </div>
         <button
           type="button"
           onClick={onNewSkill}
-          className="flex h-6 items-center gap-1 rounded bg-zinc-800/60 px-2 text-[11px] text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+          className="flex h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100"
           title={t('aiLibrary.skills.newSkillButton', 'New Skill')}
+          aria-label={t('aiLibrary.skills.newSkillButton', 'New Skill')}
         >
-          <Plus size={12} />
-          <span>{t('aiLibrary.skills.newSkillButton', 'New Skill')}</span>
+          <Plus size={14} />
         </button>
       </div>
 
@@ -311,45 +325,43 @@ export const SkillList: React.FC<SkillListProps> = ({
               }
             }
 
+            const SrcIcon = sourceIcon(s);
             return (
               <div
                 key={s.slug ?? String(s.id)}
                 className="border-b border-zinc-900/50 last:border-b-0"
               >
-                <div className="flex items-center gap-1 px-2 py-1.5">
+                <div className="group flex items-center gap-1 px-3 py-1.5 hover:bg-zinc-800/30">
+                  <button
+                    type="button"
+                    onClick={() => onSelectSkill(s.slug ?? String(s.id))}
+                    className={`flex min-w-0 flex-1 items-center gap-2 text-left transition-colors ${
+                      skillActive
+                        ? 'text-zinc-100'
+                        : 'text-zinc-300 hover:text-zinc-100'
+                    }`}
+                    title={preset ? t('aiLibrary.skills.presetTooltip', 'Bundled MediaHub preset') : s.name}
+                  >
+                    <SrcIcon
+                      size={12}
+                      className={`shrink-0 ${
+                        skillActive ? 'text-zinc-300' : 'text-zinc-500'
+                      }`}
+                    />
+                    <span className="min-w-0 truncate text-[13px] font-medium">
+                      {s.name}
+                    </span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => toggleSkill(s.slug ?? String(s.id))}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 opacity-70 transition-opacity hover:bg-zinc-800/60 hover:text-zinc-200 group-hover:opacity-100"
                     aria-label={expanded ? 'Collapse' : 'Expand'}
                   >
                     {expanded ? (
                       <ChevronDown size={12} />
                     ) : (
                       <ChevronRight size={12} />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSelectSkill(s.slug ?? String(s.id))}
-                    className={`flex flex-1 min-w-0 flex-col items-start gap-0.5 px-1 py-0.5 text-left transition-colors ${
-                      skillActive
-                        ? 'text-indigo-200'
-                        : 'text-zinc-200 hover:text-zinc-50'
-                    }`}
-                  >
-                    <div className="flex w-full min-w-0 items-center gap-2">
-                      <span className="text-[13px] truncate">{s.icon ?? '🧩'} {s.name}</span>
-                      {preset && (
-                        <span className="ml-auto shrink-0 rounded bg-zinc-800 px-1.5 py-[1px] text-[9px] uppercase tracking-wider text-zinc-400">
-                          {t('aiLibrary.skills.presetBadge', 'Preset')}
-                        </span>
-                      )}
-                    </div>
-                    {s.description && (
-                      <span className="w-full truncate text-[11px] text-zinc-500">
-                        {s.description}
-                      </span>
                     )}
                   </button>
                 </div>
