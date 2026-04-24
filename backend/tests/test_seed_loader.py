@@ -11,7 +11,6 @@ import pytest
 
 from app.services.seed_loader import SeedLoader
 
-
 # ─── Fake repo helpers ────────────────────────────────────────────────
 #
 # Both repos expose `_get_client()` returning an async client; the loader
@@ -55,12 +54,17 @@ def _make_agent_repo(get_by_slug_result: Any = None) -> AsyncMock:
     return repo
 
 
-def _make_skill_repo(get_by_slug_result: Any = None) -> AsyncMock:
+def _make_skill_repo(
+    get_by_slug_result: Any = None,
+    list_files_result: Any = None,
+) -> AsyncMock:
     """Mock SkillRepository with required async methods."""
     repo = AsyncMock()
     repo.get_by_slug = AsyncMock(return_value=get_by_slug_result)
     repo.update_fields = AsyncMock(return_value={})
     repo.upsert_file = AsyncMock(return_value={})
+    repo.list_files = AsyncMock(return_value=list_files_result or [])
+    repo.delete_file = AsyncMock(return_value=None)
     return repo
 
 
@@ -264,6 +268,64 @@ async def test_bindings_skip_when_script_ai_missing(
 
     assert bound == 0
     agent_repo.update_skill_bindings.assert_not_awaited()
+
+
+# ─── _load_skill_subfiles reconcile (V6pre②) ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_load_skill_subfiles_deletes_orphans(tmp_path: Path) -> None:
+    """Disk has references/a.md; DB has a.md + stale old.md.
+    After reconcile, DB upsert on a.md and delete on old.md."""
+    skill_dir = tmp_path / "skills" / "demo"
+    refs = skill_dir / "references"
+    refs.mkdir(parents=True)
+    (refs / "a.md").write_text("content A")
+
+    skill_repo = _make_skill_repo(
+        list_files_result=[
+            {"path": "references/a.md", "file_type": "markdown"},
+            {"path": "references/old.md", "file_type": "markdown"},
+            {"path": "scripts/run.sh", "file_type": "script"},  # disk has none
+        ]
+    )
+    agent_repo = _make_agent_repo()
+
+    loader = SeedLoader(agent_repo, skill_repo, tmp_path)
+    await loader._load_skill_subfiles(skill_id=99, skill_dir=skill_dir)
+
+    # a.md upserted
+    upsert_calls = skill_repo.upsert_file.await_args_list
+    upserted_paths = {c.kwargs.get("path") for c in upsert_calls}
+    assert "references/a.md" in upserted_paths
+
+    # Both orphans deleted (references/old.md and scripts/run.sh)
+    delete_calls = skill_repo.delete_file.await_args_list
+    deleted_paths = {c.args[1] for c in delete_calls}
+    assert deleted_paths == {"references/old.md", "scripts/run.sh"}
+
+
+@pytest.mark.asyncio
+async def test_load_skill_subfiles_preserves_user_files(tmp_path: Path) -> None:
+    """User-authored files outside managed prefixes (SKILL.md variants,
+    custom/ subtree) must NOT be deleted by the reconcile pass."""
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    # No disk sub-files at all
+
+    skill_repo = _make_skill_repo(
+        list_files_result=[
+            # Hypothetical user-created path, outside references/scripts/assets
+            {"path": "custom/extra.md", "file_type": "markdown"},
+        ]
+    )
+    agent_repo = _make_agent_repo()
+
+    loader = SeedLoader(agent_repo, skill_repo, tmp_path)
+    await loader._load_skill_subfiles(skill_id=77, skill_dir=skill_dir)
+
+    # custom/ is outside the managed subtree — reconcile must leave it alone
+    skill_repo.delete_file.assert_not_awaited()
 
 
 # ─── _format_error ────────────────────────────────────────────────────

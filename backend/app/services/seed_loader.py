@@ -182,6 +182,20 @@ class SeedLoader:
         return skill_id
 
     async def _load_skill_subfiles(self, skill_id: int, skill_dir: Path) -> None:
+        """Upsert every text sub-file from disk, then delete DB rows that
+        disappeared from disk.
+
+        Without the reconcile step, deleting a ``references/old.md`` file
+        and redeploying leaves a stale ``skill_files`` row forever — the
+        agent keeps seeing it in the file tree and can still fetch its
+        content. The reconcile pass scans the DB and removes anything not
+        present on disk this startup.
+
+        Note we only reconcile the ``references/``, ``scripts/``,
+        ``assets/`` subtrees; the top-level ``SKILL.md`` lives on
+        ``skills.body_md``, not ``skill_files``.
+        """
+        disk_paths: set[str] = set()
         for sub_path in ("references", "scripts", "assets"):
             sub_dir = skill_dir / sub_path
             if not sub_dir.exists():
@@ -207,6 +221,30 @@ class SeedLoader:
                     continue
                 await self.skill_repo.upsert_file(
                     skill_id, path=rel, content=content, file_type=file_type
+                )
+                disk_paths.add(rel)
+
+        # Reconcile: remove DB rows whose source file vanished from disk.
+        # We only touch paths under the managed subtrees to avoid nuking
+        # hand-authored skill files someone may have added via the UI.
+        existing = await self.skill_repo.list_files(skill_id)
+        managed_prefixes = ("references/", "scripts/", "assets/")
+        for row in existing:
+            row_path = row.get("path") or ""
+            if not row_path.startswith(managed_prefixes):
+                continue
+            if row_path in disk_paths:
+                continue
+            try:
+                await self.skill_repo.delete_file(skill_id, row_path)
+                logger.info(
+                    f"seed_loader: removed orphan skill_file (skill_id={skill_id}, "
+                    f"path={row_path!r})"
+                )
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.warning(
+                    f"seed_loader: could not remove orphan {row_path!r} for "
+                    f"skill_id={skill_id}: {exc}"
                 )
 
     # ---------- bindings ----------
