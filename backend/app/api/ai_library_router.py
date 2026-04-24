@@ -629,6 +629,8 @@ async def create_skill(
 
     # Base fields. User-created skills are private by default (is_public=False),
     # status='active', and owned by the creator.
+    # Dual-write body_md → content_md so legacy readers (storyboard_ai_service,
+    # /api/v1/skills endpoints) can still see the body. See migration 152.
     fields: Dict[str, Any] = {
         "slug": payload.slug,
         "name": payload.name,
@@ -636,6 +638,7 @@ async def create_skill(
         "category": payload.category,
         "icon": payload.icon if payload.icon is not None else "✨",
         "body_md": payload.body_md,
+        "content_md": payload.body_md,
         "frontmatter_json": payload.frontmatter_json or {},
         "output_format": payload.output_format,
         "is_public": False,
@@ -678,6 +681,9 @@ async def create_skill(
         if val is not None:
             fields[key] = val
 
+    # Resync content_md with the final resolved body_md (after fork + overrides).
+    fields["content_md"] = fields.get("body_md")
+
     created = await skill_repo.insert(fields)
     skill_id = int(created["id"])
     files = await skill_repo.list_files(skill_id)
@@ -714,6 +720,10 @@ async def update_skill(
 
     skill_id = int(skill["id"])
     updates = payload.model_dump(exclude_none=True)
+    # Keep legacy content_md in sync with body_md edits so storyboard_ai_service
+    # and /api/v1/skills readers see the latest text. See migration 152.
+    if "body_md" in updates:
+        updates["content_md"] = updates["body_md"]
     if updates:
         user_uuid = _coerce_user_uuid(auth.user_id)
         await skill_repo.update_fields_versioned(
