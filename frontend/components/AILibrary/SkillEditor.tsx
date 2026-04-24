@@ -26,6 +26,18 @@ interface SkillEditorProps {
    * returns to the list where the new skill is visible after reload.
    */
   onSkillForked?: (newSlug: string) => void;
+  /**
+   * External control over which file tab is active (e.g. URL-driven in
+   * the V6 split-pane). When set, the editor syncs its activeTab to this
+   * value whenever it changes. Empty string / null falls back to SKILL.md.
+   */
+  filePath?: string | null;
+  /**
+   * V6 split-pane mode hides the in-editor "← Back" button because the
+   * left rail (SkillList) already handles navigation. Default false so
+   * the legacy list/detail view keeps its back button.
+   */
+  hideBack?: boolean;
 }
 
 const SKILL_MD = 'SKILL.md';
@@ -34,6 +46,8 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   slug,
   onBack,
   onSkillForked,
+  filePath = null,
+  hideBack = false,
 }) => {
   const { t } = useTranslation();
   const { userProfile } = useAuth();
@@ -70,6 +84,14 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
+
+  // URL-driven tab selection in split-pane mode. ``filePath`` = null/undef
+  // means "parent isn't controlling the tab"; empty string means "show the
+  // root SKILL.md".
+  useEffect(() => {
+    if (filePath == null) return;
+    setActiveTab(filePath === '' ? SKILL_MD : filePath);
+  }, [filePath]);
 
   if (error) {
     return (
@@ -224,12 +246,16 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-6 py-3">
-        <button
-          onClick={onBack}
-          className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
-        >
-          ← Back
-        </button>
+        {hideBack ? (
+          <div className="w-[4.5rem]" aria-hidden />
+        ) : (
+          <button
+            onClick={onBack}
+            className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
+          >
+            ← Back
+          </button>
+        )}
         <div className="min-w-0 flex-1 flex items-center justify-center gap-2">
           <h2 className="min-w-0 truncate font-semibold text-zinc-100">
             {skill.icon ? `${skill.icon} ` : ''}
