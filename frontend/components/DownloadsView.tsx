@@ -752,7 +752,12 @@ export const DownloadsView: React.FC = () => {
             )}
 
             {libraryViewMode === 'feed' && (
-              <LibraryFeed data={filteredLibrary} />
+              <LibraryFeed
+                data={filteredLibrary}
+                hasMore={!isSearchActive && hasMoreData}
+                isLoadingMore={isLoadingMore}
+                onLoadMore={() => { void loadMoreLibrary(); }}
+              />
             )}
 
             {!isSearchActive && libraryViewMode !== 'feed' && (
@@ -899,15 +904,37 @@ export const DownloadsView: React.FC = () => {
           <div className="pointer-events-auto flex items-center justify-end">
             {isMobileSearchOpen ? (
               <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-[calc(100vw-80px)] max-w-sm animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
-                <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
+                {isAISearching ? (
+                  <Loader2
+                    size={16}
+                    className="mr-2 flex-shrink-0 animate-spin text-indigo-300"
+                  />
+                ) : (
+                  <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
+                )}
                 <input
                   autoFocus
+                  enterKeyHint="search"
                   className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-zinc-400"
-                  placeholder="Search downloads..."
+                  placeholder="Search (press Enter for library)"
                   value={mobileSearchQuery}
                   onChange={(e) => {
                     setMobileSearchQuery(e.target.value);
+                    // Instant local filter for already-loaded items
                     handleSearchQueryChange(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const q = mobileSearchQuery.trim();
+                      if (q.length > 0) {
+                        // Trigger hybrid DB search across full library,
+                        // not just the pages already paginated in memory.
+                        void handleAISearch(q, 'hybrid');
+                        // Let the virtual keyboard close so results become visible.
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }
                   }}
                 />
                 <button
@@ -915,6 +942,7 @@ export const DownloadsView: React.FC = () => {
                     setIsMobileSearchOpen(false);
                     setMobileSearchQuery('');
                     handleSearchQueryChange('');
+                    handleSearchClear();
                   }}
                   className="ml-2 text-zinc-400 hover:text-white"
                 >
