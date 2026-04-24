@@ -40,8 +40,15 @@ export const ResourcesShell: React.FC<ResourcesShellProps> = ({
   infoPanelProps,
   children,
 }) => {
+  // Mobile uses min-h-screen so content can grow past the viewport (viewport
+  // scrolls naturally + infinite scroll observer fires). Desktop keeps
+  // sm:h-full to stay inside the sm:h-screen + sm:overflow-hidden frame set
+  // up by AppLayout — internal scroll is handled by DownloadsView's
+  // md:overflow-y-auto content area. The previous ``style={height:100vh}``
+  // pinned mobile to the viewport and clipped everything below, which
+  // silently broke infinite scroll on the Downloads grid / list.
   return (
-    <div className="flex sm:h-full sm:-m-8 sm:-mt-20 sm:-mb-8" style={{ height: '100vh' }}>
+    <div className="flex min-h-screen sm:h-full sm:min-h-0 sm:-m-8 sm:-mt-20 sm:-mb-8">
       {/* Left panel: Desktop sidebar navigation (hidden on mobile) */}
       <ResourcesSidebar {...sidebarProps} />
 
