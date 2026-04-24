@@ -9,10 +9,24 @@ import { useAuth } from '../contexts/AuthContext';
 
 interface LibraryFeedProps {
   data: Video[];
+  /** Whether there are more pages to fetch. Disables sentinel load when false. */
+  hasMore?: boolean;
+  /** True while a page fetch is in flight — drives the spinner at the end. */
+  isLoadingMore?: boolean;
+  /** Called when the feed's internal sentinel enters the scroll container
+   *  (with a preload margin). The feed owns its own observer so the root is
+   *  the feed's scroll container, not the viewport. */
+  onLoadMore?: () => void;
 }
 
-export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
+export const LibraryFeed: React.FC<LibraryFeedProps> = ({
+  data,
+  hasMore,
+  isLoadingMore,
+  onLoadMore,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(true);
 
@@ -33,12 +47,39 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
     };
 
     const observer = new IntersectionObserver(handleIntersection, options);
-    
+
     const elements = containerRef.current?.querySelectorAll('.feed-item');
     elements?.forEach((el) => observer.observe(el));
 
     return () => observer.disconnect();
   }, [data]);
+
+  // Infinite scroll: load more pages when the sentinel enters the feed's
+  // scroll container. Critically, root = containerRef so the observer fires
+  // when the user swipes near the end of the feed (not when the whole feed
+  // component first mounts into the viewport).
+  useEffect(() => {
+    if (!onLoadMore || !hasMore || !sentinelRef.current || !containerRef.current) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry.isIntersecting && hasMore && !isLoadingMore) {
+          onLoadMore();
+        }
+      },
+      {
+        root: containerRef.current,
+        threshold: 0.01,
+        // Preload a couple screens ahead so the next videos are fetched
+        // BEFORE the user hits the true end — avoids the "stuck" feeling.
+        rootMargin: '800px',
+      },
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [data.length, hasMore, isLoadingMore, onLoadMore]);
 
   const togglePlay = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -90,6 +131,31 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({ data }) => {
            <div className="h-full flex flex-col items-center justify-center text-zinc-500 gap-4">
              <p>No videos found in this feed.</p>
            </div>
+        )}
+
+        {/* Infinite-scroll sentinel + loading spinner. Sits AFTER the last
+            feed item so the observer (root = this container) fires when the
+            user scrolls near the end. rootMargin=800px means the next page
+            starts fetching ~2 videos before the true end. */}
+        {data.length > 0 && hasMore && (
+          <div
+            ref={sentinelRef}
+            className="w-full flex items-center justify-center py-6 text-zinc-400"
+            aria-hidden={!isLoadingMore}
+          >
+            {isLoadingMore ? (
+              <Loader2 size={20} className="animate-spin" />
+            ) : (
+              <span className="text-xs text-zinc-600">Loading more…</span>
+            )}
+          </div>
+        )}
+        {data.length > 0 && !hasMore && (
+          <div className="w-full py-6 flex justify-center">
+            <span className="text-xs text-zinc-700">
+              All {data.length} videos loaded
+            </span>
+          </div>
         )}
       </div>
     </div>
