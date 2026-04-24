@@ -1232,6 +1232,13 @@
   "aiLibrary": {
     "title": "AI Library",
     "menuItem": "AI Library",
+    "agentsSection": "Agents",
+    "skillsSection": "Skills",
+    "usageSection": "Usage",
+    "loadingAgents": "Loading...",
+    "noAgents": "No agents yet",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar",
     "tabs": {
       "agents": "Agents",
       "skills": "Skills"

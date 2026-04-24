@@ -22,6 +22,7 @@ export const VIEW_PATH_MAP: Record<ViewState, string> = {
   shared: '/shared',
   agents: '/agents',
   skills: '/skills',
+  ailibrary: '/ai-library/agents',
 };
 
 /**
@@ -48,6 +49,9 @@ export function pathnameToView(pathname: string): ViewState {
   if (stripped.startsWith('/resources')) return 'resources';
   if (stripped.startsWith('/todolist')) return 'todolist';
   if (stripped.startsWith('/shared')) return 'shared';
+  // /ai-library/* is the new nested AI Library area — checked before the
+  // flat /agents and /skills so it wins on match.
+  if (stripped.startsWith('/ai-library')) return 'ailibrary';
   if (stripped.startsWith('/agents')) return 'agents';
   if (stripped.startsWith('/skills')) return 'skills';
 
