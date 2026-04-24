@@ -159,6 +159,52 @@ export const DownloadsView: React.FC = () => {
     }
   }, [pullDistance, pullRefreshing, loadLibraryData]);
 
+  // ─── Belt-and-suspenders infinite scroll (mobile-safe) ─────────────
+  // useLibrary already has an IntersectionObserver with default root=viewport.
+  // On mobile the layout chain can land us in a state where the scroll
+  // happens on an intermediate container rather than the viewport, so that
+  // observer never fires. This backup listens for scroll events on BOTH
+  // the content container and the window, then checks whether the sentinel
+  // is within the 600px preload zone using getBoundingClientRect() — works
+  // regardless of which element is doing the scrolling.
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel) return;
+    let rafId: number | null = null;
+    const checkSentinel = () => {
+      if (rafId != null) return; // debounce via rAF
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (!hasMoreData || isLoadingMore || isSearchActive) return;
+        const rect = sentinel.getBoundingClientRect();
+        const viewportH = window.innerHeight || document.documentElement.clientHeight;
+        // Trigger when sentinel is within 600px of the bottom of the viewport.
+        if (rect.top < viewportH + 600) {
+          loadMoreLibrary();
+        }
+      });
+    };
+    window.addEventListener('scroll', checkSentinel, { passive: true });
+    const scroller = contentScrollRef.current;
+    if (scroller) {
+      scroller.addEventListener('scroll', checkSentinel, { passive: true });
+    }
+    // Also check once on mount in case the sentinel is already in zone
+    // (happens when initial page doesn't fill the viewport).
+    checkSentinel();
+    return () => {
+      if (rafId != null) cancelAnimationFrame(rafId);
+      window.removeEventListener('scroll', checkSentinel);
+      if (scroller) scroller.removeEventListener('scroll', checkSentinel);
+    };
+  }, [
+    hasMoreData,
+    isLoadingMore,
+    isSearchActive,
+    loadMoreLibrary,
+    library.length,
+  ]);
+
   // ─── Filtered library ─────────────────────────────────
   // Chip filters are now applied server-side (see libraryFilterParams
   // → useLibrary → fetchLibraryPaginated). Only the local
