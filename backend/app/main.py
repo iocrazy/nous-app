@@ -285,8 +285,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 # 添加CORS中间件
-# allow_origin_regex 匹配所有 localhost 端口，无需逐个配置
-# allow_origins 保留生产域名列表
+# allow_origin_regex 同时覆盖:
+#   - localhost / 内网 IP 任意端口（本地开发）
+#   - Vercel preview 域名：每个 PR 一个动态子域名
+#     (mediahub-git-<branch>-heygos-projects.vercel.app 和
+#      mediahub-<hash>-heygos-projects.vercel.app)
+#     没法穷举加到 CORS_ORIGINS，所以走 regex
+# allow_origins 保留生产域名列表 (prod .env: CORS_ORIGINS=["https://mediahub.heygo.cn"])
 # Security: wildcard origins + credentials is forbidden by browsers and dangerous.
 # Auto-disable credentials and warn if misconfigured, rather than silently shipping.
 _cors_origins = settings.CORS_ORIGINS
@@ -298,10 +303,17 @@ if _cors_credentials and ("*" in _cors_origins or _cors_origins == ["*"]):
     )
     _cors_credentials = False
 
+_CORS_ALLOW_REGEX = (
+    # localhost / RFC1918 dev hosts on any port
+    r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+):\d+$"
+    # Vercel preview for this project (git branch or immutable deployment URL)
+    r"|^https://mediahub-(git-)?[a-z0-9-]+-heygos-projects\.vercel\.app$"
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+):\d+$",
+    allow_origin_regex=_CORS_ALLOW_REGEX,
     allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
