@@ -26,7 +26,7 @@ import { LibraryFeed } from './LibraryFeed';
 import { ToolbarSearch } from './ToolbarSearch';
 import { ShareModal } from './ShareModal';
 import { getCoverUrl, getVideoUrl } from '../utils/awemeType';
-import { semanticSearch, hybridSearch, localSearch } from '../services/searchService';
+import { semanticSearch, hybridSearch, localSearch, textSearch } from '../services/searchService';
 import { useToast } from './Toast';
 import { trashResourceByPlatformId, updateResource } from '../services/resourceService';
 import { createTag } from '../services/unifiedTagService';
@@ -227,15 +227,20 @@ export const DownloadsView: React.FC = () => {
     setSearchQuery(query);
   }, []);
 
-  const handleAISearch = useCallback(async (query: string, mode: 'hybrid' | 'semantic') => {
+  const handleAISearch = useCallback(async (query: string, mode: 'hybrid' | 'semantic' | 'text' = 'text') => {
     setIsAISearching(true);
     try {
-      // Bump to 100 (backend caps at 100 per schemas/search.py) so results
-      // feel comprehensive. Old 20-limit felt "not comprehensive" on large
-      // libraries where only the top 20 semantic hits were returned.
-      const response = mode === 'semantic'
-        ? await semanticSearch(query, 100)
-        : await hybridSearch(query, {}, 100, 0.5);
+      // Default ``text`` = plain ILIKE returning EVERY match (up to 1000),
+      // no top-N ranking. This is what users mean when they type a keyword
+      // — "show me all videos containing 'memory'", not "top 20 semantically
+      // similar". ``hybrid`` / ``semantic`` remain available for callers
+      // that explicitly want ranking.
+      const response =
+        mode === 'semantic'
+          ? await semanticSearch(query, 100)
+          : mode === 'hybrid'
+            ? await hybridSearch(query, {}, 100, 0.5)
+            : await textSearch(query, 1000);
       setSearchResults(response.results as any);
       // Backend now attaches full ParsedMedia rows in ``videos``. Index them
       // by platform_id so filteredLibrary can render AI-status icons etc.
@@ -973,9 +978,11 @@ export const DownloadsView: React.FC = () => {
                       e.preventDefault();
                       const q = mobileSearchQuery.trim();
                       if (q.length > 0) {
-                        // Trigger hybrid DB search across full library,
-                        // not just the pages already paginated in memory.
-                        void handleAISearch(q, 'hybrid');
+                        // ``text`` = plain ILIKE on title/description/author/
+                        // hashtags returning EVERY match (not top-N). Mobile
+                        // default because users typing a keyword on a small
+                        // screen almost always mean "show me all of them".
+                        void handleAISearch(q, 'text');
                         // Let the virtual keyboard close so results become visible.
                         (e.target as HTMLInputElement).blur();
                       }

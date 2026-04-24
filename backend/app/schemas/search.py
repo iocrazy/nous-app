@@ -37,6 +37,19 @@ class HybridSearchRequest(BaseModel):
     )
 
 
+class TextSearchRequest(BaseModel):
+    """Request schema for plain-text ILIKE search (no semantic ranking).
+
+    Returns ALL matches whose ``title`` / ``description`` / ``author`` /
+    ``hashtags`` contains the substring, sorted by ``created_at DESC``.
+    Use this when the user wants "everything that contains this keyword"
+    rather than the top-N by embedding similarity.
+    """
+
+    query: str = Field(..., min_length=1, max_length=500)
+    limit: int = Field(1000, ge=1, le=5000)
+
+
 class SearchResultItem(BaseModel):
     """A single search result item."""
 
