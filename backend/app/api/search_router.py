@@ -7,6 +7,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
+from app.repositories.media_repository import MediaRepository
 from app.schemas.search import (
     HybridSearchRequest,
     SearchResponse,
@@ -22,13 +23,17 @@ router = APIRouter(prefix="/search", tags=["Search"])
 async def _hydrate_media_by_platform_ids(
     platform_ids: List[str],
 ) -> List[Dict[str, Any]]:
-    """Fetch full parsed_media rows for a list of platform_ids, preserving order.
+    """Fetch card-view parsed_media rows for a list of platform_ids.
 
     Search endpoints return slim ``SearchResultItem`` objects. The UI also
-    needs the full ``ParsedMedia`` record (AI status, audio paths, like/
+    needs a richer card-view projection (AI status, audio paths, like/
     comment/share/favorite counts, hashtags, etc.) to render the same card
-    chrome on search hits as on regular library rows. This helper pulls those
-    full rows in a single ``IN`` query and re-sorts to match the ranking.
+    chrome on search hits as on regular library rows. This helper pulls that
+    projection in a single ``IN`` query and re-sorts to match the ranking.
+
+    Heavy AI text fields (``ai_extract_text`` / ``ai_rewrite_text`` /
+    ``ai_analyze_text``) are excluded — the detail endpoint is the one that
+    returns them. See MediaRepository.CARD_SELECT for the field list.
 
     Returns empty list if ``platform_ids`` is empty.
     """
@@ -37,7 +42,7 @@ async def _hydrate_media_by_platform_ids(
     client = await get_async_supabase_admin()
     result = (
         await client.table("parsed_media")
-        .select("*")
+        .select(MediaRepository.CARD_SELECT)
         .in_("platform_id", platform_ids)
         .execute()
     )
@@ -218,7 +223,7 @@ async def text_search(
     try:
         result = (
             await client.table("parsed_media")
-            .select("*")
+            .select(MediaRepository.CARD_SELECT)
             .or_(
                 f"title.ilike.{pattern},"
                 f"description.ilike.{pattern},"
