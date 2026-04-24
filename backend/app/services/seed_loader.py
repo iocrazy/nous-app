@@ -150,6 +150,10 @@ class SeedLoader:
                     "name": fm.get("name", slug),
                     "description": fm.get("description"),
                     "body_md": body,
+                    # Dual-write legacy content_md so storyboard_ai_service and
+                    # /api/v1/skills readers see the body on preset inserts too.
+                    # Migration 152 dropped NOT NULL; this keeps data in sync.
+                    "content_md": body,
                     "category": fm.get("category"),
                     "icon": fm.get("icon", "✨"),
                     "is_public": fm.get("is_public", True),

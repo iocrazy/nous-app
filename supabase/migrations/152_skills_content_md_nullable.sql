@@ -1,0 +1,23 @@
+-- 152 — Drop NOT NULL on skills.content_md so AI Library create flow can insert
+-- rows that only populate `body_md`.
+--
+-- Context: The legacy `/api/v1/skills` API (used by project output templates
+-- and storyboard_ai_service) stores skill text in `content_md`. The new AI
+-- Library (`/api/v1/ai-library/skills`, migration 138+) uses `body_md` and
+-- never sets `content_md`. Before this migration, creating a skill via the
+-- AI Library UI hit:
+--     "null value in column content_md of relation skills violates not-null
+--      constraint"
+-- and returned 500. FastAPI's unhandled-exception path returned the error
+-- response without CORS headers, so the browser surfaced it as a misleading
+-- "No Access-Control-Allow-Origin header" CORS error.
+--
+-- This migration drops the legacy constraint. Backend code (`seed_loader`,
+-- `create_skill`) still dual-writes both columns where body_md is present,
+-- so legacy consumers continue to work. Long-term, `content_md` should be
+-- dropped entirely once all readers are migrated to `body_md`.
+--
+-- Applied directly via Supabase MCP on 2026-04-24. This file exists as a
+-- record for fresh environment provisioning.
+
+ALTER TABLE skills ALTER COLUMN content_md DROP NOT NULL;
