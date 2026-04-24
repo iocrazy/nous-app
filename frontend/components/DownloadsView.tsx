@@ -112,6 +112,12 @@ export const DownloadsView: React.FC = () => {
   // ─── Local search state ───────────────────────────────
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<import('../services/searchService').SearchResult[]>([]);
+  /** Backend-hydrated full Video rows for every hit in ``searchResults``,
+   *  keyed by platform_id. Populated on handleAISearch from the ``videos``
+   *  field of SearchResponse. Used by ``filteredLibrary`` so the cards
+   *  (including AI-status icons, counts, audio paths) render correctly even
+   *  for hits that aren't in the paginated library yet. */
+  const [searchVideoMap, setSearchVideoMap] = useState<Record<string, Video>>({});
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchQueryText, setSearchQueryText] = useState('');
   const [isAISearching, setIsAISearching] = useState(false);
@@ -160,15 +166,13 @@ export const DownloadsView: React.FC = () => {
   const filteredLibrary = useMemo(() => {
     if (isSearchActive) {
       if (searchResults.length === 0) return [];
-      // IMPORTANT: don't limit display to library pages already loaded. DB
-      // search may match items on page 3+ while only page 1 is paginated in
-      // memory — previously those matches were silently dropped.
-      //
-      // Strategy: prefer full Video records from ``library`` when present
-      // (user has scrolled that page and has the full metadata) and fall
-      // back to a minimal Video constructed from SearchResultItem so the
-      // card can still render title + cover + author without waiting for
-      // an extra fetch.
+      // Priority order for assembling the row data per hit:
+      //   1) Already-loaded library row (authoritative, includes resource_id
+      //      overrides etc. that the search endpoint doesn't touch)
+      //   2) Backend-hydrated ``videos`` from SearchResponse (full
+      //      ParsedMedia — includes AI status, counts, paths)
+      //   3) Slim SearchResultItem projection (last-resort, preserves card
+      //      rendering even when a race drops the ``videos`` field)
       const libraryByPlatformId = new Map(
         library.map((v) => [v.platform_id, v]),
       );
@@ -181,9 +185,8 @@ export const DownloadsView: React.FC = () => {
         .map((r): Video => {
           const existing = libraryByPlatformId.get(r.platform_id);
           if (existing) return existing;
-          // Minimal SearchResultItem → Video projection. Unknown fields are
-          // left undefined; cards read them optionally. ``id`` is stringified
-          // to match ParsedMedia.id = string (Snowflake BIGINT).
+          const hydrated = searchVideoMap[r.platform_id];
+          if (hydrated) return hydrated;
           return {
             id: r.media_id != null ? String(r.media_id) : undefined,
             platform_id: r.platform_id,
@@ -214,22 +217,35 @@ export const DownloadsView: React.FC = () => {
         const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
         return bTime - aTime;
       });
-  }, [library, isSearchActive, searchResults, searchQuery, tagSearchMap]);
+  }, [library, isSearchActive, searchResults, searchVideoMap, searchQuery, tagSearchMap]);
 
   // ─── Search handlers ──────────────────────────────────
   const handleSearchQueryChange = useCallback((query: string) => {
     setIsSearchActive(false);
     setSearchResults([]);
+    setSearchVideoMap({});
     setSearchQuery(query);
   }, []);
 
   const handleAISearch = useCallback(async (query: string, mode: 'hybrid' | 'semantic') => {
     setIsAISearching(true);
     try {
+      // Bump to 100 (backend caps at 100 per schemas/search.py) so results
+      // feel comprehensive. Old 20-limit felt "not comprehensive" on large
+      // libraries where only the top 20 semantic hits were returned.
       const response = mode === 'semantic'
-        ? await semanticSearch(query, 20)
-        : await hybridSearch(query, {}, 20, 0.5);
+        ? await semanticSearch(query, 100)
+        : await hybridSearch(query, {}, 100, 0.5);
       setSearchResults(response.results as any);
+      // Backend now attaches full ParsedMedia rows in ``videos``. Index them
+      // by platform_id so filteredLibrary can render AI-status icons etc.
+      // for hits outside the paginated library.
+      const hydrated: Record<string, Video> = {};
+      for (const v of response.videos ?? []) {
+        const pid = (v as any).platform_id;
+        if (typeof pid === 'string') hydrated[pid] = v as unknown as Video;
+      }
+      setSearchVideoMap(hydrated);
       setIsSearchActive(true);
       setSearchQueryText(query);
     } catch (error) {
@@ -245,6 +261,7 @@ export const DownloadsView: React.FC = () => {
 
   const handleSearchClear = useCallback(() => {
     setSearchResults([]);
+    setSearchVideoMap({});
     setIsSearchActive(false);
     setSearchQueryText('');
     setSearchQuery('');

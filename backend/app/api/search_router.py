@@ -1,9 +1,12 @@
 """API routes for Semantic Search."""
 
+from typing import Any, Dict, List
+
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.db.supabase_client import get_async_supabase_admin
 from app.schemas.search import (
     HybridSearchRequest,
     SearchResponse,
@@ -13,6 +16,35 @@ from app.schemas.search import (
 from app.services.search_service import SearchService
 
 router = APIRouter(prefix="/search", tags=["Search"])
+
+
+async def _hydrate_media_by_platform_ids(
+    platform_ids: List[str],
+) -> List[Dict[str, Any]]:
+    """Fetch full parsed_media rows for a list of platform_ids, preserving order.
+
+    Search endpoints return slim ``SearchResultItem`` objects. The UI also
+    needs the full ``ParsedMedia`` record (AI status, audio paths, like/
+    comment/share/favorite counts, hashtags, etc.) to render the same card
+    chrome on search hits as on regular library rows. This helper pulls those
+    full rows in a single ``IN`` query and re-sorts to match the ranking.
+
+    Returns empty list if ``platform_ids`` is empty.
+    """
+    if not platform_ids:
+        return []
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("parsed_media")
+        .select("*")
+        .in_("platform_id", platform_ids)
+        .execute()
+    )
+    rows = result.data or []
+    by_pid = {r["platform_id"]: r for r in rows if r.get("platform_id")}
+    # Preserve the ranking order from ``platform_ids`` — hits missing from the
+    # DB (e.g., just deleted) are silently dropped.
+    return [by_pid[pid] for pid in platform_ids if pid in by_pid]
 
 
 @router.post("/semantic", response_model=SearchResponse)
@@ -40,6 +72,8 @@ async def semantic_search(
             user_id=auth.user_id,
         )
 
+        platform_ids = [r.platform_id for r in response.results]
+        videos = await _hydrate_media_by_platform_ids(platform_ids)
         return SearchResponse(
             results=[
                 SearchResultItem(
@@ -56,6 +90,7 @@ async def semantic_search(
                 )
                 for r in response.results
             ],
+            videos=videos,
             total=response.total,
             query=response.query,
             search_type=response.search_type,
@@ -98,6 +133,8 @@ async def hybrid_search(
             user_id=auth.user_id,
         )
 
+        platform_ids = [r.platform_id for r in response.results]
+        videos = await _hydrate_media_by_platform_ids(platform_ids)
         return SearchResponse(
             results=[
                 SearchResultItem(
@@ -114,6 +151,7 @@ async def hybrid_search(
                 )
                 for r in response.results
             ],
+            videos=videos,
             total=response.total,
             query=response.query,
             search_type=response.search_type,

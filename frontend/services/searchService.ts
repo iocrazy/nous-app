@@ -23,10 +23,15 @@ export type SearchResult = SearchResultItem;
 
 export interface SearchResponse {
   results: SearchResultItem[];
+  /** Full ParsedMedia / Video rows for each hit, sorted by the same ranking
+   *  as ``results``. Backend populates this so the UI can render AI-status
+   *  icons / counts / audio paths on hits that aren't in the paginated
+   *  in-memory library yet. Legacy callers can ignore it. */
+  videos?: Array<Record<string, unknown>>;
   total: number;
   query: string;
   search_type: string;
-  processing_time_ms: number;
+  processing_time_ms?: number;
 }
 
 export interface HybridSearchFilters {
@@ -49,7 +54,7 @@ export interface QuickSearchSuggestion {
  */
 export const semanticSearch = async (
   query: string,
-  limit: number = 20,
+  limit: number = 100,
   threshold: number = 0.5,
 ): Promise<SearchResponse> =>
   apiClient.post<SearchResponse>('/api/v1/search/semantic', {
@@ -64,7 +69,7 @@ export const semanticSearch = async (
 export const hybridSearch = async (
   query: string,
   filters: HybridSearchFilters = {},
-  limit: number = 20,
+  limit: number = 100,
   threshold: number = 0.3,
 ): Promise<SearchResponse> =>
   apiClient.post<SearchResponse>('/api/v1/search/hybrid', {
