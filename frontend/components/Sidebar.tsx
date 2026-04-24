@@ -26,7 +26,6 @@ import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { SidebarSection } from './sidebar/SidebarSection';
-import { SidebarAgentsSection } from './sidebar/SidebarAgents';
 import { hasPermission } from '../utils/permissions';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 
@@ -332,7 +331,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <nav className="flex-1 flex flex-col gap-4">
-          <SidebarSection label={t('sidebar.workspace')} hideLabel={collapsed}>
+          <SidebarSection label="" hideLabel>
             {isViewEnabled('resources') && (
               <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
             )}
@@ -341,15 +340,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
             <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
             <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+            <SidebarItem
+              icon={Sparkles}
+              label={t('sidebar.aiLibrary', 'AI Library')}
+              active={currentView === 'ailibrary'}
+              onClick={() => handleNav('ailibrary')}
+              collapsed={collapsed}
+            />
           </SidebarSection>
 
-          <SidebarAgentsSection
-            urlPrefix={activeTeamId ? `/team/${activeTeamId}` : ''}
-            collapsed={collapsed}
-          />
-
           {hasPermission(permissions, 'member.view') && (
-            <SidebarSection label={t('sidebar.management')} hideLabel={collapsed}>
+            <SidebarSection label="" hideLabel>
               <SidebarItem
                 icon={Settings}
                 label={t('sidebar.management')}
@@ -395,7 +396,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       <nav className="flex-1 flex flex-col gap-4">
-        <SidebarSection label={t('sidebar.workspace')} hideLabel={collapsed}>
+        <SidebarSection label="" hideLabel>
           {isViewEnabled('parser') && (
             <SidebarItem icon={Search} label={t('nav.linkParser')} active={currentView === 'parser'} onClick={() => handleNav('parser')} collapsed={collapsed} />
           )}
@@ -408,12 +409,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
           <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
           <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
+          <SidebarItem
+            icon={Sparkles}
+            label={t('sidebar.aiLibrary', 'AI Library')}
+            active={currentView === 'ailibrary'}
+            onClick={() => handleNav('ailibrary')}
+            collapsed={collapsed}
+          />
         </SidebarSection>
-
-        <SidebarAgentsSection
-          urlPrefix={activeTeamId ? `/team/${activeTeamId}` : ''}
-          collapsed={collapsed}
-        />
       </nav>
 
       <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />

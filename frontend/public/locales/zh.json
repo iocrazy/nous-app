@@ -1232,6 +1232,15 @@
   "aiLibrary": {
     "title": "AI 库",
     "menuItem": "AI 库",
+    "agentsSection": "Agents",
+    "skillsSection": "Skills",
+    "usageSection": "Usage",
+    "loadingAgents": "加载中...",
+    "noAgents": "暂无智能体",
+    "loadAgentsError": "加载失败",
+    "retry": "重试",
+    "expandSidebar": "展开侧边栏",
+    "collapseSidebar": "折叠侧边栏",
     "tabs": {
       "agents": "智能体",
       "skills": "技能"
