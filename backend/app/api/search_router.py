@@ -1,6 +1,6 @@
 """API routes for Semantic Search."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
@@ -20,8 +20,31 @@ from app.services.search_service import SearchService
 router = APIRouter(prefix="/search", tags=["Search"])
 
 
+async def _fetch_user_media_ids(user_id: str) -> List[int]:
+    """Return the ``parsed_media.id`` list this user owns via ``resources``.
+
+    ``parsed_media`` is a **global** table — one row per platform_id across
+    every user in the system. Per-user ownership lives on ``resources``
+    (``creator_id`` + ``media_id`` FK to ``parsed_media.id`` + ``is_trashed``
+    + ``source_type='web'``). Every search that should only return "my
+    library" must first look up this list and scope the parsed_media query
+    to it, otherwise results leak across users.
+    """
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("resources")
+        .select("media_id")
+        .eq("creator_id", user_id)
+        .eq("source_type", "web")
+        .eq("is_trashed", False)
+        .execute()
+    )
+    return [int(r["media_id"]) for r in (result.data or []) if r.get("media_id")]
+
+
 async def _hydrate_media_by_platform_ids(
     platform_ids: List[str],
+    user_media_ids: Optional[List[int]] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch card-view parsed_media rows for a list of platform_ids.
 
@@ -35,17 +58,26 @@ async def _hydrate_media_by_platform_ids(
     ``ai_analyze_text``) are excluded — the detail endpoint is the one that
     returns them. See MediaRepository.CARD_SELECT for the field list.
 
+    When ``user_media_ids`` is provided, the hydration is further scoped to
+    rows that exist in the user's ``resources`` — prevents cross-user leak
+    for callers whose platform_ids came from a non-scoped ranker (e.g.
+    ``semantic_search`` doesn't currently filter by user).
+
     Returns empty list if ``platform_ids`` is empty.
     """
     if not platform_ids:
         return []
     client = await get_async_supabase_admin()
-    result = (
-        await client.table("parsed_media")
+    query = (
+        client.table("parsed_media")
         .select(MediaRepository.CARD_SELECT)
         .in_("platform_id", platform_ids)
-        .execute()
     )
+    if user_media_ids is not None:
+        if not user_media_ids:
+            return []
+        query = query.in_("id", user_media_ids)
+    result = await query.execute()
     rows = result.data or []
     by_pid = {r["platform_id"]: r for r in rows if r.get("platform_id")}
     # Preserve the ranking order from ``platform_ids`` — hits missing from the
@@ -79,7 +111,15 @@ async def semantic_search(
         )
 
         platform_ids = [r.platform_id for r in response.results]
-        videos = await _hydrate_media_by_platform_ids(platform_ids)
+        # semantic_search doesn't filter by user_id yet — scope hydration via
+        # user_media_ids so we don't leak cross-user parsed_media rows.
+        user_media_ids = await _fetch_user_media_ids(auth.user_id)
+        videos = await _hydrate_media_by_platform_ids(
+            platform_ids, user_media_ids=user_media_ids
+        )
+        # Filter ranked results to only include hits the user actually owns.
+        owned_pids = {v["platform_id"] for v in videos if v.get("platform_id")}
+        ranked_results = [r for r in response.results if r.platform_id in owned_pids]
         return SearchResponse(
             results=[
                 SearchResultItem(
@@ -94,10 +134,10 @@ async def semantic_search(
                     view_count=r.view_count,
                     created_at=r.created_at,
                 )
-                for r in response.results
+                for r in ranked_results
             ],
             videos=videos,
-            total=response.total,
+            total=len(ranked_results),
             query=response.query,
             search_type=response.search_type,
         )
@@ -140,7 +180,13 @@ async def hybrid_search(
         )
 
         platform_ids = [r.platform_id for r in response.results]
-        videos = await _hydrate_media_by_platform_ids(platform_ids)
+        # hybrid_search already filters by user_id internally, but we still
+        # pass user_media_ids to hydration as a defensive guardrail in case
+        # of a race between the ranker query and the hydration.
+        user_media_ids = await _fetch_user_media_ids(auth.user_id)
+        videos = await _hydrate_media_by_platform_ids(
+            platform_ids, user_media_ids=user_media_ids
+        )
         return SearchResponse(
             results=[
                 SearchResultItem(
@@ -219,11 +265,25 @@ async def text_search(
         )
     pattern = f"*{q_safe}*"
 
+    # CRITICAL: scope to rows THIS user owns via ``resources``. parsed_media
+    # is a global table — searching it directly returns every user's library
+    # mashed together. Get the per-user media_id allowlist first.
+    user_media_ids = await _fetch_user_media_ids(auth.user_id)
+    if not user_media_ids:
+        return SearchResponse(
+            results=[],
+            videos=[],
+            total=0,
+            query=q,
+            search_type="text",
+        )
+
     client = await get_async_supabase_admin()
     try:
         result = (
             await client.table("parsed_media")
             .select(MediaRepository.CARD_SELECT)
+            .in_("id", user_media_ids)
             .or_(
                 f"title.ilike.{pattern},"
                 f"description.ilike.{pattern},"
