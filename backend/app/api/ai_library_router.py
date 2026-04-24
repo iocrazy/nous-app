@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
@@ -153,6 +153,34 @@ async def _fetch_user_team_ids(user_id: UUID) -> List[int]:
     ]
 
 
+def _scoped_team_id(
+    request: Request, user_team_ids: List[int]
+) -> Optional[int]:
+    """Resolve the ``X-Team-Id`` header to a team filter, if any.
+
+    Returns the parsed BIGINT when:
+      * the header is present and parseable
+      * the user is a member of that team
+
+    Returns ``None`` when the header is absent, unparseable, or the user is
+    not a member (silently falling back to "no team scoping"). That matches
+    MediaHub's existing X-Team-Id convention — the header is a hint, not an
+    authorization boundary. The underlying resource RLS is still enforced
+    via ``team_ids`` / ``project_ids``, so a bogus header can only *narrow*
+    the visible set, never expand it.
+    """
+    raw = request.headers.get("X-Team-Id")
+    if not raw:
+        return None
+    try:
+        scoped = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if scoped not in user_team_ids:
+        return None
+    return scoped
+
+
 async def _fetch_user_project_ids(user_id: UUID) -> List[int]:
     """Return BIGINT project ids the user owns or is a member of."""
     client = await get_async_supabase_admin()
@@ -246,13 +274,15 @@ _enrich_skills_with_scope_names = _enrich_rows_with_scope_names
 
 
 @router.get("/agents", response_model=List[AgentOut], summary="List accessible agents")
-async def list_agents(auth: AuthDep) -> List[Dict[str, Any]]:
+async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
     """Return all agents visible to the current user with their skill bindings.
 
     Visible set = union of:
       * system presets (``is_system_preset=true``)
       * user's own agents (``user_id = me``)
-      * agents on any team the user is a member of
+      * agents on the active team — narrowed by ``X-Team-Id`` header when
+        present and the user is a member of that team; otherwise all teams
+        the user is a member of
       * agents on any project the user owns or is a member of
 
     Each row is enriched with ``skill_ids`` (ordered, enabled only) plus the
@@ -260,8 +290,13 @@ async def list_agents(auth: AuthDep) -> List[Dict[str, Any]]:
     """
     agent_repo, _ = _repos()
     user_uuid = _coerce_user_uuid(auth.user_id)
-    team_ids = await _fetch_user_team_ids(user_uuid)
+    user_team_ids = await _fetch_user_team_ids(user_uuid)
     project_ids = await _fetch_user_project_ids(user_uuid)
+    # X-Team-Id narrows the visible team resources to one team. When absent
+    # or the user isn't a member of the requested team, fall back to every
+    # team the user belongs to (legacy behavior).
+    scoped_team = _scoped_team_id(request, user_team_ids)
+    team_ids = [scoped_team] if scoped_team is not None else user_team_ids
     rows = await agent_repo.list_accessible(
         user_id=user_uuid,
         team_ids=team_ids,
@@ -525,16 +560,19 @@ async def resume_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
 
 
 @router.get("/skills", response_model=List[SkillOut], summary="List accessible skills")
-async def list_skills(auth: AuthDep) -> List[Dict[str, Any]]:
+async def list_skills(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
     """Return skills visible to the current user, each enriched with its files.
 
-    Visible set = public (system) skills + user's own + team/project-scoped
-    skills for teams/projects the user belongs to.
+    Visible set = public (system) skills + user's own private + skills scoped
+    to the active team (narrowed by ``X-Team-Id`` header when present, else
+    all teams the user is a member of) + user's project-scoped skills.
     """
     _, skill_repo = _repos()
     user_uuid = _coerce_user_uuid(auth.user_id)
-    team_ids = await _fetch_user_team_ids(user_uuid)
+    user_team_ids = await _fetch_user_team_ids(user_uuid)
     project_ids = await _fetch_user_project_ids(user_uuid)
+    scoped_team = _scoped_team_id(request, user_team_ids)
+    team_ids = [scoped_team] if scoped_team is not None else user_team_ids
     skills = await skill_repo.list_accessible(
         user_id=user_uuid,
         team_ids=team_ids,
