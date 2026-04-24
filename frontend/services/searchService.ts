@@ -80,6 +80,22 @@ export const hybridSearch = async (
   });
 
 /**
+ * Plain-text ILIKE search — returns every row whose title / description /
+ * author / hashtags contains the substring. No semantic ranking, no top-N
+ * cutoff (up to ``limit``, backend caps at 5000). Use this when you want
+ * "every video that contains 'memory'" rather than "top 20 semantically
+ * similar videos".
+ */
+export const textSearch = async (
+  query: string,
+  limit: number = 1000,
+): Promise<SearchResponse> =>
+  apiClient.post<SearchResponse>('/api/v1/search/text', {
+    query,
+    limit,
+  });
+
+/**
  * Find similar videos based on a source video
  */
 export const findSimilarVideos = async (

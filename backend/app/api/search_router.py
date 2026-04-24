@@ -12,6 +12,7 @@ from app.schemas.search import (
     SearchResponse,
     SearchResultItem,
     SemanticSearchRequest,
+    TextSearchRequest,
 )
 from app.services.search_service import SearchService
 
@@ -163,6 +164,107 @@ async def hybrid_search(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
         )
+
+
+# ---------------------------------------------------------------------------
+# Plain-text ILIKE search — "give me everything that contains this keyword"
+# ---------------------------------------------------------------------------
+#
+# Characters that would break a PostgREST ``or()`` filter value if passed
+# through verbatim (comma separates filters, dot separates column.op, parens
+# delimit nested filters, colon tails, plus quotes). We replace them with a
+# space since none of them are meaningful inside typical search queries.
+_PG_REST_FILTER_STRIP = str.maketrans({c: " " for c in ",.():\"'[]\\"})
+
+
+@router.post("/text", response_model=SearchResponse)
+async def text_search(
+    request: TextSearchRequest,
+    auth: AuthDep,
+):
+    """Plain-text ILIKE search across title / description / author / hashtags.
+
+    Returns EVERY row whose searchable text contains the substring — no
+    semantic ranking, no top-N cutoff (up to ``limit``, max 5000). Sorted
+    by ``created_at DESC`` so newer matches come first.
+
+    Use this when the user wants "give me all videos that contain the word
+    'memory'" rather than "top 20 semantically similar videos".
+    """
+    q = request.query.strip()
+    if not q:
+        return SearchResponse(
+            results=[],
+            videos=[],
+            total=0,
+            query="",
+            search_type="text",
+        )
+    # Sanitize special chars that would break PostgREST's or() filter
+    # grammar. Keep letters / digits / CJK / spaces / common punctuation.
+    q_safe = q.translate(_PG_REST_FILTER_STRIP).strip()
+    if not q_safe:
+        # User only typed special chars — nothing meaningful to match on.
+        return SearchResponse(
+            results=[],
+            videos=[],
+            total=0,
+            query=q,
+            search_type="text",
+        )
+    pattern = f"*{q_safe}*"
+
+    client = await get_async_supabase_admin()
+    try:
+        result = (
+            await client.table("parsed_media")
+            .select("*")
+            .or_(
+                f"title.ilike.{pattern},"
+                f"description.ilike.{pattern},"
+                f"author.ilike.{pattern},"
+                f"hashtags.ilike.{pattern}"
+            )
+            .order("created_at", desc=True)
+            .limit(request.limit)
+            .execute()
+        )
+        rows: List[Dict[str, Any]] = result.data or []
+    except Exception as e:
+        logger.error(f"Text search failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {str(e)}",
+        )
+
+    # Project every row into a slim SearchResultItem (for analytics /
+    # backwards-compat callers) AND include the full rows in ``videos``.
+    results = [
+        SearchResultItem(
+            media_id=int(row["id"]) if row.get("id") is not None else 0,
+            platform_id=row.get("platform_id") or "",
+            title=row.get("title") or "",
+            description=row.get("description"),
+            cover_url=(
+                (row.get("cover_urls") or [None])[0] if row.get("cover_urls") else None
+            ),
+            # Text search has no similarity score — fill a constant so the
+            # UI sort doesn't surprise and analytics schemas stay valid.
+            similarity_score=1.0,
+            tags=row.get("tags") or [],
+            author=row.get("author"),
+            view_count=row.get("like_count") or 0,
+            created_at=row.get("created_at"),
+        )
+        for row in rows
+    ]
+    return SearchResponse(
+        results=results,
+        videos=rows,
+        total=len(rows),
+        query=q,
+        search_type="text",
+    )
 
 
 @router.get("/similar/{media_id}", response_model=SearchResponse)
