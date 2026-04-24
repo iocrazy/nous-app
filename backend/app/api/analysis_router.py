@@ -209,6 +209,7 @@ async def trigger_analysis(
             cover_url=cover_url,
             title=media.get("title", ""),
             description=media.get("description", ""),
+            user_id=auth.user_id,
         )
 
         return TaskStatusResponse(
@@ -239,6 +240,7 @@ async def trigger_analysis(
             video_path=video_path,
             title=media.get("title", ""),
             description=media.get("description", ""),
+            user_id=auth.user_id,
         )
 
         return TaskStatusResponse(
@@ -283,6 +285,7 @@ async def trigger_batch_analysis(
         batch_analyze_l1_task.delay,
         media_ids=request.media_ids,
         batch_size=len(request.media_ids),
+        user_id=auth.user_id,
     )
 
     return {

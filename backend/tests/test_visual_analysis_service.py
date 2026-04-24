@@ -111,10 +111,7 @@ async def test_analyze_l1_routes_through_runner_with_l1_instruction() -> None:
             return_value=composer,
         ),
         patch("app.services.visual_analysis_service.AgentRunner", return_value=runner),
-        patch(
-            "app.services.visual_analysis_service.get_adapter",
-            return_value=MagicMock(),
-        ),
+        patch.object(svc, "_build_adapter", return_value=MagicMock()),
         patch(
             "app.services.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
@@ -179,10 +176,7 @@ async def test_analyze_l2_sends_cover_plus_keyframes() -> None:
             return_value=composer,
         ),
         patch("app.services.visual_analysis_service.AgentRunner", return_value=runner),
-        patch(
-            "app.services.visual_analysis_service.get_adapter",
-            return_value=MagicMock(),
-        ),
+        patch.object(svc, "_build_adapter", return_value=MagicMock()),
         patch(
             "app.services.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
@@ -221,3 +215,104 @@ def test_agent_slug_constant() -> None:
     """Regression guard: agent slug must match the seeded DB row."""
     assert AGENT_SLUG == "analyze"
     assert VisualAnalysisService.AGENT_SLUG == "analyze"
+
+
+# ---------------------------------------------------------------------------
+# V4: BYO provider config flows into the adapter
+# ---------------------------------------------------------------------------
+
+
+def test_build_adapter_uses_user_cfg_for_doubao() -> None:
+    """V4: when caller passes Doubao provider config, _build_adapter
+    routes through get_adapter_for_user with the user's api_key /
+    base_url — NOT through global settings.
+    """
+    svc = VisualAnalysisService(
+        provider_key="doubao",
+        provider_config={
+            "api_key": "user-doubao-key",
+            "base_url": "https://ark.example.com/api/v3/chat/completions",
+            "model": "doubao-seed-2-0-pro-260215",
+        },
+    )
+    adapter = svc._build_adapter("doubao-seed-2-0-pro-260215")
+    # DoubaoAdapter inherits from OpenAICompatibleAdapter — check the
+    # concrete state the service would hand to the runner.
+    assert adapter.api_key == "user-doubao-key"
+    assert "ark.example.com" in adapter.api_url
+
+
+def test_build_adapter_uses_user_cfg_for_openai() -> None:
+    """Same path for the OpenAI family: BYO api_key propagates through."""
+    svc = VisualAnalysisService(
+        provider_key="openai",
+        provider_config={
+            "api_key": "sk-user-personal",
+            "model": "gpt-4o",
+        },
+    )
+    adapter = svc._build_adapter("gpt-4o")
+    assert adapter.api_key == "sk-user-personal"
+    # OpenAIAdapter uses the canonical endpoint when base_url is empty.
+    assert "api.openai.com" in adapter.api_url
+
+
+def test_build_adapter_empty_config_falls_back_to_generic_compat() -> None:
+    """No BYO config + unknown model prefix → generic compat adapter
+    (will fail loudly at request time, not silently misroute)."""
+    svc = VisualAnalysisService()  # no provider key, no config
+    adapter = svc._build_adapter("totally-unknown-vendor-x-7b")
+    # OpenAICompatibleAdapter is the concrete fallback class
+    from app.services.ai_adapters.openai_compat import OpenAICompatibleAdapter
+
+    assert isinstance(adapter, OpenAICompatibleAdapter)
+
+
+@pytest.mark.asyncio
+async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
+    """End-to-end: L1 call with BYO config → runner gets an adapter
+    built from user_cfg, not from global settings."""
+    svc = VisualAnalysisService(
+        provider_key="doubao",
+        provider_config={
+            "api_key": "user-doubao-key",
+            "model": "doubao-seed-2-0-pro-260215",
+        },
+    )
+
+    composed = MagicMock()
+    composed.agent_id = "00000000-0000-0000-0000-000000000001"
+    composed.agent_slug = "analyze"
+    composed.model = "doubao-seed-2-0-pro-260215"
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(
+        return_value={
+            "content": '{"category":"Other","visual_description":"","detected_objects":[]}',
+            "raw": {},
+        }
+    )
+
+    build_adapter_spy = MagicMock(return_value=MagicMock())
+
+    with (
+        patch.object(
+            svc, "_encode_image_from_url", new=AsyncMock(return_value="IMGDATA")
+        ),
+        patch(
+            "app.services.visual_analysis_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch("app.services.visual_analysis_service.AgentRunner", return_value=runner),
+        patch.object(svc, "_build_adapter", build_adapter_spy),
+        patch(
+            "app.services.visual_analysis_service.SkillToolService",
+            return_value=MagicMock(),
+        ),
+    ):
+        await svc.analyze_l1("https://example.com/cover.jpg")
+
+    # _build_adapter was called with the resolved model from composed
+    build_adapter_spy.assert_called_once_with("doubao-seed-2-0-pro-260215")

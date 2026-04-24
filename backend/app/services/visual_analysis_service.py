@@ -1,14 +1,13 @@
-"""Visual analysis service using GPT-4o with multimodal prompts.
+"""Visual analysis service — runs ``analyze`` agent through AgentRunner.
 
-V1 (runner-multimodal): the ``analyze`` agent now runs through
-``AgentRunner`` + ``RunRecorder`` like every other AI service. The
-OpenAI-native closure that used to bypass the runner is gone; the
-factory-registered :class:`OpenAIAdapter` carries multimodal content
-arrays straight through to GPT-4o's chat-completions endpoint.
-
-This matches the pattern used by ``script_ai_service`` /
-``llm_analysis_service`` / ``storyboard_ai_service``: compose prompt
-from DB, build runner via adapter factory, wrap in RunRecorder, run.
+V1 (runner-multimodal) moved the ``analyze`` path off its OpenAI-native
+closure onto ``AgentRunner`` + ``RunRecorder`` like every other AI service.
+V4 (analyze-byo) wires in per-user BYO credentials: the caller passes
+``provider_key`` + ``provider_config`` (from ``user_profiles.ai_providers``)
+exactly the way :class:`LLMAnalysisService` does for summarize, so the agent
+runs against whichever multimodal provider the user configured (Doubao
+vision, gpt-4o, qwen-vl, Claude vision, etc.) with **their** key — no
+hardcoded global fallback to one provider.
 
 Per-request ``L1`` vs ``L2`` selection is carried through the composer's
 ``request_instructions`` field. The agent's ``AGENT.md`` documents both
@@ -31,7 +30,12 @@ from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.services.agent_runner import AgentRunner
-from app.services.ai_adapters.factory import get_adapter, provider_key_for_model
+from app.services.ai_adapters.base import AIAdapter
+from app.services.ai_adapters.factory import (
+    get_adapter_for_user,
+    provider_key_for_model,
+)
+from app.services.ai_adapters.openai_compat import OpenAICompatibleAdapter
 from app.services.prompt_composer import ComposerInput, PromptComposer
 from app.services.run_recorder import AgentPausedError, RunRecorder
 from app.services.skill_tool_service import SkillToolService
@@ -71,13 +75,27 @@ class VisualAnalysisService:
 
     AGENT_SLUG: str = AGENT_SLUG
 
-    def __init__(self) -> None:
-        # GPT-4o pricing for cost estimation — kept here because the
-        # ``agent_runs`` row already carries authoritative cost via the
-        # price-snapshot columns. This estimate is just for the
-        # dataclass return field, which downstream code treats as
-        # informational.
-        self.model = settings.OPENAI_MODEL or "gpt-4o"
+    def __init__(
+        self,
+        provider_key: str = "",
+        provider_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Hold per-call BYO credentials.
+
+        ``provider_key`` / ``provider_config`` come from the Celery task
+        layer (which reads the user's ``ai_settings.ai_providers`` per the
+        resolved agent's model). When both are empty, :meth:`_build_adapter`
+        falls back to the factory's per-model default using global settings
+        — that path is only exercised by the smoke-test / no-user
+        invocations.
+        """
+        self._provider_key = (provider_key or "").strip()
+        self._provider_config: Dict[str, Any] = dict(provider_config or {})
+        # Cost estimate coefficients (informational only; authoritative
+        # cost lives on the agent_runs row via RunRecorder's price-snapshot
+        # columns). Kept as GPT-4o pricing historically; deliberately not
+        # per-provider, since this field decays once telemetry takes over.
+        self.model = self._provider_config.get("model") or "gpt-4o"
 
     # ── Image encoding helpers ────────────────────────────────────────
 
@@ -147,6 +165,59 @@ class VisualAnalysisService:
             logger.warning(f"[VisualAnalysis] JSON parse failed: {err}")
             return {}
 
+    # ── Adapter assembly (BYO-aware) ──────────────────────────────────
+
+    def _build_adapter(self, model: str) -> AIAdapter:
+        """Build an adapter for ``model`` using caller-supplied BYO config.
+
+        Mirrors :func:`llm_analysis_service._build_adapter_from_provider_config`:
+        the caller (Celery analysis task) has already resolved the agent's
+        ``model`` → ``provider_key`` and read the user's BYO entry from
+        ``ai_settings.ai_providers``. We wrap that dict under the right
+        provider key and hand it to :func:`get_adapter_for_user`, which
+        picks the correct adapter subclass per prefix (Doubao / Qwen /
+        DeepSeek / Claude / OpenAI).
+
+        If the model prefix is unknown to the factory (e.g. a custom
+        OpenAI-compatible endpoint ID) we fall back to a generic
+        :class:`OpenAICompatibleAdapter` using whatever ``base_url`` /
+        ``api_key`` the task provided. If no BYO config at all was passed
+        (bare smoke-test path), routes through the factory's
+        per-provider global settings fallback.
+        """
+        provider_key = self._provider_key
+        if not provider_key and model:
+            try:
+                provider_key = provider_key_for_model(model)
+            except ValueError:
+                provider_key = ""
+        if not provider_key:
+            # No caller context and no derivable prefix — last-ditch
+            # generic compatible adapter. Will almost certainly fail at
+            # request time if neither base_url nor api_key was set, which
+            # is the desired outcome (loud failure over silent misroute).
+            return OpenAICompatibleAdapter(
+                api_url=self._provider_config.get("base_url", "") or "",
+                api_key=self._provider_config.get("api_key", "") or "",
+                default_model=model,
+            )
+
+        user_cfg_scoped = {
+            provider_key: {
+                "api_key": self._provider_config.get("api_key", ""),
+                "base_url": self._provider_config.get("base_url", "") or "",
+                "app_id": self._provider_config.get("app_id", ""),
+            }
+        }
+        try:
+            return get_adapter_for_user(model, user_cfg_scoped, settings)
+        except ValueError:
+            return OpenAICompatibleAdapter(
+                api_url=self._provider_config.get("base_url", "") or "",
+                api_key=self._provider_config.get("api_key", "") or "",
+                default_model=model,
+            )
+
     # ── Shared runner invocation ──────────────────────────────────────
 
     async def _run_multimodal(
@@ -174,7 +245,7 @@ class VisualAnalysisService:
             )
         )
 
-        adapter = get_adapter(composed.model or self.model, settings)
+        adapter = self._build_adapter(composed.model or self.model)
         runner = AgentRunner(
             adapter=adapter,
             skill_tool=SkillToolService(SkillRepository()),
@@ -208,10 +279,13 @@ class VisualAnalysisService:
 
         uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
         model = composed.model or self.model
-        try:
-            provider = provider_key_for_model(model) if model else "openai"
-        except ValueError:
-            provider = "openai"
+        if self._provider_key:
+            provider = self._provider_key
+        else:
+            try:
+                provider = provider_key_for_model(model) if model else "openai"
+            except ValueError:
+                provider = "openai"
 
         try:
             async with RunRecorder(

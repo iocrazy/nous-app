@@ -158,9 +158,18 @@ def _dispatch_download(
 
 
 def _trigger_l1_analysis(
-    video_db_id, platform_id: str, parsed_data: dict, video_title: str
+    video_db_id,
+    platform_id: str,
+    parsed_data: dict,
+    video_title: str,
+    user_id: str,
 ):
-    """Trigger L1 cover analysis. Non-blocking."""
+    """Trigger L1 cover analysis. Non-blocking.
+
+    ``user_id`` is the owner of the parsed_media row — propagated into the
+    Celery task so it can resolve the user's BYO provider config for the
+    multimodal call.
+    """
     try:
         cover_url = (
             parsed_data.get("cover_urls", [None])[0]
@@ -175,6 +184,7 @@ def _trigger_l1_analysis(
                 cover_url=cover_url,
                 title=video_title or "",
                 description=parsed_data.get("description", ""),
+                user_id=user_id,
             )
             logger.info(f"[Parse] Triggered L1 analysis for {platform_id}")
     except Exception as e:
@@ -263,7 +273,9 @@ def parse_single_link_task(
 
         # 6. Trigger L1 analysis (non-blocking)
         if video_db_id:
-            _trigger_l1_analysis(video_db_id, platform_id, parsed_data, video_title)
+            _trigger_l1_analysis(
+                video_db_id, platform_id, parsed_data, video_title, user_id
+            )
 
         # 7. Log + respond
         run_async(
