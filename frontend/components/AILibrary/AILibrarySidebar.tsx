@@ -74,6 +74,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
 
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showNewAgentModal, setShowNewAgentModal] = useState(false);
 
   const activeAgentSlug = (() => {
@@ -85,11 +86,13 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
 
   const loadAgents = useCallback(async () => {
     try {
+      setLoadError(null);
       const list = await aiLibraryService.listAgents();
       const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name));
       setAgents(sorted);
     } catch (err) {
       console.error('[AILibrarySidebar] listAgents failed:', err);
+      setLoadError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoaded(true);
     }
@@ -148,6 +151,19 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
             {!loaded ? (
               <div className="px-3 py-1 text-[11px] text-zinc-600">
                 {t('aiLibrary.loadingAgents', 'Loading...')}
+              </div>
+            ) : loadError ? (
+              <div className="px-2 py-1 space-y-1">
+                <div className="text-[11px] text-red-400 truncate" title={loadError}>
+                  {t('aiLibrary.loadAgentsError', 'Failed to load')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadAgents()}
+                  className="text-[11px] text-indigo-400 hover:text-indigo-300"
+                >
+                  {t('aiLibrary.retry', 'Retry')}
+                </button>
               </div>
             ) : agents.length === 0 ? (
               <div className="px-3 py-1 text-[11px] text-zinc-600">

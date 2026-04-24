@@ -1237,6 +1237,8 @@
     "usageSection": "Usage",
     "loadingAgents": "Loading...",
     "noAgents": "No agents yet",
+    "loadAgentsError": "Failed to load",
+    "retry": "Retry",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "tabs": {
