@@ -1,8 +1,17 @@
-"""Celery tasks for video analysis."""
+"""Celery tasks for video analysis.
+
+V4 (analyze-byo): every L1/L2 entrypoint now resolves the ``analyze``
+agent's model + the user's BYO provider config from ``ai_settings`` and
+hands both to :class:`VisualAnalysisService`. Before V4 this path used
+global settings silently, so user-configured Doubao / Qwen-VL / Claude
+keys never took effect — analyze always ran against whatever the backend
+``.env`` held (often nothing). See ``_resolve_analyze_provider_config``.
+"""
 
 import asyncio
 import os
 import tempfile
+from typing import Any, Dict, Optional, Tuple
 
 from celery import shared_task
 from loguru import logger
@@ -11,6 +20,7 @@ from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.tags_repository import TagsRepository
 from app.services.embedding_service import EmbeddingService
 from app.services.visual_analysis_service import VisualAnalysisService
+from app.tasks.ai_tasks import _get_ai_settings, _get_provider_config
 from app.tasks.utils import run_async
 
 
@@ -24,33 +34,96 @@ def _update_visual_status(video_id: str, status: str):
     )
 
 
+def _resolve_analyze_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str]:
+    """Resolve analyze agent's model + user's BYO provider config.
+
+    Returns ``(provider_key, provider_config, model)``. Reads the
+    ``analyze`` ``ai_agents`` row to get its ``model``, derives the
+    provider prefix, then pulls the user's BYO entry for that provider
+    out of ``ai_settings.ai_providers``. When the user has not configured
+    that provider, the caller (:class:`VisualAnalysisService`) falls back
+    to the factory's global settings path, but for BYO-only projects
+    (where the global key is intentionally absent) that fallback will
+    surface as a visible request-time error — the desired outcome.
+
+    When ``user_id`` is None (legacy / no-auth path), returns empty
+    config and lets the service route through the factory's default
+    for whichever prefix ``model`` has.
+    """
+    from app.repositories.agent_repository import AgentRepository
+    from app.services.ai_adapters.factory import provider_key_for_model
+
+    agent_repo = AgentRepository()
+    agent = run_async(agent_repo.get_by_slug("analyze"))
+    model = ((agent or {}).get("model") or "").strip()
+    if not model:
+        logger.warning(
+            "[AI] analyze agent row missing or has no model; "
+            "VisualAnalysisService will use built-in default"
+        )
+        return "", {}, ""
+
+    try:
+        provider_key = provider_key_for_model(model)
+    except ValueError:
+        logger.warning(
+            f"[AI] analyze agent model '{model}' has unknown provider prefix; "
+            "falling back to generic OpenAI-compatible adapter"
+        )
+        provider_key = ""
+
+    if not user_id or not provider_key:
+        return provider_key, {"model": model}, model
+
+    ai_settings = _get_ai_settings(user_id)
+    provider_config = dict(_get_provider_config(ai_settings, provider_key))
+    provider_config["model"] = model
+    return provider_key, provider_config, model
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def analyze_video_l1_task(
-    self, media_id: int, cover_url: str, title: str = "", description: str = ""
+    self,
+    media_id: int,
+    cover_url: str,
+    title: str = "",
+    description: str = "",
+    user_id: Optional[str] = None,
 ):
     """
     L1 Analysis: Analyze video cover image.
 
     This task:
-    1. Analyzes the cover image using GPT-4o
-    2. Stores results in video_analysis table
-    3. Updates tags based on detected category
-    4. Generates embedding for semantic search
+    1. Resolves the ``analyze`` agent's model + the user's BYO provider
+       config from ``ai_settings.ai_providers``
+    2. Analyzes the cover image through the resolved multimodal provider
+    3. Stores results in resource_analysis
+    4. Updates tags based on detected category
+    5. Generates embedding for semantic search
+
+    ``user_id`` is the owner of the parsed_media / resource being
+    analyzed. Required for BYO credentials to take effect; when None
+    (e.g. system-initiated backfill with no user context) the service
+    falls back to whatever the factory resolves from global settings.
     """
-    logger.info(f"Starting L1 analysis for media {media_id}")
+    logger.info(f"Starting L1 analysis for media {media_id} (user={user_id})")
+
+    provider_key, provider_config, agent_model = _resolve_analyze_provider_config(
+        user_id
+    )
 
     async def _analyze():
-        analysis_service = VisualAnalysisService()
+        analysis_service = VisualAnalysisService(
+            provider_key=provider_key,
+            provider_config=provider_config,
+        )
         embedding_service = EmbeddingService()
         analysis_repo = AnalysisRepository()
         tags_repo = TagsRepository()
 
-        # TODO(agent-telemetry): thread user_id through this celery task so the
-        # visual analysis run is captured in agent_runs. Current caller is a
-        # system trigger without a user context; instrumenting means either
-        # adding user_id to the task signature or resolving it from the owning
-        # resource. Follow-up PR.
-        result = await analysis_service.analyze_l1(cover_url)
+        result = await analysis_service.analyze_l1(cover_url, user_id=user_id)
 
         if not result:
             logger.warning(f"L1 analysis returned no result for media {media_id}")
@@ -65,7 +138,7 @@ def analyze_video_l1_task(
             detected_scenes=result.detected_scenes,
             detected_people=result.detected_people,
             detected_text=result.detected_text,
-            analysis_model="gpt-4o",
+            analysis_model=agent_model or "unknown",
             analysis_cost=result.cost,
         )
 
@@ -122,20 +195,31 @@ def analyze_video_l2_task(
     video_path: str,
     title: str = "",
     description: str = "",
+    user_id: Optional[str] = None,
 ):
     """
     L2 Analysis: Analyze cover + keyframes.
 
     This task:
-    1. Extracts keyframes from video using FFmpeg
-    2. Analyzes cover + keyframes using GPT-4o
-    3. Updates analysis record
-    4. Regenerates embedding with richer data
+    1. Resolves the ``analyze`` agent model + user BYO provider config
+    2. Extracts keyframes from video using FFmpeg
+    3. Analyzes cover + keyframes through the resolved multimodal provider
+    4. Updates analysis record
+    5. Regenerates embedding with richer data
+
+    See ``analyze_video_l1_task`` for the ``user_id`` contract.
     """
-    logger.info(f"Starting L2 analysis for media {media_id}")
+    logger.info(f"Starting L2 analysis for media {media_id} (user={user_id})")
+
+    provider_key, provider_config, agent_model = _resolve_analyze_provider_config(
+        user_id
+    )
 
     async def _analyze():
-        analysis_service = VisualAnalysisService()
+        analysis_service = VisualAnalysisService(
+            provider_key=provider_key,
+            provider_config=provider_config,
+        )
         embedding_service = EmbeddingService()
         analysis_repo = AnalysisRepository()
         tags_repo = TagsRepository()
@@ -197,7 +281,9 @@ def analyze_video_l2_task(
                 )
 
                 # Run L2 analysis
-                result = await analysis_service.analyze_l2(cover_url, keyframe_paths)
+                result = await analysis_service.analyze_l2(
+                    cover_url, keyframe_paths, user_id=user_id
+                )
 
                 if not result:
                     logger.warning(
@@ -214,7 +300,7 @@ def analyze_video_l2_task(
                     detected_scenes=result.detected_scenes,
                     detected_people=result.detected_people,
                     detected_text=result.detected_text,
-                    analysis_model="gpt-4o",
+                    analysis_model=agent_model or "unknown",
                     analysis_cost=result.cost,
                 )
 
@@ -274,10 +360,21 @@ def analyze_video_l2_task(
 
 
 @shared_task
-def batch_analyze_l1_task(media_ids: list, batch_size: int = 10):
+def batch_analyze_l1_task(
+    media_ids: list,
+    batch_size: int = 10,
+    user_id: Optional[str] = None,
+):
     """
     Batch L1 analysis for multiple media items.
     Dispatches individual L1 tasks.
+
+    ``user_id`` is the user whose BYO provider config should be used for
+    every dispatched L1 job. Required when the caller is a real user
+    request (REST endpoint); the scheduled-backfill path passes None and
+    the dispatched L1 tasks will each resolve the owner from their own
+    ``parsed_media.user_id`` — but for now, passing None means each L1
+    task falls back to global settings.
 
     Note: Uses run_async helper to work with async Supabase client.
     Celery workers run in separate processes and don't share event loops.
@@ -308,6 +405,7 @@ def batch_analyze_l1_task(media_ids: list, batch_size: int = 10):
                         cover_url=cover_url,
                         title=media.get("title", ""),
                         description=media.get("description", ""),
+                        user_id=user_id,
                     )
                     dispatched += 1
                     logger.info(f"Dispatched L1 analysis for media {media_id}")
