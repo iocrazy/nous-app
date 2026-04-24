@@ -140,6 +140,12 @@ export const router = createBrowserRouter([
               { path: 'agents/:slug', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
               { path: 'skills', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
               { path: 'skills/:slug', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
+              {
+                // Splat captures the full ``<relpath>`` after ``/files/`` so
+                // that paths like ``references/examples.md`` resolve.
+                path: 'skills/:slug/files/*',
+                element: <SuspenseWrap><SkillsPage /></SuspenseWrap>,
+              },
               { path: 'usage', element: <SuspenseWrap><UsagePage /></SuspenseWrap> },
             ],
           },
