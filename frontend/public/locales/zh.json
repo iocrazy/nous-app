@@ -1403,7 +1403,19 @@
       "deleteSkillConfirm": "确认删除技能 \"{{name}}\"？此操作不可恢复。",
       "deletedToast": "已删除技能：{{name}}",
       "forkSkill": "复制到我的技能",
-      "forkedToast": "已创建 {{slug}}"
+      "forkedToast": "已创建 {{slug}}",
+      "newFileInline": "新建文件/文件夹",
+      "newFileTitle": "新建文件或文件夹",
+      "newFileHint": "可以把文件放到 references/、scripts/ 或 assets/。文件夹通过路径自动创建。",
+      "newFileModeFile": "文件",
+      "newFileModeFolder": "文件夹",
+      "newFilePathLabel": "文件路径",
+      "newFolderPathLabel": "文件夹路径",
+      "newFilePathClash": "该路径已存在同名文件。",
+      "newFileTypeHint": "类型：{{t}}",
+      "newFileContentLabel": "初始内容",
+      "deleteFileConfirm": "删除 {{path}}？此操作不可恢复。",
+      "deleteFileError": "删除失败：{{err}}"
     }
   },
   "aiUsage": {

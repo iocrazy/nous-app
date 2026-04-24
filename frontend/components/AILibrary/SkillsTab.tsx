@@ -14,6 +14,7 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { SkillEditor } from './SkillEditor';
 import { SkillList } from './SkillList';
 import { NewSkillModal } from './NewSkillModal';
+import { NewSkillFileModal } from './NewSkillFileModal';
 
 interface SkillsTabProps {
   /** Currently selected skill slug (from URL). */
@@ -37,6 +38,8 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showNewSkillModal, setShowNewSkillModal] = useState(false);
+  /** Slug of the skill whose file-creation modal is open, null when closed. */
+  const [newFileSkillSlug, setNewFileSkillSlug] = useState<string | null>(null);
 
   const loadSkills = useCallback(async () => {
     try {
@@ -73,6 +76,43 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
     onSlugChange?.(newSlug);
   };
 
+  const handleFileCreated = async (slug: string, path: string) => {
+    setNewFileSkillSlug(null);
+    await loadSkills();
+    if (onFilePathChange) onFilePathChange(slug, path);
+  };
+
+  const handleDeleteFile = async (slug: string, path: string) => {
+    const ok = window.confirm(
+      t(
+        'aiLibrary.skills.deleteFileConfirm',
+        `Delete ${path}? This cannot be undone.`,
+        { path },
+      ),
+    );
+    if (!ok) return;
+    try {
+      await aiLibraryService.deleteSkillFile(slug, path);
+      await loadSkills();
+      // If the user was viewing the file they just deleted, drop back to SKILL.md.
+      if (slug === selectedSlug && path === selectedFilePath) {
+        onSlugChange?.(slug);
+      }
+    } catch (err) {
+      console.error('[SkillsTab] delete file failed:', err);
+      window.alert(
+        t('aiLibrary.skills.deleteFileError', 'Failed to delete: {{err}}', {
+          err: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  };
+
+  const newFileSkill =
+    newFileSkillSlug != null
+      ? skills.find((s) => (s.slug ?? String(s.id)) === newFileSkillSlug) ?? null
+      : null;
+
   const selectedSlug = slug ?? null;
   const selectedFilePath = filePath ?? null;
 
@@ -88,6 +128,8 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
           else onSlugChange?.(s);
         }}
         onNewSkill={() => setShowNewSkillModal(true)}
+        onNewFile={(s) => setNewFileSkillSlug(s)}
+        onDeleteFile={handleDeleteFile}
       />
 
       <div className="flex-1 min-w-0 h-full">
@@ -128,6 +170,19 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
           existingSkills={skills}
           onClose={() => setShowNewSkillModal(false)}
           onCreated={handleCreated}
+        />
+      )}
+
+      {newFileSkill && (
+        <NewSkillFileModal
+          skill={newFileSkill}
+          onClose={() => setNewFileSkillSlug(null)}
+          onCreated={(path) =>
+            handleFileCreated(
+              newFileSkill.slug ?? String(newFileSkill.id),
+              path,
+            )
+          }
         />
       )}
     </div>

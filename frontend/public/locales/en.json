@@ -1403,7 +1403,19 @@
       "deleteSkillConfirm": "Delete skill \"{{name}}\"? This cannot be undone.",
       "deletedToast": "Skill deleted: {{name}}",
       "forkSkill": "Fork to My Skills",
-      "forkedToast": "Forked as {{slug}}"
+      "forkedToast": "Forked as {{slug}}",
+      "newFileInline": "New file or folder",
+      "newFileTitle": "New file or folder",
+      "newFileHint": "Add files under references/, scripts/, or assets/. Folders are path-derived.",
+      "newFileModeFile": "File",
+      "newFileModeFolder": "Folder",
+      "newFilePathLabel": "File path",
+      "newFolderPathLabel": "Folder path",
+      "newFilePathClash": "A file already exists at that path.",
+      "newFileTypeHint": "Type: {{t}}",
+      "newFileContentLabel": "Initial content",
+      "deleteFileConfirm": "Delete {{path}}? This cannot be undone.",
+      "deleteFileError": "Failed to delete: {{err}}"
     }
   },
   "aiUsage": {
