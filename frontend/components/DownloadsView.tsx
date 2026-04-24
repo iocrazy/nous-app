@@ -160,13 +160,41 @@ export const DownloadsView: React.FC = () => {
   const filteredLibrary = useMemo(() => {
     if (isSearchActive) {
       if (searchResults.length === 0) return [];
-      const searchIds = new Set(searchResults.map(r => r.platform_id));
-      return library
-        .filter(item => searchIds.has(item.platform_id))
-        .sort((a, b) => {
-          const aScore = searchResults.find(r => r.platform_id === a.platform_id)?.similarity_score || 0;
-          const bScore = searchResults.find(r => r.platform_id === b.platform_id)?.similarity_score || 0;
-          return bScore - aScore;
+      // IMPORTANT: don't limit display to library pages already loaded. DB
+      // search may match items on page 3+ while only page 1 is paginated in
+      // memory — previously those matches were silently dropped.
+      //
+      // Strategy: prefer full Video records from ``library`` when present
+      // (user has scrolled that page and has the full metadata) and fall
+      // back to a minimal Video constructed from SearchResultItem so the
+      // card can still render title + cover + author without waiting for
+      // an extra fetch.
+      const libraryByPlatformId = new Map(
+        library.map((v) => [v.platform_id, v]),
+      );
+      return searchResults
+        .slice()
+        .sort(
+          (a, b) =>
+            (b.similarity_score || 0) - (a.similarity_score || 0),
+        )
+        .map((r): Video => {
+          const existing = libraryByPlatformId.get(r.platform_id);
+          if (existing) return existing;
+          // Minimal SearchResultItem → Video projection. Unknown fields are
+          // left undefined; cards read them optionally. ``id`` is stringified
+          // to match ParsedMedia.id = string (Snowflake BIGINT).
+          return {
+            id: r.media_id != null ? String(r.media_id) : undefined,
+            platform_id: r.platform_id,
+            original_url: '',
+            title: r.title,
+            author: r.author ?? undefined,
+            description: r.description ?? undefined,
+            cover_urls: r.cover_url ? [r.cover_url] : undefined,
+            tags: r.tags,
+            created_at: r.created_at,
+          } as Video;
         });
     }
     return library
