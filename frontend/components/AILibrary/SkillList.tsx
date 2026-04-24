@@ -24,6 +24,7 @@ import {
   Package,
   Plus,
   Search,
+  Trash2,
   User as UserIcon,
   Users,
   Wrench,
@@ -38,6 +39,10 @@ interface SkillListProps {
   onSelectSkill: (slug: string) => void;
   onSelectFile: (slug: string, filePath: string) => void;
   onNewSkill: () => void;
+  /** Open the "new file/folder" modal scoped to this skill. */
+  onNewFile?: (slug: string) => void;
+  /** Delete the given file (after user confirmation is handled by caller). */
+  onDeleteFile?: (slug: string, filePath: string) => void;
 }
 
 /** Preset = system-seed: is_public && no team/project owner. */
@@ -98,6 +103,8 @@ interface TreeProps {
   expandedDirs: Set<string>;
   onToggleDir: (path: string) => void;
   onSelectFile: (filePath: string) => void;
+  onDeleteFile?: (filePath: string) => void;
+  deleteLabel?: string;
 }
 
 const TreeRow: React.FC<TreeProps> = ({
@@ -107,6 +114,8 @@ const TreeRow: React.FC<TreeProps> = ({
   expandedDirs,
   onToggleDir,
   onSelectFile,
+  onDeleteFile,
+  deleteLabel,
 }) => {
   // Root node isn't rendered — only its children.
   if (depth === 0) {
@@ -121,6 +130,8 @@ const TreeRow: React.FC<TreeProps> = ({
             expandedDirs={expandedDirs}
             onToggleDir={onToggleDir}
             onSelectFile={onSelectFile}
+            onDeleteFile={onDeleteFile}
+            deleteLabel={deleteLabel}
           />
         ))}
       </div>
@@ -134,22 +145,40 @@ const TreeRow: React.FC<TreeProps> = ({
     const Icon = fileIcon(node.file);
     const active = activeFilePath === node.path;
     return (
-      <button
-        type="button"
-        onClick={() => onSelectFile(node.path)}
-        className={`flex w-full items-center gap-2 py-1 text-left text-[12px] transition-colors ${
+      <div
+        className={`group flex w-full items-center gap-1 pr-1 text-[12px] transition-colors ${
           active
             ? 'bg-indigo-500/12 text-indigo-200'
             : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
         }`}
-        style={{ paddingLeft }}
       >
-        <Icon
-          size={12}
-          className={`shrink-0 ${active ? 'text-indigo-300' : 'text-zinc-500'}`}
-        />
-        <span className="truncate">{node.name}</span>
-      </button>
+        <button
+          type="button"
+          onClick={() => onSelectFile(node.path)}
+          className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left"
+          style={{ paddingLeft }}
+        >
+          <Icon
+            size={12}
+            className={`shrink-0 ${active ? 'text-indigo-300' : 'text-zinc-500'}`}
+          />
+          <span className="truncate">{node.name}</span>
+        </button>
+        {onDeleteFile && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteFile(node.path);
+            }}
+            className="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-zinc-500 hover:bg-red-500/15 hover:text-red-400 group-hover:flex"
+            title={deleteLabel ?? 'Delete'}
+            aria-label={deleteLabel ?? 'Delete'}
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
+      </div>
     );
   }
 
@@ -182,6 +211,8 @@ const TreeRow: React.FC<TreeProps> = ({
               expandedDirs={expandedDirs}
               onToggleDir={onToggleDir}
               onSelectFile={onSelectFile}
+              onDeleteFile={onDeleteFile}
+              deleteLabel={deleteLabel}
             />
           ))}
         </div>
@@ -209,6 +240,8 @@ export const SkillList: React.FC<SkillListProps> = ({
   onSelectSkill,
   onSelectFile,
   onNewSkill,
+  onNewFile,
+  onDeleteFile,
 }) => {
   const { t } = useTranslation();
   const [filter, setFilter] = useState('');
@@ -398,7 +431,33 @@ export const SkillList: React.FC<SkillListProps> = ({
                       onSelectFile={(p) =>
                         onSelectFile(s.slug ?? String(s.id), p)
                       }
+                      onDeleteFile={
+                        !preset && onDeleteFile
+                          ? (p) => onDeleteFile(s.slug ?? String(s.id), p)
+                          : undefined
+                      }
+                      deleteLabel={t(
+                        'aiLibrary.skills.deleteFile',
+                        'Delete file',
+                      )}
                     />
+
+                    {/* + New file / folder — only for user-editable skills. */}
+                    {!preset && onNewFile && (
+                      <button
+                        type="button"
+                        onClick={() => onNewFile(s.slug ?? String(s.id))}
+                        className="mt-1 flex w-full items-center gap-2 py-1 pl-6 pr-2 text-left text-[11px] text-zinc-500 transition-colors hover:bg-zinc-800/40 hover:text-zinc-300"
+                      >
+                        <Plus size={11} className="shrink-0" />
+                        <span>
+                          {t(
+                            'aiLibrary.skills.newFileInline',
+                            'New file or folder',
+                          )}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
