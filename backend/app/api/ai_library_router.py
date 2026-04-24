@@ -153,9 +153,7 @@ async def _fetch_user_team_ids(user_id: UUID) -> List[int]:
     ]
 
 
-def _scoped_team_id(
-    request: Request, user_team_ids: List[int]
-) -> Optional[int]:
+def _scoped_team_id(request: Request, user_team_ids: List[int]) -> Optional[int]:
     """Resolve the ``X-Team-Id`` header to a team filter, if any.
 
     Returns the parsed BIGINT when:
