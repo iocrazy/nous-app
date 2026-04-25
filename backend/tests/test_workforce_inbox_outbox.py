@@ -3,7 +3,6 @@
 These cover the contract corners that the M2 dispatch loop depends on:
     - Inbox tick: spawn_task path creates task + transitions worker
     - Inbox tick: cancel/status_query bypass task creation
-    - Inbox tick: lock contention is swallowed (no exception escapes)
     - Outbox tick: user vs agent vs broadcast routing
     - Outbox tick: dedup_key set to outbox row id
 """
@@ -20,7 +19,6 @@ from app.services.workforce.inbox_processor import InboxProcessor
 from app.services.workforce.outbox_dispatcher import OutboxDispatcher
 from app.services.workforce.state_machine import (
     InvalidTransitionError,
-    LockNotAcquiredError,
 )
 
 
@@ -91,45 +89,6 @@ async def test_inbox_tick_spawns_task_and_transitions_worker():
     # The transition trigger must be task_assigned (not error / pause).
     kwargs = sm.transition.await_args.kwargs
     assert kwargs["trigger"] == "task_assigned"
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_inbox_tick_lock_contended_requeues_and_does_not_orphan():
-    """If the state machine raises LockNotAcquiredError after the task row
-    was created, the processor must:
-      1. NOT mark the inbox message processed (orphan-prevention contract)
-      2. Requeue the task so another tick re-picks it
-      3. Not raise — tick continues for other agents
-    """
-    repo = _stub_repo()
-    sm = _stub_state_machine()
-    sm.transition = AsyncMock(side_effect=LockNotAcquiredError("contended"))
-
-    task_id = uuid4()
-    repo.claim_next_unread = AsyncMock(
-        return_value={
-            "id": str(uuid4()),
-            "message_type": "task",
-            "sender_user_id": str(uuid4()),
-            "payload": {},
-        }
-    )
-    repo.create_task = AsyncMock(return_value={"id": str(task_id)})
-
-    processor = InboxProcessor(repo=repo, state_machine=sm)
-    with patch.object(
-        processor, "_agents_with_unread_messages",
-        AsyncMock(return_value=[uuid4()]),
-    ):
-        stats = await processor.tick()
-
-    # Tick completes despite lock contention.
-    assert stats["errors"] == 0
-    # Task was requeued — the orphan-prevention path fired.
-    repo.requeue_task.assert_awaited_once_with(task_id)
-    # Inbox row was NOT marked processed (it stays in 'reading' for retry).
-    repo.mark_inbox_processed.assert_not_called()
 
 
 @pytest.mark.unit

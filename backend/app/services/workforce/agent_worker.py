@@ -303,57 +303,34 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
 async def _move_worker_back_to_idle(
     agent_id: UUID, task_id: UUID, *, trigger: str
 ) -> None:
-    """Best-effort post-turn worker state transition (lock-free path).
+    """Best-effort post-turn worker state transition.
 
-    Fires worker state back to 'idle' so the next inbox message can
-    transition idle→working. Without this, the agent stays in 'working'
-    after the first task and ALLOWED_TRANSITIONS rejects the next
-    task_assigned, blocking the agent.
+    Fires the state machine so worker state goes back to 'idle' (on
+    task_completed) or 'blocked' (on error). Without this, the agent
+    stays in 'working' after the first task and ALLOWED_TRANSITIONS
+    rejects the next ``task_assigned``.
 
-    Why bypass WorkerStateMachine.transition (which has the advisory
-    lock): the lock pattern is broken under PostgREST's per-session
-    routing (TODO-AI-012). In single-process M3 deployment, the
-    asyncio.Lock inside AgentWorkerPool already serialises transitions
-    per agent — DB-side locking is redundant. We call the repository
-    directly so the post-turn transition can't fail on contended-lock
-    grounds.
-
-    State move: 'working' → 'idle' (or whatever ``trigger`` resolves to).
-    Failure is logged + swallowed — agent_tasks.lifecycle_status is the
-    source of truth for whether the work succeeded; worker state row is
-    just routing metadata.
+    Failure is logged + swallowed — ``agent_tasks.lifecycle_status`` is
+    the source of truth for whether the work succeeded; worker state
+    row is just routing metadata.
     """
-    from app.repositories.agent_workforce_repository import (
-        AgentWorkforceRepository,
-    )
     from app.services.workforce.state_machine import (
         InvalidTransitionError,
-        _resolve_target,
+        WorkerStateMachine,
     )
 
-    repo = AgentWorkforceRepository()
     try:
-        worker = await repo.get_worker(agent_id)
-        from_state = worker.get("state") if worker else None
-        try:
-            to_state = _resolve_target(from_state=from_state, trigger=trigger)
-        except InvalidTransitionError:
-            # Worker is already in idle/terminated/etc — nothing to do.
-            logger.debug(
-                f"[agent-worker] no state move needed "
-                f"(agent={agent_id}, from={from_state}, trigger={trigger})"
-            )
-            return
-
-        await repo.update_worker_state(
-            agent_id=agent_id, state=to_state, current_task_id=None
-        )
-        await repo.log_state_transition(
+        await WorkerStateMachine().transition(
             agent_id=agent_id,
-            from_state=from_state,
-            to_state=to_state,
             trigger=trigger,
             task_id=task_id,
+            current_task_id=None,
+        )
+    except InvalidTransitionError as err:
+        # Worker is already in idle/terminated/etc — nothing to do.
+        logger.debug(
+            f"[agent-worker] no state move needed "
+            f"(agent={agent_id}, trigger={trigger}): {err}"
         )
     except Exception as err:
         logger.exception(

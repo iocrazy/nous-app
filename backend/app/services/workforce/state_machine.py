@@ -1,9 +1,7 @@
 """Worker state machine.
 
 Encapsulates the 6 worker states and the legal transitions between them.
-Every transition is gated by a per-agent Postgres advisory lock (so two
-processes can't drive the same agent concurrently) and recorded in
-``agent_state_history`` for audit.
+Every transition is recorded in ``agent_state_history`` for audit.
 
 States (mirrors the DB CHECK on agent_workers.state):
     idle, working, waiting_for_other, blocked, paused, terminated
@@ -22,24 +20,34 @@ Allowed transitions — read as ``from -> to``:
 
 Transitions outside this set raise ``InvalidTransitionError``.
 
-Advisory lock: each agent's UUID hashes to a stable bigint key. Lock is
-acquired through the ``public.try_advisory_lock`` wrapper added in
-migration 149 (PostgREST can't call pg_catalog.pg_try_advisory_lock
-directly). Lock is released in a finally block. If the connection drops
-mid-task, Postgres releases the lock at session end.
+## Why no DB-side lock
+
+Earlier revisions used a Postgres advisory lock per agent (TODO-AI-012)
+to prevent concurrent transitions across processes. We dropped it for
+two reasons:
+
+1. The PostgREST advisory-lock RPC is per-session — Supabase pools
+   sessions across requests, so the lock can be released by an unrelated
+   request before the holding request finishes. Lock acquisition would
+   succeed but provide no real exclusion.
+2. M3 runs the workforce as a single in-process scheduler. The
+   ``AgentWorkerPool``'s per-agent ``asyncio.Lock`` already serialises
+   transitions for the same agent. Cross-process exclusion isn't a
+   concern at the current deployment scale.
+
+If we ever scale to multiple FastAPI workers, the right fix is to move
+exclusion to a real distributed primitive (Redis / Postgres
+``SELECT … FOR UPDATE``) — not back to the broken PostgREST RPC.
 """
 
 from __future__ import annotations
 
-import contextlib
-import hashlib
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, FrozenSet, Optional, Tuple
+from typing import FrozenSet, Optional, Tuple
 from uuid import UUID
 
 from loguru import logger
 
-from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_workforce_repository import AgentWorkforceRepository
 
 # ─── states & transitions ────────────────────────────────────────────
@@ -95,30 +103,7 @@ class InvalidTransitionError(Exception):
         self.trigger = trigger
 
 
-class LockNotAcquiredError(Exception):
-    """Raised when ``pg_try_advisory_lock`` returns false within the budget.
-
-    The state machine keeps this contended path failing fast rather than
-    queuing internally — the dispatcher can retry on its own loop, and
-    we'd rather see contention in metrics than hide it under blocking
-    waits."""
-
-
 # ─── helpers ─────────────────────────────────────────────────────────
-
-
-def agent_lock_key(agent_id: UUID) -> int:
-    """Hash a UUID into a stable, deterministic int8 advisory-lock key.
-
-    Postgres ``pg_advisory_lock(bigint)`` takes a single signed-bigint key.
-    We take the first 8 hex chars of SHA-1(uuid_bytes), mask to 63 bits, and
-    return as a positive int. Same UUID always → same lock key, no collisions
-    in practice given the 2^63 namespace.
-    """
-    digest = hashlib.sha1(agent_id.bytes).digest()
-    # First 8 bytes → unsigned 64-bit int → mask off sign bit for positive int8.
-    raw = int.from_bytes(digest[:8], byteorder="big", signed=False)
-    return raw & 0x7FFFFFFFFFFFFFFF
 
 
 def _resolve_target(
@@ -149,55 +134,16 @@ class TransitionResult:
 class WorkerStateMachine:
     """Drives transitions for one agent at a time.
 
-    The state machine is stateless across calls — each transition reads the
-    current state under an advisory lock, validates the move, persists the
-    new state + history row, releases the lock. Concurrent callers either
-    serialise through the lock or raise ``LockNotAcquiredError``.
+    Lock-free: in-process serialisation is provided by the pool's
+    per-agent ``asyncio.Lock``. Each transition reads current state,
+    validates the move, persists the new state + history row.
     """
-
-    LOCK_FN = "try_advisory_lock"
-    UNLOCK_FN = "advisory_unlock"
 
     def __init__(
         self,
         repo: Optional[AgentWorkforceRepository] = None,
     ) -> None:
         self.repo = repo or AgentWorkforceRepository()
-
-    # ----- lock primitives -----
-
-    @contextlib.asynccontextmanager
-    async def _hold_lock(self, agent_id: UUID) -> AsyncIterator[Any]:
-        client = await get_async_supabase_admin()
-        key = agent_lock_key(agent_id)
-        acquired = False
-        try:
-            acquired = await self._try_lock(client, key)
-            if not acquired:
-                raise LockNotAcquiredError(
-                    f"agent={agent_id} lock held by another worker"
-                )
-            yield client
-        finally:
-            if acquired:
-                try:
-                    await client.rpc(self.UNLOCK_FN, {"lock_key": key}).execute()
-                except Exception as err:  # pragma: no cover — defensive
-                    logger.warning(
-                        f"[state-machine] advisory_unlock failed (agent={agent_id}): {err}"
-                    )
-
-    async def _try_lock(self, client: Any, key: int) -> bool:
-        try:
-            result = await client.rpc(self.LOCK_FN, {"lock_key": key}).execute()
-            return bool(result.data) if result.data is not None else False
-        except Exception as err:
-            logger.warning(
-                f"[state-machine] try_advisory_lock failed (key={key}): {err}"
-            )
-            return False
-
-    # ----- public API -----
 
     async def transition(
         self,
@@ -210,42 +156,40 @@ class WorkerStateMachine:
         # also updated (used on task_assigned / task_completed).
         current_task_id: Optional[UUID] = None,
     ) -> TransitionResult:
-        """Atomically read current state, validate, persist new state +
-        history row. Raises InvalidTransitionError on illegal moves and
-        LockNotAcquiredError when contended."""
-        async with self._hold_lock(agent_id):
-            worker = await self.repo.get_worker(agent_id)
-            if not worker:
-                # First-touch: register an idle worker so transitions resolve
-                # against a known from_state.
-                await self.repo.upsert_worker(agent_id=agent_id, state="idle")
-                from_state: Optional[WorkerState] = "idle"
-            else:
-                from_state = worker.get("state")
-            to_state = _resolve_target(from_state=from_state, trigger=trigger)
+        """Read current state, validate, persist new state + history row.
+        Raises InvalidTransitionError on illegal moves."""
+        worker = await self.repo.get_worker(agent_id)
+        if not worker:
+            # First-touch: register an idle worker so transitions resolve
+            # against a known from_state.
+            await self.repo.upsert_worker(agent_id=agent_id, state="idle")
+            from_state: Optional[WorkerState] = "idle"
+        else:
+            from_state = worker.get("state")
+        to_state = _resolve_target(from_state=from_state, trigger=trigger)
 
-            await self.repo.update_worker_state(
-                agent_id=agent_id,
-                state=to_state,
-                current_task_id=current_task_id,
-            )
-            await self.repo.log_state_transition(
-                agent_id=agent_id,
-                from_state=from_state,
-                to_state=to_state,
-                trigger=trigger,
-                task_id=task_id,
-                metadata=metadata,
-            )
-            logger.info(
-                f"[state-machine] {agent_id} {from_state} --({trigger})--> {to_state}"
-            )
-            return TransitionResult(
-                agent_id=agent_id,
-                from_state=from_state,
-                to_state=to_state,
-                trigger=trigger,
-            )
+        await self.repo.update_worker_state(
+            agent_id=agent_id,
+            state=to_state,
+            current_task_id=current_task_id,
+        )
+        await self.repo.log_state_transition(
+            agent_id=agent_id,
+            from_state=from_state,
+            to_state=to_state,
+            trigger=trigger,
+            task_id=task_id,
+            metadata=metadata,
+        )
+        logger.info(
+            f"[state-machine] {agent_id} {from_state} --({trigger})--> {to_state}"
+        )
+        return TransitionResult(
+            agent_id=agent_id,
+            from_state=from_state,
+            to_state=to_state,
+            trigger=trigger,
+        )
 
     async def force_terminate(
         self,
@@ -254,14 +198,11 @@ class WorkerStateMachine:
         reason: str = "heartbeat_lost",
         metadata: Optional[dict] = None,
     ) -> TransitionResult:
-        """Sweeper-only path: skip the lock (the worker is presumed dead, so
-        nothing else is holding it), force state → terminated, log history.
+        """Sweeper-only path: force state → terminated, log history.
 
-        We don't take the advisory lock here because the only reason we'd
-        force-terminate is that the worker is unresponsive — taking the
-        lock would either succeed because no one is holding it, or block
-        if a stuck process is gripping it. Either way, the sweeper needs
-        to make progress.
+        Used when a worker is presumed dead (no heartbeat). Skips the
+        normal transition validation since a stuck worker may be in any
+        state and we just need to free its slot.
         """
         repo = self.repo
         worker = await repo.get_worker(agent_id)
