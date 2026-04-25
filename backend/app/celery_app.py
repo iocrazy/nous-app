@@ -128,6 +128,16 @@ celery_app.conf.update(
             "task": "app.tasks.agent_runs_sweeper.sweep",
             "schedule": 60.0,  # Heartbeat 清理 + 预算重算（pg_try_advisory_lock 保护）
         },
+        # M2 Persistent Workforce: inbox→tasks 每 10s 一次（snappy 响应），
+        # outbox→delivery 每 5s 一次（用户 Realtime 体感关键路径）
+        "workforce-inbox-10s": {
+            "task": "app.tasks.agent_workforce_tasks.process_inbox_tick",
+            "schedule": 10.0,
+        },
+        "workforce-outbox-5s": {
+            "task": "app.tasks.agent_workforce_tasks.dispatch_outbox_tick",
+            "schedule": 5.0,
+        },
     },
 )
 
