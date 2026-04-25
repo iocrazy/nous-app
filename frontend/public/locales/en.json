@@ -146,7 +146,9 @@
     "title": "Your Collection",
     "subtitle": "Manage your saved downloads",
     "empty": "No content yet",
-    "searchPlaceholder": "Search title, tags, notes..."
+    "searchPlaceholder": "Search title, tags, notes...",
+    "searchResultsCount": "Found {{count}} matching items",
+    "searchResultsCountSingular": "Found 1 matching item"
   },
   "dashboard": {
     "title": "Analytics",

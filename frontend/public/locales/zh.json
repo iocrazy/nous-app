@@ -146,7 +146,9 @@
     "title": "媒体收藏",
     "subtitle": "管理已保存的下载内容",
     "empty": "暂无内容",
-    "searchPlaceholder": "搜索标题、标签、备注..."
+    "searchPlaceholder": "搜索标题、标签、备注...",
+    "searchResultsCount": "搜索到 {{count}} 条结果",
+    "searchResultsCountSingular": "搜索到 1 条结果"
   },
   "dashboard": {
     "title": "数据统计",

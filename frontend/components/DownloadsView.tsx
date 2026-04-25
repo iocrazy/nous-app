@@ -856,6 +856,19 @@ export const DownloadsView: React.FC = () => {
               />
             )}
 
+            {/* Search-results count — shown when search is active. The
+                ``Load More`` block below is hidden in search mode so users
+                otherwise have no signal for how many hits were returned. */}
+            {isSearchActive && filteredLibrary.length > 0 && libraryViewMode !== 'feed' && (
+              <div className="w-full py-6 flex justify-center">
+                <span className="text-zinc-600 text-xs">
+                  {t('library.searchResultsCount', 'Found {{count}} matching items', {
+                    count: filteredLibrary.length,
+                  })}
+                </span>
+              </div>
+            )}
+
             {!isSearchActive && libraryViewMode !== 'feed' && (
               <>
                 {/* Invisible sentinel: IntersectionObserver target.

@@ -39,8 +39,11 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [selectedLibraryItem, setSelectedLibraryItem] = useState<Video | null>(null);
 
-  // Pagination
+  // Pagination — switched from OFFSET to cursor (resources.created_at) so
+  // deep scrolls stay O(1). currentPage is kept for any consumer that
+  // displays the page count, but the actual fetch keys off ``nextCursor``.
   const [currentPage, setCurrentPage] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number>(-1);
@@ -125,6 +128,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     setIsLoadingLibrary(true);
     setLibraryError(null);
     setCurrentPage(0);
+    setNextCursor(null);
     setHasMoreData(true);
     try {
       if (isSupabaseConfigured()) {
@@ -134,10 +138,12 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           isMobile ? 10 : 20,
           controller.signal,
           filterParamsRef.current,
+          null, // cursor: null = first page
         );
         if (controller.signal.aborted) return;
         setLibrary(result.data);
         setHasMoreData(result.hasMore);
+        setNextCursor(result.nextCursor);
         setCurrentPage(0);
         if (result.totalCount >= 0) setTotalCount(result.totalCount);
       } else {
@@ -172,6 +178,12 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
 
   const loadMoreLibrary = async () => {
     if (!hasMoreData || isLoadingMore || !isSupabaseConfigured()) return;
+    if (!nextCursor) {
+      // No cursor → no next page (or initial load hasn't completed yet).
+      // Don't fall back to OFFSET — that would re-fetch page 1.
+      setHasMoreData(false);
+      return;
+    }
     setIsLoadingMore(true);
     try {
       const nextPage = currentPage + 1;
@@ -184,14 +196,17 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         isMobile ? 10 : 20,
         controller.signal,
         filterParamsRef.current,
+        nextCursor,
       );
       if (controller.signal.aborted) return;
       if (result.data.length > 0) {
         setLibrary(prev => [...prev, ...result.data]);
         setCurrentPage(nextPage);
+        setNextCursor(result.nextCursor);
         setHasMoreData(result.hasMore);
       } else {
         setHasMoreData(false);
+        setNextCursor(null);
       }
     } catch (err: any) {
       if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
