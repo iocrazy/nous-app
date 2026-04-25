@@ -196,6 +196,40 @@ async def test_recall_failure_degrades_to_empty():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_delegate_tool_wired_with_caller_context():
+    """M2.5 wiring: build_agent_runner_stack must inject a DelegateToolService
+    into AgentRunner with the caller's identity baked in. Top-level chat
+    turns are always at depth=0 with no parent_run_id."""
+    settings = MagicMock()
+    user_id = uuid4()
+    agent_record = _agent()
+
+    with patch(
+        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        AsyncMock(return_value=[]),
+    ):
+        stack = await build_agent_runner_stack(
+            agent=agent_record,
+            skill_repo=MagicMock(),
+            user_id=user_id,
+            session_id=uuid4(),
+            user_query="hi",
+            settings=settings,
+        )
+
+    delegate_tool = stack.runner.delegate_tool
+    assert delegate_tool is not None
+    # Caller context is baked in
+    from uuid import UUID as _UUID
+    assert delegate_tool.caller_agent_id == _UUID(agent_record["id"])
+    assert delegate_tool.caller_user_id == user_id
+    # ChatPanel-initiated → top of dispatch tree
+    assert delegate_tool.parent_run_id is None
+    assert delegate_tool.agent_depth == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_recall_returns_empty_when_supabase_unavailable():
     """The internal _safe_recall path should swallow supabase init errors.
 

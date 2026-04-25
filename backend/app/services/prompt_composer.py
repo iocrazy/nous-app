@@ -240,10 +240,18 @@ class PromptComposer:
     def _build_tools(self, skills: list[dict[str, Any]]) -> list[dict]:
         """Build the function-calling tools list.
 
-        Phase 1 injects exactly one ``Skill`` tool; other caller-provided
-        tools merge upstream (adapter layer). Returns an empty list when
-        the agent has no bound skills, so the adapter can omit the
-        ``tools`` parameter entirely.
+        Two built-in tools are advertised when the agent has bound skills:
+        - ``Skill`` — load a skill definition (M1)
+        - ``Delegate`` — hand a sub-task to another persistent agent (M2.5)
+
+        Returns empty when the agent has no skills, so the adapter omits
+        the ``tools`` parameter entirely. Caller-provided tools merge
+        upstream (adapter layer).
+
+        Delegate target discovery (which slugs are valid persistent
+        workers) is M3 work — for now the LLM either knows slugs from
+        the user prompt or gets an "unknown agent slug" error from the
+        DelegateToolService.
         """
         if not skills:
             return []
@@ -276,7 +284,64 @@ class PromptComposer:
                         "required": ["skill"],
                     },
                 },
-            }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "Delegate",
+                    "description": (
+                        "Hand off a sub-task to another persistent agent. "
+                        "The target picks the task from its inbox on the "
+                        "next dispatch tick. Fire-and-forget by default; "
+                        "use status_query to check progress later. Use this "
+                        "for parallel work, specialised expertise, or when "
+                        "you need a different agent's persona/skills."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "agent_slug": {
+                                "type": "string",
+                                "description": (
+                                    "Slug of the target persistent agent "
+                                    "(e.g. 'summary', 'analyze'). Target "
+                                    "must have ai_agents.persistent=true."
+                                ),
+                            },
+                            "prompt": {
+                                "type": "string",
+                                "description": (
+                                    "The task description / instruction "
+                                    "for the target agent. Be specific."
+                                ),
+                            },
+                            "title": {
+                                "type": "string",
+                                "description": (
+                                    "Optional short title for the task "
+                                    "(shown in worker UI)."
+                                ),
+                            },
+                            "priority": {
+                                "type": "integer",
+                                "description": (
+                                    "Inbox priority 1-10 (higher = sooner). "
+                                    "Default 5."
+                                ),
+                            },
+                            "dedup_key": {
+                                "type": "string",
+                                "description": (
+                                    "Optional dedup key — repeated calls "
+                                    "with the same key are folded while "
+                                    "the message is unread."
+                                ),
+                            },
+                        },
+                        "required": ["agent_slug", "prompt"],
+                    },
+                },
+            },
         ]
 
     def _prefix_fingerprint(

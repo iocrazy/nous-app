@@ -145,6 +145,41 @@ def test_empty_skills_produces_no_tools(fake_agent):
 
 
 @pytest.mark.unit
+def test_delegate_tool_advertised_alongside_skill(fake_agent, fake_skills):
+    """M2.5: agents must see both Skill and Delegate in their tool list so
+    the LLM can choose to dispatch sub-tasks to other persistent agents."""
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    tools = composer._build_tools(fake_skills)
+    names = [t["function"]["name"] for t in tools]
+    assert "Skill" in names
+    assert "Delegate" in names
+
+
+@pytest.mark.unit
+def test_delegate_tool_schema_required_params(fake_agent, fake_skills):
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    tools = composer._build_tools(fake_skills)
+    delegate = next(t for t in tools if t["function"]["name"] == "Delegate")
+    params = delegate["function"]["parameters"]
+    assert "agent_slug" in params["properties"]
+    assert "prompt" in params["properties"]
+    # Optional knobs documented but not required
+    assert "title" in params["properties"]
+    assert "priority" in params["properties"]
+    assert "dedup_key" in params["properties"]
+    assert set(params["required"]) == {"agent_slug", "prompt"}
+
+
+@pytest.mark.unit
+def test_delegate_tool_omitted_when_no_skills(fake_agent):
+    """No skills bound → no tools advertised at all (Delegate included).
+    Agents without skills shouldn't show Delegate either — the contract is
+    'either both built-ins or neither', not 'Delegate always'."""
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    assert composer._build_tools([]) == []
+
+
+@pytest.mark.unit
 def test_description_html_escaped():
     composer = PromptComposer(agent_repo=None, skill_repo=None)
     skills = [
