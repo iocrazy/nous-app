@@ -111,6 +111,22 @@ class DelegateToolService:
                 )
             }
 
+        # Cycle detection: walk parent_run_id chain to root and reject
+        # if any ancestor run's agent already appears in the chain.
+        # Without this, A→B→A→B can stay under MAX_DELEGATION_DEPTH and
+        # ping-pong indefinitely. We also catch broken/loopy data via a
+        # hard cap on walk depth.
+        cycle = await self._detect_cycle(target_agent_id=target_agent_id)
+        if cycle is not None:
+            return {
+                "error": (
+                    f"cycle detected: target '{slug}' already appears in the "
+                    f"delegation chain (ancestor run {cycle})"
+                ),
+                "agent_slug": slug,
+                "cycle_run_id": str(cycle),
+            }
+
         # Forwarded options
         title = args.get("title")
         priority = int(args.get("priority") or 5)
@@ -175,3 +191,71 @@ class DelegateToolService:
                 "the target completes. For now the call returns immediately."
             ),
         }
+
+    # ────────────────────────────────────────────────────────────
+    # Cycle detection
+    # ────────────────────────────────────────────────────────────
+
+    # Walk depth cap. ``MAX_DELEGATION_DEPTH`` already bounds well-formed
+    # chains; this is a defense-in-depth limit so a corrupt parent_run_id
+    # cycle (data loop) doesn't loop the walker forever.
+    MAX_CHAIN_WALK_DEPTH = 16
+
+    async def _detect_cycle(self, *, target_agent_id: UUID):
+        """Return the ancestor run id where the target agent first
+        appears in the chain, or None if no cycle.
+
+        Walk = follow agent_runs.parent_run_id starting from
+        ``self.parent_run_id`` toward the root. At each hop, if
+        ``agent_id == target_agent_id`` we've found a cycle (target
+        already running upstream). Caller's own agent is also checked
+        — caller_agent_id == target_agent_id is filtered earlier as
+        self-delegate, but a delegation that would re-enter ANY agent
+        already on the chain is a cycle.
+        """
+        if self.parent_run_id is None:
+            return None
+
+        try:
+            from app.db.supabase_client import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+        except Exception as err:
+            logger.warning(f"[delegate] cycle-walk: admin client unavailable ({err})")
+            return None
+
+        current = self.parent_run_id
+        for _ in range(self.MAX_CHAIN_WALK_DEPTH):
+            if current is None:
+                return None
+            try:
+                row = (
+                    await client.table("agent_runs")
+                    .select("id,agent_id,parent_run_id")
+                    .eq("id", str(current))
+                    .maybe_single()
+                    .execute()
+                )
+            except Exception as err:
+                # Best-effort: if the lookup fails, fall through and
+                # let the rest of the dispatch continue. The depth cap
+                # still protects against runaway recursion.
+                logger.warning(f"[delegate] cycle-walk lookup failed at {current}: {err}")
+                return None
+
+            data = row.data if row and row.data else None
+            if not data:
+                return None
+
+            if str(data.get("agent_id")) == str(target_agent_id):
+                return data["id"]
+
+            parent = data.get("parent_run_id")
+            current = UUID(parent) if parent else None
+
+        # Walked the cap without resolution — treat as cycle to be safe.
+        logger.warning(
+            f"[delegate] cycle-walk hit MAX_CHAIN_WALK_DEPTH "
+            f"({self.MAX_CHAIN_WALK_DEPTH}) — refusing dispatch"
+        )
+        return self.parent_run_id
