@@ -822,14 +822,31 @@ export const TagsSettings: React.FC = () => {
                                   return;
                                 }
                                 setDragTagId(tag.id);
-                                // Required for the drag image to render in
-                                // some browsers; payload is unused since
-                                // dragTagId state carries the id.
                                 e.dataTransfer.effectAllowed = 'move';
+                                // Lead with a custom mediahub-only MIME.
+                                // Eagle's browser extension auto-pops its
+                                // "choose folder" wheel when it sees a
+                                // draggable element with a media-shaped
+                                // payload (image, uri-list, Files). Setting
+                                // a non-standard MIME first signals to such
+                                // extensions that this drag isn't an asset
+                                // they should intercept.
+                                try {
+                                  e.dataTransfer.setData(
+                                    'application/x-mediahub-tag',
+                                    tag.id,
+                                  );
+                                } catch {
+                                  /* ignore — older browsers reject custom mimes */
+                                }
+                                // text/plain stays as a universal fallback
+                                // so other drop targets (or our own
+                                // handleDrop reading dataTransfer) still
+                                // get the id.
                                 try {
                                   e.dataTransfer.setData('text/plain', tag.id);
                                 } catch {
-                                  /* ignore — some browsers reject for non-text mime */
+                                  /* ignore */
                                 }
                               }}
                               onDragEnd={() => {
