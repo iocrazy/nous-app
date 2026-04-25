@@ -196,6 +196,10 @@ export interface PaginatedResult<T> {
   totalCount: number;
   hasMore: boolean;
   page: number;
+  /** Cursor for the next page — pass back as ``cursor`` to fetch the
+   *  following slice. Null when there are no more pages. Currently the
+   *  resources.created_at of the last returned row (matches the ORDER BY). */
+  nextCursor: string | null;
 }
 
 /**
@@ -273,15 +277,22 @@ async function resolveLibraryTagIntersection(
 
 /**
  * Fetch video library (paginated) — queries through resources table.
- * Accepts server-side filter params; filters are pushed to PostgREST,
- * never applied client-side (the Downloads view relies on this for
- * correct pagination + totalCount).
+ *
+ * Cursor-based pagination: pass ``cursor=null`` for the first page, then
+ * forward ``result.nextCursor`` to subsequent calls. Falls back to
+ * page-based offset for legacy callers passing a ``page`` number, but
+ * cursor is preferred — it's O(1) regardless of how deep the user has
+ * scrolled, while OFFSET is O(skip) and gets noticeable past page ~50.
+ *
+ * Filters are pushed to PostgREST server-side; the Downloads view relies
+ * on this for correct pagination + totalCount.
  */
 export const fetchLibraryPaginated = async (
   page: number = 0,
   pageSize: number = PAGE_SIZE,
   signal?: AbortSignal,
   filters?: FetchLibraryFilterParams,
+  cursor?: string | null,
 ): Promise<PaginatedResult<ParsedMedia>> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
@@ -296,14 +307,14 @@ export const fetchLibraryPaginated = async (
     }
     const userId = session.user.id;
 
-    const from = page * pageSize;
     const f = filters ?? {};
+    const useCursor = cursor !== undefined; // explicit cursor mode (null = first page)
 
     // Tag intersection first — an empty set short-circuits the paginated
     // query (no rows, no count, no round-trip).
     const tagResourceIds = await resolveLibraryTagIntersection(supabase, f.tag_ids);
     if (tagResourceIds !== null && tagResourceIds.length === 0) {
-      return { data: [], totalCount: 0, hasMore: false, page };
+      return { data: [], totalCount: 0, hasMore: false, page, nextCursor: null };
     }
 
     const socialMetricActive =
@@ -328,8 +339,19 @@ export const fetchLibraryPaginated = async (
       .eq('creator_id', userId)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
-      .order('created_at', { ascending: false })
-      .range(from, from + pageSize);
+      .order('created_at', { ascending: false });
+
+    if (useCursor) {
+      // Cursor mode: WHERE created_at < cursor LIMIT pageSize+1 (extra row
+      // detects hasMore). O(1) regardless of depth thanks to the implicit
+      // index on resources.created_at.
+      if (cursor) query = query.lt('created_at', cursor);
+      query = query.limit(pageSize + 1);
+    } else {
+      // Legacy offset mode (kept for any caller that hasn't migrated).
+      const from = page * pageSize;
+      query = query.range(from, from + pageSize);
+    }
     query = applyLibraryFilters(query, f, tagResourceIds);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
@@ -340,10 +362,18 @@ export const fetchLibraryPaginated = async (
     const hasMore = rows.length > pageSize;
     const pageData = hasMore ? rows.slice(0, pageSize) : rows;
 
-    // Fast total count (only on first page). Duplicate the filter set
-    // so the count reflects what the user is seeing.
+    // Capture the cursor BEFORE flattenResourceMedia overwrites
+    // ``created_at`` with parsed_media.created_at (the row-level created_at
+    // belongs to the resources table — that's what the ORDER BY uses).
+    const lastRow = pageData[pageData.length - 1];
+    const nextCursor =
+      hasMore && lastRow ? (lastRow as { created_at?: string }).created_at ?? null : null;
+
+    // Fast total count (only on first page — cursor=null OR page=0). Duplicate
+    // the filter set so the count reflects what the user is seeing.
     let totalCount = -1;
-    if (page === 0) {
+    const isFirstPage = useCursor ? cursor == null : page === 0;
+    if (isFirstPage) {
       let countQuery = supabase
         .from('resources')
         .select(`id, ${mediaJoinToken}()`, { count: 'exact', head: true })
@@ -360,6 +390,7 @@ export const fetchLibraryPaginated = async (
       totalCount,
       hasMore,
       page,
+      nextCursor,
     };
   } catch (err: any) {
     console.error('Library query failed:', err?.message || err);
