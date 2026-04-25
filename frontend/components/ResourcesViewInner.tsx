@@ -31,6 +31,12 @@ import {
   moveResourceItem,
   moveFolder,
 } from '../services/resourceService';
+import {
+  RESOURCE_SCOPE_OPTIONS,
+  loadResourceSearchScope,
+  saveResourceSearchScope,
+  type ResourceSearchField,
+} from './resourceSearchScope';
 
 // ─── Component ────────────────────────────────────────
 
@@ -72,6 +78,16 @@ export const ResourcesViewInner: React.FC = () => {
   // ─── AI search state ──────────────────────────────────
   const [aiSearchMatchedMediaIds, setAiSearchMatchedMediaIds] = useState<Set<string> | null>(null);
   const [isAISearching, setIsAISearching] = useState(false);
+
+  // ─── Resource search scope (Eagle-style) ─────────────
+  const [resourceSearchScope, setResourceSearchScope] = useState<ResourceSearchField[]>(
+    () => loadResourceSearchScope(),
+  );
+  const handleResourceSearchScopeChange = useCallback((next: string[]) => {
+    const typed = next as ResourceSearchField[];
+    setResourceSearchScope(typed);
+    saveResourceSearchScope(typed);
+  }, []);
 
   // ─── Context menu state ──────────────────────────────
   const [contextMenu, setContextMenu] = useState<{
@@ -293,6 +309,7 @@ export const ResourcesViewInner: React.FC = () => {
     aiSearchMatchedMediaIds, scopeType, selectedFolderId, selectedLibraryId,
     selectedSmartFolderId, isSharedView, isRecycleView, isDownloadsView,
     smartFolders, libraries, folderChain, navigate, resPath, setRecycleFolderId,
+    searchScope: resourceSearchScope,
   });
 
   // ─── Operations hook ──────────────────────────────────
@@ -410,6 +427,9 @@ export const ResourcesViewInner: React.FC = () => {
     currentSortLabel,
     onQueryChange: handleResourceQueryChange, onAISearch: handleResourceAISearch,
     onSearchClear: handleResourceSearchClear, isAISearching, uploading,
+    searchScope: resourceSearchScope,
+    onSearchScopeChange: handleResourceSearchScopeChange,
+    scopeOptions: RESOURCE_SCOPE_OPTIONS,
     overallProgress: upload.overallProgress, fileInputRef, folderInputRef,
     canUploadDrop: canUpload, dragOver, onDragEnter: handleDragEnter,
     onDragOver: handleDragOver, onDragLeave: handleDragLeave, onDrop: handleDrop,
@@ -439,7 +459,8 @@ export const ResourcesViewInner: React.FC = () => {
     allSelectableIds, sortOptions, filterBarConfig, allTags, availablePlatforms,
     uploadsAllowedChips,
     currentSortLabel, handleResourceQueryChange, handleResourceAISearch, handleResourceSearchClear,
-    isAISearching, uploading, upload.overallProgress, fileInputRef, folderInputRef, canUpload,
+    isAISearching, resourceSearchScope, handleResourceSearchScopeChange,
+    uploading, upload.overallProgress, fileInputRef, folderInputRef, canUpload,
     dragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop,
     handleResourceClick, handleResourceDoubleClick, handleFileContextMenu, handleFolderContextMenu,
     handleEmptyAreaContextMenu, handleCardClick, handleToggleSelect, handleDropOnFolder,

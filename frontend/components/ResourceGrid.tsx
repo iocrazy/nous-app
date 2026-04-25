@@ -101,6 +101,12 @@ export interface ResourceGridProps {
   onSearchClear: () => void;
   isAISearching: boolean;
 
+  // Search-scope picker — when these are passed, the magnifier dropdown
+  // shows the Eagle-style scope checkboxes (Name / Notes / Tags etc).
+  searchScope?: string[];
+  onSearchScopeChange?: (next: string[]) => void;
+  scopeOptions?: import('./ToolbarSearch').ScopeOption[];
+
   // Upload
   uploading: boolean;
   overallProgress: number;
@@ -187,6 +193,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   onAISearch,
   onSearchClear,
   isAISearching,
+  searchScope,
+  onSearchScopeChange,
+  scopeOptions,
   uploading,
   overallProgress,
   fileInputRef,
@@ -405,6 +414,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               isSearching={isAISearching}
               placeholder={t('resources.searchFiles')}
               className="w-48"
+              searchScope={searchScope}
+              onSearchScopeChange={onSearchScopeChange}
+              scopeOptions={scopeOptions}
             />
 
             {/* Filter bar visibility toggle — plain funnel. Shows / hides

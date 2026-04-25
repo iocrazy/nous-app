@@ -13,6 +13,13 @@ import { ALL_SEARCH_FIELDS } from '../services/searchService';
 
 export type SearchMode = 'keyword' | 'hybrid' | 'semantic';
 
+export interface ScopeOption {
+  id: string;
+  label: string;
+  /** Optional i18n key — when provided, label is used as the fallback. */
+  i18nKey?: string;
+}
+
 interface ToolbarSearchProps {
   /** Called on every keystroke in keyword mode */
   onQueryChange: (query: string) => void;
@@ -26,11 +33,14 @@ interface ToolbarSearchProps {
   className?: string;
   /** Search scope (which fields to scan). When provided, the magnifier
    *  dropdown also shows scope checkboxes — Eagle-style. */
-  searchScope?: SearchField[];
-  onSearchScopeChange?: (next: SearchField[]) => void;
+  searchScope?: string[];
+  onSearchScopeChange?: (next: string[]) => void;
+  /** Per-host scope options. Defaults to media (parsed_media) fields when
+   *  omitted, so the existing DownloadsView call site keeps working. */
+  scopeOptions?: ScopeOption[];
 }
 
-const SCOPE_LABELS: Record<SearchField, string> = {
+const MEDIA_SCOPE_LABELS: Record<SearchField, string> = {
   title: 'Title',
   description: 'Description',
   author: 'Author',
@@ -39,6 +49,12 @@ const SCOPE_LABELS: Record<SearchField, string> = {
   tags: 'Tags',
   notes: 'Notes',
 };
+
+const DEFAULT_MEDIA_SCOPE_OPTIONS: ScopeOption[] = ALL_SEARCH_FIELDS.map((field) => ({
+  id: field,
+  label: MEDIA_SCOPE_LABELS[field],
+  i18nKey: `search.scope.${field}`,
+}));
 
 const MODES: Array<{ id: SearchMode; label: string; desc: string; Icon: typeof Search }> = [
   { id: 'keyword', label: 'Quick Search', desc: 'Instant local filter', Icon: Search },
@@ -55,7 +71,9 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
   className = '',
   searchScope,
   onSearchScopeChange,
+  scopeOptions,
 }) => {
+  const effectiveScopeOptions = scopeOptions ?? DEFAULT_MEDIA_SCOPE_OPTIONS;
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<SearchMode>('keyword');
@@ -197,16 +215,16 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
               <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
                 {t('search.scopeHeader', 'Search Scope')}
               </div>
-              {ALL_SEARCH_FIELDS.map((field) => {
-                const checked = searchScope.includes(field);
+              {effectiveScopeOptions.map((opt) => {
+                const checked = searchScope.includes(opt.id);
                 return (
                   <button
-                    key={field}
+                    key={opt.id}
                     type="button"
                     onClick={() => {
                       const next = checked
-                        ? searchScope.filter((f) => f !== field)
-                        : [...searchScope, field];
+                        ? searchScope.filter((f) => f !== opt.id)
+                        : [...searchScope, opt.id];
                       // Refuse to disable everything — empty scope returns
                       // zero results and confuses the user.
                       if (next.length === 0) return;
@@ -214,7 +232,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
                     }}
                     className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/60"
                   >
-                    <span>{t(`search.scope.${field}`, SCOPE_LABELS[field])}</span>
+                    <span>{opt.i18nKey ? t(opt.i18nKey, opt.label) : opt.label}</span>
                     {checked && <Check size={13} className="shrink-0 text-indigo-400" />}
                   </button>
                 );

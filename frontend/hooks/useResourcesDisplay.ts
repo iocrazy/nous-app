@@ -20,6 +20,8 @@ import { useTranslation } from 'react-i18next';
 import type { Folder, ResourceItem, SmartCollection, Library } from '../types';
 import type { SortBy } from '../contexts/ResourcesContext';
 import type { BreadcrumbSegment } from '../components/Breadcrumb';
+import type { ResourceSearchField } from '../components/resourceSearchScope';
+import { DEFAULT_RESOURCE_SCOPE } from '../components/resourceSearchScope';
 
 interface UseResourcesDisplayOptions {
   sidebarView: string;
@@ -47,6 +49,9 @@ interface UseResourcesDisplayOptions {
   navigate: (path: string) => void;
   resPath: (path: string) => string;
   setRecycleFolderId: (id: string | null) => void;
+  /** Eagle-style scope toggles — when omitted, defaults to all three
+   *  fields (name / notes / tags). */
+  searchScope?: ResourceSearchField[];
 }
 
 export function useResourcesDisplay({
@@ -75,6 +80,7 @@ export function useResourcesDisplay({
   navigate,
   resPath,
   setRecycleFolderId,
+  searchScope = DEFAULT_RESOURCE_SCOPE,
 }: UseResourcesDisplayOptions) {
   const { t } = useTranslation();
 
@@ -128,11 +134,23 @@ export function useResourcesDisplay({
     let items = currentItems;
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.trim().toLowerCase();
+      const wantName = searchScope.includes('name');
+      const wantNotes = searchScope.includes('notes');
+      const wantTags = searchScope.includes('tags');
       items = items.filter((item) => {
-        const filename = (item.resource?.filename || '').toLowerCase();
-        const notes = (item.resource?.notes || '').toLowerCase();
-        const tagNames = (resourceTagNamesMap[String(item.resource?.id)] || '').toLowerCase();
-        return filename.includes(q) || notes.includes(q) || tagNames.includes(q);
+        if (wantName) {
+          const filename = (item.resource?.filename || '').toLowerCase();
+          if (filename.includes(q)) return true;
+        }
+        if (wantNotes) {
+          const notes = (item.resource?.notes || '').toLowerCase();
+          if (notes.includes(q)) return true;
+        }
+        if (wantTags) {
+          const tagNames = (resourceTagNamesMap[String(item.resource?.id)] || '').toLowerCase();
+          if (tagNames.includes(q)) return true;
+        }
+        return false;
       });
     }
     if (aiSearchMatchedMediaIds) {
@@ -147,6 +165,7 @@ export function useResourcesDisplay({
     debouncedSearch,
     aiSearchMatchedMediaIds,
     resourceTagNamesMap,
+    searchScope,
   ]);
 
   const sortedItems = useMemo(() => {
@@ -164,9 +183,13 @@ export function useResourcesDisplay({
 
   const filteredFolders = useMemo(() => {
     if (!debouncedSearch.trim()) return childFolders;
+    // Folders only have a name. If 'name' isn't in the scope, the user
+    // explicitly opted out of name search — leave folders unfiltered
+    // rather than hiding everything.
+    if (!searchScope.includes('name')) return childFolders;
     const q = debouncedSearch.trim().toLowerCase();
     return childFolders.filter((f) => f.name.toLowerCase().includes(q));
-  }, [childFolders, debouncedSearch]);
+  }, [childFolders, debouncedSearch, searchScope]);
 
   const allSelectableIds = useMemo(() => {
     const ids: string[] = [];
