@@ -153,38 +153,65 @@ export const TagsSettings: React.FC = () => {
     });
   }, [tags, searchQuery]);
 
+  // Names that collide with the sentinel "(no group)" display label — if
+  // a real group has one of these names (legacy data — backend now blocks
+  // creating new ones), we merge its tags into the sentinel bucket so the
+  // UI doesn't show two "Uncategorized" sections at once.
+  const RESERVED_GROUP_NAMES = useMemo(
+    () => new Set(['uncategorized', '未分类']),
+    [],
+  );
+  const isReservedGroupName = (name: string | null | undefined) =>
+    !!name && RESERVED_GROUP_NAMES.has(name.trim().toLowerCase());
+
+  // Real groups minus any whose name collides with the sentinel.
+  const visibleGroups = useMemo(
+    () => groups.filter((g) => !isReservedGroupName(g.name)),
+    [groups],
+  );
+
   // Count tags per group (for sidebar, uses unfiltered tags)
   const groupCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const group of groups) {
+    for (const group of visibleGroups) {
       counts.set(group.name, 0);
     }
     counts.set('__uncategorized__', 0);
     for (const tag of tags) {
-      const key = tag.group_name || '__uncategorized__';
+      // Treat tags from a reserved-named real group as sentinel-bucket
+      // tags so the count and the right pane line up.
+      const collisionGroup = isReservedGroupName(tag.group_name);
+      const key =
+        !tag.group_name || collisionGroup ? '__uncategorized__' : tag.group_name;
       counts.set(key, (counts.get(key) || 0) + 1);
     }
     return counts;
-  }, [tags, groups]);
+  }, [tags, visibleGroups]);
 
   // Group tags by group_name, preserving group sort order
   const groupedTags = useMemo(() => {
     const groupMap = new Map<string, Tag[]>();
 
-    for (const group of groups) {
+    for (const group of visibleGroups) {
       groupMap.set(group.name, []);
     }
     groupMap.set('__uncategorized__', []);
 
-    // Apply sidebar filter + search
+    // Apply sidebar filter + search. Reserved-named groups are merged into
+    // the sentinel for both the filter check and the bucket assignment.
     const source = filteredTags.filter((tag) => {
+      const collisionGroup = isReservedGroupName(tag.group_name);
       if (selectedGroup === null) return true;
-      if (selectedGroup === '__uncategorized__') return !tag.group_name;
+      if (selectedGroup === '__uncategorized__') {
+        return !tag.group_name || collisionGroup;
+      }
       return tag.group_name === selectedGroup;
     });
 
     for (const tag of source) {
-      const key = tag.group_name || '__uncategorized__';
+      const collisionGroup = isReservedGroupName(tag.group_name);
+      const key =
+        !tag.group_name || collisionGroup ? '__uncategorized__' : tag.group_name;
       if (!groupMap.has(key)) groupMap.set(key, []);
       groupMap.get(key)!.push(tag);
     }
@@ -199,7 +226,7 @@ export const TagsSettings: React.FC = () => {
       }
     }
     return result;
-  }, [filteredTags, groups, selectedGroup]);
+  }, [filteredTags, visibleGroups, selectedGroup]);
 
   // Toggle enabled status
   const handleToggleEnabled = async (tag: Tag, e: React.MouseEvent) => {
@@ -564,10 +591,42 @@ export const TagsSettings: React.FC = () => {
               <span className="text-xs text-zinc-500">{groupCounts.get('__uncategorized__') || 0}</span>
             </button>
 
+            {/* Collision banner — a real group whose name matches the
+                sentinel "Uncategorized" exists from legacy data. We've
+                merged its tags into the sentinel above; offer a one-click
+                cleanup so the user can delete the orphan group (its tags
+                stay, just become truly uncategorized). */}
+            {groups.some((g) => isReservedGroupName(g.name)) && (
+              <div className="mx-3 mt-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200/90 space-y-2">
+                <div>
+                  Found a custom group named "Uncategorized" — its tags
+                  have been merged into the bucket above.
+                </div>
+                <button
+                  onClick={async () => {
+                    const orphans = groups.filter((g) =>
+                      isReservedGroupName(g.name),
+                    );
+                    for (const g of orphans) {
+                      try {
+                        await deleteTagGroup(g.id);
+                      } catch (err) {
+                        console.error('Cleanup orphan group failed:', err);
+                      }
+                    }
+                    loadData();
+                  }}
+                  className="w-full text-center px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 transition-colors"
+                >
+                  Clean up
+                </button>
+              </div>
+            )}
+
             {/* Groups header */}
             <div className="flex items-center justify-between pt-4 pb-1 px-3">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                Groups ({groups.length})
+                Groups ({visibleGroups.length})
               </span>
               <button
                 onClick={() => setShowCreateGroup(!showCreateGroup)}
@@ -603,7 +662,7 @@ export const TagsSettings: React.FC = () => {
             )}
 
             {/* Group list */}
-            {groups.map((group) => {
+            {visibleGroups.map((group) => {
               const isTagDropTarget = tagDropTargetGroupId === group.id;
               return (
               <div

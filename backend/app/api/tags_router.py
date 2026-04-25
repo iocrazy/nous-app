@@ -57,11 +57,27 @@ class TagGroupCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50)
 
 
+# Names that collide with the frontend's "(no group)" sentinel — forbidden
+# as real-group names so the sidebar / picker render unambiguously.
+_RESERVED_GROUP_NAMES = {"uncategorized", "未分类"}
+
+
+def _validate_group_name(name: str) -> str:
+    cleaned = name.strip()
+    if cleaned.lower() in _RESERVED_GROUP_NAMES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"'{cleaned}' is reserved for the built-in uncategorized bucket — pick a different name.",
+        )
+    return cleaned
+
+
 @router.post(
     "/groups", response_model=TagGroupItem, status_code=status.HTTP_201_CREATED
 )
 async def create_tag_group(auth: AuthDep, body: TagGroupCreate):
     """Create a new tag group."""
+    body.name = _validate_group_name(body.name)
     client = await get_async_supabase_admin()
     # Get max sort_order
     existing = (
@@ -95,6 +111,7 @@ class TagGroupUpdate(BaseModel):
 @router.put("/groups/{group_id}", response_model=TagGroupItem)
 async def rename_tag_group(auth: AuthDep, group_id: str, body: TagGroupUpdate):
     """Rename a tag group."""
+    body.name = _validate_group_name(body.name)
     client = await get_async_supabase_admin()
     result = (
         await client.table("tag_groups")
