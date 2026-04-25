@@ -46,8 +46,6 @@ CACHE_BOUNDARY_MARKER = "<!-- CACHE_BOUNDARY -->"
 class AgentNotFoundError(Exception):
     """Raised when a requested agent slug does not exist in ``ai_agents``."""
 
-    pass
-
 
 @dataclass(frozen=True)
 class RecalledMemory:

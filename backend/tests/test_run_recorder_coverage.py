@@ -55,6 +55,12 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # session to record against. Memory extraction LLM calls are tracked
     # via Celery task metrics, not RunRecorder.
     "tasks/memory_tasks.py": "memory extraction in Celery task, off-chat-path",
+    # M1.5 wiring: cheap-model auxiliary LLM call for memory ranker.
+    # Side-channel from the main agent run; cost tracked separately.
+    "services/ai_library_chat_wiring.py": "memory ranker auxiliary LLM, side-channel",
+    # M1.5 chat compactor: cheap-model summarizer for history compaction.
+    # Side-channel from the main agent run; cost tracked separately.
+    "services/ai_library_chat_service.py": "compaction summariser auxiliary LLM, side-channel",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a

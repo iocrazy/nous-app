@@ -26,11 +26,14 @@ from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
-from app.services.agent_runner import AgentRunner
+from app.services.agent_runner import AgentRunner  # noqa: F401 — patched in tests
 from app.services.ai_adapters.factory import get_adapter, provider_key_for_model
+from app.services.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.prompt_composer import ComposerInput, PromptComposer
 from app.services.run_recorder import AgentPausedError, RunRecorder
-from app.services.skill_tool_service import SkillToolService
+from app.services.skill_tool_service import (  # noqa: F401 — patched in tests
+    SkillToolService,
+)
 
 
 class AILibraryChatService:
@@ -262,8 +265,29 @@ class AILibraryChatService:
         )
         user_msg = user_msg_resp.data[0] if user_msg_resp.data else None
 
-        # Compose prompt + build runner.
-        composer = PromptComposer(AgentRepository(), SkillRepository())
+        # M1.5 wiring: load agent record so we can read budget/fallback,
+        # then build the full runner stack (HookRegistry pre-populated,
+        # fallback chain wrapping adapter, memory recall pre-fetched).
+        agent_repo = AgentRepository()
+        skill_repo = SkillRepository()
+        agent_record = await agent_repo.get_by_slug(agent_slug)
+        if not agent_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"agent slug not found: {agent_slug}",
+            )
+
+        stack = await build_agent_runner_stack(
+            agent=agent_record,
+            skill_repo=skill_repo,
+            user_id=user_id,
+            session_id=session_id,
+            user_query=content,
+            settings=settings,
+        )
+
+        # Compose prompt with recalled memories injected after cache_boundary.
+        composer = PromptComposer(agent_repo, skill_repo)
         composed = await composer.compose(
             ComposerInput(
                 agent_slug=agent_slug,
@@ -273,14 +297,11 @@ class AILibraryChatService:
                     "bound skill is clearly applicable; otherwise answer "
                     "directly in natural language."
                 ),
+                recalled_memories=stack.recalled_memories,
             )
         )
 
-        adapter = get_adapter(composed.model or "", settings)
-        runner = AgentRunner(
-            adapter=adapter,
-            skill_tool=SkillToolService(SkillRepository()),
-        )
+        runner = stack.runner
 
         # Build the message history payload: prior turns + new user turn.
         # We always pass role+content; tool-call stubs that AgentRunner
@@ -293,6 +314,12 @@ class AILibraryChatService:
                 continue
             user_messages.append({"role": role, "content": msg.get("content") or ""})
         user_messages.append({"role": "user", "content": content})
+
+        # M1.5 wiring: compact the message list if it has grown past the
+        # threshold. Compactor preserves tool_use/result pairs so the
+        # next API call won't 400. Failure degrades to "send full history
+        # and let the model deal with it" — never breaks the chat.
+        user_messages = await self._maybe_compact(user_messages)
 
         model = composed.model or ""
         try:
@@ -388,3 +415,84 @@ class AILibraryChatService:
             "usage": usage_snapshot,
             "run_id": str(run_id) if run_id else None,
         }
+
+    async def _maybe_compact(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Compact long histories. Failure → return original messages.
+
+        Compaction calls a cheap auxiliary LLM to summarise the
+        head; degrading on failure is fine since the LLM call itself
+        will eventually 400 if context truly overflows, and the user
+        will see a clear error instead of a silent corruption.
+        """
+        from app.services.llm_compactor import (
+            DEFAULT_AUTO_COMPACTION_INPUT_TOKENS,
+            compact_messages,
+            estimate_tokens,
+        )
+
+        if estimate_tokens(messages) < DEFAULT_AUTO_COMPACTION_INPUT_TOKENS:
+            return messages
+
+        async def _summarizer(head: List[Dict[str, Any]]) -> str:
+            try:
+                cheap_model = "qwen-turbo"
+                adapter = get_adapter(cheap_model, settings)
+                from uuid import UUID as _UUID
+
+                from app.schemas.ai_library import ComposedSystemPrompt
+
+                composed = ComposedSystemPrompt(
+                    agent_id=_UUID(int=0),
+                    agent_slug="compactor",
+                    model=cheap_model,
+                    temperature=0.0,
+                    max_tokens=2048,
+                    system_message=(
+                        "You summarise chat history. Capture decisions made, "
+                        "facts established, and the current task state. "
+                        "Be terse. No preamble."
+                    ),
+                    tools=[],
+                    skill_manifest=[],
+                    cache_fingerprint="compactor_v1",
+                )
+                resp = await adapter.call(
+                    composed,
+                    [{"role": "user", "content": _format_history_for_summary(head)}],
+                )
+                return resp["choices"][0]["message"].get("content") or ""
+            except Exception:
+                logger.exception(
+                    "[chat] compactor summarizer failed; using empty summary"
+                )
+                return "[history truncated for context length]"
+
+        try:
+            result = await compact_messages(messages, summarizer=_summarizer)
+            if result.compacted:
+                logger.info(
+                    "[chat] compacted: %d → %d tokens (%d head messages summarised)",
+                    result.estimated_input_tokens_before,
+                    result.estimated_input_tokens_after,
+                    result.head_message_count,
+                )
+                return result.messages
+        except Exception:
+            logger.exception("[chat] compact_messages crashed; sending full history")
+
+        return messages
+
+
+def _format_history_for_summary(messages: List[Dict[str, Any]]) -> str:
+    """Render head messages as a numbered transcript for the summariser."""
+    parts = []
+    for i, msg in enumerate(messages, start=1):
+        role = msg.get("role") or "?"
+        content = msg.get("content") or ""
+        if isinstance(content, list):
+            content = " ".join(str(p) for p in content)
+        truncated = content[:1000] + ("..." if len(content) > 1000 else "")
+        parts.append(f"[{i}] {role}: {truncated}")
+    return "\n".join(parts)
