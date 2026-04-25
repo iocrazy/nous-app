@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type LazyExoticComponent } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
 import { AppLayout } from './components/AppLayout';
@@ -8,31 +8,64 @@ import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTe
 // Eagerly loaded (needed immediately)
 import { LoginPage } from './pages/LoginPage';
 
+// Stale-chunk auto-reload: when a deploy ships and the user's session
+// holds onto an HTML referencing now-deleted chunk hashes, ``import()``
+// rejects with "Failed to fetch dynamically imported module". Catch
+// that, force a one-time reload (sessionStorage sentinel prevents an
+// infinite loop on real network errors), and surface the error
+// otherwise. This makes deploys self-healing for users who don't hard
+// refresh.
+const STALE_CHUNK_RELOADED_KEY = 'mh_stale_chunk_reloaded';
+function lazyWithRetry<T extends { default: any }>(
+  factory: () => Promise<T>,
+): LazyExoticComponent<any> {
+  return lazy(() =>
+    factory().catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isStaleChunk =
+        /Failed to fetch dynamically imported module/i.test(msg) ||
+        /Loading chunk \d+ failed/i.test(msg) ||
+        /error loading dynamically imported module/i.test(msg);
+      if (isStaleChunk && typeof window !== 'undefined') {
+        const reloaded = sessionStorage.getItem(STALE_CHUNK_RELOADED_KEY);
+        if (!reloaded) {
+          sessionStorage.setItem(STALE_CHUNK_RELOADED_KEY, String(Date.now()));
+          window.location.reload();
+          // Never-resolving promise so React stays on the loader instead
+          // of flashing the error UI before the reload kicks in.
+          return new Promise<T>(() => {});
+        }
+      }
+      throw err;
+    }),
+  );
+}
+
 // Lazy-loaded pages (code-split per route)
-const ParserPage = lazy(() => import('./pages/ParserPage').then(m => ({ default: m.ParserPage })));
-const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
-const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const CleanupPage = lazy(() => import('./pages/CleanupPage').then(m => ({ default: m.CleanupPage })));
-const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
-const PointsPage = lazy(() => import('./pages/PointsPage').then(m => ({ default: m.PointsPage })));
-const BillingPage = lazy(() => import('./pages/BillingPage').then(m => ({ default: m.BillingPage })));
-const MembersPage = lazy(() => import('./pages/MembersPage').then(m => ({ default: m.MembersPage })));
-const ResourcesPage = lazy(() => import('./pages/ResourcesPage').then(m => ({ default: m.ResourcesPage })));
-const TodolistPage = lazy(() => import('./pages/TodolistPage').then(m => ({ default: m.TodolistPage })));
-const FileDetailDispatcher = lazy(() => import('./pages/FileDetailDispatcher').then(m => ({ default: m.FileDetailDispatcher })));
-const SharePage = lazy(() => import('./pages/SharePage').then(m => ({ default: m.SharePage })));
-const SharedPage = lazy(() => import('./pages/SharedPage').then(m => ({ default: m.SharedPage })));
-const ShortcutsTagsPage = lazy(() => import('./pages/ShortcutsTagsPage').then(m => ({ default: m.ShortcutsTagsPage })));
-const StoryboardWorkbench = lazy(() => import('./pages/StoryboardWorkbench').then(m => ({ default: m.StoryboardWorkbench })));
-const ScriptEditor = lazy(() => import('./pages/ScriptEditor').then(m => ({ default: m.ScriptEditor })));
-const DownloadDetailPage = lazy(() => import('./pages/DownloadDetailPage').then(m => ({ default: m.DownloadDetailPage })));
-const AgentsPage = lazy(() => import('./pages/AgentsPage').then(m => ({ default: m.AgentsPage })));
-const SkillsPage = lazy(() => import('./pages/SkillsPage').then(m => ({ default: m.SkillsPage })));
-const UsagePage = lazy(() => import('./pages/UsagePage').then(m => ({ default: m.UsagePage })));
-const AILibraryLayout = lazy(() =>
+const ParserPage = lazyWithRetry(() => import('./pages/ParserPage').then(m => ({ default: m.ParserPage })));
+const DashboardPage = lazyWithRetry(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const SettingsPage = lazyWithRetry(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const CleanupPage = lazyWithRetry(() => import('./pages/CleanupPage').then(m => ({ default: m.CleanupPage })));
+const ProjectsPage = lazyWithRetry(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
+const PointsPage = lazyWithRetry(() => import('./pages/PointsPage').then(m => ({ default: m.PointsPage })));
+const BillingPage = lazyWithRetry(() => import('./pages/BillingPage').then(m => ({ default: m.BillingPage })));
+const MembersPage = lazyWithRetry(() => import('./pages/MembersPage').then(m => ({ default: m.MembersPage })));
+const ResourcesPage = lazyWithRetry(() => import('./pages/ResourcesPage').then(m => ({ default: m.ResourcesPage })));
+const TodolistPage = lazyWithRetry(() => import('./pages/TodolistPage').then(m => ({ default: m.TodolistPage })));
+const FileDetailDispatcher = lazyWithRetry(() => import('./pages/FileDetailDispatcher').then(m => ({ default: m.FileDetailDispatcher })));
+const SharePage = lazyWithRetry(() => import('./pages/SharePage').then(m => ({ default: m.SharePage })));
+const SharedPage = lazyWithRetry(() => import('./pages/SharedPage').then(m => ({ default: m.SharedPage })));
+const ShortcutsTagsPage = lazyWithRetry(() => import('./pages/ShortcutsTagsPage').then(m => ({ default: m.ShortcutsTagsPage })));
+const StoryboardWorkbench = lazyWithRetry(() => import('./pages/StoryboardWorkbench').then(m => ({ default: m.StoryboardWorkbench })));
+const ScriptEditor = lazyWithRetry(() => import('./pages/ScriptEditor').then(m => ({ default: m.ScriptEditor })));
+const DownloadDetailPage = lazyWithRetry(() => import('./pages/DownloadDetailPage').then(m => ({ default: m.DownloadDetailPage })));
+const AgentsPage = lazyWithRetry(() => import('./pages/AgentsPage').then(m => ({ default: m.AgentsPage })));
+const SkillsPage = lazyWithRetry(() => import('./pages/SkillsPage').then(m => ({ default: m.SkillsPage })));
+const UsagePage = lazyWithRetry(() => import('./pages/UsagePage').then(m => ({ default: m.UsagePage })));
+const AILibraryLayout = lazyWithRetry(() =>
   import('./components/AILibrary/AILibraryLayout').then(m => ({ default: m.AILibraryLayout })),
 );
-const AILibraryIndex = lazy(() =>
+const AILibraryIndex = lazyWithRetry(() =>
   import('./pages/AILibraryIndex').then(m => ({ default: m.AILibraryIndex })),
 );
 
