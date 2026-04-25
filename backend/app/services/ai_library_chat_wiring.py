@@ -39,6 +39,7 @@ from app.services.llm_fallback_chain import LLMFallbackChain
 from app.services.memory.retriever import MemoryRetriever
 from app.services.prompt_composer import RecalledMemory
 from app.services.skill_tool_service import SkillToolService
+from app.services.workforce.delegate_tool import DelegateToolService
 
 logger = logging.getLogger(__name__)
 
@@ -141,11 +142,24 @@ async def build_agent_runner_stack(
         adapter_factory=_adapter_factory,
     )
 
-    # ── 4. AgentRunner ──────────────────────────────────────────────
+    # ── 4. Delegate tool (M2.5 wiring) ──────────────────────────────
+    # ChatPanel-initiated turns are always at the top of the dispatch
+    # tree, so parent_run_id=None and agent_depth=0. Worker-initiated
+    # runs (M3) will wire this through a different entry point that
+    # inherits depth from the parent agent_runs row.
+    delegate_tool = DelegateToolService(
+        caller_agent_id=UUID(agent["id"]),
+        caller_user_id=user_id,
+        parent_run_id=None,
+        agent_depth=0,
+    )
+
+    # ── 5. AgentRunner ──────────────────────────────────────────────
     runner = AgentRunner(
         adapter=fallback_chain,
         skill_tool=SkillToolService(skill_repo),
         hooks=registry,
+        delegate_tool=delegate_tool,
     )
 
     return AgentRunnerStack(
