@@ -30,6 +30,7 @@ from uuid import UUID
 
 from app.services.agent_runner import AgentRunner
 from app.services.ai_adapters import get_adapter
+from app.services.ai_adapters.factory import get_adapter_for_user
 from app.services.embedding_service import EmbeddingService
 from app.services.hooks import HookRegistry
 from app.services.hooks.budget_guard import BudgetGuardHook
@@ -141,9 +142,16 @@ async def build_agent_runner_stack(
         priority=80,
     )
 
-    # ── 3. Fallback-wrapped adapter ─────────────────────────────────
+    # ── 3. Fallback-wrapped adapter (per-user BYO keys with global fallback) ─
+    # Loads user_settings.ai_settings.ai_providers once per turn so
+    # Doubao / OpenAI / Claude / Qwen all read the user's BYO key when
+    # configured, falling back to global env vars otherwise. M1.5 originally
+    # used the global-only get_adapter — that meant any agent on a
+    # provider without a global env key (like Doubao here) would 401.
+    user_provider_config = await _load_user_provider_config(user_id)
+
     def _adapter_factory(model: str):
-        return get_adapter(model, settings)
+        return get_adapter_for_user(model, user_provider_config, settings)
 
     fallback_chain = LLMFallbackChain(
         primary_model=primary_model,
@@ -268,6 +276,38 @@ def _build_sonnet_call(settings: Any):
         return resp["choices"][0]["message"].get("content") or ""
 
     return _call
+
+
+async def _load_user_provider_config(user_id: UUID) -> dict[str, Any]:
+    """Read ``user_settings.settings_json.ai_settings.ai_providers`` for
+    one user. Returns the providers dict or empty {} on any failure.
+
+    The dict shape is ``{"doubao": {"api_key": "...", "base_url": "..."},
+    "qwen": {...}, "openai": {...}, ...}``. Only the provider whose key
+    matches the agent's model is actually used by ``get_adapter_for_user``.
+
+    Best-effort: a missing row, malformed JSON, or DB outage degrades to
+    "use global env keys only" rather than crashing the chat turn.
+    """
+    try:
+        from app.db.supabase_client import get_async_supabase_admin
+
+        client = await get_async_supabase_admin()
+        result = (
+            await client.table("user_settings")
+            .select("settings_json")
+            .eq("user_id", str(user_id))
+            .maybe_single()
+            .execute()
+        )
+        if not result or not result.data:
+            return {}
+        settings_json = result.data.get("settings_json") or {}
+        ai_settings = settings_json.get("ai_settings") or {}
+        return ai_settings.get("ai_providers") or {}
+    except Exception as err:
+        logger.warning(f"[wiring] user_settings lookup failed for {user_id}: {err}")
+        return {}
 
 
 def _get_redis_client_or_none():
