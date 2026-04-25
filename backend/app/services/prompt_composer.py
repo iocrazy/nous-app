@@ -188,9 +188,7 @@ class PromptComposer:
 
         return "\n\n".join(parts)
 
-    def _render_memory_section(
-        self, memories: list["RecalledMemory"]
-    ) -> str:
+    def _render_memory_section(self, memories: list["RecalledMemory"]) -> str:
         """Render <recalled_memories> XML manifest with int-mapped refs.
 
         LLM sees [0]/[1]/[2] not raw UUIDs (Mem Zero pattern).

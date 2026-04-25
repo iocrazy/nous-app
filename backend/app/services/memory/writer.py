@@ -40,8 +40,12 @@ class MemoryWriter:
 
     user_extractor: UserMemoryExtractor
     assistant_extractor: AssistantMemoryExtractor
-    embedding_service: Any  # exposes async generate_embedding(text) -> list[float] | None
-    supabase_client: Any    # async client, exposes table('agent_memories').insert().execute()
+    embedding_service: (
+        Any  # exposes async generate_embedding(text) -> list[float] | None
+    )
+    supabase_client: (
+        Any  # async client, exposes table('agent_memories').insert().execute()
+    )
 
     async def write(
         self,
@@ -63,8 +67,12 @@ class MemoryWriter:
             return 0
 
         rows = await asyncio.gather(
-            *(self._build_row(fact, agent_id=agent_id, user_id=user_id, run_id=run_id, scope=scope)
-              for fact in all_facts)
+            *(
+                self._build_row(
+                    fact, agent_id=agent_id, user_id=user_id, run_id=run_id, scope=scope
+                )
+                for fact in all_facts
+            )
         )
         rows = [r for r in rows if r is not None]
         if not rows:

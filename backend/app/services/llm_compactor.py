@@ -30,7 +30,7 @@ INPUT_TOKENS in claw-code). Override per-call.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ DEFAULT_AUTO_COMPACTION_INPUT_TOKENS = 100_000
 # preserved tail messages, we skip compaction entirely (nothing useful to
 # summarise).
 DEFAULT_KEEP_FLOOR_TURNS = 6
+
 
 # Cheap token estimator: ~4 chars per token. Good enough for the threshold
 # decision; not used for billing.
@@ -143,9 +144,7 @@ async def compact_messages(
     summary_message = {
         "role": "system",
         "content": (
-            "<conversation_summary>\n"
-            f"{summary_text}\n"
-            "</conversation_summary>"
+            "<conversation_summary>\n" f"{summary_text}\n" "</conversation_summary>"
         ),
     }
     new_messages = [summary_message, *tail]
@@ -223,9 +222,7 @@ def _safe_split_index(messages: list[dict], candidate: int) -> int:
         while new_candidate >= 0:
             msg = messages[new_candidate]
             if msg.get("role") == "assistant":
-                msg_call_ids = {
-                    c.get("id") for c in msg.get("tool_calls") or []
-                }
+                msg_call_ids = {c.get("id") for c in msg.get("tool_calls") or []}
                 if msg_call_ids & orphans:
                     candidate = new_candidate
                     break

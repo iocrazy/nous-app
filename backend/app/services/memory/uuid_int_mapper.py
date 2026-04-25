@@ -20,7 +20,7 @@ prompt-rendering aid.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterable
 from uuid import UUID
 
@@ -60,9 +60,7 @@ class UuidIntMapper:
     def to_uuid(self, int_ref: int) -> UUID:
         """Look up the UUID for a display int."""
         if int_ref < 0 or int_ref >= len(self.ids):
-            raise IndexError(
-                f"int_ref {int_ref} out of range (size {len(self.ids)})"
-            )
+            raise IndexError(f"int_ref {int_ref} out of range (size {len(self.ids)})")
         return self.ids[int_ref]
 
     def resolve_int_refs(self, text: str) -> list[UUID]:

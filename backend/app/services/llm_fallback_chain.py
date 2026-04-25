@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Callable, Optional
 
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.llm_retry_middleware import (

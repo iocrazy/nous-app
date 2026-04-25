@@ -18,9 +18,8 @@ Design notes:
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from app.services.hooks import HookContext, HookResult
@@ -70,9 +69,7 @@ class CostAuditorHook:
             completion_delta = ctx.accumulated_completion_tokens
             cost_delta = ctx.accumulated_cost_cents
         else:
-            prompt_delta = max(
-                0, ctx.accumulated_prompt_tokens - int(prev["prompt"])
-            )
+            prompt_delta = max(0, ctx.accumulated_prompt_tokens - int(prev["prompt"]))
             completion_delta = max(
                 0, ctx.accumulated_completion_tokens - int(prev["completion"])
             )

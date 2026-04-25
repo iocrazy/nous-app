@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Callable, Optional
 
 from app.services.hooks import HookContext, HookResult
 
@@ -89,9 +89,7 @@ class _LazyBudgetGuard:
         try:
             budget_cents = self.budget_loader()
         except Exception:  # noqa: BLE001 — hook failures must never break the run
-            logger.exception(
-                "[BudgetGuard] budget_loader failed, assuming unlimited"
-            )
+            logger.exception("[BudgetGuard] budget_loader failed, assuming unlimited")
             return HookResult(decision="continue")
 
         if budget_cents is None:

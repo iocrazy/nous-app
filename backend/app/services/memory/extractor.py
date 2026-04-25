@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Awaitable, Callable
 
 from app.services.memory import ExtractedFrom
 
@@ -42,12 +42,13 @@ LLMCall = Callable[[str], Awaitable[str]]
 class ExtractedFact:
     """One memory candidate produced by an extractor."""
 
-    summary: str          # The fact, in 1 short sentence
-    when_to_use: str      # When this fact would help — used for embedding
+    summary: str  # The fact, in 1 short sentence
+    when_to_use: str  # When this fact would help — used for embedding
     extracted_from: ExtractedFrom
 
 
-_USER_EXTRACTION_PROMPT = """You read recent USER messages from a chat with an AI agent and extract durable facts worth remembering across sessions.
+_USER_EXTRACTION_PROMPT = """You read recent USER messages from a chat with an AI agent
+and extract durable facts worth remembering across sessions.
 
 DO extract:
 - Preferences ("I prefer X over Y")
@@ -71,7 +72,9 @@ USER MESSAGES:
 JSON only, no explanation:"""
 
 
-_ASSISTANT_EXTRACTION_PROMPT = """You read recent ASSISTANT messages from a chat between a user and an AI agent. Extract working notes the AGENT should remember next time it picks up similar work.
+_ASSISTANT_EXTRACTION_PROMPT = """You read recent ASSISTANT messages from a chat between
+a user and an AI agent. Extract working notes the AGENT should remember next time it
+picks up similar work.
 
 DO extract:
 - Decisions the agent made (tone choices, structural choices)
@@ -151,7 +154,9 @@ def _parse_facts(raw: str, source: ExtractedFrom) -> list[ExtractedFact]:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("[memory.extractor] non-JSON response; dropping. raw=%r", raw[:200])
+        logger.warning(
+            "[memory.extractor] non-JSON response; dropping. raw=%r", raw[:200]
+        )
         return []
 
     facts_raw = payload.get("facts")
@@ -168,7 +173,7 @@ def _parse_facts(raw: str, source: ExtractedFrom) -> list[ExtractedFact]:
             continue
         out.append(
             ExtractedFact(
-                summary=summary[:500],          # hard cap
+                summary=summary[:500],  # hard cap
                 when_to_use=when[:500],
                 extracted_from=source,
             )

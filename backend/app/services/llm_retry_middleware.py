@@ -167,9 +167,7 @@ class LLMRetryMiddleware:
     rng: Optional[Callable[[], float]] = None
 
     # Test seam: override sleep so tests don't actually sleep seconds.
-    sleep: Callable[[float], Awaitable[None]] = field(
-        default=asyncio.sleep, init=False
-    )
+    sleep: Callable[[float], Awaitable[None]] = field(default=asyncio.sleep, init=False)
 
     async def call(
         self, composed: ComposedSystemPrompt, messages: list[dict]
@@ -188,9 +186,7 @@ class LLMRetryMiddleware:
                 )
                 last_exc = exc
                 if classification == "non_retryable":
-                    raise LLMCallError(
-                        f"non-retryable: {exc}"
-                    ) from exc
+                    raise LLMCallError(f"non-retryable: {exc}") from exc
                 if attempt >= self.max_retries:
                     break  # exhausted; raise after loop
                 # Sleep before next try, polling cancel every poll-interval.

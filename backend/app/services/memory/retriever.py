@@ -26,7 +26,6 @@ Cost shape:
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -55,7 +54,8 @@ _SALIENCE_WEIGHT = 0.3
 
 
 # Sonnet filter prompt template. Caller passes through to a cheap LLM.
-_RANKING_PROMPT = """You will see {n} candidate memories that might be relevant to a user's query. Pick the {target} most useful ones.
+_RANKING_PROMPT = """You will see {n} candidate memories that might be relevant to a
+user's query. Pick the {target} most useful ones.
 
 USER QUERY:
 {query}
@@ -79,10 +79,10 @@ class MemoryRetriever:
     All I/O dependencies are injected so the class is unit-testable.
     """
 
-    supabase_client: Any            # async client
-    embedding_call: EmbeddingCall   # text -> Optional[vector]
-    sonnet_call: SonnetCall         # prompt -> ranking text
-    redis_client: Optional[Any]     # async redis or None (cache disabled)
+    supabase_client: Any  # async client
+    embedding_call: EmbeddingCall  # text -> Optional[vector]
+    sonnet_call: SonnetCall  # prompt -> ranking text
+    redis_client: Optional[Any]  # async redis or None (cache disabled)
 
     top_k: int = DEFAULT_TOP_K_CANDIDATES
     top_n: int = DEFAULT_TOP_N_FINAL
@@ -185,8 +185,11 @@ class MemoryRetriever:
     ) -> list[tuple[MemoryRecord, float]]:
         """Re-score candidates: 0.7*cosine + 0.3*log(1+reinforcement_count)."""
         scored = [
-            (rec, _COSINE_WEIGHT * cosine
-                  + _SALIENCE_WEIGHT * math.log(1 + max(0, rec.reinforcement_count)))
+            (
+                rec,
+                _COSINE_WEIGHT * cosine
+                + _SALIENCE_WEIGHT * math.log(1 + max(0, rec.reinforcement_count)),
+            )
             for rec, cosine in candidates
         ]
         scored.sort(key=lambda t: t[1], reverse=True)
@@ -212,8 +215,7 @@ class MemoryRetriever:
             for i, rec in enumerate(records)
         )
         prompt = (
-            _RANKING_PROMPT
-            .replace("{n}", str(len(records)))
+            _RANKING_PROMPT.replace("{n}", str(len(records)))
             .replace("{target}", str(self.top_n))
             .replace("{query}", user_query[:500])
             .replace("{candidates}", rendered)
