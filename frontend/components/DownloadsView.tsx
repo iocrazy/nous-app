@@ -189,6 +189,7 @@ export const DownloadsView: React.FC = () => {
       rafId = requestAnimationFrame(() => {
         rafId = null;
         if (!hasMoreData || isLoadingMore || isSearchActive) return;
+        if (searchQuery.trim().length > 0) return;
         const rect = sentinel.getBoundingClientRect();
         const viewportH = window.innerHeight || document.documentElement.clientHeight;
         // Trigger when sentinel is within 600px of the bottom of the viewport.
@@ -214,6 +215,7 @@ export const DownloadsView: React.FC = () => {
     hasMoreData,
     isLoadingMore,
     isSearchActive,
+    searchQuery,
     loadMoreLibrary,
     library.length,
   ]);
@@ -330,6 +332,37 @@ export const DownloadsView: React.FC = () => {
     setSearchQueryText('');
     setSearchQuery('');
   }, []);
+
+  // Quick Search auto-promotion: when the user types in keyword mode the
+  // local filter only sees the paginated slice that's been loaded so far
+  // (e.g. 50 of 417). Debounce-fire ``textSearch`` against the backend so
+  // the visible result set reflects the whole library, not just what
+  // happened to be loaded. This piggybacks on the same ``isSearchActive``
+  // state that AI / Smart search use, so the existing "Found N matching
+  // items" footer + hidden Load More UX kicks in for keyword mode too.
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) return;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await textSearch(trimmed, 1000, searchScope);
+        setSearchResults(response.results as any);
+        const hydrated: Record<string, Video> = {};
+        for (const v of response.videos ?? []) {
+          const pid = (v as any).platform_id;
+          if (typeof pid === 'string') hydrated[pid] = v as unknown as Video;
+        }
+        setSearchVideoMap(hydrated);
+        setIsSearchActive(true);
+        setSearchQueryText(trimmed);
+      } catch (err) {
+        console.error('quick-search backend fetch failed', err);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchScope]);
+
+  const hasActiveQuery = isSearchActive || searchQuery.trim().length > 0;
 
   // ─── Selection state ───────────────────────────────────
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
@@ -877,16 +910,20 @@ export const DownloadsView: React.FC = () => {
             {libraryViewMode === 'feed' && (
               <LibraryFeed
                 data={filteredLibrary}
-                hasMore={!isSearchActive && hasMoreData}
+                hasMore={!hasActiveQuery && hasMoreData}
                 isLoadingMore={isLoadingMore}
                 onLoadMore={() => { void loadMoreLibrary(); }}
               />
             )}
 
-            {/* Search-results count — shown when search is active. The
-                ``Load More`` block below is hidden in search mode so users
-                otherwise have no signal for how many hits were returned. */}
-            {isSearchActive && filteredLibrary.length > 0 && libraryViewMode !== 'feed' && (
+            {/* Search-results count — shown whenever a query is active.
+                The ``Load More`` block below is hidden in search mode so
+                users otherwise have no signal for how many hits were
+                returned. While the backend search is debouncing, the
+                local filter on the loaded slice is rendered, so the count
+                may briefly under-report before the backend response
+                lands. */}
+            {hasActiveQuery && filteredLibrary.length > 0 && libraryViewMode !== 'feed' && (
               <div className="w-full py-6 flex justify-center">
                 <span className="text-zinc-600 text-xs">
                   {t('library.searchResultsCount', 'Found {{count}} matching items', {
@@ -896,7 +933,7 @@ export const DownloadsView: React.FC = () => {
               </div>
             )}
 
-            {!isSearchActive && libraryViewMode !== 'feed' && (
+            {!hasActiveQuery && libraryViewMode !== 'feed' && (
               <>
                 {/* Invisible sentinel: IntersectionObserver target.
                     Stays at the natural end-of-list position so the
