@@ -23,7 +23,6 @@ from loguru import logger
 
 from app.celery_app import celery
 
-
 # How many recent turns we feed each extractor. Cap is a cost control —
 # extractor prompts grow linearly with this. M1.B default is 10; tune once
 # we see real usage.
@@ -153,10 +152,11 @@ async def _build_cheap_llm_call():
     Defaults to Qwen-Turbo (cheapest model in our adapter set). Wire-up
     is deferred to keep this importable in unit tests without env vars.
     """
-    from app.core.config import settings
-    from app.services.ai_adapters import get_adapter
-    from app.schemas.ai_library import ComposedSystemPrompt
     from uuid import UUID as _UUID
+
+    from app.core.config import settings
+    from app.schemas.ai_library import ComposedSystemPrompt
+    from app.services.ai_adapters import get_adapter
 
     cheap_model = "qwen-turbo"
     adapter = get_adapter(cheap_model, settings)

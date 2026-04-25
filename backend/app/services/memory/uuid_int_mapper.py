@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from typing import Iterable
 from uuid import UUID
 
-
 # Match [N] anywhere in LLM output. Tolerates whitespace, supports up to 9999.
 _INT_REF_PATTERN = re.compile(r"\[(\d{1,4})\]")
 
