@@ -73,10 +73,16 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   const images = data.image_download_urls || [];
   const isAlbum = !isVideo && images.length > 1;
 
-  // 封面 URL: 如果是图集则使用当前索引，否则使用封面
+  // 封面 URL: 如果是图集则使用当前索引，否则使用封面。
+  // ``getCoverUrl`` returns undefined when no local cover exists (PR #94
+  // hardened it against hot-link to remote CDNs). We let it stay
+  // undefined so the placeholder branch below renders, instead of falling
+  // back to picsum.photos which serves random stock images and looks
+  // like mock content.
   const coverUrl = isAlbum && images.length > 0
     ? images[currentImageIndex]
-    : (getCoverUrl(data, mediaToken ?? undefined) || "https://picsum.photos/400/600");
+    : getCoverUrl(data, mediaToken ?? undefined);
+  const hasCover = Boolean(coverUrl);
 
   // --- Video seek scrub (universal fallback for any video) ---
   const videoUrl = isVideo ? getVideoUrl(data, mediaToken ?? undefined) : undefined;
@@ -231,7 +237,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         onMouseMove={isVideo ? handleThumbMouseMove : undefined}
       >
         {/* Cover image (hidden when sprite overlay active) */}
-        {imageError ? (
+        {!hasCover || imageError ? (
           <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800">
             <ImageIcon size={32} className="text-zinc-600 mb-2" />
             <span className="text-xs text-zinc-500">Image unavailable</span>
