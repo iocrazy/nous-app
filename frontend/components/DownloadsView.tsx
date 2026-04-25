@@ -77,12 +77,6 @@ export const DownloadsView: React.FC = () => {
     setFilterParams: setLibraryFilterParams,
   } = useLibraryContext();
 
-  // ─── Resource data ───────────────────────────────────
-  const mediaIds = useMemo(() => library.map((item) => item.id).filter(Boolean), [library]);
-  const { resourceDataMap, setResourceDataMap, resourceIdMap, aiStatusMap } = useResourceDataMap(mediaIds);
-  const tagSearchMap = useTagSearchMap(resourceDataMap);
-  const { allTags, setAllTags } = useAllTags();
-
   // ─── Filter bar (Eagle-style chip toolbar) ─────────────
   const filterBarConfig = useFilterBarConfig();
   const { visible: isFilterBarVisible, toggle: toggleFilterBar } = useFilterBarVisibility();
@@ -134,6 +128,27 @@ export const DownloadsView: React.FC = () => {
   // Eagle-style search-scope toggles (Title / Description / Author /
   // Hashtags). Persisted in localStorage so the choice survives reloads.
   const [searchScope, setSearchScope] = useState<SearchField[]>(() => loadSearchScope());
+
+  // ─── Resource data ───────────────────────────────────
+  // Need media_ids from the paginated library AND from the active search
+  // result set, otherwise hits that fall outside the loaded slice render
+  // with stale/default AI-status icons (transcript / summary / analysis
+  // all gray). searchVideoMap is keyed by platform_id; its values carry
+  // ``id`` (parsed_media id), so pull from there.
+  const mediaIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const item of library) {
+      if (item.id) ids.add(String(item.id));
+    }
+    for (const v of Object.values(searchVideoMap)) {
+      const vid = (v as any).id;
+      if (vid != null) ids.add(String(vid));
+    }
+    return Array.from(ids);
+  }, [library, searchVideoMap]);
+  const { resourceDataMap, setResourceDataMap, resourceIdMap, aiStatusMap } = useResourceDataMap(mediaIds);
+  const tagSearchMap = useTagSearchMap(resourceDataMap);
+  const { allTags, setAllTags } = useAllTags();
 
   // ─── Pull-to-refresh (mobile) ───
   const contentScrollRef = useRef<HTMLDivElement>(null);
