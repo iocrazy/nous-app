@@ -95,19 +95,19 @@ class PromptComposer:
         skills = await self.skill_repo.list_by_ids(skill_ids)
 
         # M3: list of persistent agents available as Delegate targets.
-        # Skipped when agent itself isn't going to use Delegate (no skills
-        # → no tools → no Delegate). Self is excluded so the LLM doesn't
-        # try to delegate to itself.
+        # Independent of whether THIS agent has skills — a coordinator
+        # agent that just delegates to others doesn't need a skill of
+        # its own. Self is excluded so the LLM doesn't try to delegate
+        # to itself.
         workers: list[dict[str, Any]] = []
-        if skills:
-            try:
-                workers_raw = await self.agent_repo.list_persistent()
-                workers = [w for w in workers_raw if w.get("id") != agent.get("id")]
-            except Exception:
-                # Best-effort. If the listing fails, render without
-                # workers — Delegate will get "unknown agent slug" from
-                # the tool layer if the LLM tries it.
-                workers = []
+        try:
+            workers_raw = await self.agent_repo.list_persistent()
+            workers = [w for w in workers_raw if w.get("id") != agent.get("id")]
+        except Exception:
+            # Best-effort. If the listing fails, render without
+            # workers — Delegate will get "unknown agent slug" from
+            # the tool layer if the LLM tries it.
+            workers = []
 
         system_message = self._assemble_system_message(
             agent=agent,
@@ -295,109 +295,112 @@ class PromptComposer:
     def _build_tools(self, skills: list[dict[str, Any]]) -> list[dict]:
         """Build the function-calling tools list.
 
-        Two built-in tools are advertised when the agent has bound skills:
-        - ``Skill`` — load a skill definition (M1)
-        - ``Delegate`` — hand a sub-task to another persistent agent (M2.5)
+        Two built-in tools are advertised:
+        - ``Skill`` — load a skill definition (only when skills are bound)
+        - ``Delegate`` — hand a sub-task to another persistent agent
+          (always, even when the agent has no skills of its own — a
+          coordinator pattern)
 
-        Returns empty when the agent has no skills, so the adapter omits
-        the ``tools`` parameter entirely. Caller-provided tools merge
-        upstream (adapter layer).
-
-        Delegate target discovery (which slugs are valid persistent
-        workers) is M3 work — for now the LLM either knows slugs from
-        the user prompt or gets an "unknown agent slug" error from the
-        DelegateToolService.
+        Returns empty only when both conditions disable both tools (no
+        skills AND ``Delegate`` is somehow undesired — currently we
+        always emit Delegate, so this list is always non-empty in
+        practice).
         """
-        if not skills:
-            return []
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "Skill",
-                    "description": (
-                        "Load a local skill definition and its instructions. "
-                        "Returns the SKILL body (and optional sub-file "
-                        "content)."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "skill": {
-                                "type": "string",
-                                "description": ("Skill slug from <available_skills>."),
-                            },
-                            "file": {
-                                "type": "string",
-                                "description": (
-                                    "Optional sub-file path like "
-                                    "'references/examples.md'. Omit to "
-                                    "return the SKILL.md body."
-                                ),
-                            },
+        tools: list[dict] = []
+        if skills:
+            tools.append(self._skill_tool_spec())
+        tools.append(self._delegate_tool_spec())
+        return tools
+
+    def _skill_tool_spec(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": "Skill",
+                "description": (
+                    "Load a local skill definition and its instructions. "
+                    "Returns the SKILL body (and optional sub-file "
+                    "content)."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill": {
+                            "type": "string",
+                            "description": "Skill slug from <available_skills>.",
                         },
-                        "required": ["skill"],
+                        "file": {
+                            "type": "string",
+                            "description": (
+                                "Optional sub-file path like "
+                                "'references/examples.md'. Omit to "
+                                "return the SKILL.md body."
+                            ),
+                        },
                     },
+                    "required": ["skill"],
                 },
             },
-            {
-                "type": "function",
-                "function": {
-                    "name": "Delegate",
-                    "description": (
-                        "Hand off a sub-task to another persistent agent. "
-                        "The target picks the task from its inbox on the "
-                        "next dispatch tick. Fire-and-forget by default; "
-                        "use status_query to check progress later. Use this "
-                        "for parallel work, specialised expertise, or when "
-                        "you need a different agent's persona/skills."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "agent_slug": {
-                                "type": "string",
-                                "description": (
-                                    "Slug of the target persistent agent "
-                                    "(e.g. 'summary', 'analyze'). Target "
-                                    "must have ai_agents.persistent=true."
-                                ),
-                            },
-                            "prompt": {
-                                "type": "string",
-                                "description": (
-                                    "The task description / instruction "
-                                    "for the target agent. Be specific."
-                                ),
-                            },
-                            "title": {
-                                "type": "string",
-                                "description": (
-                                    "Optional short title for the task "
-                                    "(shown in worker UI)."
-                                ),
-                            },
-                            "priority": {
-                                "type": "integer",
-                                "description": (
-                                    "Inbox priority 1-10 (higher = sooner). "
-                                    "Default 5."
-                                ),
-                            },
-                            "dedup_key": {
-                                "type": "string",
-                                "description": (
-                                    "Optional dedup key — repeated calls "
-                                    "with the same key are folded while "
-                                    "the message is unread."
-                                ),
-                            },
+        }
+
+    def _delegate_tool_spec(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": "Delegate",
+                "description": (
+                    "Hand off a sub-task to another persistent agent. "
+                    "The target picks the task from its inbox on the "
+                    "next dispatch tick. Fire-and-forget by default; "
+                    "use status_query to check progress later. Use this "
+                    "for parallel work, specialised expertise, or when "
+                    "you need a different agent's persona/skills."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent_slug": {
+                            "type": "string",
+                            "description": (
+                                "Slug of the target persistent agent "
+                                "(see <available_workers>). Target "
+                                "must have ai_agents.persistent=true."
+                            ),
                         },
-                        "required": ["agent_slug", "prompt"],
+                        "prompt": {
+                            "type": "string",
+                            "description": (
+                                "The task description / instruction "
+                                "for the target agent. Be specific."
+                            ),
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": (
+                                "Optional short title for the task "
+                                "(shown in worker UI)."
+                            ),
+                        },
+                        "priority": {
+                            "type": "integer",
+                            "description": (
+                                "Inbox priority 1-10 (higher = sooner). "
+                                "Default 5."
+                            ),
+                        },
+                        "dedup_key": {
+                            "type": "string",
+                            "description": (
+                                "Optional dedup key — repeated calls "
+                                "with the same key are folded while "
+                                "the message is unread."
+                            ),
+                        },
                     },
+                    "required": ["agent_slug", "prompt"],
                 },
             },
-        ]
+        }
 
     def _prefix_fingerprint(
         self,

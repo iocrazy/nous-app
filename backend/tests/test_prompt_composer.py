@@ -230,9 +230,13 @@ def test_skill_tool_has_required_params(fake_agent, fake_skills):
 
 
 @pytest.mark.unit
-def test_empty_skills_produces_no_tools(fake_agent):
+def test_empty_skills_still_advertises_delegate(fake_agent):
+    """G milestone: Delegate is independent of skills — coordinator-style
+    agents (no skills, just routing) still need it."""
     composer = PromptComposer(agent_repo=None, skill_repo=None)
-    assert composer._build_tools([]) == []
+    tools = composer._build_tools([])
+    names = [t["function"]["name"] for t in tools]
+    assert names == ["Delegate"]
 
 
 @pytest.mark.unit
@@ -262,12 +266,14 @@ def test_delegate_tool_schema_required_params(fake_agent, fake_skills):
 
 
 @pytest.mark.unit
-def test_delegate_tool_omitted_when_no_skills(fake_agent):
-    """No skills bound → no tools advertised at all (Delegate included).
-    Agents without skills shouldn't show Delegate either — the contract is
-    'either both built-ins or neither', not 'Delegate always'."""
+def test_skill_tool_omitted_when_no_skills(fake_agent):
+    """G milestone: when an agent has no bound skills, the Skill tool is
+    omitted (loading nothing makes no sense). Delegate stays — coordinators
+    without skills still need it."""
     composer = PromptComposer(agent_repo=None, skill_repo=None)
-    assert composer._build_tools([]) == []
+    names = [t["function"]["name"] for t in composer._build_tools([])]
+    assert "Skill" not in names
+    assert "Delegate" in names
 
 
 @pytest.mark.unit
