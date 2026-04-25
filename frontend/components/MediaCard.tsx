@@ -554,12 +554,16 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                ) : (
                  <>
                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10 pointer-events-none" />
-                   <img
-                    src={coverUrl || "https://picsum.photos/400/600"}
-                    alt="Thumbnail"
-                    className="w-full h-full object-contain opacity-90"
-                    referrerPolicy="no-referrer"
-                   />
+                   {coverUrl ? (
+                     <img
+                       src={coverUrl}
+                       alt="Thumbnail"
+                       className="w-full h-full object-contain opacity-90"
+                       referrerPolicy="no-referrer"
+                     />
+                   ) : (
+                     <div className="w-full h-full bg-zinc-800" />
+                   )}
                    <div className="absolute z-20 w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center group-hover:scale-110 transition-transform border border-white/20 shadow-xl">
                       <Play className="w-8 h-8 text-white fill-white ml-1" />
                    </div>
@@ -569,12 +573,19 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           ) : (
             <div className="w-full h-full relative">
                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
-               <img
-                src={(isAlbum ? images[currentImageIndex] : images[0]) || "https://picsum.photos/400/600"}
-                alt="Cover"
-                className="w-full h-full object-cover transition-opacity duration-300"
-                referrerPolicy="no-referrer"
-               />
+               {(() => {
+                 const src = isAlbum ? images[currentImageIndex] : images[0];
+                 return src ? (
+                   <img
+                     src={src}
+                     alt="Cover"
+                     className="w-full h-full object-cover transition-opacity duration-300"
+                     referrerPolicy="no-referrer"
+                   />
+                 ) : (
+                   <div className="w-full h-full bg-zinc-800" />
+                 );
+               })()}
 
                {isAlbum ? (
                  <>

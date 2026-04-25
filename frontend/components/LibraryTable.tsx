@@ -234,17 +234,24 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
           onClick={(e) => { e.stopPropagation(); handleMediaClick(item); }}
           className="w-20 h-20 bg-zinc-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-zinc-700"
         >
-          <img
-            src={getCoverUrl(item, mediaToken ?? undefined) || "https://picsum.photos/400/600"}
-            alt="Preview"
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              target.style.display = 'none';
-              target.parentElement?.classList.add('bg-zinc-700');
-            }}
-          />
+          {(() => {
+            const src = getCoverUrl(item, mediaToken ?? undefined);
+            return src ? (
+              <img
+                src={src}
+                alt="Preview"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                  target.parentElement?.classList.add('bg-zinc-700');
+                }}
+              />
+            ) : (
+              <div className="w-full h-full bg-zinc-700" />
+            );
+          })()}
           <div className="absolute inset-0 flex items-center justify-center">
             {isVideoType(item.media_type) ? (
               <div className="bg-black/40 p-1.5 rounded-full">
@@ -410,17 +417,23 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                     onClick={() => handleMediaClick(item)}
                     className="w-16 h-16 bg-zinc-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-zinc-700 hover:border-zinc-500 transition-colors"
                   >
-                     <img
-                      src={getCoverUrl(item, mediaToken ?? undefined) || "https://picsum.photos/400/600"}
-                      alt="Preview"
-                      className="w-full h-full object-cover opacity-80 group-hover:opacity-60 transition-all"
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.style.display = 'none';
-                        target.parentElement?.classList.add('bg-zinc-700');
-                      }}
-                     />
+                     {(() => {
+                      const src = getCoverUrl(item, mediaToken ?? undefined);
+                      if (!src) return <div className="w-full h-full bg-zinc-700" />;
+                      return (
+                        <img
+                          src={src}
+                          alt="Preview"
+                          className="w-full h-full object-cover opacity-80 group-hover:opacity-60 transition-all"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            target.parentElement?.classList.add('bg-zinc-700');
+                          }}
+                        />
+                      );
+                     })()}
                      <div className="absolute inset-0 flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
                         {isVideoType(item.media_type) ? (
                           <div className="bg-black/30 p-1.5 rounded-full backdrop-blur-sm shadow-md">
