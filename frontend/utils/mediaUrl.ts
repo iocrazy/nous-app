@@ -44,8 +44,21 @@ export function buildStreamUrl(hlsPath: string): string {
 }
 
 /**
+ * Status helper — only "completed" means the file is actually on disk.
+ *
+ * Some rows in `parsed_media` have a path field set even though the latest
+ * download attempt failed (we never clear path on failure — see
+ * downloader.py:1298). Trusting `path` alone yields 404s. The status field
+ * is the ground truth.
+ */
+const isStatusCompleted = (status?: string | null): boolean =>
+  typeof status === 'string' && status.toLowerCase() === 'completed';
+
+/**
  * Get video playback URL by media/resource ID.
  * Priority: HLS > ID-based /media/ URL > undefined
+ *
+ * Local route only when video_download_status === 'completed' AND path set.
  */
 export function getPlaybackUrl(
   data: {
@@ -53,45 +66,57 @@ export function getPlaybackUrl(
     media_format?: string;
     hls_path?: string;
     download_path?: string;
+    video_download_status?: string;
   },
   token?: string,
 ): string | undefined {
   if (data.media_format === 'hls' && data.hls_path) {
     return buildStreamUrl(data.hls_path);
   }
-  // Use ID-based URL (preferred) — backend resolves file path from DB
-  if (data.id && data.download_path && data.download_path !== '#') {
+  if (
+    data.id
+    && data.download_path
+    && data.download_path !== '#'
+    && isStatusCompleted(data.video_download_status)
+  ) {
     return buildMediaUrl(String(data.id), token);
   }
   return undefined;
 }
 
 /**
- * Get cover image URL.
- * Priority: ID-based cover URL > cover_urls[0] > dynamic_cover_url > image_download_urls[0]
+ * Get cover image URL — local-only, status-gated.
+ *
+ * We never hand a remote CDN URL (bilibili / douyin / xhs) to the browser:
+ * those CDNs hot-link-protect on Referer and respond 403 to direct GETs,
+ * which spams the console AND risks getting our IP banned.
+ *
+ * Returns the local proxy URL only when BOTH:
+ *   - cover_download_path is set
+ *   - cover_download_status === 'completed'
+ *
+ * Otherwise returns undefined and the caller renders a placeholder. This
+ * defends against orphan rows where path was set on a previous successful
+ * download but the file has since been removed (status reverted to
+ * failed / null).
  */
 export function getCoverImageUrl(
   data: {
     id?: string;
     cover_download_path?: string;
-    cover_urls?: string[];
-    dynamic_cover_url?: string;
-    image_download_urls?: string[];
+    cover_download_status?: string;
   },
   token?: string,
 ): string | undefined {
-  // Local cover via ID-based route
-  if (data.id && data.cover_download_path && data.cover_download_path !== '#') {
+  if (
+    data.id
+    && data.cover_download_path
+    && data.cover_download_path !== '#'
+    && isStatusCompleted(data.cover_download_status)
+  ) {
     return buildMediaCoverUrl(String(data.id), token);
   }
-  // External CDN URLs (no auth needed)
-  if (data.cover_urls?.[0] && data.cover_urls[0] !== '#') {
-    return data.cover_urls[0];
-  }
-  if (data.dynamic_cover_url && data.dynamic_cover_url !== '#') {
-    return data.dynamic_cover_url;
-  }
-  return data.image_download_urls?.[0];
+  return undefined;
 }
 
 /**

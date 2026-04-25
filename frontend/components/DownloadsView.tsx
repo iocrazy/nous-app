@@ -88,12 +88,15 @@ export const DownloadsView: React.FC = () => {
   const { visible: isFilterBarVisible, toggle: toggleFilterBar } = useFilterBarVisibility();
 
   // Push chip values to the library fetch as server-side filter params.
-  // FetchResourcesFilterParams is a superset of FetchLibraryFilterParams
-  // (types-chip doesn't apply here — every row is web media), so we
-  // drop it before forwarding.
+  // The Type chip uses ``types`` (mime-prefix style for the Resources
+  // path); for the library/parsed_media path we map it to ``media_types``
+  // and let the dataService translate to media_type wire values.
   const libraryFilterParams = useMemo(() => {
-    const { types: _drop, ...rest } = filterBarConfig.toFilterParams();
-    return rest;
+    const { types, ...rest } = filterBarConfig.toFilterParams();
+    return {
+      ...rest,
+      ...(types && types.length > 0 ? { media_types: types } : {}),
+    };
   }, [filterBarConfig]);
   const libraryFilterParamsKey = useMemo(
     () => JSON.stringify(libraryFilterParams),
@@ -702,12 +705,20 @@ export const DownloadsView: React.FC = () => {
               isSearching={isAISearching}
               placeholder={t('library.searchPlaceholder', 'Search title, tags, notes...')}
               className="w-52"
-            />
-
-            {/* Eagle-style scope picker — choose which fields to search. */}
-            <SearchScopePicker
-              value={searchScope}
-              onChange={setSearchScope}
+              searchScope={searchScope}
+              onSearchScopeChange={(next) => {
+                setSearchScope(next);
+                // Persist Eagle-style — same key as the standalone picker
+                // so the choice carries across views.
+                try {
+                  window.localStorage.setItem(
+                    'mediahub_search_scope',
+                    JSON.stringify(next),
+                  );
+                } catch {
+                  /* ignore quota / private mode errors */
+                }
+              }}
             />
 
             {/* Filter bar visibility toggle — plain funnel, mirrors the
@@ -892,12 +903,13 @@ export const DownloadsView: React.FC = () => {
                     600px rootMargin pre-trigger still works. */}
                 <div ref={loadMoreRef} aria-hidden="true" className="w-full h-px" />
 
-                {/* End-of-list status — natural inline position on both
-                    desktop and mobile (only when everything is loaded). */}
-                {!hasMoreData && library.length > 0 && (
+                {/* End-of-list status — show the count actually on screen,
+                    which is filteredLibrary.length when chip filters are
+                    active, otherwise equals library.length. */}
+                {!hasMoreData && filteredLibrary.length > 0 && (
                   <div className="w-full py-6 flex justify-center">
                     <span className="text-zinc-600 text-xs">
-                      All {library.length} items loaded
+                      All {filteredLibrary.length} items loaded
                     </span>
                   </div>
                 )}

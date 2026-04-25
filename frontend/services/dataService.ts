@@ -191,15 +191,26 @@ export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMe
 const PAGE_SIZE = 20;
 const LOCAL_CACHE_SIZE = 500;
 
+/** Composite keyset cursor (created_at + id). Needed because the
+ *  resources.created_at column has timestamp ties (batch crawl inserts
+ *  ~100 rows in the same millisecond), and a strict `created_at < cursor`
+ *  predicate would silently skip every row sharing the boundary
+ *  timestamp. The id tiebreaker makes pagination stable regardless of
+ *  duplicate timestamps.
+ */
+export interface LibraryCursor {
+  ts: string;
+  id: string;
+}
+
 export interface PaginatedResult<T> {
   data: T[];
   totalCount: number;
   hasMore: boolean;
   page: number;
   /** Cursor for the next page — pass back as ``cursor`` to fetch the
-   *  following slice. Null when there are no more pages. Currently the
-   *  resources.created_at of the last returned row (matches the ORDER BY). */
-  nextCursor: string | null;
+   *  following slice. Null when there are no more pages. */
+  nextCursor: LibraryCursor | null;
 }
 
 /**
@@ -220,6 +231,10 @@ export interface FetchLibraryFilterParams {
   min_rating?: number;
   /** parsed_media.source_platform IN (...). Requires inner join. */
   platforms?: string[];
+  /** Broad type filter (matches parsed_media.media_type). OR across the set.
+   *  Used by the Type chip on My Downloads — every row in the library has a
+   *  parsed_media row, so we can filter on its media_type column directly. */
+  media_types?: Array<'video' | 'image' | 'audio' | 'document' | 'other'>;
   /** ai status flags. */
   ai_transcribed?: boolean;
   ai_summarized?: boolean;
@@ -241,6 +256,21 @@ export interface FetchLibraryFilterParams {
   /** parsed_media.comment_count > 0. AND-on-top floor. */
   has_comments?: boolean;
 }
+
+/**
+ * parsed_media.media_type wire values that map to each broad type chip.
+ * Source of truth: ``frontend/utils/awemeType.ts::MEDIA_TYPE_MAP``. Legacy
+ * numeric strings ('0','2','4','61','68') and the modern enum strings
+ * ('video','carousel','image_text','special','short','live_clip') coexist
+ * in the column; we list both so existing rows still match.
+ */
+const MEDIA_TYPE_VALUES_BY_TYPE: Record<string, string[]> = {
+  video: ['video', 'special', 'short', 'live_clip', '0', '4', '61'],
+  image: ['carousel', 'image_text', '2', '68'],
+  audio: [],
+  document: [],
+  other: [],
+};
 
 /**
  * Resolve a set of tag ids to the intersection of resource ids that
@@ -292,7 +322,7 @@ export const fetchLibraryPaginated = async (
   pageSize: number = PAGE_SIZE,
   signal?: AbortSignal,
   filters?: FetchLibraryFilterParams,
-  cursor?: string | null,
+  cursor?: LibraryCursor | null,
 ): Promise<PaginatedResult<ParsedMedia>> => {
   const supabase = getSupabaseClient();
   if (!isSupabaseConfigured() || !supabase) {
@@ -324,6 +354,7 @@ export const fetchLibraryPaginated = async (
       (f.min_shares !== undefined && f.min_shares > 0);
     const needsMediaInner =
       (f.platforms && f.platforms.length > 0) ||
+      (f.media_types && f.media_types.length > 0) ||
       socialMetricActive ||
       Boolean(f.has_comments);
     const mediaJoinToken = needsMediaInner ? 'parsed_media!inner' : 'parsed_media!inner';
@@ -332,20 +363,29 @@ export const fetchLibraryPaginated = async (
     // unconditionally. Kept the token name for parity with resourceService.
     const select = `id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, ${mediaJoinToken}(*)`;
 
-    // Build the paged data query.
+    // Build the paged data query. ORDER BY (created_at DESC, id DESC) so
+    // ties in created_at have a stable secondary order for keyset paging.
     let query = supabase
       .from('resources')
       .select(select)
       .eq('creator_id', userId)
       .eq('source_type', 'web')
       .eq('is_trashed', false)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false });
 
     if (useCursor) {
-      // Cursor mode: WHERE created_at < cursor LIMIT pageSize+1 (extra row
-      // detects hasMore). O(1) regardless of depth thanks to the implicit
-      // index on resources.created_at.
-      if (cursor) query = query.lt('created_at', cursor);
+      // Composite keyset: WHERE (created_at, id) < (cursor.ts, cursor.id).
+      // PostgREST encoding: or(created_at.lt.<ts>,and(created_at.eq.<ts>,id.lt.<id>)).
+      // Without the id tiebreaker, batched inserts that share a single
+      // timestamp (e.g. 94 rows at the same crawl tick) get clipped at
+      // the page boundary and silently lost — that bug accounted for the
+      // 417→340 mismatch users were seeing.
+      if (cursor) {
+        query = query.or(
+          `created_at.lt.${cursor.ts},and(created_at.eq.${cursor.ts},id.lt.${cursor.id})`,
+        );
+      }
       query = query.limit(pageSize + 1);
     } else {
       // Legacy offset mode (kept for any caller that hasn't migrated).
@@ -363,11 +403,14 @@ export const fetchLibraryPaginated = async (
     const pageData = hasMore ? rows.slice(0, pageSize) : rows;
 
     // Capture the cursor BEFORE flattenResourceMedia overwrites
-    // ``created_at`` with parsed_media.created_at (the row-level created_at
-    // belongs to the resources table — that's what the ORDER BY uses).
-    const lastRow = pageData[pageData.length - 1];
-    const nextCursor =
-      hasMore && lastRow ? (lastRow as { created_at?: string }).created_at ?? null : null;
+    // ``created_at`` (which belongs to resources, not parsed_media).
+    const lastRow = pageData[pageData.length - 1] as
+      | { id?: string | number; created_at?: string }
+      | undefined;
+    const nextCursor: LibraryCursor | null =
+      hasMore && lastRow && lastRow.created_at && lastRow.id != null
+        ? { ts: lastRow.created_at, id: String(lastRow.id) }
+        : null;
 
     // Fast total count (only on first page — cursor=null OR page=0). Duplicate
     // the filter set so the count reflects what the user is seeing.
@@ -435,6 +478,20 @@ function applyLibraryFilters<T extends { [k: string]: any }>(
   }
   if (f.platforms && f.platforms.length > 0) {
     query = query.in('parsed_media.source_platform', f.platforms);
+  }
+  if (f.media_types && f.media_types.length > 0) {
+    const wireValues = f.media_types.flatMap(
+      (t) => MEDIA_TYPE_VALUES_BY_TYPE[t] ?? [],
+    );
+    if (wireValues.length > 0) {
+      query = query.in('parsed_media.media_type', wireValues);
+    } else {
+      // 'audio' / 'document' / 'other' alone yields zero rows from
+      // parsed_media (web library has no such items). Force-empty result
+      // by intersecting with an impossible value rather than silently
+      // returning the unfiltered list.
+      query = query.in('parsed_media.media_type', ['__impossible__']);
+    }
   }
   if (f.has_comments) {
     query = query.gt('parsed_media.comment_count', 0);

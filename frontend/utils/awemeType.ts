@@ -80,25 +80,27 @@ export { buildStreamUrl as getStreamUrl, isPlayableUrl };
 
 /**
  * Get video playback URL (backward-compatible wrapper).
+ * Status-gated — only returns a URL when video_download_status === 'completed'.
  */
 export const getVideoUrl = (data: {
   id?: string;
   media_format?: string;
   hls_path?: string;
   download_path?: string;
+  video_download_status?: string;
 }, token?: string): string | undefined => {
   return getPlaybackUrl(data, token);
 };
 
 /**
  * Get cover image URL (backward-compatible wrapper).
+ * Local-only + status-gated — never returns a remote CDN URL, never returns
+ * a stale local path whose backing file may have been cleaned up.
  */
 export const getCoverUrl = (data: {
   id?: string;
   cover_download_path?: string;
-  cover_urls?: string[];
-  dynamic_cover_url?: string;
-  image_download_urls?: string[];
+  cover_download_status?: string;
 }, token?: string): string | undefined => {
   return getCoverImageUrl(data, token);
 };

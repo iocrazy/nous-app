@@ -1295,10 +1295,14 @@ class DownloaderService:
             result.cover_download_status = DownloadStatus.FAILED
             result.error = "所有封面 URL 下载失败"
 
+            # Clear stale path: if a previous attempt left a path but this
+            # one failed, the file on disk may be gone. Path field must
+            # only ever represent a real, completed download.
             await repo.update(
                 platform_id,
                 {
                     "cover_download_status": DownloadStatus.FAILED.value,
+                    "cover_download_path": None,
                     "error_message": result.error,
                 },
             )
@@ -1327,6 +1331,7 @@ class DownloaderService:
                     platform_id,
                     {
                         "cover_download_status": DownloadStatus.FAILED.value,
+                        "cover_download_path": None,
                         "error_message": str(e)[:500],
                     },
                 )

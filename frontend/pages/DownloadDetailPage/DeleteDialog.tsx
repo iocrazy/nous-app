@@ -1,6 +1,8 @@
 import React from 'react';
-import { Loader2, Trash2, X } from 'lucide-react';
+import { Loader2, Trash2, X, Image as ImageIcon } from 'lucide-react';
 import { Video } from '../../types';
+import { getCoverUrl } from '../../utils/awemeType';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface DeleteDialogProps {
   video: Video;
@@ -10,6 +12,8 @@ interface DeleteDialogProps {
 }
 
 export function DeleteDialog({ video, isDeleting, onClose, onConfirm }: DeleteDialogProps) {
+  const { mediaToken } = useAuth();
+  const coverUrl = getCoverUrl(video, mediaToken ?? undefined);
   return (
     <div
       className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
@@ -39,12 +43,17 @@ export function DeleteDialog({ video, isDeleting, onClose, onConfirm }: DeleteDi
             This item will be moved to the Recycle Bin. You can restore it later.
           </p>
           <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
-            <img
-              src={(video.cover_urls?.[0]) || "https://picsum.photos/80/80"}
-              alt="Preview"
-              className="w-12 h-12 rounded-lg object-cover"
-              referrerPolicy="no-referrer"
-            />
+            {coverUrl ? (
+              <img
+                src={coverUrl}
+                alt="Preview"
+                className="w-12 h-12 rounded-lg object-cover"
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-lg bg-zinc-700 flex items-center justify-center">
+                <ImageIcon className="w-5 h-5 text-zinc-500" />
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               <p className="text-sm text-white font-medium truncate">
                 {video.title || 'Untitled'}

@@ -7,6 +7,7 @@ import {
   deleteItem,
   cleanupStaleDownloads,
   type FetchLibraryFilterParams,
+  type LibraryCursor,
 } from '../services/dataService';
 import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoToCollection, removeVideoFromCollection } from '../services/collectionService';
 import { MOCK_LIBRARY } from '../constants';
@@ -43,7 +44,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   // deep scrolls stay O(1). currentPage is kept for any consumer that
   // displays the page count, but the actual fetch keys off ``nextCursor``.
   const [currentPage, setCurrentPage] = useState(0);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<LibraryCursor | null>(null);
   const [hasMoreData, setHasMoreData] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number>(-1);
