@@ -8,13 +8,11 @@ from __future__ import annotations
 from app.services.workforce.state_machine import (
     ALLOWED_TRANSITIONS,
     InvalidTransitionError,
-    LockNotAcquiredError,
     WorkerStateMachine,
 )
 
 __all__ = [
     "ALLOWED_TRANSITIONS",
     "InvalidTransitionError",
-    "LockNotAcquiredError",
     "WorkerStateMachine",
 ]

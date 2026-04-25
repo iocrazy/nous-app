@@ -30,7 +30,6 @@ from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_workforce_repository import AgentWorkforceRepository
 from app.services.workforce.state_machine import (
     InvalidTransitionError,
-    LockNotAcquiredError,
     WorkerStateMachine,
 )
 
@@ -80,9 +79,6 @@ class InboxProcessor:
                 if created:
                     stats["tasks_created"] += 1
                 stats["agents_processed"] += 1
-            except LockNotAcquiredError:
-                # Lock held by another worker — fine, we'll retry next tick.
-                logger.debug(f"[inbox] agent={agent_id} lock contended, skipping tick")
             except Exception as err:
                 stats["errors"] += 1
                 logger.exception(f"[inbox] agent={agent_id} processing failed: {err}")
@@ -145,10 +141,10 @@ class InboxProcessor:
             return False
 
         # Drive the worker into 'working' BEFORE marking the inbox processed.
-        # If the state machine raises (lock contention, invalid transition),
-        # we don't want a "processed" inbox message paired with an idle worker
-        # and an orphan queued task. The CAS guard in claim_next_unread set
-        # the message to 'reading' so concurrent ticks won't re-pick it.
+        # If the state machine raises an invalid transition, we don't want a
+        # "processed" inbox message paired with an idle worker and an orphan
+        # queued task. The CAS guard in claim_next_unread set the message to
+        # 'reading' so concurrent ticks won't re-pick it.
         try:
             await self.state_machine.transition(
                 agent_id=agent_id,
@@ -170,19 +166,6 @@ class InboxProcessor:
                 )
             except Exception:  # pragma: no cover — defensive fallthrough
                 pass
-        except LockNotAcquiredError:
-            # Another worker beat us to the lock for this agent. Re-queue
-            # the task (back to 'queued') and revert the inbox claim so the
-            # next tick (or other worker) retries cleanly.
-            logger.debug(
-                f"[inbox] agent={agent_id} lock contended after task "
-                f"create — requeuing and reverting inbox"
-            )
-            await self.repo.requeue_task(UUID(task["id"]))
-            # Note: revert-to-unread isn't exposed on the repo yet; the
-            # message stays in 'reading' until the next tick reclaims it
-            # via the orphan-reading sweeper (M2 follow-up TODO).
-            return False
 
         # State move succeeded — now safe to finalise the inbox row.
         await self.repo.mark_inbox_processed(
