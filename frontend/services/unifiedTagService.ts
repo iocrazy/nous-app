@@ -147,6 +147,25 @@ export async function createTagGroup(name: string): Promise<TagGroup> {
   return res.json();
 }
 
+export async function renameTagGroup(
+  groupId: string,
+  name: string,
+): Promise<TagGroup> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/tags/groups/${groupId}`, {
+    method: 'PUT',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to rename group' }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function deleteTagGroup(groupId: string): Promise<void> {
   const apiUrl = getApiUrl();
   const res = await fetch(`${apiUrl}/api/v1/tags/groups/${groupId}`, {

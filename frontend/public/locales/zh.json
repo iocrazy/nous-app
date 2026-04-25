@@ -113,6 +113,7 @@
   "common": {
     "cancel": "取消",
     "close": "关闭",
+    "create": "创建",
     "delete": "删除",
     "deleting": "删除中...",
     "previous": "上一页",
