@@ -203,3 +203,65 @@ async def test_await_flag_forwarded_into_payload_and_response():
     )
     assert out["await"] is True
     assert workforce.enqueue_inbox.await_args.kwargs["payload"]["await"] is True
+
+
+# ─── J milestone: cycle detection ───────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cycle_detected_rejects_dispatch():
+    """If walking parent_run_id finds the target agent already on the
+    chain, refuse the dispatch — that's a ping-pong cycle (A→B→A→B)
+    that would slip past the depth-only check."""
+    target_aid = uuid4()
+    target = {"id": str(target_aid), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    ancestor_run = uuid4()
+    svc._detect_cycle = AsyncMock(return_value=ancestor_run)
+
+    out = await svc.execute({"agent_slug": "summary", "prompt": "loop"})
+    assert "error" in out
+    assert "cycle detected" in out["error"]
+    assert out["cycle_run_id"] == str(ancestor_run)
+
+    # No inbox/outbox written when cycle is detected.
+    workforce.enqueue_inbox.assert_not_called()
+    workforce.enqueue_outbox.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_cycle_proceeds_normally():
+    """When the walker reports no cycle (None), dispatch proceeds."""
+    target_aid = uuid4()
+    target = {"id": str(target_aid), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    svc._detect_cycle = AsyncMock(return_value=None)
+
+    out = await svc.execute({"agent_slug": "summary", "prompt": "ok"})
+    assert "error" not in out
+    workforce.enqueue_inbox.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cycle_walker_returns_none_when_no_parent_run_id():
+    """Without a parent_run_id (top-of-tree call), no walk is needed —
+    the chain is empty, so no cycle is possible."""
+    target = {"id": str(uuid4()), "slug": "summary", "persistent": True}
+    agent_repo = MagicMock()
+    agent_repo.get_by_slug = AsyncMock(return_value=target)
+    workforce = MagicMock()
+    workforce.enqueue_inbox = AsyncMock(return_value={"id": str(uuid4())})
+    workforce.enqueue_outbox = AsyncMock(return_value={"id": str(uuid4())})
+    svc = DelegateToolService(
+        caller_agent_id=uuid4(),
+        caller_user_id=uuid4(),
+        parent_run_id=None,
+        agent_depth=0,
+        agent_repo=agent_repo,
+        workforce_repo=workforce,
+    )
+    cycle = await svc._detect_cycle(target_agent_id=uuid4())
+    assert cycle is None
