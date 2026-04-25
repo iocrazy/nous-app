@@ -65,6 +65,22 @@ export interface WorkforceBoard {
   recent_state_history: WorkforceStateHistoryRow[];
 }
 
+async function postJson<T>(
+  path: string,
+  body: Record<string, unknown> | null = null,
+): Promise<T> {
+  const resp = await fetch(`${base()}${path}`, {
+    method: 'POST',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
 export const workforceService = {
   async getBoard(): Promise<WorkforceBoard> {
     const resp = await fetch(`${base()}/board`, {
@@ -75,5 +91,21 @@ export const workforceService = {
       throw new Error(`${resp.status}: ${text}`);
     }
     return resp.json();
+  },
+
+  async pauseAgent(slug: string, reason?: string): Promise<void> {
+    await postJson(`/agents/${encodeURIComponent(slug)}/pause`, { reason });
+  },
+
+  async resumeAgent(slug: string): Promise<void> {
+    await postJson(`/agents/${encodeURIComponent(slug)}/resume`);
+  },
+
+  async clearInbox(slug: string): Promise<{ cleared: number }> {
+    return postJson(`/agents/${encodeURIComponent(slug)}/clear-inbox`);
+  },
+
+  async cancelTask(taskId: string): Promise<void> {
+    await postJson(`/tasks/${encodeURIComponent(taskId)}/cancel`);
   },
 };
