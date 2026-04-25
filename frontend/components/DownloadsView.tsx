@@ -707,7 +707,7 @@ export const DownloadsView: React.FC = () => {
               className="w-52"
               searchScope={searchScope}
               onSearchScopeChange={(next) => {
-                setSearchScope(next);
+                setSearchScope(next as SearchField[]);
                 // Persist Eagle-style — same key as the standalone picker
                 // so the choice carries across views.
                 try {
