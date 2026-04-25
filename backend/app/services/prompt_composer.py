@@ -396,6 +396,24 @@ class PromptComposer:
                                 "the message is unread."
                             ),
                         },
+                        "await": {
+                            "type": "boolean",
+                            "description": (
+                                "If true, block this turn until the target "
+                                "finishes and embed the result content in "
+                                "the response. Default false (fire-and-"
+                                "forget). Use sparingly: holds the caller's "
+                                "agent for up to await_timeout_seconds."
+                            ),
+                        },
+                        "await_timeout_seconds": {
+                            "type": "number",
+                            "description": (
+                                "Max seconds to block when await=true. "
+                                "Default 60, capped at 180. Ignored when "
+                                "await=false."
+                            ),
+                        },
                     },
                     "required": ["agent_slug", "prompt"],
                 },

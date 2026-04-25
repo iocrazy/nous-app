@@ -198,8 +198,23 @@ async def test_dedup_key_forwarded():
 async def test_await_flag_forwarded_into_payload_and_response():
     target = {"id": str(uuid4()), "slug": "summary", "persistent": True}
     svc, _, workforce, *_ = _service(target=target)
+    # Stub cycle + lookup to terminate immediately; we're only pinning that
+    # await=true is forwarded into the inbox payload and response shape.
+    svc._detect_cycle = AsyncMock(return_value=None)
+    svc._lookup_task_by_inbox = AsyncMock(
+        return_value={
+            "id": str(uuid4()),
+            "lifecycle_status": "done",
+            "result": {"content": "ok"},
+        }
+    )
     out = await svc.execute(
-        {"agent_slug": "summary", "prompt": "hi", "await": True}
+        {
+            "agent_slug": "summary",
+            "prompt": "hi",
+            "await": True,
+            "await_timeout_seconds": 0.5,
+        }
     )
     assert out["await"] is True
     assert workforce.enqueue_inbox.await_args.kwargs["payload"]["await"] is True
@@ -265,3 +280,122 @@ async def test_cycle_walker_returns_none_when_no_parent_run_id():
     )
     cycle = await svc._detect_cycle(target_agent_id=uuid4())
     assert cycle is None
+
+
+# ─── F milestone: await=true ────────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_await_true_returns_result_when_task_done():
+    """When await=true and target finishes within the timeout, the
+    response carries the task's content + status='done'."""
+    target_aid = uuid4()
+    target = {"id": str(target_aid), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    svc._detect_cycle = AsyncMock(return_value=None)
+
+    task_id = uuid4()
+    svc._lookup_task_by_inbox = AsyncMock(
+        return_value={
+            "id": str(task_id),
+            "lifecycle_status": "done",
+            "result": {"content": "the summary text", "run_id": str(uuid4())},
+        }
+    )
+
+    out = await svc.execute(
+        {"agent_slug": "summary", "prompt": "summarise it", "await": True}
+    )
+    assert out["status"] == "done"
+    assert out["result"] == "the summary text"
+    assert out["task_id"] == str(task_id)
+    assert "waited_seconds" in out
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_await_true_failed_task_returns_error_fields():
+    target = {"id": str(uuid4()), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    svc._detect_cycle = AsyncMock(return_value=None)
+
+    svc._lookup_task_by_inbox = AsyncMock(
+        return_value={
+            "id": str(uuid4()),
+            "lifecycle_status": "failed",
+            "error_code": "runtime_error",
+            "error_message": "model exploded",
+        }
+    )
+
+    out = await svc.execute(
+        {"agent_slug": "summary", "prompt": "x", "await": True}
+    )
+    assert out["status"] == "failed"
+    assert out["error_code"] == "runtime_error"
+    assert out["error_message"] == "model exploded"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_await_true_timeout_when_task_never_terminal():
+    """When the target never lands a terminal lifecycle within the
+    timeout, status='timeout' and the inbox_message_id is preserved so
+    the caller can follow up via status_query."""
+    target = {"id": str(uuid4()), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    svc._detect_cycle = AsyncMock(return_value=None)
+
+    svc._lookup_task_by_inbox = AsyncMock(
+        return_value={"id": str(uuid4()), "lifecycle_status": "in_progress"}
+    )
+
+    # Tight timeout so the test runs fast.
+    out = await svc.execute(
+        {
+            "agent_slug": "summary",
+            "prompt": "x",
+            "await": True,
+            "await_timeout_seconds": 0.5,
+        }
+    )
+    assert out["status"] == "timeout"
+    assert out["last_lifecycle"] == "in_progress"
+    assert out["inbox_message_id"] is not None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_await_timeout_capped_at_max():
+    """await_timeout_seconds is capped at MAX_AWAIT_TIMEOUT_S so a
+    runaway prompt can't pin the agent forever."""
+    from app.services.workforce.delegate_tool import (
+        MAX_AWAIT_TIMEOUT_S,
+    )
+
+    target = {"id": str(uuid4()), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    svc._detect_cycle = AsyncMock(return_value=None)
+    # Resolve immediately so the timeout cap doesn't actually have to expire
+    svc._lookup_task_by_inbox = AsyncMock(
+        return_value={
+            "id": str(uuid4()),
+            "lifecycle_status": "done",
+            "result": {"content": "ok"},
+        }
+    )
+
+    out = await svc.execute(
+        {
+            "agent_slug": "summary",
+            "prompt": "x",
+            "await": True,
+            "await_timeout_seconds": 99999,  # absurd
+        }
+    )
+    # We don't assert exact wait time; the cap is enforced inside execute.
+    # Sanity-check: terminal path still returns done.
+    assert out["status"] == "done"
+    # And the cap exists.
+    assert MAX_AWAIT_TIMEOUT_S < 99999

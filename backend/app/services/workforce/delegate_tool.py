@@ -9,30 +9,27 @@ sub-task to another persistent agent. The tool:
     4. Writes one inbox row for the target + one outbox row for the
        caller (audit + Realtime). Both link to the caller's run via
        parent_run_id so cost rollups stay tree-aware.
-    5. Returns a status payload to the LLM — fire-and-forget by default;
-       awaiting the result is M3 work (wait/notify on agent_outbox).
-
-The actual execution of the delegated task happens later, when the
-target agent's worker processes its inbox in the next dispatch tick.
-This is intentional asynchrony — the caller doesn't block; instead it
-sees the dispatch confirmation, decides whether to wait, and either
-finishes the turn or asks for a status_query.
+    5. Returns a status payload to the LLM. With ``await=false``
+       (default) it's fire-and-forget. With ``await=true`` (F milestone)
+       it polls the target's task lifecycle until terminal and embeds
+       the result content in the response so the caller's LLM can
+       reason on it in the same turn.
 
 Notes on design choices:
 - We reject self-delegate hard (same caller_agent_id == target_agent_id).
   Same-agent recursion needs explicit task spawning, not Delegate.
-- M2 cycle protection is depth-only (``agent_depth >= MAX_DELEGATION_DEPTH``).
-  This catches runaway recursion within a single dispatch tree but does NOT
-  detect ping-pong cycles like A→B→A→B that stay below the depth cap. Full
-  parent-chain walk + agent-membership check is M3 work; tracked as P0
-  follow-up TODO.
-- ``await=true`` is parsed but not yet honoured — M3's wait primitive
-  will hook in here. For now the field is forwarded into the inbox
-  payload so the target agent sees it.
+- Cycle protection (J): walks ``agent_runs.parent_run_id`` to root and
+  rejects when the target agent already appears upstream. Catches
+  ping-pong loops that depth-only protection misses.
+- Awaited path is implemented via polling, not LISTEN/NOTIFY: Supabase
+  pgbouncer transaction pooling drops LISTEN, and polling at 1-5s
+  intervals is fine for the M3 cadence.
 """
 
 from __future__ import annotations
 
+import asyncio
+from time import monotonic
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -45,6 +42,14 @@ from app.repositories.agent_workforce_repository import AgentWorkforceRepository
 # meaningful workforce composition (planner → executor → critic) without
 # letting a buggy agent runaway-recurse into the inbox.
 MAX_DELEGATION_DEPTH = 3
+
+# Default and ceiling for ``await=true`` polling. The caller's LLM-call
+# wallclock is already heavy; we don't want a stuck delegation to hold
+# its asyncio.Lock forever. Caller can request a custom value via the
+# ``await_timeout_seconds`` arg, capped at MAX.
+DEFAULT_AWAIT_TIMEOUT_S = 60.0
+MAX_AWAIT_TIMEOUT_S = 180.0
+TERMINAL_LIFECYCLE_STATES = {"done", "failed", "cancelled"}
 
 
 class DelegateToolService:
@@ -132,6 +137,12 @@ class DelegateToolService:
         priority = int(args.get("priority") or 5)
         dedup_key = args.get("dedup_key")
         await_result = bool(args.get("await") or False)
+        await_timeout = float(
+            args.get("await_timeout_seconds") or DEFAULT_AWAIT_TIMEOUT_S
+        )
+        if await_timeout <= 0:
+            await_timeout = DEFAULT_AWAIT_TIMEOUT_S
+        await_timeout = min(await_timeout, MAX_AWAIT_TIMEOUT_S)
 
         payload = {
             "title": title,
@@ -171,26 +182,152 @@ class DelegateToolService:
         logger.info(
             f"[delegate] {self.caller_agent_id} → {target_agent_id} "
             f"(slug={slug}, depth={self.agent_depth + 1}, "
-            f"inbox={inbox_row.get('id')}, outbox={(outbox_row or {}).get('id')})"
+            f"inbox={inbox_row.get('id')}, outbox={(outbox_row or {}).get('id')}, "
+            f"await={await_result})"
         )
 
-        return {
+        base_response = {
             "delegated_to": slug,
             "agent_id": str(target_agent_id),
             "inbox_message_id": inbox_row.get("id"),
             "outbox_message_id": (outbox_row or {}).get("id"),
-            "status": "queued",
             "depth": self.agent_depth + 1,
             "await": await_result,
+        }
+
+        if not await_result:
+            return {
+                **base_response,
+                "status": "queued",
+                "note": (
+                    "Task is queued. The target agent will pick it up on its "
+                    "next dispatch tick. Use a status_query message or read "
+                    "the outbox to track completion."
+                ),
+            }
+
+        # F milestone: poll the target's task lifecycle until terminal.
+        await_outcome = await self._await_delegated_result(
+            caller_inbox_id=UUID(inbox_row["id"]),
+            timeout_seconds=await_timeout,
+        )
+        return {**base_response, **await_outcome}
+
+    # ────────────────────────────────────────────────────────────
+    # Awaited delegation (F milestone)
+    # ────────────────────────────────────────────────────────────
+
+    async def _await_delegated_result(
+        self,
+        *,
+        caller_inbox_id: UUID,
+        timeout_seconds: float,
+    ) -> Dict[str, Any]:
+        """Poll the target's task until it's terminal or the timeout
+        expires. Returns a dict that's spread into the tool response.
+
+        On success: ``status='done'`` (or 'failed' / 'cancelled') with
+        ``result`` (the task's content payload) and ``waited_seconds``.
+
+        On timeout: ``status='timeout'`` with ``waited_seconds`` and a
+        note pointing the caller at status_query for follow-up.
+
+        Backoff: 1s → 1.5s → 2.25s → … capped at 5s. Cumulative budget
+        is bounded by ``timeout_seconds``.
+        """
+        start = monotonic()
+        deadline = start + timeout_seconds
+        delay = 1.0
+        last_task: Optional[Dict[str, Any]] = None
+
+        while True:
+            now = monotonic()
+            if now >= deadline:
+                break
+
+            try:
+                task = await self._lookup_task_by_inbox(caller_inbox_id)
+            except Exception as err:  # pragma: no cover — defensive
+                logger.warning(f"[delegate] await poll failed: {err}")
+                task = None
+
+            if task is not None:
+                last_task = task
+                lifecycle = task.get("lifecycle_status")
+                if lifecycle in TERMINAL_LIFECYCLE_STATES:
+                    waited = monotonic() - start
+                    return self._format_terminal_outcome(task, waited)
+
+            # Sleep, but never past the deadline.
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(delay, remaining))
+            delay = min(delay * 1.5, 5.0)
+
+        waited = monotonic() - start
+        return {
+            "status": "timeout",
+            "waited_seconds": round(waited, 2),
+            "last_lifecycle": (last_task or {}).get("lifecycle_status"),
             "note": (
-                "Task is queued. The target agent will pick it up on its "
-                "next dispatch tick. Use a status_query message or read "
-                "the outbox to track completion."
-                if not await_result
-                else "Awaited delegation is queued; M3 will block this turn until "
-                "the target completes. For now the call returns immediately."
+                f"Awaited the target for {waited:.1f}s without a terminal "
+                "lifecycle. The task is still queued/running — use a "
+                "status_query message or check the outbox later."
             ),
         }
+
+    def _format_terminal_outcome(
+        self,
+        task: Dict[str, Any],
+        waited_seconds: float,
+    ) -> Dict[str, Any]:
+        """Translate a terminal task row into the awaited-response shape."""
+        lifecycle = task.get("lifecycle_status")
+        if lifecycle == "done":
+            result = task.get("result") or {}
+            content = (
+                result.get("content") if isinstance(result, dict) else None
+            )
+            return {
+                "status": "done",
+                "waited_seconds": round(waited_seconds, 2),
+                "result": content,
+                "task_id": task.get("id"),
+                "run_id": (result.get("run_id") if isinstance(result, dict) else None),
+            }
+        # failed / cancelled
+        return {
+            "status": lifecycle,
+            "waited_seconds": round(waited_seconds, 2),
+            "task_id": task.get("id"),
+            "error_code": task.get("error_code"),
+            "error_message": task.get("error_message"),
+        }
+
+    async def _lookup_task_by_inbox(
+        self, caller_inbox_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """Find the agent_task that the target's inbox processor created
+        for our inbox row. Returns None if the row hasn't been picked up
+        yet (dispatcher still warming up) or if the lookup fails."""
+        try:
+            from app.db.supabase_client import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            result = (
+                await client.table("agent_tasks")
+                .select(
+                    "id,lifecycle_status,result,error_code,error_message"
+                )
+                .eq("inbox_message_id", str(caller_inbox_id))
+                .maybe_single()
+                .execute()
+            )
+            return result.data if result and result.data else None
+        except Exception as err:
+            logger.debug(f"[delegate] task lookup transient: {err}")
+            return None
 
     # ────────────────────────────────────────────────────────────
     # Cycle detection
