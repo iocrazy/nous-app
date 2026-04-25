@@ -31,7 +31,14 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       react(),
       VitePWA({
-        registerType: 'prompt',
+        // ``autoUpdate`` instead of ``prompt`` — the prompt path leaves the
+        // new SW in a waiting state until the user clicks an "update"
+        // button we never wired up, so SW caches drift forever and old
+        // precache manifests reference chunks (e.g. ``minus-Du63Q9Ce.js``)
+        // that no longer exist after a redeploy → 404 + bad-precaching-
+        // response in console. autoUpdate + skipWaiting + clientsClaim
+        // makes a fresh SW take over on the next navigation.
+        registerType: 'autoUpdate',
         includeAssets: ['favicon.svg', 'apple-touch-icon-180x180.png'],
         manifest: {
           name: 'MediaHub',
@@ -50,6 +57,14 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB
+          // Discard caches from previous SW versions on activation so the
+          // new manifest doesn't try to reuse stale 404'd chunk URLs.
+          cleanupOutdatedCaches: true,
+          // Activate the new SW immediately, then take over already-open
+          // tabs. Without these, the user has to close every tab before
+          // the new SW kicks in.
+          skipWaiting: true,
+          clientsClaim: true,
           navigateFallback: '/index.html',
           navigateFallbackDenylist: [/^\/api\//, /^\/media\//, /^\/stream\//],
           runtimeCaching: [
