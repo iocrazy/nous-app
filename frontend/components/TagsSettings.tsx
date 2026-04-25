@@ -863,10 +863,35 @@ export const TagsSettings: React.FC = () => {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">
-                  {t('settings.tags.tagName')} (中文)
-                  <span className="text-zinc-500 text-xs ml-2">Optional</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-zinc-300">
+                    {t('settings.tags.tagName')} (中文)
+                    <span className="text-zinc-500 text-xs ml-2">Optional</span>
+                  </label>
+                  {/* "=" — chrome-extension parity. For terms that should
+                      stay identical in both languages (Agent, Skill,
+                      LLM, brand names), click to copy the English value
+                      into this field verbatim and skip translation. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Cancel any pending auto-translate so it doesn't
+                      // overwrite the value we just copied in.
+                      if (translateTimerRef.current) {
+                        window.clearTimeout(translateTimerRef.current);
+                        translateTimerRef.current = null;
+                      }
+                      const src = newTagName.trim();
+                      if (!src) return;
+                      setNewTagNameZh(src);
+                    }}
+                    disabled={!newTagName.trim()}
+                    title={t('settings.tags.sameAsEnglish', 'Use the same value as English (skip translation)')}
+                    className="text-[11px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    = EN
+                  </button>
+                </div>
                 <input
                   type="text"
                   placeholder="例如：美食、旅行、音乐"
