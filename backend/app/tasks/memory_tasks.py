@@ -21,7 +21,7 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.celery_app import celery
+from app.celery_app import celery_app
 
 # How many recent turns we feed each extractor. Cap is a cost control —
 # extractor prompts grow linearly with this. M1.B default is 10; tune once
@@ -29,7 +29,7 @@ from app.celery_app import celery
 _RECENT_TURNS_PER_CHANNEL = 10
 
 
-@celery.task(bind=True, name="memory.write_memory_task", max_retries=2)
+@celery_app.task(bind=True, name="memory.write_memory_task", max_retries=2)
 def write_memory_task(
     self,
     *,

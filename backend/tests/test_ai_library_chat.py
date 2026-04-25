@@ -189,9 +189,36 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
         async def __aexit__(self_inner, exc_type, exc, tb):
             return False
 
+    # M1.5 wiring: chat() now calls AgentRepository.get_by_slug then
+    # build_agent_runner_stack. Patch both so the test stays focused on
+    # the chat-service coordination logic (M1.5 wiring is unit-tested
+    # separately under test_ai_library_chat_wiring.py).
+    fake_agent_record = {
+        "id": str(agent_id),
+        "slug": "script_ai",
+        "model": "qwen-max",
+        "budget_per_run_cents": None,
+        "fallback_models": [],
+    }
+
+    fake_stack = MagicMock()
+    fake_stack.runner = runner
+    fake_stack.recalled_memories = []
+    fake_stack.primary_model = "qwen-max"
+    fake_stack.fallback_chain_active = False
+
+    fake_agent_repo_instance = MagicMock()
+    fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
+
     with patch(
         "app.services.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
+    ), patch(
+        "app.services.ai_library_chat_service.AgentRepository",
+        return_value=fake_agent_repo_instance,
+    ), patch(
+        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        AsyncMock(return_value=fake_stack),
     ), patch(
         "app.services.ai_library_chat_service.PromptComposer",
         return_value=composer,
