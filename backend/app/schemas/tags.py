@@ -42,6 +42,10 @@ class TagUpdate(BaseModel):
     color: Optional[str] = Field(None, description="Hex color code")
     icon: Optional[str] = Field(None, description="Emoji or icon identifier")
     enabled: Optional[bool] = Field(None, description="Whether visible in frontend API")
+    group_id: Optional[str] = Field(
+        None,
+        description="Reassign to a tag group (or null to leave uncategorized)",
+    )
 
 
 class TagResponse(TagBase):

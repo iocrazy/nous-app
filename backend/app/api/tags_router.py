@@ -88,6 +88,26 @@ async def create_tag_group(auth: AuthDep, body: TagGroupCreate):
     return TagGroupItem(id=str(g["id"]), name=g["name"], sort_order=g["sort_order"])
 
 
+class TagGroupUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+
+
+@router.put("/groups/{group_id}", response_model=TagGroupItem)
+async def rename_tag_group(auth: AuthDep, group_id: str, body: TagGroupUpdate):
+    """Rename a tag group."""
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("tag_groups")
+        .update({"name": body.name})
+        .eq("id", group_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Tag group not found")
+    g = result.data[0]
+    return TagGroupItem(id=str(g["id"]), name=g["name"], sort_order=g["sort_order"])
+
+
 @router.delete("/groups/{group_id}", status_code=status.HTTP_200_OK)
 async def delete_tag_group(auth: AuthDep, group_id: str):
     """Delete a tag group. Tags in this group become uncategorized."""
@@ -288,6 +308,7 @@ async def update_tag(
         color=tag_update.color,
         icon=tag_update.icon,
         enabled=tag_update.enabled,
+        group_id=tag_update.group_id,
     )
 
     return updated

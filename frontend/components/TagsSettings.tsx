@@ -27,6 +27,7 @@ import {
   fetchTagGroups,
   createTag,
   createTagGroup,
+  renameTagGroup,
   deleteTagGroup,
   reorderTagGroups,
   updateTag,
@@ -96,6 +97,21 @@ export const TagsSettings: React.FC = () => {
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
   const [dragGroupId, setDragGroupId] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
+
+  // Inline rename for groups (double-click)
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
+  const [renameGroupValue, setRenameGroupValue] = useState('');
+
+  // Drag a tag onto a group sidebar row to reassign it. Tag drag uses a
+  // separate state slot so it doesn't collide with the existing group
+  // reorder drag (which targets the same drop zones).
+  const [dragTagId, setDragTagId] = useState<string | null>(null);
+  const [tagDropTargetGroupId, setTagDropTargetGroupId] = useState<string | null>(null);
+
+  // Auto-translate (Chrome-extension parity) — when the user types Chinese
+  // in the English field (or vice-versa) we hit mymemory.translated.net
+  // after a 600ms idle to fill the other field.
+  const translateTimerRef = React.useRef<number | null>(null);
 
   // Load tags and groups
   useEffect(() => {
@@ -278,6 +294,90 @@ export const TagsSettings: React.FC = () => {
   };
 
   // Group management handlers
+  const handleRenameGroupConfirm = async (groupId: string) => {
+    const trimmed = renameGroupValue.trim();
+    const original = groups.find((g) => g.id === groupId);
+    if (!original || !trimmed || trimmed === original.name) {
+      setRenamingGroupId(null);
+      return;
+    }
+    // Optimistic update — flip name client-side, reconcile on failure.
+    const oldName = original.name;
+    setGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, name: trimmed } : g)),
+    );
+    setTags((prev) =>
+      prev.map((tt) =>
+        tt.group_name === oldName ? { ...tt, group_name: trimmed } : tt,
+      ),
+    );
+    if (selectedGroup === oldName) setSelectedGroup(trimmed);
+    setRenamingGroupId(null);
+    try {
+      await renameTagGroup(groupId, trimmed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename group');
+      loadData();
+    }
+  };
+
+  // mymemory.translated.net free MT — same endpoint the chrome-extension
+  // popup uses, so the web UX matches when creating a tag.
+  const isChinese = (text: string) => /[一-鿿]/.test(text);
+  const fetchTranslation = async (
+    source: string,
+    direction: 'zh|en' | 'en|zh',
+  ): Promise<string | null> => {
+    try {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(source)}&langpair=${direction}&de=8512939@qq.com`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const translated = data?.responseData?.translatedText;
+      return translated && translated !== source ? translated : null;
+    } catch (err) {
+      console.error('Tag translate failed:', err);
+      return null;
+    }
+  };
+  // Debounced translate hook for the create-tag dialog. Mirrors the
+  // chrome-extension popup: single input → fill the other language field
+  // when the corresponding target is still empty.
+  const scheduleTranslate = (source: string, originField: 'en' | 'zh') => {
+    if (translateTimerRef.current) window.clearTimeout(translateTimerRef.current);
+    const trimmed = source.trim();
+    if (!trimmed) return;
+    translateTimerRef.current = window.setTimeout(async () => {
+      const sourceIsChinese = isChinese(trimmed);
+      // EN field with Chinese input → user wants to type in Chinese; flip
+      // the layout: fill EN with translation, mirror Chinese into ZH.
+      if (originField === 'en' && sourceIsChinese) {
+        const en = await fetchTranslation(trimmed, 'zh|en');
+        if (en) {
+          setNewTagName(en);
+          // Mirror the original Chinese into the ZH field if it's empty.
+          setNewTagNameZh((prev) => (prev.trim() ? prev : trimmed));
+        }
+        return;
+      }
+      // EN field with English input → translate to ZH if ZH is empty.
+      if (originField === 'en' && !sourceIsChinese) {
+        const zh = await fetchTranslation(trimmed, 'en|zh');
+        if (zh) {
+          setNewTagNameZh((prev) => (prev.trim() ? prev : zh));
+        }
+        return;
+      }
+      // ZH field with Chinese input → translate to EN if EN is empty.
+      if (originField === 'zh' && sourceIsChinese) {
+        const en = await fetchTranslation(trimmed, 'zh|en');
+        if (en) {
+          setNewTagName((prev) => (prev.trim() ? prev : en));
+        }
+      }
+    }, 600);
+  };
+
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return;
     setCreatingGroup(true);
@@ -322,10 +422,52 @@ export const TagsSettings: React.FC = () => {
 
   const handleDragOver = (e: React.DragEvent, groupId: string) => {
     e.preventDefault();
+    if (dragTagId) {
+      // A tag is being dragged onto a group row — that path takes
+      // precedence over group reordering.
+      setTagDropTargetGroupId(groupId);
+      return;
+    }
     if (groupId !== dragGroupId) setDragOverGroupId(groupId);
   };
 
+  // Drop handler doubles as: (a) group reorder when a group was dragged,
+  // (b) tag reassignment when a tag was dragged onto the group row.
   const handleDrop = async (targetGroupId: string) => {
+    // ── Tag drop: reassign the dragged tag to ``targetGroupId`` ────────
+    if (dragTagId) {
+      const draggedTag = tags.find((tt) => tt.id === dragTagId);
+      const tagId = dragTagId;
+      setDragTagId(null);
+      setTagDropTargetGroupId(null);
+      if (!draggedTag) return;
+      const newGroupId =
+        targetGroupId === '__uncategorized__' ? null : targetGroupId;
+      // Skip the network call if the tag is already in this group.
+      if (
+        (draggedTag as any).group_id === newGroupId ||
+        (newGroupId == null && !(draggedTag as any).group_id)
+      ) {
+        return;
+      }
+      // Optimistic update so the UI flips immediately; reconcile on error.
+      const targetGroup = groups.find((g) => g.id === newGroupId);
+      setTags((prev) =>
+        prev.map((tt) =>
+          tt.id === tagId
+            ? { ...tt, group_id: newGroupId, group_name: targetGroup?.name || null }
+            : tt,
+        ),
+      );
+      try {
+        await updateTag(tagId, { group_id: newGroupId });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to move tag');
+        loadData();
+      }
+      return;
+    }
+
     if (!dragGroupId || dragGroupId === targetGroupId) {
       setDragGroupId(null);
       setDragOverGroupId(null);
@@ -461,19 +603,52 @@ export const TagsSettings: React.FC = () => {
             )}
 
             {/* Group list */}
-            {groups.map((group) => (
+            {groups.map((group) => {
+              const isTagDropTarget = tagDropTargetGroupId === group.id;
+              return (
               <div
                 key={group.id}
-                className={`group/item relative ${dragOverGroupId === group.id ? 'border-t-2 border-indigo-500' : ''}`}
-                draggable
+                className={`group/item relative ${
+                  isTagDropTarget
+                    ? 'ring-2 ring-indigo-500 rounded-lg'
+                    : dragOverGroupId === group.id
+                      ? 'border-t-2 border-indigo-500'
+                      : ''
+                }`}
+                draggable={renamingGroupId !== group.id}
                 onDragStart={() => handleDragStart(group.id)}
                 onDragOver={(e) => handleDragOver(e, group.id)}
-                onDragLeave={() => setDragOverGroupId(null)}
+                onDragLeave={() => {
+                  setDragOverGroupId(null);
+                  if (tagDropTargetGroupId === group.id) setTagDropTargetGroupId(null);
+                }}
                 onDrop={() => handleDrop(group.id)}
                 onDragEnd={() => { setDragGroupId(null); setDragOverGroupId(null); }}
               >
+                {renamingGroupId === group.id ? (
+                  <div className="flex gap-1.5 px-3 py-2">
+                    <input
+                      type="text"
+                      value={renameGroupValue}
+                      autoFocus
+                      onChange={(e) => setRenameGroupValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRenameGroupConfirm(group.id);
+                        if (e.key === 'Escape') setRenamingGroupId(null);
+                      }}
+                      onBlur={() => handleRenameGroupConfirm(group.id)}
+                      className="flex-1 min-w-0 px-2 py-1 rounded-md bg-zinc-800 border border-indigo-500 text-xs text-zinc-200 outline-none"
+                    />
+                  </div>
+                ) : (
                 <button
                   onClick={() => setSelectedGroup(group.name)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setRenamingGroupId(group.id);
+                    setRenameGroupValue(group.name);
+                  }}
+                  title={t('settings.tags.doubleClickToRename', 'Double-click to rename')}
                   className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
                     dragGroupId === group.id ? 'opacity-40' : ''
                   } ${
@@ -487,6 +662,7 @@ export const TagsSettings: React.FC = () => {
                   <span className="flex-1 text-left truncate">{group.name}</span>
                   <span className="text-xs text-zinc-500 group-hover/item:hidden">{groupCounts.get(group.name) || 0}</span>
                 </button>
+                )}
                 {/* Delete button on hover */}
                 {deletingGroupId === group.id ? (
                   <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -512,7 +688,8 @@ export const TagsSettings: React.FC = () => {
                   </button>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -579,11 +756,32 @@ export const TagsSettings: React.FC = () => {
                           ) : (
                             <div
                               onClick={() => tag.type !== 'system' && handleStartEdit(tag)}
+                              draggable={tag.type !== 'system'}
+                              onDragStart={(e) => {
+                                if (tag.type === 'system') {
+                                  e.preventDefault();
+                                  return;
+                                }
+                                setDragTagId(tag.id);
+                                // Required for the drag image to render in
+                                // some browsers; payload is unused since
+                                // dragTagId state carries the id.
+                                e.dataTransfer.effectAllowed = 'move';
+                                try {
+                                  e.dataTransfer.setData('text/plain', tag.id);
+                                } catch {
+                                  /* ignore — some browsers reject for non-text mime */
+                                }
+                              }}
+                              onDragEnd={() => {
+                                setDragTagId(null);
+                                setTagDropTargetGroupId(null);
+                              }}
                               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-all ${
                                 tag.type !== 'system'
                                   ? 'cursor-pointer hover:scale-105 hover:shadow-lg'
                                   : 'cursor-default'
-                              }`}
+                              } ${dragTagId === tag.id ? 'opacity-40' : ''}`}
                               style={getTagStyle(tag.color, tag.enabled === false)}
                             >
                               <TagIcon size={11} className="shrink-0" />
@@ -654,7 +852,11 @@ export const TagsSettings: React.FC = () => {
                   type="text"
                   placeholder="e.g. Food, Travel, Music"
                   value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setNewTagName(value);
+                    scheduleTranslate(value, 'en');
+                  }}
                   className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   autoFocus
                   onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
@@ -669,7 +871,11 @@ export const TagsSettings: React.FC = () => {
                   type="text"
                   placeholder="例如：美食、旅行、音乐"
                   value={newTagNameZh}
-                  onChange={(e) => setNewTagNameZh(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setNewTagNameZh(value);
+                    scheduleTranslate(value, 'zh');
+                  }}
                   className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
                 />
