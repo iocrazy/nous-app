@@ -203,7 +203,21 @@ class SkillCreate(BaseModel):
 
 
 class ComposedSystemPrompt(BaseModel):
-    """Output of prompt_composer.compose()."""
+    """Output of prompt_composer.compose().
+
+    Two fingerprints (M1.B, plan-eng-review Issue 2.2):
+      - prefix_fingerprint: hash of agent + skills (stable across turns)
+      - dynamic_fingerprint: prefix_fingerprint + recalled memory ids hash
+        (changes when memory recall set changes)
+
+    Downstream prompt-cache providers use prefix for prefix-cache reuse,
+    dynamic for staleness checks. Splitting prevents cross-user memory
+    leakage via stale cache hits (the failure mode that motivated the
+    split).
+
+    cache_fingerprint is kept as an alias of prefix_fingerprint for
+    back-compat with existing call sites (Phase-1 code reads this name).
+    """
 
     agent_id: UUID
     agent_slug: str
@@ -213,4 +227,7 @@ class ComposedSystemPrompt(BaseModel):
     system_message: str
     tools: list[dict]  # function-calling schema array
     skill_manifest: list[dict]  # [{slug, name, description}]
-    cache_fingerprint: str  # sha1 of stable prefix inputs
+    cache_fingerprint: str  # alias of prefix_fingerprint (back-compat)
+    prefix_fingerprint: str = ""  # M1.B: stable prefix hash
+    dynamic_fingerprint: str = ""  # M1.B: prefix + memory recall hash
+    recalled_memory_ids: list[UUID] = Field(default_factory=list)

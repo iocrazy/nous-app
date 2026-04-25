@@ -31,7 +31,7 @@ are unit-testable without touching Supabase.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
@@ -50,6 +50,16 @@ class AgentNotFoundError(Exception):
 
 
 @dataclass(frozen=True)
+class RecalledMemory:
+    """One memory the retriever decided to inject. Identity by id; UI int
+    label is assigned by the composer when rendering."""
+
+    id: UUID
+    summary: str
+    when_to_use: str
+
+
+@dataclass(frozen=True)
 class ComposerInput:
     """Immutable input to :meth:`PromptComposer.compose`."""
 
@@ -57,6 +67,9 @@ class ComposerInput:
     request_instructions: Optional[str] = None
     session_id: Optional[str] = None
     model_override: Optional[str] = None
+    # M1.B: caller (chat service) recalls memories first then passes them
+    # in. PromptComposer doesn't do retrieval — separation of concerns.
+    recalled_memories: list[RecalledMemory] = field(default_factory=list)
 
 
 class PromptComposer:
@@ -87,6 +100,7 @@ class PromptComposer:
             agent=agent,
             skills=skills,
             request_instructions=inp.request_instructions,
+            recalled_memories=inp.recalled_memories,
         )
         tools = self._build_tools(skills)
         manifest = [
@@ -98,6 +112,9 @@ class PromptComposer:
             for s in skills
         ]
 
+        prefix_fp = self._prefix_fingerprint(agent, skills)
+        dynamic_fp = self._dynamic_fingerprint(prefix_fp, inp.recalled_memories)
+
         return ComposedSystemPrompt(
             agent_id=UUID(agent["id"]),
             agent_slug=agent["slug"],
@@ -107,7 +124,10 @@ class PromptComposer:
             system_message=system_message,
             tools=tools,
             skill_manifest=manifest,
-            cache_fingerprint=self._fingerprint(agent, skills),
+            cache_fingerprint=prefix_fp,  # back-compat alias
+            prefix_fingerprint=prefix_fp,
+            dynamic_fingerprint=dynamic_fp,
+            recalled_memory_ids=[m.id for m in inp.recalled_memories],
         )
 
     # ------------------------------------------------------------------
@@ -119,9 +139,20 @@ class PromptComposer:
         agent: dict[str, Any],
         skills: list[dict[str, Any]],
         request_instructions: Optional[str],
+        recalled_memories: list["RecalledMemory"] = None,
     ) -> str:
-        """Render the full system message string, sections joined by \\n\\n."""
+        """Render the full system message string, sections joined by \\n\\n.
+
+        Layout (M1.B):
+            Identity / Soul / Agent / <available_skills>
+            <!-- CACHE_BOUNDARY -->
+            <recalled_memories> [M1.B injection — after boundary so the
+                                 prefix cache stays stable across turns]
+            Request Instructions
+            Runtime
+        """
         parts: list[str] = []
+        recalled_memories = recalled_memories or []
 
         identity = (agent.get("identity_md") or "").strip()
         if identity:
@@ -145,12 +176,40 @@ class PromptComposer:
 
         parts.append(CACHE_BOUNDARY_MARKER)
 
+        # Memory section MUST be AFTER cache_boundary so the stable prefix
+        # remains cacheable across turns. Recall results change every turn.
+        if recalled_memories:
+            parts.append(self._render_memory_section(recalled_memories))
+
         if request_instructions and request_instructions.strip():
             parts.append(f"# Request Instructions\n{request_instructions.strip()}")
 
         parts.append(self._render_runtime_line(agent))
 
         return "\n\n".join(parts)
+
+    def _render_memory_section(self, memories: list["RecalledMemory"]) -> str:
+        """Render <recalled_memories> XML manifest with int-mapped refs.
+
+        LLM sees [0]/[1]/[2] not raw UUIDs (Mem Zero pattern).
+        """
+        header = (
+            "## Recalled Memories\n"
+            "These are facts the system remembers about this user from past "
+            "conversations. Use them to personalise your reply when relevant. "
+            "Reference by [N] if you cite one.\n"
+        )
+        xml: list[str] = ["<recalled_memories>"]
+        for i, mem in enumerate(memories):
+            summary = (mem.summary or "").replace("<", "&lt;").replace(">", "&gt;")
+            when = (mem.when_to_use or "").replace("<", "&lt;").replace(">", "&gt;")
+            xml.append("  <memory>")
+            xml.append(f"    <ref>[{i}]</ref>")
+            xml.append(f"    <when_to_use>{when}</when_to_use>")
+            xml.append(f"    <fact>{summary}</fact>")
+            xml.append("  </memory>")
+        xml.append("</recalled_memories>")
+        return header + "\n" + "\n".join(xml)
 
     def _render_skills_section(self, skills: list[dict[str, Any]]) -> str:
         """Render the ``## Available Skills`` block + XML manifest."""
@@ -222,17 +281,16 @@ class PromptComposer:
             }
         ]
 
-    def _fingerprint(
+    def _prefix_fingerprint(
         self,
         agent: dict[str, Any],
         skills: list[dict[str, Any]],
     ) -> str:
-        """Stable SHA-1 over the prefix inputs (for cache keying).
+        """Stable SHA-1 over prefix inputs (agent identity/soul/agent + skills).
 
-        Excludes request-scoped fields (no ``request_instructions``, no
-        timestamps) so two composes that would produce the same prefix
-        get the same fingerprint. Skills are sorted by id so binding
-        order doesn't destabilise the hash.
+        Renamed from ``_fingerprint`` in M1.B. Same behaviour — excludes
+        request-scoped fields so two composes producing the same prefix
+        get the same fingerprint. Skills sorted by id for stability.
         """
         h = hashlib.sha1()  # noqa: S324 — not used for security
         h.update(str(agent.get("id", "")).encode())
@@ -243,4 +301,24 @@ class PromptComposer:
         for s in sorted(skills, key=lambda x: str(x.get("id"))):
             h.update(str(s.get("id", "")).encode())
             h.update(str(s.get("updated_at", "")).encode())
+        return h.hexdigest()
+
+    def _dynamic_fingerprint(
+        self,
+        prefix_fp: str,
+        recalled_memories: list["RecalledMemory"],
+    ) -> str:
+        """Prefix fingerprint extended with recalled memory id set hash.
+
+        Critical for cache safety (plan-eng-review Issue 2.2): when memory
+        recall changes, downstream cache providers must see a different
+        fingerprint and not serve a stale prefix that could leak another
+        user's facts.
+        """
+        h = hashlib.sha1()  # noqa: S324
+        h.update(prefix_fp.encode())
+        # Order doesn't matter — recall set is what we hash, not order.
+        for mid in sorted(str(m.id) for m in recalled_memories):
+            h.update(mid.encode())
+            h.update(b"|")
         return h.hexdigest()

@@ -44,6 +44,17 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     "services/embedding_service.py": "embeddings API, not chat completions",
     # ASR: speech-to-text via Volcengine, not an LLM chat completion.
     "services/volcengine_asr_service.py": "ASR API, not an agent invocation",
+    # M1.A retry middleware: wraps adapter.call() for callers that DO
+    # supply a RunRecorder via AgentRunner. The middleware itself is
+    # recorder-agnostic; coverage is enforced one level up.
+    "services/llm_retry_middleware.py": "retry wrapper, recorder lives in caller",
+    # M1.A FALLBACK chain: walks fallback_models list, each attempt goes
+    # through LLMRetryMiddleware. Same coverage shape as the retry MW.
+    "services/llm_fallback_chain.py": "fallback chain, recorder lives in caller",
+    # M1.B memory writer Celery task: runs OFF the chat path, no chat
+    # session to record against. Memory extraction LLM calls are tracked
+    # via Celery task metrics, not RunRecorder.
+    "tasks/memory_tasks.py": "memory extraction in Celery task, off-chat-path",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a
