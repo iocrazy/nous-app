@@ -1,0 +1,379 @@
+"""Unit tests for the M3 agent worker runtime.
+
+Covers the contract a worker must honour:
+- Happy path: queued/assigned → in_progress → done + outbox row
+- Refuses non-persistent agents
+- Refuses tasks whose inherited depth exceeds MAX_INHERITED_DEPTH
+- Refuses tasks already past 'assigned' (idempotent on retry)
+- Translates runtime exceptions to lifecycle_status='failed'
+- Routes outbox to user vs agent based on inbox sender_kind
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID, uuid4
+
+import pytest
+
+from app.services.workforce.agent_worker import (
+    MAX_INHERITED_DEPTH,
+    run_one_task,
+)
+
+
+# ─── helpers ──────────────────────────────────────────────────────────
+
+
+def _task(
+    *,
+    agent_id: UUID | None = None,
+    user_id: UUID | None = None,
+    prompt: str = "do the thing",
+    depth: int = 0,
+    parent_run_id: UUID | None = None,
+    inbox_message_id: UUID | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"prompt": prompt}
+    if depth:
+        payload["delegated_at_depth"] = depth
+    if parent_run_id:
+        payload["parent_run_id"] = str(parent_run_id)
+    return {
+        "id": str(uuid4()),
+        "agent_id": str(agent_id or uuid4()),
+        "user_id": str(user_id or uuid4()),
+        "lifecycle_status": "assigned",
+        "payload": payload,
+        "inbox_message_id": str(inbox_message_id) if inbox_message_id else None,
+    }
+
+
+def _persistent_agent(
+    *,
+    agent_id: UUID,
+    slug: str = "summarize",
+    persistent: bool = True,
+    model: str = "doubao-seed-2-0-pro-260215",
+) -> dict[str, Any]:
+    return {
+        "id": str(agent_id),
+        "slug": slug,
+        "name": slug,
+        "model": model,
+        "persistent": persistent,
+        "fallback_models": [],
+        "budget_per_run_cents": None,
+    }
+
+
+def _build_runner_stack_mock(content: str = "OK"):
+    """Returns a MagicMock that mimics AgentRunnerStack with a runner
+    whose run_turn returns ``{'content': content}``."""
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(return_value={"content": content})
+    stack = MagicMock()
+    stack.runner = runner
+    stack.recalled_memories = []
+    stack.primary_model = "doubao-seed-2-0-pro-260215"
+    stack.fallback_chain_active = False
+    return stack
+
+
+def _run_recorder_cm(run_id: UUID):
+    """Build an async-context-manager mock that returns a RunRecorder
+    stub with the given run_id and noop set_summaries."""
+    recorder = MagicMock()
+    recorder.run_id = run_id
+    recorder.prompt_tokens = 10
+    recorder.completion_tokens = 5
+    recorder.set_summaries = MagicMock()
+
+    class _CM:
+        async def __aenter__(self):
+            return recorder
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    return _CM(), recorder
+
+
+# ─── happy path ───────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_happy_path_queued_to_done_with_outbox():
+    agent_id = uuid4()
+    user_id = uuid4()
+    task = _task(agent_id=agent_id, user_id=user_id, prompt="summarise this PR")
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.get_task = AsyncMock(
+        return_value={**task, "lifecycle_status": "assigned"}
+    )
+    workforce.update_task_status = AsyncMock(return_value=True)
+    workforce.enqueue_outbox = AsyncMock(return_value={"id": str(uuid4())})
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_persistent_agent(agent_id=agent_id))
+
+    stack = _build_runner_stack_mock(content="Done summary.")
+    cm, recorder = _run_recorder_cm(run_id=uuid4())
+
+    with (
+        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
+        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
+        patch("app.services.workforce.agent_worker.SkillRepository", return_value=MagicMock()),
+        patch("app.services.workforce.agent_worker.build_agent_runner_stack", AsyncMock(return_value=stack)),
+        patch("app.services.workforce.agent_worker.PromptComposer") as PC,
+        patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
+        patch("app.services.workforce.agent_worker._lookup_inbox_message", AsyncMock(return_value=None)),
+        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
+    ):
+        composer = MagicMock()
+        composer.compose = AsyncMock(
+            return_value=MagicMock(
+                agent_id=agent_id, agent_slug="summarize", model="doubao-seed-2-0-pro-260215"
+            )
+        )
+        PC.return_value = composer
+
+        result = await run_one_task(task)
+
+    assert result["status"] == "done"
+    assert result["run_id"] == str(recorder.run_id)
+
+    # Lifecycle: in_progress then done
+    statuses = [c.kwargs["lifecycle_status"] for c in workforce.update_task_status.await_args_list]
+    assert statuses == ["in_progress", "done"]
+
+    # Outbox row written with task_result content
+    workforce.enqueue_outbox.assert_awaited_once()
+    outbox_kwargs = workforce.enqueue_outbox.await_args.kwargs
+    assert outbox_kwargs["sender_agent_id"] == agent_id
+    assert outbox_kwargs["recipient_kind"] == "user"  # default fallback when no inbox_msg
+    assert outbox_kwargs["payload"]["content"] == "Done summary."
+    assert outbox_kwargs["message_type"] == "task_result"
+
+
+# ─── refuses non-persistent agent ────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_refuses_non_persistent_agent():
+    agent_id = uuid4()
+    task = _task(agent_id=agent_id)
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.get_task = AsyncMock(
+        return_value={**task, "lifecycle_status": "assigned"}
+    )
+    workforce.update_task_status = AsyncMock(return_value=True)
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(
+        return_value=_persistent_agent(agent_id=agent_id, persistent=False)
+    )
+
+    with (
+        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
+        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
+    ):
+        result = await run_one_task(task)
+
+    assert result["status"] == "failed"
+    update_kwargs = workforce.update_task_status.await_args.kwargs
+    assert update_kwargs["lifecycle_status"] == "failed"
+    assert update_kwargs["error_code"] == "not_persistent"
+
+
+# ─── refuses depth > MAX ─────────────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_refuses_depth_exceeded():
+    """delegated_at_depth + 1 > MAX_INHERITED_DEPTH → failed."""
+    task = _task(depth=MAX_INHERITED_DEPTH)  # +1 = MAX+1, over the line
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.update_task_status = AsyncMock(return_value=True)
+
+    with patch(
+        "app.services.workforce.agent_worker.AgentWorkforceRepository",
+        return_value=workforce,
+    ):
+        result = await run_one_task(task)
+
+    assert result["status"] == "failed"
+    update_kwargs = workforce.update_task_status.await_args.kwargs
+    assert update_kwargs["error_code"] == "depth_exceeded"
+
+
+# ─── idempotency: skip already-claimed task ──────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_skips_task_no_longer_claimable():
+    task = _task()
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    # Task is already done (someone else processed it).
+    workforce.get_task = AsyncMock(return_value={**task, "lifecycle_status": "done"})
+    workforce.update_task_status = AsyncMock(return_value=True)
+
+    with patch(
+        "app.services.workforce.agent_worker.AgentWorkforceRepository",
+        return_value=workforce,
+    ):
+        result = await run_one_task(task)
+
+    assert result["status"] == "skipped"
+    workforce.update_task_status.assert_not_called()
+
+
+# ─── empty prompt ────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_empty_prompt_fails_fast():
+    agent_id = uuid4()
+    task = _task(agent_id=agent_id, prompt="")  # missing prompt
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.get_task = AsyncMock(
+        return_value={**task, "lifecycle_status": "assigned"}
+    )
+    workforce.update_task_status = AsyncMock(return_value=True)
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_persistent_agent(agent_id=agent_id))
+
+    with (
+        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
+        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
+    ):
+        result = await run_one_task(task)
+
+    assert result["status"] == "failed"
+    update_kwargs = workforce.update_task_status.await_args.kwargs
+    assert update_kwargs["error_code"] == "empty_prompt"
+
+
+# ─── runtime exception → failed ──────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_run_turn_exception_marks_failed():
+    agent_id = uuid4()
+    task = _task(agent_id=agent_id, prompt="hi")
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.get_task = AsyncMock(
+        return_value={**task, "lifecycle_status": "assigned"}
+    )
+    workforce.update_task_status = AsyncMock(return_value=True)
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_persistent_agent(agent_id=agent_id))
+
+    stack = _build_runner_stack_mock()
+    stack.runner.run_turn = AsyncMock(side_effect=RuntimeError("LLM 500"))
+    cm, _ = _run_recorder_cm(run_id=uuid4())
+
+    with (
+        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
+        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
+        patch("app.services.workforce.agent_worker.SkillRepository", return_value=MagicMock()),
+        patch("app.services.workforce.agent_worker.build_agent_runner_stack", AsyncMock(return_value=stack)),
+        patch("app.services.workforce.agent_worker.PromptComposer") as PC,
+        patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
+        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
+    ):
+        composer = MagicMock()
+        composer.compose = AsyncMock(
+            return_value=MagicMock(
+                agent_id=agent_id, agent_slug="summarize", model="doubao-seed-2-0-pro-260215"
+            )
+        )
+        PC.return_value = composer
+
+        result = await run_one_task(task)
+
+    assert result["status"] == "failed"
+    # Final update should be 'failed' with runtime_error
+    statuses = [c.kwargs["lifecycle_status"] for c in workforce.update_task_status.await_args_list]
+    assert statuses[-1] == "failed"
+    assert workforce.update_task_status.await_args_list[-1].kwargs["error_code"] == "runtime_error"
+
+
+# ─── outbox routing ─────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_outbox_routes_to_agent_when_sender_kind_agent():
+    """If the inbox row says sender_kind='agent', the outbox should
+    route back to that agent (cross-agent reply)."""
+    agent_id = uuid4()
+    user_id = uuid4()
+    sender_agent = uuid4()
+    inbox_id = uuid4()
+    task = _task(agent_id=agent_id, user_id=user_id, inbox_message_id=inbox_id)
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.get_task = AsyncMock(
+        return_value={**task, "lifecycle_status": "assigned"}
+    )
+    workforce.update_task_status = AsyncMock(return_value=True)
+    workforce.enqueue_outbox = AsyncMock(return_value={"id": str(uuid4())})
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_persistent_agent(agent_id=agent_id))
+
+    stack = _build_runner_stack_mock(content="reply")
+    cm, _ = _run_recorder_cm(run_id=uuid4())
+
+    inbox_lookup = AsyncMock(
+        return_value={
+            "sender_kind": "agent",
+            "sender_user_id": str(user_id),
+            "sender_agent_id": str(sender_agent),
+        }
+    )
+
+    with (
+        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
+        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
+        patch("app.services.workforce.agent_worker.SkillRepository", return_value=MagicMock()),
+        patch("app.services.workforce.agent_worker.build_agent_runner_stack", AsyncMock(return_value=stack)),
+        patch("app.services.workforce.agent_worker.PromptComposer") as PC,
+        patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
+        patch("app.services.workforce.agent_worker._lookup_inbox_message", inbox_lookup),
+        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
+    ):
+        composer = MagicMock()
+        composer.compose = AsyncMock(
+            return_value=MagicMock(agent_id=agent_id, agent_slug="summarize", model="doubao-seed-2-0-pro-260215")
+        )
+        PC.return_value = composer
+
+        await run_one_task(task)
+
+    outbox_kwargs = workforce.enqueue_outbox.await_args.kwargs
+    assert outbox_kwargs["recipient_kind"] == "agent"
+    assert outbox_kwargs["recipient_agent_id"] == sender_agent

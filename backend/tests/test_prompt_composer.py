@@ -91,6 +91,97 @@ def test_empty_skills_skips_xml_section(fake_agent):
 
 
 @pytest.mark.unit
+def test_available_workers_section_rendered_when_workers_present(fake_agent, fake_skills):
+    """M3: persistent agents listed as Delegate targets in `<available_workers>`."""
+    workers = [
+        {
+            "id": str(uuid4()),
+            "slug": "summarize",
+            "name": "Summarize",
+            "description": "Summarises long text into bullet points",
+            "model": "doubao-seed-2-0-pro-260215",
+        },
+        {
+            "id": str(uuid4()),
+            "slug": "analyze",
+            "name": "Analyze",
+            "description": "Visual analysis of frames",
+            "model": "doubao-seed-2-0-pro-260215",
+        },
+    ]
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    msg = composer._assemble_system_message(
+        fake_agent, fake_skills, request_instructions=None, workers=workers
+    )
+    assert "## Available Workers" in msg
+    assert "<available_workers>" in msg
+    assert "<slug>summarize</slug>" in msg
+    assert "<slug>analyze</slug>" in msg
+    # Workers section should sit BEFORE cache boundary (stable in prefix).
+    assert msg.index("<available_workers>") < msg.index(CACHE_BOUNDARY_MARKER)
+
+
+@pytest.mark.unit
+def test_available_workers_section_absent_when_empty(fake_agent, fake_skills):
+    """No persistent workers → no `<available_workers>` block at all."""
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    msg = composer._assemble_system_message(
+        fake_agent, fake_skills, request_instructions=None, workers=[]
+    )
+    assert "<available_workers>" not in msg
+    assert "## Available Workers" not in msg
+
+
+@pytest.mark.unit
+def test_workers_html_escaped_in_description(fake_agent, fake_skills):
+    """Worker description with raw < > must be escaped in the XML."""
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    workers = [
+        {
+            "id": str(uuid4()),
+            "slug": "evil",
+            "name": "Evil",
+            "description": "uses <tag> & >more<",
+            "model": "x",
+        }
+    ]
+    msg = composer._assemble_system_message(
+        fake_agent, fake_skills, request_instructions=None, workers=workers
+    )
+    assert "&lt;tag&gt;" in msg
+    # Make sure raw <tag> didn't leak (sandwich check around the worker's
+    # description so we don't catch the legitimate <slug> / <description>
+    # XML markers).
+    desc_block = msg[msg.index("<slug>evil</slug>"):]
+    assert "<tag>" not in desc_block
+
+
+@pytest.mark.unit
+def test_prefix_fingerprint_includes_workers(fake_agent, fake_skills):
+    """Adding/removing a persistent worker MUST change the fingerprint
+    so the prompt cache invalidates."""
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    fp_no_workers = composer._prefix_fingerprint(fake_agent, fake_skills, [])
+    fp_one_worker = composer._prefix_fingerprint(
+        fake_agent,
+        fake_skills,
+        [{"id": str(uuid4()), "slug": "summarize"}],
+    )
+    assert fp_no_workers != fp_one_worker
+
+
+@pytest.mark.unit
+def test_prefix_fingerprint_stable_across_worker_order(fake_agent, fake_skills):
+    """Workers sorted internally → caller's list order doesn't affect fp."""
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+    w1 = {"id": "1111", "slug": "a"}
+    w2 = {"id": "2222", "slug": "b"}
+    fp_a = composer._prefix_fingerprint(fake_agent, fake_skills, [w1, w2])
+    fp_b = composer._prefix_fingerprint(fake_agent, fake_skills, [w2, w1])
+    assert fp_a == fp_b
+
+
+@pytest.mark.unit
 def test_cache_boundary_position(fake_agent, fake_skills):
     composer = PromptComposer(agent_repo=None, skill_repo=None)
     msg = composer._assemble_system_message(

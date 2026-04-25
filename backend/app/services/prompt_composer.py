@@ -94,9 +94,25 @@ class PromptComposer:
         skill_ids = await self.agent_repo.get_skill_ids(UUID(agent["id"]))
         skills = await self.skill_repo.list_by_ids(skill_ids)
 
+        # M3: list of persistent agents available as Delegate targets.
+        # Skipped when agent itself isn't going to use Delegate (no skills
+        # → no tools → no Delegate). Self is excluded so the LLM doesn't
+        # try to delegate to itself.
+        workers: list[dict[str, Any]] = []
+        if skills:
+            try:
+                workers_raw = await self.agent_repo.list_persistent()
+                workers = [w for w in workers_raw if w.get("id") != agent.get("id")]
+            except Exception:
+                # Best-effort. If the listing fails, render without
+                # workers — Delegate will get "unknown agent slug" from
+                # the tool layer if the LLM tries it.
+                workers = []
+
         system_message = self._assemble_system_message(
             agent=agent,
             skills=skills,
+            workers=workers,
             request_instructions=inp.request_instructions,
             recalled_memories=inp.recalled_memories,
         )
@@ -110,7 +126,7 @@ class PromptComposer:
             for s in skills
         ]
 
-        prefix_fp = self._prefix_fingerprint(agent, skills)
+        prefix_fp = self._prefix_fingerprint(agent, skills, workers)
         dynamic_fp = self._dynamic_fingerprint(prefix_fp, inp.recalled_memories)
 
         return ComposedSystemPrompt(
@@ -138,16 +154,23 @@ class PromptComposer:
         skills: list[dict[str, Any]],
         request_instructions: Optional[str],
         recalled_memories: list["RecalledMemory"] = None,
+        workers: list[dict[str, Any]] = None,
     ) -> str:
         """Render the full system message string, sections joined by \\n\\n.
 
-        Layout (M1.B):
+        Layout (M1.B + M3):
             Identity / Soul / Agent / <available_skills>
+            <available_workers> [M3 — persistent agents Delegate can target]
             <!-- CACHE_BOUNDARY -->
             <recalled_memories> [M1.B injection — after boundary so the
                                  prefix cache stays stable across turns]
             Request Instructions
             Runtime
+
+        ``<available_workers>`` lives BEFORE the cache boundary because
+        the persistent agent list rarely changes — including it in the
+        prefix lets cache reuse work across turns. Adding/removing a
+        persistent agent invalidates the cache, which is correct.
         """
         parts: list[str] = []
         recalled_memories = recalled_memories or []
@@ -171,6 +194,9 @@ class PromptComposer:
 
         if skills:
             parts.append(self._render_skills_section(skills))
+
+        if workers:
+            parts.append(self._render_workers_section(workers))
 
         parts.append(CACHE_BOUNDARY_MARKER)
 
@@ -230,6 +256,35 @@ class PromptComposer:
             xml.append(f"    <description>{desc}</description>")
             xml.append("  </skill>")
         xml.append("</available_skills>")
+        return header + "\n" + "\n".join(xml)
+
+    def _render_workers_section(self, workers: list[dict[str, Any]]) -> str:
+        """Render the ``## Available Workers`` block + XML manifest (M3).
+
+        Lists every other persistent agent the caller can dispatch via
+        ``Delegate(agent_slug=...)``. Empty list → caller still has the
+        Delegate tool registered, but no targets to choose from.
+        """
+        header = (
+            "## Available Workers\n"
+            "Other persistent agents you can dispatch sub-tasks to via "
+            "Delegate(agent_slug=..., prompt=...). They run in parallel "
+            "and reply via your inbox. Pick one only when their description "
+            "matches the sub-task — otherwise just answer directly.\n"
+        )
+        xml: list[str] = ["<available_workers>"]
+        for w in workers:
+            slug = w.get("slug") or w.get("name") or ""
+            desc = (
+                (w.get("description") or "").replace("<", "&lt;").replace(">", "&gt;")
+            )
+            model = w.get("model") or ""
+            xml.append("  <worker>")
+            xml.append(f"    <slug>{slug}</slug>")
+            xml.append(f"    <description>{desc}</description>")
+            xml.append(f"    <model>{model}</model>")
+            xml.append("  </worker>")
+        xml.append("</available_workers>")
         return header + "\n" + "\n".join(xml)
 
     def _render_runtime_line(self, agent: dict[str, Any]) -> str:
@@ -348,12 +403,17 @@ class PromptComposer:
         self,
         agent: dict[str, Any],
         skills: list[dict[str, Any]],
+        workers: list[dict[str, Any]] = None,
     ) -> str:
-        """Stable SHA-1 over prefix inputs (agent identity/soul/agent + skills).
+        """Stable SHA-1 over prefix inputs.
 
-        Renamed from ``_fingerprint`` in M1.B. Same behaviour — excludes
-        request-scoped fields so two composes producing the same prefix
-        get the same fingerprint. Skills sorted by id for stability.
+        Inputs: agent identity/soul/agent_md, bound skills, and (M3) the
+        list of persistent worker agents available as Delegate targets.
+        Adding/removing a persistent worker invalidates this fingerprint
+        — required for prompt-cache safety since the rendered prompt
+        changes.
+
+        Workers sorted by id for stability. Skills sorted by id for stability.
         """
         h = hashlib.sha1()  # noqa: S324 — not used for security
         h.update(str(agent.get("id", "")).encode())
@@ -364,6 +424,11 @@ class PromptComposer:
         for s in sorted(skills, key=lambda x: str(x.get("id"))):
             h.update(str(s.get("id", "")).encode())
             h.update(str(s.get("updated_at", "")).encode())
+        if workers:
+            for w in sorted(workers, key=lambda x: str(x.get("id"))):
+                h.update(b"|worker|")
+                h.update(str(w.get("id", "")).encode())
+                h.update((w.get("slug") or "").encode())
         return h.hexdigest()
 
     def _dynamic_fingerprint(

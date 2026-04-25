@@ -60,6 +60,29 @@ class AgentRepository:
             logger.error(f"Failed to get agent by id {agent_id}: {e}")
             return None
 
+    async def list_persistent(self) -> List[Dict[str, Any]]:
+        """List agents marked as persistent workers (M3 Delegate targets).
+
+        Returns slug + name + description so the PromptComposer can
+        render an `<available_workers>` block. Sorted by slug for
+        stable fingerprinting. Empty list when no persistent agents
+        exist (Delegate then becomes self-documenting "no workers
+        available").
+        """
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE)
+                .select("id,slug,name,description,model")
+                .eq("persistent", True)
+                .order("slug")
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Failed to list persistent agents: {e}")
+            return []
+
     async def list_accessible(
         self,
         user_id: UUID,

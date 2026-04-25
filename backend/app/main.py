@@ -127,7 +127,31 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to record deployment log: {e}")
 
+    # ── M3: workforce scheduler — in-process asyncio tick loop ──────
+    # Replaces the M2 Celery beat tasks (agent_workforce_tasks). Single
+    # uvicorn process owns the dispatch loop + AgentWorkerPool. See
+    # app/services/workforce/scheduler.py for design rationale.
+    workforce_scheduler = None
+    try:
+        from app.services.workforce.scheduler import WorkforceScheduler
+
+        workforce_scheduler = WorkforceScheduler()
+        workforce_scheduler.start()
+        app.state.workforce_scheduler = workforce_scheduler
+        logger.info("Workforce scheduler started (in-process asyncio loop)")
+    except Exception as e:
+        logger.warning(f"Failed to start workforce scheduler: {e}")
+
     yield logger.success(f"{settings.APP_NAME}启动成功")
+
+    # Stop workforce scheduler before other teardown — drains in-flight
+    # agent runs gracefully.
+    if workforce_scheduler is not None:
+        try:
+            await workforce_scheduler.stop(drain_timeout=5.0)
+            logger.info("Workforce scheduler stopped")
+        except Exception as e:
+            logger.warning(f"Workforce scheduler shutdown error: {e}")
 
     try:
         # 关闭 DrissionPageParser 浏览器资源

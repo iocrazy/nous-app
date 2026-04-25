@@ -50,9 +50,16 @@ class InboxProcessor:
         self,
         repo: Optional[AgentWorkforceRepository] = None,
         state_machine: Optional[WorkerStateMachine] = None,
+        dispatcher: Optional[Any] = None,
     ) -> None:
         self.repo = repo or AgentWorkforceRepository()
         self.state_machine = state_machine or WorkerStateMachine(repo=self.repo)
+        # M3: paperclip-style direct hand-off to AgentWorkerPool.
+        # When set, every successfully-created task is dispatched to be
+        # run immediately (no polling lag). Backward compatible — when
+        # None, behaviour matches M2 (task lands queued, ran by separate
+        # poller). Tests that don't care about dispatch can leave it None.
+        self.dispatcher = dispatcher
 
     # ────────────────────────────────────────────────────────────
     # Tick entry point
@@ -183,6 +190,20 @@ class InboxProcessor:
             task_id=UUID(task["id"]),
             status="processed",
         )
+
+        # M3: hand off to the worker pool so the LLM call fires now,
+        # not on the next polling cycle. Failure here is non-fatal — task
+        # row is already 'queued' in the DB, a polling fallback (or the
+        # next inbox tick when the agent is idle again) can pick it up.
+        if self.dispatcher is not None:
+            try:
+                await self.dispatcher.dispatch(task)
+            except Exception as err:  # pragma: no cover — defensive
+                logger.warning(
+                    f"[inbox] dispatcher.dispatch failed for task "
+                    f"{task['id']}: {err}"
+                )
+
         return True
 
     async def _handle_cancel(self, agent_id: UUID, message: Dict[str, Any]) -> bool:

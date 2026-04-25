@@ -66,14 +66,23 @@ async def build_agent_runner_stack(
     session_id: Optional[UUID],
     user_query: str,
     settings: Any,
+    parent_run_id: Optional[UUID] = None,
+    agent_depth: int = 0,
 ) -> AgentRunnerStack:
-    """Construct a fully-wired AgentRunner for one chat turn.
+    """Construct a fully-wired AgentRunner for one agent turn.
+
+    Two callers:
+      - ChatPanel (default): top-of-tree turn, ``parent_run_id=None``,
+        ``agent_depth=0``.
+      - Worker runtime (M3): inherits ``parent_run_id`` + ``agent_depth+1``
+        from the calling agent's run, so Delegate cycle/depth limits
+        and cost-rollup-by-tree continue to work.
 
     Steps:
       1. Recall relevant memories (P0-isolated by user_id)
       2. Build per-turn HookRegistry with BudgetGuard + CostAuditor + MemoryHarvester
       3. Wrap adapter in LLMFallbackChain (retry + fallback semantics)
-      4. Construct AgentRunner with hooks
+      4. Construct AgentRunner with hooks + Delegate tool
     """
     primary_model = agent.get("model") or "qwen-max"
     fallback_models: list[str] = list(agent.get("fallback_models") or [])
@@ -143,15 +152,14 @@ async def build_agent_runner_stack(
     )
 
     # ── 4. Delegate tool (M2.5 wiring) ──────────────────────────────
-    # ChatPanel-initiated turns are always at the top of the dispatch
-    # tree, so parent_run_id=None and agent_depth=0. Worker-initiated
-    # runs (M3) will wire this through a different entry point that
-    # inherits depth from the parent agent_runs row.
+    # ChatPanel uses defaults (parent_run_id=None, depth=0). Worker
+    # runtime (M3) passes inherited values so the Delegate tool's
+    # depth/cycle protection sees the correct chain position.
     delegate_tool = DelegateToolService(
         caller_agent_id=UUID(agent["id"]),
         caller_user_id=user_id,
-        parent_run_id=None,
-        agent_depth=0,
+        parent_run_id=parent_run_id,
+        agent_depth=agent_depth,
     )
 
     # ── 5. AgentRunner ──────────────────────────────────────────────
