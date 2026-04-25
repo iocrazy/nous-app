@@ -105,17 +105,17 @@ def test_cache_boundary_position(fake_agent, fake_skills):
 @pytest.mark.unit
 def test_cache_fingerprint_stable(fake_agent, fake_skills):
     composer = PromptComposer(agent_repo=None, skill_repo=None)
-    fp1 = composer._fingerprint(fake_agent, fake_skills)
-    fp2 = composer._fingerprint(fake_agent, fake_skills)
+    fp1 = composer._prefix_fingerprint(fake_agent, fake_skills)
+    fp2 = composer._prefix_fingerprint(fake_agent, fake_skills)
     assert fp1 == fp2
 
 
 @pytest.mark.unit
 def test_cache_fingerprint_changes_when_agent_changes(fake_agent, fake_skills):
     composer = PromptComposer(agent_repo=None, skill_repo=None)
-    fp1 = composer._fingerprint(fake_agent, fake_skills)
+    fp1 = composer._prefix_fingerprint(fake_agent, fake_skills)
     fake_agent["agent_md"] = "CHANGED"
-    fp2 = composer._fingerprint(fake_agent, fake_skills)
+    fp2 = composer._prefix_fingerprint(fake_agent, fake_skills)
     assert fp1 != fp2
 
 
