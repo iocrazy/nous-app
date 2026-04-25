@@ -9,24 +9,27 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Filter } from 'lucide-react';
 import type { SearchField } from '../services/searchService';
-import { ALL_SEARCH_FIELDS } from '../services/searchService';
+import { ALL_SEARCH_FIELDS, DEFAULT_SEARCH_FIELDS } from '../services/searchService';
 
 const STORAGE_KEY = 'mediahub_search_scope';
 
-/** Read selected scope from localStorage, default = all fields. */
+/** Read selected scope from localStorage; default = the four
+ *  parsed_media direct columns. The three Eagle extras (transcript /
+ *  tags / notes) are opt-in because they're heavier — user must check
+ *  them once and the choice persists. */
 export function loadSearchScope(): SearchField[] {
-  if (typeof window === 'undefined') return ALL_SEARCH_FIELDS;
+  if (typeof window === 'undefined') return DEFAULT_SEARCH_FIELDS;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return ALL_SEARCH_FIELDS;
+    if (!raw) return DEFAULT_SEARCH_FIELDS;
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return ALL_SEARCH_FIELDS;
+    if (!Array.isArray(parsed)) return DEFAULT_SEARCH_FIELDS;
     const valid = parsed.filter((f): f is SearchField =>
       ALL_SEARCH_FIELDS.includes(f as SearchField),
     );
-    return valid.length > 0 ? valid : ALL_SEARCH_FIELDS;
+    return valid.length > 0 ? valid : DEFAULT_SEARCH_FIELDS;
   } catch {
-    return ALL_SEARCH_FIELDS;
+    return DEFAULT_SEARCH_FIELDS;
   }
 }
 
@@ -74,7 +77,11 @@ export const SearchScopePicker: React.FC<SearchScopePickerProps> = ({
     }
   };
 
-  const allOn = value.length === ALL_SEARCH_FIELDS.length;
+  // Indigo tint when scope is "non-default" — helps user notice they have
+  // a custom set active. Compares as a set so order doesn't matter.
+  const isDefault =
+    value.length === DEFAULT_SEARCH_FIELDS.length &&
+    DEFAULT_SEARCH_FIELDS.every((f) => value.includes(f));
   const buttonClass = compact
     ? 'p-1.5 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/40 transition-colors'
     : 'p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors';
@@ -85,7 +92,7 @@ export const SearchScopePicker: React.FC<SearchScopePickerProps> = ({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={`${buttonClass} ${
-          !allOn ? 'text-indigo-400 hover:text-indigo-300' : ''
+          !isDefault ? 'text-indigo-400 hover:text-indigo-300' : ''
         }`}
         title={t('search.scopeTooltip', 'Search scope')}
         aria-label={t('search.scopeTooltip', 'Search scope')}
@@ -133,6 +140,12 @@ function defaultLabel(field: SearchField): string {
       return 'Author';
     case 'hashtags':
       return 'Hashtags';
+    case 'transcript':
+      return 'AI Transcript';
+    case 'tags':
+      return 'Tags';
+    case 'notes':
+      return 'Notes';
   }
 }
 

@@ -157,7 +157,10 @@
       "title": "标题",
       "description": "描述",
       "author": "作者",
-      "hashtags": "话题标签"
+      "hashtags": "话题标签",
+      "transcript": "AI 转录",
+      "tags": "标签",
+      "notes": "笔记"
     }
   },
   "dashboard": {

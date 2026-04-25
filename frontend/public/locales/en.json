@@ -157,7 +157,10 @@
       "title": "Title",
       "description": "Description",
       "author": "Author",
-      "hashtags": "Hashtags"
+      "hashtags": "Hashtags",
+      "transcript": "AI Transcript",
+      "tags": "Tags",
+      "notes": "Notes"
     }
   },
   "dashboard": {

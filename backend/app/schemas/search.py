@@ -37,7 +37,23 @@ class HybridSearchRequest(BaseModel):
     )
 
 
-SearchField = Literal["title", "description", "author", "hashtags"]
+SearchField = Literal[
+    "title",
+    "description",
+    "author",
+    "hashtags",
+    # Eagle-style extras — different storage layout than the four above:
+    "transcript",  # parsed_media.ai_extract_text (heavyweight, indexed in 154)
+    "tags",  # tags.name → resource_tags → resources.media_id (join chain)
+    "notes",  # resources.notes (per-user)
+]
+
+DEFAULT_SEARCH_FIELDS: List[SearchField] = [
+    "title",
+    "description",
+    "author",
+    "hashtags",
+]
 
 
 class TextSearchRequest(BaseModel):
@@ -47,15 +63,21 @@ class TextSearchRequest(BaseModel):
     sorted by ``created_at DESC``. Use this when the user wants
     "everything that contains this keyword" rather than top-N semantic.
 
-    ``fields`` controls which columns to search. Defaults to all four
-    when omitted. An empty list returns no results (caller probably
-    means "no scopes selected" rather than "any scope" — fail closed).
+    ``fields`` controls which scopes to search. Defaults to the four
+    parsed_media fields when omitted (title / description / author /
+    hashtags). Other scopes:
+      * ``transcript`` — searches ``parsed_media.ai_extract_text``
+        (heavyweight, can be 10k+ chars per row). Indexed by 154.
+      * ``tags`` — joins through ``resource_tags`` → ``tags.name``
+      * ``notes`` — searches ``resources.notes`` for the current user
+    An empty list returns no results (caller probably means "no scopes
+    selected" rather than "any scope" — fail closed).
     """
 
     query: str = Field(..., min_length=1, max_length=500)
     limit: int = Field(1000, ge=1, le=5000)
     fields: List[SearchField] = Field(
-        default_factory=lambda: ["title", "description", "author", "hashtags"]
+        default_factory=lambda: list(DEFAULT_SEARCH_FIELDS)
     )
 
 

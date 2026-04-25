@@ -289,9 +289,95 @@ async def text_search(
             query=q,
             search_type="text",
         )
-    or_filter = ",".join(f"{f}.ilike.{pattern}" for f in request.fields)
 
     client = await get_async_supabase_admin()
+
+    # Direct parsed_media columns map straight to ILIKE filters.
+    column_map = {
+        "title": "title",
+        "description": "description",
+        "author": "author",
+        "hashtags": "hashtags",
+        "transcript": "ai_extract_text",
+    }
+    direct_or_parts = [
+        f"{column_map[f]}.ilike.{pattern}" for f in request.fields if f in column_map
+    ]
+
+    # tags / notes need pre-queries — they live on other tables and
+    # contribute media_ids that we OR into the main filter via id.in.(...)
+    extra_media_ids: set[int] = set()
+    try:
+        if "tags" in request.fields:
+            tags_q = (
+                await client.table("tags").select("id").ilike("name", pattern).execute()
+            )
+            tag_ids = [t["id"] for t in (tags_q.data or []) if t.get("id") is not None]
+            if tag_ids:
+                rt_q = (
+                    await client.table("resource_tags")
+                    .select("resource_id")
+                    .in_("tag_id", tag_ids)
+                    .execute()
+                )
+                resource_ids = [
+                    r["resource_id"] for r in (rt_q.data or []) if r.get("resource_id")
+                ]
+                if resource_ids:
+                    res_q = (
+                        await client.table("resources")
+                        .select("media_id")
+                        .in_("id", resource_ids)
+                        .eq("creator_id", auth.user_id)
+                        .eq("source_type", "web")
+                        .eq("is_trashed", False)
+                        .execute()
+                    )
+                    for r in res_q.data or []:
+                        if r.get("media_id"):
+                            extra_media_ids.add(int(r["media_id"]))
+
+        if "notes" in request.fields:
+            notes_q = (
+                await client.table("resources")
+                .select("media_id")
+                .eq("creator_id", auth.user_id)
+                .eq("source_type", "web")
+                .eq("is_trashed", False)
+                .ilike("notes", pattern)
+                .execute()
+            )
+            for r in notes_q.data or []:
+                if r.get("media_id"):
+                    extra_media_ids.add(int(r["media_id"]))
+    except Exception as e:
+        logger.error(f"Text search side-query failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {str(e)}",
+        )
+
+    or_parts = list(direct_or_parts)
+    if extra_media_ids:
+        # Intersect with user_media_ids (defense in depth — already-scoped
+        # but cheap to re-confirm).
+        scoped = extra_media_ids & set(user_media_ids)
+        if scoped:
+            ids_csv = ",".join(str(i) for i in scoped)
+            or_parts.append(f"id.in.({ids_csv})")
+
+    # If the only selected scopes were tags/notes and they yielded zero
+    # extra_media_ids AND there are no direct fields, no rows can match.
+    if not or_parts:
+        return SearchResponse(
+            results=[],
+            videos=[],
+            total=0,
+            query=q,
+            search_type="text",
+        )
+
+    or_filter = ",".join(or_parts)
     try:
         result = (
             await client.table("parsed_media")

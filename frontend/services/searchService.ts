@@ -79,11 +79,34 @@ export const hybridSearch = async (
     ...filters,
   });
 
-/** Eagle-style search-scope toggles. Each maps to a parsed_media column.
- *  Backend defaults to all four when ``fields`` is omitted. */
-export type SearchField = 'title' | 'description' | 'author' | 'hashtags';
+/** Eagle-style search-scope toggles. ``title``/``description``/``author``/
+ *  ``hashtags`` are direct parsed_media columns. ``transcript`` searches
+ *  ``parsed_media.ai_extract_text`` (heavyweight). ``tags`` joins through
+ *  resource_tags → tags.name. ``notes`` searches resources.notes (per-user).
+ *  Backend defaults to the four direct fields when ``fields`` is omitted. */
+export type SearchField =
+  | 'title'
+  | 'description'
+  | 'author'
+  | 'hashtags'
+  | 'transcript'
+  | 'tags'
+  | 'notes';
 
 export const ALL_SEARCH_FIELDS: SearchField[] = [
+  'title',
+  'description',
+  'author',
+  'hashtags',
+  'transcript',
+  'tags',
+  'notes',
+];
+
+/** The four scopes selected by default on a fresh install. The three
+ *  extras (transcript / tags / notes) are opt-in because they involve
+ *  heavier columns or extra joins. */
+export const DEFAULT_SEARCH_FIELDS: SearchField[] = [
   'title',
   'description',
   'author',
