@@ -28,6 +28,7 @@ import {
 import { TimeRangeSelector } from '../../components/TimeRangeSelector'
 import { PageHeader } from '../../components/PageHeader'
 import { EmptyState } from '../../components/EmptyState'
+import { BackendHealthCard } from '../../components/BackendHealthCard'
 import { formatDateTime } from '../../utils/format'
 
 const { Row, Col } = Grid
@@ -174,6 +175,13 @@ export function MonitoringDashboard() {
         icon={<IconCompass />}
         breadcrumb={['Logs & Monitoring', 'Monitoring']}
       />
+      {/* Backend services health — openclaw-style gateway dashboard */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={24}>
+          <BackendHealthCard />
+        </Col>
+      </Row>
+
       {/* Time Range Selector */}
       <Card style={{ marginBottom: 16 }}>
         <TimeRangeSelector
