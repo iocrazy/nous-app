@@ -56,6 +56,7 @@ from app.api.teams_router import router as teams_router
 from app.api.temp_token_router import router as temp_token_router
 from app.api.user_settings_router import router as settings_router
 from app.api.video_collections_router import router as video_collections_router
+from app.api.workforce_router import router as workforce_router
 
 api_router = APIRouter()
 
@@ -146,3 +147,5 @@ api_router.include_router(router=script_import_router, tags=["Script Import"])
 api_router.include_router(router=script_export_router, tags=["Script Export"])
 
 api_router.include_router(router=ai_library_router, tags=["AI Library"])
+
+api_router.include_router(router=workforce_router, tags=["Workforce"])

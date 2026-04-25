@@ -6,6 +6,7 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
+  Cpu,
   Library,
   Plus,
 } from 'lucide-react';
@@ -83,6 +84,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
   })();
   const skillsActive = /\/ai-library\/skills(\/|$)/.test(location.pathname);
   const usageActive = /\/ai-library\/usage(\/|$)/.test(location.pathname);
+  const workforceActive = /\/ai-library\/workforce(\/|$)/.test(location.pathname);
 
   const loadAgents = useCallback(async () => {
     try {
@@ -244,6 +246,22 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
               label={t('sidebar.skills', 'Skills')}
               active={skillsActive}
               onClick={() => navigate(`${urlPrefix}/ai-library/skills`)}
+            />
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="mx-3 my-2 border-t border-zinc-800/80" />
+
+        {/* Runtime */}
+        <div className="px-2">
+          <SectionLabel>{t('aiLibrary.runtimeSection', 'Runtime')}</SectionLabel>
+          <div className="mt-1 flex flex-col gap-0.5">
+            <NavItem
+              icon={Cpu}
+              label={t('sidebar.workforce', 'Workforce')}
+              active={workforceActive}
+              onClick={() => navigate(`${urlPrefix}/ai-library/workforce`)}
             />
           </div>
         </div>
