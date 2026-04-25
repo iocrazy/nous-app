@@ -14,7 +14,7 @@
  * an issue, since the board endpoint already exists.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Activity,
@@ -37,8 +37,21 @@ import {
   type WorkforceStateHistoryRow,
 } from '../services/workforceService';
 import { getAgentIcon } from '../components/AILibrary/agentIcons';
+import { getSupabaseClient } from '../supabaseClient';
 
-const POLL_MS = 5000;
+// Realtime is the primary refresh trigger; the safety poll covers the
+// case where a Realtime subscription drops silently (Supabase gateway
+// blip, browser tab throttle). 30s is conservative — any user-visible
+// change should already arrive via the channel within a second.
+const SAFETY_POLL_MS = 30_000;
+const REALTIME_DEBOUNCE_MS = 200;
+const WATCHED_TABLES = [
+  'agent_workers',
+  'agent_inbox',
+  'agent_outbox',
+  'agent_state_history',
+  'agent_tasks',
+] as const;
 
 export const WorkforcePage: React.FC = () => {
   const { t } = useTranslation();
@@ -58,11 +71,57 @@ export const WorkforcePage: React.FC = () => {
     }
   }, []);
 
+  // Debounced refresh for Realtime bursts: a single workforce turn can
+  // fire a flurry of events (state_history INSERT + workers UPDATE +
+  // tasks UPDATE + outbox INSERT) in <100ms. Without coalescing, we'd
+  // hit the board endpoint 5x for no extra information.
+  const debounceRef = useRef<number | null>(null);
+  const scheduleRefresh = useCallback(() => {
+    if (debounceRef.current != null) {
+      window.clearTimeout(debounceRef.current);
+    }
+    debounceRef.current = window.setTimeout(() => {
+      debounceRef.current = null;
+      void refresh();
+    }, REALTIME_DEBOUNCE_MS);
+  }, [refresh]);
+
+  // Initial fetch + safety poll. Realtime is primary; this catches the
+  // case where a subscription drops silently.
   useEffect(() => {
     void refresh();
-    const id = window.setInterval(() => void refresh(), POLL_MS);
+    const id = window.setInterval(() => void refresh(), SAFETY_POLL_MS);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  // Realtime subscriptions on the five workforce tables. Any change →
+  // debounced re-fetch of the aggregate board. We don't try to apply
+  // payloads client-side because the board is computed (counts,
+  // top-N runs, joined state); a re-fetch is cheaper than reproducing
+  // that aggregation in TypeScript.
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    const channel = supabase.channel('workforce-board-page');
+    for (const table of WATCHED_TABLES) {
+      channel.on(
+        // @ts-expect-error — supabase-js types for postgres_changes
+        // event don't recognise '*' but the runtime accepts it (any
+        // INSERT/UPDATE/DELETE). Splitting into three .on() calls
+        // works too but quadruples the chatter for no benefit.
+        'postgres_changes',
+        { event: '*', schema: 'public', table },
+        () => scheduleRefresh(),
+      );
+    }
+    void channel.subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+      if (debounceRef.current != null) {
+        window.clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+    };
+  }, [scheduleRefresh]);
 
   // Per-agent action lock to prevent double-fires from rapid clicks.
   const [busySlug, setBusySlug] = useState<string | null>(null);
