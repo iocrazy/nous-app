@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { fetchLibrary } from '../services/dataService';
 import { linkVideoToProject } from '../services/projectsService';
 import { Video as VideoType } from '../types';
+import { getCoverUrl } from '../utils/awemeType';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LinkVideoModalProps {
   isOpen: boolean;
@@ -19,6 +21,7 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
   onLinked,
 }) => {
   const { t } = useTranslation();
+  const { mediaToken } = useAuth();
   const [videos, setVideos] = useState<VideoType[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -135,20 +138,23 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
               disabled={isLinking !== null}
               className="w-full flex items-center gap-3 p-3 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/30 hover:border-zinc-600 rounded-xl transition-all text-left disabled:opacity-50"
             >
-              {/* Thumbnail */}
+              {/* Thumbnail — local-only; show <Video> icon if not yet downloaded */}
               <div className="w-16 h-12 bg-zinc-700 rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center">
-                {video.cover_urls && video.cover_urls.length > 0 ? (
-                  <img
-                    src={video.cover_urls[0]}
-                    alt=""
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <Video size={20} className="text-zinc-500" />
-                )}
+                {(() => {
+                  const coverUrl = getCoverUrl(video, mediaToken ?? undefined);
+                  return coverUrl ? (
+                    <img
+                      src={coverUrl}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <Video size={20} className="text-zinc-500" />
+                  );
+                })()}
               </div>
 
               {/* Info */}

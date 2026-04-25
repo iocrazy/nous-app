@@ -223,8 +223,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   const videoDownloaded = fetchSubmitted.video
     || (!!data.download_path && videoStatusCompleted)
     || !!(data.video_download_urls?.[0] && data.video_download_urls[0] !== '#' && isPlayableUrl(data.video_download_urls[0]));
-  const coverDownloaded = fetchSubmitted.cover || !!data.cover_download_path
-    || !!(data.cover_urls?.[0] && data.cover_urls[0] !== '#');
+  const coverDownloaded = fetchSubmitted.cover || !!data.cover_download_path;
   const musicDownloaded = !!data.music_download_path;
 
   // Setup HLS.js for .m3u8 video playback

@@ -6,8 +6,10 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, Sparkles, X, Loader2, ChevronDown } from 'lucide-react';
+import { Search, Sparkles, X, Loader2, ChevronDown, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import type { SearchField } from '../services/searchService';
+import { ALL_SEARCH_FIELDS } from '../services/searchService';
 
 export type SearchMode = 'keyword' | 'hybrid' | 'semantic';
 
@@ -22,7 +24,21 @@ interface ToolbarSearchProps {
   isSearching?: boolean;
   placeholder?: string;
   className?: string;
+  /** Search scope (which fields to scan). When provided, the magnifier
+   *  dropdown also shows scope checkboxes — Eagle-style. */
+  searchScope?: SearchField[];
+  onSearchScopeChange?: (next: SearchField[]) => void;
 }
+
+const SCOPE_LABELS: Record<SearchField, string> = {
+  title: 'Title',
+  description: 'Description',
+  author: 'Author',
+  hashtags: 'Hashtags',
+  transcript: 'AI Transcript',
+  tags: 'Tags',
+  notes: 'Notes',
+};
 
 const MODES: Array<{ id: SearchMode; label: string; desc: string; Icon: typeof Search }> = [
   { id: 'keyword', label: 'Quick Search', desc: 'Instant local filter', Icon: Search },
@@ -37,6 +53,8 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
   isSearching = false,
   placeholder,
   className = '',
+  searchScope,
+  onSearchScopeChange,
 }) => {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
@@ -152,9 +170,10 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
         </div>
       </div>
 
-      {/* Mode dropdown */}
+      {/* Mode dropdown — also embeds the search-scope checkbox section
+          when the host passes ``searchScope`` + ``onSearchScopeChange``. */}
       {showDropdown && (
-        <div className="absolute top-full left-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden py-1">
+        <div className="absolute top-full left-0 mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden py-1">
           {MODES.map((m) => (
             <button
               key={m.id}
@@ -172,6 +191,36 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
               </div>
             </button>
           ))}
+          {searchScope && onSearchScopeChange && (
+            <>
+              <div className="my-1 border-t border-zinc-800" />
+              <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                {t('search.scopeHeader', 'Search Scope')}
+              </div>
+              {ALL_SEARCH_FIELDS.map((field) => {
+                const checked = searchScope.includes(field);
+                return (
+                  <button
+                    key={field}
+                    type="button"
+                    onClick={() => {
+                      const next = checked
+                        ? searchScope.filter((f) => f !== field)
+                        : [...searchScope, field];
+                      // Refuse to disable everything — empty scope returns
+                      // zero results and confuses the user.
+                      if (next.length === 0) return;
+                      onSearchScopeChange(next);
+                    }}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/60"
+                  >
+                    <span>{t(`search.scope.${field}`, SCOPE_LABELS[field])}</span>
+                    {checked && <Check size={13} className="shrink-0 text-indigo-400" />}
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
     </div>
