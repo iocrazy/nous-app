@@ -68,17 +68,43 @@ async def _hydrate_media_by_platform_ids(
     if not platform_ids:
         return []
     client = await get_async_supabase_admin()
-    query = (
-        client.table("parsed_media")
-        .select(MediaRepository.CARD_SELECT)
-        .in_("platform_id", platform_ids)
-    )
+    # If ``user_media_ids`` would push the URL past nginx's 8KB limit
+    # (each Snowflake id is ~15 chars, plus separators), drop the
+    # ``id IN`` filter and intersect in Python instead. ``platform_id IN``
+    # is already small (top-N ranker output), so this is safe.
+    URL_SAFE_LIMIT = 100
     if user_media_ids is not None:
         if not user_media_ids:
             return []
-        query = query.in_("id", user_media_ids)
-    result = await query.execute()
-    rows = result.data or []
+        if len(user_media_ids) <= URL_SAFE_LIMIT:
+            query = (
+                client.table("parsed_media")
+                .select(MediaRepository.CARD_SELECT)
+                .in_("platform_id", platform_ids)
+                .in_("id", user_media_ids)
+            )
+            result = await query.execute()
+            rows = result.data or []
+        else:
+            # Too many ids for a single URL — fetch by platform_id then
+            # intersect with the allowlist in memory. Cheap because the
+            # platform_ids ranker has already trimmed to a few dozen.
+            user_id_set = set(user_media_ids)
+            query = (
+                client.table("parsed_media")
+                .select(MediaRepository.CARD_SELECT)
+                .in_("platform_id", platform_ids)
+            )
+            result = await query.execute()
+            rows = [r for r in (result.data or []) if r.get("id") in user_id_set]
+    else:
+        query = (
+            client.table("parsed_media")
+            .select(MediaRepository.CARD_SELECT)
+            .in_("platform_id", platform_ids)
+        )
+        result = await query.execute()
+        rows = result.data or []
     by_pid = {r["platform_id"]: r for r in rows if r.get("platform_id")}
     # Preserve the ranking order from ``platform_ids`` — hits missing from the
     # DB (e.g., just deleted) are silently dropped.
@@ -378,23 +404,44 @@ async def text_search(
         )
 
     or_filter = ",".join(or_parts)
+    # Chunk the user_media_ids — PostgREST encodes ``in_(...)`` into a
+    # query-string filter, and a few hundred 18-digit Snowflake ids blow
+    # past nginx's URI length limit (8KB) → 414. Each chunk is sized so
+    # ``id=in.(id1,id2,…)`` plus the OR filter and base URL stays under
+    # ~6KB. Results are merged + re-sorted client-side, then trimmed to
+    # ``request.limit``.
+    URL_SAFE_CHUNK = 100
+    rows: List[Dict[str, Any]] = []
+    seen_ids: set[int] = set()
     try:
-        result = (
-            await client.table("parsed_media")
-            .select(MediaRepository.CARD_SELECT)
-            .in_("id", user_media_ids)
-            .or_(or_filter)
-            .order("created_at", desc=True)
-            .limit(request.limit)
-            .execute()
-        )
-        rows: List[Dict[str, Any]] = result.data or []
+        for start in range(0, len(user_media_ids), URL_SAFE_CHUNK):
+            chunk = user_media_ids[start : start + URL_SAFE_CHUNK]
+            chunk_result = (
+                await client.table("parsed_media")
+                .select(MediaRepository.CARD_SELECT)
+                .in_("id", chunk)
+                .or_(or_filter)
+                .order("created_at", desc=True)
+                .limit(request.limit)
+                .execute()
+            )
+            for row in chunk_result.data or []:
+                rid = row.get("id")
+                if rid is None or rid in seen_ids:
+                    continue
+                seen_ids.add(rid)
+                rows.append(row)
     except Exception as e:
         logger.error(f"Text search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
         )
+
+    # Merge + global sort + trim. Each chunk was sorted DESC and limited,
+    # but cross-chunk order needs a final re-sort to match the contract.
+    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    rows = rows[: request.limit]
 
     # Project every row into a slim SearchResultItem (for analytics /
     # backwards-compat callers) AND include the full rows in ``videos``.
