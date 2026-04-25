@@ -240,6 +240,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             error_code="agent_paused",
             error_message=str(err),
         )
+        await _move_worker_back_to_idle(agent_id, task_id, trigger="task_completed")
         return {"task_id": str(task_id), "status": "failed", "run_id": None}
     except Exception as err:
         logger.exception(f"[agent-worker] turn failed for task {task_id}: {err}")
@@ -249,6 +250,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             error_code="runtime_error",
             error_message=str(err)[:500],
         )
+        await _move_worker_back_to_idle(agent_id, task_id, trigger="task_completed")
         return {"task_id": str(task_id), "status": "failed", "run_id": None}
 
     # ── Persist task result + outbox delivery ───────────────────────
@@ -289,7 +291,48 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         task_id=task_id,
     )
 
+    # Worker is done with this task — move state machine back to idle so
+    # the inbox processor can dispatch the next message. Without this, the
+    # agent stays in 'working' forever and ALLOWED_TRANSITIONS rejects the
+    # next 'task_assigned'.
+    await _move_worker_back_to_idle(agent_id, task_id, trigger="task_completed")
+
     return {"task_id": str(task_id), "status": "done", "run_id": str(run_id)}
+
+
+async def _move_worker_back_to_idle(
+    agent_id: UUID, task_id: UUID, *, trigger: str
+) -> None:
+    """Best-effort post-turn state transition.
+
+    Fires the state machine so worker state goes back to 'idle' (on done)
+    or 'blocked' (on error). Without this, the agent stays in 'working'
+    after a single task and the inbox processor's next ``task_assigned``
+    transition raises InvalidTransitionError. Failure is logged and
+    swallowed — task lifecycle is the source of truth for whether the
+    work happened, not the worker state row.
+    """
+    from app.services.workforce.state_machine import (
+        InvalidTransitionError,
+        LockNotAcquiredError,
+        WorkerStateMachine,
+    )
+
+    try:
+        await WorkerStateMachine().transition(
+            agent_id=agent_id,
+            trigger=trigger,
+            task_id=task_id,
+        )
+    except (InvalidTransitionError, LockNotAcquiredError) as err:
+        logger.warning(
+            f"[agent-worker] state machine post-turn transition failed "
+            f"(agent={agent_id}, trigger={trigger}): {err}"
+        )
+    except Exception as err:
+        logger.exception(
+            f"[agent-worker] unexpected error in post-turn transition: {err}"
+        )
 
 
 async def _lookup_inbox_message(
