@@ -436,6 +436,15 @@ export const fetchLibraryPaginated = async (
       nextCursor,
     };
   } catch (err: any) {
+    // Recognise AbortError — useLibrary cancels the in-flight request on
+    // every reload / loadMore / filter change. That's expected, not a
+    // failure, so log at debug (still visible in DevTools verbose mode
+    // but doesn't fire console.error + the React fiber-unwind cascade)
+    // and re-throw so callers can ``catch`` and skip state updates.
+    if (err?.name === 'AbortError') {
+      console.debug('Library query aborted (in-flight cancelled by next load)');
+      throw err;
+    }
     console.error('Library query failed:', err?.message || err);
     throw err;
   }
