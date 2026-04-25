@@ -153,3 +153,106 @@
 **Context**: Adversarial review P2. `migrations/156_agent_memories_m1b.sql:9`.
 
 **Status**: pending — M2
+
+---
+
+## TODO-AI-012: PostgREST advisory lock per-session limitation (M2/M3 — P0)
+
+**What**: `try_advisory_lock` / `advisory_unlock` called via supabase-py REST RPC are per-DB-session, but each REST call uses a (potentially) different PostgREST connection. The lock is acquired in session A and the unlock RPC may route to session B, leaving session A's lock held until the connection is recycled. Affects:
+- `agent_runs_sweeper.SWEEPER_LOCK_KEY` (inherited from M1)
+- `agent_workforce_tasks.{INBOX,OUTBOX}_LOCK_KEY` (M2)
+- `WorkerStateMachine._hold_lock` per-agent locks (M2)
+
+**Why**: Concurrent Celery beat workers can both believe they hold the lock and run ticks in parallel. Per-agent state transitions can race. The CAS guards on inbox/task claims (`status='unread'`, `lifecycle_status='queued'`) provide actual mutual exclusion at the row level, so the practical blast radius is bounded — but state_changed_at can flap and audit history can record racing transitions.
+
+**Pros**: Fixing this hardens the entire dispatch/state-machine foundation across M1+M2.
+
+**Cons**: Requires replacing the REST-RPC-based lock with either (a) pinned psycopg sessions per Celery worker process, (b) `pg_advisory_xact_lock` inside SQL functions that do the whole transition atomically, or (c) row-based locks (`SELECT ... FOR UPDATE` on agent_workers) — each is non-trivial.
+
+**Context**: Adversarial review (Claude subagent, 2026-04-25) CRITICAL #1. Affects `app/tasks/agent_runs_sweeper.py:48-70` and `app/services/workforce/state_machine.py:_hold_lock`.
+
+**Status**: pending — P0 follow-up after M2 ships
+
+---
+
+## TODO-AI-013: cascade_cancel_run trigger fan-out guard (M2 follow-up)
+
+**What**: `cascade_cancel_run` fires AFTER UPDATE of `cancel_requested` and itself UPDATEs all children to `cancel_requested=true`, which RE-fires the trigger on each child. For a tree of N running children this is N nested executions of the same WHERE-scan. Worst case quadratic locking on `agent_runs`.
+
+**Fix**: add `IF pg_trigger_depth() > 1 THEN RETURN NEW; END IF;` early-return, OR fold the cascade into a single recursive CTE statement.
+
+**Context**: Adversarial review CRITICAL #2. `migrations/159_workforce_schema_m2.sql:228-239`.
+
+**Status**: pending — fix in next migration
+
+---
+
+## TODO-AI-014: Inbox dedup_key TTL after processed (M2)
+
+**What**: Unique index on `agent_inbox(recipient_agent_id, dedup_key)` is partial — `WHERE status IN ('unread', 'reading')`. Once processed, the dedup expires. A flapping LLM that retries `Delegate(... dedup_key=X)` after the previous one finished will create duplicates instead of being deduped.
+
+**Fix**: widen the partial WHERE to exclude only `expired`, OR stamp a TTL window in code (e.g. dedup_key valid for 5 min after creation), OR rate-limit Delegate at the tool level.
+
+**Context**: Adversarial review HIGH #5. `migrations/159_workforce_schema_m2.sql:95-97`.
+
+**Status**: pending — M2 follow-up
+
+---
+
+## TODO-AI-015: Delegate cycle detection beyond depth (M3)
+
+**What**: Cycle protection is currently depth-only (`agent_depth >= 3`). A→B→A→B→A hits depth=4 and aborts, but A→B→A within 3 levels is permitted and could ping-pong harmlessly forever as long as the chain length stays ≤3.
+
+**Fix**: walk `agent_runs.parent_run_id` and reject if `target_agent_id` already appears in the chain. Requires storing the agent chain on agent_runs (column or recursive CTE on lookup).
+
+**Context**: Adversarial review HIGH #4. `app/services/workforce/delegate_tool.py:execute`. Module docstring updated to acknowledge depth-only protection.
+
+**Status**: pending — M3
+
+---
+
+## TODO-AI-016: force_terminate must requeue in-flight task + race fence (M2 follow-up)
+
+**What**: `WorkerStateMachine.force_terminate` skips the per-agent advisory lock by design (sweeper path — worker is presumed dead). But it does NOT call `requeue_task` for the worker's `current_task_id`, so the in-flight task is orphaned in `assigned`/`in_progress` state. Also TOCTOU vs a still-live worker: `read state='working'` → sweeper writes 'terminated' → live worker writes 'idle' overwrites.
+
+**Fix**: in `force_terminate`, look up `current_task_id` and call `repo.requeue_task` if non-null. Add a CAS fence on the UPDATE: `WHERE worker_pid = <expected> AND heartbeat_at < <stale_before>`.
+
+**Context**: Adversarial review HIGH #7. `app/services/workforce/state_machine.py:268-294`.
+
+**Status**: pending — M2 follow-up
+
+---
+
+## TODO-AI-017: Inbox starvation under one-agent backlog (M2 follow-up)
+
+**What**: `_agents_with_unread_messages` reads up to 500 inbox rows and dedupes recipients in Python. If one agent has 500+ backlogged messages, every other agent disappears from the tick.
+
+**Fix**: replace with SQL `SELECT DISTINCT recipient_agent_id FROM agent_inbox WHERE status='unread'` via RPC (PostgREST `?select=...&limit=500` does NOT dedupe server-side).
+
+**Context**: Adversarial review MEDIUM. `app/services/workforce/inbox_processor.py:217-244`.
+
+**Status**: pending — fix when first observed in production telemetry
+
+---
+
+## TODO-AI-018: upsert_worker stomps state + wipes audit (M2 follow-up)
+
+**What**: `repo.upsert_worker` always overwrites `state`, `worker_pid`, `worker_hostname`, `state_changed_at`. If called outside worker-startup (e.g. SM first-touch path), it stomps a `terminated` or `paused` agent back to `idle`.
+
+**Fix**: split into `register_worker` (insert-only with `ON CONFLICT DO NOTHING`) vs `update_worker_state` (the existing one); only bump `state_changed_at` when state actually changes.
+
+**Context**: Adversarial review MEDIUM. `app/repositories/agent_workforce_repository.py:73-101`.
+
+**Status**: pending — M2 follow-up
+
+---
+
+## TODO-AI-019: Realtime missed-event backfill (M2 follow-up)
+
+**What**: `_dispatch_to_user` relies on Supabase Realtime firing on the original outbox INSERT. If the user is offline / not subscribed at insert time, the message is lost (dispatcher marks delivered, frontend never sees it).
+
+**Fix**: keep `delivered=false` until the frontend explicitly ACKs, OR have the frontend on connect query `agent_outbox WHERE recipient_user_id=... AND created_at > <last_seen>` to backfill.
+
+**Context**: Adversarial review MEDIUM. `app/services/workforce/outbox_dispatcher.py:76-84`.
+
+**Status**: pending — M2 follow-up before public launch

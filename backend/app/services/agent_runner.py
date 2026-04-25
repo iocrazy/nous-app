@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_ITERATIONS = 5
 
+# Tool names recognised by the runner. Anything else is silently ignored
+# (forward-compat with future caller-provided tools).
+SUPPORTED_TOOLS: frozenset[str] = frozenset({"Skill", "Delegate"})
+
 
 class AgentRunner:
     def __init__(
@@ -52,10 +56,15 @@ class AgentRunner:
         skill_tool: SkillToolService,
         *,
         hooks: Optional[HookRegistry] = None,
+        delegate_tool: Optional[Any] = None,
     ) -> None:
         self.adapter = adapter
         self.skill_tool = skill_tool
         self.hooks = hooks  # None = no hook chain (back-compat default)
+        # Optional cross-agent dispatch tool. When None, ``Delegate`` calls
+        # are answered with an explicit "tool not configured" so the LLM
+        # gets useful feedback instead of silent skip behaviour.
+        self.delegate_tool = delegate_tool
 
     async def run_turn(
         self,
@@ -102,7 +111,8 @@ class AgentRunner:
             # Resolve each tool call (with hook chain bracketing).
             for call in tool_calls:
                 fn = call.get("function") or {}
-                if fn.get("name") != "Skill":
+                tool_name = fn.get("name")
+                if tool_name not in SUPPORTED_TOOLS:
                     # Unknown tool — skip (caller-provided tools handled elsewhere in future)
                     continue
                 try:
@@ -114,7 +124,7 @@ class AgentRunner:
                 pre_result = await self._run_pre_hooks(
                     composed=composed,
                     recorder=recorder,
-                    tool_name="Skill",
+                    tool_name=tool_name,
                     args=args,
                     iteration=iteration,
                 )
@@ -133,14 +143,28 @@ class AgentRunner:
                         args = pre_result.modified_args
 
                 # ── Tool dispatch ──────────────────────────────────────────
-                if recorder is not None and args.get("skill"):
-                    recorder.record_skill(str(args["skill"]))
-                result = await self.skill_tool.execute(args)
+                if tool_name == "Skill":
+                    if recorder is not None and args.get("skill"):
+                        recorder.record_skill(str(args["skill"]))
+                    result = await self.skill_tool.execute(args)
+                else:  # tool_name == "Delegate"
+                    if self.delegate_tool is None:
+                        result = {
+                            "error": (
+                                "Delegate tool not configured for this run. "
+                                "Cross-agent dispatch requires a "
+                                "DelegateToolService — wiring this run "
+                                "didn't supply one."
+                            )
+                        }
+                    else:
+                        result = await self.delegate_tool.execute(args)
+
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id"),
-                        "name": "Skill",
+                        "name": tool_name,
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
@@ -149,7 +173,7 @@ class AgentRunner:
                 post_result = await self._run_post_hooks(
                     composed=composed,
                     recorder=recorder,
-                    tool_name="Skill",
+                    tool_name=tool_name,
                     args=args,
                     tool_result=result,
                     iteration=iteration,

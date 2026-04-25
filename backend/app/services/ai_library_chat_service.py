@@ -26,14 +26,12 @@ from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
-from app.services.agent_runner import AgentRunner  # noqa: F401 — patched in tests
+from app.services.agent_runner import AgentRunner  # noqa: F401  patched in tests
 from app.services.ai_adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.prompt_composer import ComposerInput, PromptComposer
 from app.services.run_recorder import AgentPausedError, RunRecorder
-from app.services.skill_tool_service import (  # noqa: F401 — patched in tests
-    SkillToolService,
-)
+from app.services.skill_tool_service import SkillToolService  # noqa: F401
 
 
 class AILibraryChatService:
