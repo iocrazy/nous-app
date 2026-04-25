@@ -183,7 +183,7 @@
 
 **Context**: Adversarial review CRITICAL #2. `migrations/159_workforce_schema_m2.sql:228-239`.
 
-**Status**: pending — fix in next migration
+**Status**: ✅ DONE — `migrations/160_cascade_cancel_depth_guard.sql` applied 2026-04-25. Function rewrites with `IF pg_trigger_depth() > 1 THEN RETURN NEW;` early-return; one outer UPDATE hits all children in a single statement.
 
 ---
 
