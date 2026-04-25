@@ -150,6 +150,16 @@
     "searchResultsCount": "Found {{count}} matching items",
     "searchResultsCountSingular": "Found 1 matching item"
   },
+  "search": {
+    "scopeTooltip": "Search scope",
+    "scopeHeader": "Search Scope",
+    "scope": {
+      "title": "Title",
+      "description": "Description",
+      "author": "Author",
+      "hashtags": "Hashtags"
+    }
+  },
   "dashboard": {
     "title": "Analytics",
     "subtitle": "Real-time statistics of your downloading habits",

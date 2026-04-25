@@ -150,6 +150,16 @@
     "searchResultsCount": "搜索到 {{count}} 条结果",
     "searchResultsCountSingular": "搜索到 1 条结果"
   },
+  "search": {
+    "scopeTooltip": "搜索范围",
+    "scopeHeader": "搜索范围",
+    "scope": {
+      "title": "标题",
+      "description": "描述",
+      "author": "作者",
+      "hashtags": "话题标签"
+    }
+  },
   "dashboard": {
     "title": "数据统计",
     "subtitle": "实时统计下载习惯",

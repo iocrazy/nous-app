@@ -26,7 +26,14 @@ import { LibraryFeed } from './LibraryFeed';
 import { ToolbarSearch } from './ToolbarSearch';
 import { ShareModal } from './ShareModal';
 import { getCoverUrl, getVideoUrl } from '../utils/awemeType';
-import { semanticSearch, hybridSearch, localSearch, textSearch } from '../services/searchService';
+import {
+  semanticSearch,
+  hybridSearch,
+  localSearch,
+  textSearch,
+  type SearchField,
+} from '../services/searchService';
+import { SearchScopePicker, loadSearchScope } from './SearchScopePicker';
 import { useToast } from './Toast';
 import { trashResourceByPlatformId, updateResource } from '../services/resourceService';
 import { createTag } from '../services/unifiedTagService';
@@ -121,6 +128,9 @@ export const DownloadsView: React.FC = () => {
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchQueryText, setSearchQueryText] = useState('');
   const [isAISearching, setIsAISearching] = useState(false);
+  // Eagle-style search-scope toggles (Title / Description / Author /
+  // Hashtags). Persisted in localStorage so the choice survives reloads.
+  const [searchScope, setSearchScope] = useState<SearchField[]>(() => loadSearchScope());
 
   // ─── Pull-to-refresh (mobile) ───
   const contentScrollRef = useRef<HTMLDivElement>(null);
@@ -286,7 +296,7 @@ export const DownloadsView: React.FC = () => {
           ? await semanticSearch(query, 100)
           : mode === 'hybrid'
             ? await hybridSearch(query, {}, 100, 0.5)
-            : await textSearch(query, 1000);
+            : await textSearch(query, 1000, searchScope);
       setSearchResults(response.results as any);
       // Backend now attaches full ParsedMedia rows in ``videos``. Index them
       // by platform_id so filteredLibrary can render AI-status icons etc.
@@ -308,7 +318,7 @@ export const DownloadsView: React.FC = () => {
     } finally {
       setIsAISearching(false);
     }
-  }, [library]);
+  }, [library, searchScope]);
 
   const handleSearchClear = useCallback(() => {
     setSearchResults([]);
@@ -694,6 +704,12 @@ export const DownloadsView: React.FC = () => {
               className="w-52"
             />
 
+            {/* Eagle-style scope picker — choose which fields to search. */}
+            <SearchScopePicker
+              value={searchScope}
+              onChange={setSearchScope}
+            />
+
             {/* Filter bar visibility toggle — plain funnel, mirrors the
                 Resources view. Shows / hides the chip row below. */}
             <button
@@ -1048,6 +1064,16 @@ export const DownloadsView: React.FC = () => {
                     }
                   }}
                 />
+                {/* Eagle-style scope picker — compact variant for the
+                    mobile overlay. Click funnel → toggle which fields to
+                    search next time the user hits Enter. */}
+                <div className="ml-1 flex-shrink-0">
+                  <SearchScopePicker
+                    value={searchScope}
+                    onChange={setSearchScope}
+                    compact
+                  />
+                </div>
                 <button
                   onClick={() => {
                     setIsMobileSearchOpen(false);

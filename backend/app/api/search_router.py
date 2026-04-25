@@ -278,18 +278,26 @@ async def text_search(
             search_type="text",
         )
 
+    # Build OR filter dynamically from selected fields. Empty fields list →
+    # no scope → empty result (caller probably means "no scope checked",
+    # not "any scope").
+    if not request.fields:
+        return SearchResponse(
+            results=[],
+            videos=[],
+            total=0,
+            query=q,
+            search_type="text",
+        )
+    or_filter = ",".join(f"{f}.ilike.{pattern}" for f in request.fields)
+
     client = await get_async_supabase_admin()
     try:
         result = (
             await client.table("parsed_media")
             .select(MediaRepository.CARD_SELECT)
             .in_("id", user_media_ids)
-            .or_(
-                f"title.ilike.{pattern},"
-                f"description.ilike.{pattern},"
-                f"author.ilike.{pattern},"
-                f"hashtags.ilike.{pattern}"
-            )
+            .or_(or_filter)
             .order("created_at", desc=True)
             .limit(request.limit)
             .execute()

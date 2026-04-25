@@ -79,20 +79,32 @@ export const hybridSearch = async (
     ...filters,
   });
 
+/** Eagle-style search-scope toggles. Each maps to a parsed_media column.
+ *  Backend defaults to all four when ``fields`` is omitted. */
+export type SearchField = 'title' | 'description' | 'author' | 'hashtags';
+
+export const ALL_SEARCH_FIELDS: SearchField[] = [
+  'title',
+  'description',
+  'author',
+  'hashtags',
+];
+
 /**
- * Plain-text ILIKE search — returns every row whose title / description /
- * author / hashtags contains the substring. No semantic ranking, no top-N
- * cutoff (up to ``limit``, backend caps at 5000). Use this when you want
- * "every video that contains 'memory'" rather than "top 20 semantically
- * similar videos".
+ * Plain-text ILIKE search — returns every row whose selected fields contain
+ * the substring. No semantic ranking, no top-N cutoff (up to ``limit``,
+ * backend caps at 5000). ``fields`` lets users narrow the search scope
+ * Eagle-style; default is all four.
  */
 export const textSearch = async (
   query: string,
   limit: number = 1000,
+  fields?: SearchField[],
 ): Promise<SearchResponse> =>
   apiClient.post<SearchResponse>('/api/v1/search/text', {
     query,
     limit,
+    fields: fields && fields.length > 0 ? fields : undefined,
   });
 
 /**

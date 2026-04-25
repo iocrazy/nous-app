@@ -1,6 +1,6 @@
 """Pydantic schemas for Search API."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -37,17 +37,26 @@ class HybridSearchRequest(BaseModel):
     )
 
 
+SearchField = Literal["title", "description", "author", "hashtags"]
+
+
 class TextSearchRequest(BaseModel):
     """Request schema for plain-text ILIKE search (no semantic ranking).
 
-    Returns ALL matches whose ``title`` / ``description`` / ``author`` /
-    ``hashtags`` contains the substring, sorted by ``created_at DESC``.
-    Use this when the user wants "everything that contains this keyword"
-    rather than the top-N by embedding similarity.
+    Returns matches whose selected ``fields`` contain the substring,
+    sorted by ``created_at DESC``. Use this when the user wants
+    "everything that contains this keyword" rather than top-N semantic.
+
+    ``fields`` controls which columns to search. Defaults to all four
+    when omitted. An empty list returns no results (caller probably
+    means "no scopes selected" rather than "any scope" — fail closed).
     """
 
     query: str = Field(..., min_length=1, max_length=500)
     limit: int = Field(1000, ge=1, le=5000)
+    fields: List[SearchField] = Field(
+        default_factory=lambda: ["title", "description", "author", "hashtags"]
+    )
 
 
 class SearchResultItem(BaseModel):
