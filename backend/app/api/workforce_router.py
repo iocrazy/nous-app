@@ -1,34 +1,52 @@
-"""Workforce dashboard endpoints — read-only board for the M3 runtime.
+"""Workforce dashboard endpoints.
 
-Exposes one endpoint, ``GET /api/v1/workforce/board``, that returns
-everything the frontend needs to render a Workforce overview without
-making N round-trips: persistent agents + their worker rows + queue
-counts (inbox unread/reading, outbox undelivered) + recent runs +
-recent state transitions.
+Read paths:
+  ``GET /api/v1/workforce/board`` — fat aggregate snapshot
 
-Why one fat endpoint instead of N small ones:
-  * The dashboard polls every ~5s; one query keeps round-trips low.
-  * The data is small (handful of agents × handful of recent rows).
-  * The values are mostly derived counts — assembling client-side
-    means duplicating SQL across the frontend.
+Admin actions (I milestone):
+  ``POST /api/v1/workforce/agents/{slug}/pause`` — set paused_reason
+  ``POST /api/v1/workforce/agents/{slug}/resume`` — clear paused_reason
+  ``POST /api/v1/workforce/agents/{slug}/clear-inbox`` — bulk-dismiss
+  ``POST /api/v1/workforce/tasks/{task_id}/cancel`` — request task cancel
 
-Auth: any logged-in user can read the board. The data exposed
-(persistent agents are system presets; queue counts are aggregates)
-is not user-private and matches what's already visible via Runs/Usage
-pages today.
+Auth: any logged-in user. The persistent agents are system presets
+(no user_id) and the dashboard data is aggregate, not user-private.
+This matches the Runs / Usage UIs today.
 """
 
 from __future__ import annotations
 
 from typing import Any, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
+from pydantic import BaseModel
 
 from app.core.deps import get_current_user
 from app.db.supabase_client import get_async_supabase_admin
+from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_workforce_repository import AgentWorkforceRepository
 
 router = APIRouter(prefix="/workforce", tags=["workforce"])
+
+
+# ─── shared helpers ────────────────────────────────────────────────────
+
+
+async def _resolve_persistent_agent(slug: str) -> dict[str, Any]:
+    """Look up a persistent agent by slug. Raises 404 / 400 cleanly so
+    the admin-action endpoints don't have to repeat the boilerplate."""
+    repo = AgentRepository()
+    agent = await repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"agent '{slug}' not found")
+    if not agent.get("persistent"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"agent '{slug}' is not a persistent worker",
+        )
+    return agent
 
 
 @router.get("/board")
@@ -195,3 +213,109 @@ def _bucket_count(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
             continue
         out[v] = out.get(v, 0) + 1
     return out
+
+
+# ─── admin actions (I milestone) ───────────────────────────────────────
+
+
+class PauseAgentBody(BaseModel):
+    reason: Optional[str] = None  # caller-supplied; default 'manual'
+
+
+@router.post("/agents/{slug}/pause")
+async def pause_agent(
+    slug: str,
+    body: PauseAgentBody = PauseAgentBody(),
+    user: Any = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Set ``paused_reason`` so RunRecorder.start refuses new runs.
+
+    In-flight turns are NOT killed — they finish naturally. The pause
+    only blocks NEW runs (chat or workforce) from starting.
+    """
+    agent = await _resolve_persistent_agent(slug)
+    reason = (body.reason or "manual").strip()[:120]
+    repo = AgentRepository()
+    await repo.update_fields(UUID(agent["id"]), {"paused_reason": reason})
+    logger.info(f"[workforce] agent '{slug}' paused (reason={reason}) by user")
+    return {"slug": slug, "paused_reason": reason, "status": "paused"}
+
+
+@router.post("/agents/{slug}/resume")
+async def resume_agent(
+    slug: str,
+    user: Any = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Clear ``paused_reason`` so the agent accepts new runs again."""
+    agent = await _resolve_persistent_agent(slug)
+    repo = AgentRepository()
+    await repo.update_fields(UUID(agent["id"]), {"paused_reason": None})
+    logger.info(f"[workforce] agent '{slug}' resumed by user")
+    return {"slug": slug, "paused_reason": None, "status": "resumed"}
+
+
+@router.post("/agents/{slug}/clear-inbox")
+async def clear_inbox(
+    slug: str,
+    user: Any = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Bulk-dismiss every unread/reading inbox row for this agent.
+
+    Use when the queue gets stuck (mis-routed messages, runaway tests).
+    Doesn't touch already-processed rows. Returns the count cleared.
+    """
+    agent = await _resolve_persistent_agent(slug)
+    client = await get_async_supabase_admin()
+    cleared = 0
+    try:
+        result = (
+            await client.table("agent_inbox")
+            .update({"status": "dismissed", "processed_at": "now()"})
+            .eq("recipient_agent_id", agent["id"])
+            .in_("status", ["unread", "reading"])
+            .execute()
+        )
+        cleared = len(result.data or [])
+    except Exception as err:
+        logger.exception(f"[workforce] clear-inbox failed for {slug}: {err}")
+        raise HTTPException(status_code=500, detail="clear-inbox failed")
+
+    logger.info(f"[workforce] agent '{slug}' inbox cleared ({cleared} rows)")
+    return {"slug": slug, "cleared": cleared}
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(
+    task_id: UUID,
+    user: Any = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Mark an in-flight or queued task as cancelled.
+
+    The DB transition is the source of truth — once
+    ``lifecycle_status='cancelled'``, the worker checks (and the
+    RunRecorder cancel poll) will refuse to keep going. Already-done
+    tasks are left alone.
+    """
+    workforce = AgentWorkforceRepository()
+    task = await workforce.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+    if task.get("lifecycle_status") in ("done", "failed", "cancelled"):
+        return {
+            "task_id": str(task_id),
+            "lifecycle_status": task["lifecycle_status"],
+            "note": "task already in terminal state — no-op",
+        }
+    try:
+        await workforce.update_task_status(
+            task_id=task_id,
+            lifecycle_status="cancelled",
+            error_code="user_cancel",
+            error_message="Cancelled via workforce admin endpoint",
+        )
+    except Exception as err:
+        logger.exception(f"[workforce] cancel-task failed for {task_id}: {err}")
+        raise HTTPException(status_code=500, detail="cancel failed")
+
+    logger.info(f"[workforce] task {task_id} cancelled by user")
+    return {"task_id": str(task_id), "lifecycle_status": "cancelled"}

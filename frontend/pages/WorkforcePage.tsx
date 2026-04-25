@@ -24,6 +24,9 @@ import {
   Clock,
   Loader2,
   PauseCircle,
+  PlayCircle,
+  StopCircle,
+  Trash2,
   XCircle,
 } from 'lucide-react';
 import {
@@ -60,6 +63,45 @@ export const WorkforcePage: React.FC = () => {
     const id = window.setInterval(() => void refresh(), POLL_MS);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  // Per-agent action lock to prevent double-fires from rapid clicks.
+  const [busySlug, setBusySlug] = useState<string | null>(null);
+
+  const runAction = useCallback(
+    async (slug: string, action: () => Promise<unknown>) => {
+      if (busySlug) return;
+      setBusySlug(slug);
+      try {
+        await action();
+        await refresh();
+      } catch (err) {
+        console.error('[WorkforcePage] action failed:', err);
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusySlug(null);
+      }
+    },
+    [busySlug, refresh],
+  );
+
+  const onPause = useCallback(
+    (slug: string) => runAction(slug, () => workforceService.pauseAgent(slug)),
+    [runAction],
+  );
+  const onResume = useCallback(
+    (slug: string) => runAction(slug, () => workforceService.resumeAgent(slug)),
+    [runAction],
+  );
+  const onClearInbox = useCallback(
+    (slug: string) =>
+      runAction(slug, () => workforceService.clearInbox(slug)),
+    [runAction],
+  );
+  const onCancelTask = useCallback(
+    (slug: string, taskId: string) =>
+      runAction(slug, () => workforceService.cancelTask(taskId)),
+    [runAction],
+  );
 
   const totalQueued = useMemo(() => {
     if (!board) return 0;
@@ -117,7 +159,15 @@ export const WorkforcePage: React.FC = () => {
         <>
           <div className="grid gap-3 sm:grid-cols-2">
             {board.agents.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                busy={busySlug === agent.slug}
+                onPause={onPause}
+                onResume={onResume}
+                onClearInbox={onClearInbox}
+                onCancelTask={onCancelTask}
+              />
             ))}
           </div>
 
@@ -130,12 +180,33 @@ export const WorkforcePage: React.FC = () => {
 
 // ─── card ───────────────────────────────────────────────────────────
 
-const AgentCard: React.FC<{ agent: WorkforceAgentEntry }> = ({ agent }) => {
+interface AgentCardProps {
+  agent: WorkforceAgentEntry;
+  busy: boolean;
+  onPause: (slug: string) => void;
+  onResume: (slug: string) => void;
+  onClearInbox: (slug: string) => void;
+  onCancelTask: (slug: string, taskId: string) => void;
+}
+
+const AgentCard: React.FC<AgentCardProps> = ({
+  agent,
+  busy,
+  onPause,
+  onResume,
+  onClearInbox,
+  onCancelTask,
+}) => {
   const Icon = getAgentIcon(agent.icon);
   const state = agent.worker?.state ?? 'unknown';
   const stateChanged = agent.worker?.state_changed_at;
   const queue = agent.queue;
   const queuedTotal = queue.inbox_unread + queue.inbox_reading + queue.outbox_undelivered;
+  const isPaused = !!agent.paused_reason;
+  const currentTaskId = agent.worker?.current_task_id || null;
+
+  const confirm = (msg: string): boolean =>
+    typeof window !== 'undefined' ? window.confirm(msg) : true;
 
   return (
     <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-4 space-y-3">
@@ -149,6 +220,52 @@ const AgentCard: React.FC<{ agent: WorkforceAgentEntry }> = ({ agent }) => {
           <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
             {agent.slug}{agent.model ? ` · ${agent.model}` : ''}
           </div>
+        </div>
+        {/* Admin actions */}
+        <div className="flex items-center gap-1 shrink-0">
+          {isPaused ? (
+            <IconButton
+              icon={PlayCircle}
+              label="Resume"
+              disabled={busy}
+              onClick={() => onResume(agent.slug)}
+              tone="emerald"
+            />
+          ) : (
+            <IconButton
+              icon={PauseCircle}
+              label="Pause"
+              disabled={busy}
+              onClick={() => onPause(agent.slug)}
+              tone="amber"
+            />
+          )}
+          <IconButton
+            icon={Trash2}
+            label="Clear inbox"
+            disabled={busy || queue.inbox_unread + queue.inbox_reading === 0}
+            onClick={() => {
+              if (
+                confirm(
+                  `Dismiss all ${queue.inbox_unread + queue.inbox_reading} pending inbox messages for ${agent.name}?`,
+                )
+              ) {
+                onClearInbox(agent.slug);
+              }
+            }}
+            tone="zinc"
+          />
+          <IconButton
+            icon={StopCircle}
+            label="Cancel current task"
+            disabled={busy || !currentTaskId}
+            onClick={() => {
+              if (currentTaskId && confirm(`Cancel task ${currentTaskId.slice(0, 8)}…?`)) {
+                onCancelTask(agent.slug, currentTaskId);
+              }
+            }}
+            tone="red"
+          />
         </div>
       </div>
 
@@ -180,6 +297,41 @@ const AgentCard: React.FC<{ agent: WorkforceAgentEntry }> = ({ agent }) => {
         </div>
       )}
     </div>
+  );
+};
+
+interface IconButtonProps {
+  icon: React.ElementType;
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+  tone: 'amber' | 'emerald' | 'red' | 'zinc';
+}
+
+const IconButton: React.FC<IconButtonProps> = ({
+  icon: Icon,
+  label,
+  disabled,
+  onClick,
+  tone,
+}) => {
+  const toneClass = {
+    amber: 'text-zinc-500 hover:text-amber-300 hover:bg-amber-500/10',
+    emerald: 'text-zinc-500 hover:text-emerald-300 hover:bg-emerald-500/10',
+    red: 'text-zinc-500 hover:text-red-300 hover:bg-red-500/10',
+    zinc: 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800',
+  }[tone];
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex h-7 w-7 items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${toneClass}`}
+    >
+      <Icon size={14} />
+    </button>
   );
 };
 
