@@ -1113,6 +1113,76 @@ export interface AgentRunListResponse {
   offset: number;
 }
 
+// ─── Per-agent Dashboard aggregate ─────────────────────────────────────────
+// Backed by GET /api/v1/ai-library/agents/{slug}/dashboard. Paperclip-style
+// 14-day overview, scoped to the authenticated user.
+
+export interface DailyCount {
+  date: string; // YYYY-MM-DD
+  count: number;
+}
+
+export interface DailySuccessRate {
+  date: string;
+  success: number;
+  total: number;
+}
+
+export interface DashboardCosts {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  total_cost_cents: number;
+  run_count: number;
+}
+
+export interface DashboardRecentTask {
+  id: string;
+  lifecycle_status: string;
+  created_at: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  title?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
+export interface DashboardRecentRun {
+  id: string;
+  status: string;
+  trigger: string;
+  model?: string | null;
+  started_at: string;
+  ended_at?: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_cents?: number | null;
+}
+
+export interface AgentDashboard {
+  agent: {
+    id: string;
+    slug: string;
+    name: string;
+    icon?: string | null;
+    model?: string | null;
+    persistent: boolean;
+    paused_reason?: string | null;
+  };
+  /** Most recent run, regardless of window. Null when never invoked. */
+  latest_run: AgentRunDetail | null;
+  /** 14 entries, oldest first; gaps filled with count=0. */
+  run_activity_14d: DailyCount[];
+  /** lifecycle_status → count, last 14d. May omit zero buckets. */
+  tasks_by_status_14d: Record<string, number>;
+  /** 14 entries with daily success/total counts. */
+  success_rate_14d: DailySuccessRate[];
+  /** Sums + total cost over the 14-day window. */
+  costs_14d: DashboardCosts;
+  recent_tasks: DashboardRecentTask[];
+  recent_runs: DashboardRecentRun[];
+}
+
 // ─── AI Usage aggregates ───────────────────────────────────────────────────
 // Mirror of backend/app/schemas/agent_runs.py (UsagePerAgent, UsageAggregate).
 // Fed by GET /api/v1/ai-library/usage?scope=&month=[&team_id=&project_id=].

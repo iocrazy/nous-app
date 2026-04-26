@@ -14,6 +14,7 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import type {
+  AgentDashboard,
   AgentRunDetail,
   AgentRunListResponse,
   AILibraryAgent,
@@ -232,6 +233,20 @@ export const aiLibraryService = {
       { headers: await getAuthHeaders() },
     );
     return handle<AgentRunListResponse>(resp);
+  },
+
+  /**
+   * Per-agent dashboard aggregate — drives the AgentEditor → Dashboard
+   * tab. One fat read with: latest run banner, 14-day run activity +
+   * success-rate series, tasks by lifecycle status, costs summary,
+   * recent tasks, recent runs.
+   */
+  async getAgentDashboard(slug: string): Promise<AgentDashboard> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/dashboard`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle<AgentDashboard>(resp);
   },
 
   /** Full detail view of one run. 404 if not owned by the caller. */

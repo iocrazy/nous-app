@@ -37,8 +37,9 @@ import {
 import { MarkdownEditor } from './MarkdownEditor';
 import { NewAgentModal } from './NewAgentModal';
 import { AgentIconPicker } from './AgentIconPicker';
+import { AgentDashboardTab } from './AgentDashboardTab';
 
-type SubTab = 'overview' | 'files' | 'skills' | 'runs';
+type SubTab = 'dashboard' | 'overview' | 'files' | 'skills' | 'runs';
 
 const RUNS_PAGE_SIZE = 25;
 const RUNS_POLL_INTERVAL_MS = 10_000;
@@ -59,7 +60,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   const isAdmin = userProfile.role === 'admin';
   const modelGroups = useMemo(() => getAvailableModels(aiSettings), [aiSettings]);
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
-  const [sub, setSub] = useState<SubTab>('overview');
+  const [sub, setSub] = useState<SubTab>('dashboard');
   const [draft, setDraft] = useState<Partial<AILibraryAgent>>({});
   const [localSkillIds, setLocalSkillIds] = useState<number[]>([]);
   const [allSkills, setAllSkills] = useState<AILibrarySkill[] | null>(null);
@@ -74,7 +75,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     let cancelled = false;
     setAgent(null);
     setError(null);
-    setSub('overview');
+    setSub('dashboard');
     setLocalSkillIds([]);
 
     aiLibraryService
@@ -264,7 +265,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     onAgentForked?.(newSlug);
   };
 
-  const subTabs: SubTab[] = ['overview', 'files', 'skills', 'runs'];
+  const subTabs: SubTab[] = ['dashboard', 'overview', 'files', 'skills', 'runs'];
 
   return (
     <div>
@@ -316,6 +317,10 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           </button>
         ))}
       </nav>
+
+      {sub === 'dashboard' && (
+        <AgentDashboardTab slug={slug} onOpenRuns={() => setSub('runs')} />
+      )}
 
       {sub === 'overview' && (
         <section className="space-y-4 text-sm">
