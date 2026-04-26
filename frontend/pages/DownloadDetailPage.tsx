@@ -23,10 +23,13 @@ export { DeleteDialog } from './DownloadDetailPage/DeleteDialog';
 interface DownloadDetailPageProps {
   resourceId?: string;
   mediaId?: string;
+  /** Pre-fetched ParsedMedia from the navigating card so the page can
+   *  paint a skeleton immediately while the full fetch resolves. */
+  preloaded?: import('../types').Video;
 }
 
-export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMediaId }: DownloadDetailPageProps = {}) {
-  const detail = useDownloadDetail({ propResourceId, propMediaId });
+export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMediaId, preloaded }: DownloadDetailPageProps = {}) {
+  const detail = useDownloadDetail({ propResourceId, propMediaId, preloaded });
   const {
     video, isLoading, notFound, playerRef,
     resourceId, resourceRating, resourceNotes, hlsUrl, authToken, mediaToken,

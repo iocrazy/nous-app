@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { ResourceDetailPage } from '../components/ResourceDetailPage';
 import { DownloadDetailPage } from './DownloadDetailPage';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
+import type { Video } from '../types';
 
 /**
  * Unified resource detail dispatcher.
@@ -12,15 +13,34 @@ import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
  * Detects the resource's source_type:
  * - 'web' (downloaded from platform) → DownloadDetailPage (download detail view)
  * - other (uploaded/imported) → ResourceDetailPage (resource management view)
+ *
+ * Optimization: when navigated from a card click (DownloadsView /
+ * search), the caller passes the full ParsedMedia row via router state
+ * as ``location.state.preloaded``. We use it to (a) skip the
+ * source_type round-trip — search hits are always ``source_type='web'``
+ * — and (b) hand DownloadDetailPage an immediate skeleton so the user
+ * sees the card chrome rendered before any network call returns. This
+ * is the same pattern most video sites (YouTube / Bilibili / TikTok)
+ * use to avoid the blank-screen pause on search→detail.
  */
 export function FileDetailDispatcher() {
   const { resourceId } = useParams<{ resourceId: string }>();
-  const [sourceType, setSourceType] = useState<string | null>(null);
-  const [mediaId, setMediaId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+  const preloaded = (location.state as { preloaded?: Video } | null)?.preloaded;
+  const [sourceType, setSourceType] = useState<string | null>(
+    preloaded ? 'web' : null,
+  );
+  const [mediaId, setMediaId] = useState<string | null>(
+    preloaded?.id ? String(preloaded.id) : null,
+  );
+  const [loading, setLoading] = useState(!preloaded);
 
   useEffect(() => {
     if (!resourceId) return;
+    // Skip source_type round-trip when the navigation came with a
+    // preloaded ParsedMedia — it's always source_type='web' for search
+    // / DownloadsView card clicks, and we already have the media_id.
+    if (preloaded?.id) return;
 
     const fetchSourceType = async () => {
       const supabase = getSupabaseClient();
@@ -47,7 +67,7 @@ export function FileDetailDispatcher() {
     };
 
     fetchSourceType();
-  }, [resourceId]);
+  }, [resourceId, preloaded?.id]);
 
   if (!resourceId) return null;
 
@@ -61,7 +81,13 @@ export function FileDetailDispatcher() {
 
   // Downloaded from platform → DownloadDetailPage (download detail view)
   if (sourceType === 'web' && mediaId) {
-    return <DownloadDetailPage resourceId={resourceId} mediaId={mediaId} />;
+    return (
+      <DownloadDetailPage
+        resourceId={resourceId}
+        mediaId={mediaId}
+        preloaded={preloaded}
+      />
+    );
   }
 
   // Uploaded/imported → ResourceDetailPage (resource management view)
