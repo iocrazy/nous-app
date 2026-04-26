@@ -1189,8 +1189,26 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
+/**
+ * One Skill / Delegate dispatch the LLM made during a chat turn.
+ * Mirrors backend ``ChatToolCall``. Returned at the top level of
+ * ``ChatResponse`` (live turn) AND folded into the assistant message's
+ * ``metadata_json.tool_calls`` so refetched history keeps it.
+ */
+export interface ChatToolCall {
+  /** 'Skill' | 'Delegate' (open string in case the runner adds more). */
+  name: string;
+  /** 1-indexed loop tick within the turn. */
+  iteration: number;
+  /** Raw arg payload the agent runner saw. */
+  args: Record<string, unknown>;
+  /** Raw result payload the dispatched tool returned. */
+  result: Record<string, unknown>;
+}
+
 export interface ChatResponse {
   message: ChatMessage;
   usage: { prompt_tokens?: number; completion_tokens?: number };
   run_id?: string | null;
+  tool_calls?: ChatToolCall[];
 }
