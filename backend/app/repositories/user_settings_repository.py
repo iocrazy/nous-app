@@ -42,7 +42,18 @@ class UserSettingsRepository:
             return None
 
     async def get_by_user_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Return cached user settings (30s TTL) or load from DB on miss."""
+        """Return cached user settings (30s TTL) or load from DB on miss.
+
+        Guards against ``user_id=None`` leaking in from Celery contexts
+        where the original requester is unknown (e.g. retry of an orphan
+        download row, system-initiated parses). Without the guard,
+        PostgREST stringifies None to "None" and PG rejects with 22P02
+        invalid uuid syntax — quietly turned into ERROR log spam without
+        breaking the call. Returning None here is the same observable
+        outcome (no settings found) without the noise.
+        """
+        if not user_id or str(user_id).lower() in ("none", "null"):
+            return None
         return await user_settings_cache.get_or_load(
             user_id,
             lambda: self._load_user_settings(user_id),

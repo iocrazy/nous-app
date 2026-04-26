@@ -53,7 +53,21 @@ class UserLogsRepository:
 
         Returns:
             创建的日志记录
+
+        Skips writes when ``user_id`` is missing — Celery retry paths
+        (scheduled_tasks.retry_failed_downloads) can pull rows with a
+        NULL ``user_id`` from legacy/system-initiated downloads, and
+        calling create(None, ...) used to fail loudly with 23502 NOT
+        NULL violation, spamming ERROR logs once per orphan download.
+        Soft-skip is correct: if there's no user, there's no per-user
+        log to create.
         """
+        if not user_id or str(user_id).lower() in ("none", "null"):
+            logger.debug(
+                f"[user-logs] skipping create with missing user_id "
+                f"(action={action}, status={status})"
+            )
+            return None
         try:
             data = {
                 "user_id": user_id,
