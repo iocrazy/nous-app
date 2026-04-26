@@ -21,6 +21,8 @@ backend (e.g. ``ai_agents_router.py``, ``skills_router.py``).
 
 from __future__ import annotations
 
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -1000,6 +1002,199 @@ def _month_bounds(month: str) -> tuple[str, str]:
     else:
         next_month = parsed.replace(month=parsed.month + 1)
     return parsed.isoformat(), next_month.isoformat()
+
+
+@router.get(
+    "/agents/{slug}/dashboard",
+    summary="Per-agent dashboard aggregate (Paperclip-style)",
+)
+async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
+    """One fat endpoint that backs the AgentEditor → Dashboard tab.
+
+    Aggregates over the last 14 days, scoped to the authenticated user
+    (same scoping as ``/agents/:slug/runs`` so the numbers match what
+    the user sees in the Runs tab).
+
+    Returns:
+        agent: slim header (slug, name, icon, model, persistent flag,
+            paused_reason).
+        latest_run: most recent agent_runs row (or None).
+        run_activity_14d: [{date, count}] — one entry per day, oldest
+            first, zeros included so the bar chart renders flat tail.
+        tasks_by_status_14d: lifecycle_status → count over 14d.
+        success_rate_14d: [{date, success, total}] daily.
+        costs_14d: prompt_tokens / completion_tokens / total_cost_cents
+            summed over 14d.
+        recent_tasks: 5 most recent agent_tasks rows.
+        recent_runs: 10 most recent slim agent_runs rows.
+    """
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    agent_uuid = UUID(str(agent["id"]))
+    client = await get_async_supabase_admin()
+
+    now = datetime.now(timezone.utc)
+    # 14-day window inclusive of today: midnight of (today - 13 days)
+    # through now. Bucketing keys are date-only ISO strings, so we want
+    # day 0 = 13 days ago and day 13 = today.
+    window_start = (
+        now.replace(hour=0, minute=0, second=0, microsecond=0)
+        - timedelta(days=13)
+    )
+    iso_start = window_start.isoformat()
+
+    # Pull 14d of runs in one shot. Bounded — even busy agents rarely
+    # break a few hundred runs/2wk; bucketing in Python beats issuing
+    # 14 + 14 + N PostgREST calls.
+    runs_q = await (
+        client.table("agent_runs")
+        .select(
+            "id,status,trigger,model,started_at,ended_at,"
+            "prompt_tokens,completion_tokens,cost_cents"
+        )
+        .eq("agent_id", str(agent_uuid))
+        .eq("user_id", str(user_uuid))
+        .gte("started_at", iso_start)
+        .order("started_at", desc=True)
+        .execute()
+    )
+    runs_14d: List[Dict[str, Any]] = runs_q.data or []
+
+    # Most recent run, regardless of window. The dashboard shows a
+    # banner even when the user hasn't run anything in 2 weeks.
+    latest_q = await (
+        client.table("agent_runs")
+        .select(
+            "id,status,trigger,model,started_at,ended_at,"
+            "prompt_tokens,completion_tokens,cost_cents,"
+            "input_summary,output_summary,error_code,error_message"
+        )
+        .eq("agent_id", str(agent_uuid))
+        .eq("user_id", str(user_uuid))
+        .order("started_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    latest_run = latest_q.data[0] if latest_q.data else None
+
+    # 14-day daily series — pre-fill with zeros so the chart's x axis
+    # stays continuous when there are gaps. ``window_start`` is already
+    # midnight of (today - 13d), so day 13 is today.
+    days: List[str] = [
+        (window_start + timedelta(days=i)).date().isoformat()
+        for i in range(14)
+    ]
+
+    activity_buckets: Counter[str] = Counter()
+    success_buckets: Dict[str, Dict[str, int]] = {
+        d: {"success": 0, "total": 0} for d in days
+    }
+    sum_prompt = 0
+    sum_completion = 0
+    sum_cost_cents = 0.0
+    for r in runs_14d:
+        started = r.get("started_at")
+        if not started:
+            continue
+        # ISO from PostgREST always YYYY-MM-DDTHH:MM:SS+HH:MM
+        date_key = started[:10]
+        activity_buckets[date_key] += 1
+        if date_key in success_buckets:
+            success_buckets[date_key]["total"] += 1
+            if r.get("status") == "completed":
+                success_buckets[date_key]["success"] += 1
+        sum_prompt += int(r.get("prompt_tokens") or 0)
+        sum_completion += int(r.get("completion_tokens") or 0)
+        cost = r.get("cost_cents")
+        if cost is not None:
+            try:
+                sum_cost_cents += float(cost)
+            except (TypeError, ValueError):
+                pass
+
+    run_activity_14d = [
+        {"date": d, "count": activity_buckets.get(d, 0)} for d in days
+    ]
+    success_rate_14d = [
+        {"date": d, **success_buckets[d]} for d in days
+    ]
+
+    # Tasks: status counts over 14d. Tasks live in agent_tasks scoped
+    # by user_id (Delegate from chat carries the caller's user_id, and
+    # direct dispatches get their owner stamped). Match the same
+    # window so the dashboard tells one consistent story.
+    tasks_q = await (
+        client.table("agent_tasks")
+        .select("id,lifecycle_status,created_at,title")
+        .eq("agent_id", str(agent_uuid))
+        .eq("user_id", str(user_uuid))
+        .gte("created_at", iso_start)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    tasks_14d: List[Dict[str, Any]] = tasks_q.data or []
+    status_counts: Counter[str] = Counter(
+        (t.get("lifecycle_status") or "unknown") for t in tasks_14d
+    )
+
+    # Recent agent_tasks (5) — pulled separately in case the 14d
+    # window is empty but older tasks still matter for context.
+    recent_tasks_q = await (
+        client.table("agent_tasks")
+        .select(
+            "id,lifecycle_status,created_at,started_at,ended_at,title,"
+            "error_code,error_message"
+        )
+        .eq("agent_id", str(agent_uuid))
+        .eq("user_id", str(user_uuid))
+        .order("created_at", desc=True)
+        .limit(5)
+        .execute()
+    )
+
+    # Recent runs table (10 slim rows, all-time so an idle agent still
+    # shows history).
+    recent_runs_q = await (
+        client.table("agent_runs")
+        .select(
+            "id,status,trigger,model,started_at,ended_at,"
+            "prompt_tokens,completion_tokens,cost_cents"
+        )
+        .eq("agent_id", str(agent_uuid))
+        .eq("user_id", str(user_uuid))
+        .order("started_at", desc=True)
+        .limit(10)
+        .execute()
+    )
+
+    return {
+        "agent": {
+            "id": str(agent_uuid),
+            "slug": agent.get("slug"),
+            "name": agent.get("name") or agent.get("slug"),
+            "icon": agent.get("icon"),
+            "model": agent.get("model"),
+            "persistent": bool(agent.get("persistent")),
+            "paused_reason": agent.get("paused_reason"),
+        },
+        "latest_run": latest_run,
+        "run_activity_14d": run_activity_14d,
+        "tasks_by_status_14d": dict(status_counts),
+        "success_rate_14d": success_rate_14d,
+        "costs_14d": {
+            "prompt_tokens": sum_prompt,
+            "completion_tokens": sum_completion,
+            "total_tokens": sum_prompt + sum_completion,
+            "total_cost_cents": round(sum_cost_cents, 4),
+            "run_count": len(runs_14d),
+        },
+        "recent_tasks": recent_tasks_q.data or [],
+        "recent_runs": recent_runs_q.data or [],
+    }
 
 
 @router.get(
