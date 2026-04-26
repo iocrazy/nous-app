@@ -798,8 +798,13 @@ class DownloaderService:
             )
             return
 
-        # cover_image_path is a shared-asset mirror; lives on parsed_media
-        # only now. Don't write it on resources.
+        # Shared assets — cover_image_path, *_download_status — live on
+        # parsed_media. ``file_path`` for carousel slides points at the
+        # resource_dir; parsed_media.image_download_path covers the same
+        # files but the resource needs a path to materialise the per-user
+        # row, so this one stays as a per-user file pointer (matches the
+        # shared dir, but written via a different lifecycle than the
+        # mirror writes we removed elsewhere).
         resource_data = {
             "creator_id": user_id,
             "media_id": media_id,
@@ -808,8 +813,6 @@ class DownloaderService:
             "mime_type": "image/jpeg",
             "filename": f"{platform_id}_slides",
             "file_type": video_data.get("media_type", "2"),
-            "video_download_status": "completed",
-            "image_download_status": "completed",
         }
         try:
             resource = await resources_repo.create_resource(resource_data)

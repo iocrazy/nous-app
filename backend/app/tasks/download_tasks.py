@@ -127,41 +127,17 @@ def download_unified_task(
         # ── Check global cache: skip download if file already on server ──
         if resource_id:
             from app.repositories.media_repository import MediaRepository as _MR
-            from app.repositories.resources_repository import ResourcesRepository as _RR
 
-            _res_repo = _RR()
             _media_repo = _MR()
             global_media = run_async(_media_repo.get_by_platform_id(platform_id))
 
             if global_media:
-                cache_updates = {}
-                # Only mark cached "completed" if both status AND file path exist
+                # PR-B: download statuses live on parsed_media; the
+                # global_media row already carries them. Don't mirror to
+                # resources. The all-cached short-circuit below still
+                # decides whether to skip the download.
                 has_video_path = bool(global_media.get("download_path"))
                 has_cover_path = bool(global_media.get("cover_download_path"))
-                if (
-                    download_video
-                    and global_media.get("video_download_status") == "completed"
-                    and has_video_path
-                ):
-                    cache_updates["video_download_status"] = "completed"
-                if (
-                    download_cover
-                    and global_media.get("cover_download_status") == "completed"
-                    and has_cover_path
-                ):
-                    cache_updates["cover_download_status"] = "completed"
-                if (
-                    download_video
-                    and int(media_type) in (2, 68)
-                    and global_media.get("image_download_status") == "completed"
-                    and has_video_path
-                ):
-                    cache_updates["image_download_status"] = "completed"
-
-                if cache_updates:
-                    run_async(
-                        _res_repo.update_download_status(resource_id, cache_updates)
-                    )
 
                 # If ALL requested types are cached (status + path), skip download entirely
                 all_cached = True
@@ -195,14 +171,8 @@ def download_unified_task(
                             run_async(manager.complete(unified_task_id))
                         except Exception:
                             pass
-                    # Update resource file paths from global media.
-                    # Cover/thumbnail are shared assets — they live on
-                    # parsed_media only. Don't mirror to resources.
-                    path_updates = {}
-                    if global_media.get("download_path"):
-                        path_updates["file_path"] = global_media["download_path"]
-                    if path_updates:
-                        run_async(_res_repo.update_resource(resource_id, path_updates))
+                    # Shared download assets (file_path, cover, statuses)
+                    # all live on parsed_media. Don't mirror to resources.
                     return {
                         "status": "success",
                         "platform_id": platform_id,
@@ -273,9 +243,15 @@ def download_unified_task(
             )
         )
 
-        # ── Update user resource download statuses based on actual results ──
-        status_updates: dict = {}
+        # ── Mirror file_size_bytes onto resources only ──
+        # All shared assets — file_path, cover, *_download_status — are
+        # the parsed_media's job (that table got the writes during the
+        # download itself). Resources only takes per-user fields here.
+        # file_size_bytes stays because the resource_version row needs
+        # the byte count and parsed_media uses different columns
+        # (storage_size / datasize_bytes) with different semantics.
         path_updates: dict = {}
+        fresh_download_path: str | None = None
         if resource_id:
             try:
                 from app.repositories.media_repository import MediaRepository as _MR2
@@ -285,33 +261,10 @@ def download_unified_task(
 
                 _res_repo2 = _RR2()
 
-                if download_video:
-                    video_result = results.get("video")
-                    if int(media_type) in (2, 68):
-                        status_updates["image_download_status"] = (
-                            video_result if video_result == "completed" else "failed"
-                        )
-                    else:
-                        status_updates["video_download_status"] = (
-                            video_result if video_result == "completed" else "failed"
-                        )
-                    # Audio extraction result (auto-extracted from video)
-                    music_result = results.get("music")
-                    if music_result:
-                        status_updates["music_download_status"] = music_result
-                # Cover status / cover_image_path / thumbnail_path are
-                # shared assets — owned by parsed_media. Don't mirror them
-                # to resources. (Video / image / music statuses still
-                # mirror because callers downstream haven't been migrated
-                # yet — that's the PR-B cleanup.)
-
-                # Also update file paths and file size on resource.
                 actual_size = 0
                 fresh_media = run_async(_MR2().get_by_platform_id(platform_id))
                 if fresh_media:
-                    if fresh_media.get("download_path"):
-                        path_updates["file_path"] = fresh_media["download_path"]
-                    # Backfill file_size_bytes from actual downloaded size
+                    fresh_download_path = fresh_media.get("download_path")
                     actual_size = (
                         fresh_media.get("storage_size")
                         or fresh_media.get("datasize_bytes")
@@ -322,19 +275,19 @@ def download_unified_task(
 
                 logger.info(
                     f"[Download/DB] resource={resource_id}: "
-                    f"status={status_updates}, paths={list(path_updates.keys())}"
+                    f"paths={list(path_updates.keys())}"
                 )
-                run_async(
-                    _res_repo2.update_resource(
-                        resource_id, {**status_updates, **path_updates}
-                    )
-                )
+                if path_updates:
+                    run_async(_res_repo2.update_resource(resource_id, path_updates))
 
-                # Ensure resource_version v1 exists (downloads don't create it)
+                # Ensure resource_version v1 exists (downloads don't create it).
+                # Version's file_path mirrors parsed_media.download_path —
+                # the per-user version row owns the history, the actual
+                # file lives at the shared path.
                 try:
                     existing_versions = run_async(_res_repo2.get_versions(resource_id))
-                    if not existing_versions and path_updates.get("file_path"):
-                        file_path = path_updates["file_path"]
+                    if not existing_versions and fresh_download_path:
+                        file_path = fresh_download_path
                         filename = (
                             file_path.rsplit("/", 1)[-1]
                             if "/" in file_path
@@ -372,10 +325,23 @@ def download_unified_task(
                         f"[Download/DB] Failed to ensure resource_version for {resource_id}: {ve}"
                     )
 
-                # Fallback: also ensure parsed_media status is in sync
-                pm_status_updates = {
-                    k: v for k, v in status_updates.items() if v == "completed"
-                }
+                # Ensure parsed_media has the completed statuses (this
+                # is the canonical source of truth post-PR-B). Build the
+                # update set from ``results`` directly since we no
+                # longer mirror via status_updates.
+                pm_status_updates: dict = {}
+                if download_video:
+                    v = results.get("video")
+                    if v == "completed":
+                        if int(media_type) in (2, 68):
+                            pm_status_updates["image_download_status"] = "completed"
+                        else:
+                            pm_status_updates["video_download_status"] = "completed"
+                    m = results.get("music")
+                    if m == "completed":
+                        pm_status_updates["music_download_status"] = "completed"
+                if download_cover and results.get("cover") == "completed":
+                    pm_status_updates["cover_download_status"] = "completed"
                 if pm_status_updates:
                     _mr2 = _MR2()
                     current_pm = fresh_media or run_async(
@@ -398,9 +364,10 @@ def download_unified_task(
                 )
 
         # Queue thumbnail + preview sprite generation out-of-band.
-        # Reuses already-known file_path (no extra DB fetch) and avoids blocking
-        # the download queue on a slow ffmpeg pass.
-        file_path_for_thumb = path_updates.get("file_path") if resource_id else None
+        # Reuses already-known download path (resolved earlier from
+        # parsed_media) and avoids blocking the download queue on a slow
+        # ffmpeg pass.
+        file_path_for_thumb = fresh_download_path if resource_id else None
         if resource_id and file_path_for_thumb:
             mime_type_for_thumb = "video/mp4"
             if file_path_for_thumb.endswith(".webm"):
@@ -438,25 +405,25 @@ def download_unified_task(
         error_msg = str(e)
         logger.error(f"[Download/{strategy}] Failed: {platform_id}, error: {error_msg}")
 
-        # Update user resource status to failed
-        if resource_id:
-            try:
-                from app.repositories.resources_repository import (
-                    ResourcesRepository as _RR3,
-                )
+        # Mark parsed_media (the canonical source of truth) as failed.
+        # Resources no longer mirrors download status, so write straight
+        # to parsed_media here.
+        try:
+            from app.repositories.media_repository import MediaRepository as _MR3
 
-                _res_repo3 = _RR3()
-                fail_updates = {}
-                if download_video:
-                    if int(media_type) in (2, 68):
-                        fail_updates["image_download_status"] = "failed"
-                    else:
-                        fail_updates["video_download_status"] = "failed"
-                if download_cover:
-                    fail_updates["cover_download_status"] = "failed"
-                run_async(_res_repo3.update_download_status(resource_id, fail_updates))
-            except Exception:
-                pass
+            _media_repo3 = _MR3()
+            fail_updates: dict = {}
+            if download_video:
+                if int(media_type) in (2, 68):
+                    fail_updates["image_download_status"] = "failed"
+                else:
+                    fail_updates["video_download_status"] = "failed"
+            if download_cover:
+                fail_updates["cover_download_status"] = "failed"
+            if fail_updates:
+                run_async(_media_repo3.update(platform_id, fail_updates))
+        except Exception:
+            pass
 
         # Celery retry with exponential backoff — do NOT mark as failed yet
         if self.request.retries < self.max_retries:
