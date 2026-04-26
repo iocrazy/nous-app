@@ -415,40 +415,34 @@ try:
 
         supabase = await get_async_supabase_admin()
 
-        # Determine which column to query based on file_type
-        resource_col = (
-            "id,creator_id,file_path"
-            if file_type == "file"
-            else "id,creator_id,cover_image_path,thumbnail_path"
-        )
+        # Determine which column to query based on file_type. Cover /
+        # thumbnail are shared assets — they live on parsed_media only.
+        # Skip the resources lookup entirely for ``file_type='cover'``
+        # and go straight to parsed_media. The ``file`` branch still
+        # checks resources first because per-user uploads have their own
+        # ``file_path`` on resources.
         media_col = "download_path" if file_type == "file" else "cover_download_path"
 
-        # 1. Try resources table
-        try:
-            res = (
-                await supabase.table("resources")
-                .select(resource_col)
-                .eq("id", media_id)
-                .maybe_single()
-                .execute()
-            )
-            if res.data:
-                result = None
-                if file_type == "file" and res.data.get("file_path"):
+        # 1. resources table — only meaningful for per-user file lookups.
+        if file_type == "file":
+            try:
+                res = (
+                    await supabase.table("resources")
+                    .select("id,creator_id,file_path")
+                    .eq("id", media_id)
+                    .maybe_single()
+                    .execute()
+                )
+                if res.data and res.data.get("file_path"):
                     result = res.data["file_path"]
-                elif file_type == "cover":
-                    result = res.data.get("thumbnail_path") or res.data.get(
-                        "cover_image_path"
-                    )
-                if result:
                     creator_id = res.data.get("creator_id")
                     resource_id = res.data["id"]
                     team_ids = await _fetch_team_ids(supabase, resource_id)
                     entry = _MediaCacheEntry(result, creator_id, team_ids, _time.time())
                     _media_path_cache[cache_key] = entry
                     return entry.file_path, entry.creator_id, entry.team_ids
-        except Exception as e:
-            logger.warning(f"Resource lookup failed for {media_id}: {e}")
+            except Exception as e:
+                logger.warning(f"Resource lookup failed for {media_id}: {e}")
 
         # 2. Try parsed_media table (no ownership info — legacy)
         try:

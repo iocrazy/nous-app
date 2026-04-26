@@ -195,14 +195,12 @@ def download_unified_task(
                             run_async(manager.complete(unified_task_id))
                         except Exception:
                             pass
-                    # Update resource file paths from global media
+                    # Update resource file paths from global media.
+                    # Cover/thumbnail are shared assets — they live on
+                    # parsed_media only. Don't mirror to resources.
                     path_updates = {}
                     if global_media.get("download_path"):
                         path_updates["file_path"] = global_media["download_path"]
-                    if global_media.get("cover_download_path"):
-                        path_updates["cover_image_path"] = global_media[
-                            "cover_download_path"
-                        ]
                     if path_updates:
                         run_async(_res_repo.update_resource(resource_id, path_updates))
                     return {
@@ -301,22 +299,18 @@ def download_unified_task(
                     music_result = results.get("music")
                     if music_result:
                         status_updates["music_download_status"] = music_result
-                if download_cover:
-                    cover_result = results.get("cover")
-                    status_updates["cover_download_status"] = (
-                        cover_result if cover_result == "completed" else "failed"
-                    )
+                # Cover status / cover_image_path / thumbnail_path are
+                # shared assets — owned by parsed_media. Don't mirror them
+                # to resources. (Video / image / music statuses still
+                # mirror because callers downstream haven't been migrated
+                # yet — that's the PR-B cleanup.)
 
-                # Also update file paths and file size on resource
+                # Also update file paths and file size on resource.
                 actual_size = 0
                 fresh_media = run_async(_MR2().get_by_platform_id(platform_id))
                 if fresh_media:
                     if fresh_media.get("download_path"):
                         path_updates["file_path"] = fresh_media["download_path"]
-                    if fresh_media.get("cover_download_path"):
-                        path_updates["cover_image_path"] = fresh_media[
-                            "cover_download_path"
-                        ]
                     # Backfill file_size_bytes from actual downloaded size
                     actual_size = (
                         fresh_media.get("storage_size")

@@ -206,12 +206,25 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   }, [onUpdate]);
 
   // ─── Thumbnail ──────────────────────────────────────
+  // Cover endpoint backfills from parsed_media when the resource is a
+  // parsed-media-backed (web download) row, so ``media_id`` alone is
+  // a sufficient signal.
   const thumbnailSrc = React.useMemo(() => {
-    if ((resource.thumbnail_path || resource.cover_image_path) && resource.id) {
+    if (
+      (resource.thumbnail_path ||
+        resource.cover_image_path ||
+        resource.media_id) &&
+      resource.id
+    ) {
       return getResourceCoverUrl(String(resource.id));
     }
     return null;
-  }, [resource.thumbnail_path, resource.cover_image_path, resource.id]);
+  }, [
+    resource.thumbnail_path,
+    resource.cover_image_path,
+    resource.media_id,
+    resource.id,
+  ]);
 
   return (
     <div className="flex-1 min-w-0 h-full bg-zinc-900 overflow-y-auto">
