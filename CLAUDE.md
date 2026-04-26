@@ -279,6 +279,27 @@ supabase db push
 - **Snowflake BIGINT 精度丢失**：PostgREST 返回 BIGINT 为 JSON number，JS 超过 2^53 精度丢失。已在 `supabaseClient.ts` 添加 `bigIntSafeFetch` 修复。
 - **catch 静默吞错**：前端 `catch { /* ignore */ }` 会隐藏错误，新代码应使用 `catch (err) { console.error(...) }`
 - **media_id vs resource_id**：`MediaTagPicker` 传入 parsed_media ID，后端自动解析为 resource_id。如果 media 没有对应 resource，标签操作返回空/404。
+- **`user_id=None` 在 Celery 链路里漂**：`scheduled_tasks.retry_failed_downloads` 会拉到 `parsed_media.user_id IS NULL` 的 orphan 行（legacy / 系统发起的下载），透传到下游会触发 `user_logs` 23502 + `user_settings` 22P02 错误风暴。修复：源头 skip + repo 防御性 early-return。任何新加的 Celery 任务都要先校验 user_id 不空再继续。
+- **`libraries` 表没有 `team_id` 列**：scope 走 `scope_type` (`team`/`user`/`project`) + `scope_id` 两列。代码里 `select("..., team_id, ...")` 会拿 PG 42703 错。team 归属判断要先看 `scope_type='team'` 再用 `scope_id`。
+- **`parsed_media` 没有 `transcript_status` 列**：AI 状态字段已迁到 `videos` 表（`transcript_status` / `summary_status` / `visual_analysis_status`）。在 `parsed_media` 上查会 PG 42703。
+
+### Schema 迁移 / 代码漂移检查口径
+
+加新代码前先用 information_schema 核列名（参考 `feedback_verify_columns_before_select.md` 的 reference）：
+
+```sql
+SELECT column_name FROM information_schema.columns
+WHERE table_name='<table>' ORDER BY ordinal_position;
+```
+
+每次发版后跑一遍 `application_logs` 错误漏斗，看是否有新的 schema/代码漂移：
+
+```sql
+SELECT module, message, COUNT(*) FROM application_logs
+WHERE level='ERROR' AND logged_at >= NOW() - INTERVAL '7 days'
+  AND (message ILIKE '%does not exist%' OR message ILIKE '%violates%not-null%')
+GROUP BY module, message ORDER BY count DESC;
+```
 
 ## Supabase 配置
 

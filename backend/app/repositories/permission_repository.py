@@ -62,12 +62,19 @@ class PermissionRepository:
             return None
 
     async def get_library_by_id(self, library_id: str) -> Optional[Dict[str, Any]]:
-        """Get library with visibility and scope info."""
+        """Get library with visibility and scope info.
+
+        ``libraries`` has no ``team_id`` column — team scope lives in
+        ``scope_type='team'`` + ``scope_id``. Earlier code selected
+        ``team_id`` directly, which produced a steady stream of PG 42703
+        ERRORs (37 in last 7d). Returning the canonical scope columns
+        instead so callers can resolve team/user/project ownership.
+        """
         try:
             client = await self._get_client()
             result = (
                 await client.table("libraries")
-                .select("id, team_id, visibility, scope")
+                .select("id, scope_type, scope_id, visibility")
                 .eq("id", library_id)
                 .limit(1)
                 .execute()

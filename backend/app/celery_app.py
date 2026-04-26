@@ -88,10 +88,12 @@ celery_app.conf.update(
             "task": "app.tasks.scheduled_tasks.retry_failed_downloads",
             "schedule": 3600.0,  # 每小时执行一次
         },
-        "update-statistics-6h": {
-            "task": "app.tasks.scheduled_tasks.update_statistics",
-            "schedule": 21600.0,  # 每 6 小时执行一次
-        },
+        # Deprecated: get_statistics is per-user (no global rollup), and
+        # the task body was a no-op log. Removed from the beat to stop
+        # the every-6h log churn. The function itself is kept (returns
+        # skipped) so any external invokers don't 500.
+        # "update-statistics-6h": removed 2026-04-26
+
         "update-system-status-30s": {
             "task": "app.tasks.scheduled_tasks.update_system_status",
             "schedule": 30.0,  # 每 30 秒执行一次
