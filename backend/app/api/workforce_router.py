@@ -364,8 +364,7 @@ async def workforce_healthz(request: Request) -> dict[str, Any]:
         persistent_agents = agents_q.count or 0
 
         since = (
-            datetime.now(timezone.utc)
-            - timedelta(seconds=_HEALTH_RECENT_WINDOW_S)
+            datetime.now(timezone.utc) - timedelta(seconds=_HEALTH_RECENT_WINDOW_S)
         ).isoformat()
         recent_q = (
             await client.table("agent_inbox")
