@@ -7,7 +7,10 @@ const VIEW_NAME = 'parsed_media';  // View dropped; query base table directly
 
 // Use parsed_media!inner(*) — specific column selection caused slow query plans
 // on self-hosted PostgREST. The payload difference is negligible for 20 rows.
-const RESOURCE_LIST_SELECT = 'id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, parsed_media!inner(*)';
+// PR-B: download statuses live on parsed_media (the canonical shared
+// source). The resources row no longer carries mirrors. ``flattenResource
+// Media`` reads everything from ``parsed_media!inner(*)``.
+const RESOURCE_LIST_SELECT = 'id, created_at, parsed_media!inner(*)';
 
 import { getApiUrl } from '../utils/apiConfig';
 
@@ -131,7 +134,7 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Parsed
 
     const { data, error } = await supabase
       .from('resources')
-      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, parsed_media!inner(*)')
+      .select('id, parsed_media!inner(*)')
       .eq('creator_id', session.user.id)
       .eq('source_type', 'web')
       .eq('parsed_media.platform_id', platformId)
@@ -168,7 +171,7 @@ export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMe
 
     const { data, error } = await supabase
       .from('resources')
-      .select('id, video_download_status, music_download_status, cover_download_status, image_download_status, parsed_media!inner(*)')
+      .select('id, parsed_media!inner(*)')
       .eq('creator_id', session.user.id)
       .eq('source_type', 'web')
       .eq('parsed_media.id', displayId)
@@ -361,7 +364,10 @@ export const fetchLibraryPaginated = async (
     // NOTE: DownloadsView always requires a parsed_media row (source_type='web'
     // means the resource was parsed from a URL), so the join is !inner
     // unconditionally. Kept the token name for parity with resourceService.
-    const select = `id, video_download_status, music_download_status, cover_download_status, image_download_status, created_at, ${mediaJoinToken}(*)`;
+    // PR-B: download statuses live on parsed_media (canonical). Drop
+    // resource-level mirrors from the select; flattenResourceMedia
+    // falls back to ``pm.*`` for these columns.
+    const select = `id, created_at, ${mediaJoinToken}(*)`;
 
     // Build the paged data query. ORDER BY (created_at DESC, id DESC) so
     // ties in created_at have a stable secondary order for keyset paging.

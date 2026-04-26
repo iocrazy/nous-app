@@ -610,6 +610,12 @@ class MediaService:
             else:
                 mime_type = "video/mp4"
 
+            # Shared assets — file_path / cover_image_path / resolution
+            # / *_download_status — live on parsed_media. The resources
+            # row is the per-user envelope (filename / notes / tags /
+            # ratings / per-user file_size_bytes for upload duplicates).
+            # Resolve cover, file path, resolution and download statuses
+            # via the parsed_media join at read time, not by mirroring.
             resource_data = {
                 "creator_id": user_id,
                 "media_id": media_id,
@@ -619,21 +625,6 @@ class MediaService:
                 "mime_type": mime_type,
                 "file_size_bytes": parsed_data.get("datasize_bytes"),
                 "duration_seconds": duration_seconds,
-                "resolution": parsed_data.get("resolution"),
-                "cover_image_path": (
-                    existing_media.get("cover_download_path")
-                    if existing_media
-                    else None
-                ),
-                "file_path": (
-                    existing_media.get("download_path")
-                    if existing_media and dedup_hit
-                    else None
-                ),
-                "video_download_status": video_status,
-                "music_download_status": music_status,
-                "cover_download_status": cover_status,
-                "image_download_status": image_status,
             }
             result = await resources_repo.create_resource(resource_data)
             resource_id = result.get("id") if result else None

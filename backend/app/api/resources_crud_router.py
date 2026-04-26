@@ -404,6 +404,28 @@ async def serve_resource_file(
             raise HTTPException(status_code=404, detail="Resource not found")
 
         file_path = resource.get("file_path")
+        # PR-B: parsed-media-backed resources don't carry the shared
+        # file path on the resources row. Fall through to parsed_media.
+        if not file_path:
+            media_id = resource.get("media_id")
+            if media_id:
+                from app.db.supabase_client import get_async_supabase_admin
+
+                client = await get_async_supabase_admin()
+                try:
+                    pm_res = (
+                        await client.table("parsed_media")
+                        .select("download_path")
+                        .eq("id", media_id)
+                        .maybe_single()
+                        .execute()
+                    )
+                    if pm_res.data and pm_res.data.get("download_path"):
+                        file_path = pm_res.data["download_path"]
+                except Exception as e:
+                    logger.warning(
+                        f"parsed_media file lookup failed for media_id={media_id}: {e}"
+                    )
         if not file_path:
             raise HTTPException(status_code=404, detail="No file available")
 
