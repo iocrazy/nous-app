@@ -141,6 +141,53 @@ describe('getAISettings', () => {
     expect(settings.preferred_language).toBe('auto');
     expect(settings.task_assignment.transcription).toBe('');
   });
+
+  it('auto-seeds enabled_models from selected_model for legacy accounts', async () => {
+    // Pre-feature accounts only had `selected_model`. The agent picker
+    // would render empty without a seed, so getAISettings backfills it
+    // on read.
+    stubJson({
+      ai_providers: {
+        doubao: {
+          enabled: true,
+          api_key: 'sk-test',
+          selected_model: 'doubao-seed-2-0-pro-260215',
+        },
+      },
+    });
+
+    const settings = await getAISettings();
+    expect(settings.providers.doubao?.enabled_models).toEqual([
+      'doubao-seed-2-0-pro-260215',
+    ]);
+  });
+
+  it('preserves existing enabled_models without overwriting', async () => {
+    stubJson({
+      ai_providers: {
+        doubao: {
+          enabled: true,
+          selected_model: 'doubao-seed-2-0-pro-260215',
+          enabled_models: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215'],
+        },
+      },
+    });
+
+    const settings = await getAISettings();
+    expect(settings.providers.doubao?.enabled_models).toEqual([
+      'doubao-seed-2-0-pro-260215',
+      'doubao-seed-2-0-lite-260215',
+    ]);
+  });
+
+  it('leaves enabled_models undefined when there is no selected_model to seed from', async () => {
+    // A provider that's never been touched has neither field; the
+    // picker treats undefined as "nothing yet" and renders only the
+    // "+ Add Model" button.
+    stubJson({ ai_providers: { kimi: { enabled: false } } });
+    const settings = await getAISettings();
+    expect(settings.providers.kimi?.enabled_models).toBeUndefined();
+  });
 });
 
 describe('saveAISettings', () => {
