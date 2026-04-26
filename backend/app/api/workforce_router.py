@@ -284,6 +284,80 @@ async def clear_inbox(
     return {"slug": slug, "cleared": cleared}
 
 
+@router.get("/agents/{slug}/detail")
+async def get_agent_detail(
+    slug: str,
+    user: Any = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Detail snapshot for one persistent agent — feeds the drawer view.
+
+    Returns recent inbox messages (with sender + payload), recent outbox
+    rows (with delivery status + payload), and recent runs (with
+    input/output summaries + cost). Bigger payloads than /board so it's
+    paged separately and only loaded when the user opens the drawer.
+    """
+    agent = await _resolve_persistent_agent(slug)
+    aid = agent["id"]
+    client = await get_async_supabase_admin()
+
+    # Inbox: most recent 20, all statuses, with payload + sender.
+    inbox_q = await (
+        client.table("agent_inbox")
+        .select(
+            "id,sender_kind,sender_user_id,sender_agent_id,message_type,"
+            "payload,status,priority,created_at,processed_at,reply_to_message_id,"
+            "dedup_key"
+        )
+        .eq("recipient_agent_id", aid)
+        .order("created_at", desc=True)
+        .limit(20)
+        .execute()
+    )
+
+    # Outbox: most recent 20 SENT by this agent.
+    outbox_q = await (
+        client.table("agent_outbox")
+        .select(
+            "id,recipient_kind,recipient_user_id,recipient_agent_id,"
+            "message_type,payload,task_id,delivered,delivered_at,created_at"
+        )
+        .eq("sender_agent_id", aid)
+        .order("created_at", desc=True)
+        .limit(20)
+        .execute()
+    )
+
+    # Runs: most recent 20 with full summaries (capped server-side at 500
+    # chars by RunRecorder, so the response stays bounded).
+    runs_q = await (
+        client.table("agent_runs")
+        .select(
+            "id,status,trigger,model,provider,started_at,ended_at,"
+            "prompt_tokens,completion_tokens,cost_cents,input_summary,"
+            "output_summary,error_code,error_message"
+        )
+        .eq("agent_id", aid)
+        .order("started_at", desc=True)
+        .limit(20)
+        .execute()
+    )
+
+    return {
+        "agent": {
+            "id": aid,
+            "slug": agent["slug"],
+            "name": agent.get("name") or agent["slug"],
+            "icon": agent.get("icon"),
+            "model": agent.get("model"),
+            "persistent": bool(agent.get("persistent")),
+            "paused_reason": agent.get("paused_reason"),
+        },
+        "inbox": inbox_q.data or [],
+        "outbox": outbox_q.data or [],
+        "runs": runs_q.data or [],
+    }
+
+
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(
     task_id: UUID,

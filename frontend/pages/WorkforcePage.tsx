@@ -38,6 +38,7 @@ import {
 } from '../services/workforceService';
 import { getAgentIcon } from '../components/AILibrary/agentIcons';
 import { getSupabaseClient } from '../supabaseClient';
+import { AgentDetailDrawer } from '../components/Workforce/AgentDetailDrawer';
 
 // Realtime is the primary refresh trigger; the safety poll covers the
 // case where a Realtime subscription drops silently (Supabase gateway
@@ -125,6 +126,9 @@ export const WorkforcePage: React.FC = () => {
 
   // Per-agent action lock to prevent double-fires from rapid clicks.
   const [busySlug, setBusySlug] = useState<string | null>(null);
+
+  // Drawer state — clicking an agent card opens the detail drawer.
+  const [openSlug, setOpenSlug] = useState<string | null>(null);
 
   const runAction = useCallback(
     async (slug: string, action: () => Promise<unknown>) => {
@@ -222,6 +226,7 @@ export const WorkforcePage: React.FC = () => {
                 key={agent.id}
                 agent={agent}
                 busy={busySlug === agent.slug}
+                onOpen={setOpenSlug}
                 onPause={onPause}
                 onResume={onResume}
                 onClearInbox={onClearInbox}
@@ -233,6 +238,10 @@ export const WorkforcePage: React.FC = () => {
           <RecentHistory rows={board.recent_state_history} />
         </>
       )}
+
+      {openSlug && (
+        <AgentDetailDrawer slug={openSlug} onClose={() => setOpenSlug(null)} />
+      )}
     </div>
   );
 };
@@ -242,6 +251,7 @@ export const WorkforcePage: React.FC = () => {
 interface AgentCardProps {
   agent: WorkforceAgentEntry;
   busy: boolean;
+  onOpen: (slug: string) => void;
   onPause: (slug: string) => void;
   onResume: (slug: string) => void;
   onClearInbox: (slug: string) => void;
@@ -251,6 +261,7 @@ interface AgentCardProps {
 const AgentCard: React.FC<AgentCardProps> = ({
   agent,
   busy,
+  onOpen,
   onPause,
   onResume,
   onClearInbox,
@@ -268,18 +279,25 @@ const AgentCard: React.FC<AgentCardProps> = ({
     typeof window !== 'undefined' ? window.confirm(msg) : true;
 
   return (
-    <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-4 space-y-3">
+    <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-4 space-y-3 hover:border-zinc-700/60 transition-colors">
       <div className="flex items-start gap-3">
-        <Icon size={20} className="text-zinc-300 shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-zinc-100">{agent.name}</span>
-            <StateBadge state={state} />
+        <button
+          type="button"
+          onClick={() => onOpen(agent.slug)}
+          className="flex items-start gap-3 flex-1 min-w-0 text-left hover:opacity-90"
+          title="Open detail drawer"
+        >
+          <Icon size={20} className="text-zinc-300 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-zinc-100">{agent.name}</span>
+              <StateBadge state={state} />
+            </div>
+            <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+              {agent.slug}{agent.model ? ` · ${agent.model}` : ''}
+            </div>
           </div>
-          <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
-            {agent.slug}{agent.model ? ` · ${agent.model}` : ''}
-          </div>
-        </div>
+        </button>
         {/* Admin actions */}
         <div className="flex items-center gap-1 shrink-0">
           {isPaused ? (

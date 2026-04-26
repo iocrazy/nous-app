@@ -65,6 +65,66 @@ export interface WorkforceBoard {
   recent_state_history: WorkforceStateHistoryRow[];
 }
 
+export interface WorkforceInboxRow {
+  id: string;
+  sender_kind: string;
+  sender_user_id: string | null;
+  sender_agent_id: string | null;
+  message_type: string;
+  payload: Record<string, unknown> | null;
+  status: string;
+  priority: number | null;
+  created_at: string;
+  processed_at: string | null;
+  reply_to_message_id: string | null;
+  dedup_key: string | null;
+}
+
+export interface WorkforceOutboxRow {
+  id: string;
+  recipient_kind: string;
+  recipient_user_id: string | null;
+  recipient_agent_id: string | null;
+  message_type: string;
+  payload: Record<string, unknown> | null;
+  task_id: string | null;
+  delivered: boolean;
+  delivered_at: string | null;
+  created_at: string;
+}
+
+export interface WorkforceDetailRun {
+  id: string;
+  status: string;
+  trigger: string;
+  model: string | null;
+  provider: string | null;
+  started_at: string;
+  ended_at: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  cost_cents: number | null;
+  input_summary: string | null;
+  output_summary: string | null;
+  error_code: string | null;
+  error_message: string | null;
+}
+
+export interface WorkforceAgentDetail {
+  agent: {
+    id: string;
+    slug: string;
+    name: string;
+    icon: string | null;
+    model: string | null;
+    persistent: boolean;
+    paused_reason: string | null;
+  };
+  inbox: WorkforceInboxRow[];
+  outbox: WorkforceOutboxRow[];
+  runs: WorkforceDetailRun[];
+}
+
 async function postJson<T>(
   path: string,
   body: Record<string, unknown> | null = null,
@@ -82,6 +142,18 @@ async function postJson<T>(
 }
 
 export const workforceService = {
+  async getAgentDetail(slug: string): Promise<WorkforceAgentDetail> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/detail`,
+      { headers: await getAuthHeaders() },
+    );
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
+    return resp.json();
+  },
+
   async getBoard(): Promise<WorkforceBoard> {
     const resp = await fetch(`${base()}/board`, {
       headers: await getAuthHeaders(),
