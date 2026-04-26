@@ -709,8 +709,6 @@ class UnifiedTaskManager:
         error_code: Optional[str] = None,
     ) -> None:
         """Fan-out results to all subscribers of a dedup'd task."""
-        from app.repositories.resources_repository import ResourcesRepository
-
         client = await self._get_client()
         result = await (
             client.table("unified_tasks")
