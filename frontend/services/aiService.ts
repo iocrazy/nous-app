@@ -7,7 +7,7 @@
  * chat-related API calls use ``services/aiLibraryService.ts`` instead.
  */
 
-import { AISettings, TranscriptData, SummaryData, NousModelPublic } from '../types';
+import { AISettings, AIProviderConfig, TranscriptData, SummaryData, NousModelPublic } from '../types';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
@@ -270,13 +270,28 @@ export const getAISettings = async (): Promise<AISettings> => {
 
   const data = await response.json();
 
+  // Auto-seed enabled_models from selected_model for accounts that
+  // predate the curated-whitelist feature. Without this, the agent
+  // model picker would be empty until the user re-enters the settings
+  // page and re-saves.
+  const rawProviders = data.ai_providers ?? {};
+  const providers: Record<string, AIProviderConfig> = {};
+  for (const [key, raw] of Object.entries(rawProviders)) {
+    const config = raw as AIProviderConfig;
+    if (config.enabled_models == null && config.selected_model) {
+      providers[key] = { ...config, enabled_models: [config.selected_model] };
+    } else {
+      providers[key] = config;
+    }
+  }
+
   // Map backend field names to frontend AISettings shape
   return {
     ai_enabled: data.ai_enabled ?? true,
     auto_transcribe: data.auto_transcribe ?? false,
     auto_summarize: data.auto_summarize ?? false,
     preferred_language: data.preferred_language ?? 'auto',
-    providers: data.ai_providers ?? {},
+    providers,
     task_assignment: {
       transcription: data.task_assignment?.transcription ?? '',
       summarization: data.task_assignment?.summarization ?? '',

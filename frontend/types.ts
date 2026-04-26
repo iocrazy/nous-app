@@ -503,7 +503,12 @@ export interface AIProviderConfig {
   api_key?: string;
   app_id?: string;
   base_url?: string;
+  // Full catalog from "Test Connection" — typically 100+ entries.
   models?: string[];
+  // User-curated whitelist: only these models are exposed to agent
+  // pickers. Auto-seeded from ``selected_model`` on first read for
+  // back-compat with pre-existing accounts.
+  enabled_models?: string[];
   selected_model?: string;
   summary_model?: string;
   analysis_model?: string;

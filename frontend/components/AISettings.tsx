@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Brain,
   Zap,
@@ -25,6 +25,8 @@ import {
   Cloud,
   ImageIcon,
   Mic,
+  Plus,
+  X,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent } from '../types';
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi, getNousModels } from '../services/aiService';
@@ -219,6 +221,122 @@ const IMAGE_PROVIDERS = [
   { id: 'zhenzhen', name: 'Zhenzhen' },
 ] as const;
 
+/**
+ * Curated-whitelist model picker for a provider. Renders chips for the
+ * already-enabled models and an "+ Add Model" affordance that drops down
+ * a filterable list of the provider's full catalog (minus what's already
+ * enabled). The catalog is whatever Test Connection populated into
+ * ``config.models``; if empty we tell the user to test first.
+ */
+const EnabledModelsField: React.FC<{
+  providerKey: string;
+  enabledModels: string[];
+  catalog: string[];
+  onAdd: (modelId: string) => void;
+  onRemove: (modelId: string) => void;
+}> = ({ providerKey, enabledModels, catalog, onAdd, onRemove }) => {
+  const [picking, setPicking] = useState(false);
+  const [filter, setFilter] = useState('');
+
+  const remaining = useMemo(
+    () =>
+      catalog.filter(
+        (m) => !enabledModels.includes(m) && m.toLowerCase().includes(filter.toLowerCase()),
+      ),
+    [catalog, enabledModels, filter],
+  );
+
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-zinc-400">Enabled Models</label>
+      <div className="flex flex-wrap items-center gap-2">
+        {enabledModels.map((m) => (
+          <span
+            key={m}
+            className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-3 py-1 text-xs font-mono text-indigo-200"
+          >
+            {m}
+            <button
+              type="button"
+              onClick={() => onRemove(m)}
+              className="text-indigo-300 hover:text-white transition-colors"
+              aria-label={`Remove ${m}`}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        {!picking && (
+          <button
+            type="button"
+            onClick={() => {
+              setPicking(true);
+              setFilter('');
+            }}
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-zinc-700 px-3 py-1 text-xs text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors"
+          >
+            <Plus size={12} />
+            Add Model
+          </button>
+        )}
+      </div>
+
+      {picking && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter models..."
+              className="flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => setPicking(false)}
+              className="text-zinc-500 hover:text-zinc-200 transition-colors"
+              aria-label="Close picker"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          {catalog.length === 0 ? (
+            <div className="text-xs text-zinc-500 px-1 py-2">
+              Catalog empty — run Test Connection first.
+            </div>
+          ) : remaining.length === 0 ? (
+            <div className="text-xs text-zinc-500 px-1 py-2">
+              {filter ? 'No matches' : 'All models already enabled'}
+            </div>
+          ) : (
+            <div className="max-h-60 overflow-y-auto space-y-0.5">
+              {remaining.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    onAdd(m);
+                    setFilter('');
+                  }}
+                  className="w-full text-left rounded px-2 py-1 text-xs font-mono text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <p className="text-[11px] text-zinc-500">
+        Only enabled models are shown to agents in the AI Library — provider:{' '}
+        <span className="font-mono">{providerKey}</span>
+      </p>
+    </div>
+  );
+};
+
 export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [providerTab, setProviderTab] = useState<ProviderTab>('text');
   const [taskTab, setTaskTab] = useState<TaskTab>('media');
@@ -309,6 +427,42 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       providers[providerKey as keyof typeof providers] = {
         ...current,
         [field]: value,
+      };
+      return { ...prev, providers };
+    });
+  };
+
+  // Add a model to the provider's curated whitelist (de-duped).
+  const addEnabledModel = (providerKey: string, modelId: string) => {
+    setLocalSettings((prev) => {
+      const providers = { ...prev.providers };
+      const current = providers[providerKey as keyof typeof providers] || { enabled: false };
+      const existing = current.enabled_models ?? (current.selected_model ? [current.selected_model] : []);
+      if (existing.includes(modelId)) return prev;
+      providers[providerKey as keyof typeof providers] = {
+        ...current,
+        enabled_models: [...existing, modelId],
+        // Keep selected_model in sync as the implicit default for legacy
+        // task_assignment paths that still expect a single model.
+        selected_model: current.selected_model || modelId,
+      };
+      return { ...prev, providers };
+    });
+  };
+
+  // Remove a model from the whitelist. If it was the selected_model,
+  // promote the first remaining model so legacy paths don't break.
+  const removeEnabledModel = (providerKey: string, modelId: string) => {
+    setLocalSettings((prev) => {
+      const providers = { ...prev.providers };
+      const current = providers[providerKey as keyof typeof providers] || { enabled: false };
+      const existing = current.enabled_models ?? (current.selected_model ? [current.selected_model] : []);
+      const next = existing.filter((m) => m !== modelId);
+      providers[providerKey as keyof typeof providers] = {
+        ...current,
+        enabled_models: next,
+        selected_model:
+          current.selected_model === modelId ? next[0] ?? '' : current.selected_model,
       };
       return { ...prev, providers };
     });
@@ -963,26 +1117,19 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                       </>
                     )}
 
-                    {/* Generic model selector for non-OpenAI providers */}
+                    {/* Generic model whitelist for non-OpenAI providers.
+                        Chips = ``enabled_models`` (what gets exposed to
+                        agent pickers). Test Connection populates the full
+                        catalog (``config.models``); the user adds the
+                        models they actually want from there. */}
                     {providerKey !== 'openai' && (
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-zinc-400">Model</label>
-                        <div className="relative">
-                          <select
-                            value={config.selected_model || meta.models[0] || ''}
-                            onChange={(e) => updateProviderField(providerKey, 'selected_model', e.target.value)}
-                            className="w-full appearance-none bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
-                          >
-                            {(config.models && config.models.length > 0 ? config.models : meta.models).map((m) => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                            {meta.models.length === 0 && (!config.models || config.models.length === 0) && (
-                              <option value="">No models available</option>
-                            )}
-                          </select>
-                          <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-                        </div>
-                      </div>
+                      <EnabledModelsField
+                        providerKey={providerKey}
+                        enabledModels={config.enabled_models ?? (config.selected_model ? [config.selected_model] : [])}
+                        catalog={config.models ?? meta.models}
+                        onAdd={(model) => addEnabledModel(providerKey, model)}
+                        onRemove={(model) => removeEnabledModel(providerKey, model)}
+                      />
                     )}
 
                     {/* Test Connection button */}

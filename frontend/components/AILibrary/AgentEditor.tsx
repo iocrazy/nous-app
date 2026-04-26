@@ -600,13 +600,14 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 };
 
 /**
- * Collect the union of models exposed by every enabled provider in aiSettings.
- * Prefers `config.models` detected from the server (via "Test Connection"); if
- * the provider has no detected models yet, returns an empty list for that
- * provider (the dropdown hides empty groups).
+ * Collect the curated whitelist of models exposed by every enabled
+ * provider in aiSettings. Reads ``config.enabled_models`` (set in the
+ * AI Settings UI via "Add Model" chips) — this is intentionally narrow
+ * so users see only the models they care about, not the full 100+
+ * provider catalog.
  *
- * Exported as a named function (not inside the component) so it can be unit-
- * tested later without a React render.
+ * Falls back to ``[selected_model]`` when ``enabled_models`` is missing
+ * (legacy accounts; aiService.getAISettings auto-seeds this on read).
  */
 export function getAvailableModels(
   settings: AISettingsType | null | undefined,
@@ -614,11 +615,16 @@ export function getAvailableModels(
   if (!settings?.providers) return [];
   return Object.entries(settings.providers)
     .filter(([, config]) => config?.enabled)
-    .map(([key, config]) => ({
-      providerKey: key,
-      providerName: PROVIDER_DISPLAY_NAMES[key] ?? key,
-      models: Array.from(new Set(config?.models ?? [])).filter(Boolean),
-    }))
+    .map(([key, config]) => {
+      const whitelist = config?.enabled_models;
+      const fallback = config?.selected_model ? [config.selected_model] : [];
+      const models = Array.from(new Set(whitelist ?? fallback)).filter(Boolean);
+      return {
+        providerKey: key,
+        providerName: PROVIDER_DISPLAY_NAMES[key] ?? key,
+        models,
+      };
+    })
     .filter((g) => g.models.length > 0);
 }
 
