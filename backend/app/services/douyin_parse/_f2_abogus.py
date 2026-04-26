@@ -350,6 +350,7 @@ class CryptoUtility:
         result_str = []
         index_b = self.big_array[1]
         initial_value = 0
+        value_e = 0
 
         for index, char in enumerate(bytes_str):
             if index == 0:
