@@ -360,6 +360,7 @@ def maybe_trigger_transcode(
 
             # Check minimum file size (applies to ALL codecs, including H.264)
             video_codec = _probe_codec_sync(str(file_path))
+            duration_sec = _probe_duration_sync(str(file_path))
             is_h264 = video_codec in ("h264",)
             min_size = settings.TRANSCODE_MIN_SIZE_MB
 

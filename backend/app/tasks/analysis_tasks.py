@@ -10,6 +10,7 @@ keys never took effect — analyze always ran against whatever the backend
 
 import asyncio
 import os
+import subprocess
 import tempfile
 from typing import Any, Dict, Optional, Tuple
 
