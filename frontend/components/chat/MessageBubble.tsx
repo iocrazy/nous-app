@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next';
 import DOMPurify from 'dompurify';
 import { Copy, Check } from 'lucide-react';
 
+import type { ChatToolCall } from '../../types';
+import { SubTaskList } from './SubTaskCard';
+
 export interface MessageBubbleProps {
   role: 'user' | 'assistant';
   content: string;
@@ -11,6 +14,11 @@ export interface MessageBubbleProps {
   onApply?: () => void;
   onCopy?: () => void;
   timestamp?: string;
+  /**
+   * Sub-task dispatches the LLM made for this assistant turn. Rendered
+   * as collapsible cards above the prose body. Ignored on user bubbles.
+   */
+  toolCalls?: ChatToolCall[];
 }
 
 export function MessageBubble({
@@ -21,6 +29,7 @@ export function MessageBubble({
   onApply,
   onCopy,
   timestamp,
+  toolCalls,
 }: MessageBubbleProps): React.ReactElement {
   const { t } = useTranslation();
   const [copied, setCopied] = React.useState(false);
@@ -56,6 +65,8 @@ export function MessageBubble({
             </span>
           </div>
         )}
+
+        <SubTaskList calls={toolCalls ?? []} />
 
         <div
           className="px-3 py-2 prose prose-invert prose-sm max-w-none"

@@ -254,3 +254,154 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
     assert out["usage"] == {"prompt_tokens": 42, "completion_tokens": 7}
     assert out["run_id"] == str(recorder.run_id)
     assert out["assistant_message"]["content"] == "Hi user"
+    # No tool calls fired this turn → trace is empty + metadata_json
+    # carries only run_id (no tool_calls noise).
+    assert out["tool_calls"] == []
+    assert asst_inserts[0]["metadata_json"] == {"run_id": str(recorder.run_id)}
+
+
+@pytest.mark.asyncio
+async def test_chat_persists_tool_calls_into_metadata_json() -> None:
+    """When the runner reports tool dispatches this turn, the assistant
+    message row's metadata_json carries them so a fresh session reload
+    still renders the sub-task cards (no separate tool_calls table)."""
+    from app.services.ai_library_chat_service import AILibraryChatService
+
+    user_id = uuid4()
+    session_id = uuid4()
+    agent_id = uuid4()
+    session_row = {
+        "id": str(session_id),
+        "user_id": str(user_id),
+        "agent_slug": "coordinator",
+        "agent_id": str(agent_id),
+        "total_tokens": 0,
+        "message_count": 0,
+        "team_id": None,
+        "project_id": None,
+    }
+
+    inserted: list[tuple[str, dict]] = []
+
+    def _make_table(name: str):
+        table = MagicMock()
+        if name == "ai_sessions":
+            q = MagicMock()
+            q.select.return_value = q
+            q.eq.return_value = q
+            q.maybe_single.return_value = q
+            q.execute = AsyncMock(return_value=MagicMock(data=session_row))
+            upd_chain = MagicMock()
+            q.update = lambda payload: upd_chain
+            upd_chain.eq.return_value = upd_chain
+            upd_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+            return q
+        if name == "ai_messages":
+            q = MagicMock()
+            q.select.return_value = q
+            q.eq.return_value = q
+            q.order.return_value = q
+            q.limit.return_value = q
+            q.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+            def _ins(payload):
+                inserted.append((name, payload))
+                ins_chain = MagicMock()
+                ins_chain.execute = AsyncMock(
+                    return_value=MagicMock(
+                        data=[{**payload, "id": str(uuid4())}]
+                    )
+                )
+                return ins_chain
+
+            q.insert = _ins
+            return q
+        return MagicMock()
+
+    client = MagicMock()
+    client.table.side_effect = _make_table
+
+    composed = MagicMock()
+    composed.agent_id = agent_id
+    composed.agent_slug = "coordinator"
+    composed.model = "qwen-max"
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    trace = [
+        {
+            "name": "Delegate",
+            "iteration": 1,
+            "args": {"agent_slug": "summary", "prompt": "do X"},
+            "result": {"status": "queued", "inbox_message_id": "abc"},
+        }
+    ]
+
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(
+        return_value={"content": "Routed it.", "raw": {}, "tool_calls": trace}
+    )
+
+    recorder = MagicMock()
+    recorder.run_id = uuid4()
+    recorder.prompt_tokens = 5
+    recorder.completion_tokens = 3
+    recorder.set_summaries = MagicMock()
+
+    class _CM:
+        async def __aenter__(self_inner):
+            return recorder
+
+        async def __aexit__(self_inner, exc_type, exc, tb):
+            return False
+
+    fake_agent_record = {
+        "id": str(agent_id),
+        "slug": "coordinator",
+        "model": "qwen-max",
+        "budget_per_run_cents": None,
+        "fallback_models": [],
+    }
+    fake_stack = MagicMock()
+    fake_stack.runner = runner
+    fake_stack.recalled_memories = []
+    fake_stack.primary_model = "qwen-max"
+    fake_stack.fallback_chain_active = False
+    fake_agent_repo_instance = MagicMock()
+    fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
+
+    with patch(
+        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        AsyncMock(return_value=client),
+    ), patch(
+        "app.services.ai_library_chat_service.AgentRepository",
+        return_value=fake_agent_repo_instance,
+    ), patch(
+        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        AsyncMock(return_value=fake_stack),
+    ), patch(
+        "app.services.ai_library_chat_service.PromptComposer",
+        return_value=composer,
+    ), patch(
+        "app.services.ai_library_chat_service.AgentRunner", return_value=runner
+    ), patch(
+        "app.services.ai_library_chat_service.get_adapter",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_service.SkillToolService",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_service.RunRecorder",
+        return_value=_CM(),
+    ):
+        svc = AILibraryChatService()
+        out = await svc.chat(session_id, user_id=user_id, content="route it")
+
+    asst_inserts = [p for t, p in inserted if p.get("role") == "assistant"]
+    assert len(asst_inserts) == 1
+    meta = asst_inserts[0]["metadata_json"]
+    assert meta["run_id"] == str(recorder.run_id)
+    assert meta["tool_calls"] == trace
+    # Live response also carries the trace so streaming clients don't
+    # need to refetch just to render cards.
+    assert out["tool_calls"] == trace

@@ -23,6 +23,7 @@ import type {
   AILibraryAgent,
   ChatMessage,
   ChatSession,
+  ChatToolCall,
 } from '../types';
 import { AgentSelector } from './AgentSelector';
 import { SessionList, type SessionItem } from './SessionList';
@@ -47,6 +48,25 @@ function formatTimestamp(isoString?: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/**
+ * Extract the per-turn Skill / Delegate trace from a persisted assistant
+ * message. Backend folds it into ``metadata_json.tool_calls``; older
+ * rows (pre Step B) just won't have the field. Returns [] for any shape
+ * we don't recognise so the renderer can drop in unconditionally.
+ */
+function extractToolCalls(msg: ChatMessage): ChatToolCall[] {
+  const meta = msg.metadata_json;
+  if (!meta || typeof meta !== 'object') return [];
+  const raw = (meta as Record<string, unknown>).tool_calls;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (entry): entry is ChatToolCall =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof (entry as ChatToolCall).name === 'string',
+  );
 }
 
 /** Coerce the string project id to a BIGINT-compatible number when possible. */
@@ -348,6 +368,9 @@ export function AIChatPanel({
                     : undefined
                 }
                 timestamp={formatTimestamp(msg.created_at)}
+                toolCalls={
+                  msg.role === 'assistant' ? extractToolCalls(msg) : undefined
+                }
                 onApply={
                   msg.role === 'assistant' && onApplyContent
                     ? () => onApplyContent(msg.content)
