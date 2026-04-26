@@ -8,10 +8,26 @@
  * expand and see the raw args + result JSON.
  */
 
-import React, { useState } from 'react';
-import { ChevronRight, ChevronDown, Workflow, Wrench, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChevronRight,
+  ChevronDown,
+  Workflow,
+  Wrench,
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+} from 'lucide-react';
 
 import type { ChatToolCall } from '../../types';
+import { getSupabaseClient } from '../../supabaseClient';
+import {
+  workforceService,
+  TERMINAL_LIFECYCLES,
+  type DelegateTaskLookup,
+  type TaskLifecycle,
+} from '../../services/workforceService';
 
 export interface SubTaskCardProps {
   call: ChatToolCall;
@@ -77,18 +93,148 @@ function safeStringify(value: unknown): string {
   }
 }
 
+interface DelegateLiveState {
+  /** Authoritative lifecycle when known; null until first fetch resolves. */
+  lifecycle: TaskLifecycle | null;
+  /** Full task + outbox payload when fetched. */
+  data: DelegateTaskLookup | null;
+  /** True while the initial GET or a Realtime update is settling. */
+  loading: boolean;
+}
+
+/**
+ * Subscribe to a Delegate dispatch's lifecycle via the workforce
+ * lookup endpoint + a Realtime channel on agent_tasks.
+ *
+ * Lifecycle:
+ *   1. Mount → GET /workforce/tasks/by-inbox/:id (initial snapshot).
+ *   2. If non-terminal, subscribe to ``agent_tasks`` UPDATE filtered
+ *      by ``inbox_message_id=eq.<id>``. INSERT covers the case where
+ *      the worker hadn't picked the inbox row up yet on initial fetch.
+ *   3. On terminal lifecycle, refetch once to pull the outbox response,
+ *      then unsubscribe — avoids leaving a channel open on every old
+ *      done card in the chat history.
+ *
+ * Returning null inboxMessageId disables everything (no-op).
+ */
+function useDelegateLiveStatus(
+  inboxMessageId: string | null,
+): DelegateLiveState {
+  const [state, setState] = useState<DelegateLiveState>({
+    lifecycle: null,
+    data: null,
+    loading: Boolean(inboxMessageId),
+  });
+  const refreshRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+  useEffect(() => {
+    if (!inboxMessageId) return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const data = await workforceService.getTaskByInbox(inboxMessageId);
+        if (cancelled) return;
+        setState({
+          lifecycle: data.task?.lifecycle_status ?? null,
+          data,
+          loading: false,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        // Network or 403/404 — fall back to the static result on the
+        // chat trace. Surface in console only; no toast (sub-task cards
+        // shouldn't pop modals).
+        console.warn('[SubTaskCard] getTaskByInbox failed:', err);
+        setState((prev) => ({ ...prev, loading: false }));
+      }
+    };
+    refreshRef.current = refresh;
+    void refresh();
+
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel(`delegate-task-${inboxMessageId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'agent_tasks',
+          filter: `inbox_message_id=eq.${inboxMessageId}`,
+        },
+        (payload) => {
+          const next = (payload.new ?? payload.old) as
+            | { lifecycle_status?: TaskLifecycle }
+            | undefined;
+          const lifecycle = next?.lifecycle_status ?? null;
+          // Terminal? Refetch once for the outbox payload + final
+          // task.result, then leave the channel open until unmount —
+          // it's cheap and an idempotent retry handles any flakes.
+          setState((prev) => ({ ...prev, lifecycle }));
+          if (lifecycle && TERMINAL_LIFECYCLES.has(lifecycle)) {
+            void refreshRef.current();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [inboxMessageId]);
+
+  return state;
+}
+
+function workforceLinkFor(slug: string): string {
+  // The workforce dashboard auto-opens the agent drawer when ``agent``
+  // query param matches a slug. New tab so the chat session isn't lost.
+  return `/workforce?agent=${encodeURIComponent(slug)}`;
+}
+
 export function SubTaskCard({ call }: SubTaskCardProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false);
-  const { label, status, isError } = summarizeToolCall(call);
+  const summary = summarizeToolCall(call);
+
+  // Delegate cards subscribe to the sub-agent's lifecycle so the user
+  // can watch queued → in_progress → done in real time. Skill cards
+  // are synchronous — no lifecycle to follow.
+  const inboxMessageId = useMemo<string | null>(() => {
+    if (call.name !== 'Delegate') return null;
+    const id = call.result?.inbox_message_id;
+    return typeof id === 'string' ? id : null;
+  }, [call]);
+
+  const live = useDelegateLiveStatus(inboxMessageId);
+
+  // Live lifecycle (when known) wins over the static "queued" the
+  // Delegate tool returned; this is the whole point of the realtime
+  // subscription — making the card feel alive while the worker runs.
+  const effectiveStatus = live.lifecycle ?? summary.status;
+  const isInFlight =
+    live.lifecycle != null && !TERMINAL_LIFECYCLES.has(live.lifecycle);
+  const isError =
+    summary.isError || live.lifecycle === 'failed';
+
+  const targetSlug =
+    call.name === 'Delegate' && typeof call.args?.agent_slug === 'string'
+      ? (call.args.agent_slug as string)
+      : null;
 
   const Icon = call.name === 'Delegate' ? Workflow : Wrench;
-  const StatusIcon = isError ? AlertTriangle : CheckCircle2;
+  let StatusIcon: typeof CheckCircle2 = CheckCircle2;
+  if (isError) StatusIcon = AlertTriangle;
+  else if (isInFlight) StatusIcon = Loader2;
 
   const accent = isError
     ? 'text-red-400 bg-red-500/10 border-red-500/30'
-    : call.name === 'Delegate'
-      ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/30'
-      : 'text-amber-300 bg-amber-500/10 border-amber-500/30';
+    : isInFlight
+      ? 'text-indigo-300 bg-indigo-500/15 border-indigo-500/40'
+      : call.name === 'Delegate'
+        ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/30'
+        : 'text-amber-300 bg-amber-500/10 border-amber-500/30';
 
   return (
     <div className={`rounded-lg border ${accent} text-xs mb-1.5`}>
@@ -103,17 +249,42 @@ export function SubTaskCard({ call }: SubTaskCardProps): React.ReactElement {
           <ChevronRight size={12} className="flex-shrink-0 opacity-70" />
         )}
         <Icon size={12} className="flex-shrink-0" />
-        <span className="font-medium flex-1 truncate" title={label}>
-          {label}
+        <span className="font-medium flex-1 truncate" title={summary.label}>
+          {summary.label}
         </span>
-        <StatusIcon size={11} className="flex-shrink-0 opacity-80" />
-        <span className="opacity-80 truncate max-w-[40%]" title={status}>
-          {status}
+        <StatusIcon
+          size={11}
+          className={`flex-shrink-0 opacity-80 ${isInFlight ? 'animate-spin' : ''}`}
+        />
+        <span
+          className="opacity-80 truncate max-w-[40%]"
+          title={effectiveStatus}
+        >
+          {effectiveStatus}
         </span>
       </button>
 
       {expanded && (
         <div className="px-2 pb-2 pt-1 space-y-2 border-t border-white/10">
+          {targetSlug && (
+            <div className="flex items-center gap-2 text-[10px]">
+              <a
+                href={workforceLinkFor(targetSlug)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10 text-zinc-200 hover:bg-white/20"
+              >
+                <ExternalLink size={10} />
+                View {targetSlug} in Workforce
+              </a>
+              {live.loading && (
+                <span className="opacity-60 inline-flex items-center gap-1">
+                  <Loader2 size={10} className="animate-spin" />
+                  syncing…
+                </span>
+              )}
+            </div>
+          )}
           <div>
             <div className="text-[10px] uppercase tracking-wide opacity-60 mb-0.5">
               args
@@ -124,12 +295,22 @@ export function SubTaskCard({ call }: SubTaskCardProps): React.ReactElement {
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wide opacity-60 mb-0.5">
-              result
+              {live.data?.task ? 'task' : 'result'}
             </div>
             <pre className="text-[10px] font-mono bg-black/30 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
-              {safeStringify(call.result)}
+              {safeStringify(live.data?.task ?? call.result)}
             </pre>
           </div>
+          {live.data?.outbox_response && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wide opacity-60 mb-0.5">
+                response
+              </div>
+              <pre className="text-[10px] font-mono bg-black/30 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                {safeStringify(live.data.outbox_response.payload)}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>
