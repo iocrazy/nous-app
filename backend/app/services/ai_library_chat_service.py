@@ -366,6 +366,11 @@ class AILibraryChatService:
                     "completion_tokens": recorder.completion_tokens,
                 }
                 assistant_content = result.get("content") or ""
+                # Tool call trace from this turn (Skill / Delegate
+                # dispatches in LLM emission order) — surfaced into the
+                # response so the chat UI can render sub-task cards
+                # inline. Empty list when the LLM answered directly.
+                tool_calls_trace = result.get("tool_calls") or []
                 recorder.set_summaries(output_summary=assistant_content)
         except AgentPausedError as err:
             logger.warning(f"[ChatService] agent paused: {err}")
@@ -424,6 +429,7 @@ class AILibraryChatService:
             "assistant_message": asst_msg,
             "usage": usage_snapshot,
             "run_id": str(run_id) if run_id else None,
+            "tool_calls": tool_calls_trace,
         }
 
     async def _maybe_compact(

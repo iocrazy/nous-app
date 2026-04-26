@@ -89,10 +89,26 @@ class ChatRequest(BaseModel):
     content: str = Field(..., min_length=1)
 
 
+class ChatToolCall(BaseModel):
+    """One Skill / Delegate dispatch made during this chat turn.
+
+    Surfaced by the chat endpoint so the frontend can render sub-task
+    cards inline ("→ summarize, 24s, ¢0.27, see result"). Order
+    matches the LLM's emission order. Args + result are the raw payloads
+    the agent runner saw, untruncated — frontend decides how to display.
+    """
+
+    name: str  # 'Skill' | 'Delegate'
+    iteration: int  # 1-indexed loop tick within the turn
+    args: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChatResponse(BaseModel):
     """Non-streaming chat response — the assistant's assistant message +
-    usage for this turn."""
+    usage for this turn + traced tool calls (for UI sub-task rendering)."""
 
     message: MessageOut
     usage: dict[str, int] = Field(default_factory=dict)
     run_id: UUID
+    tool_calls: list[ChatToolCall] = Field(default_factory=list)

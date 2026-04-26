@@ -176,3 +176,57 @@ async def test_unsupported_tool_still_skipped_after_delegate_added():
     assert result["content"] == "FINAL"
     # Delegate must NOT have been called for an unsupported tool.
     assert delegate.calls == []
+
+
+# ─── Step A: tool_calls trace for chat UI ────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_run_turn_returns_tool_calls_trace():
+    """The runner returns a per-turn trace of every Skill / Delegate
+    dispatch, in LLM emission order, with args + result captured. The
+    chat endpoint surfaces this list so the frontend can render
+    sub-task cards inline."""
+    adapter = AsyncMock()
+    adapter.call.side_effect = [
+        _delegate_call_payload("summary"),
+        {"choices": [{"message": {"content": "DONE"}}]},
+    ]
+    delegate = _FakeDelegateTool()
+    runner = AgentRunner(
+        adapter=adapter,
+        skill_tool=_FakeSkillTool(),
+        delegate_tool=delegate,
+    )
+    result = await runner.run_turn(
+        _composed(), [{"role": "user", "content": "delegate then reply"}]
+    )
+
+    assert "tool_calls" in result
+    assert len(result["tool_calls"]) == 1
+    entry = result["tool_calls"][0]
+    assert entry["name"] == "Delegate"
+    assert entry["iteration"] == 1
+    assert entry["args"]["agent_slug"] == "summary"
+    assert entry["result"]["status"] == "queued"
+    assert entry["result"]["inbox_message_id"] == "fake-msg-id"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_run_turn_trace_empty_when_no_tools_called():
+    """Direct LLM answers (no tool calls) → empty trace, not missing key."""
+    adapter = AsyncMock()
+    adapter.call.return_value = {
+        "choices": [{"message": {"content": "answer"}}]
+    }
+    runner = AgentRunner(
+        adapter=adapter,
+        skill_tool=_FakeSkillTool(),
+        delegate_tool=_FakeDelegateTool(),
+    )
+    result = await runner.run_turn(
+        _composed(), [{"role": "user", "content": "just answer"}]
+    )
+    assert result["tool_calls"] == []
