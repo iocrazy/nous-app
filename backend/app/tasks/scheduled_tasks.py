@@ -123,10 +123,21 @@ def retry_failed_downloads():
 
         retried_count = 0
 
+        skipped_orphan = 0
         for video in failed_videos:
             platform_id = video.get("platform_id")
             media_type = video.get("media_type", 0)
             user_id = video.get("user_id")
+
+            # Orphan rows (legacy / system-initiated downloads with no
+            # user_id) can't be retried — there's no one to attribute
+            # the run to, no settings to read, no log to write. Without
+            # this skip, the retry would dispatch with user_id=None and
+            # spam the user_logs / user_settings repos with 23502 / 22P02
+            # errors.
+            if not user_id:
+                skipped_orphan += 1
+                continue
 
             try:
                 # Reset status to PENDING
@@ -159,10 +170,12 @@ def retry_failed_downloads():
             "status": "success",
             "total_failed": len(failed_videos),
             "retried": retried_count,
+            "skipped_orphan": skipped_orphan,
         }
 
         logger.success(
-            f"[Celery Beat] Retry complete: {retried_count}/{len(failed_videos)} tasks resubmitted"
+            f"[Celery Beat] Retry complete: {retried_count}/{len(failed_videos)} resubmitted, "
+            f"{skipped_orphan} skipped (no user_id)"
         )
 
         return result
