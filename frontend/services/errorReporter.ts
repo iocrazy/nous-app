@@ -50,6 +50,31 @@ function ensureSessionId(): string {
 const DEDUP_WINDOW_MS = 10_000;
 const recentFingerprints = new Map<string, number>();
 
+// Browser-noise messages that aren't real bugs. Filtering at the
+// reporter so they never hit frontend_error_logs and pollute the
+// /health dashboard. Each entry is a substring match — case-sensitive,
+// minimal escaping. Add carefully: anything matched here vanishes
+// from telemetry permanently.
+const BROWSER_NOISE_FRAGMENTS: readonly string[] = [
+  // Benign browser-quirk warning fired by every layout-watching
+  // component (charts, virtualized lists, drag handles, etc). Spec
+  // explicitly says these are non-fatal.
+  // https://stackoverflow.com/q/49384120
+  'ResizeObserver loop completed with undelivered notifications',
+  'ResizeObserver loop limit exceeded',
+  // React 19 startTransition can mark a transition as skipped when
+  // a newer one supersedes it — by design, not an error.
+  'Transition was skipped',
+];
+
+function isBrowserNoise(message: string): boolean {
+  if (!message) return false;
+  for (const frag of BROWSER_NOISE_FRAGMENTS) {
+    if (message.includes(frag)) return true;
+  }
+  return false;
+}
+
 function shouldSkip(fingerprint: string): boolean {
   const now = Date.now();
   // Evict stale entries; keep the map small.
@@ -98,6 +123,7 @@ export async function reportError(
   } = {},
 ): Promise<void> {
   const err = normalizeError(error);
+  if (isBrowserNoise(err.message)) return;
   const fingerprint = `${err.message}::${(err.stack ?? '').slice(0, 100)}`;
   if (shouldSkip(fingerprint)) return;
 
@@ -160,4 +186,9 @@ export function installErrorReporter(): void {
 }
 
 // Exposed for tests.
-export const __test = { ensureSessionId, normalizeError, shouldSkip };
+export const __test = {
+  ensureSessionId,
+  normalizeError,
+  shouldSkip,
+  isBrowserNoise,
+};

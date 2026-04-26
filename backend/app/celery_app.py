@@ -93,7 +93,6 @@ celery_app.conf.update(
         # the every-6h log churn. The function itself is kept (returns
         # skipped) so any external invokers don't 500.
         # "update-statistics-6h": removed 2026-04-26
-
         "update-system-status-30s": {
             "task": "app.tasks.scheduled_tasks.update_system_status",
             "schedule": 30.0,  # 每 30 秒执行一次

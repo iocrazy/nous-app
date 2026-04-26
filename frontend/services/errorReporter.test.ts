@@ -90,6 +90,27 @@ describe('reportError', () => {
     await new Promise(r => setTimeout(r, 0));
   });
 
+  it('skips browser-noise messages (ResizeObserver loop)', async () => {
+    const fetchSpy = spyFetch();
+    await reportError(
+      new Error('ResizeObserver loop completed with undelivered notifications.'),
+    );
+    await reportError(new Error('ResizeObserver loop limit exceeded'));
+    await reportError(new Error('Transition was skipped'));
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('still reports messages that contain noise as a substring of a real error', async () => {
+    const fetchSpy = spyFetch();
+    // Real error message that doesn't trip the filter
+    await reportError(new Error('Network request failed: timeout'));
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('truncates very long stacks and messages', async () => {
     const fetchSpy = spyFetch();
     const longMessage = 'x'.repeat(5000);
