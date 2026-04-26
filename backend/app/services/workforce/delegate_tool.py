@@ -29,8 +29,9 @@ Notes on design choices:
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict, deque
 from time import monotonic
-from typing import Any, Dict, Optional
+from typing import Any, Deque, Dict, Optional
 from uuid import UUID
 
 from loguru import logger
@@ -50,6 +51,48 @@ MAX_DELEGATION_DEPTH = 3
 DEFAULT_AWAIT_TIMEOUT_S = 60.0
 MAX_AWAIT_TIMEOUT_S = 180.0
 TERMINAL_LIFECYCLE_STATES = {"done", "failed", "cancelled"}
+
+# Q milestone: per-caller-agent rate limit on Delegate dispatch.
+#
+# An LLM in a tool-use loop can otherwise emit dozens of Delegate calls
+# in seconds and flood the workforce inbox. Sliding window: keep
+# timestamps for each caller_agent_id, reject when the count in the
+# trailing window exceeds the cap. Process-local; we run a single
+# uvicorn worker so this matches deployment shape.
+#
+# 30 calls / 60s is well above normal workflows (coordinator typically
+# does 1-2 per turn every ~30s) but catches runaway loops fast.
+RATE_LIMIT_WINDOW_S = 60.0
+RATE_LIMIT_MAX_CALLS = 30
+_dispatch_history: dict[UUID, Deque[float]] = defaultdict(deque)
+
+
+def _check_rate_limit(caller_agent_id: UUID) -> Optional[Dict[str, Any]]:
+    """Sliding-window rate check. Returns an error payload when the
+    caller is over the limit, or ``None`` when they're under it.
+
+    Side effect: appends ``now`` to the caller's history when the
+    request is allowed; prunes expired entries on every call.
+    """
+    now = monotonic()
+    history = _dispatch_history[caller_agent_id]
+    cutoff = now - RATE_LIMIT_WINDOW_S
+    while history and history[0] < cutoff:
+        history.popleft()
+    if len(history) >= RATE_LIMIT_MAX_CALLS:
+        retry_in = max(0.0, history[0] + RATE_LIMIT_WINDOW_S - now)
+        return {
+            "error": (
+                f"rate limit: {RATE_LIMIT_MAX_CALLS} Delegate calls per "
+                f"{RATE_LIMIT_WINDOW_S:.0f}s window per caller agent — "
+                "back off before dispatching more"
+            ),
+            "retry_after_seconds": round(retry_in, 1),
+            "window_seconds": int(RATE_LIMIT_WINDOW_S),
+            "limit": RATE_LIMIT_MAX_CALLS,
+        }
+    history.append(now)
+    return None
 
 
 class DelegateToolService:
@@ -86,7 +129,17 @@ class DelegateToolService:
         if not prompt:
             return {"error": "prompt required"}
 
-        # Depth check first — cheap, no DB roundtrip needed.
+        # Rate limit before depth — both are cheap, but rate limit
+        # lets us fast-fail a runaway loop without spending DB roundtrips.
+        rl_error = _check_rate_limit(self.caller_agent_id)
+        if rl_error is not None:
+            logger.warning(
+                f"[delegate] rate-limit hit for caller={self.caller_agent_id} "
+                f"(slug={slug})"
+            )
+            return rl_error
+
+        # Depth check next — cheap, no DB roundtrip needed.
         if self.agent_depth >= MAX_DELEGATION_DEPTH:
             return {
                 "error": (

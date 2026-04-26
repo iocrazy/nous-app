@@ -7,6 +7,7 @@ Pins the cross-agent dispatch contract:
     - Rejects non-persistent target
     - Writes both inbox + outbox rows on success
     - Carries parent_run_id + depth into the inbox payload
+    - Rate-limits per-caller (Q milestone)
 """
 
 from __future__ import annotations
@@ -16,10 +17,21 @@ from uuid import uuid4
 
 import pytest
 
+from app.services.workforce import delegate_tool as _dt_mod
 from app.services.workforce.delegate_tool import (
     MAX_DELEGATION_DEPTH,
+    RATE_LIMIT_MAX_CALLS,
     DelegateToolService,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_history() -> None:
+    """Each test starts with an empty rate-limit window so order doesn't
+    leak between tests."""
+    _dt_mod._dispatch_history.clear()
+    yield
+    _dt_mod._dispatch_history.clear()
 
 
 def _build_repos(*, target: dict | None = None):
@@ -399,3 +411,53 @@ async def test_await_timeout_capped_at_max():
     assert out["status"] == "done"
     # And the cap exists.
     assert MAX_AWAIT_TIMEOUT_S < 99999
+
+
+# ─── Q milestone: per-caller rate limit ────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_rate_limit_kicks_in_after_max_calls():
+    """The 31st Delegate call from the same caller within the window is
+    rejected with retry_after_seconds + the limit details."""
+    target_aid = uuid4()
+    target = {"id": str(target_aid), "slug": "summary", "persistent": True}
+    svc, _, workforce, *_ = _service(target=target)
+    svc._detect_cycle = AsyncMock(return_value=None)
+
+    # Fire RATE_LIMIT_MAX_CALLS legitimate dispatches — all should pass.
+    for _ in range(RATE_LIMIT_MAX_CALLS):
+        out = await svc.execute({"agent_slug": "summary", "prompt": "p"})
+        assert "error" not in out, out
+
+    # Next one trips the limit.
+    rl = await svc.execute({"agent_slug": "summary", "prompt": "p"})
+    assert "error" in rl
+    assert "rate limit" in rl["error"]
+    assert rl["limit"] == RATE_LIMIT_MAX_CALLS
+    assert rl["window_seconds"] == 60
+    assert rl["retry_after_seconds"] >= 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_rate_limit_is_per_caller_not_global():
+    """Two different caller agents have independent windows. One getting
+    rate-limited must not block the other."""
+    target_aid = uuid4()
+    target = {"id": str(target_aid), "slug": "summary", "persistent": True}
+
+    # Caller A: pin to its limit.
+    svc_a, _, _, *_ = _service(target=target)
+    svc_a._detect_cycle = AsyncMock(return_value=None)
+    for _ in range(RATE_LIMIT_MAX_CALLS):
+        await svc_a.execute({"agent_slug": "summary", "prompt": "p"})
+    capped = await svc_a.execute({"agent_slug": "summary", "prompt": "p"})
+    assert "rate limit" in capped["error"]
+
+    # Caller B: fresh window, first call should succeed.
+    svc_b, _, _, *_ = _service(target=target)
+    svc_b._detect_cycle = AsyncMock(return_value=None)
+    out = await svc_b.execute({"agent_slug": "summary", "prompt": "p"})
+    assert "error" not in out
