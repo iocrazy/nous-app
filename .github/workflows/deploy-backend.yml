@@ -20,8 +20,19 @@ on:
       - 'v*'
 
 concurrency:
+  # Queue successive deploys instead of cancelling the in-flight one.
+  #
+  # We previously had ``cancel-in-progress: true`` to "always deploy the
+  # newest commit fast". In practice that meant: when two PRs landed
+  # ~3 min apart, the first PR's build got cancelled mid-way and its
+  # changes were silently dropped — we'd think we deployed it because
+  # the merge succeeded, but the image never got built. The M3 sequence
+  # hit this twice (G build cancelled by J push; F build cancelled by
+  # I push). With ``cancel-in-progress: false`` builds queue serially,
+  # each one builds master HEAD at its own time, and no commit gets
+  # silently dropped.
   group: deploy-backend
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
