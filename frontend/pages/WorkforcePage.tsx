@@ -128,7 +128,13 @@ export const WorkforcePage: React.FC = () => {
   const [busySlug, setBusySlug] = useState<string | null>(null);
 
   // Drawer state — clicking an agent card opens the detail drawer.
-  const [openSlug, setOpenSlug] = useState<string | null>(null);
+  // Initial value reads ``?agent=<slug>`` so the chat sub-task cards'
+  // "View in Workforce" link can deep-link straight into the drawer.
+  const [openSlug, setOpenSlug] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('agent');
+  });
 
   const runAction = useCallback(
     async (slug: string, action: () => Promise<unknown>) => {

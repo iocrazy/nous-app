@@ -519,3 +519,106 @@ async def cancel_task(
 
     logger.info(f"[workforce] task {task_id} cancelled by user")
     return {"task_id": str(task_id), "lifecycle_status": "cancelled"}
+
+
+# ─── Delegate sub-task lookup ───────────────────────────────────────────
+#
+# The chat UI's sub-task cards (TapNow Step B) need to follow the
+# lifecycle of a Delegate dispatch from queued → in_progress → done. The
+# Delegate tool's response carries ``inbox_message_id``; this endpoint
+# resolves that to the matching agent_tasks row + the sub-agent's outbox
+# response when terminal. Frontend pairs this with a Realtime subscription
+# on agent_tasks (filter by inbox_message_id) for live updates.
+
+
+@router.get("/tasks/by-inbox/{inbox_message_id}")
+async def get_task_by_inbox(
+    inbox_message_id: UUID,
+    user: Any = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Resolve an ``inbox_message_id`` (returned by the Delegate tool)
+    to the sub-agent's task lifecycle + final outbox response.
+
+    Returns:
+        ``task``: the agent_tasks row owning this inbox message
+            (lifecycle_status / started_at / ended_at / error_*).
+            ``None`` when the recipient agent hasn't picked it up yet.
+        ``outbox_response``: the sub-agent's reply outbox row when the
+            task is done. ``None`` for queued / in_progress.
+
+    Auth: only callers who can see the inbox message itself — i.e. the
+    sender_user_id of the inbox row (the user who triggered the chat
+    turn that fired Delegate). System-preset agent presets have no
+    user_id so chat-triggered Delegates have a sender_user_id we can
+    check against.
+    """
+    client = await get_async_supabase_admin()
+
+    inbox_q = await (
+        client.table("agent_inbox")
+        .select(
+            "id,recipient_agent_id,sender_kind,sender_user_id,sender_agent_id,"
+            "reply_to_message_id"
+        )
+        .eq("id", str(inbox_message_id))
+        .maybe_single()
+        .execute()
+    )
+    inbox = inbox_q.data if inbox_q else None
+    if not inbox:
+        raise HTTPException(
+            status_code=404,
+            detail=f"inbox message {inbox_message_id} not found",
+        )
+
+    # Auth: the user must be the sender of the inbox message. Chat
+    # turns set sender_user_id; agent-to-agent delegates set
+    # sender_agent_id and we don't expose those here (admin-only via
+    # the workforce drawer).
+    sender_user_id = inbox.get("sender_user_id")
+    user_id_str = str(getattr(user, "id", user))
+    if not sender_user_id or str(sender_user_id) != user_id_str:
+        raise HTTPException(
+            status_code=403,
+            detail="not authorized to view this delegate task",
+        )
+
+    # Look up the task — may not exist yet if the recipient hasn't
+    # ticked. Return None rather than 404 so the frontend can show
+    # "queued" until the worker picks it up.
+    task_q = await (
+        client.table("agent_tasks")
+        .select(
+            "id,agent_id,lifecycle_status,started_at,ended_at,"
+            "error_code,error_message,created_at,inbox_message_id,result"
+        )
+        .eq("inbox_message_id", str(inbox_message_id))
+        .maybe_single()
+        .execute()
+    )
+    task = task_q.data if task_q else None
+
+    # Sub-agent's reply (if any). The sub-agent writes to outbox with
+    # ``reply_to_message_id`` pointing back at our inbox row, so we can
+    # find the response without a task→outbox join.
+    outbox_response: Optional[dict[str, Any]] = None
+    if task and task.get("lifecycle_status") in ("done", "failed"):
+        outbox_q = await (
+            client.table("agent_outbox")
+            .select(
+                "id,sender_agent_id,message_type,payload,created_at,"
+                "delivered,delivered_at"
+            )
+            .eq("reply_to_message_id", str(inbox_message_id))
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if outbox_q.data:
+            outbox_response = outbox_q.data[0]
+
+    return {
+        "inbox_message_id": str(inbox_message_id),
+        "task": task,
+        "outbox_response": outbox_response,
+    }

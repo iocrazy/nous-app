@@ -180,4 +180,74 @@ export const workforceService = {
   async cancelTask(taskId: string): Promise<void> {
     await postJson(`/tasks/${encodeURIComponent(taskId)}/cancel`);
   },
+
+  /**
+   * Look up the agent_tasks row + sub-agent's outbox response for a
+   * Delegate dispatch identified by ``inbox_message_id`` (returned by
+   * the Delegate tool). Powers the chat sub-task cards' live status.
+   *
+   * Returns task=null when the recipient hasn't picked up the inbox
+   * row yet (still 'queued'); outbox_response=null when the sub-agent
+   * hasn't replied yet.
+   */
+  async getTaskByInbox(
+    inboxMessageId: string,
+  ): Promise<DelegateTaskLookup> {
+    const resp = await fetch(
+      `${base()}/tasks/by-inbox/${encodeURIComponent(inboxMessageId)}`,
+      { headers: await getAuthHeaders() },
+    );
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
+    return resp.json();
+  },
 };
+
+/** Possible values of agent_tasks.lifecycle_status. */
+export type TaskLifecycle =
+  | 'queued'
+  | 'assigned'
+  | 'in_progress'
+  | 'waiting_for_other'
+  | 'blocked'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+export interface DelegateTaskRow {
+  id: string;
+  agent_id: string;
+  lifecycle_status: TaskLifecycle;
+  started_at: string | null;
+  ended_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  inbox_message_id: string;
+  result: Record<string, unknown> | null;
+}
+
+export interface DelegateOutboxResponse {
+  id: string;
+  sender_agent_id: string;
+  message_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+  delivered: boolean;
+  delivered_at: string | null;
+}
+
+export interface DelegateTaskLookup {
+  inbox_message_id: string;
+  task: DelegateTaskRow | null;
+  outbox_response: DelegateOutboxResponse | null;
+}
+
+/** Lifecycle states that won't change anymore — stop polling / unsub. */
+export const TERMINAL_LIFECYCLES: ReadonlySet<TaskLifecycle> = new Set([
+  'done',
+  'failed',
+  'cancelled',
+]);
