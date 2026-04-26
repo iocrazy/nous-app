@@ -104,18 +104,14 @@ export const cleanupStaleDownloads = async (timeoutMinutes: number = 30): Promis
 
 /**
  * Merge a resources row (with nested parsed_media from !inner join)
- * into a flat ParsedMedia object.  Per-user download statuses from
- * the resources table take precedence over parsed_media's global values.
+ * into a flat ParsedMedia object. Download statuses live on parsed_media
+ * (canonical) — the resources table no longer mirrors them.
  */
 function flattenResourceMedia(row: any): ParsedMedia {
   const pm = row.parsed_media || {};
   return {
     ...pm,
     resource_id: String(row.id),
-    video_download_status: row.video_download_status ?? pm.video_download_status,
-    music_download_status: row.music_download_status ?? pm.music_download_status,
-    cover_download_status: row.cover_download_status ?? pm.cover_download_status,
-    image_download_status: row.image_download_status ?? pm.image_download_status,
   };
 }
 
