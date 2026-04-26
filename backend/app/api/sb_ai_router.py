@@ -339,12 +339,19 @@ async def chat(auth: AuthDep, body: ChatRequest) -> Dict[str, Any]:
 
         from app.services.storyboard_ai_service import StoryboardAIService
 
+        from uuid import UUID as _UUID
+
         svc = StoryboardAIService()
+        try:
+            user_uuid = _UUID(str(auth.user_id))
+        except (TypeError, ValueError):
+            user_uuid = None
         result = await svc.chat(
             project_id=body.project_id,
             message=body.message,
             selected_frame_id=body.selected_frame_id,
             skill_id=body.skill_id,
+            user_id=user_uuid,
         )
         return {"success": True, "data": result}
     except Exception as exc:

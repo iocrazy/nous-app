@@ -18,6 +18,7 @@ import asyncio
 import json
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 import httpx
 from loguru import logger
@@ -26,7 +27,12 @@ from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.repositories.storyboard_repository import StoryboardCharacterRepository
+from app.services.agent_runner import AgentRunner
+from app.services.ai_adapters import get_adapter
+from app.services.ai_adapters.factory import provider_key_for_model
 from app.services.prompt_composer import ComposerInput, PromptComposer
+from app.services.run_recorder import AgentPausedError, RunRecorder
+from app.services.skill_tool_service import SkillToolService
 from app.services.storyboard_service import StoryboardService
 from app.services.video_providers import (
     ImageGenResult,
@@ -50,6 +56,78 @@ class StoryboardAIService:
     # ------------------------------------------------------------------ #
     # Agent prompt composition (Phase 2 PR 2.6 — DB-driven prompts)
     # ------------------------------------------------------------------ #
+
+    async def _run_via_agent_runner(
+        self,
+        *,
+        instruction: str,
+        user_content: str,
+        user_id: Optional[UUID] = None,
+        team_id: Optional[int] = None,
+        project_id: Optional[int] = None,
+        trigger: str = "storyboard_ai",
+    ) -> str:
+        """Compose + run the storyboard agent through AgentRunner +
+        RunRecorder. Returns raw assistant content.
+
+        K migration: replaces the sync httpx path for telemetry-worthy
+        sites (currently only ``chat()``). Brings:
+            * agent_runs row with cost / tokens / model / trigger
+            * paused_reason gate (admin pause works)
+            * Skill / Delegate tools available to the LLM
+            * fallback chain (when wired)
+
+        Telemetry is best-effort: if user_id is None or RunRecorder.start
+        fails, the run still goes through with a no-op recorder.
+        """
+        composer = PromptComposer(AgentRepository(), SkillRepository())
+        composed = await composer.compose(
+            ComposerInput(
+                agent_slug=self.AGENT_SLUG,
+                request_instructions=instruction,
+            )
+        )
+        adapter = get_adapter(composed.model or "", settings)
+        runner = AgentRunner(
+            adapter=adapter,
+            skill_tool=SkillToolService(SkillRepository()),
+        )
+        user_messages = [{"role": "user", "content": user_content}]
+
+        if user_id is None:
+            # No-telemetry path. Mirrors script_ai_service for parity.
+            result = await runner.run_turn(composed, user_messages=user_messages)
+            return result.get("content") or ""
+
+        model = composed.model or ""
+        try:
+            provider = provider_key_for_model(model) if model else None
+        except ValueError:
+            provider = None
+
+        try:
+            async with RunRecorder(
+                agent_id=composed.agent_id,
+                user_id=user_id,
+                trigger=trigger,
+                team_id=team_id,
+                project_id=project_id,
+                model=model or None,
+                provider=provider,
+                input_summary=user_content,
+                metadata={"full_input": user_content[:5000]},
+            ) as recorder:
+                result = await runner.run_turn(
+                    composed,
+                    user_messages=user_messages,
+                    recorder=recorder,
+                )
+                content = result.get("content") or ""
+                recorder.set_summaries(output_summary=content)
+                return content
+        except AgentPausedError:
+            # Surface as runtime so callers translate it; matches script_ai.
+            raise
 
     async def _compose_system_prompt(self, instruction: str) -> str:
         """Fetch the ``storyboard`` agent's composed system message from DB.
@@ -612,6 +690,7 @@ class StoryboardAIService:
         message: str,
         selected_frame_id: Optional[str] = None,
         skill_id: Optional[str] = None,
+        user_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """
         Handle a conversational message in the context of a storyboard project.
@@ -721,16 +800,19 @@ class StoryboardAIService:
         instruction_parts.append(f"Project context:\n{context_block}")
         instruction = "\n\n".join(instruction_parts)
 
-        system_prompt = await self._compose_system_prompt(instruction)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message},
-        ]
-
         try:
-            raw_response = await self._call_llm(
-                messages, temperature=0.7, max_tokens=2048
+            raw_response = await self._run_via_agent_runner(
+                instruction=instruction,
+                user_content=message,
+                user_id=user_id,
+                trigger="storyboard_chat",
             )
+        except AgentPausedError:
+            logger.warning(
+                "[Storyboard] chat refused — agent paused for project %s",
+                project_id,
+            )
+            raise
         except RuntimeError:
             logger.error("LLM call failed during chat for project %s", project_id)
             raise

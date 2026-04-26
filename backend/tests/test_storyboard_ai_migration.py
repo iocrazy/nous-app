@@ -122,7 +122,12 @@ async def test_analyze_video_composes_mode_b_once_for_all_keyframes() -> None:
 @pytest.mark.asyncio
 async def test_chat_instruction_carries_context_and_skill() -> None:
     """chat's dynamic instruction must include Mode C header, skill content,
-    and project context (characters / selected frame details)."""
+    and project context (characters / selected frame details).
+
+    Post-K migration, chat() goes through ``_run_via_agent_runner`` instead
+    of ``_compose_system_prompt`` + ``_call_llm`` directly. The dynamic
+    instruction is still the first positional arg via kwargs.
+    """
     svc = StoryboardAIService()
 
     # Mock character lookup
@@ -143,16 +148,11 @@ async def test_chat_instruction_carries_context_and_skill() -> None:
             }
         )
 
-        with (
-            patch.object(
-                svc, "_compose_system_prompt", new=AsyncMock(return_value="SYS_C")
-            ) as mock_compose,
-            patch.object(
-                svc,
-                "_call_llm",
-                new=AsyncMock(return_value="Here is my response, no actions."),
-            ),
-        ):
+        with patch.object(
+            svc,
+            "_run_via_agent_runner",
+            new=AsyncMock(return_value="Here is my response, no actions."),
+        ) as mock_run:
             result = await svc.chat(
                 project_id="proj-1",
                 message="What camera angle for the opening?",
@@ -163,12 +163,16 @@ async def test_chat_instruction_carries_context_and_skill() -> None:
     assert result["actions"] == []  # No actions fence in response
 
     # Instruction carried Mode C header + skill content + character context
-    instruction = mock_compose.await_args.args[0]
+    instruction = mock_run.await_args.kwargs["instruction"]
     assert "Mode C" in instruction
     assert "chat" in instruction
     assert "SPECIAL SKILL BODY" in instruction
     assert "Alice" in instruction
     assert "protagonist" in instruction
+    # User message threads through unchanged
+    assert mock_run.await_args.kwargs["user_content"] == (
+        "What camera angle for the opening?"
+    )
 
 
 @pytest.mark.asyncio
@@ -185,11 +189,10 @@ async def test_chat_parses_actions_block_at_end_of_response() -> None:
         "```"
     )
 
-    with (
-        patch.object(
-            svc, "_compose_system_prompt", new=AsyncMock(return_value="SYS_C")
-        ),
-        patch.object(svc, "_call_llm", new=AsyncMock(return_value=raw_with_actions)),
+    with patch.object(
+        svc,
+        "_run_via_agent_runner",
+        new=AsyncMock(return_value=raw_with_actions),
     ):
         result = await svc.chat(project_id="proj-1", message="help")
 
