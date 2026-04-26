@@ -285,6 +285,11 @@ class AILibraryChatService:
         )
 
         # Compose prompt with recalled memories injected after cache_boundary.
+        # M (G→J→F→I→H follow-up): prompt now explicitly notes that the
+        # Delegate tool can hand off to persistent specialists listed in
+        # <available_workers>. Without this hint the LLM tends to do the
+        # work itself even when a better specialist exists. Use await=true
+        # if you need the result in the same turn.
         composer = PromptComposer(agent_repo, skill_repo)
         composed = await composer.compose(
             ComposerInput(
@@ -293,7 +298,14 @@ class AILibraryChatService:
                     "You are in an interactive chat session with the user. "
                     "Respond conversationally. Use the Skill tool when a "
                     "bound skill is clearly applicable; otherwise answer "
-                    "directly in natural language."
+                    "directly in natural language. "
+                    "If <available_workers> lists a specialist agent that's "
+                    "a clearly better fit for the request than you are "
+                    "(e.g. summarize for transcript condensation, analyze "
+                    "for visual analysis), call Delegate(agent_slug=..., "
+                    "prompt=..., await=true) and weave the returned result "
+                    "into your reply. Use Delegate only when the specialist "
+                    "is a clear win — for general chat, just answer directly."
                 ),
                 recalled_memories=stack.recalled_memories,
             )
