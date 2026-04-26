@@ -75,6 +75,14 @@ class AgentRunner:
     ) -> dict[str, Any]:
         messages = list(user_messages)
         iteration = 0
+        # Step A milestone: trace each Skill / Delegate dispatch made
+        # during this turn. The chat service surfaces this list so the
+        # frontend can render sub-task cards inline ("→ summarize, 24s,
+        # ¢0.27") without needing a separate streaming channel. Order
+        # mirrors LLM emission order. Result is best-effort serialised
+        # (we strip non-JSON values so dataclasses / UUIDs don't poison
+        # the response payload).
+        tool_call_trace: list[dict[str, Any]] = []
 
         for _ in range(MAX_TOOL_ITERATIONS):
             iteration += 1
@@ -99,7 +107,11 @@ class AgentRunner:
                 # msg.get("content") can be None (e.g. Claude emits null
                 # content on a pure-tool-use turn). The `or ""` guarantees
                 # the contract — callers always receive a str.
-                return {"content": msg.get("content") or "", "raw": resp}
+                return {
+                    "content": msg.get("content") or "",
+                    "raw": resp,
+                    "tool_calls": tool_call_trace,
+                }
 
             # Append assistant tool-call stub. Tracked separately so we
             # can strip it on a PreToolUse abort — leaving an assistant
@@ -159,6 +171,20 @@ class AgentRunner:
                         }
                     else:
                         result = await self.delegate_tool.execute(args)
+
+                # Trace for the chat UI. Done AFTER the dispatch so the
+                # result is captured. The result payload is already a
+                # plain dict from skill_tool / delegate_tool; we don't
+                # truncate here — the frontend renders summarised, this
+                # keeps the API truthful.
+                tool_call_trace.append(
+                    {
+                        "name": tool_name,
+                        "args": args,
+                        "result": result,
+                        "iteration": iteration,
+                    }
+                )
 
                 messages.append(
                     {

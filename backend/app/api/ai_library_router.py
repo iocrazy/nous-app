@@ -1282,4 +1282,5 @@ async def send_chat_message(
         "message": result["assistant_message"],
         "usage": result["usage"],
         "run_id": result["run_id"],
+        "tool_calls": result.get("tool_calls", []),
     }
