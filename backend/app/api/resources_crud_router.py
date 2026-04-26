@@ -435,8 +435,14 @@ async def serve_resource_file(
 async def serve_resource_cover(resource_id: str):
     """Serve cover/thumbnail image for a resource (no auth required).
 
-    Priority: thumbnail_path > cover_image_path.
-    Both are relative paths resolved against DOWNLOAD_PATH.
+    Priority for INDEPENDENT resources (user uploads):
+        thumbnail_path > cover_image_path > original file (if mime=image/*).
+
+    For PARSED-MEDIA-BACKED resources (i.e., ``resource.media_id`` is set),
+    cover lives on parsed_media — fall through to that as the source of
+    truth. The duplicated ``cover_image_path`` / ``thumbnail_path``
+    columns on resources are deprecated for this case (PR-A:
+    cover-only).
     """
     try:
         repo = ResourcesRepository()
@@ -448,12 +454,11 @@ async def serve_resource_cover(resource_id: str):
 
         from app.core.config import settings
 
-        # Try thumbnail first, then cover image
+        # Try thumbnail first, then cover image (independent uploads).
         for field in ("thumbnail_path", "cover_image_path"):
             rel_path = resource.get(field)
             if not rel_path:
                 continue
-            # Skip old Supabase Storage URLs (http://...)
             if rel_path.startswith("http"):
                 continue
             full_path = Path(settings.DOWNLOAD_PATH) / rel_path
@@ -465,7 +470,40 @@ async def serve_resource_cover(resource_id: str):
                     headers={"Cache-Control": "public, max-age=604800, immutable"},
                 )
 
-        # Fallback for image files: serve the original file as cover
+        # Parsed-media-backed resource: cover lives on parsed_media now,
+        # not on the resources row. Resolve via the join.
+        media_id = resource.get("media_id")
+        if media_id:
+            from app.db.supabase_client import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            try:
+                pm_res = (
+                    await client.table("parsed_media")
+                    .select("cover_download_path,cover_download_status")
+                    .eq("id", media_id)
+                    .maybe_single()
+                    .execute()
+                )
+                if pm_res.data:
+                    pm_path = pm_res.data.get("cover_download_path")
+                    if pm_path and not pm_path.startswith("http"):
+                        full_path = Path(settings.DOWNLOAD_PATH) / pm_path
+                        if full_path.exists():
+                            mime, _ = mimetypes.guess_type(str(full_path))
+                            return FileResponse(
+                                path=str(full_path),
+                                media_type=mime or "image/jpeg",
+                                headers={
+                                    "Cache-Control": "public, max-age=604800, immutable"
+                                },
+                            )
+            except Exception as e:
+                logger.warning(
+                    f"parsed_media cover lookup failed for media_id={media_id}: {e}"
+                )
+
+        # Fallback for image files: serve the original file as cover.
         if resource.get("mime_type", "").startswith("image/"):
             file_path = resource.get("file_path")
             if file_path and not file_path.startswith("http"):

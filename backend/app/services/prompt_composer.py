@@ -384,8 +384,7 @@ class PromptComposer:
                         "priority": {
                             "type": "integer",
                             "description": (
-                                "Inbox priority 1-10 (higher = sooner). "
-                                "Default 5."
+                                "Inbox priority 1-10 (higher = sooner). " "Default 5."
                             ),
                         },
                         "dedup_key": {

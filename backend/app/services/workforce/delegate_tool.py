@@ -339,9 +339,7 @@ class DelegateToolService:
         lifecycle = task.get("lifecycle_status")
         if lifecycle == "done":
             result = task.get("result") or {}
-            content = (
-                result.get("content") if isinstance(result, dict) else None
-            )
+            content = result.get("content") if isinstance(result, dict) else None
             return {
                 "status": "done",
                 "waited_seconds": round(waited_seconds, 2),
@@ -370,9 +368,7 @@ class DelegateToolService:
             client = await get_async_supabase_admin()
             result = (
                 await client.table("agent_tasks")
-                .select(
-                    "id,lifecycle_status,result,error_code,error_message"
-                )
+                .select("id,lifecycle_status,result,error_code,error_message")
                 .eq("inbox_message_id", str(caller_inbox_id))
                 .maybe_single()
                 .execute()
@@ -430,7 +426,9 @@ class DelegateToolService:
                 # Best-effort: if the lookup fails, fall through and
                 # let the rest of the dispatch continue. The depth cap
                 # still protects against runaway recursion.
-                logger.warning(f"[delegate] cycle-walk lookup failed at {current}: {err}")
+                logger.warning(
+                    f"[delegate] cycle-walk lookup failed at {current}: {err}"
+                )
                 return None
 
             data = row.data if row and row.data else None

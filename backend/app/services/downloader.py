@@ -798,6 +798,8 @@ class DownloaderService:
             )
             return
 
+        # cover_image_path is a shared-asset mirror; lives on parsed_media
+        # only now. Don't write it on resources.
         resource_data = {
             "creator_id": user_id,
             "media_id": media_id,
@@ -806,7 +808,6 @@ class DownloaderService:
             "mime_type": "image/jpeg",
             "filename": f"{platform_id}_slides",
             "file_type": video_data.get("media_type", "2"),
-            "cover_image_path": video_data.get("cover_download_path"),
             "video_download_status": "completed",
             "image_download_status": "completed",
         }

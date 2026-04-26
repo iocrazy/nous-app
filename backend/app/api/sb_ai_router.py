@@ -337,9 +337,9 @@ async def chat(auth: AuthDep, body: ChatRequest) -> Dict[str, Any]:
         sb_svc = StoryboardService()
         await sb_svc.verify_project_access(body.project_id, auth.user_id)
 
-        from app.services.storyboard_ai_service import StoryboardAIService
-
         from uuid import UUID as _UUID
+
+        from app.services.storyboard_ai_service import StoryboardAIService
 
         svc = StoryboardAIService()
         try:

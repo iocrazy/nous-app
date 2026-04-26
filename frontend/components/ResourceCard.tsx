@@ -120,13 +120,27 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   const createdAt = resource?.created_at ?? item.created_at;
   const { icon: IconComponent, color, bg } = getFileIcon(mimeType);
 
-  // Determine thumbnail source: always use cover API endpoint
+  // Determine thumbnail source: always use cover API endpoint. The
+  // backend now falls through to ``parsed_media.cover_download_path``
+  // when the resource has ``media_id`` set, so any of the three
+  // signals (thumbnail / cover_image / media_id) is enough to attempt
+  // the request.
   const thumbnailSrc = React.useMemo(() => {
-    if ((resource?.thumbnail_path || resource?.cover_image_path) && resource?.id) {
+    if (
+      (resource?.thumbnail_path ||
+        resource?.cover_image_path ||
+        resource?.media_id) &&
+      resource?.id
+    ) {
       return getResourceCoverUrl(String(resource.id));
     }
     return null;
-  }, [resource?.thumbnail_path, resource?.cover_image_path, resource?.id]);
+  }, [
+    resource?.thumbnail_path,
+    resource?.cover_image_path,
+    resource?.media_id,
+    resource?.id,
+  ]);
 
   // Hover scrub state for video cards
   const isVideo = mimeType?.startsWith('video/') ?? false;
