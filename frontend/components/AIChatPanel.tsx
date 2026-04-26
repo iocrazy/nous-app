@@ -306,7 +306,7 @@ export function AIChatPanel({
   const hasMessages = messages.length > 0 || sending;
 
   return (
-    <div className="w-80 flex-shrink-0 flex flex-col bg-zinc-900 border-l border-zinc-800 h-full overflow-hidden">
+    <div className="w-full h-full flex-1 flex flex-col bg-zinc-900 overflow-hidden min-h-0">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 flex-shrink-0">
         <span className="text-sm font-medium text-zinc-200 flex-1">AI Chat</span>

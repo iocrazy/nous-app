@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Users, MessageCircle, Film, FileText, Download } from 'lucide-react';
+import { Users, Film, FileText, Download } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { EditorTopBar } from '../../components/EditorTopBar';
 import { EditorLoadingScreen } from '../../components/EditorLoadingScreen';
@@ -9,13 +9,13 @@ import { useCanvasStore } from '../../stores/canvasStore';
 import { useStoryboardStore } from '../../stores/storyboardStore';
 import { fetchProject } from '../../services/storyboardService';
 import { CharacterPanel } from '../../features/storyboard/ui/CharacterPanel';
-import ChatPanel from '../../features/storyboard/ui/ChatPanel';
+import { AIChatDrawer } from '../../components/AIChatDrawer';
 import { FrameTimeline } from '../../features/storyboard/ui/FrameTimeline';
 import { ScriptImportDialog } from '../../features/storyboard/ui/ScriptImportDialog';
 import { ExportDialog } from '../../features/storyboard/ui/ExportDialog';
 import type { CanvasNode, CanvasEdge } from '../../stores/canvasStore';
 
-type SidePanel = 'characters' | 'chat' | null;
+type SidePanel = 'characters' | null;
 
 /**
  * Map backend node_type to frontend ReactFlow node type.
@@ -209,12 +209,11 @@ export function CanvasEditorPage() {
                   active={showTimeline}
                   onClick={() => setShowTimeline((v) => !v)}
                 />
-                <FloatingIconButton
-                  icon={<MessageCircle size={16} />}
-                  tooltip="Chat"
-                  active={sidePanel === 'chat'}
-                  onClick={() => toggleSidePanel('chat')}
-                />
+                {/* AI Chat moved to a bottom-right floating button (see
+                    AIChatDrawer below). The legacy left-toolbar entry
+                    was removed when chat migrated from
+                    storyboardService.chatWithAI to the AI Library /
+                    AgentRunner pipeline. */}
                 <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
                 <FloatingIconButton
                   icon={<Download size={16} />}
@@ -228,11 +227,6 @@ export function CanvasEditorPage() {
             {sidePanel === 'characters' && projectId && (
               <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
                 <CharacterPanel projectId={projectId} onClose={() => setSidePanel(null)} />
-              </div>
-            )}
-            {sidePanel === 'chat' && projectId && (
-              <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
-                <ChatPanel projectId={projectId} onClose={() => setSidePanel(null)} />
               </div>
             )}
           </div>
@@ -254,6 +248,15 @@ export function CanvasEditorPage() {
                 projectId={projectId}
                 isOpen={showExport}
                 onClose={() => setShowExport(false)}
+              />
+              {/* AI Chat Drawer — bottom-right FAB + slide-in panel.
+                  Now goes through the AI Library / AgentRunner pipeline,
+                  so users see Skill / Delegate sub-task cards inline
+                  and every turn lands in agent_runs telemetry. */}
+              <AIChatDrawer
+                projectId={projectId}
+                contextType="storyboard"
+                contextId={projectId}
               />
             </>
           )}

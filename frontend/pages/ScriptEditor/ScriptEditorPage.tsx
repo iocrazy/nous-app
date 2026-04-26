@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Save, MessageSquare } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { useScriptCanvasStore, type ScriptNode } from '../../stores/scriptCanvasStore';
 import { EditorTopBar } from '../../components/EditorTopBar';
 import { EditorLoadingScreen } from '../../components/EditorLoadingScreen';
@@ -16,7 +16,7 @@ import { ExportDialog } from '../../features/script/components/ExportDialog';
 import { ViewControls } from '../../features/script/components/ViewControls';
 import { GridView } from '../../features/script/views/GridView';
 import { ListView } from '../../features/script/views/ListView';
-import { AIChatPanel } from '../../components/AIChatPanel';
+import { AIChatDrawer } from '../../components/AIChatDrawer';
 import {
   fetchScriptProject,
   updateScriptProject,
@@ -83,7 +83,6 @@ export function ScriptEditorPage() {
   const [showExport, setShowExport] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showChat, setShowChat] = useState(false);
 
   // Derived: has branch nodes
   const hasBranches = nodes.some((n) => n.data.branchType != null);
@@ -246,18 +245,9 @@ export function ScriptEditorPage() {
               }
             }}
             saving={saving}
-          >
-            <button
-              type="button"
-              onClick={() => setShowChat((v) => !v)}
-              className={`p-1.5 rounded hover:bg-zinc-800 transition-colors ${
-                showChat ? 'text-indigo-400' : 'text-zinc-500'
-              }`}
-              title="AI Chat"
-            >
-              <MessageSquare size={16} />
-            </button>
-          </EditorTopBar>
+          />
+          {/* AI Chat is opened via the bottom-right floating button
+              rendered by AIChatDrawer (⌘I to toggle). */}
 
 
           {/* Sidebar + main content */}
@@ -291,21 +281,8 @@ export function ScriptEditorPage() {
               )}
             </div>
 
-            {/* AI Chat Panel — slides in from right */}
-            {showChat && (
-              <AIChatPanel
-                projectId={projectId ?? ''}
-                contextType="script"
-                contextId={scriptId}
-                onApplyContent={(content) => {
-                  const editingId = useScriptCanvasStore.getState().editingNodeId;
-                  if (editingId) {
-                    useScriptCanvasStore.getState().updateNodeData(editingId, { content });
-                  }
-                }}
-                onClose={() => setShowChat(false)}
-              />
-            )}
+            {/* AIChatDrawer mounted below — its FAB lives bottom-right
+                of the viewport, so it doesn't belong inline here. */}
           </div>
         </>
       )}
@@ -358,6 +335,21 @@ export function ScriptEditorPage() {
           summary={branchDialog.summary}
         />
       )}
+
+      {/* AI Chat Drawer — FAB bottom-right + slide-in panel.
+          onApply writes the assistant content into whichever chapter
+          node the user is currently editing. */}
+      <AIChatDrawer
+        projectId={projectId ?? ''}
+        contextType="script"
+        contextId={scriptId}
+        onApplyContent={(content) => {
+          const editingId = useScriptCanvasStore.getState().editingNodeId;
+          if (editingId) {
+            useScriptCanvasStore.getState().updateNodeData(editingId, { content });
+          }
+        }}
+      />
     </div>
   );
 }
