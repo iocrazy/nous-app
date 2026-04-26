@@ -1267,7 +1267,8 @@
     },
     "agents": {
       "systemPreset": "System Preset",
-      "selectAgent": "Select an agent to edit",
+      "selectAgent": "No agents yet — use + to create one.",
+      "pickFromSidebar": "Pick an agent from the sidebar.",
       "identityTitle": "Identity",
       "soulTitle": "Soul",
       "instructionsTitle": "Instructions",

@@ -1267,7 +1267,8 @@
     },
     "agents": {
       "systemPreset": "系统预置",
-      "selectAgent": "选择一个智能体进行编辑",
+      "selectAgent": "暂无智能体 — 点击 + 创建一个",
+      "pickFromSidebar": "从左侧选择一个智能体",
       "identityTitle": "身份",
       "soulTitle": "性格",
       "instructionsTitle": "指令",
