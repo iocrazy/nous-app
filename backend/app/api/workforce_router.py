@@ -16,10 +16,11 @@ This matches the Runs / Usage UIs today.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel
 
@@ -29,6 +30,15 @@ from app.repositories.agent_repository import AgentRepository
 from app.repositories.agent_workforce_repository import AgentWorkforceRepository
 
 router = APIRouter(prefix="/workforce", tags=["workforce"])
+
+
+# Tunables for the healthz overall verdict.
+# Inbox cadence is 10s + LLM-call latency. 5 minutes without a tick is
+# clearly broken; under 90s is normal idle. Recent inbox processing is
+# only checked when we have agents at all — empty queue is healthy.
+_HEALTH_DEGRADED_AFTER_S = 90
+_HEALTH_DOWN_AFTER_S = 300
+_HEALTH_RECENT_WINDOW_S = 300
 
 
 # ─── shared helpers ────────────────────────────────────────────────────
@@ -282,6 +292,123 @@ async def clear_inbox(
 
     logger.info(f"[workforce] agent '{slug}' inbox cleared ({cleared} rows)")
     return {"slug": slug, "cleared": cleared}
+
+
+@router.get("/healthz")
+async def workforce_healthz(request: Request) -> dict[str, Any]:
+    """Operational health snapshot for the workforce runtime.
+
+    Three signals:
+      * scheduler: alive + recent tick. ``alive=False`` or
+        ``seconds_since_last_tick > 300`` → ``status='down'``.
+      * recent_inbox_throughput: count of inbox rows processed in the
+        last 5 min. Only flagged when there's at least one persistent
+        agent — empty queues on a deployed-but-unused system are fine.
+      * supabase: a light SELECT 1 on ai_agents to confirm the DB is
+        reachable from the API container (workforce can't run without
+        it, so this surfaces as ``down``).
+
+    Intentionally NOT auth-gated: monitors / NAS healthchecks need to
+    poll without juggling tokens. The data exposed (counters + latency)
+    is not user-private.
+    """
+    overall = "healthy"
+    issues: list[str] = []
+    response: dict[str, Any] = {"status": overall, "issues": issues}
+
+    # 1. Scheduler in-process state.
+    scheduler = getattr(request.app.state, "workforce_scheduler", None)
+    if scheduler is None:
+        response["scheduler"] = {"alive": False, "note": "not started"}
+        issues.append("scheduler not initialised")
+        overall = "down"
+    else:
+        snap = scheduler.health_snapshot()
+        response["scheduler"] = snap
+        if not snap["alive"]:
+            issues.append("scheduler task not running")
+            overall = "down"
+        elif (
+            snap["seconds_since_last_tick"] is not None
+            and snap["seconds_since_last_tick"] > _HEALTH_DOWN_AFTER_S
+        ):
+            issues.append(
+                f"no scheduler tick for {snap['seconds_since_last_tick']:.0f}s"
+            )
+            overall = "down"
+        elif (
+            snap["seconds_since_last_tick"] is not None
+            and snap["seconds_since_last_tick"] > _HEALTH_DEGRADED_AFTER_S
+        ):
+            issues.append(
+                f"scheduler tick stale ({snap['seconds_since_last_tick']:.0f}s)"
+            )
+            overall = "degraded"
+        if snap.get("last_error"):
+            issues.append(f"last tick error: {snap['last_error']}")
+            if overall == "healthy":
+                overall = "degraded"
+
+    # 2. DB reachability + recent inbox throughput.
+    try:
+        client = await get_async_supabase_admin()
+        # Are there any persistent agents? If not, "no recent processing" is
+        # not a fault.
+        agents_q = (
+            await client.table("ai_agents")
+            .select("id", count="exact")
+            .eq("persistent", True)
+            .limit(1)
+            .execute()
+        )
+        persistent_agents = agents_q.count or 0
+
+        since = (
+            datetime.now(timezone.utc)
+            - timedelta(seconds=_HEALTH_RECENT_WINDOW_S)
+        ).isoformat()
+        recent_q = (
+            await client.table("agent_inbox")
+            .select("id", count="exact")
+            .gte("processed_at", since)
+            .limit(1)
+            .execute()
+        )
+        recent_processed = recent_q.count or 0
+
+        # Pending queue depth (unread + reading) gives us a "stuck queue"
+        # signal: persistent agents + zero recent processing + non-empty
+        # queue → scheduler is alive but not draining.
+        pending_q = (
+            await client.table("agent_inbox")
+            .select("id", count="exact")
+            .in_("status", ["unread", "reading"])
+            .limit(1)
+            .execute()
+        )
+        pending_depth = pending_q.count or 0
+
+        response["supabase"] = {
+            "reachable": True,
+            "persistent_agents": persistent_agents,
+            "recent_processed_5m": recent_processed,
+            "pending_depth": pending_depth,
+        }
+
+        if persistent_agents > 0 and pending_depth > 0 and recent_processed == 0:
+            issues.append(
+                f"queue stuck: {pending_depth} pending, no rows processed "
+                f"in last {_HEALTH_RECENT_WINDOW_S}s"
+            )
+            if overall == "healthy":
+                overall = "degraded"
+    except Exception as err:
+        response["supabase"] = {"reachable": False, "error": str(err)[:200]}
+        issues.append(f"supabase unreachable: {type(err).__name__}")
+        overall = "down"
+
+    response["status"] = overall
+    return response
 
 
 @router.get("/agents/{slug}/detail")
