@@ -410,11 +410,24 @@ export const DownloadsView: React.FC = () => {
   }, [selectedVideo?.platform_id, selectedResourceData]);
 
   // ─── Navigation ────────────────────────────────────────
+  // Prefer resource_id (per-user). Search hydration in PR includes it,
+  // but legacy callers / stale cards may still come through with only
+  // parsed_media.id — in that case we abort the navigation rather than
+  // routing to /resources/file/<parsed_media_id>, which 404s on the
+  // detail page (parsed_media.id ≠ resource.id).
+  //
+  // We pass the full item via router state so ResourceDetailPage can
+  // render the card chrome immediately while it fetches the rest —
+  // matches the pattern most video sites use (search → detail without
+  // a blank-screen pause).
   const handleNavigateToDetail = useCallback((item: Video) => {
-    const rid = (item as any).resource_id || item.id;
-    if (!rid) return;
+    const rid = (item as any).resource_id;
+    if (!rid) {
+      console.warn('[DownloadsView] item has no resource_id, skipping nav', item);
+      return;
+    }
     const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-    navigate(`${teamPath}/resources/file/${rid}`);
+    navigate(`${teamPath}/resources/file/${rid}`, { state: { preloaded: item } });
   }, [selectedTeamId, navigate]);
 
   // ─── Multi-select ──────────────────────────────────────
@@ -610,17 +623,29 @@ export const DownloadsView: React.FC = () => {
   const handleCtxViewDetails = useCallback(() => {
     if (!contextMenu) return;
     const v = contextMenu.video;
+    const rid = (v as any).resource_id;
+    if (!rid) {
+      console.warn('[DownloadsView] context-menu item has no resource_id', v);
+      setContextMenu(null);
+      return;
+    }
     const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-    const rid = (v as any).resource_id || v.id;
-    navigate(`${teamPath}/resources/file/${rid}`);
+    navigate(`${teamPath}/resources/file/${rid}`, { state: { preloaded: v } });
     setContextMenu(null);
   }, [contextMenu, selectedTeamId, navigate]);
 
   const handleCtxOpenNewTab = useCallback(() => {
     if (!contextMenu) return;
     const v = contextMenu.video;
+    const rid = (v as any).resource_id;
+    if (!rid) {
+      console.warn('[DownloadsView] context-menu item has no resource_id', v);
+      setContextMenu(null);
+      return;
+    }
     const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-    const rid = (v as any).resource_id || v.id;
+    // Cross-tab navigation can't carry router state, so the new tab will
+    // re-fetch from the network — same behavior as a hard refresh.
     window.open(`${teamPath}/resources/file/${rid}`, '_blank');
     setContextMenu(null);
   }, [contextMenu, selectedTeamId]);

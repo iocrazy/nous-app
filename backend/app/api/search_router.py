@@ -42,9 +42,54 @@ async def _fetch_user_media_ids(user_id: str) -> List[int]:
     return [int(r["media_id"]) for r in (result.data or []) if r.get("media_id")]
 
 
+async def _fetch_user_resources_by_media_id(
+    user_id: str,
+    media_ids: List[int],
+) -> Dict[int, Dict[str, Any]]:
+    """Return a ``{media_id: {resource_id, ai_status_fields}}`` map.
+
+    Search hydration needs more than ``parsed_media`` columns:
+      * ``resource_id`` so the card click can navigate to the right
+        ``/resources/file/<id>`` URL (search hits without it would
+        fall back to ``parsed_media.id`` and 404 on detail load).
+      * AI status fields (``transcript_status`` / ``summary_status`` /
+        ``visual_analysis_status``) so the card's AI dot icons reflect
+        the per-user processing state instead of always rendering grey.
+
+    Empty ``media_ids`` short-circuits to avoid an unnecessary query.
+    """
+    if not media_ids:
+        return {}
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("resources")
+        .select(
+            "id, media_id, transcript_status, summary_status, visual_analysis_status"
+        )
+        .eq("creator_id", user_id)
+        .eq("source_type", "web")
+        .eq("is_trashed", False)
+        .in_("media_id", media_ids)
+        .execute()
+    )
+    out: Dict[int, Dict[str, Any]] = {}
+    for row in result.data or []:
+        mid = row.get("media_id")
+        if mid is None:
+            continue
+        out[int(mid)] = {
+            "resource_id": str(row["id"]) if row.get("id") is not None else None,
+            "transcript_status": row.get("transcript_status"),
+            "summary_status": row.get("summary_status"),
+            "visual_analysis_status": row.get("visual_analysis_status"),
+        }
+    return out
+
+
 async def _hydrate_media_by_platform_ids(
     platform_ids: List[str],
     user_media_ids: Optional[List[int]] = None,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch card-view parsed_media rows for a list of platform_ids.
 
@@ -105,6 +150,25 @@ async def _hydrate_media_by_platform_ids(
         )
         result = await query.execute()
         rows = result.data or []
+    # Merge per-user resource_id + AI status onto each hit so the card
+    # click navigates to the correct /resources/file/<resource_id> URL
+    # and the AI dot icons reflect real state. Search rows without a
+    # matching resource (e.g., from a non-scoped ranker) keep the bare
+    # parsed_media projection.
+    if user_id:
+        media_ids_for_hydration = [
+            int(r["id"]) for r in rows if r.get("id") is not None
+        ]
+        resource_map = await _fetch_user_resources_by_media_id(
+            user_id, media_ids_for_hydration
+        )
+        for row in rows:
+            mid = row.get("id")
+            if mid is None:
+                continue
+            extra = resource_map.get(int(mid))
+            if extra:
+                row.update(extra)
     by_pid = {r["platform_id"]: r for r in rows if r.get("platform_id")}
     # Preserve the ranking order from ``platform_ids`` — hits missing from the
     # DB (e.g., just deleted) are silently dropped.
@@ -141,7 +205,9 @@ async def semantic_search(
         # user_media_ids so we don't leak cross-user parsed_media rows.
         user_media_ids = await _fetch_user_media_ids(auth.user_id)
         videos = await _hydrate_media_by_platform_ids(
-            platform_ids, user_media_ids=user_media_ids
+            platform_ids,
+            user_media_ids=user_media_ids,
+            user_id=auth.user_id,
         )
         # Filter ranked results to only include hits the user actually owns.
         owned_pids = {v["platform_id"] for v in videos if v.get("platform_id")}
@@ -211,7 +277,9 @@ async def hybrid_search(
         # of a race between the ranker query and the hydration.
         user_media_ids = await _fetch_user_media_ids(auth.user_id)
         videos = await _hydrate_media_by_platform_ids(
-            platform_ids, user_media_ids=user_media_ids
+            platform_ids,
+            user_media_ids=user_media_ids,
+            user_id=auth.user_id,
         )
         return SearchResponse(
             results=[
@@ -442,6 +510,22 @@ async def text_search(
     # but cross-chunk order needs a final re-sort to match the contract.
     rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     rows = rows[: request.limit]
+
+    # Merge per-user resource_id + AI status onto each row so the card
+    # click navigates to the right /resources/file/<resource_id> URL and
+    # the AI dot icons reflect real state. See _hydrate_media_by_platform_ids
+    # for the same pattern on the semantic / hybrid endpoints.
+    media_ids_for_hydration = [int(r["id"]) for r in rows if r.get("id") is not None]
+    resource_map = await _fetch_user_resources_by_media_id(
+        auth.user_id, media_ids_for_hydration
+    )
+    for row in rows:
+        mid = row.get("id")
+        if mid is None:
+            continue
+        extra = resource_map.get(int(mid))
+        if extra:
+            row.update(extra)
 
     # Project every row into a slim SearchResultItem (for analytics /
     # backwards-compat callers) AND include the full rows in ``videos``.

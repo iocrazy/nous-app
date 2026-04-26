@@ -16,9 +16,12 @@ export const DEFAULT_PANEL_WIDTH = 560;
 interface UseDownloadDetailOptions {
   propResourceId?: string;
   propMediaId?: string;
+  /** Pre-fetched row from the navigating card. Lets the page paint a
+   *  skeleton immediately and survive transient fetch failures. */
+  preloaded?: Video;
 }
 
-export function useDownloadDetail({ propResourceId, propMediaId }: UseDownloadDetailOptions = {}) {
+export function useDownloadDetail({ propResourceId, propMediaId, preloaded }: UseDownloadDetailOptions = {}) {
   const { displayId, teamId } = useParams<{ displayId: string; teamId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -27,8 +30,13 @@ export function useDownloadDetail({ propResourceId, propMediaId }: UseDownloadDe
   // Support both: direct URL params (legacy /player/:displayId) and props (from ResourceDetailPage)
   const effectiveDisplayId = propMediaId || displayId;
 
-  const [video, setVideo] = useState<Video | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Seed video state from the preloaded card data so the page renders
+  // immediately. The fetchVideoByDisplayId call below replaces it with
+  // the authoritative row when ready; if it fails (network blip,
+  // permissions race), we keep the preloaded skeleton visible instead
+  // of falling into the "Failed to load" notFound state.
+  const [video, setVideo] = useState<Video | null>(preloaded ?? null);
+  const [isLoading, setIsLoading] = useState(!preloaded);
   const [notFound, setNotFound] = useState(false);
   const playerRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -104,17 +112,27 @@ export function useDownloadDetail({ propResourceId, propMediaId }: UseDownloadDe
   useEffect(() => {
     if (!effectiveDisplayId) return;
 
-    setIsLoading(true);
+    // If we already have a preloaded skeleton, keep it visible while
+    // we fetch — don't toggle isLoading to true and flash a spinner
+    // over content the user is already looking at.
+    const hasSkeleton = video !== null;
+    if (!hasSkeleton) setIsLoading(true);
     setNotFound(false);
 
     fetchVideoByDisplayId(effectiveDisplayId).then((data) => {
       if (data) {
         setVideo(data);
-      } else {
+      } else if (!hasSkeleton) {
+        // Only flip to "not found" when we have nothing to show.
+        // With a skeleton present, a transient fetch miss should
+        // surface the cached card chrome rather than a hard error.
         setNotFound(true);
       }
       setIsLoading(false);
     });
+    // ``video`` intentionally omitted — the effect should run on
+    // displayId changes only; ``hasSkeleton`` is captured at call time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveDisplayId]);
 
   // Realtime: auto-refresh when this parsed_media record is updated (e.g. download completes)
