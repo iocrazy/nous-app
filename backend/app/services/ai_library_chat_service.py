@@ -387,7 +387,15 @@ class AILibraryChatService:
                 detail=f"agent runner error: {result.get('error')}",
             )
 
-        # Persist the assistant turn.
+        # Persist the assistant turn. We fold the tool_calls trace into
+        # metadata_json so a fresh page-load (which refetches history)
+        # still renders the sub-task cards. Top-level ``tool_calls`` in
+        # the response stays for clients that want the raw payload.
+        asst_metadata: dict[str, Any] = {}
+        if run_id:
+            asst_metadata["run_id"] = str(run_id)
+        if tool_calls_trace:
+            asst_metadata["tool_calls"] = tool_calls_trace
         asst_resp = (
             await supabase.table("ai_messages")
             .insert(
@@ -398,7 +406,7 @@ class AILibraryChatService:
                     "agent_id": str(composed.agent_id),
                     "prompt_tokens": usage_snapshot["prompt_tokens"],
                     "completion_tokens": usage_snapshot["completion_tokens"],
-                    "metadata_json": {"run_id": str(run_id)} if run_id else {},
+                    "metadata_json": asst_metadata,
                 }
             )
             .execute()
