@@ -193,29 +193,22 @@ def update_statistics():
     Calculate and cache various statistics.
     Runs every 6 hours.
     """
-    logger.info("[Celery Beat] Starting statistics update...")
-
-    try:
-        from app.repositories.media_repository import MediaRepository
-
-        repo = MediaRepository()
-
-        # Get global statistics
-        stats = run_async(repo.get_statistics())
-
-        result = {
-            "status": "success",
-            "updated_at": datetime.now().isoformat(),
-            "statistics": stats,
-        }
-
-        logger.success(f"[Celery Beat] Statistics update complete: {stats}")
-
-        return result
-
-    except Exception as e:
-        logger.error(f"[Celery Beat] Statistics update failed: {e}")
-        return {"status": "failed", "error": str(e)}
+    # MediaRepository.get_statistics is per-user (requires user_id) since the
+    # resources-table refactor — there's no longer a "global statistics"
+    # rollup, and the result of this beat task was only ever logged, never
+    # stored or displayed. Calling it without args used to fail every 6h
+    # with a TypeError ("missing 1 required positional argument: 'user_id'")
+    # — 13 ERRORs in last 7d, all noise.
+    #
+    # No-op for now. The beat schedule will be removed in a follow-up. If
+    # global stats become useful again (e.g. an admin dashboard), the right
+    # implementation is per-user aggregation in a SQL view, not a Celery
+    # task that loops every user every 6h.
+    logger.debug("[Celery Beat] update_statistics is a no-op (deprecated)")
+    return {
+        "status": "skipped",
+        "reason": "deprecated — get_statistics is per-user; no global aggregation exists",
+    }
 
 
 @shared_task
@@ -615,7 +608,12 @@ def grant_daily_free_points():
                 user_id = team["owner_id"]
                 team_id = team["id"]
 
-                # Check if already granted today (prevent duplicates)
+                # Check if already granted today (prevent duplicates).
+                # ``maybe_single().execute()`` returns ``None`` (NOT an
+                # APIResponse with data=None) when the query matches zero
+                # rows — supabase-py quirk. Without the ``existing is None``
+                # guard this raises AttributeError, which is exactly the
+                # 6 ERRORs / 7d this beat task spammed.
                 existing = (
                     await supabase.table("daily_point_gifts")
                     .select("id")
@@ -624,7 +622,7 @@ def grant_daily_free_points():
                     .maybe_single()
                     .execute()
                 )
-                if existing.data:
+                if existing is not None and existing.data:
                     skipped += 1
                     continue
 
