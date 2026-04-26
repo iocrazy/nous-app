@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.services.workforce.agent_worker import run_one_task
@@ -80,6 +81,43 @@ class WorkforceScheduler:
         self._task: Optional[asyncio.Task[None]] = None
         self._stop_event = asyncio.Event()
         self._tick_count = 0
+        self._last_tick_at: Optional[datetime] = None
+        self._last_error: Optional[str] = None
+        self._started_at: Optional[datetime] = None
+
+    # ────────────────────────────────────────────────────────────
+    # Health surface (P milestone)
+    # ────────────────────────────────────────────────────────────
+
+    @property
+    def alive(self) -> bool:
+        """True iff the loop coroutine is scheduled and not done."""
+        return self._task is not None and not self._task.done()
+
+    def health_snapshot(self) -> dict[str, Any]:
+        """Lightweight self-report for the /workforce/healthz endpoint.
+
+        No I/O — just the in-memory counters / timestamps. Callers
+        decide whether the values mean ``healthy`` / ``degraded`` /
+        ``down``.
+        """
+        last = self._last_tick_at
+        seconds_since_last_tick: Optional[float] = None
+        if last is not None:
+            seconds_since_last_tick = max(
+                0.0, (datetime.now(timezone.utc) - last).total_seconds()
+            )
+        return {
+            "alive": self.alive,
+            "tick_count": self._tick_count,
+            "fast_tick_seconds": self.fast_tick_seconds,
+            "inbox_every_n_ticks": self.inbox_every_n_ticks,
+            "started_at": self._started_at.isoformat() if self._started_at else None,
+            "last_tick_at": last.isoformat() if last else None,
+            "seconds_since_last_tick": seconds_since_last_tick,
+            "last_error": self._last_error,
+            "pool_inflight": self.pool.inflight_count,
+        }
 
     # ────────────────────────────────────────────────────────────
     # Lifecycle
@@ -89,6 +127,7 @@ class WorkforceScheduler:
         if self._task is not None and not self._task.done():
             return
         self._stop_event.clear()
+        self._started_at = datetime.now(timezone.utc)
         self._task = asyncio.create_task(self._loop(), name="workforce-scheduler")
 
     async def stop(self, drain_timeout: float = 5.0) -> None:
@@ -122,8 +161,13 @@ class WorkforceScheduler:
                 self._tick_count += 1
                 try:
                     await self._tick()
+                    self._last_tick_at = datetime.now(timezone.utc)
+                    self._last_error = None
                 except Exception as err:
-                    # A failing tick must not break the loop.
+                    # A failing tick must not break the loop. Record the
+                    # error so /healthz can surface it without scraping
+                    # logs.
+                    self._last_error = f"{type(err).__name__}: {err}"[:240]
                     logger.exception(f"[workforce-scheduler] tick error: {err}")
                 # Sleep with bailout on stop signal.
                 try:
