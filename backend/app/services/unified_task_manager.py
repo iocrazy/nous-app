@@ -709,8 +709,6 @@ class UnifiedTaskManager:
         error_code: Optional[str] = None,
     ) -> None:
         """Fan-out results to all subscribers of a dedup'd task."""
-        from app.repositories.resources_repository import ResourcesRepository
-
         client = await self._get_client()
         result = await (
             client.table("unified_tasks")
@@ -730,93 +728,18 @@ class UnifiedTaskManager:
         if not subscribers:
             return
 
-        task_type = task.get("task_type", "")
-        media_id = task.get("media_id")
-        res_repo = ResourcesRepository()
-
-        for sub in subscribers:
-            resource_id = sub.get("resource_id")
-            if not resource_id:
-                continue
-            try:
-                if success and task_type == "download" and media_id:
-                    await self._copy_download_result_to_resource(
-                        res_repo, resource_id, media_id
-                    )
-                elif not success:
-                    await self._mark_resource_failed(res_repo, resource_id, task_type)
-            except Exception as e:
-                logger.error(
-                    f"[TaskManager] Failed to notify subscriber "
-                    f"resource={resource_id}: {e}"
-                )
+        # PR-C: download statuses live on parsed_media; the row was
+        # already updated by the download task itself. Subscribers used
+        # to receive a per-resource mirror of those statuses, but
+        # resources no longer carries the columns. Notification is now
+        # a no-op for download tasks — frontend reads parsed_media via
+        # the join. The hook is preserved so non-download task types
+        # can still post per-resource side-effects later.
 
         logger.info(
             f"[TaskManager] Notified {len(subscribers)} subscriber(s) "
             f"for task {task_id} (success={success})"
         )
-
-    async def _copy_download_result_to_resource(
-        self,
-        res_repo: Any,
-        resource_id: str,
-        media_id: str,
-    ) -> None:
-        """Copy download statuses and paths from parsed_media to a resource row."""
-        from app.repositories.media_repository import MediaRepository
-
-        media_repo = MediaRepository()
-        media = await media_repo.get_by_id(media_id)
-        if not media:
-            logger.warning(
-                f"[TaskManager] _copy_download_result: "
-                f"parsed_media {media_id} not found"
-            )
-            return
-
-        updates: Dict[str, Any] = {}
-        for status_field in (
-            "video_download_status",
-            "music_download_status",
-            "cover_download_status",
-            "image_download_status",
-        ):
-            value = media.get(status_field)
-            if value is not None:
-                updates[status_field] = value
-
-        if updates:
-            await res_repo.update_resource(resource_id, updates)
-            logger.debug(
-                f"[TaskManager] Copied download result to resource {resource_id} "
-                f"from media {media_id}"
-            )
-
-    async def _mark_resource_failed(
-        self,
-        res_repo: Any,
-        resource_id: str,
-        task_type: str,
-    ) -> None:
-        """Mark resource download statuses as failed."""
-        if task_type == "download":
-            statuses = {
-                "video_download_status": "failed",
-                "music_download_status": "failed",
-                "cover_download_status": "failed",
-                "image_download_status": "failed",
-            }
-        elif task_type in ("ai_extract", "ai_transcription", "ai_summary"):
-            statuses = {}
-        else:
-            statuses = {}
-
-        if statuses:
-            await res_repo.update_download_status(resource_id, statuses)
-            logger.debug(
-                f"[TaskManager] Marked resource {resource_id} as failed "
-                f"for task_type={task_type}"
-            )
 
     # ── Lock management ───────────────────────────────────────────────
 

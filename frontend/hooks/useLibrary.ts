@@ -153,9 +153,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       }
     } catch (err: any) {
       // Swallow AbortError — it means a newer load/filter change took over
-      // and the previous fetch was intentionally cancelled. Showing a red
-      // "Could not fetch real data" banner in that case is user-confusing
-      // because the next fetch is already in flight.
+      // and the previous fetch was intentionally cancelled.
       if (
         err?.name === 'AbortError' ||
         controller.signal.aborted ||
@@ -164,10 +162,10 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         return;
       }
       console.error("Failed to load library:", err);
-      setLibrary(MOCK_LIBRARY);
+      setLibrary([]);
       setHasMoreData(false);
       const errorMessage = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
-      setLibraryError(`Could not fetch real data (${errorMessage}). Using local cache.`);
+      setLibraryError(errorMessage);
     } finally {
       // Only clear loading if this request wasn't superseded by a newer one.
       if (!controller.signal.aborted) {

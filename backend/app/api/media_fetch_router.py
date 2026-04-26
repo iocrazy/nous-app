@@ -204,13 +204,15 @@ async def fetch_media_by_type(
                 existing_media=media,
             )
         else:
-            status_updates = {}
+            # PR-C: download statuses live on parsed_media. Read +
+            # write status on the canonical row.
+            pm_status_updates: dict = {}
             for t in request.types:
                 status_field = f"{t}_download_status"
-                if user_resource.get(status_field) == "skipped":
-                    status_updates[status_field] = "pending"
-            if status_updates:
-                await resources_repo.update_download_status(resource_id, status_updates)
+                if media.get(status_field) == "skipped":
+                    pm_status_updates[status_field] = "pending"
+            if pm_status_updates:
+                await repo.update(platform_id, pm_status_updates)
 
         original_url = media.get("original_url")
         dispatch_url = None

@@ -190,26 +190,6 @@ class ResourcesRepository:
             )
             return None
 
-    async def update_download_status(
-        self, resource_id: str, statuses: Dict[str, str]
-    ) -> Optional[Dict[str, Any]]:
-        """Update one or more download status fields on a resource.
-
-        Args:
-            resource_id: Resource ID.
-            statuses: Dict of status fields, e.g. {"video_download_status": "completed"}.
-        """
-        valid_fields = {
-            "video_download_status",
-            "music_download_status",
-            "cover_download_status",
-            "image_download_status",
-        }
-        data = {k: v for k, v in statuses.items() if k in valid_fields}
-        if not data:
-            return None
-        return await self.update_resource(resource_id, data)
-
     async def update_resource(
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:

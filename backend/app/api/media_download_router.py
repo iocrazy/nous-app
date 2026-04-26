@@ -86,6 +86,7 @@ async def retry_download(
 
         resource_id = None
         if media_id:
+            from app.repositories.media_repository import MediaRepository
             from app.repositories.resources_repository import ResourcesRepository
 
             res_repo = ResourcesRepository()
@@ -94,15 +95,17 @@ async def retry_download(
             )
             if user_resource:
                 resource_id = user_resource.get("id")
-                res_status_updates = {}
-                if request.video_bool:
-                    res_status_updates["video_download_status"] = "pending"
-                if request.cover_bool:
-                    res_status_updates["cover_download_status"] = "pending"
-                if res_status_updates:
-                    await res_repo.update_download_status(
-                        resource_id, res_status_updates
-                    )
+
+            # PR-C: download statuses live on parsed_media. Mark
+            # ``pending`` directly on the shared row instead of mirroring
+            # to resources.
+            pm_status_updates: dict = {}
+            if request.video_bool:
+                pm_status_updates["video_download_status"] = "pending"
+            if request.cover_bool:
+                pm_status_updates["cover_download_status"] = "pending"
+            if pm_status_updates:
+                await MediaRepository().update(platform_id, pm_status_updates)
 
         dispatch_result = await _dedup_and_dispatch(
             platform_id=platform_id,
