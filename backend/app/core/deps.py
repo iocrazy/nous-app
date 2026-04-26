@@ -243,7 +243,13 @@ async def _validate_bearer_token(authorization: str) -> AuthContext:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"JWT 验证失败: {e}")
+        # Malformed / expired client tokens are user-input errors, not
+        # server bugs — they're handled by the 401 response. Logging
+        # them at ERROR pollutes the dashboard and triggers ops alerts
+        # for what is just "user logged out an hour ago and their cached
+        # tab tried again". WARNING is the right level: visible in logs
+        # for diagnosis, doesn't trip alerting thresholds.
+        logger.warning(f"JWT 验证失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=f"认证失败: {str(e)}"
         )
