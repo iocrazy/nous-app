@@ -312,11 +312,9 @@ export interface Resource {
   notes: string | null;
   url: string | null;
   rating: number; // 0-5
-  // Per-user download status
-  video_download_status: string | null;
-  music_download_status: string | null;
-  cover_download_status: string | null;
-  image_download_status: string | null;
+  // Download status fields used to live here as mirrors of parsed_media;
+  // PR-C dropped the columns. Read these via the parsed_media join
+  // (``resource.parsed_media?.video_download_status`` etc.) when needed.
   // AI Processing Status (moved from ParsedMedia to Resource)
   transcript_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
   summary_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
