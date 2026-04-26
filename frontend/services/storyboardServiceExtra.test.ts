@@ -6,7 +6,6 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  chatWithAI,
   createCharacter,
   deleteCharacter,
   exportProject,
@@ -149,25 +148,6 @@ describe('project update', () => {
     expect(result.name).toBe('Renamed');
     const init = spy.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe('PATCH');
-  });
-});
-
-describe('AI chat', () => {
-  it('chatWithAI sends message + frame_id + skill_id', async () => {
-    const spy = stubJson({
-      data: { response: 'ok', actions: [{ type: 'insertFrame' }] },
-    });
-    const result = await chatWithAI('p1', 'hello', 'frame-5', 'skill-x');
-    expect(result.response).toBe('ok');
-    expect(result.actions).toHaveLength(1);
-    const body = JSON.parse(
-      (spy.mock.calls[0][1] as RequestInit).body as string,
-    );
-    expect(body).toEqual({
-      message: 'hello',
-      frame_id: 'frame-5',
-      skill_id: 'skill-x',
-    });
   });
 });
 

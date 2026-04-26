@@ -12,7 +12,7 @@ can poll via the unified task manager.
 """
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -48,15 +48,6 @@ class DetectScenesRequest(BaseModel):
     project_id: str
     video_url: str = Field(..., min_length=1, max_length=2000)
     threshold: float = Field(default=0.3, ge=0.0, le=1.0)
-
-
-class ChatRequest(BaseModel):
-    """Request body for storyboard assistant chat."""
-
-    project_id: str
-    message: str = Field(..., min_length=1, max_length=4000)
-    selected_frame_id: Optional[str] = None
-    skill_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -320,40 +311,8 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
         )
 
 
-# ---------------------------------------------------------------------------
-# POST /chat
-# ---------------------------------------------------------------------------
-
-
-@router.post("/chat")
-async def chat(auth: AuthDep, body: ChatRequest) -> Dict[str, Any]:
-    """
-    Send a conversational message to the storyboard AI assistant.
-
-    This endpoint is synchronous (waits for LLM response) because chat
-    latency is typically low enough to not require a task queue.
-    """
-    try:
-        sb_svc = StoryboardService()
-        await sb_svc.verify_project_access(body.project_id, auth.user_id)
-
-        from uuid import UUID as _UUID
-
-        from app.services.storyboard_ai_service import StoryboardAIService
-
-        svc = StoryboardAIService()
-        try:
-            user_uuid = _UUID(str(auth.user_id))
-        except (TypeError, ValueError):
-            user_uuid = None
-        result = await svc.chat(
-            project_id=body.project_id,
-            message=body.message,
-            selected_frame_id=body.selected_frame_id,
-            skill_id=body.skill_id,
-            user_id=user_uuid,
-        )
-        return {"success": True, "data": result}
-    except Exception as exc:
-        logger.error("[SBAi] chat project=%s failed: %s", body.project_id, exc)
-        raise HTTPException(status_code=500, detail=f"Chat request failed: {exc}")
+# Chat moved to /api/v1/ai-library/sessions/* (AgentRunner pipeline). The
+# legacy POST /chat endpoint + StoryboardAIService.chat() were deleted in
+# the AIChatDrawer migration — Storyboard now uses the same agent runner
+# as ScriptEditor, picking up Skill / Delegate / agent_runs telemetry for
+# free.

@@ -286,22 +286,6 @@ export async function splitScript(
   return { task_id: body.task_id };
 }
 
-export async function chatWithAI(
-  projectId: string,
-  message: string,
-  frameId?: string,
-  skillId?: string,
-): Promise<{ response: string; actions: unknown[] }> {
-  const result = await apiClient.post<
-    Envelope<{ response: string; actions: unknown[] }>
-  >(`/api/v1/storyboard/projects/${projectId}/chat`, {
-    message,
-    frame_id: frameId,
-    skill_id: skillId,
-  });
-  return result.data;
-}
-
 // ─── Image Upload ─────────────────────────────────────────────────────────────
 
 export interface UploadImageResult {
