@@ -48,12 +48,11 @@ def main() -> int:
         post_pub = _list_realtime_pub(DB_URL)
 
         new = sorted(set(post_schemas) - set(pre_schemas))
-        if new == ["dbos"]:
-            print(f"PASS dbos schema isolated; new schemas: {new}")
-        elif "dbos" in new and len(new) == 1:
-            print(f"PASS only dbos schema added: {new}")
+        already = "dbos" in pre_schemas
+        if new == ["dbos"] or (not new and already):
+            print(f"PASS dbos schema isolated (delta={new}, pre-existing={already})")
         else:
-            print(f"FAIL unexpected schema delta: {new}")
+            print(f"FAIL unexpected schema delta: {new} (pre-existing={already})")
             fails.append("#2 schema isolation")
 
         if post_pub == pre_pub:
@@ -86,6 +85,28 @@ def main() -> int:
         else:
             print(f"FAIL workflow returned: {out!r}")
             fails.append("#6 workflow call")
+
+        section("PoC #9: fan-out — parent starts 3 children, awaits all")
+
+        @DBOS.step()
+        def square_step(n: int) -> int:
+            return n * n
+
+        @DBOS.workflow()
+        def child_workflow(n: int) -> int:
+            return square_step(n)
+
+        @DBOS.workflow()
+        def parent_workflow(numbers: list[int]) -> list[int]:
+            handles = [DBOS.start_workflow(child_workflow, n) for n in numbers]
+            return [h.get_result() for h in handles]
+
+        results = parent_workflow([2, 3, 5])
+        if results == [4, 9, 25]:
+            print(f"PASS fan-out results: {results}")
+        else:
+            print(f"FAIL fan-out got: {results}")
+            fails.append("#9 fan-out")
 
     finally:
         try:
