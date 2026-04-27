@@ -87,16 +87,16 @@ docker-compose up -d --force-recreate mediahub celery-worker celery-beat
 
 ### Check container logs
 ```bash
-docker logs mediahub
-docker logs mediahub-celery-worker
+docker logs mediahub-app-backend
+docker logs mediahub-app-celery-worker
 ```
 
 ### Check container health
 ```bash
-docker inspect mediahub | grep -A 10 Health
+docker inspect mediahub-app-backend | grep -A 10 Health
 ```
 
 ### Enter container shell
 ```bash
-docker exec -it mediahub /bin/sh
+docker exec -it mediahub-app-backend /bin/sh
 ```

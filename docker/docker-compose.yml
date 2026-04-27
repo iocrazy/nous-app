@@ -8,7 +8,7 @@ services:
   # Redis - Message queue and result storage
   redis:
     image: redis:7-alpine
-    container_name: mediahub-redis
+    container_name: mediahub-app-redis
     restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -24,7 +24,7 @@ services:
   # MediaHub Main Service (FastAPI)
   mediahub:
     image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
-    container_name: mediahub
+    container_name: mediahub-app-backend
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
@@ -55,7 +55,7 @@ services:
   # Celery Worker - Task executor (downloads, parsing, transcription, analysis)
   celery-worker:
     image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
-    container_name: mediahub-celery-worker
+    container_name: mediahub-app-celery-worker
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
@@ -93,7 +93,7 @@ services:
   # Celery Beat - Scheduled task scheduler
   celery-beat:
     image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
-    container_name: mediahub-celery-beat
+    container_name: mediahub-app-celery-beat
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
@@ -117,7 +117,7 @@ services:
   # Nginx - HLS streaming server
   nginx:
     image: nginx:alpine
-    container_name: mediahub-nginx
+    container_name: mediahub-app-nginx
     restart: unless-stopped
     ports:
       - "8081:80"
