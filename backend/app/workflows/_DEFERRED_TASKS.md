@@ -15,7 +15,7 @@ PR-D3 sequence can pick them up without re-investigating each.
 | `upload` | (no dedicated celery task — file uploads handled in handler) | Probably skip — already synchronous in handlers. |
 | `transcode` | TranscodeService (in transcode_tasks.py) | 427-line file with Redis pub/sub progress reporting + multi-stage retry. Port carefully in PR-D3a — needs end-to-end test against a real ResourceVersion. |
 | `ai_extract` (analyze_l1) | VisualAnalysisService + EmbeddingService | ✅ ported — `app/workflows/analyze_l1.py`. analyze_l2 + batch_analyze + analyze_pending are wrappers around the same service; port pattern identical, add when needed. |
-| `script_outline_gen` | script_ai_service | Already an async service call. PR-D3c — easy. |
+| `script_outline_gen` | script_ai_service | ✅ ported — `app/workflows/script_outline.py`. LLM call + chapter-node persistence as two steps. |
 
 ## Sized: medium (multi-step, internal state)
 

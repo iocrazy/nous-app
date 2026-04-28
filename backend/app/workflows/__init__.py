@@ -14,6 +14,7 @@ from app.workflows.ai_summary import ai_summary_workflow  # noqa: F401
 from app.workflows.ai_transcription import ai_transcription_workflow  # noqa: F401
 from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
 from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
+from app.workflows.script_outline import script_outline_workflow  # noqa: F401
 
 __all__ = [
     "execute_issue",
@@ -21,4 +22,5 @@ __all__ = [
     "ai_transcription_workflow",
     "thumbnail_workflow",
     "analyze_l1_workflow",
+    "script_outline_workflow",
 ]
