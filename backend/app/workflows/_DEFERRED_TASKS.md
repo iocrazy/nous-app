@@ -23,7 +23,7 @@ PR-D3 sequence can pick them up without re-investigating each.
 |---|---|
 | `download` (download_unified_task) | Douyin vs yt-dlp branching; extract by media_type. ~200 LOC port. PR-D3a (or split D3a-1 and D3a-2). |
 | `storyboard_image_gen` / `storyboard_video_gen` / `storyboard_script_split` / `storyboard_video_analysis` / `storyboard_scene_detect` / `storyboard_export` | Form a sub-workflow chain. PR-D3b — port as a single `storyboard_pipeline_workflow` with 6 steps. |
-| `agent_runs_sweeper` | Scheduled job; should stay celery-beat OR use DBOS `@scheduled_workflow`. Decide in PR-D3c. |
+| `agent_runs_sweeper` | ✅ ported — `app/workflows/agent_runs_sweeper.py`. `@DBOS.scheduled('* * * * *')`; advisory lock dropped (DBOS dedup via deterministic workflow_id). Celery-beat schedule entry should be removed in D3d. |
 
 ## Sized: complex (touches more state, FYI)
 
