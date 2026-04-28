@@ -13,7 +13,7 @@ PR-D3 sequence can pick them up without re-investigating each.
 |---|---|---|
 | `parse` (parse_single_link_task) | (multiple — DouyinParser, YtDlpExtractor, etc) | 1033-line task file but the task body itself is mostly orchestration; extract the body into a callable + DBOS-wrap. PR-D3a candidate. |
 | `upload` | (no dedicated celery task — file uploads handled in handler) | Probably skip — already synchronous in handlers. |
-| `transcode` | TranscodeService (in transcode_tasks.py) | 427-line file with Redis pub/sub progress reporting + multi-stage retry. Port carefully in PR-D3a — needs end-to-end test against a real ResourceVersion. |
+| `transcode` | TranscodeService (in transcode_tasks.py) | ✅ ported — `app/workflows/transcode.py`. ~75% of the legacy 427 LOC was unified_task_manager glue + Celery retry boilerplate that DBOS handles natively. Redis pub/sub progress callback preserved. **End-to-end test against a real ResourceVersion still TODO before flipping `dbos_workflow_routing` to `'shadow'` then `'dbos'`.** |
 | `ai_extract` (analyze_l1) | VisualAnalysisService + EmbeddingService | ✅ ported — `app/workflows/analyze_l1.py`. analyze_l2 + batch_analyze + analyze_pending are wrappers around the same service; port pattern identical, add when needed. |
 | `script_outline_gen` | script_ai_service | ✅ ported — `app/workflows/script_outline.py`. LLM call + chapter-node persistence as two steps. |
 
