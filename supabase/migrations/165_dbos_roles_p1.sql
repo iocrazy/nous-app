@@ -46,9 +46,18 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO mediahub_dbos;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT ON TABLES TO mediahub_dbos;
 
--- DBOS metadata lives in a separate database (postgres_dbos_sys), so we do
--- NOT grant write on public.* here. Future migrations will grant per-table
--- write access for tables DBOS workflows directly mutate (e.g. issues).
+-- DBOS application-side state (workflow_status / operation_outputs / etc.)
+-- lives in a `dbos` schema in the application database (postgres). DBOS
+-- creates that schema on first launch and needs CREATE on the database to
+-- do so. Discovered during PoC #7 on 2026-04-28: without this grant,
+-- `DBOS.launch()` fails with `permission denied for database postgres`
+-- when issuing `CREATE SCHEMA "dbos"`.
+GRANT CREATE ON DATABASE postgres TO mediahub_dbos;
+
+-- DBOS system metadata lives in a separate database (postgres_dbos_sys),
+-- created automatically via the CREATEDB privilege above. We do NOT grant
+-- write on public.* here. Future migrations will grant per-table write
+-- access for tables DBOS workflows directly mutate (e.g. issues).
 
 -- =============================================================================
 -- Role 2: mediahub_app
