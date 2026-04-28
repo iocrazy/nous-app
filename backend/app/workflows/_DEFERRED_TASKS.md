@@ -32,25 +32,28 @@ PR-D3 sequence can pick them up without re-investigating each.
 | `memory_tasks` | ✅ ported — `app/workflows/write_memory.py`. Note: file is actually a single task with two phases (load messages + extract+persist), not multiple sub-tasks as the original ledger note suggested. |
 | `signals` | Celery signal hooks for orchestrator dedup; redesign for DBOS native dedup (workflow_id) before porting. PR-D3d candidate. |
 
-## Scheduled jobs (`scheduled_tasks.py`) — bucket for D3c2
+## Scheduled jobs (`scheduled_tasks.py`) — ✅ D3c2 done
 
-These all run on celery-beat today. Each becomes a `@DBOS.scheduled(<cron>)`
-workflow. None need design work — they delegate to existing services and
-the cron expressions live in `backend/app/celery_app.py` `beat_schedule`.
+11 of 12 ported as @DBOS.scheduled (update_statistics is deprecated
+no-op, dropped). Files:
 
-| function | Notes |
-|---|---|
-| `cleanup_temp_files` | Pure FS cleanup, no DB writes; trivial port. |
-| `retry_failed_downloads` | ⚠️ has the user_id=None orphan bug (CLAUDE.md memory). Source-side `WHERE user_id IS NOT NULL` filter must be preserved on port. |
-| `update_statistics` | Aggregation; delegate to existing analytics service. |
-| `update_system_status` | Health snapshot writer. |
-| `reset_monthly_quotas` | Run on cron; safe to memoize via deterministic workflow_id. |
-| `reap_stuck_pending_tasks` | Touches unified_tasks; coordinate with D3d signals redesign so we don't double-reap. |
-| `cleanup_old_unified_tasks` | Trivial GC. |
-| `health_check` | Trivial. |
-| `recover_stale_orchestrator_locks` | Will be obsolete once DBOS dedup replaces orchestrator locks (D3d). |
-| `grant_daily_free_points` / `reclaim_daily_free_points` | Daily cron pair; quota mutations — write integration test before port. |
-| `cleanup_trashed_resources` | Soft-delete sweeper; delegate to ResourceRepository. |
+| group | file | jobs |
+|---|---|---|
+| cleanup | `app/workflows/scheduled_cleanup.py` | cleanup_temp_files / cleanup_trashed_resources / cleanup_old_unified_tasks |
+| health | `app/workflows/scheduled_health.py` | update_system_status (every 30s, 6-field cron) / health_check |
+| recovery | `app/workflows/scheduled_recovery.py` | retry_failed_downloads / reap_stuck_pending_tasks / recover_stale_orchestrator_locks |
+| quotas | `app/workflows/scheduled_quotas.py` | reset_monthly_quotas / grant_daily_free_points / reclaim_daily_free_points |
+
+Notable callouts honored on port:
+- `retry_failed_downloads` keeps the `if not user_id: skipped_orphan += 1; continue` filter from the CLAUDE.md regression notes.
+- `update_system_status` preserves the 30s cadence via 6-field cron `*/30 * * * * *` (DBOS croniter is initialized with `second_at_beginning=True`).
+- `recover_stale_orchestrator_locks` ported as transitional; will be deleted in D3d once DBOS workflow_id replaces the orchestrator dedup lock model.
+- `grant_daily_free_points` keeps the `existing is None and existing.data` guard for the supabase-py `maybe_single()` quirk.
+
+D3d follow-ups when removing celery-beat:
+1. delete `backend/app/celery_app.py` `beat_schedule` entries for ported jobs
+2. delete `recover_stale_orchestrator_locks` workflow + step (obsolete)
+3. add integration test for grant/reclaim daily_free_points pair before flipping celery-beat off (real money proxy)
 
 ## Pattern for ports
 
