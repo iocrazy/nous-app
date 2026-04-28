@@ -376,17 +376,19 @@ class AgentRunner:
 
     @staticmethod
     def _dispatch_side_effect(name: str, result: HookResult) -> None:
-        """Fire HookResult.side_effect via Celery .delay() — non-blocking.
+        """Fire HookResult.side_effect — non-blocking.
 
-        side_effect is expected to be a Celery task signature (e.g.
-        ``task.s(arg1=...)``). We call ``.delay()`` to enqueue. Failure
-        to enqueue (broker down, signature malformed) is logged and
-        swallowed — the run continues.
+        side_effect is a zero-arg callable. Hook owners build a closure
+        that does whatever dispatch they want — Celery `.delay()`,
+        `start_workflow_routed("...", ...)`, or both for shadow mode.
+        AgentRunner just invokes it and continues. Dispatch failures
+        (broker down, DBOS not enabled, signature malformed) are logged
+        and swallowed — the run continues.
         """
         if result.side_effect is None:
             return
         try:
-            result.side_effect.delay()
+            result.side_effect()
         except Exception:  # noqa: BLE001
             logger.exception(
                 "[hook:%s] side_effect dispatch failed; run continues", name
