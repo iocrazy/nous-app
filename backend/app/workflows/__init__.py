@@ -39,6 +39,16 @@ from app.workflows.scheduled_quotas import (  # noqa: F401
 from app.workflows.transcode import transcode_workflow  # noqa: F401
 from app.workflows.download import download_workflow  # noqa: F401
 from app.workflows.parse import parse_workflow  # noqa: F401
+from app.workflows.storyboard import (  # noqa: F401
+    storyboard_annotation_workflow,
+    storyboard_export_workflow,
+    storyboard_image_batch_workflow,
+    storyboard_image_grid_split_workflow,
+    storyboard_image_workflow,
+    storyboard_script_split_workflow,
+    storyboard_video_analysis_workflow,
+    storyboard_video_workflow,
+)
 
 __all__ = [
     "execute_issue",
@@ -64,4 +74,13 @@ __all__ = [
     "transcode_workflow",
     "download_workflow",
     "parse_workflow",
+    # storyboard bucket
+    "storyboard_image_workflow",
+    "storyboard_image_batch_workflow",
+    "storyboard_video_workflow",
+    "storyboard_script_split_workflow",
+    "storyboard_video_analysis_workflow",
+    "storyboard_export_workflow",
+    "storyboard_image_grid_split_workflow",
+    "storyboard_annotation_workflow",
 ]
