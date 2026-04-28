@@ -32,27 +32,35 @@ class IssueRepository:
 
         payload should NOT contain `id`, `issue_number`, `identifier`,
         `created_at`, or `updated_at` — the DB sets those.
-        """
-        client = await self._client()
-        # Step 1: allocate identifier
-        rpc_result = await client.rpc("issue_next_identifier", {}).execute()
-        if not rpc_result.data:
-            raise RuntimeError("issue_next_identifier returned empty result")
-        first = rpc_result.data[0] if isinstance(rpc_result.data, list) else rpc_result.data
-        issue_number = first["issue_number"]
-        identifier = first["identifier"]
 
-        # Step 2: insert with allocated identifier
-        row = {
-            **payload,
-            "issue_number": issue_number,
-            "identifier": identifier,
-        }
-        result = await client.table(self.TABLE_NAME).insert(row).execute()
+        Uses the `issue_create_atomic(payload jsonb)` stored procedure
+        (migration 173) which performs the counter UPDATE + INSERT in a
+        single PG transaction. If INSERT fails (RLS / CHECK / FK), the
+        counter rolls back too — no MH-N gap.
+        """
+        # UUIDs (and other non-JSON-native types) need to be string-coerced
+        # before being sent through PostgREST RPC payload.
+        from uuid import UUID
+        sanitized: dict[str, Any] = {}
+        for k, v in payload.items():
+            sanitized[k] = str(v) if isinstance(v, UUID) else v
+
+        client = await self._client()
+        result = await client.rpc(
+            "issue_create_atomic",
+            {"payload": sanitized},
+        ).execute()
         if not result.data:
-            raise RuntimeError(f"Insert into {self.TABLE_NAME} returned no rows")
-        logger.info("Created issue %s (id=%s)", identifier, result.data[0].get("id"))
-        return result.data[0]
+            raise RuntimeError("issue_create_atomic returned empty result")
+        # Postgres function returns issues row; supabase-py wraps it as either
+        # the row dict directly OR a single-element list, depending on version.
+        row = result.data if isinstance(result.data, dict) else (
+            result.data[0] if isinstance(result.data, list) and result.data else None
+        )
+        if not row:
+            raise RuntimeError("issue_create_atomic returned malformed result")
+        logger.info("Created issue %s (id=%s)", row.get("identifier"), row.get("id"))
+        return row
 
     async def get_by_id(self, issue_id: int) -> Optional[dict[str, Any]]:
         client = await self._client()
