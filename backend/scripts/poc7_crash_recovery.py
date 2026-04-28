@@ -1,5 +1,13 @@
 """PoC #7 — DBOS crash recovery / step memoization.
 
+⚠ ONE-SHOT DEV SCRIPT (committed for reference, not for prod use)
+   - Dependencies: backend/.env.local with DBOS_DATABASE_URL pointing at a
+     reachable NAS dev PG (typically via Termius SSH local-forward to
+     127.0.0.1:55433). See docs/dbos-fallback-options.md + Notion Q&A
+     35075c5fd44f81ba932af0524e9defb4 for the SSH tunnel rationale.
+   - Result was already captured in design doc PoC #7 section (PASS).
+   - Re-run only if you are re-validating DBOS upgrades or reproducing a bug.
+
 Verifies: a workflow that crashes mid-step is replayed on the next launch with
 completed steps memoized (not re-executed) and the in-flight step retried.
 

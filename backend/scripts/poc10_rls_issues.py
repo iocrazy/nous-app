@@ -1,5 +1,10 @@
 """PoC #10 — issues 表 6 条 RLS policy 草稿验证。
 
+⚠ ONE-SHOT DEV SCRIPT (committed for reference, not for prod use)
+   - Creates and drops a temporary `_poc_issues` table on NAS dev each run.
+   - The verified policies were promoted to migration 166 (issues table real).
+   - Re-run only if you need to retest a different RLS shape.
+
 Creates `_poc_issues` (a draft of the future issues table) on NAS dev with the 6
 policies from design doc P10, runs an access matrix, then drops the table.
 

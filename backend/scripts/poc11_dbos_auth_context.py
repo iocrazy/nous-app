@@ -1,5 +1,11 @@
 """PoC #11 — DBOS step 内 supabase-py auth 上下文工作模式验证。
 
+⚠ ONE-SHOT DEV SCRIPT (committed for reference, not for prod use)
+   - Creates and drops `_poc11_issues` on NAS dev.
+   - Demonstrates the canonical "handler validates user → workflow uses
+     service_role to bypass RLS" pattern that production DBOS workflows
+     should follow. See design doc PoC #11 section.
+
 设计文档 P10/P11 工作模式：
     1) FastAPI handler 拿到 user JWT → 校验 user 有权创建该资源 → 调 DBOS.start_workflow(...)
     2) DBOS workflow 内 step 用 service_role HTTP 客户端调 PostgREST → bypass RLS

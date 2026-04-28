@@ -1,5 +1,11 @@
 """PoC #8 — DBOS workflow doing a real LLM summary call against NAS dev.
 
+⚠ ONE-SHOT DEV SCRIPT (committed for reference, not for prod use)
+   - Hardcoded parsed_media id + USER_ID; ran successfully once (2026-04-28).
+   - Reads Doubao LLM credentials from user_settings.settings_json on NAS dev.
+   - Mutates parsed_media.ai_rewrite_text — running it overwrites the row.
+   - Re-run only if validating DBOS upgrades, LLM provider change, or repro.
+
 Workflow:
     step1 load_transcript  — fetch resource_transcripts.full_text via parsed_media.id
     step2 call_llm         — Doubao (OpenAI-compatible) summarize transcript

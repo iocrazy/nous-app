@@ -1,5 +1,11 @@
 """PR-D1 verify — sanity-test issues schema, atomic counter, RLS, FK back-refs.
 
+⚠ DEV-ONLY VERIFICATION SCRIPT (safe to re-run on NAS dev)
+   - Idempotent: deletes test rows + resets counter at start and end.
+   - Requires NAS dev SSH tunnel via Termius (see Notion Q&A
+     35075c5fd44f81ba932af0524e9defb4) so 127.0.0.1:55433 reaches PG.
+   - Use this whenever you change migration 166-168 to confirm nothing broke.
+
 Run from backend/:
     uv run python scripts/pr_d1_verify.py
 """
