@@ -11,7 +11,7 @@ PR-D3 sequence can pick them up without re-investigating each.
 
 | task_type | Service to delegate to | Notes |
 |---|---|---|
-| `parse` (parse_single_link_task) | (multiple — DouyinParser, YtDlpExtractor, etc) | 1033-line task file but the task body itself is mostly orchestration; extract the body into a callable + DBOS-wrap. PR-D3a candidate. |
+| `parse` (parse_single_link_task) | (multiple — DouyinParser, YtDlpExtractor, etc) | ✅ ported — `app/workflows/parse.py`. Helpers stay in `app/tasks/parse_tasks.py` (touched would balloon the diff); workflow wraps them in 7 steps. Both downstream dispatches (`download`, `ai_extract`) now go through `start_workflow_routed` so the routing table controls per-key cutover. parse_batch_links_task and parse_media_task (yt-dlp variant) NOT yet ported — separate D3a-2 if needed. **End-to-end test (a) Douyin URL parse→download→analyze chain in shadow mode + (b) verify routing table flip works before canonical 'dbos' switch.** |
 | `upload` | (no dedicated celery task — file uploads handled in handler) | Probably skip — already synchronous in handlers. |
 | `transcode` | TranscodeService (in transcode_tasks.py) | ✅ ported — `app/workflows/transcode.py`. ~75% of the legacy 427 LOC was unified_task_manager glue + Celery retry boilerplate that DBOS handles natively. Redis pub/sub progress callback preserved. **End-to-end test against a real ResourceVersion still TODO before flipping `dbos_workflow_routing` to `'shadow'` then `'dbos'`.** |
 | `ai_extract` (analyze_l1) | VisualAnalysisService + EmbeddingService | ✅ ported — `app/workflows/analyze_l1.py`. analyze_l2 + batch_analyze + analyze_pending are wrappers around the same service; port pattern identical, add when needed. |
