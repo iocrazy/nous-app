@@ -1,0 +1,18 @@
+"""DBOS workflow registry.
+
+Importing this package registers every workflow with the DBOS singleton
+(decorators run at import time). The orchestrator imports this module once
+during FastAPI lifespan startup, before calling `DBOS.launch()`.
+"""
+from __future__ import annotations
+
+# Import workflow modules so their @DBOS.workflow decorators register.
+# Order doesn't matter as long as `dbos_orchestrator.init_dbos` ran first.
+
+from app.workflows.issue_lifecycle import execute_issue  # noqa: F401
+from app.workflows.ai_summary import ai_summary_workflow  # noqa: F401
+
+__all__ = [
+    "execute_issue",
+    "ai_summary_workflow",
+]

@@ -19,6 +19,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
 from app.middleware.request_logging import RequestLoggingMiddleware
+from app.services import dbos_orchestrator
 from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 
 # 在应用启动前设置日志
@@ -142,7 +143,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to start workforce scheduler: {e}")
 
+    # DBOS Orchestrator (PR-D2.2): instantiate the singleton, import workflow
+    # modules so their decorators register, then launch the worker pool.
+    # Failure here is non-fatal — backend keeps serving requests; only DBOS-
+    # routed task_types degrade. This is intentional for the Celery → DBOS
+    # migration window where 'celery' mode is the safe default.
+    try:
+        dbos_orchestrator.init_dbos()
+        if dbos_orchestrator.is_enabled():
+            import app.workflows  # noqa: F401 — registers @DBOS.workflow decorators
+
+            dbos_orchestrator.launch_dbos()
+            logger.info("DBOS orchestrator launched")
+    except Exception as e:
+        logger.error(f"DBOS orchestrator startup failed: {e!r} — continuing without DBOS")
+
     yield logger.success(f"{settings.APP_NAME}启动成功")
+
+    # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
+    try:
+        dbos_orchestrator.shutdown_dbos()
+    except Exception as e:
+        logger.warning(f"DBOS shutdown raised {e!r}")
 
     # Stop workforce scheduler before other teardown — drains in-flight
     # agent runs gracefully.

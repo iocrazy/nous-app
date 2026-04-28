@@ -117,6 +117,11 @@ api_router.include_router(router=task_manager_router, tags=["Task Manager"])
 
 api_router.include_router(router=teams_router, tags=["Teams"])
 
+# DBOS orchestrator health + introspection (PR-D2.2)
+from app.api.dbos_router import router as dbos_router  # noqa: E402
+
+api_router.include_router(router=dbos_router, tags=["DBOS"])
+
 api_router.include_router(router=invites_router, tags=["Invites"])
 
 api_router.include_router(router=video_collections_router, tags=["Video Collections"])

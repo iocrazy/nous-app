@@ -51,7 +51,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "gmssl>=3.2.2",
     "python-frontmatter>=1.1.0",
-    "dbos>=1.0",
+    "dbos>=2.19.0",  # PoC #1-12 validated on 2.19.0; pin major version
 ]
 
 [project.optional-dependencies]

@@ -1395,7 +1395,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "bleach", specifier = ">=6.3.0" },
     { name = "celery", extras = ["redis"], specifier = ">=5.4.0" },
-    { name = "dbos", specifier = ">=1.0" },
+    { name = "dbos", specifier = ">=2.19.0" },
     { name = "drissionpage", specifier = ">=4.1.0.18" },
     { name = "fastapi", specifier = ">=0.115.12" },
     { name = "faster-whisper", specifier = ">=1.1.0" },
