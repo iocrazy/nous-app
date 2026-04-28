@@ -21,7 +21,7 @@ PR-D3 sequence can pick them up without re-investigating each.
 
 | task_type | Notes |
 |---|---|
-| `download` (download_unified_task) | Douyin vs yt-dlp branching; extract by media_type. ~200 LOC port. PR-D3a (or split D3a-1 and D3a-2). |
+| `download` (download_unified_task) | ✅ ported — `app/workflows/download.py`. Five steps: cache check / strategy dispatch / finalize / log / chain followups. UnifiedProgressTracker reused with `unified_tracker=None` so it degrades to Redis-only mode (channel `task_progress:{user_id}`). Followup chain (thumbnail/transcode/AI) still goes through Celery dispatchers — D4 wiring will swap to start_workflow_routed once the dispatch site is touched. **End-to-end test against (a) fresh Douyin URL and (b) yt-dlp URL still TODO before flipping `dbos_workflow_routing` to `'shadow'`.** |
 | `storyboard_image_gen` / `storyboard_video_gen` / `storyboard_script_split` / `storyboard_video_analysis` / `storyboard_scene_detect` / `storyboard_export` | Form a sub-workflow chain. PR-D3b — port as a single `storyboard_pipeline_workflow` with 6 steps. |
 | `agent_runs_sweeper` | ✅ ported — `app/workflows/agent_runs_sweeper.py`. `@DBOS.scheduled('* * * * *')`; advisory lock dropped (DBOS dedup via deterministic workflow_id). Celery-beat schedule entry should be removed in D3d. |
 

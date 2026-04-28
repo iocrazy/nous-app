@@ -37,6 +37,7 @@ from app.workflows.scheduled_quotas import (  # noqa: F401
     reset_monthly_quotas_workflow,
 )
 from app.workflows.transcode import transcode_workflow  # noqa: F401
+from app.workflows.download import download_workflow  # noqa: F401
 
 __all__ = [
     "execute_issue",
@@ -60,4 +61,5 @@ __all__ = [
     "grant_daily_free_points_workflow",
     "reclaim_daily_free_points_workflow",
     "transcode_workflow",
+    "download_workflow",
 ]
