@@ -16,6 +16,7 @@ from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
 from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
 from app.workflows.script_outline import script_outline_workflow  # noqa: F401
 from app.workflows.agent_runs_sweeper import agent_runs_sweeper_workflow  # noqa: F401
+from app.workflows.write_memory import write_memory_workflow  # noqa: F401
 
 __all__ = [
     "execute_issue",
@@ -25,4 +26,5 @@ __all__ = [
     "analyze_l1_workflow",
     "script_outline_workflow",
     "agent_runs_sweeper_workflow",
+    "write_memory_workflow",
 ]

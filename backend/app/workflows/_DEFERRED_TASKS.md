@@ -29,7 +29,7 @@ PR-D3 sequence can pick them up without re-investigating each.
 
 | task_type | Notes |
 |---|---|
-| `memory_tasks` | Multiple sub-tasks; review batching strategy when porting. |
+| `memory_tasks` | ✅ ported — `app/workflows/write_memory.py`. Note: file is actually a single task with two phases (load messages + extract+persist), not multiple sub-tasks as the original ledger note suggested. |
 | `signals` | Celery signal hooks for orchestrator dedup; redesign for DBOS native dedup (workflow_id) before porting. PR-D3d candidate. |
 
 ## Pattern for ports
