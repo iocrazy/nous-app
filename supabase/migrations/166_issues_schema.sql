@@ -34,7 +34,9 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS public.issue_sequence (
   scope   TEXT PRIMARY KEY DEFAULT 'global',
   prefix  TEXT NOT NULL DEFAULT 'MH',
-  counter INTEGER NOT NULL DEFAULT 0
+  counter BIGINT NOT NULL DEFAULT 0  -- BIGINT not INTEGER: 2.1B INTEGER ceiling
+                                      -- is reachable under counter-burn DoS or
+                                      -- decade-scale growth.
 );
 
 INSERT INTO public.issue_sequence (scope, prefix, counter)
@@ -66,7 +68,7 @@ CREATE TABLE public.issues (
 
   -- Content
   title       TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 500),
-  description TEXT,
+  description TEXT CHECK (description IS NULL OR length(description) <= 50000),
 
   -- State machine — 7 statuses (Paperclip parity)
   status TEXT NOT NULL DEFAULT 'backlog' CHECK (status IN
@@ -206,15 +208,29 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.issue_next_identifier() FROM PUBLIC;
-GRANT  EXECUTE ON FUNCTION public.issue_next_identifier() TO authenticated, service_role, mediahub_app, mediahub_dbos;
+-- Counter-burn defense: do NOT grant to `authenticated` / `anon`. Any logged-in
+-- user could otherwise call this RPC in a tight loop and exhaust the
+-- human-readable MH-N space (jumps to MH-10000001 etc). End-user issue creation
+-- goes through a backend handler that calls this server-side via service_role.
+GRANT EXECUTE ON FUNCTION public.issue_next_identifier() TO service_role, mediahub_app, mediahub_dbos;
 
 
 -- =============================================================================
 -- Grants — base table privileges (RLS still applies for non-bypass roles)
 -- =============================================================================
-GRANT SELECT, INSERT, UPDATE        ON public.issues          TO authenticated, service_role, mediahub_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.issues          TO mediahub_dbos;  -- DBOS workflows mutate freely
-GRANT SELECT, UPDATE                ON public.issue_sequence  TO mediahub_dbos, service_role;
+-- IMPORTANT: only `service_role` has BYPASSRLS=true (verified PoC #11). Every
+-- other role here — including `mediahub_dbos` — is subject to RLS policies.
+-- DBOS workflow steps that need to write `public.issues` MUST `SET ROLE
+-- service_role` first (canonical pattern: see PoC #11 docstring). The grants
+-- below are necessary-but-not-sufficient — without service_role elevation,
+-- `mediahub_dbos` direct writes will silently affect 0 rows because no RLS
+-- policies grant DML to non-auth.uid() roles.
+GRANT SELECT, INSERT, UPDATE         ON public.issues          TO authenticated, service_role, mediahub_app;
+-- mediahub_dbos: SELECT/INSERT/UPDATE only (no DELETE — soft-delete via UPDATE
+-- hidden_at; hard delete is service_role responsibility). DELETE grant here
+-- would silently RLS-filter to 0 rows anyway.
+GRANT SELECT, INSERT, UPDATE         ON public.issues          TO mediahub_dbos;
+GRANT SELECT, UPDATE                 ON public.issue_sequence  TO mediahub_dbos, service_role;
 
 
 -- =============================================================================
@@ -239,13 +255,16 @@ CREATE POLICY issues_select ON public.issues
         WHERE p.id = public.issues.project_id
           AND (
             p.owner_id = auth.uid()
-            OR p.visibility = 'public'
             OR (p.team_id IS NOT NULL AND EXISTS (
               SELECT 1 FROM public.team_members tm2
               WHERE tm2.team_id = p.team_id AND tm2.user_id = auth.uid()
             ))
           )
       ))
+      -- NOTE: removed `p.visibility = 'public'` branch — `projects.visibility`
+      -- schema (migrations 047/058) only allows ('inherited','restricted'), so
+      -- 'public' is dead code. If a real public-discoverability tier is added
+      -- later, add it back with explicit semantics confirmed.
     )
     AND (
       hidden_at IS NULL
@@ -285,7 +304,11 @@ CREATE POLICY issues_update_general ON public.issues
 --    service_role bypasses RLS for hard delete (privacy compliance, etc.).
 --    No CREATE POLICY here = implicit deny for authenticated.
 
--- 6. ALL for service_role / mediahub_dbos — both bypass RLS naturally.
---    service_role has BYPASSRLS attribute; mediahub_dbos uses explicit
---    SET ROLE service_role inside DBOS step for cross-RLS writes
---    (see PoC #11 for verified pattern).
+-- 6. service_role bypass: BYPASSRLS=true on the role, so all CRUD works
+--    directly without policy match. Used by FastAPI handlers via the supabase
+--    admin client (`get_async_supabase_admin`) and by DBOS workflow steps
+--    that explicitly elevate via `SET ROLE service_role`.
+--    NOTE: mediahub_dbos is NOT BYPASSRLS (verified PoC #11). Direct DML
+--    from mediahub_dbos against `public.issues` will RLS-filter to 0 rows
+--    (no policy grants DML without auth.uid(), and DBOS context has none).
+--    See PoC #11 for the canonical "elevate to service_role" pattern.

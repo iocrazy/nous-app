@@ -109,6 +109,13 @@ class IssueRepository:
 
         Returns (items, total).
         """
+        # Defensive: validate user_id is a real UUID before interpolating into
+        # the PostgREST `or_` filter expression. PostgREST or-syntax uses commas,
+        # parens, and dots as separators — a malformed user_id (or one from an
+        # untrusted source in the future) could otherwise extend the filter.
+        from uuid import UUID
+        UUID(user_id)  # raises ValueError on bad input
+
         client = await self._client()
         # We always filter on creator/assignee/team-membership at the app layer
         # since we use service_role (which bypasses RLS). Mirror the policy logic.

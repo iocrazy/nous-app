@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -41,14 +42,17 @@ class IssueOriginKind(str, Enum):
 
 class IssueBase(BaseModel):
     title: str = Field(min_length=1, max_length=500)
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=50000)
     status: IssueStatus = IssueStatus.BACKLOG
     priority: IssuePriority = IssuePriority.MEDIUM
     team_id: Optional[int] = None
     project_id: Optional[int] = None
     parent_id: Optional[int] = None
-    assignee_user_id: Optional[str] = None
-    assignee_agent_id: Optional[str] = None
+    # UUID type (not str) so empty-string and malformed values fail at parse,
+    # not at the DB. Empty string would silently bypass the XOR check below
+    # because "" is falsy.
+    assignee_user_id: Optional[UUID] = None
+    assignee_agent_id: Optional[UUID] = None
     origin_kind: IssueOriginKind = IssueOriginKind.MANUAL
     origin_id: Optional[str] = None
     origin_fingerprint: str = "default"
@@ -56,7 +60,7 @@ class IssueBase(BaseModel):
 
     @model_validator(mode="after")
     def assignee_xor(self) -> "IssueBase":
-        if self.assignee_user_id and self.assignee_agent_id:
+        if self.assignee_user_id is not None and self.assignee_agent_id is not None:
             raise ValueError("assignee_user_id and assignee_agent_id are mutually exclusive")
         return self
 
@@ -68,10 +72,10 @@ class IssueCreate(IssueBase):
 class IssueUpdate(BaseModel):
     """PATCH payload — every field optional. Status changes go through dedicated endpoint."""
     title: Optional[str] = Field(default=None, min_length=1, max_length=500)
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=50000)
     priority: Optional[IssuePriority] = None
-    assignee_user_id: Optional[str] = None
-    assignee_agent_id: Optional[str] = None
+    assignee_user_id: Optional[UUID] = None
+    assignee_agent_id: Optional[UUID] = None
     project_id: Optional[int] = None
     team_id: Optional[int] = None
     billing_code: Optional[str] = None
@@ -79,7 +83,7 @@ class IssueUpdate(BaseModel):
 
     @model_validator(mode="after")
     def assignee_xor(self) -> "IssueUpdate":
-        if self.assignee_user_id and self.assignee_agent_id:
+        if self.assignee_user_id is not None and self.assignee_agent_id is not None:
             raise ValueError("assignee_user_id and assignee_agent_id are mutually exclusive")
         return self
 
@@ -94,8 +98,8 @@ class Issue(IssueBase):
     id: int
     issue_number: int
     identifier: str
-    created_by_user_id: Optional[str] = None
-    created_by_agent_id: Optional[str] = None
+    created_by_user_id: Optional[UUID] = None
+    created_by_agent_id: Optional[UUID] = None
     dbos_workflow_id: Optional[str] = None
     execution_locked_at: Optional[datetime] = None
     execution_state: Optional[dict[str, Any]] = None
