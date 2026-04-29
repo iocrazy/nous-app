@@ -51,13 +51,19 @@ def fetch_and_parse_step(
     cover_bool: bool,
     categories: Optional[str],
     user_agent: str,
+    user_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """DrissionPage fetch + DouyinFormatter parse. Heavy I/O — 3 retries
-    matches the Celery max_retries=3 budget."""
+    """3-tier fallback parse (LightHTTP → ABogus → DrissionPage) +
+    formatter. Heavy I/O — 3 retries matches legacy Celery budget."""
     from app.services.parse_helpers import fetch_and_parse
 
     aweme_detail, parsed_data = fetch_and_parse(
-        valid_url, video_bool, cover_bool, categories, user_agent=user_agent
+        valid_url,
+        video_bool,
+        cover_bool,
+        categories,
+        user_agent=user_agent,
+        user_id=user_id,
     )
     return {"aweme_detail": aweme_detail, "parsed_data": parsed_data}
 
@@ -226,7 +232,7 @@ def parse_workflow(
 
     legacy_ua = pick_ua()
     fetched = fetch_and_parse_step(
-        valid_url, video_bool, cover_bool, categories, legacy_ua
+        valid_url, video_bool, cover_bool, categories, legacy_ua, user_id=user_id
     )
     aweme_detail = fetched["aweme_detail"]
     parsed_data = fetched["parsed_data"]
