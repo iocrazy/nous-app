@@ -38,6 +38,8 @@ import asyncio
 from typing import Any, Optional
 
 from dbos import DBOS
+
+from app.services.workflow_tracker import tracked_workflow
 from loguru import logger
 
 
@@ -358,6 +360,10 @@ def log_download_outcome_step(
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="download",
+    title_fn=lambda kw: f"Download {(kw.get('video_title') or kw.get('platform_id') or '')[:50]}",
+)
 def download_workflow(
     platform_id: str,
     user_id: str,

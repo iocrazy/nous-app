@@ -201,6 +201,14 @@ async def dedup_and_dispatch(
         dl_video = ("video" in types_to_download) or ("image" in types_to_download)
         dl_cover = "cover" in types_to_download
 
+        # Pre-generate DBOS workflow_id so the unified_tasks row exists
+        # with celery_task_id populated BEFORE the workflow's tracker
+        # decorator fires. See media_fetch_helpers.parse path for the
+        # rationale.
+        import uuid as _uuid
+
+        task_id = str(_uuid.uuid4())
+
         try:
             dl_parts = [t.capitalize() for t in types_to_download]
             dl_subtitle = " + ".join(dl_parts)
@@ -211,6 +219,7 @@ async def dedup_and_dispatch(
                 subtitle=dl_subtitle,
                 media_id=platform_id,
                 resource_id=resource_id,
+                celery_task_id=task_id,
             )
         except Exception as e:
             logger.warning(f"[Download/Dedup] Pre-create unified_task failed: {e}")
@@ -218,9 +227,9 @@ async def dedup_and_dispatch(
         try:
             logger.info(
                 f"[Download/Init] DBOS dispatch: platform_id={platform_id}, "
-                f"types={types_to_download}, user={user_id}"
+                f"types={types_to_download}, user={user_id}, wf_id={task_id}"
             )
-            decision = await start_workflow_routed(
+            await start_workflow_routed(
                 "download",
                 dbos_workflow_callable=download_workflow,
                 dbos_workflow_kwargs={
@@ -233,15 +242,8 @@ async def dedup_and_dispatch(
                     "video_title": (video_title[:50] if video_title else "undefined"),
                     "resource_id": resource_id,
                 },
+                workflow_id=task_id,
             )
-            task_id = decision.get("dbos_workflow_id", "")
-            if unified_task_id and task_id:
-                try:
-                    await orchestrator._atomic_update(
-                        unified_task_id, {"celery_task_id": task_id}
-                    )
-                except Exception:
-                    pass
         except Exception as celery_err:
             logger.warning(f"[Download/Init] DBOS dispatch failed: {celery_err}")
             if background_tasks:
@@ -439,6 +441,15 @@ async def handle_ytdlp_fetch(
     except Exception as e:
         logger.warning(f"[Parse/Dedup] check failed, proceeding: {e}")
 
+    # Pre-generate the DBOS workflow_id so we can write
+    # unified_tasks.celery_task_id BEFORE dispatch. Otherwise the
+    # workflow's tracker decorator (mark_started) races the router's
+    # post-dispatch _atomic_update and fires before the column is
+    # populated, leaving started_at=null forever.
+    import uuid as _uuid
+
+    dbos_wf_id = str(_uuid.uuid4())
+
     unified_task_id = None
     try:
         unified_task_id = await mgr.create(
@@ -447,11 +458,12 @@ async def handle_ytdlp_fetch(
             title=f"Parse {url[:50]}",
             subtitle="Initializing...",
             dedup_key=dedup_key,
+            celery_task_id=dbos_wf_id,
         )
     except Exception as e:
         logger.warning(f"[Parse] Pre-create unified_task failed: {e}")
 
-    decision = await start_workflow_routed(
+    await start_workflow_routed(
         "parse",
         dbos_workflow_callable=parse_workflow,
         dbos_workflow_kwargs={
@@ -460,14 +472,8 @@ async def handle_ytdlp_fetch(
             "video_bool": request.video_bool,
             "cover_bool": True,
         },
+        workflow_id=dbos_wf_id,
     )
-    dbos_wf_id = decision.get("dbos_workflow_id", "")
-
-    if unified_task_id and dbos_wf_id:
-        try:
-            await mgr._atomic_update(unified_task_id, {"celery_task_id": dbos_wf_id})
-        except Exception:
-            pass
 
     background_tasks.add_task(
         log_user_action,

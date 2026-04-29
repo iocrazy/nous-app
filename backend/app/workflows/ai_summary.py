@@ -22,6 +22,8 @@ from dbos import DBOS
 from loguru import logger
 from openai import OpenAI
 
+from app.services.workflow_tracker import tracked_workflow
+
 
 def _dsn() -> str:
     url = os.environ.get("DBOS_DATABASE_URL")
@@ -137,6 +139,10 @@ def persist_summary(parsed_media_id: int, summary: str) -> dict[str, Any]:
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="ai_summary",
+    title_fn=lambda kw: f"Summarize media {kw.get('parsed_media_id')}",
+)
 def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     """Production-shaped DBOS port of the ai_summary Celery task.
 

@@ -32,6 +32,8 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
+from app.services.workflow_tracker import tracked_workflow
+
 
 @DBOS.step()
 def resolve_resource_title_step(resource_id: str, version_id: str) -> str:
@@ -175,6 +177,10 @@ def log_transcode_outcome_step(
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="transcode",
+    title_fn=lambda kw: f"Transcode {(kw.get('resource_id') or '')[:20]}",
+)
 def transcode_workflow(
     resource_id: str,
     version_id: str,
