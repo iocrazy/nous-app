@@ -52,67 +52,19 @@ services:
       retries: 3
       start_period: 60s
 
-  # Celery Worker - Task executor (downloads, parsing, transcription, analysis)
-  celery-worker:
-    image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
-    container_name: mediahub-app-celery-worker
-    restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-    command: uv run celery -A app.celery_app worker -l info -c 4 -Q downloads,parsing,transcription,analysis,scheduled,celery
-    volumes:
-      - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
-      - ./.env:/app/.env
-      - ./config/config.yml:/app/config.yml
-    environment:
-      - TZ=Asia/Shanghai
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
-      - WHISPER_PROVIDER=${WHISPER_PROVIDER:-openai_api}
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "uv run celery -A app.celery_app inspect ping --timeout 10 2>/dev/null | grep -q OK"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 60s
-    # ── GPU Transcode Support (uncomment as needed) ──
-    # NVIDIA GPU:
-    #   runtime: nvidia
-    #   environment:
-    #     - NVIDIA_VISIBLE_DEVICES=all
-    # Intel iGPU (QSV / VA-API):
-    #   devices:
-    #     - /dev/dri:/dev/dri
-
-  # Celery Beat - Scheduled task scheduler
-  celery-beat:
-    image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
-    container_name: mediahub-app-celery-beat
-    restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-    command: uv run celery -A app.celery_app beat -l info
-    volumes:
-      - ./.env:/app/.env
-    environment:
-      - TZ=Asia/Shanghai
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "uv run python -c \"import redis; redis.Redis.from_url('redis://redis:6379/0').ping()\""]
-      interval: 60s
-      timeout: 15s
-      retries: 3
-      start_period: 30s
+  # PR-D7 phase 3b: celery-worker + celery-beat removed. All workflows
+  # now run inside the `mediahub` container via DBOS (durable PG-backed
+  # queues + @DBOS.scheduled cron). Redis is kept for live download
+  # progress tracking + UnifiedProgressTracker key-value state.
+  #
+  # ── GPU Transcode Support (when GPU transcoding lands) ──
+  # The mediahub service above can be augmented with:
+  #   runtime: nvidia
+  #   environment:
+  #     - NVIDIA_VISIBLE_DEVICES=all
+  # or for Intel iGPU (QSV / VA-API):
+  #   devices:
+  #     - /dev/dri:/dev/dri
 
   # Nginx - HLS streaming server
   nginx:
