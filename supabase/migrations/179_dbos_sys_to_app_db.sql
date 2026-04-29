@@ -46,13 +46,14 @@ GRANT USAGE ON SCHEMA dbos TO authenticated;
 GRANT SELECT ON dbos.workflow_status TO authenticated;
 
 -- ──────────────────────────────────────────────────────────
--- Part B — owner: postgres (run separately via Supabase Studio
--- SQL editor or psql with postgres-role connection).
+-- Part B — owner: postgres (must be run via the postgres role,
+-- e.g. psql 'postgresql://postgres.<tenant>@host:port/postgres'
+-- or Supabase Studio SQL editor as superuser).
 -- ──────────────────────────────────────────────────────────
---
--- DO $$
--- BEGIN
---   ALTER PUBLICATION supabase_realtime ADD TABLE dbos.workflow_status;
--- EXCEPTION WHEN duplicate_object THEN
---   RAISE NOTICE 'dbos.workflow_status already in supabase_realtime publication';
--- END$$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE dbos.workflow_status;
+EXCEPTION WHEN duplicate_object THEN
+  RAISE NOTICE 'dbos.workflow_status already in supabase_realtime publication';
+END$$;
