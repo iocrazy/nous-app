@@ -100,8 +100,13 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
 
     async def _do() -> tuple[int, int]:
         supabase = await get_async_supabase_admin()
-        cutoff = (datetime.now() - timedelta(hours=1)).isoformat()
-        now_iso = datetime.now().isoformat()
+        # Use timezone-aware UTC so the ISO string carries +00:00 and
+        # PostgreSQL doesn't fall back to interpreting it in the
+        # connection's local TZ. Naive `datetime.now()` was reaping
+        # 25-second-old DBOS workflows because Mac local time +8h
+        # made cutoff far in the future of any UTC timestamptz row.
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
 
         result = (
             await supabase.table("unified_tasks")
@@ -110,9 +115,9 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
                     "status": "failed",
                     "phase": "failed",
                     "error_msg": (
-                        "Worker never claimed this task — Celery message "
-                        "was lost (worker crash / broker restart). "
-                        "Use Retry to re-queue."
+                        "Worker never claimed this task within 1h — "
+                        "DBOS workflow may have crashed or never "
+                        "executed. Use Retry to re-queue."
                     ),
                     "error_code": "WORKER_LOST",
                     "updated_at": now_iso,

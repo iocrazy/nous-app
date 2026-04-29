@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +80,9 @@ def cleanup_old_unified_tasks_step() -> dict[str, Any]:
 
     async def _do() -> int:
         supabase = await get_async_supabase_admin()
-        cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+        # See scheduled_recovery.reap_stuck_pending_tasks_step for why
+        # this MUST be timezone-aware UTC, not naive local time.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         result = (
             await supabase.table("unified_tasks")
             .delete()
