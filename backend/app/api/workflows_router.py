@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from app.core.deps import AuthDep
+from app.core.deps import AuthDep, get_optional_auth
 from app.services import dbos_orchestrator
 
 router = APIRouter(prefix="/workflows", tags=["DBOS Workflows"])
@@ -254,22 +254,54 @@ async def _sse_event_stream(
 async def stream_workflow_events(
     workflow_id: str,
     request: Request,
-    auth: AuthDep,
     include_steps: bool = Query(
         False,
         description="Also stream the step list on every status change. "
         "Heavier but lets the UI render per-step timelines.",
     ),
+    token: Optional[str] = Query(
+        None,
+        description="Supabase JWT for browsers (EventSource can't set "
+        "Authorization headers). Server validates the same way as "
+        "Bearer header. Falls back to header auth when omitted.",
+    ),
 ) -> StreamingResponse:
     """SSE stream of DBOS workflow status changes. Closes on terminal
     state, 30-min ceiling, or client disconnect.
 
+    Auth: prefers Authorization header; falls back to ?token= query
+    parameter for browser EventSource compatibility.
+
     Frontend usage:
-        const es = new EventSource(`/api/v1/workflows/${id}/events?token=...`);
+        const es = new EventSource(
+          `/api/v1/workflows/${id}/events?token=${jwt}`
+        );
         es.addEventListener("status", (e) => render(JSON.parse(e.data)));
         es.addEventListener("done",   () => es.close());
         es.addEventListener("not_found", () => showError("workflow gone"));
     """
+    # Auth: header first (preferred), then query token fallback.
+    auth_ctx = await get_optional_auth(request)
+    if auth_ctx is None:
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No auth: provide Authorization header or ?token=",
+            )
+        # Validate query token via the same Bearer path so audit/log
+        # trails look identical regardless of transport.
+        from app.core.deps import _validate_bearer_token
+
+        try:
+            await _validate_bearer_token(f"Bearer {token}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid token: {e}",
+            )
+
     # Validate workflow exists before opening the stream so the client
     # gets a synchronous 404 instead of the SSE not_found event.
     snap = await _get_status(workflow_id)
