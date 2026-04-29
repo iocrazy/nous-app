@@ -36,8 +36,7 @@ services:
       - ./config/config.yml:/app/config.yml
     environment:
       - TZ=Asia/Shanghai
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}

@@ -28,12 +28,13 @@ docker-compose logs -f mediahub
 
 | Service | Port | Description |
 |---------|------|-------------|
-| mediahub | 8080 | Main API server |
-| celery-worker | - | Background task executor (downloads, parsing, transcription, analysis) |
-| celery-beat | - | Scheduled task scheduler |
+| mediahub | 8080 | Main API server (embeds DBOS workflow runtime + scheduler) |
 | nginx | 8081 | HLS video streaming server |
-| flower | 5555 | Task monitoring UI |
-| redis | 6379 | Message queue |
+| redis | 6379 | Live download progress KV state |
+
+> PR-D7 phase 3b: `celery-worker` + `celery-beat` services were removed.
+> All durable workflows + cron jobs now run inside the `mediahub`
+> container via DBOS (PG-backed queues + `@DBOS.scheduled`).
 
 ## File Structure
 
@@ -80,7 +81,7 @@ When new code is pushed to master:
 cd /volume1/docker/mediahub/docker
 git pull origin master
 docker pull imheygo/mediahub:latest
-docker-compose up -d --force-recreate mediahub celery-worker celery-beat
+docker-compose up -d --force-recreate mediahub
 ```
 
 ## Troubleshooting
@@ -88,7 +89,6 @@ docker-compose up -d --force-recreate mediahub celery-worker celery-beat
 ### Check container logs
 ```bash
 docker logs mediahub-app-backend
-docker logs mediahub-app-celery-worker
 ```
 
 ### Check container health
