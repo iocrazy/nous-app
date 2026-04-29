@@ -200,6 +200,81 @@ async def resume_workflow(
     return {"status": "resumed", "workflow_id": workflow_id}
 
 
+@router.post("/{workflow_id}/restart", status_code=status.HTTP_202_ACCEPTED)
+async def restart_workflow(
+    workflow_id: str,
+    auth: AuthDep,
+) -> dict[str, Any]:
+    """Re-execute a completed/failed workflow as a NEW workflow with
+    the same inputs. Returns the new workflow_id.
+
+    Differs from /resume — resume re-runs a paused workflow under its
+    existing id (replaying durable steps); restart forks a fresh id.
+    """
+    if not dbos_orchestrator.is_enabled():
+        raise HTTPException(503, detail="DBOS not enabled")
+    from dbos import DBOS
+
+    try:
+        # start_step=1: replay all steps from scratch (DBOS step ids
+        # are 1-indexed). For partial restart, frontend would need to
+        # let user pick the step.
+        new_handle = await DBOS.fork_workflow_async(workflow_id, start_step=1)
+    except Exception as e:
+        logger.warning(f"[workflows] restart({workflow_id}): {e}")
+        raise HTTPException(400, detail=str(e))
+    return {
+        "status": "restarted",
+        "original_workflow_id": workflow_id,
+        "new_workflow_id": new_handle.workflow_id,
+    }
+
+
+@router.get("")
+async def list_workflows(
+    auth: AuthDep,
+    name: Optional[str] = Query(None, description="Workflow name filter (e.g. parse_workflow)"),
+    workflow_status: Optional[str] = Query(
+        None, description="DBOS status filter: PENDING / ENQUEUED / SUCCESS / ERROR / CANCELLED"
+    ),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    sort_desc: bool = Query(True, description="Newest first"),
+) -> dict[str, Any]:
+    """List the authenticated user's DBOS workflows.
+
+    Backed directly by `dbos.workflow_status` — no unified_tasks read.
+    Frontend Task Center should subscribe via Supabase Realtime to
+    `dbos.workflow_status` for push updates and use this endpoint for
+    initial load + pagination.
+    """
+    if not dbos_orchestrator.is_enabled():
+        raise HTTPException(503, detail="DBOS not enabled")
+    from dbos import DBOS
+
+    try:
+        rows = await DBOS.list_workflows_async(
+            user=auth.user_id,
+            name=name,
+            status=workflow_status,
+            limit=limit,
+            offset=offset,
+            sort_desc=sort_desc,
+            load_input=False,
+            load_output=False,
+        )
+    except Exception as e:
+        logger.warning(f"[workflows] list({auth.user_id[:8]}): {e}")
+        raise HTTPException(500, detail=str(e))
+
+    return {
+        "workflows": [_serialize_status(r) for r in rows],
+        "total": len(rows),
+        "offset": offset,
+        "limit": limit,
+    }
+
+
 async def _sse_event_stream(
     workflow_id: str,
     request: Request,

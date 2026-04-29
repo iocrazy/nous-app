@@ -163,15 +163,25 @@ async def start_workflow_routed(
         and dbos_workflow_callable is not None
         and is_enabled()
     ):
-        from dbos import DBOS, SetWorkflowID
+        from contextlib import nullcontext
+
+        from dbos import DBOS, DBOSContextSetAuth, SetWorkflowID
 
         kwargs = dbos_workflow_kwargs or {}
+        # Set authenticated_user on the DBOS workflow_status row so
+        # GET /api/v1/workflows can filter by user. Requires user_id
+        # in workflow kwargs.
+        user_id = kwargs.get("user_id")
+        auth_ctx = (
+            DBOSContextSetAuth(user=user_id, roles=[]) if user_id else nullcontext()
+        )
         try:
-            if workflow_id:
-                with SetWorkflowID(workflow_id):
+            with auth_ctx:
+                if workflow_id:
+                    with SetWorkflowID(workflow_id):
+                        handle = DBOS.start_workflow(dbos_workflow_callable, **kwargs)
+                else:
                     handle = DBOS.start_workflow(dbos_workflow_callable, **kwargs)
-            else:
-                handle = DBOS.start_workflow(dbos_workflow_callable, **kwargs)
             out["dbos_workflow_id"] = handle.workflow_id
             if decision.mode == "shadow":
                 logger.info(
