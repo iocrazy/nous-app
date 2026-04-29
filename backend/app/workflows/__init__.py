@@ -49,6 +49,10 @@ from app.workflows.storyboard import (  # noqa: F401
     storyboard_video_analysis_workflow,
     storyboard_video_workflow,
 )
+from app.workflows.agent_workforce import (  # noqa: F401
+    agent_workforce_queue,
+    agent_workforce_workflow,
+)
 
 __all__ = [
     "execute_issue",
@@ -83,4 +87,6 @@ __all__ = [
     "storyboard_export_workflow",
     "storyboard_image_grid_split_workflow",
     "storyboard_annotation_workflow",
+    "agent_workforce_workflow",
+    "agent_workforce_queue",
 ]
