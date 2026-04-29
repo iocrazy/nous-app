@@ -4,6 +4,7 @@ import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
@@ -199,7 +200,24 @@ async def trigger_analysis(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Media has no cover URL"
             )
 
-        decision = await start_workflow_routed(
+        # Pre-create unified_tasks row so @tracked_workflow finds it.
+        import uuid as _uuid
+
+        from app.services.unified_task_manager import get_task_manager
+
+        wf_id = str(_uuid.uuid4())
+        try:
+            await get_task_manager().create(
+                user_id=auth.user_id,
+                task_type="ai_extract",
+                title=f"Analyze L1: {(media.get('title') or media_id)[:40]}",
+                media_id=str(media_id),
+                celery_task_id=wf_id,
+            )
+        except Exception as e:
+            logger.warning(f"[Analysis] pre-create unified_task failed: {e}")
+
+        await start_workflow_routed(
             "ai_extract",
             dbos_workflow_callable=analyze_l1_workflow,
             dbos_workflow_kwargs={
@@ -209,10 +227,11 @@ async def trigger_analysis(
                 "description": media.get("description", ""),
                 "user_id": auth.user_id,
             },
+            workflow_id=wf_id,
         )
         return TaskStatusResponse(
             message="L1 analysis started",
-            task_id=decision.get("dbos_workflow_id", ""),
+            task_id=wf_id,
             media_id=media_id,
         )
 
@@ -262,7 +281,12 @@ async def trigger_batch_analysis(
             detail="Batch analysis currently only supports L1 level",
         )
 
+    import uuid as _uuid
+
+    from app.services.unified_task_manager import get_task_manager
+
     media_repo = AnalysisRepository()
+    mgr = get_task_manager()
     started = 0
     for mid in request.media_ids:
         try:
@@ -272,6 +296,17 @@ async def trigger_batch_analysis(
             cover = ((row.get("cover_urls") or []) + [None])[0]
             if not cover:
                 continue
+            wf_id = str(_uuid.uuid4())
+            try:
+                await mgr.create(
+                    user_id=auth.user_id,
+                    task_type="ai_extract",
+                    title=f"Analyze L1: {(row.get('title') or mid)[:40]}",
+                    media_id=str(mid),
+                    celery_task_id=wf_id,
+                )
+            except Exception:
+                pass  # Pre-create best-effort; tracker will retry-update
             await start_workflow_routed(
                 "ai_extract",
                 dbos_workflow_callable=analyze_l1_workflow,
@@ -282,6 +317,7 @@ async def trigger_batch_analysis(
                     "description": row.get("description", ""),
                     "user_id": auth.user_id,
                 },
+                workflow_id=wf_id,
             )
             started += 1
         except Exception:

@@ -259,9 +259,12 @@ async def restart_workflow(
 @router.get("")
 async def list_workflows(
     auth: AuthDep,
-    name: Optional[str] = Query(None, description="Workflow name filter (e.g. parse_workflow)"),
+    name: Optional[str] = Query(
+        None, description="Workflow name filter (e.g. parse_workflow)"
+    ),
     workflow_status: Optional[str] = Query(
-        None, description="DBOS status filter: PENDING / ENQUEUED / SUCCESS / ERROR / CANCELLED"
+        None,
+        description="DBOS status filter: PENDING / ENQUEUED / SUCCESS / ERROR / CANCELLED",
     ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),

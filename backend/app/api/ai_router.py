@@ -241,35 +241,33 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists, dispatch ai_summary_workflow.
+            import uuid as _uuid
+
             from app.services.dbos_orchestrator import start_workflow_routed
             from app.services.unified_task_manager import get_task_manager
             from app.workflows.ai_summary import ai_summary_workflow
 
             tracker = get_task_manager()
+            wf_id = str(_uuid.uuid4())
             task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="ai_summary",
                 title=f"Summarize: {platform_id}",
                 media_id=platform_id,
                 resource_id=resource_id,
+                celery_task_id=wf_id,
             )
-            await tracker.start(task_id)
             _orphan_task_id = task_id
 
-            decision = await start_workflow_routed(
+            await start_workflow_routed(
                 "ai_summary",
                 dbos_workflow_callable=ai_summary_workflow,
                 dbos_workflow_kwargs={
                     "parsed_media_id": int(media["id"]),
                     "user_id": auth.user_id,
                 },
+                workflow_id=wf_id,
             )
-            wid = decision.get("dbos_workflow_id")
-            if wid:
-                try:
-                    await tracker._atomic_update(task_id, {"celery_task_id": wid})
-                except Exception as _e:
-                    logger.debug(f"[AI] Failed to link workflow_id for {task_id}: {_e}")
             _orphan_task_id = None
             return {
                 "message": "Summary generation queued",
@@ -452,35 +450,33 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     try:
         if transcript and transcript.get("full_text"):
             # Transcript exists — dispatch ai_summary_workflow.
+            import uuid as _uuid
+
             from app.services.dbos_orchestrator import start_workflow_routed
             from app.services.unified_task_manager import get_task_manager
             from app.workflows.ai_summary import ai_summary_workflow
 
             tracker = get_task_manager()
+            wf_id = str(_uuid.uuid4())
             task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="ai_summary",
                 title=f"Summarize: {platform_id}",
                 media_id=platform_id,
                 resource_id=_resource_id,
+                celery_task_id=wf_id,
             )
-            await tracker.start(task_id)
             _orphan_task_id = task_id
 
-            decision = await start_workflow_routed(
+            await start_workflow_routed(
                 "ai_summary",
                 dbos_workflow_callable=ai_summary_workflow,
                 dbos_workflow_kwargs={
                     "parsed_media_id": int(media_id),
                     "user_id": auth.user_id,
                 },
+                workflow_id=wf_id,
             )
-            wid = decision.get("dbos_workflow_id")
-            if wid:
-                try:
-                    await tracker._atomic_update(task_id, {"celery_task_id": wid})
-                except Exception as _e:
-                    logger.debug(f"[AI] Failed to link workflow_id for {task_id}: {_e}")
             _orphan_task_id = None
             return {"message": "Summary generation queued", "platform_id": platform_id}
         else:

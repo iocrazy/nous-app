@@ -175,9 +175,7 @@ def tracked_workflow(
 
             user_id = kwargs.get("user_id")
             try:
-                title = (
-                    title_fn(kwargs) if title_fn else f"{fn.__name__}({wf_id[:8]})"
-                )
+                title = title_fn(kwargs) if title_fn else f"{fn.__name__}({wf_id[:8]})"
             except Exception:
                 title = f"{fn.__name__}({wf_id[:8]})"
 

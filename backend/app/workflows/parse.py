@@ -30,9 +30,9 @@ import asyncio
 from typing import Any, Optional
 
 from dbos import DBOS
+from loguru import logger
 
 from app.services.workflow_tracker import tracked_workflow
-from loguru import logger
 
 
 @DBOS.step()

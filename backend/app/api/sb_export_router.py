@@ -61,13 +61,17 @@ async def export_project(
         )
 
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_export",
             title=f"Export storyboard as {body.format.upper()}",
+            celery_task_id=wf_id,
             metadata={
                 "project_id": project_id,
                 "format": body.format,
@@ -87,6 +91,7 @@ async def export_project(
                 "format": body.format,
                 "options": body.options or {},
             },
+            workflow_id=wf_id,
         )
 
         logger.info(
