@@ -120,9 +120,41 @@ type Action =
   | { type: 'UPDATE'; task: UnifiedTask }
   | { type: 'UPDATE_PROGRESS'; payload: WsProgressPayload }
   | { type: 'DOWNLOAD_STARTED'; payload: WsDownloadStartedPayload }
+  | { type: 'DBOS_PATCH'; payload: DbosWorkflowStatusRow }
   | { type: 'DELETE'; id: string }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'SET_CONNECTED'; connected: boolean };
+
+/** Raw row shape from Supabase Realtime on dbos.workflow_status. */
+export interface DbosWorkflowStatusRow {
+  workflow_uuid: string;
+  status: string; // PENDING | ENQUEUED | SUCCESS | ERROR | CANCELLED | MAX_RECOVERY_ATTEMPTS_EXCEEDED
+  name: string | null;
+  authenticated_user: string | null;
+  created_at: number | string | null;
+  updated_at: number | string | null;
+  started_at_epoch_ms: number | null;
+  workflow_deadline_epoch_ms: number | null;
+  error: string | null;
+}
+
+/** Map DBOS workflow_status.status → app TaskStatus. */
+function dbosStatusToTaskStatus(s: string | null | undefined): TaskStatus | undefined {
+  switch (s) {
+    case 'PENDING':
+    case 'ENQUEUED':
+      return 'pending';
+    case 'SUCCESS':
+      return 'completed';
+    case 'ERROR':
+    case 'MAX_RECOVERY_ATTEMPTS_EXCEEDED':
+      return 'failed';
+    case 'CANCELLED':
+      return 'cancelled';
+    default:
+      return undefined;
+  }
+}
 
 /** Map WebSocket status strings to task lifecycle status. */
 function wsStatusToTaskStatus(wsStatus?: string): TaskStatus | undefined {
@@ -163,6 +195,39 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
         ...state,
         tasks: state.tasks.map(t => t.id === action.task.id ? action.task : t),
       };
+    case 'DBOS_PATCH': {
+      // DBOS workflow_status row → patch matching unified_task by
+      // celery_task_id == workflow_uuid. We never INSERT from this
+      // channel — the router pre-creates the unified_tasks row at
+      // dispatch with celery_task_id set, so any DBOS event will
+      // find a matching task. Orphan DBOS workflows (recovery, no
+      // user) are intentionally invisible in this UI.
+      const row = action.payload;
+      const mapped = dbosStatusToTaskStatus(row.status);
+      const startedAt = row.started_at_epoch_ms
+        ? new Date(row.started_at_epoch_ms).toISOString()
+        : undefined;
+      const updatedAt = typeof row.updated_at === 'number'
+        ? new Date(row.updated_at).toISOString()
+        : (row.updated_at as string | undefined);
+      const completedAt = (mapped === 'completed' || mapped === 'failed' || mapped === 'cancelled')
+        ? updatedAt
+        : undefined;
+      return {
+        ...state,
+        tasks: state.tasks.map(t => {
+          if (t.celery_task_id !== row.workflow_uuid) return t;
+          return {
+            ...t,
+            ...(mapped ? { status: mapped } : {}),
+            ...(startedAt ? { started_at: startedAt } : {}),
+            ...(completedAt ? { completed_at: completedAt } : {}),
+            ...(updatedAt ? { updated_at: updatedAt } : {}),
+            ...(row.error ? { error_msg: row.error } : {}),
+          };
+        }),
+      };
+    }
     case 'UPDATE_PROGRESS': {
       const p = action.payload;
       const mappedStatus = wsStatusToTaskStatus(p.status);
@@ -385,11 +450,38 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     channelRef.current = channel;
 
+    // ─── DBOS workflow_status (D7 phase 3) ──────────────────────
+    // Authoritative status feed straight from the DBOS sys-DB. RLS
+    // gates rows to the current user, so no client-side filter
+    // needed. Patches existing unified_tasks rows (matched by
+    // celery_task_id == workflow_uuid) with status/started_at/
+    // completed_at/error from DBOS.
+    const dbosChannel = supabase
+      .channel(`user-dbos-workflows-${currentUserId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'dbos',
+        table: 'workflow_status',
+      }, (payload) => {
+        dispatch({ type: 'DBOS_PATCH', payload: payload.new as DbosWorkflowStatusRow });
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'dbos',
+        table: 'workflow_status',
+      }, (payload) => {
+        dispatch({ type: 'DBOS_PATCH', payload: payload.new as DbosWorkflowStatusRow });
+      })
+      .subscribe((status, err) => {
+        console.debug(`[TaskManager] DBOS realtime status: ${status}`, err || '');
+      });
+
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
+      supabase.removeChannel(dbosChannel);
     };
   }, [currentUserId, refreshTasks]);
 
