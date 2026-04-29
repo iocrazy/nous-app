@@ -37,9 +37,9 @@ from loguru import logger
 def extract_url_step(url: str) -> str:
     """Validate + canonicalise URL. Raises ValueError on bad input —
     workflow catches that and returns a failed-status dict."""
-    from app.tasks.parse_tasks import _extract_url
+    from app.services.parse_helpers import extract_url
 
-    return _extract_url(url)
+    return extract_url(url)
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3)
@@ -52,9 +52,9 @@ def fetch_and_parse_step(
 ) -> dict[str, Any]:
     """DrissionPage fetch + DouyinFormatter parse. Heavy I/O — 3 retries
     matches the Celery max_retries=3 budget."""
-    from app.tasks.parse_tasks import _fetch_and_parse
+    from app.services.parse_helpers import fetch_and_parse
 
-    aweme_detail, parsed_data = _fetch_and_parse(
+    aweme_detail, parsed_data = fetch_and_parse(
         valid_url, video_bool, cover_bool, categories, user_agent=user_agent
     )
     return {"aweme_detail": aweme_detail, "parsed_data": parsed_data}
@@ -65,9 +65,9 @@ def save_media_step(
     parsed_data: dict[str, Any], platform_id: str, video_bool: bool
 ) -> Optional[dict[str, Any]]:
     """Insert/update parsed_media row. Returns the saved record or None."""
-    from app.tasks.parse_tasks import _save_media_to_db
+    from app.services.parse_helpers import save_media_to_db
 
-    return _save_media_to_db(parsed_data, platform_id, video_bool)
+    return save_media_to_db(parsed_data, platform_id, video_bool)
 
 
 @DBOS.step()
@@ -79,9 +79,9 @@ def auto_tag_step(
     description: str,
 ) -> None:
     """Best-effort hashtag → tag classification. Never raises."""
-    from app.tasks.parse_tasks import _auto_tag_media
+    from app.services.parse_helpers import auto_tag_media
 
-    _auto_tag_media(video_db_id, platform_id, aweme_detail, title, description)
+    auto_tag_media(video_db_id, platform_id, aweme_detail, title, description)
 
 
 @DBOS.step()
@@ -104,19 +104,7 @@ def dispatch_download_step(
       {"mode": "celery"|"shadow"|"dbos", "celery_task_id"?,
        "dbos_workflow_id"?}"""
     from app.services.dbos_orchestrator import start_workflow_routed
-    from app.tasks.download_tasks import download_unified_task
     from app.workflows.download import download_workflow
-
-    def _celery_dispatch() -> Any:
-        return download_unified_task.delay(
-            platform_id=platform_id,
-            user_id=user_id,
-            download_video=download_video,
-            download_cover=download_cover,
-            media_type=media_type,
-            video_title=video_title,
-            user_agent=user_agent,
-        )
 
     return asyncio.run(
         start_workflow_routed(
@@ -131,7 +119,6 @@ def dispatch_download_step(
                 "video_title": video_title,
                 "user_agent": user_agent,
             },
-            celery_dispatch=_celery_dispatch,
         )
     )
 
@@ -150,17 +137,7 @@ def dispatch_l1_analysis_step(
     was a try/except wrapper that swallowed errors)."""
     try:
         from app.services.dbos_orchestrator import start_workflow_routed
-        from app.tasks.analysis_tasks import analyze_video_l1_task
         from app.workflows.analyze_l1 import analyze_l1_workflow
-
-        def _celery_dispatch() -> Any:
-            return analyze_video_l1_task.delay(
-                media_id=media_id,
-                cover_url=cover_url,
-                title=title,
-                description=description,
-                user_id=user_id,
-            )
 
         return asyncio.run(
             start_workflow_routed(
@@ -173,7 +150,6 @@ def dispatch_l1_analysis_step(
                     "description": description,
                     "user_id": user_id,
                 },
-                celery_dispatch=_celery_dispatch,
             )
         )
     except Exception as e:

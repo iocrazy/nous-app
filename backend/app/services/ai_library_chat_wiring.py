@@ -115,13 +115,12 @@ async def build_agent_runner_stack(
     )
 
     # MemoryHarvester wired with a dispatch closure that routes through
-    # `start_workflow_routed("memory_tasks", ...)`. The routing table
-    # decides celery vs shadow vs dbos at fire time. Imports deferred
-    # to avoid circular imports with app.tasks at startup.
+    # `start_workflow_routed("memory_tasks", ...)`. PR-D7 phase 3:
+    # celery_dispatch fallback dropped — routing is all 'dbos' and the
+    # legacy write_memory_task Celery wrapper has been deleted.
     import asyncio
 
     from app.services.dbos_orchestrator import start_workflow_routed
-    from app.tasks.memory_tasks import write_memory_task
     from app.workflows.write_memory import write_memory_workflow
 
     def _memory_signature_factory(
@@ -134,9 +133,7 @@ async def build_agent_runner_stack(
         tool_name: str,
     ):
         """Return a zero-arg dispatch closure. AgentRunner invokes it
-        and continues — fire-and-forget. Wraps the async
-        start_workflow_routed call in asyncio.run since this fires from
-        a sync hook context."""
+        and continues — fire-and-forget."""
 
         def _fire() -> None:
             asyncio.run(
@@ -151,14 +148,6 @@ async def build_agent_runner_stack(
                         "iteration": iteration,
                         "tool_name": tool_name,
                     },
-                    celery_dispatch=lambda: write_memory_task.delay(
-                        run_id=run_id,
-                        agent_id=agent_id,
-                        user_id=user_id,
-                        session_id=session_id,
-                        iteration=iteration,
-                        tool_name=tool_name,
-                    ),
                 )
             )
 

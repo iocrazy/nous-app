@@ -7,7 +7,6 @@ Unified task center API: list, cancel, retry, delete, clear completed tasks.
 Covers all task types: download, upload, transcode, ai_pipeline, ai_extract, ai_transcription, ai_summary.
 """
 
-import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -97,14 +96,17 @@ async def retry_task(task_id: str, auth: AuthDep):
                 if versions:
                     version_id = str(versions[0]["id"])
             if version_id:
-                from app.tasks.transcode_tasks import transcode_to_hls
+                from app.services.dbos_orchestrator import start_workflow_routed
+                from app.workflows.transcode import transcode_workflow
 
-                await asyncio.to_thread(
-                    transcode_to_hls.delay,
-                    resource_id,
-                    version_id,
-                    user_id,
-                    _unified_task_id=str(task_id),
+                await start_workflow_routed(
+                    "transcode",
+                    dbos_workflow_callable=transcode_workflow,
+                    dbos_workflow_kwargs={
+                        "resource_id": resource_id,
+                        "version_id": version_id,
+                        "user_id": user_id,
+                    },
                 )
                 logger.info(
                     f"[TaskRetry] Dispatched transcode for resource={resource_id}, version={version_id}, reusing task={task_id}"
@@ -117,9 +119,10 @@ async def retry_task(task_id: str, auth: AuthDep):
         elif task_type == "download":
             # Re-dispatch the download. The reaper marks zombie pending
             # tasks as failed (status=failed, error_code=WORKER_LOST),
-            # and this path rehydrates the Celery job from the media row.
+            # and this path rehydrates the DBOS workflow from the media row.
             from app.repositories.media_repository import MediaRepository
-            from app.tasks.download_tasks import download_unified_task
+            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.workflows.download import download_workflow
 
             media_id = task.get("media_id")
             if not media_id:
@@ -143,43 +146,38 @@ async def retry_task(task_id: str, auth: AuthDep):
             )
             want_cover = "Cover" in subtitle
 
-            celery_task = await asyncio.to_thread(
-                download_unified_task.delay,
-                platform_id=media_id,
-                user_id=user_id,
-                url=None,  # Douyin path — strategies refresh expired URLs via ensure_download_urls
-                download_video=want_video,
-                download_cover=want_cover or True,  # default include cover
-                media_type=int(media.get("media_type") or 0),
-                video_title=media.get("title") or media_id,
-                resource_id=resource_id,
-                user_agent=meta.get("user_agent"),
-                _unified_task_id=str(task_id),
+            await start_workflow_routed(
+                "download",
+                dbos_workflow_callable=download_workflow,
+                dbos_workflow_kwargs={
+                    "platform_id": media_id,
+                    "user_id": user_id,
+                    "url": None,  # Douyin path
+                    "download_video": want_video,
+                    "download_cover": want_cover or True,
+                    "media_type": int(media.get("media_type") or 0),
+                    "video_title": media.get("title") or media_id,
+                    "resource_id": resource_id,
+                    "user_agent": meta.get("user_agent"),
+                },
             )
-            try:
-                await tracker._atomic_update(
-                    str(task_id), {"celery_task_id": celery_task.id}
-                )
-            except Exception as _e:
-                logger.debug(f"[TaskRetry] Failed to link celery_task_id: {_e}")
             logger.info(
                 f"[TaskRetry] Re-dispatched download for task={task_id}, media={media_id}"
             )
 
         elif task_type == "ai_summary" and resource_id:
-            from app.tasks.ai_tasks import generate_summary_task
+            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.workflows.ai_summary import ai_summary_workflow
 
             media_id = task.get("media_id")
-            celery_task = await asyncio.to_thread(
-                generate_summary_task.delay,
-                media_id,
-                user_id,
-                resource_id,
-                str(task_id),
-            )
             try:
-                await tracker._atomic_update(
-                    str(task_id), {"celery_task_id": celery_task.id}
+                await start_workflow_routed(
+                    "ai_summary",
+                    dbos_workflow_callable=ai_summary_workflow,
+                    dbos_workflow_kwargs={
+                        "parsed_media_id": int(media_id),
+                        "user_id": user_id,
+                    },
                 )
             except Exception as _e:
                 logger.debug(f"[TaskRetry] Failed to link celery_task_id: {_e}")

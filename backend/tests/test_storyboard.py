@@ -308,12 +308,18 @@ class TestExport:
 
     @pytest.mark.asyncio
     async def test_export_pdf(self, client: AsyncClient):
+        # PR-D7 phase 3: Celery .delay() replaced with
+        # start_workflow_routed. Patch the dispatcher so the test stays
+        # isolated from DBOS init.
         with (
             _svc_patch("verify_project_access"),
             patch(
                 "app.api.sb_export_router.get_task_manager"
             ) as mock_mgr_fn,
-            patch("app.api.sb_export_router.asyncio.to_thread", new_callable=AsyncMock),
+            patch(
+                "app.services.dbos_orchestrator.start_workflow_routed",
+                new_callable=AsyncMock,
+            ),
         ):
             mock_mgr = AsyncMock()
             mock_mgr.create = AsyncMock(return_value="task-abc")

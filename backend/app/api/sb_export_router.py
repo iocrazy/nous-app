@@ -8,7 +8,6 @@ Dispatches a Celery task and returns a task_id immediately so the client
 can poll for completion via the unified task manager.
 """
 
-import asyncio
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -76,14 +75,18 @@ async def export_project(
             },
         )
 
-        from app.tasks.storyboard_tasks import export_storyboard
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.workflows.storyboard import storyboard_export_workflow
 
-        await asyncio.to_thread(
-            export_storyboard.delay,
-            task_id,
-            project_id,
-            body.format,
-            body.options or {},
+        await start_workflow_routed(
+            "storyboard_export",
+            dbos_workflow_callable=storyboard_export_workflow,
+            dbos_workflow_kwargs={
+                "project_id": project_id,
+                "task_id": task_id,
+                "format": body.format,
+                "options": body.options or {},
+            },
         )
 
         logger.info(
