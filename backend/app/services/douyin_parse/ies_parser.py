@@ -211,7 +211,14 @@ class IesDouyinParser:
 
             user_agent = pick_ua()
 
-        path_segment = "slides" if content_type == "slides" else "video"
+        # Map content_type → URL path segment. Note pages 302 if served
+        # via /share/video/, so we must keep them on /share/note/.
+        if content_type == "slides":
+            path_segment = "slides"
+        elif content_type == "note":
+            path_segment = "note"
+        else:
+            path_segment = "video"
         share_page_url = f"https://www.iesdouyin.com/share/{path_segment}/{video_id}"
 
         try:
@@ -220,7 +227,9 @@ class IesDouyinParser:
                 "User-Agent": user_agent,
                 **(extra_headers or {}),
             }
-            async with httpx.AsyncClient(timeout=cls.TIMEOUT) as client:
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=cls.TIMEOUT
+            ) as client:
                 response = await client.get(share_page_url, headers=headers)
                 response.raise_for_status()
 
