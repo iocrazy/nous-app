@@ -20,11 +20,11 @@ import json
 import time
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from app.core.deps import AuthDep, get_optional_auth
+from app.core.deps import AuthDep
 from app.services import dbos_orchestrator
 
 router = APIRouter(prefix="/workflows", tags=["DBOS Workflows"])
@@ -96,6 +96,15 @@ async def _get_status(workflow_id: str) -> Optional[dict[str, Any]]:
     return _serialize_status(ws)
 
 
+def _step_field(s: Any, key: str, default: Any = None) -> Any:
+    """DBOS list_workflow_steps_async returns dict items in v2.19.0,
+    but earlier/later versions may return dataclass instances. Support
+    both shapes."""
+    if isinstance(s, dict):
+        return s.get(key, default)
+    return getattr(s, key, default)
+
+
 async def _get_steps(workflow_id: str) -> list[dict[str, Any]]:
     """Step list snapshot. Best-effort — returns [] on any error."""
     if not dbos_orchestrator.is_enabled():
@@ -106,15 +115,17 @@ async def _get_steps(workflow_id: str) -> list[dict[str, Any]]:
         steps = await DBOS.list_workflow_steps_async(workflow_id)
         return [
             {
-                "function_id": getattr(s, "function_id", None),
-                "function_name": getattr(s, "function_name", None),
-                "output": _safe_json(getattr(s, "output", None)),
+                "function_id": _step_field(s, "function_id"),
+                "function_name": _step_field(s, "function_name"),
+                "output": _safe_json(_step_field(s, "output")),
                 "error": (
-                    str(getattr(s, "error", None))
-                    if getattr(s, "error", None)
+                    str(_step_field(s, "error"))
+                    if _step_field(s, "error")
                     else None
                 ),
-                "child_workflow_id": getattr(s, "child_workflow_id", None),
+                "child_workflow_id": _step_field(s, "child_workflow_id"),
+                "started_at_epoch_ms": _step_field(s, "started_at_epoch_ms"),
+                "completed_at_epoch_ms": _step_field(s, "completed_at_epoch_ms"),
             }
             for s in steps
         ]
@@ -273,6 +284,7 @@ async def stream_workflow_events(
         "Authorization headers). Server validates the same way as "
         "Bearer header. Falls back to header auth when omitted.",
     ),
+    authorization: Optional[str] = Header(None),
 ) -> StreamingResponse:
     """SSE stream of DBOS workflow status changes. Closes on terminal
     state, 30-min ceiling, or client disconnect.
@@ -288,27 +300,28 @@ async def stream_workflow_events(
         es.addEventListener("done",   () => es.close());
         es.addEventListener("not_found", () => showError("workflow gone"));
     """
-    # Auth: header first (preferred), then query token fallback.
-    auth_ctx = await get_optional_auth(request)
-    if auth_ctx is None:
-        if not token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="No auth: provide Authorization header or ?token=",
-            )
-        # Validate query token via the same Bearer path so audit/log
-        # trails look identical regardless of transport.
-        from app.core.deps import _validate_bearer_token
+    # Auth: header first (preferred), then query token fallback. We
+    # don't reuse `Depends(get_optional_auth)` here because we want
+    # to fall through to the query-param path WITHOUT raising 401
+    # when the header is absent — a behaviour that's awkward to
+    # express through Depends on a single endpoint.
+    from app.core.deps import _validate_bearer_token
 
-        try:
-            await _validate_bearer_token(f"Bearer {token}")
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token: {e}",
-            )
+    bearer = authorization or (f"Bearer {token}" if token else None)
+    if not bearer:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No auth: provide Authorization header or ?token=",
+        )
+    try:
+        await _validate_bearer_token(bearer)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {e}",
+        )
 
     # Validate workflow exists before opening the stream so the client
     # gets a synchronous 404 instead of the SSE not_found event.
