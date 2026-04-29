@@ -468,12 +468,11 @@ class MediaRepository:
         """
         try:
             client = await self._get_client()
-            # Query resources with embedded parsed_media via FK: resources.media_id -> parsed_media.id
-            resource_fields = (
-                "id, video_download_status, music_download_status, "
-                "cover_download_status, image_download_status, "
-                "media_id, created_at"
-            )
+            # Schema note: *_download_status columns moved off `resources`
+            # onto `parsed_media` (single source of truth). The CARD_SELECT
+            # projection on parsed_media already includes them, so we no
+            # longer need to overlay per-user statuses from `resources`.
+            resource_fields = "id, media_id, created_at"
             query = (
                 client.table("resources")
                 .select(f"{resource_fields}," f"parsed_media!inner({self.CARD_SELECT})")
@@ -485,20 +484,10 @@ class MediaRepository:
             )
             result = await query.execute()
 
-            # Flatten: merge parsed_media into top-level, overlay user statuses
             videos = []
             for row in result.data or []:
                 media = dict(row.get("parsed_media", {}))
                 media["resource_id"] = row["id"]
-                for field in (
-                    "video_download_status",
-                    "music_download_status",
-                    "cover_download_status",
-                    "image_download_status",
-                ):
-                    user_status = row.get(field)
-                    if user_status is not None:
-                        media[field] = user_status
                 videos.append(media)
             return videos
         except Exception as e:
@@ -525,10 +514,9 @@ class MediaRepository:
         """
         try:
             client = await self._get_client()
-            resource_fields = (
-                "id, video_download_status, music_download_status, "
-                "cover_download_status, image_download_status, media_id, created_at"
-            )
+            # See get_user_media_list for the schema rationale: download
+            # statuses live on parsed_media now, not resources.
+            resource_fields = "id, media_id, created_at"
             query = (
                 client.table("resources")
                 .select(f"{resource_fields}, parsed_media!inner(*)")
@@ -546,7 +534,7 @@ class MediaRepository:
                 query = query.ilike("parsed_media.author", f"%{author}%")
 
             if status:
-                query = query.eq("video_download_status", status.value)
+                query = query.eq("parsed_media.video_download_status", status.value)
 
             if media_type:
                 query = query.eq("parsed_media.media_type", media_type)
@@ -560,20 +548,10 @@ class MediaRepository:
             query = query.order("created_at", desc=True).range(skip, skip + limit - 1)
             result = await query.execute()
 
-            # Flatten: merge parsed_media into top-level, overlay user statuses
             videos = []
             for row in result.data or []:
                 media = dict(row.get("parsed_media", {}))
                 media["resource_id"] = row["id"]
-                for field in (
-                    "video_download_status",
-                    "music_download_status",
-                    "cover_download_status",
-                    "image_download_status",
-                ):
-                    user_status = row.get(field)
-                    if user_status is not None:
-                        media[field] = user_status
                 videos.append(media)
             return videos
         except Exception as e:
@@ -589,7 +567,7 @@ class MediaRepository:
             base = (
                 client.table("resources")
                 .select(
-                    "video_download_status, parsed_media(datasize_bytes, author)",
+                    "parsed_media(video_download_status, datasize_bytes, author)",
                     count="exact",
                 )
                 .eq("creator_id", user_id)
@@ -602,21 +580,20 @@ class MediaRepository:
             total = total_result.count or 0
             rows = total_result.data or []
 
-            # Count statuses from result data
+            # Statuses now read from joined parsed_media — see schema note
+            # in get_user_media_list().
+            def _pm_status(row):
+                pm = row.get("parsed_media") or {}
+                return pm.get("video_download_status")
+
             pending = sum(
-                1
-                for r in rows
-                if r.get("video_download_status") == DownloadStatus.PENDING.value
+                1 for r in rows if _pm_status(r) == DownloadStatus.PENDING.value
             )
             completed = sum(
-                1
-                for r in rows
-                if r.get("video_download_status") == DownloadStatus.COMPLETED.value
+                1 for r in rows if _pm_status(r) == DownloadStatus.COMPLETED.value
             )
             failed = sum(
-                1
-                for r in rows
-                if r.get("video_download_status") == DownloadStatus.FAILED.value
+                1 for r in rows if _pm_status(r) == DownloadStatus.FAILED.value
             )
 
             # Calculate total storage bytes and unique authors from joined parsed_media

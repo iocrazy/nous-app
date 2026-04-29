@@ -94,12 +94,18 @@ def save_media_to_db(
         logger.error(f"Data validation failed: {e}")
         return None
 
-    # MediaCreate carries `need_download_video` / `need_download_music`
-    # / `need_download_cover` for the request schema, but those columns
-    # don't live on parsed_media (download intent flows through
-    # resources.{video,cover,image}_download_status instead). Strip
-    # them before insert to avoid PGRST204 schema-cache errors.
-    for k in ("need_download_video", "need_download_music", "need_download_cover"):
+    # MediaCreate carries request-shape fields that don't live on
+    # parsed_media. Strip before insert to avoid PGRST204 schema-cache
+    # errors. user_id moved to resources.creator_id (per-user ownership)
+    # — parse_workflow stuffs it onto parsed_data for downstream
+    # MediaService.process_video to pick up, but it must not land in
+    # the parsed_media INSERT itself.
+    for k in (
+        "need_download_video",
+        "need_download_music",
+        "need_download_cover",
+        "user_id",
+    ):
         data_dict.pop(k, None)
     # Internal helper marker added in fetch_and_parse — don't persist.
     data_dict.pop("_pending_categories", None)

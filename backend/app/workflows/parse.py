@@ -84,7 +84,6 @@ def auto_tag_step(
     auto_tag_media(video_db_id, platform_id, aweme_detail, title, description)
 
 
-@DBOS.step()
 def dispatch_download_step(
     *,
     platform_id: str,
@@ -95,14 +94,14 @@ def dispatch_download_step(
     video_title: str,
     user_agent: str,
 ) -> dict[str, Any]:
-    """Route the download via the migration table. In `'celery'` mode
-    this fires the legacy task; in `'shadow'` it fires both and
-    discards the DBOS output for comparison; in `'dbos'` it starts
-    download_workflow.
+    """Route the download via the migration table. Returns the routing
+    decision dict from start_workflow_routed.
 
-    Returns the routing decision dict from start_workflow_routed:
-      {"mode": "celery"|"shadow"|"dbos", "celery_task_id"?,
-       "dbos_workflow_id"?}"""
+    NOT a `@DBOS.step` — `start_workflow_routed` calls
+    `DBOS.start_workflow` internally, which asserts when invoked from
+    inside a step context. Must be called directly from the workflow
+    body where DBOS workflow context is active. Idempotency is handled
+    at the routing layer (DBOS workflow_id dedup)."""
     from app.services.dbos_orchestrator import start_workflow_routed
     from app.workflows.download import download_workflow
 
@@ -123,7 +122,6 @@ def dispatch_download_step(
     )
 
 
-@DBOS.step()
 def dispatch_l1_analysis_step(
     *,
     media_id: Any,
@@ -133,8 +131,9 @@ def dispatch_l1_analysis_step(
     user_id: str,
 ) -> dict[str, Any]:
     """Route L1 cover analysis via the migration table. Best-effort —
-    returns the routing decision but never raises (legacy behaviour
-    was a try/except wrapper that swallowed errors)."""
+    returns the routing decision but never raises.
+
+    NOT a `@DBOS.step` for the same reason as dispatch_download_step."""
     try:
         from app.services.dbos_orchestrator import start_workflow_routed
         from app.workflows.analyze_l1 import analyze_l1_workflow
