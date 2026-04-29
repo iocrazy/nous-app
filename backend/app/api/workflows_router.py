@@ -49,14 +49,27 @@ _MAX_STREAM_SECONDS = 30 * 60
 _TERMINAL_STATES = frozenset({"SUCCESS", "ERROR", "CANCELLED"})
 
 
-def _serialize_status(ws: Any) -> dict[str, Any]:
+def _stringify_error(err: Any) -> Optional[str]:
+    """DBOS stores `error` as a deserialised exception instance (or
+    None). `str(exc)` gives a clean message; for bare `Exception()`
+    fall back to the type name. Pickled bytes (rare path) get repr'd."""
+    if err is None:
+        return None
+    if isinstance(err, BaseException):
+        msg = str(err) or type(err).__name__
+        return msg[:500]
+    if isinstance(err, (bytes, bytearray)):
+        return f"<pickled-error len={len(err)}>"
+    return str(err)[:500]
+
+
+def _serialize_status(ws: Any, *, include_io: bool = False) -> dict[str, Any]:
     """Project a DBOS WorkflowStatus into a JSON-safe dict for the
-    frontend. We deliberately drop the `input` field — it can contain
-    non-JSON-serialisable kwargs (e.g. open file handles in the legacy
-    download path) and the frontend doesn't need it."""
+    frontend. `include_io=True` adds inputs/output (used by detail
+    endpoints; list endpoint omits to keep payload small)."""
     if ws is None:
         return {}
-    return {
+    out: dict[str, Any] = {
         "workflow_id": getattr(ws, "workflow_uuid", None)
         or getattr(ws, "workflow_id", None),
         "status": getattr(ws, "status", None),
@@ -64,13 +77,15 @@ def _serialize_status(ws: Any) -> dict[str, Any]:
         "queue_name": getattr(ws, "queue_name", None),
         "created_at": getattr(ws, "created_at", None),
         "updated_at": getattr(ws, "updated_at", None),
-        "output": _safe_json(getattr(ws, "output", None)),
-        "error": (
-            str(getattr(ws, "error", None)) if getattr(ws, "error", None) else None
-        ),
+        "error": _stringify_error(getattr(ws, "error", None)),
         "executor_id": getattr(ws, "executor_id", None),
         "app_version": getattr(ws, "app_version", None),
+        "authenticated_user": getattr(ws, "authenticated_user", None),
     }
+    if include_io:
+        out["input"] = _safe_json(getattr(ws, "input", None))
+        out["output"] = _safe_json(getattr(ws, "output", None))
+    return out
 
 
 def _safe_json(value: Any) -> Any:
@@ -85,7 +100,11 @@ def _safe_json(value: Any) -> Any:
 
 
 async def _get_status(workflow_id: str) -> Optional[dict[str, Any]]:
-    """One DBOS status read. Returns None if workflow_id is unknown."""
+    """One DBOS status read. Returns None if workflow_id is unknown.
+
+    For ERROR workflows we additionally call retrieve_workflow().get_result_async()
+    to surface the underlying exception — `WorkflowStatus.error` from
+    list/get_status alone is None until the result is realised."""
     if not dbos_orchestrator.is_enabled():
         return None
     from dbos import DBOS
@@ -93,7 +112,14 @@ async def _get_status(workflow_id: str) -> Optional[dict[str, Any]]:
     ws = await DBOS.get_workflow_status_async(workflow_id)
     if ws is None:
         return None
-    return _serialize_status(ws)
+    snapshot = _serialize_status(ws, include_io=True)
+    if snapshot.get("status") == "ERROR" and not snapshot.get("error"):
+        try:
+            handle = DBOS.retrieve_workflow(workflow_id)
+            await handle.get_result_async()
+        except Exception as exc:
+            snapshot["error"] = _stringify_error(exc)
+    return snapshot
 
 
 def _step_field(s: Any, key: str, default: Any = None) -> Any:
@@ -260,15 +286,15 @@ async def list_workflows(
             limit=limit,
             offset=offset,
             sort_desc=sort_desc,
-            load_input=False,
-            load_output=False,
+            load_input=True,  # cheap; lets UI render "Parse <url>" titles
+            load_output=False,  # output can be large; fetch via /status
         )
     except Exception as e:
         logger.warning(f"[workflows] list({auth.user_id[:8]}): {e}")
         raise HTTPException(500, detail=str(e))
 
     return {
-        "workflows": [_serialize_status(r) for r in rows],
+        "workflows": [_serialize_status(r, include_io=True) for r in rows],
         "total": len(rows),
         "offset": offset,
         "limit": limit,
