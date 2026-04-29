@@ -30,10 +30,15 @@ from loguru import logger
 @DBOS.step()
 def retry_failed_downloads_step() -> dict[str, Any]:
     """Find FAILED downloads, reset to PENDING, re-dispatch download task.
-    Skips orphan rows (user_id IS NULL) per CLAUDE.md regression notes."""
+    Skips orphan rows (user_id IS NULL) per CLAUDE.md regression notes.
+
+    PR-D7 phase 2: dispatch goes through start_workflow_routed so the
+    routing table picks DBOS / celery / shadow per task_type."""
     from app.core.enums import DownloadStatus
     from app.repositories.media_repository import MediaRepository
+    from app.services.dbos_orchestrator import start_workflow_routed
     from app.tasks.download_tasks import download_unified_task
+    from app.workflows.download import download_workflow
 
     async def _do() -> dict[str, int]:
         repo = MediaRepository()
@@ -62,14 +67,25 @@ def retry_failed_downloads_step() -> dict[str, Any]:
                         "error_message": None,
                     },
                 )
-                # NOTE: download_unified_task is still a Celery task today;
-                # in D3a we'll swap this to start_workflow_routed("download", ...).
-                download_unified_task.delay(
-                    platform_id,
-                    user_id,
-                    download_video=True,
-                    download_cover=True,
-                    media_type=int(media_type),
+                await start_workflow_routed(
+                    "download",
+                    dbos_workflow_callable=download_workflow,
+                    dbos_workflow_kwargs={
+                        "platform_id": platform_id,
+                        "user_id": user_id,
+                        "download_video": True,
+                        "download_cover": True,
+                        "media_type": int(media_type),
+                    },
+                    celery_dispatch=lambda pid=platform_id, uid=user_id, mt=int(
+                        media_type
+                    ): download_unified_task.delay(
+                        pid,
+                        uid,
+                        download_video=True,
+                        download_cover=True,
+                        media_type=mt,
+                    ),
                 )
                 retried += 1
             except Exception as e:

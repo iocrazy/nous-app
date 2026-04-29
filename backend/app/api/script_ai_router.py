@@ -44,14 +44,30 @@ async def generate_outline(
             title=f"Generate outline ({body.chapter_count} chapters)",
         )
 
+        # PR-D7 phase 2: route via start_workflow_routed. The DBOS
+        # workflow signature drops `task_id` (DBOS owns workflow status
+        # via its own dbos_workflow_id); the celery fallback keeps
+        # task_id for the legacy unified_tasks UI path during transition.
+        from app.services.dbos_orchestrator import start_workflow_routed
         from app.tasks.script_tasks import generate_script_outline
+        from app.workflows.script_outline import script_outline_workflow
 
-        generate_script_outline.delay(
-            task_id,
-            body.script_id,
-            body.premise,
-            body.chapter_count,
-            body.style_guide,
+        await start_workflow_routed(
+            "script_outline_gen",
+            dbos_workflow_callable=script_outline_workflow,
+            dbos_workflow_kwargs={
+                "script_id": body.script_id,
+                "premise": body.premise,
+                "chapter_count": body.chapter_count,
+                "style_guide": body.style_guide,
+            },
+            celery_dispatch=lambda: generate_script_outline.delay(
+                task_id,
+                body.script_id,
+                body.premise,
+                body.chapter_count,
+                body.style_guide,
+            ),
         )
 
         return {"success": True, "task_id": task_id}

@@ -284,9 +284,28 @@ def chain_followups_step(
 
     if mime_type.startswith("video/"):
         try:
+            # PR-D7 phase 2: route via start_workflow_routed instead of
+            # bare .delay() so the migration table controls celery vs
+            # dbos. Celery fallback kept until routing flip is verified
+            # in prod.
+            from app.services.dbos_orchestrator import start_workflow_routed
             from app.tasks.thumbnail_tasks import generate_thumbnail_task
+            from app.workflows.thumbnail import thumbnail_workflow
 
-            generate_thumbnail_task.delay(resource_id, fresh_download_path, mime_type)
+            asyncio.run(
+                start_workflow_routed(
+                    "thumbnail",
+                    dbos_workflow_callable=thumbnail_workflow,
+                    dbos_workflow_kwargs={
+                        "resource_id": resource_id,
+                        "file_path": fresh_download_path,
+                        "mime_type": mime_type,
+                    },
+                    celery_dispatch=lambda: generate_thumbnail_task.delay(
+                        resource_id, fresh_download_path, mime_type
+                    ),
+                )
+            )
         except Exception as e:
             logger.warning(f"[download.chain] thumbnail: {e}")
 
