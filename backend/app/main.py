@@ -140,7 +140,12 @@ async def lifespan(app: FastAPI):
     try:
         dbos_orchestrator.init_dbos()
         if dbos_orchestrator.is_enabled():
-            import app.workflows  # noqa: F401 — registers @DBOS.workflow decorators
+            # `from app import workflows` (NOT `import app.workflows`) so that
+            # the `app` parameter on this function is not shadowed by a local
+            # module binding. `import app.X` introduces `app` as a local in
+            # the enclosing function, which would break the
+            # `app.state.workforce_scheduler = ...` assignment below.
+            from app import workflows  # noqa: F401 — registers @DBOS decorators
 
             dbos_orchestrator.launch_dbos()
             logger.info("DBOS orchestrator launched")
