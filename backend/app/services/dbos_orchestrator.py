@@ -88,12 +88,21 @@ def init_dbos() -> None:
 
     from dbos import DBOS, DBOSConfig
 
+    # Co-locate DBOS sys tables (workflow_status, operation_outputs,
+    # workflow_events, etc.) in the SAME database as the app, in the
+    # `dbos` schema. Default behaviour creates a separate
+    # `<db>_dbos_sys` database, which would prevent Supabase Realtime
+    # from broadcasting workflow_status changes (Realtime only
+    # publishes from the configured app DB). Co-locating lets us add
+    # `dbos.workflow_status` to supabase_realtime publication and
+    # have the frontend Task Center subscribe natively.
     cfg: DBOSConfig = {
         "name": "mediahub",
-        "database_url": db_url,
+        "application_database_url": db_url,
+        "system_database_url": db_url,
     }
     _dbos = DBOS(config=cfg)
-    logger.info("[dbos] singleton instantiated")
+    logger.info("[dbos] singleton instantiated (sys + app share same DB)")
 
 
 def launch_dbos() -> None:
