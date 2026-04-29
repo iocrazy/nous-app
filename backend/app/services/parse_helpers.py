@@ -59,11 +59,19 @@ def fetch_and_parse(
             download_video=video_bool,
             download_music=False,
             download_cover=cover_bool,
-            categories=categories,
         )
     )
     if not parsed_data:
         raise RuntimeError("Parse failed")
+
+    # `categories` was a user-supplied tag set in the legacy Celery
+    # parse_task; the formatter never consumed it (it's persisted
+    # separately via auto_tag_step / explicit tag dispatch). Keep
+    # the kwarg in our signature for caller compatibility but stop
+    # forwarding it to the formatter — that was a regression
+    # introduced when parse_tasks.py was extracted into this helper.
+    if categories:
+        parsed_data["_pending_categories"] = categories
 
     return aweme_detail, parsed_data
 
@@ -85,6 +93,16 @@ def save_media_to_db(
     except Exception as e:
         logger.error(f"Data validation failed: {e}")
         return None
+
+    # MediaCreate carries `need_download_video` / `need_download_music`
+    # / `need_download_cover` for the request schema, but those columns
+    # don't live on parsed_media (download intent flows through
+    # resources.{video,cover,image}_download_status instead). Strip
+    # them before insert to avoid PGRST204 schema-cache errors.
+    for k in ("need_download_video", "need_download_music", "need_download_cover"):
+        data_dict.pop(k, None)
+    # Internal helper marker added in fetch_and_parse — don't persist.
+    data_dict.pop("_pending_categories", None)
 
     data_dict["video_download_status"] = (
         DownloadStatus.PENDING.value if video_bool else DownloadStatus.SKIPPED.value
