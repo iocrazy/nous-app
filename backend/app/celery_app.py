@@ -9,7 +9,6 @@ Celery 应用初始化模块
 import pkgutil
 
 from celery import Celery
-from celery.schedules import crontab
 from celery.signals import beat_init, worker_process_init
 
 import app.tasks as _tasks_pkg
@@ -78,63 +77,28 @@ celery_app.conf.update(
         "app.tasks.ai_tasks.transcribe_audio_task": {"queue": "transcription"},
         "app.tasks.ai_tasks.generate_summary_task": {"queue": "analysis"},
     },
-    # 定时任务调度（Celery Beat）
-    beat_schedule={
-        "cleanup-temp-files-daily": {
-            "task": "app.tasks.scheduled_tasks.cleanup_temp_files",
-            "schedule": 86400.0,  # 每天执行一次
-        },
-        "retry-failed-downloads-hourly": {
-            "task": "app.tasks.scheduled_tasks.retry_failed_downloads",
-            "schedule": 3600.0,  # 每小时执行一次
-        },
-        # Deprecated: get_statistics is per-user (no global rollup), and
-        # the task body was a no-op log. Removed from the beat to stop
-        # the every-6h log churn. The function itself is kept (returns
-        # skipped) so any external invokers don't 500.
-        # "update-statistics-6h": removed 2026-04-26
-        "update-system-status-30s": {
-            "task": "app.tasks.scheduled_tasks.update_system_status",
-            "schedule": 30.0,  # 每 30 秒执行一次
-        },
-        "reset-monthly-quotas": {
-            "task": "app.tasks.scheduled_tasks.reset_monthly_quotas",
-            "schedule": crontab(minute=0, hour=0, day_of_month=1),
-        },
-        "cleanup-trashed-resources-daily": {
-            "task": "app.tasks.scheduled_tasks.cleanup_trashed_resources",
-            "schedule": 86400.0,  # 每天执行一次
-        },
-        "cleanup-old-unified-tasks-daily": {
-            "task": "app.tasks.scheduled_tasks.cleanup_old_unified_tasks",
-            "schedule": 86400.0,  # 每天执行一次
-        },
-        "reap-stuck-pending-tasks-15min": {
-            "task": "app.tasks.scheduled_tasks.reap_stuck_pending_tasks",
-            "schedule": 900.0,  # 每 15 分钟：把 worker 丢的 pending 标记 failed
-        },
-        "recover-stale-orchestrator-locks-hourly": {
-            "task": "app.tasks.scheduled_tasks.recover_stale_orchestrator_locks",
-            "schedule": 3600.0,  # Every hour
-        },
-        "grant-daily-free-points": {
-            "task": "app.tasks.scheduled_tasks.grant_daily_free_points",
-            "schedule": crontab(minute=0, hour=0),  # 每天 00:00
-        },
-        "reclaim-daily-free-points": {
-            "task": "app.tasks.scheduled_tasks.reclaim_daily_free_points",
-            "schedule": crontab(minute=20, hour=0),  # 每天 00:20
-        },
-        "agent-runs-sweeper-60s": {
-            "task": "app.tasks.agent_runs_sweeper.sweep",
-            "schedule": 60.0,  # Heartbeat 清理 + 预算重算（pg_try_advisory_lock 保护）
-        },
-        # M2/M3 note: workforce inbox/outbox dispatch moved out of Celery
-        # beat in M3 — see app/services/workforce/scheduler.py. Lives in
-        # the FastAPI lifespan as an in-process asyncio loop with the
-        # AgentWorkerPool. Celery beat keeps agent_runs_sweeper which
-        # genuinely belongs in Celery (long-tail batch maintenance).
-    },
+    # 定时任务调度（Celery Beat）— PR-D7: ALL ENTRIES REMOVED.
+    #
+    # Each scheduled job has a DBOS @scheduled equivalent under
+    # `backend/app/workflows/scheduled_*.py` (PR-D3c2) plus
+    # `agent_runs_sweeper.py` (PR-D3c). Running both side-by-side
+    # would double-execute write tasks (e.g. grant_daily_free_points
+    # would credit users twice per day).
+    #
+    # The legacy task FUNCTIONS in `app/tasks/scheduled_tasks.py` and
+    # `app/tasks/agent_runs_sweeper.py` are kept for now — other code
+    # paths invoke them programmatically. The schedule entry was the
+    # "what fires automatically" config; removing it switches the cron
+    # source-of-truth to DBOS without breaking direct callers.
+    #
+    # If celery-beat is still running in your env, this means: it has
+    # nothing to fire. The deployment can drop the celery-beat process
+    # entirely (see docker-compose teardown notes in D7 README).
+    beat_schedule={},
+    # M2/M3 note: workforce inbox/outbox dispatch moved out of Celery
+    # beat in M3 — see app/services/workforce/scheduler.py. Lives in
+    # the FastAPI lifespan as an in-process asyncio loop with the
+    # AgentWorkerPool (or DbosAgentWorkforcePool when D5 flag is on).
 )
 
 # Register signal handlers (decorators auto-connect on import)
