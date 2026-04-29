@@ -240,9 +240,9 @@ async def get_task_progress(task_id: str, auth: AuthDep):
     # Try Redis first for real-time progress
     if celery_id:
         try:
-            from app.celery_app import celery_app
+            from app.core.redis import get_sync_redis
 
-            redis_client = celery_app.backend.client
+            redis_client = get_sync_redis()
             raw = redis_client.get(f"download_progress:{celery_id}")
             if raw:
                 data = json.loads(raw)

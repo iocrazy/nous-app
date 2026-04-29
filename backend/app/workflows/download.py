@@ -101,7 +101,7 @@ def run_download_step(
 ) -> dict[str, Any]:
     """Dispatch to the right strategy. Returns the per-asset
     {video, cover, music} → status dict from the strategy."""
-    from app.celery_app import celery_app
+    from app.core.redis import get_sync_redis
     from app.tasks.download_progress import UnifiedProgressTracker
     from app.tasks.download_strategies import (
         _do_douyin_download,
@@ -114,7 +114,7 @@ def run_download_step(
 
     tracker = UnifiedProgressTracker(
         task_id=fake_task_id,
-        redis_client=celery_app.backend.client,
+        redis_client=get_sync_redis(),
         unified_tracker=None,  # DBOS workflow status replaces this
         unified_task_id=None,
         user_id=user_id,

@@ -342,13 +342,42 @@ async def extract_audio(
             logger.warning(f"[ExtractAudio] Failed to create unified task: {e}")
 
         async def _do_extract(pid: str, task_id: str | None):
+            """PR-D7 phase 3: ffmpeg subprocess inlined here. The legacy
+            `_extract_audio_from_video` helper lived inside
+            app/tasks/download_tasks.py which has been deleted."""
             import asyncio
+            import subprocess
+            from pathlib import Path
 
-            from app.tasks.download_tasks import _extract_audio_from_video
+            from app.core.config import settings as _settings
+            from app.repositories.media_repository import MediaRepository as _MR
 
             _tracker = get_task_manager()
             try:
-                success = await asyncio.to_thread(_extract_audio_from_video, pid)
+                _media = await _MR().get_by_platform_id(pid)
+                if not _media or not _media.get("download_path"):
+                    raise RuntimeError("media row missing download_path")
+                video_path = Path(_settings.DOWNLOAD_PATH) / _media["download_path"]
+                audio_path = video_path.with_suffix(".m4a")
+
+                def _run_ffmpeg() -> bool:
+                    proc = subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            str(video_path),
+                            "-vn",
+                            "-c:a",
+                            "copy",
+                            str(audio_path),
+                        ],
+                        capture_output=True,
+                        timeout=300,
+                    )
+                    return proc.returncode == 0
+
+                success = await asyncio.to_thread(_run_ffmpeg)
                 if task_id:
                     if success:
                         await _tracker.complete(task_id)

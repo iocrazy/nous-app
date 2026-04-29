@@ -148,9 +148,11 @@ async def dedup_and_dispatch(
     url: str | None = None,
     background_tasks: BackgroundTasks | None = None,
 ) -> dict:
-    """Per-type Orchestrator dedup check + Celery dispatch."""
+    """Per-type Orchestrator dedup check + DBOS workflow dispatch.
+    PR-D7 phase 3: was Celery .delay()."""
+    from app.services.dbos_orchestrator import start_workflow_routed
     from app.services.unified_task_manager import get_task_manager
-    from app.tasks.download_tasks import download_unified_task
+    from app.workflows.download import download_workflow
 
     is_image_type = int(media_type) in (2, 68)
 
@@ -215,23 +217,25 @@ async def dedup_and_dispatch(
 
         try:
             logger.info(
-                f"[Download/Init] Celery dispatch: platform_id={platform_id}, "
+                f"[Download/Init] DBOS dispatch: platform_id={platform_id}, "
                 f"types={types_to_download}, user={user_id}"
             )
-            celery_task = await asyncio.to_thread(
-                download_unified_task.delay,
-                platform_id=platform_id,
-                user_id=user_id,
-                url=url,
-                download_video=dl_video,
-                download_cover=dl_cover,
-                media_type=media_type,
-                video_title=video_title[:50] if video_title else "undefined",
-                resource_id=resource_id,
-                _unified_task_id=unified_task_id,
+            decision = await start_workflow_routed(
+                "download",
+                dbos_workflow_callable=download_workflow,
+                dbos_workflow_kwargs={
+                    "platform_id": platform_id,
+                    "user_id": user_id,
+                    "url": url,
+                    "download_video": dl_video,
+                    "download_cover": dl_cover,
+                    "media_type": media_type,
+                    "video_title": (video_title[:50] if video_title else "undefined"),
+                    "resource_id": resource_id,
+                },
             )
-            task_id = celery_task.id
-            if unified_task_id:
+            task_id = decision.get("dbos_workflow_id", "")
+            if unified_task_id and task_id:
                 try:
                     await orchestrator._atomic_update(
                         unified_task_id, {"celery_task_id": task_id}
@@ -239,7 +243,7 @@ async def dedup_and_dispatch(
                 except Exception:
                     pass
         except Exception as celery_err:
-            logger.warning(f"[Download/Init] Celery unavailable: {celery_err}")
+            logger.warning(f"[Download/Init] DBOS dispatch failed: {celery_err}")
             if background_tasks:
                 from app.services.downloader import DownloaderService
 
@@ -391,9 +395,15 @@ async def handle_ytdlp_fetch(
     tags: Optional[list[str]] = None,
     tag_ids: Optional[list[str]] = None,
 ) -> dict:
-    """Unified video fetch handler for ALL platforms via yt-dlp."""
+    """Unified video fetch handler for ALL platforms via yt-dlp.
+
+    PR-D7 phase 3: was Celery `parse_media_task.delay`. Now dispatches
+    `parse_workflow` via DBOS. The yt-dlp branch logic lived in the
+    legacy task — DBOS port handles Douyin path; yt-dlp variant
+    deferred to D3a-2."""
+    from app.services.dbos_orchestrator import start_workflow_routed
     from app.services.unified_task_manager import get_task_manager
-    from app.tasks.parse_tasks import parse_media_task
+    from app.workflows.parse import parse_workflow
 
     mgr = get_task_manager()
 
@@ -441,25 +451,21 @@ async def handle_ytdlp_fetch(
     except Exception as e:
         logger.warning(f"[Parse] Pre-create unified_task failed: {e}")
 
-    celery_task = await asyncio.to_thread(
-        parse_media_task.delay,
-        url=url,
-        platform=platform,
-        user_id=auth.user_id,
-        video_bool=request.video_bool,
-        cover_bool=True,
-        tags=tags,
-        tag_ids=tag_ids,
-        skip_ytdlp=skip_ytdlp,
-        _unified_task_id=unified_task_id,
-        _dedup_key=dedup_key,
+    decision = await start_workflow_routed(
+        "parse",
+        dbos_workflow_callable=parse_workflow,
+        dbos_workflow_kwargs={
+            "url": url,
+            "user_id": auth.user_id,
+            "video_bool": request.video_bool,
+            "cover_bool": True,
+        },
     )
+    dbos_wf_id = decision.get("dbos_workflow_id", "")
 
-    if unified_task_id:
+    if unified_task_id and dbos_wf_id:
         try:
-            await mgr._atomic_update(
-                unified_task_id, {"celery_task_id": celery_task.id}
-            )
+            await mgr._atomic_update(unified_task_id, {"celery_task_id": dbos_wf_id})
         except Exception:
             pass
 

@@ -1,8 +1,17 @@
 # app/tasks/__init__.py
 
 """
-Celery 任务模块
+Legacy app.tasks namespace.
 
-所有 @shared_task 由 celery_app.autodiscover_tasks() 自动发现，
-新增 task 文件无需在此手动注册。
+PR-D7 phase 3b: All @shared_task / @celery_app.task decorated modules
+were physically deleted. The only files that remain are pure helpers
+(no Celery decorators) used by DBOS workflows + FastAPI routes:
+
+    - utils.py              (run_async helper)
+    - download_progress.py  (UnifiedProgressTracker class)
+    - download_strategies.py (_do_douyin_download / _do_ytdlp_download)
+    - download_helpers.py   (maybe_chain_*, ensure_download_urls,
+                             extract_audio_from_video, validate_*)
+
+The package itself no longer registers Celery tasks.
 """

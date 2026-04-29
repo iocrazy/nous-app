@@ -64,10 +64,12 @@ def health_check_step() -> dict[str, Any]:
         "storage": "unknown",
     }
 
+    # PR-D7 phase 3: was celery_app.control.ping. Celery is gone;
+    # check Redis directly via the get_sync_redis helper.
     try:
-        from app.celery_app import celery_app
+        from app.core.redis import get_sync_redis
 
-        celery_app.control.ping(timeout=5)
+        get_sync_redis().ping()
         checks["redis"] = "ok"
     except Exception as e:
         checks["redis"] = f"error: {str(e)[:50]}"

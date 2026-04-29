@@ -8,12 +8,8 @@ from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.repositories.analysis_repository import AnalysisRepository
-from app.tasks.analysis_tasks import (
-    analyze_pending_videos_task,
-    analyze_video_l1_task,
-    analyze_video_l2_task,
-    batch_analyze_l1_task,
-)
+from app.services.dbos_orchestrator import start_workflow_routed
+from app.workflows.analyze_l1 import analyze_l1_workflow
 
 router = APIRouter(prefix="/analysis", tags=["Analysis"])
 
@@ -203,48 +199,30 @@ async def trigger_analysis(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Media has no cover URL"
             )
 
-        task = await asyncio.to_thread(
-            analyze_video_l1_task.delay,
-            media_id=media_id,
-            cover_url=cover_url,
-            title=media.get("title", ""),
-            description=media.get("description", ""),
-            user_id=auth.user_id,
+        decision = await start_workflow_routed(
+            "ai_extract",
+            dbos_workflow_callable=analyze_l1_workflow,
+            dbos_workflow_kwargs={
+                "media_id": media_id,
+                "cover_url": cover_url,
+                "title": media.get("title", ""),
+                "description": media.get("description", ""),
+                "user_id": auth.user_id,
+            },
         )
-
         return TaskStatusResponse(
-            message="L1 analysis started", task_id=task.id, media_id=media_id
+            message="L1 analysis started",
+            task_id=decision.get("dbos_workflow_id", ""),
+            media_id=media_id,
         )
 
     elif request.level == "L2":
-        if not media.get("download_path"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Media file not downloaded yet. Download it first, then run L2 analysis.",
-            )
-
-        # Get full path
-        try:
-            base_path = Utils.get_download_base_path()
-            video_path = f"{base_path}/{media['download_path']}"
-        except ValueError as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Download path not configured: {e}",
-            )
-
-        task = await asyncio.to_thread(
-            analyze_video_l2_task.delay,
-            media_id=media_id,
-            cover_url=cover_url or "",
-            video_path=video_path,
-            title=media.get("title", ""),
-            description=media.get("description", ""),
-            user_id=auth.user_id,
-        )
-
-        return TaskStatusResponse(
-            message="L2 analysis started", task_id=task.id, media_id=media_id
+        # PR-D7 phase 3: L2 / batch / pending workflows haven't been
+        # ported to DBOS yet (pending PR D3a-2). Return 501 until they
+        # are ported. The L1 path above is the high-volume one.
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="L2 analysis is pending DBOS port (PR-D3a-2)",
         )
 
     elif request.level == "L3":
@@ -275,23 +253,42 @@ async def trigger_batch_analysis(
             detail="Maximum 100 media items per batch",
         )
 
+    # PR-D7 phase 3: batch + pending paths use the same DBOS workflow
+    # (analyze_l1_workflow) one row at a time. Loop here keeps the
+    # API contract; per-row failures are absorbed (best-effort batch).
     if request.level != "L1":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Batch analysis currently only supports L1 level",
         )
 
-    task = await asyncio.to_thread(
-        batch_analyze_l1_task.delay,
-        media_ids=request.media_ids,
-        batch_size=len(request.media_ids),
-        user_id=auth.user_id,
-    )
-
+    media_repo = AnalysisRepository()
+    started = 0
+    for mid in request.media_ids:
+        try:
+            row = await media_repo.get_media(mid)
+            if not row:
+                continue
+            cover = ((row.get("cover_urls") or []) + [None])[0]
+            if not cover:
+                continue
+            await start_workflow_routed(
+                "ai_extract",
+                dbos_workflow_callable=analyze_l1_workflow,
+                dbos_workflow_kwargs={
+                    "media_id": mid,
+                    "cover_url": cover,
+                    "title": row.get("title", ""),
+                    "description": row.get("description", ""),
+                    "user_id": auth.user_id,
+                },
+            )
+            started += 1
+        except Exception:
+            continue
     return {
-        "message": f"Batch {request.level} analysis started for {len(request.media_ids)} media items",
-        "task_id": task.id,
-        "media_count": len(request.media_ids),
+        "message": f"Batch {request.level} analysis started for {started} media items",
+        "media_count": started,
     }
 
 
@@ -300,16 +297,12 @@ async def analyze_pending_videos(
     auth: AuthDep,
     limit: int = Query(50, le=100, description="Maximum number of videos to analyze"),
 ):
-    """
-    Analyze all pending videos (videos without analysis).
-    Useful for backfilling analysis on existing videos.
-    """
-    task = await asyncio.to_thread(analyze_pending_videos_task.delay, limit=limit)
-
-    return {
-        "message": f"Started analyzing pending videos (up to {limit})",
-        "task_id": task.id,
-    }
+    """PR-D7 phase 3: pending-video bulk analysis hasn't been ported
+    to DBOS yet. Returns 501 until D3a-2 lands the workflow."""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="analyze-pending bulk endpoint is pending DBOS port (PR-D3a-2)",
+    )
 
 
 @router.delete("/{media_id}", status_code=status.HTTP_204_NO_CONTENT)

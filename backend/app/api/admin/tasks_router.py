@@ -146,14 +146,13 @@ async def cancel_task(
 
     celery_task_id = task.get("celery_task_id")
     if celery_task_id:
-        try:
-            from app.celery_app import celery_app
-
-            celery_app.control.revoke(celery_task_id, terminate=True)
-        except Exception as e:
-            logger.warning(
-                f"[Admin] Failed to revoke Celery task {celery_task_id}: {e}"
-            )
+        # PR-D7 phase 3: Celery is gone — no broker to revoke from.
+        # Log + skip; the unified_tasks row still gets marked cancelled
+        # below.
+        logger.debug(
+            f"[Admin] Skipped Celery revoke for legacy {celery_task_id} "
+            "(Celery removed)"
+        )
 
     await repo.update(task_id, {"status": "cancelled", "phase": "cancelled"})
 

@@ -119,9 +119,7 @@ async def _get_steps(workflow_id: str) -> list[dict[str, Any]]:
                 "function_name": _step_field(s, "function_name"),
                 "output": _safe_json(_step_field(s, "output")),
                 "error": (
-                    str(_step_field(s, "error"))
-                    if _step_field(s, "error")
-                    else None
+                    str(_step_field(s, "error")) if _step_field(s, "error") else None
                 ),
                 "child_workflow_id": _step_field(s, "child_workflow_id"),
                 "started_at_epoch_ms": _step_field(s, "started_at_epoch_ms"),

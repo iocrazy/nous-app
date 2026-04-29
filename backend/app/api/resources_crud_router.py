@@ -7,7 +7,6 @@ Core resource CRUD, file serving, recycle bin operations,
 move, tags, and batch transcode.
 """
 
-import asyncio
 from datetime import date
 from pathlib import Path
 from typing import List, Optional
@@ -315,15 +314,22 @@ async def batch_transcode(auth: AuthDep):
         repo = ResourcesRepository()
         versions = await repo.get_untranscoded_video_versions()
 
-        from app.tasks.transcode_tasks import transcode_to_hls
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.workflows.transcode import transcode_workflow
 
         queued = 0
         for v in versions:
             try:
                 vid = str(v["id"])
                 await repo.update_version(vid, {"transcode_status": "pending"})
-                await asyncio.to_thread(
-                    transcode_to_hls.delay, str(v["resource_id"]), vid, auth.user_id
+                await start_workflow_routed(
+                    "transcode",
+                    dbos_workflow_callable=transcode_workflow,
+                    dbos_workflow_kwargs={
+                        "resource_id": str(v["resource_id"]),
+                        "version_id": vid,
+                        "user_id": auth.user_id,
+                    },
                 )
                 queued += 1
             except Exception as e:

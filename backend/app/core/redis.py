@@ -3,14 +3,19 @@
 """
 Redis client utilities.
 
-Provides async Redis client for WebSocket pub/sub and a sync convenience accessor.
+Provides async + sync Redis clients for pub/sub and general use.
+PR-D7 phase 3: dropped the celery_app.backend.client indirection;
+both helpers now construct redis-py clients directly from the
+broker URL setting.
 """
 
+import redis as sync_redis_pkg
 import redis.asyncio as aioredis
 
 from app.core.config import settings
 
 _async_redis: aioredis.Redis | None = None
+_sync_redis: sync_redis_pkg.Redis | None = None
 
 
 async def get_async_redis() -> aioredis.Redis:
@@ -32,11 +37,14 @@ async def close_async_redis():
         _async_redis = None
 
 
-def get_sync_redis():
-    """Return the sync Redis client used by Celery backend.
+def get_sync_redis() -> sync_redis_pkg.Redis:
+    """Return a shared sync Redis client.
 
-    Must be called after Celery app is initialized (i.e. inside tasks or API handlers).
-    """
-    from app.celery_app import celery_app
-
-    return celery_app.backend.client
+    PR-D7: was `celery_app.backend.client` — now a plain redis-py
+    client built from `settings.CELERY_BROKER_URL` (the env var name
+    is preserved for backward compatibility; the URL points at the
+    broker Redis instance regardless of whether Celery is in use)."""
+    global _sync_redis
+    if _sync_redis is None:
+        _sync_redis = sync_redis_pkg.Redis.from_url(settings.CELERY_BROKER_URL)
+    return _sync_redis

@@ -132,10 +132,11 @@ class UnifiedTaskManager:
         return await get_async_supabase_admin()
 
     def _get_redis(self):
-        """Get Redis connection from Celery backend."""
-        from app.celery_app import celery_app
+        """Get sync Redis connection. PR-D7: was via celery_app.backend;
+        now via the dedicated `app.core.redis.get_sync_redis` helper."""
+        from app.core.redis import get_sync_redis
 
-        return celery_app.backend.client
+        return get_sync_redis()
 
     async def _get_phase(self, task_id: str) -> TaskPhase:
         """Fetch the current phase of a task."""
@@ -447,15 +448,15 @@ class UnifiedTaskManager:
         self._last_progress_value.pop(task_id, None)
 
         if celery_id:
-            try:
-                from app.celery_app import celery_app
-
-                celery_app.control.revoke(celery_id, terminate=True)
-                logger.info(f"[TaskManager] Revoked Celery task {celery_id}")
-            except Exception as e:
-                logger.warning(
-                    f"[TaskManager] Failed to revoke Celery task {celery_id}: {e}"
-                )
+            # PR-D7 phase 3: Celery is gone. The legacy `celery_id`
+            # column on unified_tasks may still get populated by older
+            # task rows; ignore it (no Celery worker to revoke from).
+            # Future: try DBOS.cancel_workflow_async() if the row also
+            # carries a dbos_workflow_id.
+            logger.debug(
+                f"[TaskManager] Skipped revoke for legacy celery_id={celery_id} "
+                "(Celery removed in PR-D7)"
+            )
 
         logger.debug(f"[TaskManager] Cancelled {task_id}")
 
