@@ -15,6 +15,8 @@ from typing import Any
 from dbos import DBOS
 from loguru import logger
 
+from app.services.workflow_tracker import tracked_workflow
+
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
 def generate_thumbnail_step(resource_id: str, file_path: str, mime_type: str) -> bool:
@@ -38,6 +40,10 @@ def generate_thumbnail_step(resource_id: str, file_path: str, mime_type: str) ->
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="thumbnail",
+    title_fn=lambda kw: f"Thumbnail {(kw.get('resource_id') or '')[:20]}",
+)
 def thumbnail_workflow(
     resource_id: str, file_path: str, mime_type: str
 ) -> dict[str, Any]:

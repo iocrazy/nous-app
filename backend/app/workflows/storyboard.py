@@ -34,6 +34,8 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
+from app.services.workflow_tracker import tracked_workflow
+
 _GRID_COLS = 4
 _GRID_NODE_WIDTH = 320
 _GRID_NODE_HEIGHT = 220
@@ -90,6 +92,10 @@ def generate_image_step(
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="storyboard_image_gen",
+    title_fn=lambda kw: f"Generate image: node {(kw.get('node_id') or '')[:8]}",
+)
 def storyboard_image_workflow(
     project_id: str,
     node_id: str,
@@ -134,6 +140,10 @@ def generate_image_batch_step(requests: list[dict[str, Any]]) -> list[dict[str, 
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="storyboard_image_gen",
+    title_fn=lambda kw: f"Batch images: {len(kw.get('requests') or [])} nodes",
+)
 def storyboard_image_batch_workflow(
     project_id: str,
     requests: list[dict[str, Any]],
@@ -191,6 +201,10 @@ def generate_video_step(
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="storyboard_video_gen",
+    title_fn=lambda kw: f"Generate video: node {(kw.get('node_id') or '')[:8]}",
+)
 def storyboard_video_workflow(
     project_id: str,
     node_id: str,
@@ -277,6 +291,10 @@ def persist_split_scenes_step(
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="storyboard_script_split",
+    title_fn=lambda kw: f"Split script: project {(kw.get('project_id') or '')[:8]}",
+)
 def storyboard_script_split_workflow(
     project_id: str,
     script_text: str,
@@ -355,6 +373,10 @@ def persist_video_scenes_step(
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="storyboard_video_analysis",
+    title_fn=lambda kw: f"Analyze video: project {(kw.get('project_id') or '')[:8]}",
+)
 def storyboard_video_analysis_workflow(
     project_id: str,
     video_path: str,
@@ -394,6 +416,10 @@ def export_storyboard_step(
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="storyboard_export",
+    title_fn=lambda kw: f"Export {kw.get('format', 'pdf').upper()}: project {(kw.get('project_id') or '')[:8]}",
+)
 def storyboard_export_workflow(
     project_id: str,
     *,
@@ -435,6 +461,10 @@ def split_image_grid_step(*, image_path: str, rows: int, cols: int) -> list[str]
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="storyboard_grid_split",
+    title_fn=lambda kw: f"Grid split {kw.get('rows', 0)}x{kw.get('cols', 0)}",
+)
 def storyboard_image_grid_split_workflow(
     project_id: str,
     image_path: str,
@@ -480,6 +510,10 @@ def process_annotation_step(node_id: str, annotation_data: dict[str, Any]) -> st
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="storyboard_annotation",
+    title_fn=lambda kw: f"Annotate node {(kw.get('node_id') or '')[:8]}",
+)
 def storyboard_annotation_workflow(
     node_id: str,
     annotation_data: dict[str, Any],

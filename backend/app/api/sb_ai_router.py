@@ -70,13 +70,17 @@ async def generate_image(auth: AuthDep, body: GenerateImageRequest) -> Dict[str,
     task manager and delivered over the realtime channel.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_image_gen",
             title=f"Generate image for node {body.node_id[:8]}",
+            celery_task_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "node_id": body.node_id,
@@ -99,6 +103,7 @@ async def generate_image(auth: AuthDep, body: GenerateImageRequest) -> Dict[str,
                 "reference_image_url": body.reference_image_url,
                 "aspect_ratio": body.aspect_ratio,
             },
+            workflow_id=wf_id,
         )
 
         logger.info(
@@ -128,13 +133,17 @@ async def generate_video(auth: AuthDep, body: GenerateVideoRequest) -> Dict[str,
     Returns a task_id immediately.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_video_gen",
             title=f"Generate video for node {body.node_id[:8]}",
+            celery_task_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "node_id": body.node_id,
@@ -159,6 +168,7 @@ async def generate_video(auth: AuthDep, body: GenerateVideoRequest) -> Dict[str,
                     else (0.25 if body.motion_intensity == "low" else 0.75)
                 ),
             },
+            workflow_id=wf_id,
         )
 
         logger.info(
@@ -188,13 +198,17 @@ async def split_script(auth: AuthDep, body: SplitScriptRequest) -> Dict[str, Any
     Returns a task_id immediately.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_script_split",
             title="Split script into storyboard scenes",
+            celery_task_id=wf_id,
             metadata={"project_id": body.project_id},
         )
 
@@ -207,6 +221,7 @@ async def split_script(auth: AuthDep, body: SplitScriptRequest) -> Dict[str, Any
                 "task_id": task_id,
                 "style_guide": body.style_guide or "",
             },
+            workflow_id=wf_id,
         )
 
         logger.info(
@@ -235,13 +250,17 @@ async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, A
     Returns a task_id immediately.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_video_analysis",
             title="Analyze video for storyboard scenes",
+            celery_task_id=wf_id,
             metadata={"project_id": body.project_id, "video_url": body.video_url},
         )
 
@@ -253,6 +272,7 @@ async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, A
                 "video_path": body.video_url,
                 "task_id": task_id,
             },
+            workflow_id=wf_id,
         )
 
         logger.info(
@@ -282,13 +302,17 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
     worker. Returns a task_id immediately.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_scene_detect",
             title="Detect scenes in video",
+            celery_task_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "video_url": body.video_url,
@@ -307,6 +331,7 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
                 "video_path": body.video_url,
                 "task_id": task_id,
             },
+            workflow_id=wf_id,
         )
 
         logger.info(
