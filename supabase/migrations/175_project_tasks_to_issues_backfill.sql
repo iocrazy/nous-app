@@ -1,5 +1,12 @@
 -- 175: PR-D6 — backfill project_tasks rows into the new issues table.
 --
+-- Connection role: when applied via direct psql under mediahub_dbos (the
+-- DBOS runtime role), schema-CREATE statements (the view at the bottom)
+-- need elevated privileges. SET ROLE upfront so the same script works
+-- under both Supabase CLI (service_role default) and direct psql
+-- (mediahub_dbos default + SET ROLE).
+SET ROLE service_role;
+--
 -- NON-DESTRUCTIVE: project_tasks stays in place and keeps serving the
 -- legacy KanbanBoard during the frontend swap window. The new IssuesPage
 -- reads from issues only. After D7 validation we drop project_tasks.
@@ -96,16 +103,17 @@ BEGIN
     v_inserted, v_skipped;
 END $$;
 
--- Sanity check view: which project_tasks have NOT been mirrored. Useful
--- during D7 cleanup to confirm coverage before dropping project_tasks.
-CREATE OR REPLACE VIEW public.unmigrated_project_tasks AS
-  SELECT pt.*
-    FROM public.project_tasks pt
-   WHERE NOT EXISTS (
-     SELECT 1 FROM public.issues i
-      WHERE i.origin_kind = 'migrated_project_task'
-        AND i.origin_fingerprint = pt.id::text
-   );
-
-COMMENT ON VIEW public.unmigrated_project_tasks IS
-  'project_tasks rows not yet mirrored into issues. Should be empty before D7 drops project_tasks.';
+-- Coverage check (inline query for ops dashboards / D7 readiness):
+--
+--   SELECT COUNT(*)
+--     FROM public.project_tasks pt
+--    WHERE NOT EXISTS (
+--      SELECT 1 FROM public.issues i
+--       WHERE i.origin_kind = 'migrated_project_task'
+--         AND i.origin_fingerprint = pt.id::text
+--    );
+--
+-- Should return 0 before D7 drops project_tasks. We deliberately don't
+-- create a persistent view here — schema-DDL on `public` requires the
+-- postgres owner role (service_role only has USAGE). Migration 176
+-- inlines the same predicate as its DROP guard.
