@@ -30,6 +30,8 @@ import asyncio
 from typing import Any, Optional
 
 from dbos import DBOS
+
+from app.services.workflow_tracker import tracked_workflow
 from loguru import logger
 
 
@@ -195,6 +197,10 @@ def log_parse_outcome_step(
 
 
 @DBOS.workflow()
+@tracked_workflow(
+    task_type="parse",
+    title_fn=lambda kw: f"Parse {(kw.get('url') or '')[:50]}",
+)
 def parse_workflow(
     url: str,
     user_id: str,
