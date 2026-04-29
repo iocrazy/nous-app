@@ -14,20 +14,20 @@ Lifecycle:
         ↓
     clear_lock (regardless of outcome)
 """
+
 from __future__ import annotations
-
-from datetime import datetime, timezone
-from typing import Any, Optional
-
-from dbos import DBOS
-from loguru import logger
 
 # Helper steps use psycopg directly because supabase-py async client is not
 # safe to call from within a DBOS step (it spins its own event loop). For
 # production we'll switch to the supabase-py admin client wrapped via
 # `asyncio.to_thread`. Keeping it minimal here.
 import os
+from datetime import datetime, timezone
+from typing import Any, Optional
+
 import psycopg
+from dbos import DBOS
+from loguru import logger
 
 
 def _dsn() -> str:
@@ -85,7 +85,10 @@ def set_status(
         # execution_state stores transient error context; cleared on rerun.
         patch_cols.append("execution_state = %s::jsonb")
         import json
-        args.append(json.dumps({"error_code": error_code, "error_message": error_message}))
+
+        args.append(
+            json.dumps({"error_code": error_code, "error_message": error_message})
+        )
 
     args.append(issue_id)
     sql = f"UPDATE public.issues SET {', '.join(patch_cols)} WHERE id = %s"
@@ -134,7 +137,12 @@ def execute_issue(issue_id: int) -> dict[str, Any]:
     """Parent workflow — owns the issue lifecycle. Child workflows (per
     assignee_agent_id / origin_kind) run inside via DBOS.start_workflow.
     """
-    issue = load_issue(issue_id)
+    # Load to validate existence + cache row in DBOS step output. The
+    # current scaffold doesn't yet branch on the loaded payload — D5
+    # will use it to pick the right child workflow per origin_kind /
+    # assignee. Keep the call so a future edit doesn't have to thread
+    # the step in from scratch.
+    load_issue(issue_id)
 
     workflow_id = DBOS.workflow_id  # the running workflow's id
     locked = atomic_checkout(issue_id, workflow_id)
@@ -149,7 +157,10 @@ def execute_issue(issue_id: int) -> dict[str, Any]:
         # For now: this parent workflow demonstrates the full lifecycle pattern
         # but doesn't dispatch real children. Leaf workflows (ai_summary etc)
         # are invoked directly by handlers, not via execute_issue, until D5.
-        result: dict[str, Any] = {"issue_id": issue_id, "noop": "PR-D5 will wire agent dispatch"}
+        result: dict[str, Any] = {
+            "issue_id": issue_id,
+            "noop": "PR-D5 will wire agent dispatch",
+        }
 
         # Default to in_review (user reviews agent output) unless skill marks auto_complete.
         # Until skill metadata wires up, default to 'done' for the no-op path.

@@ -14,10 +14,10 @@ The dispatch endpoint kicks off `execute_issue` via DBOS and writes
 the workflow_id back onto issues.dbos_workflow_id so the frontend can
 subscribe via /api/v1/workflows/{workflow_id}/events (D4 SSE).
 """
+
 from __future__ import annotations
 
 from typing import Optional
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
@@ -55,9 +55,7 @@ async def create_issue(payload: IssueCreate, auth: AuthDep) -> Issue:
         row = await issue_repository.atomic_create(body)
     except Exception as e:
         logger.warning(f"[issues] create failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 
@@ -120,9 +118,7 @@ async def get_issue(issue_id: int, auth: AuthDep) -> Issue:
 
 
 @router.patch("/{issue_id}", response_model=Issue)
-async def update_issue(
-    issue_id: int, payload: IssueUpdate, auth: AuthDep
-) -> Issue:
+async def update_issue(issue_id: int, payload: IssueUpdate, auth: AuthDep) -> Issue:
     """Partial update. Status changes go through /transition instead so
     the lifecycle timestamps (started_at / completed_at / cancelled_at)
     fire correctly."""
@@ -200,14 +196,15 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
             DBOS.start_workflow(execute_issue, issue_id)
     except Exception as e:
         # Duplicate workflow_id is a soft success — DBOS already has it.
-        if "already exists" not in repr(e).lower() and "duplicate" not in repr(e).lower():
+        if (
+            "already exists" not in repr(e).lower()
+            and "duplicate" not in repr(e).lower()
+        ):
             logger.warning(f"[issues] dispatch {issue_id} failed: {e}")
             raise HTTPException(status_code=500, detail=f"DBOS dispatch failed: {e}")
 
     # Persist workflow_id so the UI can find it without re-deriving.
-    row = await issue_repository.update(
-        issue_id, {"dbos_workflow_id": workflow_id}
-    )
+    row = await issue_repository.update(issue_id, {"dbos_workflow_id": workflow_id})
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 
@@ -238,6 +235,4 @@ def _assert_visibility(row: dict, auth) -> None:
         return
     # Team/project visibility folded in by repo in D6.1; until then
     # restrict to own/assignee. 404 (not 403) so we don't leak existence.
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND, detail="not found"
-    )
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")

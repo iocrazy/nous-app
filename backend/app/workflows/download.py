@@ -31,6 +31,7 @@ Steps:
 yt-dlp-supported URL. The dispatch site is parse_workflow (not yet
 ported) — D4 wiring will swap parse → download chain.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -195,9 +196,7 @@ def finalize_post_download_step(
                 if not existing_versions and fresh_download_path:
                     file_path = fresh_download_path
                     filename = (
-                        file_path.rsplit("/", 1)[-1]
-                        if "/" in file_path
-                        else file_path
+                        file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
                     )
                     mime_type = "video/mp4"
                     if filename.endswith(".webm"):
@@ -221,9 +220,7 @@ def finalize_post_download_step(
                                 ver["id"], {"file_size_bytes": actual_size}
                             )
             except Exception as ve:
-                logger.warning(
-                    f"[download.finalize] resource_version backfill: {ve}"
-                )
+                logger.warning(f"[download.finalize] resource_version backfill: {ve}")
 
             # parsed_media status fallback
             pm_status_updates: dict[str, str] = {}
@@ -325,9 +322,7 @@ def log_download_outcome_step(
                 await log_user_action(
                     user_id=user_id,
                     action="download",
-                    message=(
-                        f"Download completed ({strategy}): {video_title[:30]}..."
-                    ),
+                    message=(f"Download completed ({strategy}): {video_title[:30]}..."),
                     status="success",
                     aweme_id=platform_id,
                     details={"media_type": media_type},

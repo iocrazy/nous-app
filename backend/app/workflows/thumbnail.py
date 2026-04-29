@@ -6,6 +6,7 @@ in a single DBOS step. The retry policy (max_attempts=2) matches Celery's
 max_retries=2 for parity. Memoized by workflow_id so re-runs after a worker
 crash skip the ffmpeg pass on the second attempt.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -37,6 +38,8 @@ def generate_thumbnail_step(resource_id: str, file_path: str, mime_type: str) ->
 
 
 @DBOS.workflow()
-def thumbnail_workflow(resource_id: str, file_path: str, mime_type: str) -> dict[str, Any]:
+def thumbnail_workflow(
+    resource_id: str, file_path: str, mime_type: str
+) -> dict[str, Any]:
     success = generate_thumbnail_step(resource_id, file_path, mime_type)
     return {"resource_id": resource_id, "success": success}

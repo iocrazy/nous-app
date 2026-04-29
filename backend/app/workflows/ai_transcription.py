@@ -11,16 +11,16 @@ This module does NOT duplicate WhisperService.transcribe_and_save; it calls
 into it. The whole port reduces to "wrap the async service call in a DBOS
 workflow + lifecycle status updates on parsed_media / resources".
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 import psycopg
 from dbos import DBOS
-from loguru import logger
 
 
 def _dsn() -> str:

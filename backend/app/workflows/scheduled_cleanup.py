@@ -10,11 +10,12 @@ service code:
 Cron offsets (00/01/02) spread the daily IO so they don't all hit the
 DB at midnight together.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 

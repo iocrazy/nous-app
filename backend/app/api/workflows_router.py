@@ -12,6 +12,7 @@ Endpoints:
     POST   /api/v1/workflows/{workflow_id}/resume   — resume after pause
     GET    /api/v1/workflows/{workflow_id}/steps    — step list snapshot
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -56,14 +57,17 @@ def _serialize_status(ws: Any) -> dict[str, Any]:
     if ws is None:
         return {}
     return {
-        "workflow_id": getattr(ws, "workflow_uuid", None) or getattr(ws, "workflow_id", None),
+        "workflow_id": getattr(ws, "workflow_uuid", None)
+        or getattr(ws, "workflow_id", None),
         "status": getattr(ws, "status", None),
         "name": getattr(ws, "name", None),
         "queue_name": getattr(ws, "queue_name", None),
         "created_at": getattr(ws, "created_at", None),
         "updated_at": getattr(ws, "updated_at", None),
         "output": _safe_json(getattr(ws, "output", None)),
-        "error": (str(getattr(ws, "error", None)) if getattr(ws, "error", None) else None),
+        "error": (
+            str(getattr(ws, "error", None)) if getattr(ws, "error", None) else None
+        ),
         "executor_id": getattr(ws, "executor_id", None),
         "app_version": getattr(ws, "app_version", None),
     }
@@ -105,7 +109,11 @@ async def _get_steps(workflow_id: str) -> list[dict[str, Any]]:
                 "function_id": getattr(s, "function_id", None),
                 "function_name": getattr(s, "function_name", None),
                 "output": _safe_json(getattr(s, "output", None)),
-                "error": (str(getattr(s, "error", None)) if getattr(s, "error", None) else None),
+                "error": (
+                    str(getattr(s, "error", None))
+                    if getattr(s, "error", None)
+                    else None
+                ),
                 "child_workflow_id": getattr(s, "child_workflow_id", None),
             }
             for s in steps

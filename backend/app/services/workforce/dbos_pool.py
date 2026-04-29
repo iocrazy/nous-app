@@ -16,13 +16,14 @@ Shutdown semantics differ slightly from the legacy pool:
       (incremented at enqueue, decremented when DBOS reports terminal).
       For exact counts, query DBOS.list_workflows(queue_name=...).
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 from uuid import UUID
 
-from dbos import DBOS, SetEnqueueOptions, SetWorkflowID
+from dbos import SetEnqueueOptions, SetWorkflowID
 
 logger = logging.getLogger(__name__)
 
@@ -64,14 +65,10 @@ class DbosAgentWorkforcePool:
         agent_id_raw = task.get("agent_id")
         task_id_raw = task.get("id")
         if not agent_id_raw or not task_id_raw:
-            logger.error(
-                f"[dbos-workforce-pool] task missing agent_id or id: {task}"
-            )
+            logger.error(f"[dbos-workforce-pool] task missing agent_id or id: {task}")
             return
 
-        agent_id = (
-            UUID(agent_id_raw) if isinstance(agent_id_raw, str) else agent_id_raw
-        )
+        agent_id = UUID(agent_id_raw) if isinstance(agent_id_raw, str) else agent_id_raw
         self._known_agents.add(agent_id)
 
         # Deferred import: agent_workforce.py registers the queue at
@@ -88,8 +85,9 @@ class DbosAgentWorkforcePool:
         partition_key = str(agent_id)
 
         try:
-            with SetWorkflowID(workflow_id), SetEnqueueOptions(
-                queue_partition_key=partition_key
+            with (
+                SetWorkflowID(workflow_id),
+                SetEnqueueOptions(queue_partition_key=partition_key),
             ):
                 # Enqueue is sync — returns a WorkflowHandle without
                 # blocking on the workflow body. DBOS schedules it.

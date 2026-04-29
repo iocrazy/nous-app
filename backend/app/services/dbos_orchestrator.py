@@ -17,12 +17,13 @@ using `celery_task.delay(...)` directly during the migration. New code paths
 (handlers being PR-D6'd, agent dispatchers being PR-D5'd) call the routed
 dispatcher.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Callable, Optional
 
 from loguru import logger
 
@@ -57,7 +58,9 @@ async def _refresh_routing_cache() -> None:
         _routing_loaded_at = asyncio.get_event_loop().time()
         logger.info(f"[dbos] routing cache refreshed: {len(_routing_cache)} entries")
     except Exception as e:
-        logger.warning(f"[dbos] routing cache refresh failed: {e!r} — keeping previous cache")
+        logger.warning(
+            f"[dbos] routing cache refresh failed: {e!r} — keeping previous cache"
+        )
 
 
 async def get_routing(task_type: str) -> RoutingDecision:
@@ -155,7 +158,11 @@ async def start_workflow_routed(
             logger.error(f"[dbos] celery dispatch failed for {task_type}: {e!r}")
             raise
 
-    if decision.mode in ("shadow", "dbos") and dbos_workflow_callable is not None and is_enabled():
+    if (
+        decision.mode in ("shadow", "dbos")
+        and dbos_workflow_callable is not None
+        and is_enabled()
+    ):
         from dbos import DBOS, SetWorkflowID
 
         kwargs = dbos_workflow_kwargs or {}
@@ -174,7 +181,9 @@ async def start_workflow_routed(
         except Exception as e:
             # Shadow mode: never let DBOS failure break the canonical celery path
             if decision.mode == "shadow":
-                logger.warning(f"[dbos][shadow] DBOS dispatch failed for {task_type}: {e!r}")
+                logger.warning(
+                    f"[dbos][shadow] DBOS dispatch failed for {task_type}: {e!r}"
+                )
             else:
                 raise
 

@@ -29,6 +29,7 @@ Concurrency tuning rationale:
     - `worker_concurrency` left None: per-worker cap = global cap
       since we expect one DBOS worker per uvicorn pod for now.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,8 +37,6 @@ import os
 from typing import Any
 
 from dbos import DBOS, Queue
-from loguru import logger
-
 
 _DEFAULT_CONCURRENCY = int(os.environ.get("WORKFORCE_QUEUE_CONCURRENCY", "8"))
 

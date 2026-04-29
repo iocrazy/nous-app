@@ -6,16 +6,14 @@ VisualAnalysisService + EmbeddingService + AnalysisRepository + TagsRepository.
 We delegate to the existing service code; the DBOS layer adds idempotency
 (workflow_id) + a per-step retry policy on the multimodal LLM call.
 """
+
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 from typing import Any, Optional
 
-import psycopg
 from dbos import DBOS
-from loguru import logger
 
 
 def _dsn() -> str:
@@ -31,7 +29,9 @@ def resolve_analyze_provider(user_id: Optional[str]) -> dict[str, Any]:
     analysis_tasks._resolve_analyze_provider_config."""
     from app.tasks.analysis_tasks import _resolve_analyze_provider_config
 
-    provider_key, provider_config, agent_model = _resolve_analyze_provider_config(user_id)
+    provider_key, provider_config, agent_model = _resolve_analyze_provider_config(
+        user_id
+    )
     return {
         "provider_key": provider_key,
         "provider_config": provider_config or {},

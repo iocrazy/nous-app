@@ -10,6 +10,7 @@ their reply via agent_runs/ai_messages); a missing memory degrades the
 NEXT chat, not the current one. DBOS retry policy is conservative
 (max_attempts=2) to match the Celery `max_retries=2` budget.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +19,6 @@ from uuid import UUID
 
 from dbos import DBOS
 from loguru import logger
-
 
 _RECENT_TURNS_PER_CHANNEL = 10
 

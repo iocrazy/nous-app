@@ -9,6 +9,7 @@ The 30s cadence is preserved using 6-field cron ("*/30 * * * * *");
 DBOS croniter is initialized with second_at_beginning=True so seconds
 are honored.
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -55,6 +55,15 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # session to record against. Memory extraction LLM calls are tracked
     # via Celery task metrics, not RunRecorder.
     "tasks/memory_tasks.py": "memory extraction in Celery task, off-chat-path",
+    # PR-D3c: DBOS port of memory_tasks. Same justification as the
+    # Celery original — workflow_id memoization + DBOS workflow status
+    # provide telemetry separately from RunRecorder.
+    "workflows/write_memory.py": "memory extraction DBOS workflow, off-chat-path",
+    # PR-D3c (PoC #8): DBOS port of the ai_summary Celery task. The
+    # OpenAI-compatible call lives directly in the workflow's @DBOS.step
+    # for retry control. Telemetry comes from DBOS workflow status +
+    # the ai_rewrite_text persistence row, not RunRecorder.
+    "workflows/ai_summary.py": "summary DBOS workflow, off-chat-path",
     # M1.5 wiring: cheap-model auxiliary LLM call for memory ranker.
     # Side-channel from the main agent run; cost tracked separately.
     "services/ai_library_chat_wiring.py": "memory ranker auxiliary LLM, side-channel",

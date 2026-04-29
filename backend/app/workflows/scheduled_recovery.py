@@ -16,6 +16,7 @@
     Kept here so the celery-beat schedule can be removed safely
     while D3d is still in flight.
 """
+
 from __future__ import annotations
 
 import asyncio

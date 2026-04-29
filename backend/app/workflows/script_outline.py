@@ -12,6 +12,7 @@ DBOS layering:
     - chapter persistence is a separate step so a half-written canvas
       doesn't re-charge the LLM on replay
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +20,6 @@ from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
-
 
 _VERTICAL_GAP = 200
 _START_X = 400
@@ -40,9 +40,7 @@ def generate_outline_chapters(
         return await ai_svc.generate_outline(premise, chapter_count, style_guide)
 
     chapters = asyncio.run(_call())
-    logger.info(
-        f"[script_outline][step] LLM returned {len(chapters)} chapters"
-    )
+    logger.info(f"[script_outline][step] LLM returned {len(chapters)} chapters")
     return chapters
 
 

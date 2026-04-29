@@ -10,11 +10,12 @@ extends that into a production-shaped workflow:
     - touches `unified_tasks` for back-compat with TaskCenter UI during
       shadow mode
 """
+
 from __future__ import annotations
 
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 import psycopg
 from dbos import DBOS
@@ -80,12 +81,16 @@ def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
         "provider": provider_key,
         "api_key": cfg["api_key"],
         "base_url": cfg.get("base_url"),
-        "model": cfg.get("selected_model") or ai_settings.get("default_summary_model") or "doubao-seed-2-0-pro-260215",
+        "model": cfg.get("selected_model")
+        or ai_settings.get("default_summary_model")
+        or "doubao-seed-2-0-pro-260215",
     }
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-def call_llm_summary(transcript: str, *, api_key: str, base_url: str, model: str) -> str:
+def call_llm_summary(
+    transcript: str, *, api_key: str, base_url: str, model: str
+) -> str:
     """Idempotent w.r.t. workflow_id (DBOS-memoized) but retry-safe w.r.t. transient
     HTTP failures. Each attempt is a fresh OpenAI call.
     """

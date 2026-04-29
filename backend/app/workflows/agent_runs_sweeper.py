@@ -15,15 +15,14 @@ Two jobs (unchanged from the Celery version):
      ai_agents.paused_reason='budget' on overrun, clear it on
      undershoot (without clobbering manual pauses)
 """
+
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from dbos import DBOS
 from loguru import logger
-
 
 HEARTBEAT_STALENESS_SECONDS = 120
 
@@ -87,12 +86,8 @@ def recompute_monthly_budgets_step() -> int:
             cost_budget = agent.get("monthly_cost_cents_budget")
             paused_reason = agent.get("paused_reason")
 
-            over_tokens = (
-                token_budget is not None and t["tokens"] > int(token_budget)
-            )
-            over_cost = (
-                cost_budget is not None and t["cost_cents"] > float(cost_budget)
-            )
+            over_tokens = token_budget is not None and t["tokens"] > int(token_budget)
+            over_cost = cost_budget is not None and t["cost_cents"] > float(cost_budget)
             should_pause = over_tokens or over_cost
 
             if should_pause and paused_reason != "budget":

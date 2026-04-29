@@ -25,6 +25,7 @@ migration 169). Two new task_types not in migration 169 are added by
 this port: `storyboard_image_batch` and `storyboard_annotation`. Add
 their routing rows in a follow-up migration if/when needed.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +33,6 @@ from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
-
 
 _GRID_COLS = 4
 _GRID_NODE_WIDTH = 320
@@ -95,7 +95,9 @@ def storyboard_image_workflow(
     node_id: str,
     prompt: str,
     *,
-    task_id: Optional[str] = None,  # legacy unified_task id; ignored, kept for D4 parity
+    task_id: Optional[
+        str
+    ] = None,  # legacy unified_task id; ignored, kept for D4 parity
     model: str = "dall-e-3",
     provider: str = "openai",
     character_ids: Optional[list] = None,
@@ -263,9 +265,7 @@ def persist_split_scenes_step(
             if node_id:
                 frame_data = {
                     "order_index": 0,
-                    "prompt": scene.get(
-                        "image_prompt", scene.get("description", "")
-                    ),
+                    "prompt": scene.get("image_prompt", scene.get("description", "")),
                     "notes": scene.get("notes", ""),
                     "status": "pending",
                 }
@@ -426,9 +426,7 @@ def storyboard_export_workflow(
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-def split_image_grid_step(
-    *, image_path: str, rows: int, cols: int
-) -> list[str]:
+def split_image_grid_step(*, image_path: str, rows: int, cols: int) -> list[str]:
     """CPU-bound — sync service call wrapped in a step for retry."""
     from app.services.storyboard_image_service import StoryboardImageService
 
@@ -450,9 +448,7 @@ def storyboard_image_grid_split_workflow(
             "status": "failed",
             "error": f"rows and cols must be ≥ 1, got rows={rows} cols={cols}",
         }
-    frame_paths = split_image_grid_step(
-        image_path=image_path, rows=rows, cols=cols
-    )
+    frame_paths = split_image_grid_step(image_path=image_path, rows=rows, cols=cols)
     return {
         "status": "success",
         "project_id": project_id,
@@ -467,9 +463,7 @@ def storyboard_image_grid_split_workflow(
 
 
 @DBOS.step()
-def process_annotation_step(
-    node_id: str, annotation_data: dict[str, Any]
-) -> str:
+def process_annotation_step(node_id: str, annotation_data: dict[str, Any]) -> str:
     """Currently a no-op placeholder per the legacy task — TODO when the
     storyboard_annotations schema lands. Returns the annotation_type for
     the workflow result payload."""

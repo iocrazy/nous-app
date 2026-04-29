@@ -145,7 +145,9 @@ async def lifespan(app: FastAPI):
             dbos_orchestrator.launch_dbos()
             logger.info("DBOS orchestrator launched")
     except Exception as e:
-        logger.error(f"DBOS orchestrator startup failed: {e!r} — continuing without DBOS")
+        logger.error(
+            f"DBOS orchestrator startup failed: {e!r} — continuing without DBOS"
+        )
 
     # ── M3 / D5: workforce scheduler — in-process asyncio tick loop ──
     # Inbox/outbox dispatch loop. Pool selection:
@@ -158,7 +160,8 @@ async def lifespan(app: FastAPI):
         from app.services.workforce.scheduler import WorkforceScheduler
 
         use_dbos_queue = (
-            os.environ.get("WORKFORCE_USE_DBOS_QUEUE", "").lower() in ("1", "true", "yes")
+            os.environ.get("WORKFORCE_USE_DBOS_QUEUE", "").lower()
+            in ("1", "true", "yes")
             and dbos_orchestrator.is_enabled()
         )
         pool = None

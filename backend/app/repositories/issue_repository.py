@@ -41,6 +41,7 @@ class IssueRepository:
         # UUIDs (and other non-JSON-native types) need to be string-coerced
         # before being sent through PostgREST RPC payload.
         from uuid import UUID
+
         sanitized: dict[str, Any] = {}
         for k, v in payload.items():
             sanitized[k] = str(v) if isinstance(v, UUID) else v
@@ -54,8 +55,14 @@ class IssueRepository:
             raise RuntimeError("issue_create_atomic returned empty result")
         # Postgres function returns issues row; supabase-py wraps it as either
         # the row dict directly OR a single-element list, depending on version.
-        row = result.data if isinstance(result.data, dict) else (
-            result.data[0] if isinstance(result.data, list) and result.data else None
+        row = (
+            result.data
+            if isinstance(result.data, dict)
+            else (
+                result.data[0]
+                if isinstance(result.data, list) and result.data
+                else None
+            )
         )
         if not row:
             raise RuntimeError("issue_create_atomic returned malformed result")
@@ -122,6 +129,7 @@ class IssueRepository:
         # parens, and dots as separators — a malformed user_id (or one from an
         # untrusted source in the future) could otherwise extend the filter.
         from uuid import UUID
+
         UUID(user_id)  # raises ValueError on bad input
 
         client = await self._client()
@@ -151,7 +159,10 @@ class IssueRepository:
     async def soft_delete(self, issue_id: int) -> dict[str, Any]:
         """User-facing delete — sets hidden_at, keeps row for audit / undo."""
         from datetime import datetime, timezone
-        return await self.update(issue_id, {"hidden_at": datetime.now(timezone.utc).isoformat()})
+
+        return await self.update(
+            issue_id, {"hidden_at": datetime.now(timezone.utc).isoformat()}
+        )
 
     async def transition_status(
         self,

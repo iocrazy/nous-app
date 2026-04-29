@@ -61,7 +61,9 @@ class IssueBase(BaseModel):
     @model_validator(mode="after")
     def assignee_xor(self) -> "IssueBase":
         if self.assignee_user_id is not None and self.assignee_agent_id is not None:
-            raise ValueError("assignee_user_id and assignee_agent_id are mutually exclusive")
+            raise ValueError(
+                "assignee_user_id and assignee_agent_id are mutually exclusive"
+            )
         return self
 
 
@@ -71,6 +73,7 @@ class IssueCreate(IssueBase):
 
 class IssueUpdate(BaseModel):
     """PATCH payload — every field optional. Status changes go through dedicated endpoint."""
+
     title: Optional[str] = Field(default=None, min_length=1, max_length=500)
     description: Optional[str] = Field(default=None, max_length=50000)
     priority: Optional[IssuePriority] = None
@@ -84,17 +87,22 @@ class IssueUpdate(BaseModel):
     @model_validator(mode="after")
     def assignee_xor(self) -> "IssueUpdate":
         if self.assignee_user_id is not None and self.assignee_agent_id is not None:
-            raise ValueError("assignee_user_id and assignee_agent_id are mutually exclusive")
+            raise ValueError(
+                "assignee_user_id and assignee_agent_id are mutually exclusive"
+            )
         return self
 
 
 class IssueStatusTransition(BaseModel):
     status: IssueStatus
-    reason: Optional[str] = None  # for transitions that need an audit hint (cancel, block)
+    reason: Optional[str] = (
+        None  # for transitions that need an audit hint (cancel, block)
+    )
 
 
 class Issue(IssueBase):
     """Read response — all server-set fields included."""
+
     id: int
     issue_number: int
     identifier: str

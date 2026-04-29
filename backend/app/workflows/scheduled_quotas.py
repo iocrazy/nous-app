@@ -12,6 +12,7 @@ These touch real money proxy (points). Per _DEFERRED_TASKS.md, write
 integration tests against NAS dev before flipping the celery-beat
 schedule off in D3d.
 """
+
 from __future__ import annotations
 
 import asyncio
