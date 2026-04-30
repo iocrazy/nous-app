@@ -6,7 +6,6 @@ Media Fetch Helpers
 Shared helper functions and models used by media fetch routes.
 """
 
-import asyncio
 from typing import Optional
 
 from fastapi import BackgroundTasks, HTTPException, Request

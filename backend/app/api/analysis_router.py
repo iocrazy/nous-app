@@ -1,6 +1,5 @@
 """API routes for Video Analysis."""
 
-import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -172,7 +171,6 @@ async def trigger_analysis(
     - **L2**: Cover + keyframes analysis (requires downloaded video, ~$0.005)
     - **L3**: Full video analysis (manual, ~$0.05) - not yet implemented
     """
-    from app.core.utils import Utils
     from app.db.supabase_client import get_async_supabase_admin
 
     supabase = await get_async_supabase_admin()

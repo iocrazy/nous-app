@@ -6,8 +6,6 @@ Media Batch Router
 Endpoints for batch fetching media and debug raw-parse.
 """
 
-import asyncio
-
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from loguru import logger
 

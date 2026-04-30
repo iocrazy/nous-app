@@ -68,7 +68,11 @@ def _get_douyin_method_flags() -> dict[str, bool]:
 
 
 def _try_lighthttp(
-    url: str, user_id: Optional[str], user_agent: Optional[str], video_bool: bool, cover_bool: bool
+    url: str,
+    user_id: Optional[str],
+    user_agent: Optional[str],
+    video_bool: bool,
+    cover_bool: bool,
 ):
     """LightHTTP via IesDouyinParser. Returns (aweme_detail, parsed_data) or None."""
     from app.services.douyin_parse.formatter import DouyinFormatter
@@ -96,7 +100,11 @@ def _try_lighthttp(
 
 
 def _try_abogus(
-    url: str, user_id: Optional[str], user_agent: Optional[str], video_bool: bool, cover_bool: bool
+    url: str,
+    user_id: Optional[str],
+    user_agent: Optional[str],
+    video_bool: bool,
+    cover_bool: bool,
 ):
     """ABogus signed HTTP via ABogusDouyinParser."""
     from app.services.douyin_parse.abogus_parser import ABogusDouyinParser
@@ -124,7 +132,11 @@ def _try_abogus(
 
 
 def _try_drissionpage(
-    url: str, user_id: Optional[str], user_agent: Optional[str], video_bool: bool, cover_bool: bool
+    url: str,
+    user_id: Optional[str],
+    user_agent: Optional[str],
+    video_bool: bool,
+    cover_bool: bool,
 ):
     """DrissionPage browser fallback (slow, last resort)."""
     from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
