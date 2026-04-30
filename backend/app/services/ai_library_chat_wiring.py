@@ -330,7 +330,7 @@ async def _load_user_provider_config(user_id: UUID) -> dict[str, Any]:
 def _get_redis_client_or_none():
     """Lazy redis import — graceful degradation if redis-py isn't installed
     or REDIS_URL isn't set."""
-    url = os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL")
+    url = os.getenv("REDIS_URL")
     if not url:
         return None
     try:

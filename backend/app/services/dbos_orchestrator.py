@@ -2,20 +2,18 @@
 
 Responsibilities:
     - Initialize the DBOS singleton from `DBOS_DATABASE_URL` env var
-    - Read & cache the `dbos_workflow_routing` table at startup; expose a
-      `get_routing(task_type)` helper for the celery / shadow / dbos decision
-    - Provide `start_workflow_routed(task_type, payload)` — the canonical
-      dispatcher that backend code calls instead of `task.delay(...)`. Looks
-      up routing, then either:
-        * 'celery' → enqueue Celery task only (legacy)
-        * 'shadow' → enqueue Celery (canonical) + DBOS workflow (parallel,
-          output captured for comparison, not used)
-        * 'dbos'   → start DBOS workflow only
+    - Read & cache the `dbos_workflow_routing` table; expose a
+      `get_routing(task_type)` helper that returns the per-task mode
+    - Provide `start_workflow_routed(task_type, ...)` — the only dispatcher.
+      After Celery removal there is no fallback path: dispatch raises if
+      the routing row says anything other than 'dbos', or if DBOS itself
+      is not enabled (missing DBOS_DATABASE_URL).
 
-This service is deliberately **not** mandatory — existing call sites can keep
-using `celery_task.delay(...)` directly during the migration. New code paths
-(handlers being PR-D6'd, agent dispatchers being PR-D5'd) call the routed
-dispatcher.
+The `dbos_workflow_routing.mode` column historically held 'celery' /
+'shadow' / 'dbos' for the migration window; the dispatcher now only
+honours 'dbos' and raises otherwise. The column itself is kept as a
+kill-switch — set mode='off' (or any non-'dbos' value) to force dispatch
+to fail without modifying code, useful for emergency disables.
 """
 
 from __future__ import annotations
@@ -39,7 +37,7 @@ _routing_refresh_interval_s: float = 60.0  # poll dbos_workflow_routing every 60
 @dataclass(frozen=True)
 class RoutingDecision:
     task_type: str
-    mode: str  # 'celery' | 'shadow' | 'dbos'
+    mode: str  # 'dbos' (or any other value to disable, see start_workflow_routed)
     notes: Optional[str] = None
 
 
@@ -64,11 +62,14 @@ async def _refresh_routing_cache() -> None:
 
 
 async def get_routing(task_type: str) -> RoutingDecision:
-    """Look up routing for a task_type. Defaults to 'celery' if unknown."""
+    """Look up routing for a task_type. Unknown task_types default to 'dbos'
+    (after Celery removal, that's the only working mode anyway — being
+    permissive avoids breaking new task_types that haven't been added to
+    the routing table yet)."""
     now = asyncio.get_event_loop().time()
     if not _routing_cache or (now - _routing_loaded_at) > _routing_refresh_interval_s:
         await _refresh_routing_cache()
-    mode = _routing_cache.get(task_type, "celery")
+    mode = _routing_cache.get(task_type, "dbos")
     return RoutingDecision(task_type=task_type, mode=mode)
 
 
@@ -137,73 +138,56 @@ def is_enabled() -> bool:
 async def start_workflow_routed(
     task_type: str,
     *,
-    dbos_workflow_callable: Optional[Callable[..., Any]] = None,
+    dbos_workflow_callable: Callable[..., Any],
     dbos_workflow_kwargs: Optional[dict[str, Any]] = None,
-    celery_dispatch: Optional[Callable[[], Any]] = None,
     workflow_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Route a task by `task_type` per dbos_workflow_routing config.
+    """Dispatch a task as a DBOS workflow, gated by `dbos_workflow_routing`.
+
+    The routing table is the only kill-switch left after Celery removal —
+    if mode != 'dbos', dispatch raises (no fallback). DBOS itself must be
+    enabled, otherwise we fail loudly so missing DBOS_DATABASE_URL surfaces
+    immediately rather than silently masking with a Celery shadow.
 
     Args:
         task_type: matched against routing table
         dbos_workflow_callable: the @DBOS.workflow function to invoke
         dbos_workflow_kwargs: kwargs passed to the workflow
-        celery_dispatch: callable that does the celery `.delay(...)` and returns
-            the AsyncResult (or whatever the legacy code path expects)
         workflow_id: optional explicit DBOS workflow id (default: server-generated)
 
     Returns:
-        dict with keys: mode, dbos_workflow_id (if applicable), celery_task_id
-        (if applicable). Caller can persist to issues.dbos_workflow_id.
+        dict with keys: mode, task_type, dbos_workflow_id.
     """
     decision = await get_routing(task_type)
-    out: dict[str, Any] = {"mode": decision.mode, "task_type": task_type}
-
-    if decision.mode in ("celery", "shadow") and celery_dispatch is not None:
-        try:
-            celery_result = celery_dispatch()
-            out["celery_task_id"] = getattr(celery_result, "id", None)
-        except Exception as e:
-            logger.error(f"[dbos] celery dispatch failed for {task_type}: {e!r}")
-            raise
-
-    if (
-        decision.mode in ("shadow", "dbos")
-        and dbos_workflow_callable is not None
-        and is_enabled()
-    ):
-        from contextlib import nullcontext
-
-        from dbos import DBOS, DBOSContextSetAuth, SetWorkflowID
-
-        kwargs = dbos_workflow_kwargs or {}
-        # Set authenticated_user on the DBOS workflow_status row so
-        # GET /api/v1/workflows can filter by user. Requires user_id
-        # in workflow kwargs.
-        user_id = kwargs.get("user_id")
-        auth_ctx = (
-            DBOSContextSetAuth(user=user_id, roles=[]) if user_id else nullcontext()
+    if decision.mode != "dbos":
+        raise RuntimeError(
+            f"task_type={task_type} routed to mode={decision.mode!r}; only 'dbos' "
+            "is supported after Celery removal. Update dbos_workflow_routing."
         )
-        try:
-            with auth_ctx:
-                if workflow_id:
-                    with SetWorkflowID(workflow_id):
-                        handle = DBOS.start_workflow(dbos_workflow_callable, **kwargs)
-                else:
-                    handle = DBOS.start_workflow(dbos_workflow_callable, **kwargs)
-            out["dbos_workflow_id"] = handle.workflow_id
-            if decision.mode == "shadow":
-                logger.info(
-                    f"[dbos][shadow] task_type={task_type} celery={out.get('celery_task_id')} "
-                    f"dbos_wf={handle.workflow_id} (DBOS output discarded for comparison only)"
-                )
-        except Exception as e:
-            # Shadow mode: never let DBOS failure break the canonical celery path
-            if decision.mode == "shadow":
-                logger.warning(
-                    f"[dbos][shadow] DBOS dispatch failed for {task_type}: {e!r}"
-                )
-            else:
-                raise
+    if not is_enabled():
+        raise RuntimeError(
+            "DBOS orchestrator is not enabled (DBOS_DATABASE_URL missing or "
+            "init failed). Cannot dispatch any workflow."
+        )
 
-    return out
+    from contextlib import nullcontext
+
+    from dbos import DBOS, DBOSContextSetAuth, SetWorkflowID
+
+    kwargs = dbos_workflow_kwargs or {}
+    # Set authenticated_user on the DBOS workflow_status row so
+    # GET /api/v1/workflows can filter by user. Requires user_id
+    # in workflow kwargs.
+    user_id = kwargs.get("user_id")
+    auth_ctx = DBOSContextSetAuth(user=user_id, roles=[]) if user_id else nullcontext()
+    with auth_ctx:
+        if workflow_id:
+            with SetWorkflowID(workflow_id):
+                handle = DBOS.start_workflow(dbos_workflow_callable, **kwargs)
+        else:
+            handle = DBOS.start_workflow(dbos_workflow_callable, **kwargs)
+    return {
+        "mode": "dbos",
+        "task_type": task_type,
+        "dbos_workflow_id": handle.workflow_id,
+    }

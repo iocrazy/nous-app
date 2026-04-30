@@ -9,7 +9,7 @@
 from pathlib import Path
 from typing import ClassVar
 
-from pydantic import AliasChoices, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import YamlConfigSettingsSource
 
@@ -98,13 +98,9 @@ class Settings(BaseSettings):
     # ============================================
     # Redis 配置 (download progress + UnifiedProgressTracker KV)
     # ============================================
-    # PR-D7 phase 3b: was CELERY_BROKER_URL — Celery is gone, but Redis
-    # is still used for live download progress and a few KV state keys.
-    # Old name kept as fallback for env compatibility during migration.
     REDIS_URL: str = Field(
         default="redis://localhost:6379/0",
         description="Redis URL (download progress, live KV state)",
-        validation_alias=AliasChoices("REDIS_URL", "CELERY_BROKER_URL"),
     )
 
     # ============================================
