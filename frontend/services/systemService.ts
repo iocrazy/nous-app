@@ -10,6 +10,9 @@ export interface QueueStatus {
   active: number;
   pending: number;
   scheduled: number;
+  // DBOS reports only online | offline. `outdated` / `degraded` are
+  // legacy Celery-era values kept for backward-compat with stale rows
+  // in system_status; safe to drop after one cache cycle (30s).
   status: 'online' | 'offline' | 'outdated' | 'degraded';
   missing_tasks?: string[];
 }
@@ -64,18 +67,15 @@ export function getStorageDisplay(storage: StorageStatus): string {
 }
 
 /**
- * Get queue display text
+ * Get DBOS engine display text
  */
 export function getQueueDisplay(queue: QueueStatus): string {
   if (queue.status === 'offline') {
     return 'Offline';
   }
-  if (queue.status === 'outdated') {
-    return 'Outdated';
-  }
   const total = queue.active + queue.pending;
   if (total === 0) {
     return 'Idle';
   }
-  return `${queue.active} Active`;
+  return `${queue.active} Running`;
 }
