@@ -2,6 +2,16 @@ import React, { createContext, useContext, useReducer, useEffect, useCallback, u
 import { getSupabaseClient, getSupabaseAccessToken } from '../supabaseClient';
 import { useAuth } from './AuthContext';
 import { getAuthHeaders } from '../services/parserService';
+import {
+  cancelWorkflow,
+  listWorkflows,
+  restartWorkflow,
+} from '../services/dbosWorkflowService';
+import {
+  dbosRowToUnifiedTask,
+  dbosSnapshotToUnifiedTask,
+  type DbosWorkflowStatusRow,
+} from './dbosTaskMapper';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -120,41 +130,9 @@ type Action =
   | { type: 'UPDATE'; task: UnifiedTask }
   | { type: 'UPDATE_PROGRESS'; payload: WsProgressPayload }
   | { type: 'DOWNLOAD_STARTED'; payload: WsDownloadStartedPayload }
-  | { type: 'DBOS_PATCH'; payload: DbosWorkflowStatusRow }
   | { type: 'DELETE'; id: string }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'SET_CONNECTED'; connected: boolean };
-
-/** Raw row shape from Supabase Realtime on dbos.workflow_status. */
-export interface DbosWorkflowStatusRow {
-  workflow_uuid: string;
-  status: string; // PENDING | ENQUEUED | SUCCESS | ERROR | CANCELLED | MAX_RECOVERY_ATTEMPTS_EXCEEDED
-  name: string | null;
-  authenticated_user: string | null;
-  created_at: number | string | null;
-  updated_at: number | string | null;
-  started_at_epoch_ms: number | null;
-  workflow_deadline_epoch_ms: number | null;
-  error: string | null;
-}
-
-/** Map DBOS workflow_status.status → app TaskStatus. */
-function dbosStatusToTaskStatus(s: string | null | undefined): TaskStatus | undefined {
-  switch (s) {
-    case 'PENDING':
-    case 'ENQUEUED':
-      return 'pending';
-    case 'SUCCESS':
-      return 'completed';
-    case 'ERROR':
-    case 'MAX_RECOVERY_ATTEMPTS_EXCEEDED':
-      return 'failed';
-    case 'CANCELLED':
-      return 'cancelled';
-    default:
-      return undefined;
-  }
-}
 
 /** Map WebSocket status strings to task lifecycle status. */
 function wsStatusToTaskStatus(wsStatus?: string): TaskStatus | undefined {
@@ -190,42 +168,25 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
       }
       return { ...state, tasks: [action.task, ...state.tasks] };
     }
-    case 'UPDATE':
-      return {
-        ...state,
-        tasks: state.tasks.map(t => t.id === action.task.id ? action.task : t),
+    case 'UPDATE': {
+      // UPDATE merges (vs replaces) so progress/speed pushed by the
+      // Redis WebSocket survives a DBOS Realtime status update — DBOS
+      // rows don't carry progress, but the WS path keeps it fresh.
+      const incoming = action.task;
+      const idx = state.tasks.findIndex(t => t.id === incoming.id);
+      if (idx < 0) return { ...state, tasks: [incoming, ...state.tasks] };
+      const existing = state.tasks[idx];
+      const merged: UnifiedTask = {
+        ...existing,
+        ...incoming,
+        // Preserve WS-derived fields when the DBOS update would clobber them with defaults.
+        progress: incoming.status === 'completed' ? 100 : (existing.progress || incoming.progress),
+        speed: existing.speed ?? incoming.speed,
+        total_bytes: existing.total_bytes ?? incoming.total_bytes,
       };
-    case 'DBOS_PATCH': {
-      // DBOS workflow_status row → patch matching unified_task by
-      // celery_task_id == workflow_uuid. We never INSERT from this
-      // channel — the router pre-creates the unified_tasks row at
-      // dispatch with celery_task_id set, so any DBOS event will
-      // find a matching task. Orphan DBOS workflows (recovery, no
-      // user) are intentionally invisible in this UI.
-      const row = action.payload;
-      const mapped = dbosStatusToTaskStatus(row.status);
-      const startedAt = row.started_at_epoch_ms
-        ? new Date(row.started_at_epoch_ms).toISOString()
-        : undefined;
-      const updatedAt = typeof row.updated_at === 'number'
-        ? new Date(row.updated_at).toISOString()
-        : (row.updated_at as string | undefined);
-      const completedAt = (mapped === 'completed' || mapped === 'failed' || mapped === 'cancelled')
-        ? updatedAt
-        : undefined;
       return {
         ...state,
-        tasks: state.tasks.map(t => {
-          if (t.celery_task_id !== row.workflow_uuid) return t;
-          return {
-            ...t,
-            ...(mapped ? { status: mapped } : {}),
-            ...(startedAt ? { started_at: startedAt } : {}),
-            ...(completedAt ? { completed_at: completedAt } : {}),
-            ...(updatedAt ? { updated_at: updatedAt } : {}),
-            ...(row.error ? { error_msg: row.error } : {}),
-          };
-        }),
+        tasks: state.tasks.map((t, i) => i === idx ? merged : t),
       };
     }
     case 'UPDATE_PROGRESS': {
@@ -316,57 +277,47 @@ function getWsBaseUrl(): string {
   return base.replace(/^http/, 'ws');
 }
 
-async function fetchActiveTasks(): Promise<UnifiedTask[]> {
-  const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks/active`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!resp.ok) {
-    console.error(`[TaskManager] fetchActiveTasks failed: ${resp.status} ${resp.statusText}`);
+async function fetchAllTasks(limit = 200, fallbackUserId?: string): Promise<UnifiedTask[]> {
+  try {
+    const resp = await listWorkflows({ limit, sortDesc: true });
+    const mapped = resp.workflows
+      .map(w => dbosSnapshotToUnifiedTask(w, { fallbackUserId }))
+      .filter((t): t is UnifiedTask => t !== null);
+    console.debug(`[TaskManager] listWorkflows returned ${mapped.length} workflows`);
+    return mapped;
+  } catch (e) {
+    console.error('[TaskManager] listWorkflows failed:', e);
     return [];
   }
-  const json = await resp.json();
-  return json.data || [];
-}
-
-async function fetchAllTasks(limit = 200): Promise<UnifiedTask[]> {
-  const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks?limit=${limit}`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!resp.ok) {
-    console.error(`[TaskManager] fetchAllTasks failed: ${resp.status} ${resp.statusText}`);
-    return [];
-  }
-  const json = await resp.json();
-  console.debug(`[TaskManager] fetchAllTasks returned ${(json.data || []).length} tasks`);
-  return json.data || [];
 }
 
 async function apiCancelTask(taskId: string): Promise<void> {
-  await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}/cancel`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
+  // taskId IS the DBOS workflow_id (since D8-1).
+  try {
+    await cancelWorkflow(taskId);
+  } catch (e) {
+    console.error(`[TaskManager] cancelWorkflow(${taskId}) failed:`, e);
+  }
 }
 
 async function apiRetryTask(taskId: string): Promise<void> {
-  await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}/retry`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
+  // restartWorkflow forks a NEW workflow_id; the original row stays in
+  // a terminal state (clearer audit than mutating in place). The new
+  // workflow's INSERT will land via Realtime.
+  try {
+    await restartWorkflow(taskId);
+  } catch (e) {
+    console.error(`[TaskManager] restartWorkflow(${taskId}) failed:`, e);
+  }
 }
 
-async function apiDeleteTask(taskId: string): Promise<void> {
-  await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}`, {
-    method: 'DELETE',
-    headers: await getAuthHeaders(),
-  });
+async function apiDeleteTask(_taskId: string): Promise<void> {
+  // DBOS doesn't expose a hard-delete; D8-3 will add a soft-hide
+  // endpoint or just rely on retention. Local-only for now.
 }
 
 async function apiClearCompleted(): Promise<void> {
-  await fetch(`${API_BASE}/api/v1/task-manager/tasks/clear-completed`, {
-    method: 'POST',
-    headers: await getAuthHeaders(),
-  });
+  // Local-only — see apiDeleteTask.
 }
 
 // ─── Context ────────────────────────────────────────────
@@ -386,15 +337,19 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const refreshTasks = useCallback(async () => {
     dispatch({ type: 'SET_LOADING', loading: true });
     try {
-      const tasks = await fetchAllTasks();
+      const tasks = await fetchAllTasks(200, currentUserId || undefined);
       dispatch({ type: 'SET_TASKS', tasks });
     } catch (e) {
       console.error('[TaskManager] Failed to fetch tasks:', e);
       dispatch({ type: 'SET_LOADING', loading: false });
     }
-  }, []);
+  }, [currentUserId]);
 
-  // Supabase Realtime subscription
+  // Supabase Realtime subscription — D8-1 single source = dbos.workflow_status.
+  // RLS gates rows to the current user (authenticated_user = auth.uid()),
+  // so no client-side filter is needed. INSERT = workflow dispatched,
+  // UPDATE = lifecycle transition (RUNNING/SUCCESS/ERROR/CANCELLED).
+  // DBOS rows are never deleted — clearCompleted only hides locally.
   useEffect(() => {
     if (!currentUserId) {
       console.warn('[TaskManager] No currentUserId, skipping task fetch & subscription');
@@ -412,32 +367,29 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     // Fetch initial data
     refreshTasks();
 
-    // Subscribe to realtime changes
     const channel = supabase
-      .channel(`user-tasks-${currentUserId}`)
+      .channel(`user-dbos-workflows-${currentUserId}`)
       .on('postgres_changes', {
         event: 'INSERT',
-        schema: 'public',
-        table: 'unified_tasks',
-        filter: `user_id=eq.${currentUserId}`,
+        schema: 'dbos',
+        table: 'workflow_status',
       }, (payload) => {
-        dispatch({ type: 'INSERT', task: payload.new as UnifiedTask });
+        const task = dbosRowToUnifiedTask(
+          payload.new as DbosWorkflowStatusRow,
+          { fallbackUserId: currentUserId }
+        );
+        if (task) dispatch({ type: 'INSERT', task });
       })
       .on('postgres_changes', {
         event: 'UPDATE',
-        schema: 'public',
-        table: 'unified_tasks',
-        filter: `user_id=eq.${currentUserId}`,
+        schema: 'dbos',
+        table: 'workflow_status',
       }, (payload) => {
-        dispatch({ type: 'UPDATE', task: payload.new as UnifiedTask });
-      })
-      .on('postgres_changes', {
-        event: 'DELETE',
-        schema: 'public',
-        table: 'unified_tasks',
-        filter: `user_id=eq.${currentUserId}`,
-      }, (payload) => {
-        dispatch({ type: 'DELETE', id: (payload.old as { id: string }).id });
+        const task = dbosRowToUnifiedTask(
+          payload.new as DbosWorkflowStatusRow,
+          { fallbackUserId: currentUserId }
+        );
+        if (task) dispatch({ type: 'UPDATE', task });
       })
       .subscribe((status, err) => {
         console.debug(`[TaskManager] Realtime status: ${status}`, err || '');
@@ -450,38 +402,11 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     channelRef.current = channel;
 
-    // ─── DBOS workflow_status (D7 phase 3) ──────────────────────
-    // Authoritative status feed straight from the DBOS sys-DB. RLS
-    // gates rows to the current user, so no client-side filter
-    // needed. Patches existing unified_tasks rows (matched by
-    // celery_task_id == workflow_uuid) with status/started_at/
-    // completed_at/error from DBOS.
-    const dbosChannel = supabase
-      .channel(`user-dbos-workflows-${currentUserId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'dbos',
-        table: 'workflow_status',
-      }, (payload) => {
-        dispatch({ type: 'DBOS_PATCH', payload: payload.new as DbosWorkflowStatusRow });
-      })
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'dbos',
-        table: 'workflow_status',
-      }, (payload) => {
-        dispatch({ type: 'DBOS_PATCH', payload: payload.new as DbosWorkflowStatusRow });
-      })
-      .subscribe((status, err) => {
-        console.debug(`[TaskManager] DBOS realtime status: ${status}`, err || '');
-      });
-
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
-      supabase.removeChannel(dbosChannel);
     };
   }, [currentUserId, refreshTasks]);
 

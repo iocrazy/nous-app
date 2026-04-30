@@ -1,13 +1,11 @@
 /**
  * DBOS workflow REST + SSE client.
  *
- * Mirrors `backend/app/api/workflows_router.py`. Use this for any
- * task that's been routed to a DBOS workflow (parse / download /
- * transcode / analyze_l1 / storyboard_* / write_memory / etc).
- *
- * Legacy unified_tasks Realtime channel keeps working in parallel
- * during the shadow window — pick whichever pipe matches the task's
- * routing-table mode.
+ * Mirrors `backend/app/api/workflows_router.py`. After D8-1 this is
+ * the authoritative source for all dispatched workflows (parse /
+ * download / transcode / analyze_l1 / storyboard_* / write_memory /
+ * etc). The legacy unified_tasks REST/Realtime is no longer read
+ * by the Task Center — see TaskManagerContext.
  */
 
 import { getAuthHeaders } from './parserService';
@@ -34,11 +32,28 @@ export interface DbosWorkflowSnapshot {
   queue_name: string | null;
   created_at: number | null; // unix ms
   updated_at: number | null;
-  output: unknown;
+  input?: unknown;
+  output?: unknown;
   error: string | null;
   executor_id: string | null;
   app_version: string | null;
+  authenticated_user?: string | null;
   steps?: DbosWorkflowStep[];
+}
+
+export interface ListWorkflowsResponse {
+  workflows: DbosWorkflowSnapshot[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface ListWorkflowsOptions {
+  name?: string; // workflow name filter (e.g. "parse_workflow")
+  status?: DbosWorkflowStatus;
+  limit?: number; // 1..200, default 50
+  offset?: number;
+  sortDesc?: boolean; // default true (newest first)
 }
 
 export interface DbosWorkflowStep {
@@ -90,6 +105,33 @@ export async function resumeWorkflow(id: string): Promise<{ status: string }> {
     headers: await getAuthHeaders(),
   });
   if (!res.ok) throw new Error(`resume ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+export async function restartWorkflow(
+  id: string
+): Promise<{ status: string; original_workflow_id: string; new_workflow_id: string }> {
+  const res = await fetch(`${_base(id)}/restart`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`restart ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+export async function listWorkflows(
+  opts: ListWorkflowsOptions = {}
+): Promise<ListWorkflowsResponse> {
+  const params = new URLSearchParams();
+  if (opts.name) params.set('name', opts.name);
+  if (opts.status) params.set('workflow_status', opts.status);
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.offset != null) params.set('offset', String(opts.offset));
+  if (opts.sortDesc != null) params.set('sort_desc', String(opts.sortDesc));
+  const qs = params.toString();
+  const url = `${getApiUrl()}/api/v1/workflows${qs ? `?${qs}` : ''}`;
+  const res = await fetch(url, { headers: await getAuthHeaders() });
+  if (!res.ok) throw new Error(`list ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
