@@ -44,8 +44,8 @@ async def collect_system_status_step() -> dict[str, Any]:
         "queue": await get_queue_status(),
         "storage": get_storage_status(),
         "network": get_network_status(),
-        "workers": get_worker_stats(),
-        "active_tasks": get_active_tasks(),
+        "workers": await get_worker_stats(),
+        "active_tasks": await get_active_tasks(),
     }
 
     supabase = await get_async_supabase_admin()

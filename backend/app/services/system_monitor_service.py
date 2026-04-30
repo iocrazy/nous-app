@@ -205,7 +205,7 @@ def get_network_status() -> dict:
         return {"speed": "0 B/s", "status": "error"}
 
 
-def get_worker_stats() -> list[dict]:
+async def get_worker_stats() -> list[dict]:
     """Return DBOS worker pool info. PR-D7: replaces Celery worker
     inspection. DBOS workers are in-process; we report a single
     synthetic 'in-process' worker entry so the admin UI keeps a
@@ -217,9 +217,6 @@ def get_worker_stats() -> list[dict]:
     try:
         from dbos import DBOS
 
-        # DBOS doesn't expose a worker introspection API; it runs in
-        # the host process. Report the workforce queue concurrency
-        # instead so the admin UI shows something meaningful.
         return [
             {
                 "name": "dbos@local",
@@ -227,7 +224,9 @@ def get_worker_stats() -> list[dict]:
                 "concurrency": 8,  # matches WORKFORCE_QUEUE_CONCURRENCY default
                 "processes": [],
                 "total_tasks": {
-                    "running": len(DBOS.list_workflows(status="RUNNING") or [])
+                    "running": len(
+                        await DBOS.list_workflows_async(status="RUNNING") or []
+                    )
                 },
             }
         ]
@@ -236,7 +235,7 @@ def get_worker_stats() -> list[dict]:
         return []
 
 
-def get_active_tasks() -> list[dict]:
+async def get_active_tasks() -> list[dict]:
     """Return list of currently RUNNING DBOS workflows. Mirrors the
     legacy Celery active_tasks shape so the admin TaskCenter UI keeps
     rendering."""
@@ -247,7 +246,7 @@ def get_active_tasks() -> list[dict]:
     try:
         from dbos import DBOS
 
-        running = DBOS.list_workflows(status="RUNNING") or []
+        running = await DBOS.list_workflows_async(status="RUNNING") or []
         return [
             {
                 "task_id": getattr(w, "workflow_id", None)

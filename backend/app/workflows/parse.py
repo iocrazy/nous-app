@@ -101,9 +101,16 @@ def dispatch_download_step(
     media_type: int,
     video_title: str,
     user_agent: str,
+    resource_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Route the download via the migration table. Returns the routing
     decision dict from start_workflow_routed.
+
+    `resource_id` is the per-user resource row pre-created by
+    save_metadata_only — passing it through lets download_workflow's
+    finalize_post_download_step build resource_version v1 + mirror
+    file_size_bytes (without it the resource has no file pointer and
+    "我的下载" shows nothing).
 
     NOT a `@DBOS.step` — `start_workflow_routed` calls
     `DBOS.start_workflow` internally, which asserts when invoked from
@@ -125,6 +132,7 @@ def dispatch_download_step(
                 "media_type": media_type,
                 "video_title": video_title,
                 "user_agent": user_agent,
+                "resource_id": resource_id,
             },
         )
     )
@@ -251,6 +259,7 @@ def parse_workflow(
             "error": "Data validation failed",
         }
     video_db_id = saved_video.get("id")
+    resource_id = saved_video.get("resource_id")
 
     # 4. Auto-tag (non-blocking — step swallows errors)
     if video_db_id:
@@ -262,7 +271,8 @@ def parse_workflow(
             parsed_data.get("description", ""),
         )
 
-    # 5. Dispatch download (routed)
+    # 5. Dispatch download (routed); pass resource_id so finalize step
+    # can build resource_version v1 and the file shows up in 我的下载.
     download_dispatch: dict[str, Any] = {}
     if video_bool or cover_bool:
         download_dispatch = dispatch_download_step(
@@ -273,6 +283,7 @@ def parse_workflow(
             media_type=int(media_type),
             video_title=video_title,
             user_agent=legacy_ua,
+            resource_id=str(resource_id) if resource_id else None,
         )
 
     # 6. Dispatch L1 analysis (routed, best-effort)

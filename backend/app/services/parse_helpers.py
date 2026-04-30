@@ -220,49 +220,47 @@ def fetch_and_parse(
 def save_media_to_db(
     parsed_data: dict, platform_id: str, video_bool: bool
 ) -> Optional[dict]:
-    """Insert or update parsed_media row. Returns saved record or None."""
-    from app.core.enums import DownloadStatus
-    from app.repositories.media_repository import MediaRepository
-    from app.schemas.media import MediaCreate
+    """Save parsed_media + create/update per-user resource via the canonical
+    two-layer write. Delegates to MediaService.save_metadata_only so the
+    DBOS workflow path matches master's Celery path (which D7 phase 3
+    accidentally bypassed by reaching past MediaService directly into the
+    repo, leaving 'video' downloads with no `resources` row → empty
+    "我的下载" page).
 
-    repo = MediaRepository()
-    existing = _run_async(repo.get_by_platform_id(platform_id))
+    Returns the dict from MediaService.save_metadata_only with at least:
+        success, platform_id, id (parsed_media.id), resource_id, dedup_hit.
+
+    Returns None on validation failure (caller treats it as soft failure)."""
+    from app.services.media_service import MediaService
+
+    # MediaService consumes need_download_* flags and user_id; ensure the
+    # video/cover request bits are present (auto_tag / categories live
+    # in our own helper marker, strip before passing through).
+    payload = dict(parsed_data)
+    payload.pop("_pending_categories", None)
+    payload.setdefault("need_download_video", video_bool)
+    payload.setdefault("need_download_cover", True)
+    payload.setdefault("need_download_music", False)
 
     try:
-        video_data = MediaCreate(**parsed_data)
-        data_dict = video_data.model_dump()
+        result = _run_async(MediaService.save_metadata_only(platform_id, payload))
     except Exception as e:
-        logger.error(f"Data validation failed: {e}")
+        logger.error(f"[Parse] save_metadata_only raised: {e!r}")
         return None
 
-    # MediaCreate carries request-shape fields that don't live on
-    # parsed_media. Strip before insert to avoid PGRST204 schema-cache
-    # errors. user_id moved to resources.creator_id (per-user ownership)
-    # — parse_workflow stuffs it onto parsed_data for downstream
-    # MediaService.process_video to pick up, but it must not land in
-    # the parsed_media INSERT itself.
-    for k in (
-        "need_download_video",
-        "need_download_music",
-        "need_download_cover",
-        "user_id",
-    ):
-        data_dict.pop(k, None)
-    # Internal helper marker added in fetch_and_parse — don't persist.
-    data_dict.pop("_pending_categories", None)
+    if not result.get("success"):
+        logger.error(
+            f"[Parse] save_metadata_only failed for {platform_id}: "
+            f"{result.get('message')}"
+        )
+        return None
 
-    data_dict["video_download_status"] = (
-        DownloadStatus.PENDING.value if video_bool else DownloadStatus.SKIPPED.value
+    logger.info(
+        f"[Parse] Saved metadata for {platform_id}: "
+        f"media_id={result.get('id')} resource_id={result.get('resource_id')} "
+        f"dedup_hit={result.get('dedup_hit')}"
     )
-    data_dict["music_download_status"] = DownloadStatus.SKIPPED.value
-
-    if existing:
-        saved = _run_async(repo.update(platform_id, data_dict))
-        logger.info(f"[Parse] Updated metadata: {platform_id}")
-    else:
-        saved = _run_async(repo.create(data_dict))
-        logger.info(f"[Parse] Created metadata: {platform_id}")
-    return saved
+    return result
 
 
 def auto_tag_media(
