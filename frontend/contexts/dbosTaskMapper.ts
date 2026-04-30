@@ -91,6 +91,24 @@ function toIso(value: number | string | null | undefined): string | undefined {
   return value;
 }
 
+/** DBOS persists `error` as a pickled exception (BYTEA in PG → base64
+ * string over Supabase Realtime). The REST endpoints (`/api/v1/workflows`)
+ * stringify it via _stringify_error on the backend, but Realtime push
+ * delivers the raw byte payload. Detect the pickle protocol prefix and
+ * collapse it to a friendly placeholder so the Task Center doesn't
+ * display 200 chars of base64 in the error field. The detail drawer
+ * (which hits /status) will show the proper exception text. */
+function friendlyError(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  // Pickle protocols 4/5 base64-encode to strings starting with `gAS`
+  // (proto 4) or `gASV` (proto 5). 100-char threshold avoids matching
+  // legitimate error messages that happen to contain `gAS`.
+  if (raw.length > 100 && /^gAS[A-Za-z0-9+/=]*$/.test(raw.slice(0, 60))) {
+    return 'Workflow failed — open the detail panel to see the error.';
+  }
+  return raw;
+}
+
 /** Parse a JSON-or-already-object input value defensively. */
 function parseInput(raw: unknown): Record<string, unknown> {
   if (!raw) return {};
@@ -169,7 +187,7 @@ export function dbosSnapshotToUnifiedTask(
     status,
     title: deriveTitle(snap.name, input),
     progress: status === 'completed' ? 100 : 0,
-    error_msg: snap.error || undefined,
+    error_msg: friendlyError(snap.error),
     media_id:
       (pickKwarg(input, 'media_id') as string | undefined) ??
       (pickKwarg(input, 'platform_id') as string | undefined),
@@ -205,7 +223,7 @@ export function dbosRowToUnifiedTask(
     status,
     title: deriveTitle(row.name, input),
     progress: status === 'completed' ? 100 : 0,
-    error_msg: row.error || undefined,
+    error_msg: friendlyError(row.error),
     media_id:
       (pickKwarg(input, 'media_id') as string | undefined) ??
       (pickKwarg(input, 'platform_id') as string | undefined),
