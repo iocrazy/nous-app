@@ -23,10 +23,13 @@ from loguru import logger
 
 
 @DBOS.step()
-def collect_system_status_step() -> dict[str, Any]:
+async def collect_system_status_step() -> dict[str, Any]:
     """Snapshot queue/storage/network/workers/active_tasks; upsert
     single-row system_status. The fixed UUID id matches the legacy
-    Celery task so the Realtime channel doesn't double up."""
+    Celery task so the Realtime channel doesn't double up.
+
+    Async because get_queue_status now awaits DBOS.list_workflows_async
+    (the sync DBOS API refuses to run in an event-loop context)."""
     from app.db.supabase_client import get_async_supabase_admin
     from app.services.system_monitor_service import (
         get_active_tasks,
@@ -38,18 +41,15 @@ def collect_system_status_step() -> dict[str, Any]:
 
     data = {
         "id": "00000000-0000-0000-0000-000000000001",
-        "queue": get_queue_status(),
+        "queue": await get_queue_status(),
         "storage": get_storage_status(),
         "network": get_network_status(),
         "workers": get_worker_stats(),
         "active_tasks": get_active_tasks(),
     }
 
-    async def _upsert() -> None:
-        supabase = await get_async_supabase_admin()
-        await supabase.table("system_status").upsert(data).execute()
-
-    asyncio.run(_upsert())
+    supabase = await get_async_supabase_admin()
+    await supabase.table("system_status").upsert(data).execute()
     return {"status": "success"}
 
 
@@ -108,10 +108,10 @@ def health_check_step() -> dict[str, Any]:
 
 @DBOS.scheduled("*/30 * * * * *")  # every 30s (6-field cron)
 @DBOS.workflow()
-def update_system_status_workflow(
+async def update_system_status_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    collect_system_status_step()
+    await collect_system_status_step()
 
 
 @DBOS.scheduled("0 * * * *")  # hourly at :00

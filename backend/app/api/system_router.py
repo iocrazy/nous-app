@@ -66,7 +66,7 @@ async def get_system_status(auth: AuthDep):
     Requires authentication: Bearer Token or API Key.
     """
     try:
-        queue_data = get_queue_status()
+        queue_data = await get_queue_status()
         storage_data = get_storage_status()
         network_data = get_network_status()
 
@@ -165,25 +165,25 @@ async def _check_trigram_via_latency() -> HealthCheck:
         )
 
 
-async def _check_celery() -> HealthCheck:
-    """Celery worker liveness via shared get_queue_status."""
+async def _check_dbos_engine() -> HealthCheck:
+    """DBOS engine liveness via shared get_queue_status."""
     try:
-        q = get_queue_status()
+        q = await get_queue_status()
         if q.get("status") == "online":
             return HealthCheck(
-                name="Celery Worker",
+                name="DBOS Engine",
                 status="healthy",
-                detail=f"Active: {q.get('active', 0)}, Pending: {q.get('pending', 0)}",
+                detail=f"Running: {q.get('active', 0)}, Pending: {q.get('pending', 0)}",
                 metrics=q,
             )
         return HealthCheck(
-            name="Celery Worker",
+            name="DBOS Engine",
             status="down" if q.get("status") == "offline" else "degraded",
             detail=q.get("status", "unknown"),
             metrics=q,
         )
     except Exception as e:
-        return HealthCheck(name="Celery Worker", status="unknown", detail=str(e)[:140])
+        return HealthCheck(name="DBOS Engine", status="unknown", detail=str(e)[:140])
 
 
 async def _check_redis() -> HealthCheck:
@@ -219,7 +219,7 @@ async def get_backend_health(auth: AdminAuthDep):
     try:
         checks.extend(await _check_database())
         checks.append(await _check_trigram_via_latency())
-        checks.append(await _check_celery())
+        checks.append(await _check_dbos_engine())
         checks.append(await _check_redis())
     except Exception as e:
         logger.error(f"Health check assembly failed: {e}")

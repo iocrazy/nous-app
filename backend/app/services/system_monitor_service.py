@@ -78,7 +78,7 @@ def _parse_speed(speed_str: str) -> float:
 # ---------------------------------------------------------------------------
 
 
-def get_queue_status() -> dict:
+async def get_queue_status() -> dict:
     """Return DBOS workflow queue metrics (5-second cache).
 
     PR-D7: Celery introspection replaced with DBOS workflow_status
@@ -86,6 +86,9 @@ def get_queue_status() -> dict:
     - "offline" — DBOS not enabled (defensive; should never happen in
       production since lifespan launches DBOS at startup)
     - "online"  — DBOS launched + queue counts available
+
+    Async because DBOS.list_workflows() (sync) refuses to run inside an
+    asyncio event loop and FastAPI handlers always have one.
     """
     current_time = time.time()
 
@@ -105,9 +108,9 @@ def get_queue_status() -> dict:
     try:
         from dbos import DBOS
 
-        running = DBOS.list_workflows(status="RUNNING") or []
-        pending = DBOS.list_workflows(status="PENDING") or []
-        enqueued = DBOS.list_workflows(status="ENQUEUED") or []
+        running = await DBOS.list_workflows_async(status="RUNNING") or []
+        pending = await DBOS.list_workflows_async(status="PENDING") or []
+        enqueued = await DBOS.list_workflows_async(status="ENQUEUED") or []
 
         result = {
             "active": len(running),
