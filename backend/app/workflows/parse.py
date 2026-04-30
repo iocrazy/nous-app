@@ -127,9 +127,11 @@ def dispatch_download_step(
                 user_id=user_id,
                 task_type="download",
                 title=f"Download {(video_title or platform_id)[:50]}",
-                subtitle=("video + cover" if download_video and download_cover
-                          else "video" if download_video
-                          else "cover"),
+                subtitle=(
+                    "video + cover"
+                    if download_video and download_cover
+                    else "video" if download_video else "cover"
+                ),
                 media_id=str(platform_id) if platform_id else None,
                 resource_id=str(resource_id) if resource_id else None,
                 dbos_workflow_id=wf_id,

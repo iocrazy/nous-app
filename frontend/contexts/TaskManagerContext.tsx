@@ -4,14 +4,8 @@ import { useAuth } from './AuthContext';
 import { getAuthHeaders } from '../services/parserService';
 import {
   cancelWorkflow,
-  listWorkflows,
   restartWorkflow,
 } from '../services/dbosWorkflowService';
-import {
-  dbosRowToUnifiedTask,
-  dbosSnapshotToUnifiedTask,
-  type DbosWorkflowStatusRow,
-} from './dbosTaskMapper';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -31,8 +25,19 @@ export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'ca
 
 export type TaskPhase = 'queued' | 'dedup_check' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
+/** Row shape of public.task_tracking after the D8-A migration. PK is
+ * dbos_workflow_id (UUID string == dbos.workflow_status.workflow_uuid).
+ * Kept the type name `UnifiedTask` for backwards-compat with the many
+ * importers across components — it's the same data, just a renamed
+ * underlying table. */
 export interface UnifiedTask {
+  /** Primary key = DBOS workflow_id (UUID string). */
   id: string;
+  /** Alias of `id` — historically separate when celery_task_id and PK
+   * differed. After D8-A they're the same value; keep for compat. */
+  dbos_workflow_id?: string;
+  /** @deprecated D7 alias of dbos_workflow_id; will be removed. */
+  celery_task_id?: string;
   user_id: string;
   task_type: TaskType;
   status: TaskStatus;
@@ -47,7 +52,6 @@ export interface UnifiedTask {
   /** @deprecated Use media_id instead */
   video_id?: string;
   group_id?: string;
-  celery_task_id?: string;
   metadata: Record<string, unknown>;
   created_at: string;
   started_at?: string;
@@ -57,6 +61,7 @@ export interface UnifiedTask {
   dedup_key?: string;
   subscribers?: Array<{ user_id: string; resource_id: string; subscribed_at: string }>;
   error_code?: string;
+  cost_cents?: number;
 }
 
 /** Map task_type to its high-level category */
@@ -133,6 +138,20 @@ type Action =
   | { type: 'DELETE'; id: string }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'SET_CONNECTED'; connected: boolean };
+
+/** task_tracking row → UnifiedTask. The table has no `id` column
+ * anymore (PK = dbos_workflow_id, see migration 180), so adapt by
+ * aliasing PK as `id` for downstream consumers (TopBar, TasksPanel, etc)
+ * that still spell it `task.id`. */
+function rowToTask(row: Record<string, unknown>): UnifiedTask {
+  const pk = (row.dbos_workflow_id || row.id || '') as string;
+  return {
+    ...(row as unknown as UnifiedTask),
+    id: pk,
+    dbos_workflow_id: pk,
+    celery_task_id: pk, // legacy alias still read by some components
+  };
+}
 
 /** Map WebSocket status strings to task lifecycle status. */
 function wsStatusToTaskStatus(wsStatus?: string): TaskStatus | undefined {
@@ -277,47 +296,69 @@ function getWsBaseUrl(): string {
   return base.replace(/^http/, 'ws');
 }
 
-async function fetchAllTasks(limit = 200, fallbackUserId?: string): Promise<UnifiedTask[]> {
-  try {
-    const resp = await listWorkflows({ limit, sortDesc: true });
-    const mapped = resp.workflows
-      .map(w => dbosSnapshotToUnifiedTask(w, { fallbackUserId }))
-      .filter((t): t is UnifiedTask => t !== null);
-    console.debug(`[TaskManager] listWorkflows returned ${mapped.length} workflows`);
-    return mapped;
-  } catch (e) {
-    console.error('[TaskManager] listWorkflows failed:', e);
+async function fetchAllTasks(limit = 200): Promise<UnifiedTask[]> {
+  // Read from public.task_tracking via the legacy task-manager REST
+  // endpoint (renamed internally to point at task_tracking; URL kept
+  // for backwards compat). This table is the application-side sidecar
+  // of dbos.workflow_status — DBOS lifecycle is auto-mirrored here by
+  // PG trigger (see migration 180), so a single fetch returns everything
+  // the UI needs (title/subtitle/progress + status/started_at/error_msg).
+  const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks?limit=${limit}`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!resp.ok) {
+    console.error(`[TaskManager] fetchAllTasks failed: ${resp.status} ${resp.statusText}`);
     return [];
   }
+  const json = await resp.json();
+  const rows: Record<string, unknown>[] = json.data || [];
+  return rows.map(rowToTask);
 }
 
 async function apiCancelTask(taskId: string): Promise<void> {
-  // taskId IS the DBOS workflow_id (since D8-1).
+  // taskId is the dbos_workflow_id (UUID). Use DBOS-native cancel so the
+  // running workflow actually stops. The trigger then mirrors the
+  // CANCELLED status into task_tracking automatically.
   try {
     await cancelWorkflow(taskId);
   } catch (e) {
     console.error(`[TaskManager] cancelWorkflow(${taskId}) failed:`, e);
+    // Fallback to legacy REST (just flips task_tracking.status without
+    // stopping the workflow — last resort).
+    await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}/cancel`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+    });
   }
 }
 
 async function apiRetryTask(taskId: string): Promise<void> {
-  // restartWorkflow forks a NEW workflow_id; the original row stays in
-  // a terminal state (clearer audit than mutating in place). The new
-  // workflow's INSERT will land via Realtime.
+  // restartWorkflow forks a NEW workflow_id; original row stays in its
+  // terminal state. The new workflow's INSERT comes through task_tracking
+  // Realtime (router pre-creates the row before DBOS dispatch).
   try {
     await restartWorkflow(taskId);
   } catch (e) {
     console.error(`[TaskManager] restartWorkflow(${taskId}) failed:`, e);
+    await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}/retry`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+    });
   }
 }
 
-async function apiDeleteTask(_taskId: string): Promise<void> {
-  // DBOS doesn't expose a hard-delete; D8-3 will add a soft-hide
-  // endpoint or just rely on retention. Local-only for now.
+async function apiDeleteTask(taskId: string): Promise<void> {
+  await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
 }
 
 async function apiClearCompleted(): Promise<void> {
-  // Local-only — see apiDeleteTask.
+  await fetch(`${API_BASE}/api/v1/task-manager/tasks/clear-completed`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
 }
 
 // ─── Context ────────────────────────────────────────────
@@ -337,19 +378,21 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const refreshTasks = useCallback(async () => {
     dispatch({ type: 'SET_LOADING', loading: true });
     try {
-      const tasks = await fetchAllTasks(200, currentUserId || undefined);
+      const tasks = await fetchAllTasks();
       dispatch({ type: 'SET_TASKS', tasks });
     } catch (e) {
       console.error('[TaskManager] Failed to fetch tasks:', e);
       dispatch({ type: 'SET_LOADING', loading: false });
     }
-  }, [currentUserId]);
+  }, []);
 
-  // Supabase Realtime subscription — D8-1 single source = dbos.workflow_status.
-  // RLS gates rows to the current user (authenticated_user = auth.uid()),
-  // so no client-side filter is needed. INSERT = workflow dispatched,
-  // UPDATE = lifecycle transition (RUNNING/SUCCESS/ERROR/CANCELLED).
-  // DBOS rows are never deleted — clearCompleted only hides locally.
+  // Supabase Realtime — single source = public.task_tracking.
+  // The PG trigger trg_mirror_dbos_lifecycle (migration 180) auto-syncs
+  // DBOS lifecycle (status/started_at/completed_at/error_msg) into this
+  // table whenever dbos.workflow_status changes. So one channel here
+  // delivers BOTH user-facing fields (title/subtitle/progress, written
+  // by application code) AND DBOS execution truth (mirrored by trigger).
+  // No second dbos.workflow_status subscription needed.
   useEffect(() => {
     if (!currentUserId) {
       console.warn('[TaskManager] No currentUserId, skipping task fetch & subscription');
@@ -364,38 +407,41 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     console.debug(`[TaskManager] Initializing for user ${currentUserId.slice(0, 8)}...`);
 
-    // Fetch initial data
     refreshTasks();
 
     const channel = supabase
-      .channel(`user-dbos-workflows-${currentUserId}`)
+      .channel(`user-tasks-${currentUserId}`)
       .on('postgres_changes', {
         event: 'INSERT',
-        schema: 'dbos',
-        table: 'workflow_status',
+        schema: 'public',
+        table: 'task_tracking',
+        filter: `user_id=eq.${currentUserId}`,
       }, (payload) => {
-        const task = dbosRowToUnifiedTask(
-          payload.new as DbosWorkflowStatusRow,
-          { fallbackUserId: currentUserId }
-        );
-        if (task) dispatch({ type: 'INSERT', task });
+        dispatch({ type: 'INSERT', task: rowToTask(payload.new) });
       })
       .on('postgres_changes', {
         event: 'UPDATE',
-        schema: 'dbos',
-        table: 'workflow_status',
+        schema: 'public',
+        table: 'task_tracking',
+        filter: `user_id=eq.${currentUserId}`,
       }, (payload) => {
-        const task = dbosRowToUnifiedTask(
-          payload.new as DbosWorkflowStatusRow,
-          { fallbackUserId: currentUserId }
-        );
-        if (task) dispatch({ type: 'UPDATE', task });
+        dispatch({ type: 'UPDATE', task: rowToTask(payload.new) });
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'task_tracking',
+        filter: `user_id=eq.${currentUserId}`,
+      }, (payload) => {
+        // REPLICA IDENTITY FULL set in migration 180, so payload.old has the row.
+        const oldRow = payload.old as { dbos_workflow_id?: string; id?: string };
+        const id = oldRow.dbos_workflow_id || oldRow.id;
+        if (id) dispatch({ type: 'DELETE', id });
       })
       .subscribe((status, err) => {
         console.debug(`[TaskManager] Realtime status: ${status}`, err || '');
         dispatch({ type: 'SET_CONNECTED', connected: status === 'SUBSCRIBED' });
         if (status === 'SUBSCRIBED') {
-          // Re-fetch on reconnect to fill any gaps
           refreshTasks();
         }
       });

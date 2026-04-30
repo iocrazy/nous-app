@@ -222,11 +222,11 @@ async def get_task_progress(task_id: str, auth: AuthDep):
     tracker = get_task_manager()
     client = await tracker._get_client()
 
-    # Look up the unified task to get dbos_workflow_id
+    # Look up the task by dbos_workflow_id (PK after migration 180).
     result = await (
         client.table("task_tracking")
         .select("dbos_workflow_id, progress, status, speed, total_bytes, error_msg")
-        .eq("id", task_id)
+        .eq("dbos_workflow_id", task_id)
         .eq("user_id", auth.user_id)
         .single()
         .execute()

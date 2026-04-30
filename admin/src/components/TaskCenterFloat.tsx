@@ -111,7 +111,7 @@ export function TaskCenterFloat() {
       .channel('admin-task-float')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'unified_tasks' },
+        { event: '*', schema: 'public', table: 'task_tracking' },
         () => {
           debouncedFetch()
         },

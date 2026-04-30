@@ -1,11 +1,14 @@
 /**
  * DBOS workflow REST + SSE client.
  *
- * Mirrors `backend/app/api/workflows_router.py`. After D8-1 this is
- * the authoritative source for all dispatched workflows (parse /
- * download / transcode / analyze_l1 / storyboard_* / write_memory /
- * etc). The legacy unified_tasks REST/Realtime is no longer read
- * by the Task Center — see TaskManagerContext.
+ * Mirrors `backend/app/api/workflows_router.py`. Used for execution-truth
+ * operations (cancel/restart/SSE event stream) — those go to DBOS native
+ * APIs because they actually stop / fork the running workflow.
+ *
+ * Reading task lists / lifecycle status, however, goes through
+ * `task_tracking` Realtime + `/api/v1/task-manager/tasks` REST (see
+ * TaskManagerContext). The PG trigger trg_mirror_dbos_lifecycle keeps
+ * task_tracking in sync with dbos.workflow_status automatically.
  */
 
 import { getAuthHeaders } from './parserService';

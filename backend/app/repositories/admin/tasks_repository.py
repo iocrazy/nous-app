@@ -10,10 +10,12 @@ from app.db import get_async_supabase_admin
 class AdminTasksRepository:
     TABLE = "task_tracking"
 
+    # `id` removed in migration 180 — PK is now dbos_workflow_id (UUID
+    # string, equals dbos.workflow_status.workflow_uuid).
     LIST_COLUMNS = (
-        "id, user_id, task_type, status, phase, title, subtitle, "
-        "progress, speed, total_bytes, error_msg, error_code, "
-        "resource_id, media_id, dbos_workflow_id, metadata, "
+        "dbos_workflow_id, user_id, task_type, status, phase, title, "
+        "subtitle, progress, speed, total_bytes, error_msg, error_code, "
+        "resource_id, media_id, cost_cents, metadata, "
         "created_at, started_at, completed_at"
     )
 
@@ -22,14 +24,18 @@ class AdminTasksRepository:
 
     async def count_total(self) -> int:
         client = await self._client()
-        result = await client.table(self.TABLE).select("id", count="exact").execute()
+        result = (
+            await client.table(self.TABLE)
+            .select("dbos_workflow_id", count="exact")
+            .execute()
+        )
         return result.count or 0
 
     async def count_by_status(self, status: str) -> int:
         client = await self._client()
         result = (
             await client.table(self.TABLE)
-            .select("id", count="exact")
+            .select("dbos_workflow_id", count="exact")
             .eq("status", status)
             .execute()
         )
@@ -61,9 +67,9 @@ class AdminTasksRepository:
                 f"dbos_workflow_id.ilike.{pat}",
                 f"metadata->>original_url.ilike.{pat}",
             ]
+            # numeric search hits BIGINT id columns on related tables.
             if search.isdigit():
                 or_clauses += [
-                    f"id.eq.{search}",
                     f"media_id.eq.{search}",
                     f"resource_id.eq.{search}",
                 ]
@@ -81,8 +87,8 @@ class AdminTasksRepository:
         client = await self._client()
         result = (
             await client.table(self.TABLE)
-            .select("id, status, dbos_workflow_id, task_type")
-            .eq("id", task_id)
+            .select("dbos_workflow_id, status, task_type")
+            .eq("dbos_workflow_id", task_id)
             .maybe_single()
             .execute()
         )
@@ -90,4 +96,9 @@ class AdminTasksRepository:
 
     async def update(self, task_id: str, changes: dict[str, Any]) -> None:
         client = await self._client()
-        await client.table(self.TABLE).update(changes).eq("id", task_id).execute()
+        await (
+            client.table(self.TABLE)
+            .update(changes)
+            .eq("dbos_workflow_id", task_id)
+            .execute()
+        )

@@ -237,7 +237,7 @@ export function TaskCenter() {
   const cancelTask = useCancelTask()
   const retryTask = useRetryTask()
 
-  // Supabase Realtime: auto-refresh on unified_tasks changes (debounced)
+  // Supabase Realtime: auto-refresh on task_tracking changes (debounced)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedInvalidate = useCallback(() => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current)
@@ -251,7 +251,7 @@ export function TaskCenter() {
       .channel('admin-tasks')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'unified_tasks' },
+        { event: '*', schema: 'public', table: 'task_tracking' },
         debouncedInvalidate,
       )
       .subscribe()

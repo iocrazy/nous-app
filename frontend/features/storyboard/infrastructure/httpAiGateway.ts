@@ -4,7 +4,7 @@
 // Backend routes (sb_ai_router.py, prefix="/storyboard"):
 //   POST /storyboard/generate/image
 //   POST /storyboard/generate/video
-// Task status is tracked via unified_tasks (task_manager_router):
+// Task status is tracked via task_tracking (task_manager_router):
 //   GET /tasks/{task_id}   (Celery status)
 
 import type { AiGateway, GenerateImagePayload } from '../application/ports';

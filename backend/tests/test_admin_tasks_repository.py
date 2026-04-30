@@ -68,9 +68,10 @@ async def test_count_total(
     fake_query._count = 42
     assert await repo.count_total() == 42
 
-    # Should only select id + count=exact, no filters
+    # Should only select PK column + count=exact, no filters.
+    # Migration 180: PK is now dbos_workflow_id (was BIGINT id).
     select_calls = [c for c in fake_query.calls if c[0] == "select"]
-    assert select_calls[0][1] == ("id",)
+    assert select_calls[0][1] == ("dbos_workflow_id",)
     assert select_calls[0][2] == {"count": "exact"}
 
 
