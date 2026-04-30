@@ -159,7 +159,10 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
         )
 
     except Exception as e:
-        logger.warning(f"[AI] Failed to chain AI pipeline for {platform_id}: {e}")
+        logger.warning(
+            f"[AI] Failed to chain AI pipeline for {platform_id}: "
+            f"{type(e).__name__}: {e!r}"
+        )
 
 
 # ─── URL availability helpers ─────────────────────────────────────────

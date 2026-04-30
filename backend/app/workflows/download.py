@@ -260,7 +260,6 @@ def finalize_post_download_step(
     return asyncio.run(_do())
 
 
-@DBOS.step()
 def chain_followups_step(
     *,
     platform_id: str,
@@ -271,10 +270,11 @@ def chain_followups_step(
     """Dispatch thumbnail + transcode + AI pipeline. Best-effort —
     failures here never fail the workflow.
 
-    Today these still go through the legacy Celery dispatchers
-    (`generate_thumbnail_task.delay`, `maybe_trigger_transcode`,
-    `maybe_chain_ai_pipeline`). D4 will rewire these to
-    start_workflow_routed once the dispatch site is touched anyway."""
+    NOT a `@DBOS.step` — `start_workflow_routed` calls
+    `DBOS.start_workflow` which asserts when invoked from inside a step
+    context (same constraint as dispatch_download_step /
+    dispatch_l1_analysis_step). Must run in workflow body where the
+    workflow context is active."""
     if not resource_id or not fresh_download_path:
         return
 
@@ -301,7 +301,9 @@ def chain_followups_step(
                 )
             )
         except Exception as e:
-            logger.warning(f"[download.chain] thumbnail: {e}")
+            logger.warning(
+                f"[download.chain] thumbnail: {type(e).__name__}: {e!r}"
+            )
 
     try:
         # PR-D7 phase 3: maybe_chain_* helpers stay in app.tasks.download_helpers
@@ -316,7 +318,9 @@ def chain_followups_step(
         maybe_chain_transcode(platform_id, user_id)
         maybe_chain_ai_pipeline(platform_id, user_id)
     except Exception as e:
-        logger.warning(f"[download.chain] transcode/ai chain: {e}")
+        logger.warning(
+            f"[download.chain] transcode/ai chain: {type(e).__name__}: {e!r}"
+        )
 
 
 @DBOS.step()
