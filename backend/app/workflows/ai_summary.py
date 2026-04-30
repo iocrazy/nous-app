@@ -7,7 +7,7 @@ extends that into a production-shaped workflow:
     - reads user's LLM provider config from user_settings
     - whole workflow is memoized by workflow_id (idempotent replays)
     - LLM call step has its own retry policy
-    - touches `unified_tasks` for back-compat with TaskCenter UI during
+    - touches `task_tracking` for back-compat with TaskCenter UI during
       shadow mode
 """
 
@@ -21,8 +21,6 @@ import psycopg
 from dbos import DBOS
 from loguru import logger
 from openai import OpenAI
-
-from app.services.workflow_tracker import tracked_workflow
 
 
 def _dsn() -> str:
@@ -139,10 +137,6 @@ def persist_summary(parsed_media_id: int, summary: str) -> dict[str, Any]:
 
 
 @DBOS.workflow()
-@tracked_workflow(
-    task_type="ai_summary",
-    title_fn=lambda kw: f"Summarize media {kw.get('parsed_media_id')}",
-)
 def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     """Production-shaped DBOS port of the ai_summary Celery task.
 

@@ -198,7 +198,7 @@ async def trigger_analysis(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Media has no cover URL"
             )
 
-        # Pre-create unified_tasks row so @tracked_workflow finds it.
+        # Pre-create task_tracking row with title (trigger handles lifecycle).
         import uuid as _uuid
 
         from app.services.unified_task_manager import get_task_manager
@@ -210,7 +210,7 @@ async def trigger_analysis(
                 task_type="ai_extract",
                 title=f"Analyze L1: {(media.get('title') or media_id)[:40]}",
                 media_id=str(media_id),
-                celery_task_id=wf_id,
+                dbos_workflow_id=wf_id,
             )
         except Exception as e:
             logger.warning(f"[Analysis] pre-create unified_task failed: {e}")
@@ -301,7 +301,7 @@ async def trigger_batch_analysis(
                     task_type="ai_extract",
                     title=f"Analyze L1: {(row.get('title') or mid)[:40]}",
                     media_id=str(mid),
-                    celery_task_id=wf_id,
+                    dbos_workflow_id=wf_id,
                 )
             except Exception:
                 pass  # Pre-create best-effort; tracker will retry-update

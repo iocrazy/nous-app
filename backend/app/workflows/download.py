@@ -10,7 +10,7 @@ Both strategy functions accept a UnifiedProgressTracker. We pass one
 with unified_tracker=None — the tracker degrades to pure Redis pub/sub
 mode (channel `task_progress:{user_id}`), which is exactly what the
 WebSocket layer consumes anyway. DBOS owns workflow lifecycle now;
-the legacy unified_tasks bookkeeping is dropped here and rebuilt as
+the legacy task_tracking bookkeeping is dropped here and rebuilt as
 the DBOS-status bridge in D4.
 
 Steps:
@@ -39,8 +39,6 @@ from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
-
-from app.services.workflow_tracker import tracked_workflow
 
 
 @DBOS.step()
@@ -168,7 +166,7 @@ def finalize_post_download_step(
     `fresh_download_path` so the chain step can dispatch thumbnail.
 
     Mirrors the legacy task's post-download bookkeeping verbatim
-    except the unified_tasks lifecycle calls (DBOS owns those now)."""
+    except the task_tracking lifecycle calls (DBOS owns those now)."""
     from app.repositories.media_repository import MediaRepository
     from app.repositories.resources_repository import ResourcesRepository
 
@@ -301,9 +299,7 @@ def chain_followups_step(
                 )
             )
         except Exception as e:
-            logger.warning(
-                f"[download.chain] thumbnail: {type(e).__name__}: {e!r}"
-            )
+            logger.warning(f"[download.chain] thumbnail: {type(e).__name__}: {e!r}")
 
     try:
         # PR-D7 phase 3: maybe_chain_* helpers stay in app.tasks.download_helpers
@@ -364,10 +360,6 @@ def log_download_outcome_step(
 
 
 @DBOS.workflow()
-@tracked_workflow(
-    task_type="download",
-    title_fn=lambda kw: f"Download {(kw.get('video_title') or kw.get('platform_id') or '')[:50]}",
-)
 def download_workflow(
     platform_id: str,
     user_id: str,

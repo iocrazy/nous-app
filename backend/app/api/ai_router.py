@@ -75,7 +75,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     # === Dedup: reject if already processing ===
     _admin = await _get_admin()
     _active = (
-        await _admin.table("unified_tasks")
+        await _admin.table("task_tracking")
         .select("id")
         .eq("resource_id", resource_id)
         .eq("task_type", "ai_transcription")
@@ -194,7 +194,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     # === Dedup: reject if already processing ===
     _admin = await _get_admin()
     _active = (
-        await _admin.table("unified_tasks")
+        await _admin.table("task_tracking")
         .select("id")
         .eq("resource_id", resource_id)
         .eq("task_type", "ai_summary")
@@ -255,7 +255,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
                 title=f"Summarize: {platform_id}",
                 media_id=platform_id,
                 resource_id=resource_id,
-                celery_task_id=wf_id,
+                dbos_workflow_id=wf_id,
             )
             _orphan_task_id = task_id
 
@@ -464,7 +464,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
                 title=f"Summarize: {platform_id}",
                 media_id=platform_id,
                 resource_id=_resource_id,
-                celery_task_id=wf_id,
+                dbos_workflow_id=wf_id,
             )
             _orphan_task_id = task_id
 

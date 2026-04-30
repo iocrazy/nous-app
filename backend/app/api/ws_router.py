@@ -37,7 +37,7 @@ async def ws_task_progress(websocket: WebSocket, token: str = Query(...)):
     Connect: ``ws(s)://<host>/ws/task-progress?token=<jwt>``
 
     Messages are JSON objects with fields:
-    ``unified_task_id``, ``celery_task_id``, ``status``, ``percent``,
+    ``unified_task_id``, ``dbos_workflow_id``, ``status``, ``percent``,
     ``speed``, ``downloaded``, ``total``, and optionally ``error``.
     """
     user_id = await _authenticate_ws(token)

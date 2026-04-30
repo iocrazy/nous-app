@@ -71,7 +71,7 @@ async def export_project(
             user_id=auth.user_id,
             task_type="storyboard_export",
             title=f"Export storyboard as {body.format.upper()}",
-            celery_task_id=wf_id,
+            dbos_workflow_id=wf_id,
             metadata={
                 "project_id": project_id,
                 "format": body.format,

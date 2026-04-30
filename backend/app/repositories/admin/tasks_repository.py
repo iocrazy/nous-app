@@ -1,4 +1,4 @@
-"""Repository for admin task center (unified_tasks table)."""
+"""Repository for admin task center (task_tracking table)."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from app.db import get_async_supabase_admin
 
 
 class AdminTasksRepository:
-    TABLE = "unified_tasks"
+    TABLE = "task_tracking"
 
     LIST_COLUMNS = (
         "id, user_id, task_type, status, phase, title, subtitle, "
         "progress, speed, total_bytes, error_msg, error_code, "
-        "resource_id, media_id, celery_task_id, metadata, "
+        "resource_id, media_id, dbos_workflow_id, metadata, "
         "created_at, started_at, completed_at"
     )
 
@@ -58,7 +58,7 @@ class AdminTasksRepository:
                 f"title.ilike.{pat}",
                 f"subtitle.ilike.{pat}",
                 f"error_msg.ilike.{pat}",
-                f"celery_task_id.ilike.{pat}",
+                f"dbos_workflow_id.ilike.{pat}",
                 f"metadata->>original_url.ilike.{pat}",
             ]
             if search.isdigit():
@@ -81,7 +81,7 @@ class AdminTasksRepository:
         client = await self._client()
         result = (
             await client.table(self.TABLE)
-            .select("id, status, celery_task_id, task_type")
+            .select("id, status, dbos_workflow_id, task_type")
             .eq("id", task_id)
             .maybe_single()
             .execute()

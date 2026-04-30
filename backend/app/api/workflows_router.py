@@ -1,7 +1,7 @@
 """DBOS workflow status + SSE endpoints.
 
 Frontends (ChatPanel, TaskCenter, Storyboard panels) subscribe here
-instead of the legacy `unified_tasks` Realtime channel for any task
+instead of the legacy `task_tracking` Realtime channel for any task
 that's been routed to a DBOS workflow. Both pipes can run side-by-side
 during the shadow window.
 
@@ -272,7 +272,7 @@ async def list_workflows(
 ) -> dict[str, Any]:
     """List the authenticated user's DBOS workflows.
 
-    Backed directly by `dbos.workflow_status` — no unified_tasks read.
+    Backed directly by `dbos.workflow_status` — no task_tracking read.
     Frontend Task Center should subscribe via Supabase Realtime to
     `dbos.workflow_status` for push updates and use this endpoint for
     initial load + pagination.

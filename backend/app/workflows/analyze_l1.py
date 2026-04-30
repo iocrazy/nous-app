@@ -15,8 +15,6 @@ from typing import Any, Optional
 
 from dbos import DBOS
 
-from app.services.workflow_tracker import tracked_workflow
-
 
 def _dsn() -> str:
     url = os.environ.get("DBOS_DATABASE_URL")
@@ -120,10 +118,6 @@ def call_analyze_l1(
 
 
 @DBOS.workflow()
-@tracked_workflow(
-    task_type="ai_extract",
-    title_fn=lambda kw: f"Analyze L1: {(kw.get('title') or kw.get('media_id') or '')[:50]}",
-)
 def analyze_l1_workflow(
     media_id: int,
     cover_url: str,

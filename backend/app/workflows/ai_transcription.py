@@ -22,8 +22,6 @@ from typing import Any
 import psycopg
 from dbos import DBOS
 
-from app.services.workflow_tracker import tracked_workflow
-
 
 def _dsn() -> str:
     url = os.environ.get("DBOS_DATABASE_URL")
@@ -133,10 +131,6 @@ def mark_transcript_completed(parsed_media_id: int) -> None:
 
 
 @DBOS.workflow()
-@tracked_workflow(
-    task_type="ai_transcription",
-    title_fn=lambda kw: f"Transcribe media {kw.get('parsed_media_id')}",
-)
 def ai_transcription_workflow(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     """DBOS port of transcribe_audio_task. Same input/output contract:
     parsed_media_id + user_id → transcript persisted to resource_transcripts +

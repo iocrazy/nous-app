@@ -47,7 +47,7 @@ async def generate_outline(
         # PR-D7 phase 3: routes through DBOS only (legacy script_tasks
         # Celery wrapper has been deleted). DBOS owns workflow status
         # via its own dbos_workflow_id; task_id is still returned for
-        # the legacy unified_tasks UI bridge during the frontend
+        # the legacy task_tracking UI bridge during the frontend
         # migration window.
         from app.services.dbos_orchestrator import start_workflow_routed
         from app.workflows.script_outline import script_outline_workflow

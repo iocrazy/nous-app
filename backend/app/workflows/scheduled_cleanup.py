@@ -4,7 +4,7 @@
 Each is a thin @DBOS.scheduled wrapper that delegates to the existing
 service code:
   - cleanup_temp_files       (daily 00:00) — FS sweep of .tmp/.part files
-  - cleanup_old_unified_tasks (daily 02:00) — drop terminal rows >7d old
+  - cleanup_old_task_tracking (daily 02:00) — drop terminal rows >7d old
   - cleanup_trashed_resources (daily 01:00) — soft-delete sweep >15d old
 
 Cron offsets (00/01/02) spread the daily IO so they don't all hit the
@@ -74,8 +74,8 @@ def cleanup_temp_files_step() -> dict[str, Any]:
 
 
 @DBOS.step()
-def cleanup_old_unified_tasks_step() -> dict[str, Any]:
-    """Drop unified_tasks rows in terminal state older than 7 days."""
+def cleanup_old_task_tracking_step() -> dict[str, Any]:
+    """Drop task_tracking rows in terminal state older than 7 days."""
     from app.db.supabase_client import get_async_supabase_admin
 
     async def _do() -> int:
@@ -84,7 +84,7 @@ def cleanup_old_unified_tasks_step() -> dict[str, Any]:
         # this MUST be timezone-aware UTC, not naive local time.
         cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         result = (
-            await supabase.table("unified_tasks")
+            await supabase.table("task_tracking")
             .delete()
             .in_("status", ["completed", "failed", "cancelled"])
             .lt("updated_at", cutoff)
@@ -131,9 +131,9 @@ def cleanup_trashed_resources_workflow(
 
 @DBOS.scheduled("0 2 * * *")  # daily 02:00 UTC
 @DBOS.workflow()
-def cleanup_old_unified_tasks_workflow(
+def cleanup_old_task_tracking_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    result = cleanup_old_unified_tasks_step()
+    result = cleanup_old_task_tracking_step()
     if result.get("deleted"):
-        logger.info(f"[cleanup_old_unified_tasks] {result}")
+        logger.info(f"[cleanup_old_task_tracking] {result}")

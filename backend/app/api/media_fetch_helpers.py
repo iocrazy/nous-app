@@ -200,8 +200,8 @@ async def dedup_and_dispatch(
         dl_video = ("video" in types_to_download) or ("image" in types_to_download)
         dl_cover = "cover" in types_to_download
 
-        # Pre-generate DBOS workflow_id so the unified_tasks row exists
-        # with celery_task_id populated BEFORE the workflow's tracker
+        # Pre-generate DBOS workflow_id so the task_tracking row exists
+        # with dbos_workflow_id populated BEFORE the workflow's tracker
         # decorator fires. See media_fetch_helpers.parse path for the
         # rationale.
         import uuid as _uuid
@@ -218,7 +218,7 @@ async def dedup_and_dispatch(
                 subtitle=dl_subtitle,
                 media_id=platform_id,
                 resource_id=resource_id,
-                celery_task_id=task_id,
+                dbos_workflow_id=task_id,
             )
         except Exception as e:
             logger.warning(f"[Download/Dedup] Pre-create unified_task failed: {e}")
@@ -441,7 +441,7 @@ async def handle_ytdlp_fetch(
         logger.warning(f"[Parse/Dedup] check failed, proceeding: {e}")
 
     # Pre-generate the DBOS workflow_id so we can write
-    # unified_tasks.celery_task_id BEFORE dispatch. Otherwise the
+    # task_tracking.dbos_workflow_id BEFORE dispatch. Otherwise the
     # workflow's tracker decorator (mark_started) races the router's
     # post-dispatch _atomic_update and fires before the column is
     # populated, leaving started_at=null forever.
@@ -457,7 +457,7 @@ async def handle_ytdlp_fetch(
             title=f"Parse {url[:50]}",
             subtitle="Initializing...",
             dedup_key=dedup_key,
-            celery_task_id=dbos_wf_id,
+            dbos_workflow_id=dbos_wf_id,
         )
     except Exception as e:
         logger.warning(f"[Parse] Pre-create unified_task failed: {e}")

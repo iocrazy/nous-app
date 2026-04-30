@@ -108,7 +108,7 @@ async def list_tasks(
             error_code=row.get("error_code"),
             resource_id=str(row["resource_id"]) if row.get("resource_id") else None,
             media_id=str(row["media_id"]) if row.get("media_id") else None,
-            celery_task_id=row.get("celery_task_id"),
+            dbos_workflow_id=row.get("dbos_workflow_id"),
             metadata=row.get("metadata"),
             created_at=row.get("created_at") or "",
             started_at=row.get("started_at"),
@@ -144,13 +144,13 @@ async def cancel_task(
             detail=f"Cannot cancel task with status '{task['status']}'",
         )
 
-    celery_task_id = task.get("celery_task_id")
-    if celery_task_id:
+    dbos_workflow_id = task.get("dbos_workflow_id")
+    if dbos_workflow_id:
         # PR-D7 phase 3: Celery is gone — no broker to revoke from.
-        # Log + skip; the unified_tasks row still gets marked cancelled
+        # Log + skip; the task_tracking row still gets marked cancelled
         # below.
         logger.debug(
-            f"[Admin] Skipped Celery revoke for legacy {celery_task_id} "
+            f"[Admin] Skipped Celery revoke for legacy {dbos_workflow_id} "
             "(Celery removed)"
         )
 
@@ -161,7 +161,7 @@ async def cancel_task(
         action="task_cancel",
         target_type="unified_task",
         target_id=task_id,
-        details={"celery_task_id": celery_task_id},
+        details={"dbos_workflow_id": dbos_workflow_id},
         ip_address=request.client.host if request.client else None,
     )
 

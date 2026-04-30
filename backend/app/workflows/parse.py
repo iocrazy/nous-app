@@ -32,8 +32,6 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
-from app.services.workflow_tracker import tracked_workflow
-
 
 @DBOS.step()
 def extract_url_step(url: str) -> str:
@@ -103,25 +101,43 @@ def dispatch_download_step(
     user_agent: str,
     resource_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Route the download via the migration table. Returns the routing
-    decision dict from start_workflow_routed.
+    """Route the download via the migration table. Pre-creates the
+    task_tracking row with a friendly title so admin/Task Center see
+    "Download <title>" while the workflow runs (the trigger updates
+    lifecycle from there).
 
-    `resource_id` is the per-user resource row pre-created by
-    save_metadata_only — passing it through lets download_workflow's
-    finalize_post_download_step build resource_version v1 + mirror
-    file_size_bytes (without it the resource has no file pointer and
-    "我的下载" shows nothing).
+    `resource_id` lets finalize_post_download_step build resource_version
+    v1 + mirror file_size_bytes — without it "我的下载" page shows nothing.
 
     NOT a `@DBOS.step` — `start_workflow_routed` calls
-    `DBOS.start_workflow` internally, which asserts when invoked from
-    inside a step context. Must be called directly from the workflow
-    body where DBOS workflow context is active. Idempotency is handled
-    at the routing layer (DBOS workflow_id dedup)."""
+    `DBOS.start_workflow` which asserts when invoked from inside a step
+    context."""
+    import uuid as _uuid
+
     from app.services.dbos_orchestrator import start_workflow_routed
+    from app.services.unified_task_manager import get_task_manager
     from app.workflows.download import download_workflow
 
-    return asyncio.run(
-        start_workflow_routed(
+    wf_id = str(_uuid.uuid4())
+
+    async def _do() -> dict[str, Any]:
+        # Pre-create task_tracking row — trigger updates lifecycle later.
+        try:
+            await get_task_manager().create(
+                user_id=user_id,
+                task_type="download",
+                title=f"Download {(video_title or platform_id)[:50]}",
+                subtitle=("video + cover" if download_video and download_cover
+                          else "video" if download_video
+                          else "cover"),
+                media_id=str(platform_id) if platform_id else None,
+                resource_id=str(resource_id) if resource_id else None,
+                dbos_workflow_id=wf_id,
+            )
+        except Exception as e:
+            logger.warning(f"[parse] pre-create download task_tracking: {e}")
+
+        return await start_workflow_routed(
             "download",
             dbos_workflow_callable=download_workflow,
             dbos_workflow_kwargs={
@@ -134,8 +150,10 @@ def dispatch_download_step(
                 "user_agent": user_agent,
                 "resource_id": resource_id,
             },
+            workflow_id=wf_id,
         )
-    )
+
+    return asyncio.run(_do())
 
 
 def dispatch_l1_analysis_step(
@@ -147,15 +165,32 @@ def dispatch_l1_analysis_step(
     user_id: str,
 ) -> dict[str, Any]:
     """Route L1 cover analysis via the migration table. Best-effort —
-    returns the routing decision but never raises.
+    pre-creates a task_tracking row with a friendly title; never raises.
 
     NOT a `@DBOS.step` for the same reason as dispatch_download_step."""
+    import uuid as _uuid
+
     try:
         from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.unified_task_manager import get_task_manager
         from app.workflows.analyze_l1 import analyze_l1_workflow
 
-        return asyncio.run(
-            start_workflow_routed(
+        wf_id = str(_uuid.uuid4())
+
+        async def _do() -> dict[str, Any]:
+            try:
+                await get_task_manager().create(
+                    user_id=user_id,
+                    task_type="ai_extract",
+                    title=f"Analyze {(title or media_id)[:40]}",
+                    subtitle="L1 cover analysis",
+                    media_id=str(media_id) if media_id else None,
+                    dbos_workflow_id=wf_id,
+                )
+            except Exception as e:
+                logger.warning(f"[parse] pre-create analyze task_tracking: {e}")
+
+            return await start_workflow_routed(
                 "ai_extract",
                 dbos_workflow_callable=analyze_l1_workflow,
                 dbos_workflow_kwargs={
@@ -165,8 +200,10 @@ def dispatch_l1_analysis_step(
                     "description": description,
                     "user_id": user_id,
                 },
+                workflow_id=wf_id,
             )
-        )
+
+        return asyncio.run(_do())
     except Exception as e:
         logger.warning(f"[parse] L1 analysis dispatch failed: {e}")
         return {"mode": "skipped", "error": str(e)}
@@ -211,10 +248,6 @@ def log_parse_outcome_step(
 
 
 @DBOS.workflow()
-@tracked_workflow(
-    task_type="parse",
-    title_fn=lambda kw: f"Parse {(kw.get('url') or '')[:50]}",
-)
 def parse_workflow(
     url: str,
     user_id: str,

@@ -19,7 +19,7 @@ from app.workflows.download import download_workflow  # noqa: F401
 from app.workflows.issue_lifecycle import execute_issue  # noqa: F401
 from app.workflows.parse import parse_workflow  # noqa: F401
 from app.workflows.scheduled_cleanup import (  # noqa: F401
-    cleanup_old_unified_tasks_workflow,
+    cleanup_old_task_tracking_workflow,
     cleanup_temp_files_workflow,
     cleanup_trashed_resources_workflow,
 )
@@ -68,7 +68,7 @@ __all__ = [
     # scheduled bucket
     "cleanup_temp_files_workflow",
     "cleanup_trashed_resources_workflow",
-    "cleanup_old_unified_tasks_workflow",
+    "cleanup_old_task_tracking_workflow",
     "update_system_status_workflow",
     "health_check_workflow",
     "retry_failed_downloads_workflow",

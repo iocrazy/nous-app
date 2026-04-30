@@ -387,7 +387,7 @@ class AdminTaskResponse(BaseModel):
     error_code: Optional[str] = None
     resource_id: Optional[str] = None
     media_id: Optional[str] = None
-    celery_task_id: Optional[str] = None
+    dbos_workflow_id: Optional[str] = None
     metadata: Optional[dict] = None
     created_at: str
     started_at: Optional[str] = None

@@ -15,8 +15,8 @@ What we keep:
     - resources.transcode_status = 'failed' on terminal failure
 
 What's deferred:
-    - unified_tasks bridge → D4 (TaskCenter UI subscribes to DBOS
-      workflow status directly, not the legacy unified_tasks rows)
+    - task_tracking bridge → D4 (TaskCenter UI subscribes to DBOS
+      workflow status directly, not the legacy task_tracking rows)
     - dispatch site (`maybe_trigger_transcode` in transcode_tasks.py)
       keeps its gating logic and just swaps the .delay() call for
       start_workflow_routed("transcode", ...) — that swap is a D4
@@ -31,8 +31,6 @@ from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
-
-from app.services.workflow_tracker import tracked_workflow
 
 
 @DBOS.step()
@@ -177,10 +175,6 @@ def log_transcode_outcome_step(
 
 
 @DBOS.workflow()
-@tracked_workflow(
-    task_type="transcode",
-    title_fn=lambda kw: f"Transcode {(kw.get('resource_id') or '')[:20]}",
-)
 def transcode_workflow(
     resource_id: str,
     version_id: str,

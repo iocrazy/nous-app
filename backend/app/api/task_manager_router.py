@@ -180,7 +180,7 @@ async def retry_task(task_id: str, auth: AuthDep):
                     },
                 )
             except Exception as _e:
-                logger.debug(f"[TaskRetry] Failed to link celery_task_id: {_e}")
+                logger.debug(f"[TaskRetry] Failed to link dbos_workflow_id: {_e}")
             logger.info(f"[TaskRetry] Re-dispatched summary for task={task_id}")
 
     except Exception as e:
@@ -213,8 +213,8 @@ async def clear_completed(auth: AuthDep):
 async def get_task_progress(task_id: str, auth: AuthDep):
     """Get real-time download progress from Redis.
 
-    Looks up the celery_task_id from unified_tasks, then reads the
-    Redis key ``download_progress:{celery_task_id}`` for live progress.
+    Looks up the dbos_workflow_id from task_tracking, then reads the
+    Redis key ``download_progress:{dbos_workflow_id}`` for live progress.
     Falls back to the task's DB progress if no Redis data exists.
     """
     import json
@@ -222,10 +222,10 @@ async def get_task_progress(task_id: str, auth: AuthDep):
     tracker = get_task_manager()
     client = await tracker._get_client()
 
-    # Look up the unified task to get celery_task_id
+    # Look up the unified task to get dbos_workflow_id
     result = await (
-        client.table("unified_tasks")
-        .select("celery_task_id, progress, status, speed, total_bytes, error_msg")
+        client.table("task_tracking")
+        .select("dbos_workflow_id, progress, status, speed, total_bytes, error_msg")
         .eq("id", task_id)
         .eq("user_id", auth.user_id)
         .single()
@@ -235,7 +235,7 @@ async def get_task_progress(task_id: str, auth: AuthDep):
         raise HTTPException(404, "Task not found")
 
     task_row = result.data
-    celery_id = task_row.get("celery_task_id")
+    celery_id = task_row.get("dbos_workflow_id")
 
     # Try Redis first for real-time progress
     if celery_id:
@@ -248,7 +248,7 @@ async def get_task_progress(task_id: str, auth: AuthDep):
                 data = json.loads(raw)
                 return {
                     "task_id": task_id,
-                    "celery_task_id": celery_id,
+                    "dbos_workflow_id": celery_id,
                     "status": data.get("status", "downloading"),
                     "percent": data.get("percent", 0),
                     "downloaded": data.get("downloaded", 0),
@@ -262,7 +262,7 @@ async def get_task_progress(task_id: str, auth: AuthDep):
     # Fallback to DB progress
     return {
         "task_id": task_id,
-        "celery_task_id": celery_id,
+        "dbos_workflow_id": celery_id,
         "status": task_row.get("status", "pending"),
         "percent": task_row.get("progress", 0),
         "speed": task_row.get("speed"),

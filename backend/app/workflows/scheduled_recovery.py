@@ -2,7 +2,7 @@
 `tasks.scheduled_tasks`.
 
   - retry_failed_downloads (hourly) — resubmit FAILED downloads
-  - reap_stuck_pending_tasks (every 15min) — flip zombie unified_tasks
+  - reap_stuck_pending_tasks (every 15min) — flip zombie task_tracking
     + resource AI status to 'failed'
   - recover_stale_orchestrator_locks (hourly) — release dedup locks
     held by dead processing tasks
@@ -93,7 +93,7 @@ def retry_failed_downloads_step() -> dict[str, Any]:
 
 @DBOS.step()
 def reap_stuck_pending_tasks_step() -> dict[str, Any]:
-    """Two passes: (1) flip queued unified_tasks rows >1h old to failed,
+    """Two passes: (1) flip queued task_tracking rows >1h old to failed,
     (2) flip resources.{ai_*}_status from pending to failed when no live
     matching unified_task exists."""
     from app.db.supabase_client import get_async_supabase_admin
@@ -109,7 +109,7 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
         now_iso = datetime.now(timezone.utc).isoformat()
 
         result = (
-            await supabase.table("unified_tasks")
+            await supabase.table("task_tracking")
             .update(
                 {
                     "status": "failed",
@@ -136,7 +136,7 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
             sql = f"""
             WITH live AS (
               SELECT DISTINCT resource_id::text AS rid
-              FROM unified_tasks
+              FROM task_tracking
               WHERE status IN ('pending','processing','running')
                 AND task_type IN ('ai_extract','ai_transcription','ai_summary','ai_pipeline','ai_visual_analysis')
                 AND resource_id IS NOT NULL
@@ -167,7 +167,7 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
 
 @DBOS.step()
 def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
-    """Release dedup locks held by unified_tasks stuck in 'processing'
+    """Release dedup locks held by task_tracking stuck in 'processing'
     >1h. Becomes obsolete in D3d (DBOS workflow_id replaces this)."""
     from app.services.unified_task_manager import get_task_manager
 
@@ -177,7 +177,7 @@ def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 
         stale = await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .select("id, dedup_key")
             .eq("phase", "processing")
             .lt("started_at", cutoff)

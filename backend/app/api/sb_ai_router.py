@@ -80,7 +80,7 @@ async def generate_image(auth: AuthDep, body: GenerateImageRequest) -> Dict[str,
             user_id=auth.user_id,
             task_type="storyboard_image_gen",
             title=f"Generate image for node {body.node_id[:8]}",
-            celery_task_id=wf_id,
+            dbos_workflow_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "node_id": body.node_id,
@@ -143,7 +143,7 @@ async def generate_video(auth: AuthDep, body: GenerateVideoRequest) -> Dict[str,
             user_id=auth.user_id,
             task_type="storyboard_video_gen",
             title=f"Generate video for node {body.node_id[:8]}",
-            celery_task_id=wf_id,
+            dbos_workflow_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "node_id": body.node_id,
@@ -208,7 +208,7 @@ async def split_script(auth: AuthDep, body: SplitScriptRequest) -> Dict[str, Any
             user_id=auth.user_id,
             task_type="storyboard_script_split",
             title="Split script into storyboard scenes",
-            celery_task_id=wf_id,
+            dbos_workflow_id=wf_id,
             metadata={"project_id": body.project_id},
         )
 
@@ -260,7 +260,7 @@ async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, A
             user_id=auth.user_id,
             task_type="storyboard_video_analysis",
             title="Analyze video for storyboard scenes",
-            celery_task_id=wf_id,
+            dbos_workflow_id=wf_id,
             metadata={"project_id": body.project_id, "video_url": body.video_url},
         )
 
@@ -312,7 +312,7 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
             user_id=auth.user_id,
             task_type="storyboard_scene_detect",
             title="Detect scenes in video",
-            celery_task_id=wf_id,
+            dbos_workflow_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "video_url": body.video_url,

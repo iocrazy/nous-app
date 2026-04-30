@@ -92,10 +92,10 @@ def script_outline_workflow(
     - output: {status, chapter_count, chapter_ids}
     - side-effects: inserts N rows into script_chapters
 
-    Note: the legacy task accepted `task_id` for unified_tasks progress
+    Note: the legacy task accepted `task_id` for task_tracking progress
     events. DBOS owns the workflow lifecycle now — TaskCenter UI should
     subscribe to dbos workflow status (D4 work) instead of the
-    unified_tasks bridge.
+    task_tracking bridge.
     """
     chapters = generate_outline_chapters(premise, chapter_count, style_guide)
     return persist_outline_chapters(script_id, chapters)
