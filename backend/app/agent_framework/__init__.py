@@ -54,6 +54,10 @@ from app.agent_framework.lane_queue import (
     LaneQueue,
     LaneTaskTimeout,
 )
+from app.agent_framework.model_health import (
+    ModelHealth,
+    ModelHealthRegistry,
+)
 from app.agent_framework.workflow_timeout_policy import (
     DEFAULT_TIMEOUT_MINUTES,
     is_stuck,
@@ -91,6 +95,8 @@ __all__ = [
     "LaneTaskTimeout",
     "LifecycleBus",
     "LifecycleEvent",
+    "ModelHealth",
+    "ModelHealthRegistry",
     "Origin",
     "RotatingAdapter",
     "RunAborted",
