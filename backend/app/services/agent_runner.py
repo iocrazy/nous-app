@@ -26,8 +26,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from app.agent_framework import AbortController
 
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.hooks import (
@@ -72,7 +75,17 @@ class AgentRunner:
         user_messages: list[dict],
         *,
         recorder: Optional[RunRecorder] = None,
+        abort: Optional["AbortController"] = None,
     ) -> dict[str, Any]:
+        """Run one turn of the agent loop.
+
+        ``recorder`` polls cancel BETWEEN iterations (cooperative).
+        ``abort`` (Sprint 2 #3) interrupts the in-flight adapter.call —
+        pressing the frontend cancel button takes effect within seconds,
+        not after the LLM call finishes. Caller is responsible for
+        creating the AbortController and the watcher coroutine that
+        fires it.
+        """
         # Pre-flight: context budget guard. A small-context model
         # (e.g. user filled qwen-max with a heavy AGENT spec) would
         # otherwise return truncated nonsense or fail with cryptic
@@ -117,7 +130,29 @@ class AgentRunner:
                 if await recorder.check_cancelled():
                     return {"content": "", "raw": None, "cancelled": True}
 
-            resp = await self.adapter.call(composed, messages)
+            # Sprint 2 #3: race adapter.call against AbortController so
+            # pressing cancel mid-LLM-call interrupts within seconds
+            # instead of waiting for the full request to complete.
+            if abort is not None:
+                from app.agent_framework import RunAborted, race_until_abort
+
+                try:
+                    resp = await race_until_abort(
+                        self.adapter.call(composed, messages),
+                        abort,
+                    )
+                except RunAborted as exc:
+                    logger.info(
+                        f"[AgentRunner] aborted mid-call: {exc}"
+                    )
+                    return {
+                        "content": "",
+                        "raw": None,
+                        "cancelled": True,
+                        "abort_reason": str(exc),
+                    }
+            else:
+                resp = await self.adapter.call(composed, messages)
 
             if recorder is not None:
                 usage = resp.get("usage") or {}
