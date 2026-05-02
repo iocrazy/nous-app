@@ -26,6 +26,7 @@ from uuid import UUID
 import httpx
 from loguru import logger
 
+from app.boundary import URLBlockedError, validate_url_async
 from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
@@ -100,14 +101,25 @@ class VisualAnalysisService:
     # ── Image encoding helpers ────────────────────────────────────────
 
     async def _encode_image_from_url(self, url: str) -> Optional[str]:
-        """Download and encode image to base64."""
+        """Download and encode image to base64.
+
+        Boundary: image URLs come from parsed_media metadata (yt-dlp
+        info_dict), which is user-influenced. Validate before fetch
+        to prevent SSRF via cover_url field.
+        """
+        try:
+            validated = await validate_url_async(url)
+        except URLBlockedError as e:
+            logger.warning(f"Image URL blocked by boundary: {e}")
+            return None
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, timeout=30.0)
+                response = await client.get(validated, timeout=30.0)
                 if response.status_code == 200:
                     return base64.b64encode(response.content).decode("utf-8")
         except Exception as e:
-            logger.error(f"Failed to download image from {url}: {e}")
+            # Log redacted by loguru patcher (Phase D); do not echo full URL
+            logger.error(f"Failed to download image: {type(e).__name__}: {e}")
         return None
 
     async def _encode_image_from_file(self, file_path: str) -> Optional[str]:
