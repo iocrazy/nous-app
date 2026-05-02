@@ -80,9 +80,64 @@ def record_workflow_failure(
                 f"[workflow.fail] failed to schedule task_tracking update: {outer!r}"
             )
 
+    # Sprint 2 #2: emit lifecycle event so listeners (Discord notify,
+    # Sentry, agent_runs writer, Realtime push) can react without this
+    # handler needing to know about each one. Emitter ignorance =
+    # decoupling. The bus listener-exception isolation contract means
+    # a buggy listener can't crash the failure handler that emitted it.
+    try:
+        _emit_lifecycle_workflow_fail(workflow_id, err_type, err_msg, ctx)
+    except Exception as e:
+        logger.debug(f"[workflow.fail] lifecycle emit failed: {e}")
+
     return {
         "status": "failed",
         "error_type": err_type,
         "error": err_msg,
         **ctx,
     }
+
+
+def _emit_lifecycle_workflow_fail(
+    workflow_id: Optional[str],
+    err_type: str,
+    err_msg: str,
+    ctx: dict[str, Any],
+) -> None:
+    """Best-effort fire of EVT_WORKFLOW_FAIL on app.state.lifecycle_bus.
+
+    The bus is held on FastAPI app.state per the lifespan setup. Workflow
+    code runs in DBOS context which doesn't carry the FastAPI app, so we
+    look it up via the global accessor when available.
+
+    Failure here is silent — emit is observability, not load-bearing.
+    The actual failure recording (mgr.fail above) already happened.
+    """
+    try:
+        from app.agent_framework import EVT_WORKFLOW_FAIL, LifecycleEvent
+        from app.main import app as _app  # late import — avoid cycle at module load
+
+        bus = getattr(_app.state, "lifecycle_bus", None)
+        if bus is None:
+            return
+
+        async def _do() -> None:
+            await bus.emit(
+                LifecycleEvent(
+                    type=EVT_WORKFLOW_FAIL,
+                    payload={
+                        "workflow_id": workflow_id,
+                        "error_type": err_type,
+                        "error_msg": err_msg,
+                        "context": ctx,
+                    },
+                )
+            )
+
+        asyncio.run(_do())
+    except (ImportError, RuntimeError):
+        # ImportError: agent_framework or app.main not yet importable
+        # (cold start race). RuntimeError: no running loop / asyncio.run
+        # called from inside a running loop. Swallow either silently —
+        # we already recorded the failure.
+        pass
