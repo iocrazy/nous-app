@@ -387,7 +387,7 @@ async def mark_cookie_if_auth_failure(user_id: str, platform: str, error: str) -
 # ============================================
 
 
-async def handle_ytdlp_fetch(
+async def handle_media_fetch_dispatch(
     url: str,
     platform: str,
     request: MediaFetchRequest,
@@ -396,12 +396,16 @@ async def handle_ytdlp_fetch(
     tags: Optional[list[str]] = None,
     tag_ids: Optional[list[str]] = None,
 ) -> dict:
-    """Unified video fetch handler for ALL platforms via yt-dlp.
+    """Unified entry for parse + dispatch across all supported platforms.
+
+    Despite the legacy `handle_ytdlp_fetch` name (renamed to this), the
+    function is NOT yt-dlp specific. Branch by platform:
+      - douyin → DrissionPage / ABogus / LightHTTP fallback chain (httpx)
+      - yt-dlp platforms → yt-dlp
+    All branches end on the same DBOS parse_workflow dispatch path.
 
     PR-D7 phase 3: was Celery `parse_media_task.delay`. Now dispatches
-    `parse_workflow` via DBOS. The yt-dlp branch logic lived in the
-    legacy task — DBOS port handles Douyin path; yt-dlp variant
-    deferred to D3a-2."""
+    `parse_workflow` via DBOS."""
     from app.services.dbos_orchestrator import start_workflow_routed
     from app.services.unified_task_manager import get_task_manager
     from app.workflows.parse import parse_workflow
@@ -420,6 +424,39 @@ async def handle_ytdlp_fetch(
             logger.warning(f"[Cookie] Cookie check failed, proceeding without: {e}")
 
     skip_ytdlp = platform == "douyin" and not has_cookie
+
+    # ── L2 dedup: per-user already-owned short-circuit ──
+    # Master used to return "already downloaded" toast at parse entry
+    # when the current user had a completed resource for this URL. The
+    # DBOS port lost that — we'd run fetch+parse+dispatch+cache-check
+    # only to land on the cache_hit short-circuit downstream. L2 puts
+    # the check back at the front door so the user gets an instant
+    # response and we save a parse pass + a worker hop.
+    try:
+        from app.repositories.resources_repository import ResourcesRepository
+
+        owned = await ResourcesRepository().get_completed_resource_by_url_and_creator(
+            url=url, creator_id=auth.user_id
+        )
+        if owned:
+            background_tasks.add_task(
+                log_user_action,
+                user_id=auth.user_id,
+                action="fetch",
+                message=f"Already owned: {url[:40]}...",
+                status="success",
+                details={"platform": platform, "dedup_action": "already_owned"},
+            )
+            return {
+                "success": True,
+                "async": False,
+                "message": "You already have this in your library",
+                "dedup_action": "already_owned",
+                "resource_id": str(owned.get("id")),
+                "media_id": str(owned.get("media_id")),
+            }
+    except Exception as e:
+        logger.debug(f"[L2/Dedup] probe failed (non-fatal): {e}")
 
     dedup_key = None
     try:
@@ -440,16 +477,24 @@ async def handle_ytdlp_fetch(
     except Exception as e:
         logger.warning(f"[Parse/Dedup] check failed, proceeding: {e}")
 
-    # Pre-generate the DBOS workflow_id so we can write
-    # task_tracking.dbos_workflow_id BEFORE dispatch. Otherwise the
-    # workflow's tracker decorator (mark_started) races the router's
-    # post-dispatch _atomic_update and fires before the column is
-    # populated, leaving started_at=null forever.
-    import uuid as _uuid
+    # ── L3 idempotency: deterministic DBOS workflow_id ──
+    # Build the workflow_id from (user_id, sha1(url), 30-second bucket)
+    # instead of a fresh UUID. Effect: a second click on the same link
+    # within 30 s reuses the same DBOS workflow → DBOS returns the cached
+    # result without re-running the body. Catches double-clicks, network
+    # retries, and concurrent dispatch races that bypass L1/L2.
+    #
+    # The 30-s bucket is short enough that a deliberate re-parse 1 minute
+    # later still gets a fresh workflow; long enough to swallow real
+    # human / network retry windows.
+    import hashlib
+    import time
 
-    dbos_wf_id = str(_uuid.uuid4())
+    bucket = int(time.time() // 30)
+    url_hash = hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
+    dbos_wf_id = f"parse-{auth.user_id[:8]}-{url_hash}-{bucket}"
 
-    unified_task_id = None
+    unified_task_id = dbos_wf_id  # PK on task_tracking is dbos_workflow_id
     try:
         unified_task_id = await mgr.create(
             user_id=auth.user_id,
@@ -460,7 +505,15 @@ async def handle_ytdlp_fetch(
             dbos_workflow_id=dbos_wf_id,
         )
     except Exception as e:
-        logger.warning(f"[Parse] Pre-create unified_task failed: {e}")
+        # Within the 30-s bucket the row may already exist — that's the
+        # whole point of L3 (idempotent re-submit). Treat unique-violation
+        # as success and let DBOS short-circuit the workflow body too.
+        if "duplicate key" in str(e).lower() or "23505" in str(e):
+            logger.info(
+                f"[L3/Parse] idempotent re-submit, reusing wf_id={dbos_wf_id[:32]}"
+            )
+        else:
+            logger.warning(f"[Parse] Pre-create unified_task failed: {e}")
 
     await start_workflow_routed(
         "parse",
@@ -470,6 +523,10 @@ async def handle_ytdlp_fetch(
             "user_id": auth.user_id,
             "video_bool": request.video_bool,
             "cover_bool": True,
+            # Forward the parse-page tag picker selection so the workflow
+            # can attach them to the new resource (was being silently
+            # dropped, breaking the tag-driven AI chain).
+            "tag_ids": tag_ids or [],
         },
         workflow_id=dbos_wf_id,
     )
@@ -497,4 +554,4 @@ _resolve_and_attach_tags = resolve_and_attach_tags
 _dedup_and_dispatch = dedup_and_dispatch
 _douyin_parse_fallback = douyin_parse_fallback
 _mark_cookie_if_auth_failure = mark_cookie_if_auth_failure
-_handle_ytdlp_fetch = handle_ytdlp_fetch
+_handle_ytdlp_fetch = handle_media_fetch_dispatch  # legacy alias, drop after callers migrate

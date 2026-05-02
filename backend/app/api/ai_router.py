@@ -151,14 +151,72 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         _points_cost = points_result.get("points_cost", 0)
     # === End billing ===
 
-    try:
-        # PR-D7 phase 3: chain_ai_pipeline used to dispatch Celery
-        # transcribe + summary tasks. We call the DBOS-routed
-        # equivalent in app.tasks.download_helpers (kept as helper).
-        from app.tasks.download_helpers import maybe_chain_ai_pipeline
+    # Track unified_task so we can mark it failed if the dispatch
+    # itself throws — and so the Task Center sees this run + Realtime
+    # pushes status changes back to the frontend.
+    _orphan_task_id: str | None = None
 
-        await asyncio.to_thread(maybe_chain_ai_pipeline, platform_id, auth.user_id)
+    # Audio-readiness gate (event-driven, not polling): the workflow's
+    # whisper step needs audio.m4a on disk. If extraction hasn't run
+    # yet, fail fast with a clear 409 instead of dispatching a workflow
+    # that we know will fail. The user can re-trigger after the audio
+    # extraction completes (chain or manual).
+    if (media or {}).get("music_download_status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Audio not yet extracted for this resource. "
+                "Wait for download/extraction to complete, then retry."
+            ),
+        )
+
+    try:
+        # Manual click path = always dispatch transcription, do NOT go
+        # through tag-driven `maybe_chain_ai_pipeline` (that helper is
+        # for the post-download auto-chain).
+        import uuid as _uuid
+
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.unified_task_manager import get_task_manager
+        from app.workflows.ai_transcription import ai_transcription_workflow
+
+        tracker = get_task_manager()
+        wf_id = str(_uuid.uuid4())
+        _orphan_task_id = await tracker.create(
+            user_id=auth.user_id,
+            task_type="ai_transcription",
+            title=f"Transcribe: {platform_id}",
+            media_id=platform_id,
+            resource_id=resource_id,
+            dbos_workflow_id=wf_id,
+        )
+
+        await start_workflow_routed(
+            "ai_transcription",
+            dbos_workflow_callable=ai_transcription_workflow,
+            dbos_workflow_kwargs={
+                "parsed_media_id": int(media["id"]),
+                "user_id": auth.user_id,
+            },
+            workflow_id=wf_id,
+        )
+        _orphan_task_id = None
+    except HTTPException:
+        raise
     except Exception as e:
+        if _orphan_task_id:
+            try:
+                from app.services.unified_task_manager import get_task_manager
+
+                await get_task_manager().fail(
+                    _orphan_task_id,
+                    f"Dispatch failed: {str(e)[:180]}",
+                    error_code="DISPATCH_ERROR",
+                )
+            except Exception as fail_err:
+                logger.error(
+                    f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}"
+                )
         if _points_cost > 0 and _team_id:
             try:
                 await points_service.refund_points(
@@ -333,13 +391,94 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
 
 @router.post("/analyze/resource/{resource_id}")
 async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
-    """Trigger visual analysis by resource_id (not yet implemented)."""
+    """Manually trigger L1 cover analysis (analyze_l1_workflow).
+
+    Mirrors the trigger_summary_by_resource pattern: dedup → pre-create
+    task_tracking → dispatch DBOS workflow with the same workflow_id so
+    the Task Center sees the run and Realtime pushes lifecycle changes
+    back to the frontend (otherwise a click would be invisible)."""
     resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
-    raise HTTPException(
-        status_code=501,
-        detail="Visual analysis is not yet implemented",
+    # Dedup: skip if a run is already in flight for this resource.
+    _admin = await _get_admin()
+    _active = (
+        await _admin.table("task_tracking")
+        .select("dbos_workflow_id")
+        .eq("resource_id", resource_id)
+        .eq("task_type", "ai_extract")
+        .in_("status", ["pending", "processing", "running"])
+        .limit(1)
+        .execute()
     )
+    if _active.data:
+        return {
+            "message": "Visual analysis already in progress",
+            "resource_id": resource_id,
+        }
+
+    cover_url = (media or {}).get("cover_urls") or []
+    cover_url = cover_url[0] if cover_url else None
+    if not cover_url:
+        raise HTTPException(
+            status_code=400,
+            detail="No cover image to analyze for this resource",
+        )
+
+    _orphan_task_id: str | None = None
+    try:
+        import uuid as _uuid
+
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.unified_task_manager import get_task_manager
+        from app.workflows.analyze_l1 import analyze_l1_workflow
+
+        tracker = get_task_manager()
+        wf_id = str(_uuid.uuid4())
+        _orphan_task_id = await tracker.create(
+            user_id=auth.user_id,
+            task_type="ai_extract",
+            title=f"Analyze: {(media or {}).get('title') or platform_id}",
+            subtitle="L1 cover analysis",
+            media_id=platform_id,
+            resource_id=resource_id,
+            dbos_workflow_id=wf_id,
+        )
+
+        await start_workflow_routed(
+            "ai_extract",
+            dbos_workflow_callable=analyze_l1_workflow,
+            dbos_workflow_kwargs={
+                "media_id": int(media["id"]),
+                "cover_url": cover_url,
+                "title": (media or {}).get("title") or "",
+                "description": (media or {}).get("description") or "",
+                "user_id": auth.user_id,
+            },
+            workflow_id=wf_id,
+        )
+        _orphan_task_id = None
+        return {
+            "message": "Visual analysis queued",
+            "resource_id": resource_id,
+            "platform_id": platform_id,
+        }
+    except Exception as e:
+        if _orphan_task_id:
+            try:
+                from app.services.unified_task_manager import get_task_manager
+
+                await get_task_manager().fail(
+                    _orphan_task_id,
+                    f"Dispatch failed: {str(e)[:180]}",
+                    error_code="DISPATCH_ERROR",
+                )
+            except Exception as fail_err:
+                logger.error(
+                    f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}"
+                )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to queue visual analysis: {str(e)}"
+        )
 
 
 # ------------------------------------------------------------------
@@ -371,13 +510,57 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
         _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
+    # Audio-readiness gate (event-driven): bail with 409 if the audio
+    # asset isn't on disk yet. Mirrors the resource_id endpoint above.
+    _media_check = await _get_media_or_404(platform_id)
+    if (_media_check or {}).get("music_download_status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Audio not yet extracted for this resource. "
+                "Wait for download/extraction to complete, then retry."
+            ),
+        )
+
+    # Track unified_task so the Task Center sees this run + Realtime
+    # pushes status changes back to the frontend (manual click would
+    # otherwise be invisible — the bug behind the "I clicked but
+    # nothing showed up" report).
+    _orphan_task_id: str | None = None
+
     try:
         # PR-D7 phase 3b: dispatch ai_transcription_workflow directly.
         # Workflow takes parsed_media_id (int), so look it up.
+        import uuid as _uuid
+
         from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.unified_task_manager import get_task_manager
         from app.workflows.ai_transcription import ai_transcription_workflow
 
         media_row = await _get_media_or_404(platform_id)
+        # Lookup the user's resource for this platform_id (best-effort —
+        # transcription can run without resource_id, the task_tracking
+        # row just won't link back to a card).
+        from app.repositories.resources_repository import ResourcesRepository
+
+        owner_resource = await ResourcesRepository().get_resource_by_media_id_and_creator(
+            str(media_row["id"]), auth.user_id
+        )
+        owner_resource_id = (
+            str(owner_resource["id"]) if owner_resource else None
+        )
+
+        tracker = get_task_manager()
+        wf_id = str(_uuid.uuid4())
+        _orphan_task_id = await tracker.create(
+            user_id=auth.user_id,
+            task_type="ai_transcription",
+            title=f"Transcribe: {platform_id}",
+            media_id=platform_id,
+            resource_id=owner_resource_id,
+            dbos_workflow_id=wf_id,
+        )
+
         await start_workflow_routed(
             "ai_transcription",
             dbos_workflow_callable=ai_transcription_workflow,
@@ -385,8 +568,23 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
                 "parsed_media_id": int(media_row["id"]),
                 "user_id": auth.user_id,
             },
+            workflow_id=wf_id,
         )
+        _orphan_task_id = None
     except Exception as e:
+        if _orphan_task_id:
+            try:
+                from app.services.unified_task_manager import get_task_manager
+
+                await get_task_manager().fail(
+                    _orphan_task_id,
+                    f"Dispatch failed: {str(e)[:180]}",
+                    error_code="DISPATCH_ERROR",
+                )
+            except Exception as fail_err:
+                logger.error(
+                    f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}"
+                )
         if _points_cost > 0 and _team_id:
             try:
                 await points_service.refund_points(

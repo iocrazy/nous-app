@@ -178,7 +178,7 @@ def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
 
         stale = await (
             client.table("task_tracking")
-            .select("id, dedup_key")
+            .select("dbos_workflow_id, dedup_key")
             .eq("phase", "processing")
             .lt("started_at", cutoff)
             .execute()
@@ -186,16 +186,18 @@ def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
 
         recovered = 0
         for task in stale.data or []:
+            tid = task.get("dbos_workflow_id")
             try:
-                await mgr.fail(
-                    task["id"], "Stale task timeout", error_code="NETWORK_TIMEOUT"
-                )
+                if tid:
+                    await mgr.fail(
+                        tid, "Stale task timeout", error_code="NETWORK_TIMEOUT"
+                    )
                 if task.get("dedup_key"):
                     mgr.release_lock(task["dedup_key"])
                 recovered += 1
             except Exception as e:
                 logger.warning(
-                    f"[recover_stale_orchestrator_locks] task {task['id']}: {e}"
+                    f"[recover_stale_orchestrator_locks] task {tid}: {e}"
                 )
         return recovered
 

@@ -30,8 +30,6 @@ class AISettingsUpdate(BaseModel):
     )
     # Frontend-specific fields persisted for UI state
     ai_enabled: Optional[bool] = None
-    auto_transcribe: Optional[bool] = None
-    auto_summarize: Optional[bool] = None
     preferred_language: Optional[str] = None
     task_assignment: Optional[Dict[str, str]] = Field(
         default=None,
@@ -59,8 +57,6 @@ class AISettingsResponse(BaseModel):
     default_analysis_model: str = "gpt-4o"
     # Frontend-consumed fields
     ai_enabled: bool = True
-    auto_transcribe: bool = False
-    auto_summarize: bool = False
     preferred_language: str = "auto"
     task_assignment: Dict[str, str] = Field(
         default_factory=lambda: {

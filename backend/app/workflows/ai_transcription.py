@@ -83,6 +83,36 @@ def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]
     }
 
 
+@DBOS.step()
+def assert_audio_present_step(audio_path: str) -> str:
+    """Defensive guard — confirm the audio file exists on disk before
+    invoking the (expensive + network-bound) whisper call.
+
+    Replaces the previous wait_for_audio_step which polled inside the
+    workflow body. Polling was the wrong abstraction: the right one is
+    event/state — `maybe_chain_ai_pipeline` and the manual trigger
+    endpoints now check `parsed_media.music_download_status='completed'`
+    BEFORE dispatching this workflow, so by the time we arrive here the
+    file should already be on disk. This step is a one-shot assertion
+    that catches the rare desync (file deleted between dispatch and
+    execution); it raises immediately rather than sleep-waiting, and
+    the workflow's top-level try/except converts the failure into a
+    task_tracking row with status='failed' instead of a hung worker."""
+    from app.core.config import settings
+
+    full_path = (
+        audio_path
+        if os.path.isabs(audio_path)
+        else os.path.join(settings.DOWNLOAD_PATH, audio_path)
+    )
+    try:
+        if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
+            return audio_path
+    except OSError:
+        pass
+    raise RuntimeError(f"audio file missing or empty at dispatch time: {audio_path}")
+
+
 @DBOS.step(retries_allowed=True, max_attempts=2)
 def run_whisper(
     audio_path: str,
@@ -139,13 +169,30 @@ def ai_transcription_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
     Workflow_id idempotency: re-running with the same workflow_id returns the
     cached result; the actual whisper call (expensive) runs once.
     """
-    inputs = load_transcribe_inputs(parsed_media_id, user_id)
-    summary = run_whisper(
-        audio_path=inputs["audio_path"],
-        resource_id=inputs["resource_id"],
-        provider_key=inputs["provider_key"],
-        provider_config=inputs["provider_config"],
-        language=inputs["language"],
-    )
-    mark_transcript_completed(parsed_media_id)
-    return {"parsed_media_id": parsed_media_id, **summary}
+    from app.workflows._failure_handler import record_workflow_failure
+
+    try:
+        inputs = load_transcribe_inputs(parsed_media_id, user_id)
+        # Cheap on-disk assertion (one stat call). Dispatcher already
+        # gated on parsed_media.music_download_status='completed', so
+        # this is a defense-in-depth check, not a wait loop.
+        audio_path = assert_audio_present_step(inputs["audio_path"])
+        summary = run_whisper(
+            audio_path=audio_path,
+            resource_id=inputs["resource_id"],
+            provider_key=inputs["provider_key"],
+            provider_config=inputs["provider_config"],
+            language=inputs["language"],
+        )
+        mark_transcript_completed(parsed_media_id)
+        return {"parsed_media_id": parsed_media_id, **summary}
+    except Exception as e:  # noqa: BLE001
+        return record_workflow_failure(
+            workflow_id=DBOS.workflow_id,
+            error=e,
+            context={
+                "workflow": "ai_transcription",
+                "parsed_media_id": parsed_media_id,
+                "user_id": user_id,
+            },
+        )

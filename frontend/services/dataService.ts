@@ -153,6 +153,49 @@ export const fetchVideoByPlatformId = async (platformId: string): Promise<Parsed
 export const fetchVideoByAwemeId = fetchVideoByPlatformId;
 
 /**
+ * L1 dedup probe — does the current user already own a completed
+ * download for this URL? Hits Supabase directly (no backend round-trip)
+ * so the parse page can short-circuit before POST /api/v1/media/fetch.
+ *
+ * Returns the matched ParsedMedia (with resource_id flattened) when
+ * the user owns it AND the global download is complete; otherwise null.
+ *
+ * The check pairs with the L2 backstop in handle_media_fetch_dispatch — non-
+ * browser callers (Shortcuts / API / extension) bypass this layer and
+ * land on L2 instead.
+ */
+export const findOwnedVideoByUrl = async (url: string): Promise<ParsedMedia | null> => {
+  const supabase = getSupabaseClient();
+  if (!isSupabaseConfigured() || !supabase) return null;
+  if (!url || !url.trim()) return null;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return null;
+
+    const { data, error } = await supabase
+      .from('resources')
+      .select('id, parsed_media!inner(*)')
+      .eq('creator_id', session.user.id)
+      .eq('source_type', 'web')
+      .eq('parsed_media.original_url', url.trim())
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    const flat = flattenResourceMedia(data);
+    const mt = String(flat.media_type ?? '');
+    const isImage = ['2', '68', 'image', 'images'].includes(mt);
+    const statusField = isImage ? 'image_download_status' : 'video_download_status';
+    if ((flat as Record<string, unknown>)[statusField] !== 'completed') return null;
+    return flat;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Fetch a single video by id (Snowflake BIGINT — parsed_media.id)
  */
 export const fetchVideoByDisplayId = async (displayId: string): Promise<ParsedMedia | null> => {
@@ -646,8 +689,30 @@ export const updateItem = async (id: string, updates: Partial<ParsedMedia>): Pro
     throw new Error("Supabase is not configured");
   }
 
-  // Strip fields that don't exist on parsed_media table
-  const { tags, summary_text, resource_id, user_id, ...dbUpdates } = updates as any;
+  // Strip fields that don't exist on parsed_media table.
+  // AI status columns (transcript_status / summary_status /
+  // visual_analysis_status) live on `resources`, not `parsed_media`
+  // — the workflow writes them via mark_transcript_completed and
+  // friends, then Realtime propagates back. Optimistic local-state
+  // updates from the MediaCard buttons should NOT try to persist
+  // them here (PostgREST returns PGRST204 — column not found —
+  // because the schema cache reflects the truth).
+  const {
+    tags, summary_text, resource_id, user_id,
+    transcript_status, summary_status, visual_analysis_status,
+    ...dbUpdates
+  } = updates as any;
+
+  // Short-circuit: when callers only patch derived/cross-table fields
+  // (e.g. MediaCard's optimistic `{transcript_status: 'processing'}`
+  // after clicking the Transcript button), `dbUpdates` becomes empty.
+  // Sending an empty PATCH to PostgREST + `.single()` would 0-match
+  // and raise PGRST116. The actual server-side flip happens in the
+  // trigger endpoint (ai_router) → workflow → resources.transcript_status,
+  // and propagates back via Realtime. No DB write is needed here.
+  if (Object.keys(dbUpdates).length === 0) {
+    return updates as ParsedMedia;
+  }
 
   const { data, error } = await supabase
     .from(TABLE_NAME)

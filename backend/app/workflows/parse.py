@@ -212,6 +212,35 @@ def dispatch_l1_analysis_step(
 
 
 @DBOS.step()
+def update_parse_tracking_step(
+    *,
+    workflow_id: str,
+    platform_id: str,
+    subtitle: str,
+) -> None:
+    """Patch the parse workflow's own task_tracking row with the resolved
+    media_id (= platform_id) and a friendlier subtitle.
+
+    Frontend `useParser` keys off `parseTask.media_id` to render the
+    parsed media card and link the follow-up download task — without
+    this update the parse task stays without a media_id and the result
+    card never appears (legacy parse_tasks.py used to do the same write
+    via `manager._atomic_update`)."""
+    from app.services.unified_task_manager import get_task_manager
+
+    async def _do() -> None:
+        try:
+            await get_task_manager()._atomic_update(
+                workflow_id,
+                {"media_id": str(platform_id), "subtitle": subtitle[:120]},
+            )
+        except Exception as e:
+            logger.warning(f"[parse] update_parse_tracking failed: {e}")
+
+    asyncio.run(_do())
+
+
+@DBOS.step()
 def log_parse_outcome_step(
     *,
     user_id: str,
@@ -249,6 +278,27 @@ def log_parse_outcome_step(
     asyncio.run(_do())
 
 
+@DBOS.step()
+def attach_tags_step(*, resource_id: str, tag_ids: list[str]) -> int:
+    """Attach the user-selected tags from the parse-page picker to the
+    freshly-created resource. Without this step the tag_ids submitted
+    in POST /api/v1/media/fetch were silently dropped, which broke the
+    tag-driven AI chain (no Transcript tag → no transcription)."""
+    from app.repositories.tags_repository import TagsRepository
+
+    async def _do() -> int:
+        try:
+            await TagsRepository().bulk_add_tags_to_resource(
+                resource_id, tag_ids, source="manual"
+            )
+            return len(tag_ids)
+        except Exception as e:
+            logger.warning(f"[parse] attach_tags_step failed: {e}")
+            return 0
+
+    return asyncio.run(_do())
+
+
 @DBOS.workflow()
 def parse_workflow(
     url: str,
@@ -257,6 +307,7 @@ def parse_workflow(
     video_bool: bool = True,
     cover_bool: bool = True,
     categories: Optional[str] = None,
+    tag_ids: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """DBOS port of parse_single_link_task.
 
@@ -296,6 +347,22 @@ def parse_workflow(
     video_db_id = saved_video.get("id")
     resource_id = saved_video.get("resource_id")
 
+    # 3a. Attach user-selected tags (from the parse-page tag picker) to
+    # the resource. Must run BEFORE dispatch_download_step so that
+    # chain_followups_step's tag-driven AI dispatch can see them.
+    if tag_ids and resource_id:
+        attach_tags_step(resource_id=str(resource_id), tag_ids=list(tag_ids))
+
+    # 3b. Backfill parse task_tracking row with media_id + friendly
+    # subtitle so the frontend can show the parsed-media card and link
+    # the upcoming download task.
+    if platform_id:
+        update_parse_tracking_step(
+            workflow_id=DBOS.workflow_id,
+            platform_id=str(platform_id),
+            subtitle=(video_title or "Parsed")[:120],
+        )
+
     # 4. Auto-tag (non-blocking — step swallows errors)
     if video_db_id:
         auto_tag_step(
@@ -321,21 +388,11 @@ def parse_workflow(
             resource_id=str(resource_id) if resource_id else None,
         )
 
-    # 6. Dispatch L1 analysis (routed, best-effort)
-    if video_db_id:
-        cover_url = (
-            parsed_data.get("cover_urls", [None])[0]
-            if parsed_data.get("cover_urls")
-            else None
-        )
-        if cover_url:
-            dispatch_l1_analysis_step(
-                media_id=video_db_id,
-                cover_url=cover_url,
-                title=video_title or "",
-                description=parsed_data.get("description", ""),
-                user_id=user_id,
-            )
+    # 6. (removed) Auto-dispatch of L1 cover analysis.
+    # D9 design: AI tasks (analyze / summary / transcript) are user-triggered
+    # via tag intents on the resource card, not chained off parse.
+    # The dispatch_l1_analysis_step helper above is kept so the tag handler
+    # can call it directly when the user opts in.
 
     # 7. Audit log
     log_parse_outcome_step(

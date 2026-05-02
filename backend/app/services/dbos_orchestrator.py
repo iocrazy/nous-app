@@ -97,13 +97,30 @@ def init_dbos() -> None:
     # publishes from the configured app DB). Co-locating lets us add
     # `dbos.workflow_status` to supabase_realtime publication and
     # have the frontend Task Center subscribe natively.
+    # Pool sizing: DBOS defaults to 20 conns per worker. The dev pooler
+    # (Supavisor in Session mode on NAS, reached over SSH tunnel) has a
+    # low pool_size cap — two reload cycles can blow past it and cause
+    # the "MaxClientsInSessionMode: max clients reached" cascade that
+    # locks up the dev session. Cap dev pool low; prod uses the env knob
+    # to bump back up if needed.
+    db_pool_size = int(os.environ.get("DBOS_DB_POOL_SIZE", "5"))
+
     cfg: DBOSConfig = {
         "name": "mediahub",
         "application_database_url": db_url,
         "system_database_url": db_url,
+        "db_engine_kwargs": {
+            "pool_size": db_pool_size,
+            "max_overflow": 0,
+            "pool_pre_ping": True,
+            "pool_recycle": 300,  # 5 min — drop stale tunneled connections
+        },
     }
     _dbos = DBOS(config=cfg)
-    logger.info("[dbos] singleton instantiated (sys + app share same DB)")
+    logger.info(
+        f"[dbos] singleton instantiated (sys + app share same DB, "
+        f"pool_size={db_pool_size})"
+    )
 
 
 def launch_dbos() -> None:
@@ -118,17 +135,57 @@ def launch_dbos() -> None:
     logger.info("[dbos] launched (worker pool started, recovery complete)")
 
 
-def shutdown_dbos() -> None:
-    """Drain the DBOS worker pool. Called from FastAPI lifespan teardown."""
+def shutdown_dbos(timeout_seconds: float = 5.0) -> None:
+    """Drain the DBOS worker pool with a hard timeout.
+
+    Called from FastAPI lifespan teardown. ``DBOS.destroy()`` blocks on
+    the queue-listener thread + PG ``LISTEN`` connection drain — under
+    ``uvicorn --reload`` that block stops the worker from exiting in
+    time, leaving the admin port (3001) + main HTTP port (8082) held by
+    a zombie that the next reload can't replace cleanly. Symptoms:
+    ``Address already in use`` on the next start, /health timeouts, the
+    whole dev session locks up after the second or third file edit.
+
+    Strategy: run destroy() on a daemon thread; if it hasn't returned
+    within ``timeout_seconds``, log + give up. The thread is daemon, so
+    the worker process can still exit even with the destroy still
+    pending — uvicorn's reload spawns a fresh worker that opens fresh
+    sockets / pools, and the orphaned thread dies with the old PID."""
+    global _dbos
     if _dbos is None:
         return
     from dbos import DBOS
 
-    try:
-        DBOS.destroy()
-        logger.info("[dbos] destroyed")
-    except Exception as e:
-        logger.warning(f"[dbos] destroy raised {e!r}")
+    import threading
+
+    done = threading.Event()
+    err: list[BaseException] = []
+
+    def _do() -> None:
+        try:
+            DBOS.destroy()
+        except BaseException as e:  # noqa: BLE001
+            err.append(e)
+        finally:
+            done.set()
+
+    t = threading.Thread(target=_do, name="dbos-destroy", daemon=True)
+    t.start()
+    finished = done.wait(timeout=timeout_seconds)
+    _dbos = None  # always release our reference so init_dbos can re-instantiate
+
+    if not finished:
+        logger.warning(
+            f"[dbos] destroy did not return within {timeout_seconds}s — "
+            "abandoning thread (daemon, dies with worker process). "
+            "If you see admin-port or DB-pool errors on the next reload, "
+            "this is the cause."
+        )
+        return
+    if err:
+        logger.warning(f"[dbos] destroy raised {err[0]!r}")
+        return
+    logger.info("[dbos] destroyed")
 
 
 def is_enabled() -> bool:

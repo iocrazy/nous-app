@@ -380,21 +380,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     }));
   };
 
-  // Toggle auto options
-  const toggleAutoTranscribe = () => {
-    setLocalSettings((prev) => ({
-      ...prev,
-      auto_transcribe: !prev.auto_transcribe,
-    }));
-  };
-
-  const toggleAutoSummarize = () => {
-    setLocalSettings((prev) => ({
-      ...prev,
-      auto_summarize: !prev.auto_summarize,
-    }));
-  };
-
   // Update preferred language
   const setPreferredLanguage = (lang: string) => {
     setLocalSettings((prev) => ({
@@ -738,18 +723,10 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </button>
           </div>
 
-          {/* Auto options */}
+          {/* Per-resource AI tasks now run via the intent tags (Transcript /
+              Summary / Analyze) attached on the parse page or MediaCard.
+              Replaces the old global Auto-Transcribe / Auto-Summarize toggles. */}
           <div className={`space-y-4 transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-zinc-300">Auto-Transcribe New Videos</span>
-              {renderToggle(localSettings.auto_transcribe, toggleAutoTranscribe, !localSettings.ai_enabled)}
-            </div>
-
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-zinc-300">Auto-Summarize After Transcription</span>
-              {renderToggle(localSettings.auto_summarize, toggleAutoSummarize, !localSettings.ai_enabled)}
-            </div>
-
             <div className="flex items-center justify-between py-2">
               <span className="text-sm text-zinc-300">Preferred Language</span>
               <div className="relative">

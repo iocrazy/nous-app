@@ -50,9 +50,32 @@ def check_global_cache_step(
     download_cover: bool,
 ) -> dict[str, Any]:
     """Return {cache_hit: True} when all requested asset types are
-    already on shared parsed_media. Otherwise return {cache_hit: False}
-    so the workflow proceeds to the strategy dispatch."""
+    already on shared parsed_media AND the underlying files actually
+    exist on disk. Otherwise return {cache_hit: False} so the workflow
+    proceeds to the strategy dispatch.
+
+    The on-disk verification matters: dev DBs often carry status=completed
+    rows pointing at files that were moved / never copied during a
+    storage-isolation cut-over (or that prod cleaned up). Without it L4
+    happily writes a resource_version v1 against a missing file and the
+    user sees a black thumbnail + an empty video player."""
+    import os
+
+    from app.core.config import settings
     from app.repositories.media_repository import MediaRepository
+
+    def _file_present(rel_or_abs_path: str | None) -> bool:
+        if not rel_or_abs_path:
+            return False
+        p = (
+            rel_or_abs_path
+            if os.path.isabs(rel_or_abs_path)
+            else os.path.join(settings.DOWNLOAD_PATH, rel_or_abs_path)
+        )
+        try:
+            return os.path.exists(p) and os.path.getsize(p) > 0
+        except OSError:
+            return False
 
     async def _do() -> dict[str, Any]:
         media_repo = MediaRepository()
@@ -60,28 +83,30 @@ def check_global_cache_step(
         if not global_media:
             return {"cache_hit": False}
 
-        has_video_path = bool(global_media.get("download_path"))
-        has_cover_path = bool(global_media.get("cover_download_path"))
+        video_path = global_media.get("download_path")
+        cover_path = global_media.get("cover_download_path")
+        has_video_path = bool(video_path)
+        has_cover_path = bool(cover_path)
 
         all_cached = True
         if download_video:
-            if int(media_type) in (2, 68):
-                all_cached = (
-                    all_cached
-                    and global_media.get("image_download_status") == "completed"
-                    and has_video_path
-                )
-            else:
-                all_cached = (
-                    all_cached
-                    and global_media.get("video_download_status") == "completed"
-                    and has_video_path
-                )
+            video_status_ok = (
+                global_media.get("image_download_status") == "completed"
+                if int(media_type) in (2, 68)
+                else global_media.get("video_download_status") == "completed"
+            )
+            all_cached = (
+                all_cached
+                and video_status_ok
+                and has_video_path
+                and _file_present(video_path)
+            )
         if download_cover:
             all_cached = (
                 all_cached
                 and global_media.get("cover_download_status") == "completed"
                 and has_cover_path
+                and _file_present(cover_path)
             )
         return {"cache_hit": bool(all_cached)}
 
@@ -91,6 +116,7 @@ def check_global_cache_step(
 @DBOS.step(retries_allowed=True, max_attempts=3)
 def run_download_step(
     *,
+    workflow_id: str,
     platform_id: str,
     user_id: str,
     url: Optional[str],
@@ -100,7 +126,13 @@ def run_download_step(
     user_agent: Optional[str],
 ) -> dict[str, Any]:
     """Dispatch to the right strategy. Returns the per-asset
-    {video, cover, music} → status dict from the strategy."""
+    {video, cover, music} → status dict from the strategy.
+
+    `workflow_id` is the parent DBOS workflow's id (= task_tracking PK).
+    Passed in (rather than read from `DBOS.workflow_id` here) because we
+    need it to flow into UnifiedProgressTracker so the Redis pub/sub
+    payload carries the same id the frontend reducer matches against
+    (`t.id === payload.unified_task_id`)."""
     from app.core.redis import get_sync_redis
     from app.tasks.download_progress import UnifiedProgressTracker
     from app.tasks.download_strategies import (
@@ -108,15 +140,11 @@ def run_download_step(
         _do_ytdlp_download,
     )
 
-    # Synthetic task_id for tracker bookkeeping. DBOS workflow_id would be
-    # nicer but the tracker only uses this for the Redis payload metadata.
-    fake_task_id = f"dbos-download-{platform_id}"
-
     tracker = UnifiedProgressTracker(
-        task_id=fake_task_id,
+        task_id=workflow_id,  # used as Redis key suffix `download_progress:{id}`
         redis_client=get_sync_redis(),
         unified_tracker=None,  # DBOS workflow status replaces this
-        unified_task_id=None,
+        unified_task_id=workflow_id,  # frontend matches this against task.id
         user_id=user_id,
     )
 
@@ -389,6 +417,34 @@ def download_workflow(
         download_cover=download_cover,
     )
     if cache.get("cache_hit"):
+        # L4 dedup: another user already pulled this content. Skip the
+        # download itself but still attach a resource_version v1 to the
+        # current user's resource — pointing at the existing global file
+        # — so 我的下载 sees a real, openable card instead of an empty
+        # shell. Master did the equivalent inside save_metadata_only's
+        # dedup_hit branch; the DBOS port lost it on the workflow side.
+        synthetic_results: dict[str, Any] = {}
+        if download_video:
+            synthetic_results["video"] = "completed"
+        if download_cover:
+            synthetic_results["cover"] = "completed"
+        finalize_post_download_step(
+            platform_id=platform_id,
+            user_id=user_id,
+            resource_id=resource_id,
+            download_video=download_video,
+            download_cover=download_cover,
+            media_type=media_type,
+            results=synthetic_results,
+        )
+        log_download_outcome_step(
+            user_id=user_id,
+            platform_id=platform_id,
+            video_title=video_title,
+            strategy=strategy,
+            media_type=media_type,
+            outcome="success",  # cache hit counts as success in audit log
+        )
         return {
             "status": "success",
             "platform_id": platform_id,
@@ -398,6 +454,7 @@ def download_workflow(
     # 2. Strategy dispatch
     try:
         download_result = run_download_step(
+            workflow_id=DBOS.workflow_id,
             platform_id=platform_id,
             user_id=user_id,
             url=url,

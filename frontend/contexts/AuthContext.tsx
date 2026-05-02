@@ -46,8 +46,6 @@ const DEFAULT_SETTINGS: UserSettings = {
 
 const DEFAULT_AI_SETTINGS: AISettingsType = {
   ai_enabled: false,
-  auto_transcribe: false,
-  auto_summarize: false,
   preferred_language: 'auto',
   providers: {},
   task_assignment: {

@@ -11,8 +11,6 @@ import type { AISettings } from '../../types';
 function buildSettings(overrides: Partial<AISettings>): AISettings {
   return {
     ai_enabled: true,
-    auto_transcribe: false,
-    auto_summarize: false,
     preferred_language: 'auto',
     providers: {},
     task_assignment: {
