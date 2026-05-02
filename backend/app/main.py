@@ -185,6 +185,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to start workforce scheduler: {e}")
 
+    # Boundary layer (B9-D/E): SsrfProxy for subprocess + browser clients
+    # (yt-dlp, DrissionPage, ffmpeg). Populates settings.SSRF_PROXY_URL so
+    # downstream code (ytdlp_service cmd builders) reads the actual port.
+    ssrf_proxy = None
+    try:
+        from app.boundary import SsrfProxy
+
+        ssrf_proxy = SsrfProxy()
+        await ssrf_proxy.start()
+        settings.SSRF_PROXY_URL = ssrf_proxy.url
+        app.state.ssrf_proxy = ssrf_proxy
+        logger.info(f"Boundary SsrfProxy started at {ssrf_proxy.url}")
+    except Exception as e:
+        logger.warning(f"Failed to start SsrfProxy: {e}")
+
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
     # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
@@ -201,6 +216,15 @@ async def lifespan(app: FastAPI):
             logger.info("Workforce scheduler stopped")
         except Exception as e:
             logger.warning(f"Workforce scheduler shutdown error: {e}")
+
+    # Stop SsrfProxy after workforce so any in-flight subprocess clients
+    # (yt-dlp etc) can finish current requests through the proxy.
+    if ssrf_proxy is not None:
+        try:
+            await ssrf_proxy.stop()
+            logger.info("Boundary SsrfProxy stopped")
+        except Exception as e:
+            logger.warning(f"SsrfProxy shutdown error: {e}")
 
     try:
         # 关闭 DrissionPageParser 浏览器资源

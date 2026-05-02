@@ -153,6 +153,14 @@ class Settings(BaseSettings):
         default=60,
         description="LRU cache TTL for DNS results (defends DNS rebinding)",
     )
+    SSRF_PROXY_URL: str = Field(
+        default="",
+        description="Local SsrfProxy URL (auto-populated at startup, "
+        "e.g. http://127.0.0.1:55001). Subprocess + browser clients "
+        "(yt-dlp, DrissionPage) are configured to route through this. "
+        "Empty value means proxy not started — clients run unproxied "
+        "(degraded boundary).",
+    )
 
     # ============================================
     # OpenAI Configuration (for visual analysis)
