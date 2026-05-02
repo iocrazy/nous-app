@@ -31,6 +31,7 @@ from app.agent_framework.key_rotation import (
     AllKeysCooledDown,
     KeyRotator,
 )
+from app.agent_framework.kill_tree import kill_process_tree
 
 __all__ = [
     "AbortController",
@@ -41,6 +42,7 @@ __all__ = [
     "RunAborted",
     "check_context_budget",
     "estimate_tokens",
+    "kill_process_tree",
     "model_window_size",
     "race_until_abort",
 ]

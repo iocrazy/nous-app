@@ -27,10 +27,12 @@ Usage from agent_runner (sketch — actual wire-up in a follow-up commit):
 
     asyncio.create_task(watch_db_cancel())
 
-    # Adapter call wrapped:
+    # Adapter call wrapped (use ``runner.run_turn`` or
+    # ``RunRecorder.run`` in practice — the LLM call inside the
+    # adapter is what gets cancelled when ``abort.fire()`` happens):
     try:
         response = await race_until_abort(
-            adapter.call(composed, messages),
+            runner.run_turn(composed, user_messages, recorder=recorder),
             abort,
         )
     except RunAborted as e:
