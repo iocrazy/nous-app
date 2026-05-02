@@ -44,6 +44,11 @@ from app.agent_framework.subprocess_registry import (
     registered_pids,
     unregister_subprocess,
 )
+from app.agent_framework.lane_dispatch import (
+    Origin,
+    classify_lane,
+    dispatch_in_lane,
+)
 from app.agent_framework.lane_queue import (
     Lane,
     LaneQueue,
@@ -86,10 +91,13 @@ __all__ = [
     "LaneTaskTimeout",
     "LifecycleBus",
     "LifecycleEvent",
+    "Origin",
     "RotatingAdapter",
     "RunAborted",
     "cancel_workflow_subprocesses",
     "check_context_budget",
+    "classify_lane",
+    "dispatch_in_lane",
     "estimate_tokens",
     "is_stuck",
     "kill_process_tree",
