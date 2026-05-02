@@ -37,6 +37,12 @@ from app.agent_framework.event_loop_ready import (
     wait_for_loop_ready,
 )
 from app.agent_framework.kill_tree import kill_process_tree
+from app.agent_framework.subprocess_registry import (
+    cancel_workflow_subprocesses,
+    register_subprocess,
+    registered_pids,
+    unregister_subprocess,
+)
 from app.agent_framework.lane_queue import (
     Lane,
     LaneQueue,
@@ -80,6 +86,7 @@ __all__ = [
     "LifecycleBus",
     "LifecycleEvent",
     "RunAborted",
+    "cancel_workflow_subprocesses",
     "check_context_budget",
     "estimate_tokens",
     "is_stuck",
@@ -87,8 +94,11 @@ __all__ = [
     "measure_drift_ms",
     "model_window_size",
     "race_until_abort",
+    "register_subprocess",
+    "registered_pids",
     "timeout_for_task_type",
     "timeout_minutes",
+    "unregister_subprocess",
     "wait_for_loop_ready",
     "watch_cancel_loop",
 ]

@@ -527,6 +527,26 @@ class UnifiedTaskManager:
                 "(Celery removed in PR-D7)"
             )
 
+        # Sprint 2 #4: kill registered subprocesses for this workflow.
+        # If yt-dlp / whisper / ffmpeg subprocesses were spawned during
+        # the workflow and registered via subprocess_registry, they get
+        # SIGTERM → grace 3s → SIGKILL. Otherwise the subprocess keeps
+        # burning GPU/disk until it finishes naturally — workflow shows
+        # "cancelled" in UI, child still running.
+        try:
+            from app.agent_framework import cancel_workflow_subprocesses
+
+            killed = await cancel_workflow_subprocesses(task_id, grace_seconds=3.0)
+            if killed > 0:
+                logger.info(
+                    f"[TaskManager] Cancel killed {killed} subprocess(es) for {task_id}"
+                )
+        except Exception as e:
+            # Best-effort — task is already marked cancelled in DB.
+            logger.warning(
+                f"[TaskManager] subprocess cleanup raised for {task_id}: {e}"
+            )
+
         logger.debug(f"[TaskManager] Cancelled {task_id}")
 
     # ── Query helpers ─────────────────────────────────────────────────
