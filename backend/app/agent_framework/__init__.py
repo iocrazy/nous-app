@@ -15,6 +15,11 @@ Sprint F-1 modules:
 
 See docs/architecture/agent-harness.md (TBD) for the layered model.
 """
+from app.agent_framework.abort_controller import (
+    AbortController,
+    RunAborted,
+    race_until_abort,
+)
 from app.agent_framework.context_window import (
     ContextWindowError,
     ContextWindowWarning,
@@ -28,11 +33,14 @@ from app.agent_framework.key_rotation import (
 )
 
 __all__ = [
+    "AbortController",
     "AllKeysCooledDown",
     "ContextWindowError",
     "ContextWindowWarning",
     "KeyRotator",
+    "RunAborted",
     "check_context_budget",
     "estimate_tokens",
     "model_window_size",
+    "race_until_abort",
 ]
