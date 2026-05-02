@@ -20,6 +20,7 @@ from app.agent_framework.abort_controller import (
     RunAborted,
     race_until_abort,
 )
+from app.agent_framework.cancel_watcher import watch_cancel_loop
 from app.agent_framework.context_window import (
     ContextWindowError,
     ContextWindowWarning,
@@ -89,4 +90,5 @@ __all__ = [
     "timeout_for_task_type",
     "timeout_minutes",
     "wait_for_loop_ready",
+    "watch_cancel_loop",
 ]
