@@ -12,6 +12,7 @@ from app.boundary.errors import (
     URLBlockedError,
 )
 from app.boundary.pinned_dns import PinnedDNSResolver
+from app.boundary.safe_http import SafeAsyncClient, safe_async_client
 from app.boundary.secret_compare import compare_secret, require_secret
 from app.boundary.types import ValidatedURL
 from app.boundary.url_guard import validate_url, validate_url_async
@@ -20,11 +21,13 @@ __all__ = [
     "BoundaryError",
     "ExternalTextRejectedError",
     "PinnedDNSResolver",
+    "SafeAsyncClient",
     "SecretMismatchError",
     "URLBlockedError",
     "ValidatedURL",
     "compare_secret",
     "require_secret",
+    "safe_async_client",
     "validate_url",
     "validate_url_async",
 ]
