@@ -15,9 +15,10 @@ from app.api.media_batch_router import router as batch_router
 from app.api.media_fetch_helpers import (
     MediaFetchRequest,
     dedup_and_dispatch,
-    handle_ytdlp_fetch,
+    handle_media_fetch_dispatch,
     resolve_team_id,
 )
+from app.boundary import BoundaryError, validate_url_async
 from app.core.deps import AuthDep
 from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
@@ -58,11 +59,14 @@ async def fetch_video(
     try:
         try:
             valid_urls = Utils.extract_valid_url(request.url)
-            url = valid_urls[0]
+            raw_url = valid_urls[0]
         except ValueError:
             raise HTTPException(
                 status_code=400, detail="Cannot extract a valid link from input"
             )
+
+        # Boundary: SSRF guard. URLBlockedError -> global handler -> 400.
+        url = await validate_url_async(raw_url)
 
         logger.info(f"[Fetch/Parse] User {auth.user_id} parsing URL, url={url}")
 
@@ -97,7 +101,7 @@ async def fetch_video(
         platform, handler_type = URLRouter.detect_platform(url)
         logger.info(f"[URLRouter] Platform: {platform}, Handler: {handler_type}")
 
-        return await handle_ytdlp_fetch(
+        return await handle_media_fetch_dispatch(
             url=url,
             platform=platform,
             request=request,
@@ -128,6 +132,10 @@ async def fetch_video(
             status="error",
             details={"error": he.detail if hasattr(he, "detail") else str(he)},
         )
+        raise
+    except BoundaryError:
+        # Re-raise so the global BoundaryError handler maps to safe 400.
+        # No points were charged before validation, so no refund needed.
         raise
     except Exception as e:
         if _points_cost > 0 and _team_id:
