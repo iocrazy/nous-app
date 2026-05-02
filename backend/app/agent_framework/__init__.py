@@ -31,6 +31,12 @@ from app.agent_framework.commitments import (
     InvalidCommitmentError,
     TriggerType,
 )
+from app.agent_framework.context_engine import (
+    ContextEngine,
+    ContextEngineRegistry,
+    ContextPayload,
+    DuplicateContextEngineError,
+)
 from app.agent_framework.context_window import (
     ContextWindowError,
     ContextWindowWarning,
@@ -94,6 +100,10 @@ __all__ = [
     "BoundsRegistry",
     "Commitment",
     "CommitmentStatus",
+    "ContextEngine",
+    "ContextEngineRegistry",
+    "ContextPayload",
+    "DuplicateContextEngineError",
     "ContextWindowError",
     "ContextWindowWarning",
     "DEFAULT_TIMEOUT_MINUTES",

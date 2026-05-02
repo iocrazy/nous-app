@@ -229,12 +229,18 @@ async def lifespan(app: FastAPI):
         from app.agent_framework import (
             BoundsAdvertisement,
             BoundsRegistry,
+            ContextEngineRegistry,
             LaneQueue,
             LifecycleBus,
         )
 
         app.state.lifecycle_bus = LifecycleBus()
         app.state.lane_queue = LaneQueue()
+        # Sprint 6: per-process context-engine registry. Surfaces (chat,
+        # search, storyboard) self-register their engines at startup so
+        # callers can fetch by surface name. Empty by default — engines
+        # opt in. The chat composer wiring follows in Sprint 6.5.
+        app.state.context_engines = ContextEngineRegistry()
 
         # Sprint 5 (D10-1): every process holds a BoundsRegistry. On worker
         # / combined processes we self-register the bounds we know about
@@ -266,7 +272,7 @@ async def lifespan(app: FastAPI):
 
         logger.info(
             "Agent framework primitives ready "
-            "(LifecycleBus + LaneQueue + BoundsRegistry)"
+            "(LifecycleBus + LaneQueue + BoundsRegistry + ContextEngineRegistry)"
         )
     except Exception as e:
         logger.warning(f"Agent framework primitive setup failed: {e}")
