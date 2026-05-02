@@ -12,6 +12,8 @@ import aiofiles
 import httpx
 from loguru import logger
 
+from app.boundary import URLBlockedError, validate_url_async
+
 
 class DownloadProgressTracker:
     """Track download progress and report to callback."""
@@ -129,6 +131,14 @@ async def download_file_with_progress(
 
         headers = Utils.get_headers()
 
+    # Boundary: SSRF guard. Reject before any I/O happens.
+    try:
+        validated_url = await validate_url_async(url)
+    except URLBlockedError as e:
+        logger.warning(f"Download URL blocked by boundary: {e}")
+        tracker.failed(str(e))
+        return False
+
     try:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
@@ -140,7 +150,7 @@ async def download_file_with_progress(
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "GET",
-                url,
+                validated_url,
                 headers=headers,
                 follow_redirects=True,
                 timeout=timeout,
