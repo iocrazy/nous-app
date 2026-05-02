@@ -131,14 +131,27 @@ def analyze_l1_workflow(
     workflow_id idempotency: re-running with same id replays the cached
     analysis result (no double LLM cost + no double embedding write).
     """
-    cfg = resolve_analyze_provider(user_id)
-    return call_analyze_l1(
-        media_id=media_id,
-        cover_url=cover_url,
-        title=title,
-        description=description,
-        user_id=user_id,
-        provider_key=cfg["provider_key"],
-        provider_config=cfg["provider_config"],
-        agent_model=cfg["agent_model"],
-    )
+    from app.workflows._failure_handler import record_workflow_failure
+
+    try:
+        cfg = resolve_analyze_provider(user_id)
+        return call_analyze_l1(
+            media_id=media_id,
+            cover_url=cover_url,
+            title=title,
+            description=description,
+            user_id=user_id,
+            provider_key=cfg["provider_key"],
+            provider_config=cfg["provider_config"],
+            agent_model=cfg["agent_model"],
+        )
+    except Exception as e:  # noqa: BLE001
+        return record_workflow_failure(
+            workflow_id=DBOS.workflow_id,
+            error=e,
+            context={
+                "workflow": "analyze_l1",
+                "media_id": media_id,
+                "user_id": user_id,
+            },
+        )

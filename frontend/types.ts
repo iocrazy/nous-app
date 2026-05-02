@@ -516,8 +516,6 @@ export interface AIProviderConfig {
 
 export interface AISettings {
   ai_enabled: boolean;
-  auto_transcribe: boolean;
-  auto_summarize: boolean;
   preferred_language: string;
   providers: {
     openai?: AIProviderConfig;

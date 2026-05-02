@@ -91,6 +91,39 @@ const getAIStatusClass = (status?: string): string => {
   }
 };
 
+// Pill styling for the AI Intent badge row — matches the 4-state mental
+// model (done / pending / failed / not requested) and gives a one-glance
+// view of the resource's AI workflow state without opening Task Center.
+const getAIIntentPillClass = (status?: string): string => {
+  switch (status) {
+    case 'completed':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
+    case 'processing':
+    case 'pending':
+    case 'running':
+      return 'bg-amber-500/15 text-amber-300 border-amber-500/40 animate-pulse';
+    case 'failed':
+      return 'bg-red-500/15 text-red-300 border-red-500/40';
+    default:
+      return 'bg-zinc-800/40 text-zinc-500 border-zinc-700/50';
+  }
+};
+
+const getAIIntentSymbol = (status?: string): string => {
+  switch (status) {
+    case 'completed':
+      return '✓';
+    case 'processing':
+    case 'pending':
+    case 'running':
+      return '…';
+    case 'failed':
+      return '✕';
+    default:
+      return '·';
+  }
+};
+
 export const MediaCard: React.FC<MediaCardProps> = ({
   data,
   onSave,
@@ -854,19 +887,30 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           )}
 
-          {/* AI Status */}
-          <div className="mb-4 flex items-center justify-end">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1" title={`Transcript: ${data.transcript_status || 'pending'}`}>
-                <FileText size={14} className={getAIStatusClass(data.transcript_status)} />
-              </div>
-              <div className="flex items-center gap-1" title={`Summary: ${data.summary_status || 'pending'}`}>
-                <Sparkles size={14} className={getAIStatusClass(data.summary_status)} />
-              </div>
-              <div className="flex items-center gap-1" title={`Visual Analysis: ${data.visual_analysis_status || 'pending'}`}>
-                <Eye size={14} className={getAIStatusClass(data.visual_analysis_status)} />
-              </div>
-            </div>
+          {/* AI Intent badges — icon-only chips, tooltip on hover.
+              Avoids label duplication with the action buttons row below
+              (which already labels Transcript / Summary / Analyze).
+              4 colour states encode lifecycle: completed / running /
+              failed / not requested. */}
+          <div className="mb-4 flex items-center gap-1.5 justify-end">
+            <span
+              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.transcript_status)}`}
+              title={`Transcript — ${data.transcript_status || 'not requested'}`}
+            >
+              <FileText size={11} />
+            </span>
+            <span
+              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.summary_status)}`}
+              title={`Summary — ${data.summary_status || 'not requested'}`}
+            >
+              <Sparkles size={11} />
+            </span>
+            <span
+              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.visual_analysis_status)}`}
+              title={`Analyze — ${data.visual_analysis_status || 'not requested'}`}
+            >
+              <Eye size={11} />
+            </span>
           </div>
 
           {/* Action Buttons Row */}
@@ -879,24 +923,27 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                <span className="text-[10px] sm:text-xs font-medium truncate">{copied ? 'Copied' : 'Copy'}</span>
              </button>
 
-             {/* AI Extract Button */}
+             {/* AI Transcript Button (was "Extract" — renamed for clarity:
+                  the action body is whisper transcription, not a generic
+                  "extract"). Action key kept as 'extract' to avoid touching
+                  every handler / status-field reference downstream. */}
              <button
                onClick={(e) => handleAction(e, 'extract')}
                disabled={loadingAction === 'extract'}
                className="ai-btn ai-btn-extract flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg text-teal-300 hover:text-teal-100"
              >
                {loadingAction === 'extract' ? <Loader2 size={16} className="animate-spin relative z-10 shrink-0" /> : <FileText size={16} className="relative z-10 shrink-0" />}
-               <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Extract</span>
+               <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Transcript</span>
              </button>
 
-             {/* AI Rewrite Button */}
+             {/* AI Summary Button (was "Rewrite" — same renaming rationale). */}
              <button
                onClick={(e) => handleAction(e, 'rewrite')}
                disabled={loadingAction === 'rewrite'}
                className="ai-btn ai-btn-rewrite flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg text-violet-300 hover:text-violet-100"
              >
                {loadingAction === 'rewrite' ? <Loader2 size={16} className="animate-spin relative z-10 shrink-0" /> : <PenTool size={16} className="relative z-10 shrink-0" />}
-               <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Rewrite</span>
+               <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Summary</span>
              </button>
 
              {/* AI Analyze Button */}

@@ -190,6 +190,49 @@ class ResourcesRepository:
             )
             return None
 
+    async def get_completed_resource_by_url_and_creator(
+        self, url: str, creator_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """L2 dedup probe — does this user already own a fully-downloaded
+        resource for this URL? Joins resources → parsed_media via media_id
+        and filters on parsed_media.original_url + completed status.
+
+        Returns the resource row (with its ``id``, ``media_id``) when a
+        match exists, otherwise None. Caller short-circuits the parse +
+        download dispatch when this returns truthy."""
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE_RESOURCES)
+                .select(
+                    "id, media_id, "
+                    "parsed_media!inner(id, platform_id, original_url, "
+                    "video_download_status, image_download_status, media_type)"
+                )
+                .eq("creator_id", creator_id)
+                .eq("parsed_media.original_url", url)
+                .limit(1)
+                .execute()
+            )
+            row = (result.data or [None])[0]
+            if not row:
+                return None
+            pm = row.get("parsed_media") or {}
+            mt = pm.get("media_type")
+            is_image = str(mt) in ("2", "68", "image", "images")
+            status_field = (
+                "image_download_status" if is_image else "video_download_status"
+            )
+            if pm.get(status_field) == "completed":
+                return row
+            return None
+        except Exception as e:
+            logger.debug(
+                f"[ResourcesRepo] L2 dedup probe failed url={url[:40]} "
+                f"creator={creator_id}: {e}"
+            )
+            return None
+
     async def update_resource(
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
