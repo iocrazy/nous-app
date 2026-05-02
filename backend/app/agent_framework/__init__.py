@@ -41,6 +41,12 @@ from app.agent_framework.lane_queue import (
     LaneQueue,
     LaneTaskTimeout,
 )
+from app.agent_framework.workflow_timeout_policy import (
+    DEFAULT_TIMEOUT_MINUTES,
+    is_stuck,
+    timeout_for_task_type,
+    timeout_minutes,
+)
 from app.agent_framework.lifecycle_bus import (
     LifecycleBus,
     LifecycleEvent,
@@ -58,6 +64,7 @@ __all__ = [
     "AllKeysCooledDown",
     "ContextWindowError",
     "ContextWindowWarning",
+    "DEFAULT_TIMEOUT_MINUTES",
     "EVT_AGENT_RUN_COMPLETE",
     "EVT_AGENT_RUN_START",
     "EVT_BOUNDARY_BLOCKED",
@@ -74,9 +81,12 @@ __all__ = [
     "RunAborted",
     "check_context_budget",
     "estimate_tokens",
+    "is_stuck",
     "kill_process_tree",
     "measure_drift_ms",
     "model_window_size",
     "race_until_abort",
+    "timeout_for_task_type",
+    "timeout_minutes",
     "wait_for_loop_ready",
 ]
