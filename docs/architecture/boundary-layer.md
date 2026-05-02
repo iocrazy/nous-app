@@ -125,6 +125,21 @@ Three approaches were evaluated before settling on "build the layer in Python":
 - mypy / pyright in CI to catch raw `str` at static-analysis time
 - `ruff` rule `RUF-BOUNDARY` banning `httpx.get(` / `requests.get(` outside `app/boundary/` and `app/services/ai_provider*`
 
+## Audit log
+
+**2026-05-02 — Sprint 1 v2 secret compare audit (UC2 / B10).** Grepped the
+codebase for `==` / `verify` / `compare_hash` patterns on secret-shaped
+variables (token, api_key, signature, hmac, password, webhook, secret).
+
+Findings:
+- `app/api/media_auth.py:86` — already uses `hmac.compare_digest(sig, expected_sig)` ✅
+- `app/api/temp_token_router.py` — Redis lookup pattern (`await redis.get(prefix:token)`); no string compare exists
+- `app/api/api_key_router.py:142,146` — Redis lookup + ownership check; no secret compare
+
+**Zero retro-fit sites.** `app/boundary/secret_compare.py` ships as preventive
+infrastructure — any future secret compare must use `compare_secret` or
+`require_secret`, not raw `==`.
+
 ## Reference
 
 - OpenClaw `infra/net/ssrf.ts` — IPv4 decimal/octal detection, IMDS hostnames
