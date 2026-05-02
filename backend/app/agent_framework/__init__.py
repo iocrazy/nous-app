@@ -31,7 +31,16 @@ from app.agent_framework.key_rotation import (
     AllKeysCooledDown,
     KeyRotator,
 )
+from app.agent_framework.event_loop_ready import (
+    measure_drift_ms,
+    wait_for_loop_ready,
+)
 from app.agent_framework.kill_tree import kill_process_tree
+from app.agent_framework.lane_queue import (
+    Lane,
+    LaneQueue,
+    LaneTaskTimeout,
+)
 from app.agent_framework.lifecycle_bus import (
     LifecycleBus,
     LifecycleEvent,
@@ -57,12 +66,17 @@ __all__ = [
     "EVT_WORKFLOW_FAIL",
     "EVT_WORKFLOW_START",
     "KeyRotator",
+    "Lane",
+    "LaneQueue",
+    "LaneTaskTimeout",
     "LifecycleBus",
     "LifecycleEvent",
     "RunAborted",
     "check_context_budget",
     "estimate_tokens",
     "kill_process_tree",
+    "measure_drift_ms",
     "model_window_size",
     "race_until_abort",
+    "wait_for_loop_ready",
 ]
