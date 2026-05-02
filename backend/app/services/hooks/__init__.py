@@ -10,10 +10,11 @@ Design (locked in plan-eng-review 2026-04-25):
 - Hooks declare a ``priority`` integer; lower numbers run first.
   Same-priority hooks run in registration order.
 - ``HookResult.side_effect`` is a zero-arg callable (NOT a coroutine).
-  AgentRunner calls ``task.delay(*args, **kwargs)`` and continues — the
-  side effect runs out-of-process, OOM-isolated, retry-able. Originally
-  considered ``asyncio.create_task()`` but rejected in review (memory leak
-  risk on hung embedding API calls).
+  Hook owners typically wrap ``start_workflow_routed("...", ...)``
+  (Celery removed in PR-D7) so the side effect runs out-of-process via
+  the DBOS worker, OOM-isolated, retry-able. Originally considered
+  ``asyncio.create_task()`` but rejected in review (memory leak risk
+  on hung embedding API calls).
 - Hook exceptions are caught + logged; the run continues. This is the
   contract that makes hooks safe to add — a buggy hook can't break ChatPanel.
 - HookContext deliberately omits ``parent_run_id`` / ``root_run_id`` /
@@ -112,10 +113,9 @@ class HookResult:
     # Callable that fires background work and returns immediately.
     # AgentRunner invokes ``side_effect()`` (no args) and continues
     # without awaiting. The hook owner picks the dispatch mechanism
-    # — Celery .delay(), start_workflow_routed("...", ...), or both
-    # for shadow-mode comparison. Keeping the dispatch choice on the
-    # hook side lets us migrate task_types one at a time without
-    # touching AgentRunner.
+    # — typically start_workflow_routed("...", ...). Keeping the
+    # dispatch choice on the hook side lets us migrate task_types one
+    # at a time without touching AgentRunner.
     side_effect: Optional[Any] = None
 
 

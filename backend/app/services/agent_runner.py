@@ -379,10 +379,10 @@ class AgentRunner:
         """Fire HookResult.side_effect — non-blocking.
 
         side_effect is a zero-arg callable. Hook owners build a closure
-        that does whatever dispatch they want — Celery `.delay()`,
-        `start_workflow_routed("...", ...)`, or both for shadow mode.
-        AgentRunner just invokes it and continues. Dispatch failures
-        (broker down, DBOS not enabled, signature malformed) are logged
+        that does whatever dispatch they want — typically
+        ``start_workflow_routed("...", ...)`` (Celery was removed in
+        PR-D7). AgentRunner just invokes it and continues. Dispatch
+        failures (DBOS not enabled, signature malformed) are logged
         and swallowed — the run continues.
         """
         if result.side_effect is None:
