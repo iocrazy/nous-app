@@ -28,6 +28,8 @@ from urllib.parse import urlencode
 import httpx
 from loguru import logger
 
+from app.boundary import safe_async_client
+
 SignEngine = Literal["python", "node"]
 
 
@@ -140,8 +142,8 @@ class ABogusDouyinParser:
         if src.isdigit():
             return src
         try:
-            async with httpx.AsyncClient(
-                follow_redirects=True, timeout=cls.SHARE_REDIRECT_TIMEOUT
+            async with safe_async_client(
+                timeout=cls.SHARE_REDIRECT_TIMEOUT
             ) as client:
                 resp = await client.get(src, headers={"User-Agent": ua})
                 final_url = str(resp.url)
@@ -299,7 +301,7 @@ class ABogusDouyinParser:
         if cookie:
             headers["Cookie"] = cookie
 
-        async with httpx.AsyncClient(timeout=cls.DETAIL_TIMEOUT) as client:
+        async with safe_async_client(timeout=cls.DETAIL_TIMEOUT) as client:
             resp = await client.get(signed_url, headers=headers)
 
             if not resp.text:

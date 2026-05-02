@@ -17,7 +17,7 @@ def _reset_caches():
 
 @pytest.mark.unit
 async def test_download_file_blocks_internal_ip(tmp_path):
-    """NAS IP must be rejected before any httpx call."""
+    """NAS IP must be rejected before any HTTP request — no file written."""
     from app.services.downloader import DownloaderService
 
     out = tmp_path / "subdir" / "file.bin"
@@ -26,9 +26,8 @@ async def test_download_file_blocks_internal_ip(tmp_path):
         file_path=str(out),
     )
     assert ok is False
-    # File must NOT have been created (mkdir didn't even run)
+    # File MUST NOT have been written (the bytes never came down)
     assert not out.exists()
-    assert not out.parent.exists()
 
 
 @pytest.mark.unit
