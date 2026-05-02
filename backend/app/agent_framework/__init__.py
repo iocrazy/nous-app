@@ -32,13 +32,33 @@ from app.agent_framework.key_rotation import (
     KeyRotator,
 )
 from app.agent_framework.kill_tree import kill_process_tree
+from app.agent_framework.lifecycle_bus import (
+    LifecycleBus,
+    LifecycleEvent,
+    EVT_AGENT_RUN_COMPLETE,
+    EVT_AGENT_RUN_START,
+    EVT_BOUNDARY_BLOCKED,
+    EVT_DEPLOY_COMPLETE,
+    EVT_WORKFLOW_COMPLETE,
+    EVT_WORKFLOW_FAIL,
+    EVT_WORKFLOW_START,
+)
 
 __all__ = [
     "AbortController",
     "AllKeysCooledDown",
     "ContextWindowError",
     "ContextWindowWarning",
+    "EVT_AGENT_RUN_COMPLETE",
+    "EVT_AGENT_RUN_START",
+    "EVT_BOUNDARY_BLOCKED",
+    "EVT_DEPLOY_COMPLETE",
+    "EVT_WORKFLOW_COMPLETE",
+    "EVT_WORKFLOW_FAIL",
+    "EVT_WORKFLOW_START",
     "KeyRotator",
+    "LifecycleBus",
+    "LifecycleEvent",
     "RunAborted",
     "check_context_budget",
     "estimate_tokens",
