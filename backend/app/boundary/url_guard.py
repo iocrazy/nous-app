@@ -135,18 +135,7 @@ def _check_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address, host: str) -> N
     if _is_dev_allowed(ip):
         return
     if _is_blocked_ip(ip):
-        # Layer 5 audit (best-effort, deferred import to keep boundary
-        # package stdlib-only at import time).
-        try:
-            from app.boundary import audit
-            audit.log_block(
-                layer=audit.LAYER_VALIDATE,
-                reason="private_ip",
-                raw_url=host,
-                resolved_ip=str(ip),
-            )
-        except Exception:
-            pass
+        _audit_block("private_ip", raw_url=host, resolved_ip=str(ip))
         raise URLBlockedError(f"blocked address for host {host}")
 
 
@@ -236,29 +225,60 @@ def _strip_ipv6_zone(addr: str) -> str:
     return addr.split("%", 1)[0]
 
 
+def _audit_block(
+    reason: str,
+    raw_url: str | None,
+    *,
+    resolved_ip: str | None = None,
+    **metadata,
+) -> None:
+    """Best-effort Layer 5 audit. Wrapped in try/except so audit failure
+    NEVER prevents the boundary block itself."""
+    try:
+        from app.boundary import audit
+        audit.log_block(
+            layer=audit.LAYER_VALIDATE,
+            reason=reason,
+            raw_url=raw_url,
+            resolved_ip=resolved_ip,
+            metadata=metadata or None,
+        )
+    except Exception:
+        pass
+
+
 def _validate_url_pre_dns(raw: str) -> tuple[str, ipaddress.IPv4Address | ipaddress.IPv6Address | None]:
     """Shared validation up to (but not including) DNS resolution.
 
     Returns (hostname, literal_ip_or_None). Raises URLBlockedError on reject.
+    Every reject path emits a Layer 5 audit row before raising.
     """
     if not raw or not isinstance(raw, str):
+        _audit_block("empty_or_non_string", raw_url=str(raw) if raw else None)
         raise URLBlockedError("empty or non-string url")
 
     try:
         parsed = urlparse(raw)
     except ValueError as e:
+        _audit_block("unparseable_url", raw_url=raw, error=str(e))
         raise URLBlockedError(f"unparseable url: {e}") from e
 
     if parsed.scheme.lower() not in ALLOWED_SCHEMES:
+        _audit_block("scheme_not_allowed", raw_url=raw, scheme=parsed.scheme)
         raise URLBlockedError(f"scheme not allowed: {parsed.scheme!r}")
 
     host = parsed.hostname
     if not host:
+        _audit_block("missing_hostname", raw_url=raw)
         raise URLBlockedError("missing hostname")
 
     # Hostname suffix / metadata-server check (cheaper than IP check).
     reason = _is_blocked_hostname(host)
     if reason is not None:
+        # The reason string already encodes the type
+        # ("blocked metadata hostname" vs "blocked hostname suffix").
+        kind = "metadata_host" if "metadata" in reason else "suffix_blocked"
+        _audit_block(kind, raw_url=raw, host=host)
         raise URLBlockedError(reason)
 
     # Try canonical IPv4/IPv6 literal first.
@@ -327,13 +347,19 @@ async def _resolve_host_async(host: str) -> list[str]:
 
 def _check_resolved_addrs(addrs: list[str], host: str) -> None:
     """Apply IP policy to every resolved address. Reject if ANY is blocked
-    (defends mixed-record DNS attacks)."""
+    (defends mixed-record DNS attacks). Audit on every reject."""
     if not addrs:
+        _audit_block("dns_no_addresses", raw_url=host)
         raise URLBlockedError(f"dns returned no addresses for {host}")
     for addr in addrs:
         try:
             ip = ipaddress.ip_address(addr)
         except ValueError as e:
+            _audit_block(
+                "dns_non_ip_address",
+                raw_url=host,
+                returned_addr=addr,
+            )
             raise URLBlockedError(
                 f"dns returned non-ip address for {host}: {addr!r}"
             ) from e
@@ -360,6 +386,7 @@ def validate_url(raw: str) -> ValidatedURL:
     try:
         addrs = _resolve_host_sync(host)
     except (socket.gaierror, socket.herror) as e:
+        _audit_block("dns_resolution_failed", raw_url=raw, host=host, error=str(e))
         raise URLBlockedError(f"dns resolution failed for {host}: {e}") from e
 
     _check_resolved_addrs(addrs, host)
@@ -387,8 +414,10 @@ async def validate_url_async(raw: str) -> ValidatedURL:
     try:
         addrs = await _resolve_host_async(host)
     except (socket.gaierror, socket.herror) as e:
+        _audit_block("dns_resolution_failed", raw_url=raw, host=host, error=str(e))
         raise URLBlockedError(f"dns resolution failed for {host}: {e}") from e
     except asyncio.TimeoutError as e:
+        _audit_block("dns_resolution_timeout", raw_url=raw, host=host)
         raise URLBlockedError(f"dns resolution timed out for {host}") from e
 
     _check_resolved_addrs(addrs, host)
