@@ -57,7 +57,7 @@ class DouyinFormatter:
             )
             if mid and mid != "0" and mid != "":
                 try:
-                    import httpx
+                    from app.boundary import safe_async_client
 
                     # Try multiple API endpoints (DNS may vary by environment)
                     api_endpoints = [
@@ -69,7 +69,7 @@ class DouyinFormatter:
                     }
                     for api_url in api_endpoints:
                         try:
-                            async with httpx.AsyncClient(timeout=10) as client:
+                            async with safe_async_client(timeout=10) as client:
                                 resp = await client.get(api_url, headers=api_headers)
                                 if resp.status_code == 200:
                                     music_info = resp.json().get("music_info", {})

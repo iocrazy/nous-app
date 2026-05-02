@@ -18,7 +18,7 @@ from typing import Callable, Optional
 import httpx
 from loguru import logger
 
-from app.boundary import ValidatedURL
+from app.boundary import ValidatedURL, safe_async_client
 from app.core.utils import Utils
 from app.services.url_router import URLRouter
 
@@ -504,7 +504,7 @@ class YtdlpService:
             None on failure.
         """
         try:
-            async with httpx.AsyncClient() as client:
+            async with safe_async_client() as client:
                 resp = await client.get(
                     f"https://api.bilibili.com/x/web-interface/archive/stat?bvid={bvid}",
                     timeout=10.0,

@@ -17,7 +17,7 @@ import httpx
 from loguru import logger
 
 # from app.db.session import get_async_transaction_session
-from app.boundary import URLBlockedError, validate_url_async
+from app.boundary import URLBlockedError, safe_async_client
 from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
@@ -199,20 +199,10 @@ class DownloaderService:
         Returns:
             bool: Whether download was successful
         """
-        # Boundary: SSRF guard. 6 internal call sites in this module pass
-        # URLs from various sources (parsed metadata fields, CDN URLs).
-        # Validate defensively here rather than retro-fitting all callers.
-        # URLBlockedError -> log + return False (consistent with download
-        # failure semantics).
-        try:
-            validated_url = await validate_url_async(url)
-        except URLBlockedError as e:
-            logger.warning(f"[Download/File] URL blocked by boundary: {e}")
-            if progress_tracker:
-                progress_tracker.failed(str(e))
-            return False
-        url = validated_url
-
+        # Boundary: safe_async_client (used below) validates URL + every
+        # redirect hop. Defense-in-depth: catch URLBlockedError here to
+        # apply the consistent "download failed" semantics (mark tracker
+        # failed, return False) rather than letting it propagate.
         if not headers:
             headers = Utils.get_headers()
         else:
@@ -245,7 +235,7 @@ class DownloaderService:
         try:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-            async with httpx.AsyncClient(http2=True) as client:
+            async with safe_async_client(http2=True) as client:
                 # Check if file exists and is complete
                 if os.path.exists(file_path):
                     existing_size = os.path.getsize(file_path)
@@ -549,7 +539,7 @@ class DownloaderService:
             download_errors = []
             for i, url in enumerate(video_urls):
                 try:
-                    async with httpx.AsyncClient(http2=True) as _diag:
+                    async with safe_async_client(http2=True) as _diag:
                         _r = await _diag.head(
                             url, headers=headers, follow_redirects=True, timeout=10.0
                         )

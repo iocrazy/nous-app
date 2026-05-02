@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional
 import httpx
 from loguru import logger
 
+from app.boundary import safe_async_client
+
 
 class IesDouyinParser:
     """轻量级抖音解析器，通过 HTTP 请求解析分享页面"""
@@ -157,7 +159,7 @@ class IesDouyinParser:
                 "User-Agent": user_agent,
                 **(extra_headers or {}),
             }
-            async with httpx.AsyncClient(
+            async with safe_async_client(
                 follow_redirects=True, timeout=cls.TIMEOUT
             ) as client:
                 response = await client.get(share_url, headers=headers)
@@ -227,7 +229,7 @@ class IesDouyinParser:
                 "User-Agent": user_agent,
                 **(extra_headers or {}),
             }
-            async with httpx.AsyncClient(
+            async with safe_async_client(
                 follow_redirects=True, timeout=cls.TIMEOUT
             ) as client:
                 response = await client.get(share_page_url, headers=headers)

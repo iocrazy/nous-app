@@ -429,14 +429,12 @@ async def check_url_accessible(url: str, timeout: float = 10.0) -> tuple[bool, s
 
     Returns (accessible, reason) tuple.
     """
-    import httpx
+    from app.boundary import safe_async_client
 
     headers = Utils.get_headers()
     try:
-        async with httpx.AsyncClient(http2=True) as client:
-            resp = await client.head(
-                url, headers=headers, follow_redirects=True, timeout=timeout
-            )
+        async with safe_async_client(http2=True) as client:
+            resp = await client.head(url, headers=headers, timeout=timeout)
             if resp.status_code == 200:
                 return True, "ok"
             reason = f"HTTP {resp.status_code}"
