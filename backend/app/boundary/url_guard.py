@@ -135,6 +135,18 @@ def _check_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address, host: str) -> N
     if _is_dev_allowed(ip):
         return
     if _is_blocked_ip(ip):
+        # Layer 5 audit (best-effort, deferred import to keep boundary
+        # package stdlib-only at import time).
+        try:
+            from app.boundary import audit
+            audit.log_block(
+                layer=audit.LAYER_VALIDATE,
+                reason="private_ip",
+                raw_url=host,
+                resolved_ip=str(ip),
+            )
+        except Exception:
+            pass
         raise URLBlockedError(f"blocked address for host {host}")
 
 
