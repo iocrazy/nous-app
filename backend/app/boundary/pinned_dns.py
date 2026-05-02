@@ -49,16 +49,36 @@ class PinnedDNSResolver:
     async def resolve_and_validate(self, host: str) -> str:
         """Return the validated, pinned IP for ``host``.
 
-        On cache miss, resolve via :func:`app.boundary.url_guard._resolve_host_async`
-        and run every returned address through
-        :func:`app.boundary.url_guard._check_resolved_addrs`. If any address
-        is in a blocked range (RFC1918, loopback, link-local, IPv6 ULA,
-        configured extra-blocked networks), raise ``URLBlockedError``.
+        Literal IPv4 / IPv6 hosts skip DNS and are validated directly
+        against the boundary IP policy. This makes the resolver safe to
+        use from the SsrfProxy CONNECT path where the target may be an
+        IP literal that an attacker hopes will bypass DNS validation.
+
+        For DNS hostnames: on cache miss, resolve via
+        :func:`app.boundary.url_guard._resolve_host_async` and run every
+        returned address through
+        :func:`app.boundary.url_guard._check_resolved_addrs`. If any
+        address is in a blocked range (RFC1918, loopback, link-local,
+        IPv6 ULA, configured extra-blocked networks), raise
+        ``URLBlockedError``.
 
         The first allowed address is pinned. Subsequent calls within TTL
         return the same IP without re-resolving (the load-bearing
         rebinding defence).
         """
+        # Literal IP fast path — validate directly, no DNS, no caching
+        # needed (the literal IS the connect target).
+        import ipaddress
+        try:
+            literal = ipaddress.ip_address(_ug._strip_ipv6_zone(host))
+        except ValueError:
+            literal = None
+
+        if literal is not None:
+            # _check_ip raises URLBlockedError on blocked range.
+            _ug._check_ip(literal, host)
+            return host
+
         now = time.time()
         cached = self._cache.get(host)
         if cached is not None and cached[1] > now:
