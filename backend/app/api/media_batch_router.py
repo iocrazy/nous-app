@@ -9,6 +9,7 @@ Endpoints for batch fetching media and debug raw-parse.
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from loguru import logger
 
+from app.boundary import validate_url_async
 from app.api.media_fetch_helpers import (
     BatchFetchRequest,
     resolve_and_attach_tags,
@@ -291,13 +292,16 @@ async def debug_raw_parse(
     Debug endpoint: return raw aweme_detail JSON from IesDouyinParser.
     No DB writes, no downloads — just raw parsed data.
     """
-    aweme_detail = await IesDouyinParser.parse(url)
+    # Boundary: SSRF guard. URLBlockedError -> global handler -> 400.
+    validated = await validate_url_async(url)
+
+    aweme_detail = await IesDouyinParser.parse(validated)
     if not aweme_detail:
         raise HTTPException(status_code=404, detail="IesDouyinParser returned None")
 
     parsed = await DouyinFormatter.parse_aweme_detail(
         aweme_detail=aweme_detail,
-        valid_url=url,
+        valid_url=validated,
         download_video=False,
         download_music=False,
     )
