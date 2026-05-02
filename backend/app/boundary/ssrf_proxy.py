@@ -170,6 +170,16 @@ class SsrfProxy:
             ip = await self._pinner.resolve_and_validate(host)
         except URLBlockedError as e:
             logger.info(f"[boundary] SsrfProxy CONNECT blocked: {target} ({e})")
+            try:
+                from app.boundary import audit
+                audit.log_block(
+                    layer=audit.LAYER_PROXY,
+                    reason="connect_blocked",
+                    raw_url=target,
+                    metadata={"method": "CONNECT", "port": port},
+                )
+            except Exception:
+                pass
             await self._reply(client_writer, 403, "Forbidden")
             return
         except Exception as e:
@@ -255,6 +265,16 @@ class SsrfProxy:
                 )
         except URLBlockedError as e:
             logger.info(f"[boundary] SsrfProxy HTTP blocked: {target} ({e})")
+            try:
+                from app.boundary import audit
+                audit.log_block(
+                    layer=audit.LAYER_PROXY,
+                    reason="http_blocked",
+                    raw_url=target,
+                    metadata={"method": method},
+                )
+            except Exception:
+                pass
             await self._reply(writer, 403, "Forbidden")
             return
         except (httpx.HTTPError, httpx.InvalidURL) as e:

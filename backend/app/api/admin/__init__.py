@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from .alert_rules_router import router as alert_rules_router
 from .audit_logs_router import router as audit_logs_router
+from .boundary_audit_router import router as boundary_audit_router
 from .celery_router import router as celery_router
 from .credits_router import router as credits_router
 from .monitoring_router import router as monitoring_router
@@ -112,4 +113,9 @@ admin_router.include_router(tags_router, prefix="/tags", tags=["Admin - Tags"])
 admin_router.include_router(celery_router, prefix="/celery", tags=["Admin - Celery"])
 admin_router.include_router(
     nous_router, prefix="/nous-models", tags=["Admin - Nous Models"]
+)
+admin_router.include_router(
+    boundary_audit_router,
+    prefix="/boundary-audit",
+    tags=["Admin - Boundary Audit"],
 )

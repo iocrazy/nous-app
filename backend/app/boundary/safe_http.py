@@ -111,7 +111,22 @@ class SafeAsyncClient(httpx.AsyncClient):
             #    Raises URLBlockedError on private/blocked IP — propagates
             #    to the caller's API edge handler (or the global
             #    BoundaryError exception handler in app/core/exceptions.py).
-            await validate_url_async(str(current.url))
+            try:
+                await validate_url_async(str(current.url))
+            except URLBlockedError as exc:
+                # Layer 5 audit. Distinguish initial (hop=0) from redirect
+                # rejection so operators can see attack patterns.
+                try:
+                    from app.boundary import audit
+                    audit.log_block(
+                        layer=audit.LAYER_SAFE_HTTP,
+                        reason="redirect_blocked" if hop > 0 else "initial_blocked",
+                        raw_url=str(current.url),
+                        metadata={"hop": hop},
+                    )
+                except Exception:
+                    pass
+                raise
 
             # 2. (PinnedDNS warm-cache hint — does not change connection
             #     target in this commit; see B9-future for socket-level
