@@ -73,6 +73,31 @@ class AgentRunner:
         *,
         recorder: Optional[RunRecorder] = None,
     ) -> dict[str, Any]:
+        # Pre-flight: context budget guard. A small-context model
+        # (e.g. user filled qwen-max with a heavy AGENT spec) would
+        # otherwise return truncated nonsense or fail with cryptic
+        # provider errors. Reject early with a structured error.
+        try:
+            from app.agent_framework import (
+                ContextWindowError,
+                check_context_budget,
+            )
+            check_context_budget(
+                system_prompt=composed.system_message,
+                user_messages=user_messages,
+                model=composed.model,
+            )
+        except ContextWindowError as exc:
+            logger.warning(f"[AgentRunner] context budget rejected: {exc}")
+            return {
+                "content": "",
+                "raw": None,
+                "error": str(exc),
+                "error_code": "context_budget_exceeded",
+            }
+        # ContextWindowWarning is emitted via warnings module — picked
+        # up by loguru's stdlib bridge if configured. Don't block on it.
+
         messages = list(user_messages)
         iteration = 0
         # Step A milestone: trace each Skill / Delegate dispatch made
