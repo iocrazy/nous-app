@@ -17,6 +17,7 @@ import httpx
 from loguru import logger
 
 # from app.db.session import get_async_transaction_session
+from app.boundary import URLBlockedError, validate_url_async
 from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
@@ -198,6 +199,20 @@ class DownloaderService:
         Returns:
             bool: Whether download was successful
         """
+        # Boundary: SSRF guard. 6 internal call sites in this module pass
+        # URLs from various sources (parsed metadata fields, CDN URLs).
+        # Validate defensively here rather than retro-fitting all callers.
+        # URLBlockedError -> log + return False (consistent with download
+        # failure semantics).
+        try:
+            validated_url = await validate_url_async(url)
+        except URLBlockedError as e:
+            logger.warning(f"[Download/File] URL blocked by boundary: {e}")
+            if progress_tracker:
+                progress_tracker.failed(str(e))
+            return False
+        url = validated_url
+
         if not headers:
             headers = Utils.get_headers()
         else:
