@@ -146,6 +146,21 @@ class Utils:
         # Remove default handlers
         logger.remove()
 
+        # Boundary (Phase D): install secret-redaction patcher BEFORE any
+        # sink is attached. Loguru applies the patcher at record creation
+        # time, so every sink (console, file, db_log_sink) sees the
+        # already-redacted form. Walks both record["message"] and
+        # record["extra"] dict values (covers logger.bind(token=...) leaks).
+        try:
+            from app.boundary.log_redact import make_loguru_patcher
+
+            logger.configure(patcher=make_loguru_patcher())
+        except Exception:
+            # Non-fatal: log_redact is observability hardening, not
+            # load-bearing. Skip on import error so logging itself
+            # always works.
+            pass
+
         # Filter: skip stdlib-intercepted logs on console (they already write to stderr,
         # so emitting them again causes Celery's stderr redirect to create duplicates)
         def _not_from_stdlib(record):

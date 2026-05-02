@@ -15,6 +15,7 @@ from app.boundary.external_text import (
     NeutralizedText,
     neutralize_external_text,
 )
+from app.boundary.log_redact import make_loguru_patcher, redact
 from app.boundary.pinned_dns import PinnedDNSResolver
 from app.boundary.safe_http import SafeAsyncClient, safe_async_client
 from app.boundary.secret_compare import compare_secret, require_secret
@@ -33,7 +34,9 @@ __all__ = [
     "URLBlockedError",
     "ValidatedURL",
     "compare_secret",
+    "make_loguru_patcher",
     "neutralize_external_text",
+    "redact",
     "require_secret",
     "safe_async_client",
     "validate_url",
