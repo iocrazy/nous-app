@@ -31,7 +31,15 @@ from loguru import logger
 
 
 class TaskPhase(str, Enum):
-    """Fine-grained task lifecycle phases."""
+    """Fine-grained task lifecycle phases.
+
+    Sprint 2 / OpenClaw task-executor-policy borrowing:
+    LOST is distinct from FAILED — LOST means "system never claimed
+    this or worker died mid-flight" (orphan / WORKER_LOST). FAILED is
+    "business logic returned an error". The reaper sets LOST; user
+    code calling .fail() sets FAILED. Operators can then query
+    failed-vs-lost separately to triage.
+    """
 
     QUEUED = "queued"
     DEDUP_CHECK = "dedup_check"
@@ -39,6 +47,7 @@ class TaskPhase(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    LOST = "lost"  # orphan / worker died — system-level, not business
 
 
 # ─── Valid Transitions ────────────────────────────────────────────────
@@ -50,19 +59,32 @@ VALID_TRANSITIONS: Dict[TaskPhase, set[TaskPhase]] = {
         TaskPhase.COMPLETED,
         TaskPhase.FAILED,
         TaskPhase.CANCELLED,
+        TaskPhase.LOST,
     },
     TaskPhase.DEDUP_CHECK: {
         TaskPhase.PROCESSING,
         TaskPhase.COMPLETED,
         TaskPhase.FAILED,
+        TaskPhase.LOST,
     },
-    TaskPhase.PROCESSING: {TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED},
+    TaskPhase.PROCESSING: {
+        TaskPhase.COMPLETED,
+        TaskPhase.FAILED,
+        TaskPhase.CANCELLED,
+        TaskPhase.LOST,
+    },
     TaskPhase.COMPLETED: set(),  # terminal
     TaskPhase.FAILED: {TaskPhase.QUEUED},  # retry path
     TaskPhase.CANCELLED: set(),  # terminal
+    TaskPhase.LOST: {TaskPhase.QUEUED},  # retry path same as FAILED
 }
 
-_TERMINAL_PHASES = {TaskPhase.COMPLETED, TaskPhase.FAILED, TaskPhase.CANCELLED}
+_TERMINAL_PHASES = {
+    TaskPhase.COMPLETED,
+    TaskPhase.FAILED,
+    TaskPhase.CANCELLED,
+    TaskPhase.LOST,
+}
 
 
 # ─── Dedup Key Fields ────────────────────────────────────────────────
@@ -105,6 +127,7 @@ _PHASE_TO_STATUS = {
     TaskPhase.COMPLETED: "completed",
     TaskPhase.FAILED: "failed",
     TaskPhase.CANCELLED: "cancelled",
+    TaskPhase.LOST: "lost",
 }
 
 
@@ -399,6 +422,48 @@ class UnifiedTaskManager:
         self._last_progress.pop(task_id, None)
         self._last_progress_value.pop(task_id, None)
         logger.debug(f"[TaskManager] Failed {task_id}: {error_msg[:80]}")
+
+    # ── Lifecycle: lost (orphan / system-level) ──────────────────────
+
+    async def mark_lost(
+        self,
+        task_id: str,
+        error_msg: str,
+        *,
+        error_code: Optional[str] = None,
+    ) -> None:
+        """Transition to LOST phase — system never claimed this task or
+        the worker died mid-flight (orphan). Distinct from FAILED
+        (business logic returned an error). Sweepers / reapers set
+        LOST; user code calling .fail() sets FAILED.
+
+        Operators can then SELECT count(*) WHERE status='lost' GROUP BY
+        task_type to triage system-level issues separately from
+        business-level failures.
+
+        Idempotent: already-terminal tasks are silently skipped.
+        """
+        current = await self._get_phase(task_id)
+        if current in _TERMINAL_PHASES:
+            logger.debug(
+                f"[TaskManager] mark_lost() skipped: {task_id} already terminal ({current.value})"
+            )
+            return
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        updates: Dict[str, Any] = {
+            "phase": TaskPhase.LOST.value,
+            "status": _PHASE_TO_STATUS[TaskPhase.LOST],
+            "error_msg": error_msg[:500] if error_msg else "Task lost (orphan)",
+            "completed_at": now_iso,
+        }
+        if error_code:
+            updates["error_code"] = error_code
+
+        await self._atomic_update(task_id, updates)
+        self._last_progress.pop(task_id, None)
+        self._last_progress_value.pop(task_id, None)
+        logger.info(f"[TaskManager] Lost {task_id}: {error_msg[:80]}")
 
     # ── Lifecycle: cancel ─────────────────────────────────────────────
 

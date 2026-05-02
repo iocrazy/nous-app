@@ -108,12 +108,15 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        # Sprint 2: status='lost' (was 'failed') — orphan tasks are a
+        # system issue (DBOS crash / never claimed), not a business
+        # failure. Lets operators distinguish in dashboards.
         result = (
             await supabase.table("task_tracking")
             .update(
                 {
-                    "status": "failed",
-                    "phase": "failed",
+                    "status": "lost",
+                    "phase": "lost",
                     "error_msg": (
                         "Worker never claimed this task within 1h — "
                         "DBOS workflow may have crashed or never "
@@ -237,11 +240,15 @@ def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
 
             try:
                 if tid:
-                    await mgr.fail(
+                    # Use mark_lost (Sprint 2): system-level orphan / worker
+                    # died, NOT business-level failure. Operators can query
+                    # status='lost' GROUP BY task_type to spot infra issues
+                    # vs application bugs.
+                    await mgr.mark_lost(
                         tid,
                         f"Stuck {task_type} timeout (elapsed {int(elapsed)}s, "
                         f"ceiling per workflow_timeout_policy)",
-                        error_code="NETWORK_TIMEOUT",
+                        error_code="WORKER_LOST",
                     )
                 if task.get("dedup_key"):
                     mgr.release_lock(task["dedup_key"])
