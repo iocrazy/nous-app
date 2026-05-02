@@ -21,6 +21,12 @@ from app.agent_framework.abort_controller import (
     race_until_abort,
 )
 from app.agent_framework.cancel_watcher import watch_cancel_loop
+from app.agent_framework.commitments import (
+    Commitment,
+    CommitmentStatus,
+    InvalidCommitmentError,
+    TriggerType,
+)
 from app.agent_framework.context_window import (
     ContextWindowError,
     ContextWindowWarning,
@@ -79,6 +85,8 @@ from app.agent_framework.lifecycle_bus import (
 __all__ = [
     "AbortController",
     "AllKeysCooledDown",
+    "Commitment",
+    "CommitmentStatus",
     "ContextWindowError",
     "ContextWindowWarning",
     "DEFAULT_TIMEOUT_MINUTES",
@@ -89,6 +97,7 @@ __all__ = [
     "EVT_WORKFLOW_COMPLETE",
     "EVT_WORKFLOW_FAIL",
     "EVT_WORKFLOW_START",
+    "InvalidCommitmentError",
     "KeyRotator",
     "Lane",
     "LaneQueue",
@@ -100,6 +109,7 @@ __all__ = [
     "Origin",
     "RotatingAdapter",
     "RunAborted",
+    "TriggerType",
     "cancel_workflow_subprocesses",
     "check_context_budget",
     "classify_lane",
