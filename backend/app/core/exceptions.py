@@ -132,6 +132,35 @@ def _cors_headers_for(request: Request) -> Dict[str, str]:
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach the global handlers to a FastAPI app."""
 
+    # Boundary-layer rejections (SSRF, prompt-injection, etc.) → HTTP 400.
+    # Must come BEFORE the generic Exception handler. Never echo the raw
+    # rejected input back to the client (log it server-side instead).
+    from app.boundary.errors import BoundaryError, URLBlockedError
+
+    @app.exception_handler(BoundaryError)
+    async def _handle_boundary(request: Request, exc: BoundaryError) -> JSONResponse:
+        # Server-side log carries the full reason for diagnosis.
+        logger.warning(
+            f"[Boundary] {type(exc).__name__} at {request.method} "
+            f"{request.url.path}: {exc}"
+        )
+        # Client sees a generic message — no input echo, no internal detail.
+        if isinstance(exc, URLBlockedError):
+            client_msg = "URL not allowed"
+            client_code = "url_blocked"
+        else:
+            client_msg = "Input rejected by boundary"
+            client_code = "boundary_rejected"
+        return JSONResponse(
+            status_code=400,
+            content=ErrorResponse(
+                error=client_msg,
+                code=client_code,
+                request_id=_request_id(request),
+            ).model_dump(),
+            headers=_cors_headers_for(request),
+        )
+
     @app.exception_handler(AppError)
     async def _handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         logger.info(
