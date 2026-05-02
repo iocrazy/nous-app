@@ -12,6 +12,7 @@ from fastapi import BackgroundTasks, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel, field_validator
 
+from app.boundary import ValidatedURL
 from app.core.deps import AuthDep
 from app.repositories.tags_repository import TagsRepository
 from app.repositories.user_logs_repository import log_user_action
@@ -388,7 +389,7 @@ async def mark_cookie_if_auth_failure(user_id: str, platform: str, error: str) -
 
 
 async def handle_media_fetch_dispatch(
-    url: str,
+    url: ValidatedURL,
     platform: str,
     request: MediaFetchRequest,
     background_tasks: BackgroundTasks,
@@ -396,6 +397,11 @@ async def handle_media_fetch_dispatch(
     tags: Optional[list[str]] = None,
     tag_ids: Optional[list[str]] = None,
 ) -> dict:
+    # Boundary: runtime guard. Caller must pass ValidatedURL (mypy not in CI).
+    assert isinstance(url, ValidatedURL), (
+        "handle_media_fetch_dispatch requires ValidatedURL — "
+        "call validate_url_async at the API edge first"
+    )
     """Unified entry for parse + dispatch across all supported platforms.
 
     Despite the legacy `handle_ytdlp_fetch` name (renamed to this), the
