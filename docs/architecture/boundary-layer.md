@@ -125,6 +125,74 @@ Three approaches were evaluated before settling on "build the layer in Python":
 - mypy / pyright in CI to catch raw `str` at static-analysis time
 - `ruff` rule `RUF-BOUNDARY` banning `httpx.get(` / `requests.get(` outside `app/boundary/` and `app/services/ai_provider*`
 
+## Layer 4 — Egress firewall (kernel-level backstop)
+
+If Layer 1-3 are bypassed (bug, novel attack), kernel-level outbound deny
+rules drop the packet before it reaches NAS internal services. This is
+the operations-level last resort — no code, just firewall config.
+
+Recommendation: deny outbound `192.168.50.0/24` (NAS LAN) except the
+explicit Supabase + Redis ports, deny RFC1918 (`10.0.0.0/8`,
+`172.16.0.0/12`, `192.168.0.0/16` minus mediahub's own subnet), deny
+`169.254.169.254` (cloud IMDS), allow public internet.
+
+Step-by-step Synology DSM 7.x runbook with rule table, verification
+commands, and failure modes: **[`docs/runbook/boundary-egress-firewall.md`](../runbook/boundary-egress-firewall.md)**
+
+After Layer 4 is active, surges in `boundary_audit` (Layer 5) reveal
+that either Layer 1-3 are working (catching things before kernel) or a
+new attack pattern has appeared. If the audit table is empty for >30
+days that does NOT mean the firewall is unused — it means earlier
+layers are catching everything.
+
+---
+
+## Future direction — Trusted Domain Allowlist mode
+
+Sprint 1 v2 defends against KNOWN bad destinations (default-allow plus
+blocklist). The architecturally pure version flips this: maintain a
+`trusted_domains` table, default-deny outbound, only allow listed
+destinations (douyin, bilibili, youtube, notion, allowed LLM providers,
+etc.).
+
+```
+default-deny + allowlist
+        │
+        ▼
+┌──────────────────────────────────┐
+│ trusted_domains table:           │
+│   *.douyin.com / *.tiktok.com    │
+│   *.bilibili.com                 │
+│   *.youtube.com / *.youtu.be     │
+│   api.notion.com                 │
+│   api.openai.com / api.anthropic │
+│   api.deepseek.com               │
+│   ark.cn-beijing.volces.com      │
+│   …admin-managed list…           │
+└──────────────────────────────────┘
+```
+
+Tradeoffs:
+- **Pro**: zero-trust outbound. Even a brand-new SSRF bypass cannot
+  reach an unfamiliar destination. Massive shrink in attack surface.
+- **Pro**: clearer threat model — security review only needs to look at
+  the allowlist, not the entire codebase
+- **Con**: every new platform integration requires a config change
+  (more friction, more deploys)
+- **Con**: dynamic content (video CDN domains that rotate) needs
+  pattern matching or wildcards — easy to mis-spec
+- **Con**: existing platforms (yt-dlp's hundreds of supported sites)
+  would need a curated list
+
+**Status**: Sprint 2+ candidate. Not in Sprint 1 v2 scope because it
+changes the operations model substantially — deploys + admin UI for
+managing the table + migration tooling for existing user URLs that
+predate the allowlist.
+
+When implemented: add as a Layer 1 sibling to `validate_url`. Both run;
+either one blocking is enough to reject. Allowlist failure produces
+`audit.log_block(reason="not_allowlisted", ...)`.
+
 ## Audit log
 
 **2026-05-02 — Sprint 1 v2 secret compare audit (UC2 / B10).** Grepped the
