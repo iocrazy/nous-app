@@ -129,7 +129,41 @@ def get_adapter_for_user(
     provider_key = provider_key_for_model(model)
     user_cfg = (user_provider_config or {}).get(provider_key, {}) or {}
 
-    user_key = (user_cfg.get("api_key") or "").strip()
+    # Sprint 2 #5: api_key may be str OR list[str] (multi-key BYO).
+    # When the list has >= 2 non-empty keys, wrap N single-key adapters
+    # in a RotatingAdapter so 429/auth-fail on one key automatically
+    # rolls to the next instead of failing the request.
+    raw_key = user_cfg.get("api_key")
+    user_keys: list[str] = []
+    if isinstance(raw_key, list):
+        user_keys = [
+            k.strip() for k in raw_key if isinstance(k, str) and k.strip()
+        ]
+    elif isinstance(raw_key, str):
+        single = raw_key.strip()
+        if single:
+            user_keys = [single]
+
+    if len(user_keys) >= 2:
+        from app.agent_framework import KeyRotator, RotatingAdapter
+
+        rotator = KeyRotator(user_keys)
+
+        def _build_with_key(key: str):
+            # Recurse with a single-key config so the normal branch below
+            # builds the right per-provider adapter.
+            return get_adapter_for_user(
+                model,
+                {
+                    **(user_provider_config or {}),
+                    provider_key: {**user_cfg, "api_key": key},
+                },
+                fallback_settings,
+            )
+
+        return RotatingAdapter(rotator, _build_with_key)
+
+    user_key = user_keys[0] if user_keys else ""
     user_base = (user_cfg.get("base_url") or "").strip()
 
     if provider_key == "claude":

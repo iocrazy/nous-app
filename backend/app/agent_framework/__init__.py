@@ -32,6 +32,7 @@ from app.agent_framework.key_rotation import (
     AllKeysCooledDown,
     KeyRotator,
 )
+from app.agent_framework.rotating_adapter import RotatingAdapter
 from app.agent_framework.event_loop_ready import (
     measure_drift_ms,
     wait_for_loop_ready,
@@ -85,6 +86,7 @@ __all__ = [
     "LaneTaskTimeout",
     "LifecycleBus",
     "LifecycleEvent",
+    "RotatingAdapter",
     "RunAborted",
     "cancel_workflow_subprocesses",
     "check_context_budget",
