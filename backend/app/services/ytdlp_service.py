@@ -18,6 +18,7 @@ from typing import Callable, Optional
 import httpx
 from loguru import logger
 
+from app.boundary import ValidatedURL
 from app.core.utils import Utils
 from app.services.url_router import URLRouter
 
@@ -89,7 +90,7 @@ class YtdlpService:
 
     @staticmethod
     async def fetch_metadata(
-        url: str,
+        url: ValidatedURL,
         user_id: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> dict:
@@ -97,7 +98,7 @@ class YtdlpService:
         Fetch video metadata using yt-dlp --dump-json.
 
         Args:
-            url: Video URL
+            url: Video URL (must have passed app.boundary.url_guard.validate_url)
             user_id: Optional user ID for per-user cookie lookup
             user_agent: Optional explicit UA (used for Douyin so the same UA
                 threads through LightHTTP/ABogus/yt-dlp/download_video).
@@ -107,7 +108,13 @@ class YtdlpService:
 
         Raises:
             RuntimeError: If yt-dlp fails or returns no data
+            AssertionError: If url is not a ValidatedURL (caller bug)
         """
+        # Boundary: runtime guard. Caller must validate first (mypy not in CI).
+        assert isinstance(url, ValidatedURL), (
+            "YtdlpService.fetch_metadata requires ValidatedURL — "
+            "call app.boundary.validate_url[_async] first"
+        )
         logger.info(f"[yt-dlp] Fetching metadata: {url}")
 
         ua_args = ["--user-agent", user_agent] if user_agent else []
@@ -170,7 +177,7 @@ class YtdlpService:
 
     @staticmethod
     async def download_video(
-        url: str,
+        url: ValidatedURL,
         output_dir: str,
         platform_id: str,
         progress_callback: Optional[Callable] = None,
@@ -181,7 +188,7 @@ class YtdlpService:
         Download video file via yt-dlp with real-time progress tracking.
 
         Args:
-            url: Video URL
+            url: Video URL (must have passed validate_url[_async])
             output_dir: Directory to save the file
             platform_id: Used for filename
             progress_callback: Optional callback(downloaded, total, speed) for progress updates
@@ -192,7 +199,15 @@ class YtdlpService:
 
         Returns:
             dict: {file_path, file_size}
+
+        Raises:
+            AssertionError: If url is not a ValidatedURL (caller bug)
         """
+        # Boundary: runtime guard. Caller must validate first (mypy not in CI).
+        assert isinstance(url, ValidatedURL), (
+            "YtdlpService.download_video requires ValidatedURL — "
+            "call app.boundary.validate_url[_async] first"
+        )
         os.makedirs(output_dir, exist_ok=True)
 
         output_template = os.path.join(output_dir, "video.%(ext)s")
@@ -297,7 +312,7 @@ class YtdlpService:
 
     @staticmethod
     async def download_audio(
-        url: str,
+        url: ValidatedURL,
         output_dir: str,
         platform_id: str,
         user_id: Optional[str] = None,
@@ -306,14 +321,22 @@ class YtdlpService:
         Extract audio only via yt-dlp.
 
         Args:
-            url: Video URL
+            url: Video URL (must have passed validate_url[_async])
             output_dir: Directory to save the file
             platform_id: Used for filename
             user_id: Optional user ID for per-user cookie lookup
 
+        Raises:
+            AssertionError: If url is not a ValidatedURL (caller bug)
+
         Returns:
             dict: {file_path, file_size}
         """
+        # Boundary: runtime guard. Caller must validate first.
+        assert isinstance(url, ValidatedURL), (
+            "YtdlpService.download_audio requires ValidatedURL — "
+            "call app.boundary.validate_url[_async] first"
+        )
         os.makedirs(output_dir, exist_ok=True)
 
         output_template = os.path.join(output_dir, "audio.%(ext)s")

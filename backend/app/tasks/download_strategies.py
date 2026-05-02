@@ -119,7 +119,13 @@ def _do_douyin_download(
                         f"with original URL for {platform_id}"
                     )
                     try:
+                        from app.boundary import validate_url
                         from app.services.ytdlp_service import YtdlpService
+
+                        # Boundary: SSRF guard. Original_url stored at parse
+                        # time was validated, but defensive re-check protects
+                        # against rows pre-dating boundary layer.
+                        validated_url = validate_url(original_url)
 
                         source_platform = media.get("source_platform", "douyin")
                         media_id = str(media["id"])
@@ -132,7 +138,7 @@ def _do_douyin_download(
 
                         ytdlp_result = run_async(
                             YtdlpService.download_video(
-                                original_url,
+                                validated_url,
                                 str(storage_dir),
                                 platform_id,
                                 progress_callback=on_progress,
@@ -437,16 +443,26 @@ def _do_ytdlp_download(
     user_agent: same UA as the parse phase (Douyin only — None for other
     platforms, which leaves yt-dlp's default behaviour unchanged).
     """
+    from app.boundary import URLBlockedError, validate_url
     from app.repositories.media_repository import MediaRepository
     from app.services.url_router import URLRouter
     from app.services.ytdlp_service import YtdlpService
 
     results = {"video": None, "music": None, "cover": None}
 
+    # Boundary: SSRF guard. URL is workflow-internal but defensively
+    # re-validated to protect against rows pre-dating boundary layer.
+    try:
+        validated_url = validate_url(url)
+    except URLBlockedError as e:
+        logger.warning(f"[Download/Exec] yt-dlp URL blocked by boundary: {e}")
+        results["video"] = "failed"
+        return results
+
     # Calculate stage progress ranges
     stages = calc_stage_ranges(download_video, download_cover)
 
-    detected_platform, _ = URLRouter.detect_platform(url)
+    detected_platform, _ = URLRouter.detect_platform(validated_url)
     repo = MediaRepository()
     media = run_async(repo.get_by_platform_id(platform_id))
     media_id = str(media["id"]) if media else platform_id  # fallback to platform_id
@@ -468,7 +484,7 @@ def _do_ytdlp_download(
 
         result = run_async(
             YtdlpService.download_video(
-                url,
+                validated_url,
                 str(storage_dir),
                 platform_id,
                 progress_callback=on_progress,
