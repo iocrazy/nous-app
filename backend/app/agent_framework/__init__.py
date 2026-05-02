@@ -20,6 +20,10 @@ from app.agent_framework.abort_controller import (
     RunAborted,
     race_until_abort,
 )
+from app.agent_framework.bounds import (
+    BoundsAdvertisement,
+    BoundsRegistry,
+)
 from app.agent_framework.cancel_watcher import watch_cancel_loop
 from app.agent_framework.commitments import (
     Commitment,
@@ -64,6 +68,7 @@ from app.agent_framework.model_health import (
     ModelHealth,
     ModelHealthRegistry,
 )
+from app.agent_framework.role import ProcessRole, role_from_env
 from app.agent_framework.workflow_timeout_policy import (
     DEFAULT_TIMEOUT_MINUTES,
     is_stuck,
@@ -85,6 +90,8 @@ from app.agent_framework.lifecycle_bus import (
 __all__ = [
     "AbortController",
     "AllKeysCooledDown",
+    "BoundsAdvertisement",
+    "BoundsRegistry",
     "Commitment",
     "CommitmentStatus",
     "ContextWindowError",
@@ -107,9 +114,11 @@ __all__ = [
     "ModelHealth",
     "ModelHealthRegistry",
     "Origin",
+    "ProcessRole",
     "RotatingAdapter",
     "RunAborted",
     "TriggerType",
+    "role_from_env",
     "cancel_workflow_subprocesses",
     "check_context_budget",
     "classify_lane",
