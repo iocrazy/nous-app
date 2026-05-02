@@ -200,6 +200,38 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to start SsrfProxy: {e}")
 
+    # Agent framework D10 primitives: per-process LifecycleBus + LaneQueue
+    # held on app.state for any code that wants to publish events / route
+    # work into a lane. Wiring callsites is per-feature follow-up.
+    try:
+        from app.agent_framework import LaneQueue, LifecycleBus
+
+        app.state.lifecycle_bus = LifecycleBus()
+        app.state.lane_queue = LaneQueue()
+        logger.info("Agent framework primitives ready (LifecycleBus + LaneQueue)")
+    except Exception as e:
+        logger.warning(f"Agent framework primitive setup failed: {e}")
+
+    # Event-loop-ready probe (D10-6): wait until the loop has settled
+    # after DBOS/seed/workforce init before we declare startup success.
+    # Avoids cold-start traffic hitting a still-loaded loop.
+    try:
+        from app.agent_framework import wait_for_loop_ready
+
+        ready = await wait_for_loop_ready(
+            threshold_ms=200,
+            consecutive_passes=2,
+            max_wait_seconds=10.0,
+        )
+        if ready:
+            logger.info("Event loop ready (drift settled)")
+        else:
+            logger.warning(
+                "Event loop did not settle within 10s — accepting traffic anyway"
+            )
+    except Exception as e:
+        logger.warning(f"Event-loop-ready probe failed: {e}")
+
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
     # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
