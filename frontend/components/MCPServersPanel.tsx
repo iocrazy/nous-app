@@ -27,24 +27,12 @@ import {
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from './Toast';
 import type { AILibraryMCPServer } from '../types';
-
-const NAME_RE = /^[A-Za-z0-9_]+$/;
-
-interface MCPServerFormValues {
-  name: string;
-  url: string;
-  bearer_token: string;
-  description: string;
-  enabled: boolean;
-}
-
-const EMPTY_FORM: MCPServerFormValues = {
-  name: '',
-  url: '',
-  bearer_token: '',
-  description: '',
-  enabled: true,
-};
+import {
+  EMPTY_MCP_FORM as EMPTY_FORM,
+  buildMCPServerUpdatePayload,
+  validateMCPServerForm,
+  type MCPServerFormValues,
+} from './MCPServersPanel.helpers';
 
 export const MCPServersPanel: React.FC = () => {
   const { addToast } = useToast();
@@ -96,17 +84,10 @@ export const MCPServersPanel: React.FC = () => {
     setForm(EMPTY_FORM);
   }, []);
 
-  const validate = useCallback((): string | null => {
-    if (creating) {
-      if (!form.name.trim()) return 'Name is required';
-      if (!NAME_RE.test(form.name))
-        return 'Name must be alphanumeric + underscore (no dots)';
-    }
-    if (!form.url.trim()) return 'URL is required';
-    if (!/^https?:\/\//.test(form.url))
-      return 'URL must start with http:// or https://';
-    return null;
-  }, [form, creating]);
+  const validate = useCallback(
+    (): string | null => validateMCPServerForm(form, creating),
+    [form, creating],
+  );
 
   const handleSubmit = useCallback(async () => {
     const err = validate();
@@ -126,15 +107,10 @@ export const MCPServersPanel: React.FC = () => {
         });
         addToast('MCP server added', 'success');
       } else if (editingId) {
-        const patch: Parameters<typeof aiLibraryService.updateMCPServer>[1] = {
-          url: form.url.trim(),
-          description: form.description.trim() || undefined,
-          enabled: form.enabled,
-        };
-        if (form.bearer_token.trim()) {
-          patch.bearer_token = form.bearer_token.trim();
-        }
-        await aiLibraryService.updateMCPServer(editingId, patch);
+        await aiLibraryService.updateMCPServer(
+          editingId,
+          buildMCPServerUpdatePayload(form),
+        );
         addToast('MCP server updated', 'success');
       }
       cancelForm();
@@ -170,17 +146,26 @@ export const MCPServersPanel: React.FC = () => {
 
   const handleToggleEnabled = useCallback(
     async (server: AILibraryMCPServer) => {
+      // L3: optimistic update — flip locally first so the UI doesn't
+      // freeze while the round-trip lands. Revert on failure.
+      const target = !server.enabled;
+      setItems((prev) =>
+        prev.map((s) => (s.id === server.id ? { ...s, enabled: target } : s)),
+      );
       try {
-        await aiLibraryService.updateMCPServer(server.id, {
-          enabled: !server.enabled,
-        });
-        await reload();
+        await aiLibraryService.updateMCPServer(server.id, { enabled: target });
       } catch (e) {
+        // Revert on failure
+        setItems((prev) =>
+          prev.map((s) =>
+            s.id === server.id ? { ...s, enabled: server.enabled } : s,
+          ),
+        );
         const msg = e instanceof Error ? e.message : String(e);
         addToast(`Toggle failed: ${msg}`, 'error');
       }
     },
-    [addToast, reload],
+    [addToast],
   );
 
   const showForm = creating || editingId !== null;

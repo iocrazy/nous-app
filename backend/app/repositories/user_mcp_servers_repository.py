@@ -4,6 +4,17 @@ CRUD on per-user MCP server registrations. Used by:
   - ai_library_chat_wiring: build MCPOutboundRegistry from enabled rows
     at chat start
   - admin / user UI: list / add / update / delete servers (follow-up)
+
+M3 SECURITY NOTE: this repo uses the service-role Supabase client which
+bypasses Row Level Security. The RLS policies in migration 194 are
+defense-in-depth only. The application layer is the actual access
+control boundary:
+  - list_for_user / get_by_id / get_by_id_for_user filter by user_id
+    in the query
+  - update / delete take an explicit owner_user_id parameter and add
+    .eq("user_id", owner) so an accidental call without the endpoint's
+    ownership check cannot cross-mutate
+The router endpoints layer additional ownership checks on top.
 """
 from __future__ import annotations
 
@@ -122,11 +133,16 @@ class UserMCPServersRepository:
         self,
         server_id: UUID,
         *,
+        owner_user_id: UUID,
         url: Optional[str] = None,
         bearer_token: Optional[str] = None,
         description: Optional[str] = None,
         enabled: Optional[bool] = None,
     ) -> bool:
+        """Update a server. ``owner_user_id`` is REQUIRED — the SQL
+        filter `.eq("user_id", owner)` ensures even an accidental call
+        without endpoint-layer ownership check cannot mutate another
+        user's row (M3 defense-in-depth)."""
         patch: dict = {}
         if url is not None:
             patch["url"] = url
@@ -144,6 +160,7 @@ class UserMCPServersRepository:
                 client.table(self.TABLE)
                 .update(patch)
                 .eq("id", str(server_id))
+                .eq("user_id", str(owner_user_id))   # M3: defensive filter
                 .execute()
             )
             return True
@@ -151,13 +168,17 @@ class UserMCPServersRepository:
             logger.warning(f"[UserMCPServersRepo] update failed: {exc}")
             return False
 
-    async def delete(self, server_id: UUID) -> bool:
+    async def delete(self, server_id: UUID, *, owner_user_id: UUID) -> bool:
+        """Delete a server. Same defensive owner_user_id filter as
+        update — accidental cross-user delete is impossible at the
+        SQL level even if the caller forgets the ownership check."""
         try:
             client = await self._client()
             await (
                 client.table(self.TABLE)
                 .delete()
                 .eq("id", str(server_id))
+                .eq("user_id", str(owner_user_id))   # M3: defensive filter
                 .execute()
             )
             return True
