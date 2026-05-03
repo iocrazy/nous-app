@@ -171,6 +171,13 @@ from app.agent_framework.prometheus_pusher import (
     from_env as prometheus_pusher_from_env,
 )
 from app.agent_framework.process_lifecycle import install_cleanup_handlers
+from app.agent_framework.multimodal import (
+    Attachment,
+    AttachmentKind,
+    build_user_message as build_multimodal_user_message,
+    flatten_to_text as flatten_multimodal_to_text,
+    sniff_supports_vision,
+)
 from app.agent_framework.db_pool_probe import (
     DbPoolCapacityReport,
     log_capacity_report as log_db_pool_capacity,
