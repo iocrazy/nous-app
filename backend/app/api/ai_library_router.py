@@ -1671,3 +1671,117 @@ async def admin_telemetry(
         "daily_trend": daily_trend,
         "failure_modes": failure_modes,
     }
+
+
+# ─── O4: User commitments listing ─────────────────────────────────────
+
+
+@router.get(
+    "/commitments",
+    summary="List the caller's agent commitments (followups)",
+)
+async def list_my_commitments(
+    auth: AuthDep,
+    status: Optional[str] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """Return commitments where ``user_id`` = authenticated caller.
+
+    Query params:
+      - status: optional 'pending' | 'fulfilled' | 'cancelled' | 'failed'
+                | 'expired'. Omit for all.
+      - limit:  1..200, default 100.
+    """
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+
+    from app.agent_framework.commitments import CommitmentStatus
+    from app.repositories.commitment_repository import CommitmentRepository
+
+    status_filter: Optional[CommitmentStatus] = None
+    if status:
+        try:
+            status_filter = CommitmentStatus(status)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid status; expected one of {[s.value for s in CommitmentStatus]}",
+            )
+
+    repo = CommitmentRepository()
+    items = await repo.list_for_user(
+        str(auth.user_id), status=status_filter, limit=limit
+    )
+    return {
+        "items": [
+            {
+                "id": c.id,
+                "agent_id": c.agent_id,
+                "session_id": c.session_id,
+                "description": c.description,
+                "trigger_type": c.trigger_type.value if c.trigger_type else None,
+                "trigger_at": c.trigger_at.isoformat() if c.trigger_at else None,
+                "trigger_event": c.trigger_event,
+                "status": c.status.value,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "fulfilled_at": (
+                    c.fulfilled_at.isoformat() if c.fulfilled_at else None
+                ),
+                "expires_at": c.expires_at.isoformat() if c.expires_at else None,
+            }
+            for c in items
+        ],
+        "count": len(items),
+    }
+
+
+@router.post(
+    "/commitments/{commitment_id}/fulfill",
+    summary="Mark a commitment fulfilled (user-initiated)",
+)
+async def fulfill_commitment(
+    commitment_id: int,
+    auth: AuthDep,
+) -> Dict[str, Any]:
+    """User says 'I took care of this' — marks the commitment fulfilled.
+
+    Ownership-checked: only the user who is named on the commitment row
+    can fulfill it; any other caller gets 404.
+    """
+    from app.repositories.commitment_repository import CommitmentRepository
+
+    repo = CommitmentRepository()
+    existing = await repo.get_by_id(commitment_id)
+    if not existing or existing.user_id != str(auth.user_id):
+        raise HTTPException(status_code=404, detail="commitment not found")
+
+    updated = await repo.mark_fulfilled(commitment_id, notes="user-initiated")
+    if not updated:
+        raise HTTPException(
+            status_code=409, detail="commitment already in terminal state"
+        )
+    return {"id": updated.id, "status": updated.status.value}
+
+
+@router.post(
+    "/commitments/{commitment_id}/cancel",
+    summary="Cancel a commitment (user-initiated)",
+)
+async def cancel_commitment(
+    commitment_id: int,
+    auth: AuthDep,
+) -> Dict[str, Any]:
+    """User dismisses a pending followup."""
+    from app.repositories.commitment_repository import CommitmentRepository
+
+    repo = CommitmentRepository()
+    existing = await repo.get_by_id(commitment_id)
+    if not existing or existing.user_id != str(auth.user_id):
+        raise HTTPException(status_code=404, detail="commitment not found")
+
+    updated = await repo.mark_cancelled(commitment_id, notes="user dismissed")
+    if not updated:
+        raise HTTPException(
+            status_code=409, detail="commitment already in terminal state"
+        )
+    return {"id": updated.id, "status": updated.status.value}

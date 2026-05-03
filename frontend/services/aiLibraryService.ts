@@ -18,6 +18,7 @@ import type {
   AgentRunDetail,
   AgentRunListResponse,
   AILibraryAgent,
+  AILibraryCommitment,
   AILibrarySkill,
   AILibrarySkillFile,
   ChatResponse,
@@ -397,6 +398,41 @@ export const aiLibraryService = {
    * row that backed this turn — usable to deep-link from the chat bubble
    * to the Runs tab). Returns a 409 if the agent is paused.
    */
+  /**
+   * O4: List the caller's commitments. Optional status filter
+   * ('pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired').
+   */
+  async listCommitments(options: {
+    status?: 'pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired';
+    limit?: number;
+  } = {}): Promise<{ items: AILibraryCommitment[]; count: number }> {
+    const params = new URLSearchParams();
+    if (options.status) params.set('status', options.status);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const qs = params.toString();
+    const resp = await fetch(
+      `${base()}/commitments${qs ? '?' + qs : ''}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  async fulfillCommitment(commitmentId: number): Promise<{ id: number; status: string }> {
+    const resp = await fetch(
+      `${base()}/commitments/${commitmentId}/fulfill`,
+      { method: 'POST', headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  async cancelCommitment(commitmentId: number): Promise<{ id: number; status: string }> {
+    const resp = await fetch(
+      `${base()}/commitments/${commitmentId}/cancel`,
+      { method: 'POST', headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
   async sendChatMessage(
     sessionId: string,
     content: string,

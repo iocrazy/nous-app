@@ -1257,6 +1257,21 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
+/** O4: AI Library commitment (followup) row, as returned by GET /commitments. */
+export interface AILibraryCommitment {
+  id: number;
+  agent_id: string;
+  session_id: string | null;
+  description: string;
+  trigger_type: 'time' | 'event' | 'next_session' | null;
+  trigger_at: string | null;
+  trigger_event: string | null;
+  status: 'pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired';
+  created_at: string | null;
+  fulfilled_at: string | null;
+  expires_at: string | null;
+}
+
 /**
  * One Skill / Delegate dispatch the LLM made during a chat turn.
  * Mirrors backend ``ChatToolCall``. Returned at the top level of
