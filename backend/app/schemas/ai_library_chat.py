@@ -87,6 +87,14 @@ class ChatRequest(BaseModel):
     comes from the server-side ai_messages rows."""
 
     content: str = Field(..., min_length=1)
+    # Phase M (M4): opt-in PlanMode. When set to 'prompt_user' the chat
+    # service runs the model in plan-only mode for this turn — emits
+    # a structured plan and waits for the user to reply approve/reject.
+    # Default 'auto' = original behavior. 'dry_run' emits plan only,
+    # never executes (good for what-if queries).
+    plan_mode: Optional[str] = Field(
+        default=None, description="auto / prompt_user / dry_run"
+    )
 
 
 class ChatToolCall(BaseModel):

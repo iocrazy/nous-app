@@ -282,8 +282,14 @@ class AILibraryChatService:
         *,
         user_id: UUID,
         content: str,
+        plan_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
+
+        Phase M (M4): when ``plan_mode='prompt_user'`` or 'dry_run', the
+        prompt composer prepends the PLAN_PROMPT instructing the LLM to
+        emit a structured plan instead of executing. The chat response
+        is the plan markdown; user replies approve/reject in next turn.
 
         Flow:
           1. Load session (404 if not owner)
@@ -360,19 +366,27 @@ class AILibraryChatService:
         # (Sprint 6.5 wire-up). Falls back to direct PromptComposer when
         # the registry isn't on app.state — keeps unit tests + scripts
         # that don't go through FastAPI lifespan working unchanged.
-        request_instructions = (
-            "You are in an interactive chat session with the user. "
-            "Respond conversationally. Use the Skill tool when a "
-            "bound skill is clearly applicable; otherwise answer "
-            "directly in natural language. "
-            "If <available_workers> lists a specialist agent that's "
-            "a clearly better fit for the request than you are "
-            "(e.g. summarize for transcript condensation, analyze "
-            "for visual analysis), call Delegate(agent_slug=..., "
-            "prompt=..., await=true) and weave the returned result "
-            "into your reply. Use Delegate only when the specialist "
-            "is a clear win — for general chat, just answer directly."
-        )
+        # Phase M (M4): if caller asked for plan mode, swap the entire
+        # request_instructions for the plan prompt template. The agent
+        # responds with structured JSON plan; user approves/rejects in
+        # next turn (no PlanMode flag → default execute behavior).
+        if plan_mode in ("prompt_user", "dry_run"):
+            from app.agent_framework.plan_mode import build_plan_prompt
+            request_instructions = build_plan_prompt()
+        else:
+            request_instructions = (
+                "You are in an interactive chat session with the user. "
+                "Respond conversationally. Use the Skill tool when a "
+                "bound skill is clearly applicable; otherwise answer "
+                "directly in natural language. "
+                "If <available_workers> lists a specialist agent that's "
+                "a clearly better fit for the request than you are "
+                "(e.g. summarize for transcript condensation, analyze "
+                "for visual analysis), call Delegate(agent_slug=..., "
+                "prompt=..., await=true) and weave the returned result "
+                "into your reply. Use Delegate only when the specialist "
+                "is a clear win — for general chat, just answer directly."
+            )
 
         # Wave G (G8): on the FIRST turn of a session, fire any
         # pending NEXT_SESSION commitments and inject reminders into

@@ -1466,7 +1466,12 @@ async def send_chat_message(
     """
     svc = AILibraryChatService()
     user_uuid = _coerce_user_uuid(auth.user_id)
-    result = await svc.chat(session_id, user_id=user_uuid, content=payload.content)
+    result = await svc.chat(
+        session_id,
+        user_id=user_uuid,
+        content=payload.content,
+        plan_mode=payload.plan_mode,
+    )
     return {
         "message": result["assistant_message"],
         "usage": result["usage"],
