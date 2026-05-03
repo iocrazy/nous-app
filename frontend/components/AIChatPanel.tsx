@@ -30,6 +30,7 @@ import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/MessageBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
 import { ChatInput } from './chat/ChatInput';
+import { CommitmentsPanel } from './CommitmentsPanel';
 import { EmptyState } from './chat/EmptyState';
 import { useToast } from './Toast';
 
@@ -359,6 +360,15 @@ export function AIChatPanel({
           </button>
         )}
       </div>
+
+      {/* O4: Pending followups — hidden when empty so it doesn't take
+          space on the common case */}
+      <CommitmentsPanel
+        status="pending"
+        limit={20}
+        className="max-h-48 overflow-hidden flex-shrink-0"
+        hideWhenEmpty
+      />
 
       {/* Session list */}
       <SessionList
