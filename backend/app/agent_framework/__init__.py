@@ -166,6 +166,16 @@ from app.agent_framework.plan_mode import (
 from app.agent_framework.lifecycle_bus_redis import RedisLifecycleBus
 from app.agent_framework.model_health_redis import RedisModelHealthRegistry
 from app.agent_framework.prometheus_exporter import render_prometheus
+from app.agent_framework.prometheus_pusher import (
+    PrometheusPusher,
+    from_env as prometheus_pusher_from_env,
+)
+from app.agent_framework.process_lifecycle import install_cleanup_handlers
+from app.agent_framework.db_pool_probe import (
+    DbPoolCapacityReport,
+    log_capacity_report as log_db_pool_capacity,
+    probe_db_pool_capacity,
+)
 from app.agent_framework.workflow_timeout_policy import (
     DEFAULT_TIMEOUT_MINUTES,
     is_stuck,
