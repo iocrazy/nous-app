@@ -1529,3 +1529,145 @@ async def send_chat_message_stream(
             "X-Accel-Buffering": "no",  # disable nginx buffering
         },
     )
+
+
+# ─── O2: Admin telemetry — system-wide rollup ─────────────────────────
+
+
+@router.get(
+    "/admin/telemetry",
+    summary="Admin-only system-wide agent telemetry snapshot",
+)
+async def admin_telemetry(
+    auth: AdminAuthDep,
+    days: int = 7,
+) -> Dict[str, Any]:
+    """Return a snapshot of agent_runs telemetry across ALL users for the
+    last N days (default 7, max 30).
+
+    Sections:
+      - overview: total runs, total tokens, total cost (cents),
+        success/fail/cancel rates
+      - top_agents: top 10 by run_count + cost
+      - top_users:  top 10 by run_count + cost (id only — admin enriches)
+      - daily_trend: per-day buckets {date, runs, cost_cents,
+        prompt_tokens, completion_tokens}
+      - status_breakdown: counts by status
+      - failure_modes: top error_codes for status='failed' rows
+
+    Admin-gated via AdminAuthDep — non-admin gets 403.
+    """
+    if days < 1 or days > 30:
+        raise HTTPException(status_code=400, detail="days must be 1..30")
+
+    from datetime import datetime as _dt, timedelta as _td
+
+    end = _dt.now(timezone.utc)
+    start = end - _td(days=days)
+
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("agent_runs")
+        .select(
+            "agent_id,user_id,status,prompt_tokens,completion_tokens,"
+            "total_tokens,cost_cents,started_at,error_code"
+        )
+        .gte("started_at", start.isoformat())
+        .lte("started_at", end.isoformat())
+        .order("started_at", desc=True)
+        .limit(20000)
+        .execute()
+    )
+    rows = result.data or []
+
+    # ---- overview rollup ----
+    n = len(rows)
+    total_prompt = sum(int(r.get("prompt_tokens") or 0) for r in rows)
+    total_completion = sum(int(r.get("completion_tokens") or 0) for r in rows)
+    total_cost = sum(float(r.get("cost_cents") or 0.0) for r in rows)
+    status_counts: Dict[str, int] = {}
+    for r in rows:
+        s = r.get("status") or "unknown"
+        status_counts[s] = status_counts.get(s, 0) + 1
+
+    # ---- per-agent + per-user buckets ----
+    per_agent: Dict[str, Dict[str, Any]] = {}
+    per_user: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        aid = r.get("agent_id") or "?"
+        uid = r.get("user_id") or "?"
+        a = per_agent.setdefault(
+            aid,
+            {"agent_id": aid, "run_count": 0, "cost_cents": 0.0, "total_tokens": 0},
+        )
+        a["run_count"] += 1
+        a["cost_cents"] += float(r.get("cost_cents") or 0.0)
+        a["total_tokens"] += int(r.get("total_tokens") or 0)
+
+        u = per_user.setdefault(
+            uid,
+            {"user_id": uid, "run_count": 0, "cost_cents": 0.0, "total_tokens": 0},
+        )
+        u["run_count"] += 1
+        u["cost_cents"] += float(r.get("cost_cents") or 0.0)
+        u["total_tokens"] += int(r.get("total_tokens") or 0)
+
+    top_agents = sorted(
+        per_agent.values(), key=lambda x: x["cost_cents"], reverse=True
+    )[:10]
+    top_users = sorted(
+        per_user.values(), key=lambda x: x["cost_cents"], reverse=True
+    )[:10]
+
+    # ---- daily trend ----
+    daily: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        ts = r.get("started_at") or ""
+        day = ts[:10] if ts else "unknown"
+        d = daily.setdefault(
+            day,
+            {
+                "date": day,
+                "runs": 0,
+                "cost_cents": 0.0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+            },
+        )
+        d["runs"] += 1
+        d["cost_cents"] += float(r.get("cost_cents") or 0.0)
+        d["prompt_tokens"] += int(r.get("prompt_tokens") or 0)
+        d["completion_tokens"] += int(r.get("completion_tokens") or 0)
+
+    daily_trend = sorted(daily.values(), key=lambda x: x["date"])
+
+    # ---- failure modes ----
+    failure_codes: Dict[str, int] = {}
+    for r in rows:
+        if r.get("status") == "failed":
+            code = r.get("error_code") or "unknown"
+            failure_codes[code] = failure_codes.get(code, 0) + 1
+    failure_modes = sorted(
+        ({"error_code": k, "count": v} for k, v in failure_codes.items()),
+        key=lambda x: x["count"],
+        reverse=True,
+    )[:10]
+
+    return {
+        "window_days": days,
+        "window_start": start.isoformat(),
+        "window_end": end.isoformat(),
+        "overview": {
+            "total_runs": n,
+            "total_prompt_tokens": total_prompt,
+            "total_completion_tokens": total_completion,
+            "total_cost_cents": round(total_cost, 4),
+            "unique_agents": len(per_agent),
+            "unique_users": len(per_user),
+        },
+        "status_breakdown": status_counts,
+        "top_agents": top_agents,
+        "top_users": top_users,
+        "daily_trend": daily_trend,
+        "failure_modes": failure_modes,
+    }
