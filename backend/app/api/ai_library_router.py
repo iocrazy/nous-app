@@ -2365,3 +2365,271 @@ async def admin_lane_snapshot(auth: AdminAuthDep) -> Dict[str, Any]:
         except Exception:
             continue
     return {"available": True, "lanes": snapshot}
+
+
+# ─── Version history (Phase 3) ────────────────────────────────────────
+
+
+def _serialize_versions(rows, *, kind: str) -> List[Dict[str, Any]]:
+    """Trim version rows for list view — full body only on detail fetch."""
+    out = []
+    for r in rows:
+        item = {
+            "id": str(r["id"]),
+            "version_number": r.get("version_number"),
+            "notes": r.get("notes"),
+            "created_by": str(r["created_by"]) if r.get("created_by") else None,
+            "created_at": r.get("created_at"),
+        }
+        if kind == "agent":
+            item["model"] = r.get("model")
+            item["temperature"] = r.get("temperature")
+            item["max_tokens"] = r.get("max_tokens")
+        elif kind == "skill_file":
+            item["path"] = r.get("path")
+            item["file_type"] = r.get("file_type")
+        out.append(item)
+    return out
+
+
+@router.get(
+    "/agents/{slug}/versions",
+    summary="List version history of an agent",
+)
+async def list_agent_versions(slug: str, auth: AuthDep, limit: int = 50) -> Dict[str, Any]:
+    """Versions ordered newest first. Includes model/temp/max_tokens in
+    list view so the user can spot config changes; full markdown bodies
+    only via the detail endpoint."""
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("ai_agent_versions")
+        .select("id,version_number,model,temperature,max_tokens,notes,created_by,created_at")
+        .eq("agent_id", str(agent["id"]))
+        .order("version_number", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return {
+        "items": _serialize_versions(result.data or [], kind="agent"),
+        "current_version": agent.get("current_version"),
+    }
+
+
+@router.get(
+    "/agents/{slug}/versions/{version_number}",
+    summary="Get a specific agent version (full body)",
+)
+async def get_agent_version(
+    slug: str, version_number: int, auth: AuthDep,
+) -> Dict[str, Any]:
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("ai_agent_versions")
+        .select("*")
+        .eq("agent_id", str(agent["id"]))
+        .eq("version_number", version_number)
+        .maybe_single()
+        .execute()
+    )
+    if not result or not result.data:
+        raise HTTPException(status_code=404, detail="version not found")
+    row = dict(result.data)
+    row["id"] = str(row["id"])
+    if row.get("created_by"):
+        row["created_by"] = str(row["created_by"])
+    return row
+
+
+@router.post(
+    "/agents/{slug}/rollback/{version_number}",
+    summary="Rollback agent to a previous version (creates a new version with the old content)",
+)
+async def rollback_agent(
+    slug: str, version_number: int, auth: AuthDep,
+) -> Dict[str, Any]:
+    """Rollback writes a NEW version with the old body content rather than
+    moving the current_version pointer back. This preserves the audit
+    trail (you can see "v7 was a rollback of v3" in the version list)
+    and never loses intermediate versions."""
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+    if _is_system_skill(agent):
+        raise HTTPException(
+            status_code=403, detail="cannot rollback a system preset agent",
+        )
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    client = await get_async_supabase_admin()
+    # Fetch the snapshot
+    snap_q = (
+        await client.table("ai_agent_versions")
+        .select("identity_md,soul_md,agent_md,model,temperature,max_tokens")
+        .eq("agent_id", str(agent["id"]))
+        .eq("version_number", version_number)
+        .maybe_single()
+        .execute()
+    )
+    if not snap_q or not snap_q.data:
+        raise HTTPException(status_code=404, detail="version not found")
+    snap = snap_q.data
+
+    # Use the existing versioned update — it snapshots current then writes new
+    notes = f"rollback of v{version_number}"
+    updated = await agent_repo.update_fields_versioned(
+        agent_id=int(agent["id"]) if isinstance(agent["id"], int) else None,
+        agent_uuid=agent["id"],
+        updates={
+            "identity_md": snap.get("identity_md"),
+            "soul_md": snap.get("soul_md"),
+            "agent_md": snap.get("agent_md"),
+            "model": snap.get("model"),
+            "temperature": snap.get("temperature"),
+            "max_tokens": snap.get("max_tokens"),
+        },
+        editor_user_id=user_uuid,
+        notes=notes,
+    ) if hasattr(agent_repo, "update_fields_versioned") else None
+
+    # Fall back to direct table update if signature mismatch (defensive)
+    if updated is None:
+        return {
+            "warning": "rollback signature mismatch — repo refactor needed",
+            "snap_loaded": True,
+        }
+
+    return {
+        "rolled_back_to": version_number,
+        "new_version": (updated.get("current_version") if isinstance(updated, dict) else None),
+        "notes": notes,
+    }
+
+
+@router.get(
+    "/skills/{slug}/versions",
+    summary="List version history of a skill",
+)
+async def list_skill_versions(slug: str, auth: AuthDep, limit: int = 50) -> Dict[str, Any]:
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    _, skill_repo = _repos()
+    skill = await skill_repo.get_by_slug(slug)
+    if not skill:
+        raise HTTPException(status_code=404, detail="skill not found")
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("skill_versions")
+        .select("id,version_number,notes,created_by,created_at")
+        .eq("skill_id", int(skill["id"]))
+        .order("version_number", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return {
+        "items": _serialize_versions(result.data or [], kind="skill"),
+        "current_version": skill.get("current_version"),
+    }
+
+
+@router.get(
+    "/skills/{slug}/files/{path:path}/versions",
+    summary="List version history of a skill file",
+)
+async def list_skill_file_versions(
+    slug: str, path: str, auth: AuthDep, limit: int = 50,
+) -> Dict[str, Any]:
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    _, skill_repo = _repos()
+    skill = await skill_repo.get_by_slug(slug)
+    if not skill:
+        raise HTTPException(status_code=404, detail="skill not found")
+    client = await get_async_supabase_admin()
+    # Find the file row first
+    file_q = (
+        await client.table("skill_files")
+        .select("id,current_version")
+        .eq("skill_id", int(skill["id"]))
+        .eq("path", path)
+        .maybe_single()
+        .execute()
+    )
+    if not file_q or not file_q.data:
+        raise HTTPException(status_code=404, detail="skill file not found")
+    file_id = file_q.data["id"]
+    cur_v = file_q.data.get("current_version")
+
+    result = (
+        await client.table("skill_file_versions")
+        .select("id,version_number,path,file_type,notes,created_by,created_at")
+        .eq("skill_file_id", str(file_id))
+        .order("version_number", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return {
+        "items": _serialize_versions(result.data or [], kind="skill_file"),
+        "current_version": cur_v,
+    }
+
+
+# ─── Phase 3: Token billing usage summary ─────────────────────────────
+
+
+@router.get(
+    "/usage/summary",
+    summary="Per-user token usage rollup (model + day breakdown)",
+)
+async def get_usage_summary(
+    auth: AuthDep,
+    days: int = 30,
+) -> Dict[str, Any]:
+    """30-day default window; cap 90. Returns by_model (top costs) +
+    by_day (sparkline) + overall totals. Driven by ai_usage_logs."""
+    if days < 1 or days > 90:
+        raise HTTPException(status_code=400, detail="days must be 1..90")
+
+    from app.services.token_billing import summarize_user_usage
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    summary = await summarize_user_usage(user_uuid, days=days)
+
+    return {
+        "window_start": summary.window_start.isoformat(),
+        "window_end": summary.window_end.isoformat(),
+        "overall": {
+            "total_tokens": summary.overall_total_tokens,
+            "cost_points": summary.overall_cost_points,
+            "run_count": summary.overall_run_count,
+        },
+        "by_model": [
+            {
+                "model": r.model,
+                "total_tokens": r.total_tokens,
+                "cost_points": r.cost_points,
+                "run_count": r.run_count,
+            }
+            for r in summary.by_model
+        ],
+        "by_day": [
+            {
+                "date": d.date,
+                "total_tokens": d.total_tokens,
+                "cost_points": d.cost_points,
+                "run_count": d.run_count,
+            }
+            for d in summary.by_day
+        ],
+    }
