@@ -19,6 +19,7 @@ import type {
   AgentRunListResponse,
   AILibraryAgent,
   AILibraryCommitment,
+  AILibraryMemory,
   AILibrarySkill,
   AILibrarySkillFile,
   ChatResponse,
@@ -431,6 +432,47 @@ export const aiLibraryService = {
       { method: 'POST', headers: await getAuthHeaders() },
     );
     return handle(resp);
+  },
+
+  /**
+   * O5: List the caller's memories for the visualization page.
+   */
+  async listMemories(options: {
+    agent_slug?: string;
+    status?: 'active' | 'archived' | 'superseded';
+    kind?: 'declarative' | 'procedural' | 'episodic';
+    limit?: number;
+  } = {}): Promise<{
+    items: AILibraryMemory[];
+    count: number;
+    stats: {
+      by_kind: Record<string, number>;
+      by_status: Record<string, number>;
+      by_agent: Record<string, number>;
+    };
+  }> {
+    const params = new URLSearchParams();
+    if (options.agent_slug) params.set('agent_slug', options.agent_slug);
+    if (options.status) params.set('status', options.status);
+    if (options.kind) params.set('kind', options.kind);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const qs = params.toString();
+    const resp = await fetch(
+      `${base()}/memories${qs ? '?' + qs : ''}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  async archiveMemory(memoryId: string): Promise<void> {
+    const resp = await fetch(
+      `${base()}/memories/${encodeURIComponent(memoryId)}`,
+      { method: 'DELETE', headers: await getAuthHeaders() },
+    );
+    if (!resp.ok && resp.status !== 204) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
   },
 
   async sendChatMessage(

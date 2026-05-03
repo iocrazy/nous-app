@@ -1785,3 +1785,108 @@ async def cancel_commitment(
             status_code=409, detail="commitment already in terminal state"
         )
     return {"id": updated.id, "status": updated.status.value}
+
+
+# ─── O5: User memory listing (visualization page) ─────────────────────
+
+
+@router.get(
+    "/memories",
+    summary="List the caller's agent memories (for visualization page)",
+)
+async def list_my_memories(
+    auth: AuthDep,
+    agent_slug: Optional[str] = None,
+    status: Optional[str] = None,
+    kind: Optional[str] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """Return memories visible to the calling user.
+
+    Filters:
+      - agent_slug: limit to one agent (else all agents user has touched)
+      - status: 'active' / 'archived' / 'superseded'
+      - kind:   'declarative' / 'procedural' / 'episodic'
+      - limit:  1..500, default 100
+    """
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be 1..500")
+
+    client = await get_async_supabase_admin()
+    q = (
+        client.table("agent_memories")
+        .select(
+            "id,agent_id,user_id,scope,summary,when_to_use,status,kind,"
+            "thread_id,session_id,extracted_from,reinforce_count,"
+            "last_reinforced_at,decay_score,created_at,updated_at"
+        )
+        .eq("user_id", str(auth.user_id))
+        .order("updated_at", desc=True)
+        .limit(limit)
+    )
+    if status:
+        q = q.eq("status", status)
+    if kind:
+        q = q.eq("kind", kind)
+    if agent_slug:
+        # Resolve agent_id from slug
+        agent_repo = AgentRepository()
+        agent = await agent_repo.get_by_slug(agent_slug)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"agent slug not found: {agent_slug}")
+        q = q.eq("agent_id", str(agent["id"]))
+
+    result = await q.execute()
+    rows = result.data or []
+
+    # Aggregate stats
+    by_kind: Dict[str, int] = {}
+    by_status: Dict[str, int] = {}
+    by_agent: Dict[str, int] = {}
+    for r in rows:
+        k = r.get("kind") or "unknown"
+        s = r.get("status") or "unknown"
+        a = r.get("agent_id") or "unknown"
+        by_kind[k] = by_kind.get(k, 0) + 1
+        by_status[s] = by_status.get(s, 0) + 1
+        by_agent[a] = by_agent.get(a, 0) + 1
+
+    return {
+        "items": rows,
+        "count": len(rows),
+        "stats": {
+            "by_kind": by_kind,
+            "by_status": by_status,
+            "by_agent": by_agent,
+        },
+    }
+
+
+@router.delete(
+    "/memories/{memory_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Archive a memory (user-initiated soft delete)",
+)
+async def archive_memory(memory_id: UUID, auth: AuthDep) -> None:
+    """Mark a memory archived. Only the user who owns it (user_id match)
+    can archive; archived memories are excluded from recall but kept
+    for audit/replay (R3 snapshot lineage)."""
+    client = await get_async_supabase_admin()
+    existing = (
+        await client.table("agent_memories")
+        .select("user_id")
+        .eq("id", str(memory_id))
+        .maybe_single()
+        .execute()
+    )
+    if not existing or not existing.data:
+        raise HTTPException(status_code=404, detail="memory not found")
+    if existing.data.get("user_id") != str(auth.user_id):
+        raise HTTPException(status_code=404, detail="memory not found")
+
+    await (
+        client.table("agent_memories")
+        .update({"status": "archived"})
+        .eq("id", str(memory_id))
+        .execute()
+    )

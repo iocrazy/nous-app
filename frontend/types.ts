@@ -1257,6 +1257,26 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
+/** O5: AI Library memory row, as returned by GET /memories. */
+export interface AILibraryMemory {
+  id: string;
+  agent_id: string;
+  user_id: string | null;
+  scope: string;
+  summary: string;
+  when_to_use: string | null;
+  status: 'active' | 'archived' | 'superseded';
+  kind: 'declarative' | 'procedural' | 'episodic' | null;
+  thread_id: string | null;
+  session_id: string | null;
+  extracted_from: string | null;
+  reinforce_count: number;
+  last_reinforced_at: string | null;
+  decay_score: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 /** O4: AI Library commitment (followup) row, as returned by GET /commitments. */
 export interface AILibraryCommitment {
   id: number;
