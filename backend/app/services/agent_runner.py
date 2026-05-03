@@ -69,6 +69,75 @@ class AgentRunner:
         # gets useful feedback instead of silent skip behaviour.
         self.delegate_tool = delegate_tool
 
+    async def stream_turn(
+        self,
+        composed: ComposedSystemPrompt,
+        user_messages: list[dict],
+        *,
+        recorder: Optional[RunRecorder] = None,
+        abort: Optional["AbortController"] = None,
+    ):
+        """Wave H (B): incremental streaming variant of run_turn.
+
+        Yields StreamChunk instances as the model emits them. Falls back
+        to a single buffered chunk when the adapter doesn't implement
+        stream(). The caller MUST consume the generator fully — pending
+        on it mid-iteration leaks the underlying httpx connection.
+
+        Limitations of this initial implementation:
+          - Text-only path. If the model emits tool_calls during stream,
+            we collect the deltas but DO NOT execute them mid-stream;
+            the caller can fall back to run_turn() for tool-using turns.
+          - Per-turn output budget (Wave 5c C2 / G4) still applies via
+            composed.max_tokens.
+          - AbortController interrupts AT chunk boundaries (not mid-byte
+            from upstream — httpx + asyncio cancel will get there next
+            yield point).
+
+        Usage:
+            async for chunk in runner.stream_turn(composed, msgs):
+                if chunk.delta_text: send_to_user(chunk.delta_text)
+                if chunk.finish_reason: break
+        """
+        from app.agent_framework import RunAborted
+        from app.services.ai_adapters.base import StreamChunk, StreamingNotSupported
+
+        stream_method = getattr(self.adapter, "stream", None)
+        if stream_method is None:
+            # Adapter doesn't support streaming → emit one buffered chunk
+            resp = await self.adapter.call(composed, user_messages)
+            msg = resp["choices"][0]["message"]
+            yield StreamChunk(
+                delta_text=msg.get("content") or "",
+                finish_reason=resp["choices"][0].get("finish_reason") or "stop",
+                usage=resp.get("usage"),
+            )
+            return
+
+        try:
+            async for chunk in stream_method(composed, user_messages):
+                if abort is not None and abort.is_aborted():
+                    raise RunAborted("user cancel mid-stream")
+                yield chunk
+                if chunk.finish_reason:
+                    if recorder is not None and chunk.usage:
+                        recorder.record_usage(
+                            prompt_tokens=int(chunk.usage.get("prompt_tokens") or 0),
+                            completion_tokens=int(
+                                chunk.usage.get("completion_tokens") or 0
+                            ),
+                        )
+                    break
+        except StreamingNotSupported:
+            # Provider exposed stream() but raised at runtime → fall back
+            resp = await self.adapter.call(composed, user_messages)
+            msg = resp["choices"][0]["message"]
+            yield StreamChunk(
+                delta_text=msg.get("content") or "",
+                finish_reason=resp["choices"][0].get("finish_reason") or "stop",
+                usage=resp.get("usage"),
+            )
+
     async def run_turn(
         self,
         composed: ComposedSystemPrompt,
