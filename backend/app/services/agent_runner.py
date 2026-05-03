@@ -221,6 +221,25 @@ class AgentRunner:
         # P1: per-run loop guard same as run_turn
         loop_guard = ToolCallLoopGuard(repeat_threshold=3, window=5)
 
+        # G3: discover MCP tools once + augment composed.tools (mirrors
+        # run_turn's logic). Failures isolated — discovery error skips
+        # MCP for this turn but the stream proceeds.
+        mcp_tool_names: set[str] = set()
+        if self.mcp_registry is not None:
+            try:
+                qualified = await self.mcp_registry.all_tools()
+                if qualified:
+                    extra_tools = _mcp_tools_to_openai_format(qualified)
+                    composed = composed.model_copy(update={
+                        "tools": list(composed.tools or []) + extra_tools,
+                    })
+                    mcp_tool_names = {qt.qualified_name for qt in qualified}
+                    inc_metric("mcp_tools_injected", by=len(extra_tools))
+            except Exception as exc:
+                logger.warning(
+                    f"[stream_turn] MCP tool discovery failed (non-fatal): {exc}"
+                )
+
         messages = list(user_messages)
         iteration = 0
         MAX_STREAM_ITERATIONS = 10
@@ -300,7 +319,11 @@ class AgentRunner:
             for call in tool_calls_to_run:
                 fn = call.get("function") or {}
                 tool_name = fn.get("name", "")
-                if tool_name not in SUPPORTED_TOOLS:
+                # G3: accept MCP tools alongside built-in Skill / Delegate
+                is_mcp = tool_name in mcp_tool_names or _is_mcp_tool_name(
+                    tool_name, self.mcp_registry,
+                )
+                if not is_mcp and tool_name not in SUPPORTED_TOOLS:
                     continue
                 try:
                     args = _json.loads(fn.get("arguments") or "{}")
@@ -308,8 +331,11 @@ class AgentRunner:
                     args = {}
 
                 # Yield synthetic UI hint
+                hint_label = (
+                    args.get("skill") or "" if tool_name == "Skill" else ""
+                )
                 yield StreamChunk(
-                    delta_text=f"\n\n→ Running {tool_name}({args.get('skill', '')})...\n",
+                    delta_text=f"\n\n→ Running {tool_name}({hint_label})...\n",
                 )
 
                 try:
@@ -323,6 +349,21 @@ class AgentRunner:
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
                     result = await self.skill_tool.execute(args)
+                elif is_mcp:
+                    # G3: route to outbound MCP server. Mirrors run_turn
+                    # error handling — transport errors → tool result
+                    # dict, not raise.
+                    try:
+                        result = await self.mcp_registry.call(tool_name, args)
+                        inc_metric("mcp_tool_call")
+                        if isinstance(result, dict) and result.get("isError"):
+                            inc_metric("mcp_tool_call_error")
+                    except Exception as exc:
+                        inc_metric("mcp_tool_call_transport_error")
+                        result = {
+                            "error": f"MCP transport failure: {exc}",
+                            "tool": tool_name,
+                        }
                 else:  # Delegate
                     if self.delegate_tool is None:
                         result = {"error": "Delegate tool not configured"}
