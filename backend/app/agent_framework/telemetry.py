@@ -63,6 +63,11 @@ COUNTER_NAMES: tuple[str, ...] = (
     # Link injection
     "link_injection_fetched",
     "link_injection_failed",
+    # Phase L (L1): tool result cache
+    "tool_cache_hit",
+    # Phase L (L2): agent todo
+    "agent_todo_replaced",
+    "agent_todo_completed",
 )
 
 

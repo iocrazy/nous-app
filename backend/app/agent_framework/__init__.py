@@ -152,6 +152,17 @@ from app.agent_framework.agent_todo import (
     TodoStatus,
     TodoValidationError,
 )
+from app.agent_framework.plan_mode import (
+    ApprovalDecision,
+    PlanMode,
+    PlanStep,
+    PlanValidationError,
+    ProposedPlan,
+    build_plan_prompt,
+    parse_approval,
+    parse_plan_response,
+    render_plan_for_user,
+)
 from app.agent_framework.lifecycle_bus_redis import RedisLifecycleBus
 from app.agent_framework.model_health_redis import RedisModelHealthRegistry
 from app.agent_framework.prometheus_exporter import render_prometheus

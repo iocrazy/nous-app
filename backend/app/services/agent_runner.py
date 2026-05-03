@@ -190,9 +190,19 @@ class AgentRunner:
         # called >= N times in last M calls" and warns the LLM mid-run
         # rather than letting it burn the iteration budget on a stuck
         # repeat. Per-instance state — different runs are independent.
-        from app.agent_framework import ToolCallLoopGuard
+        from app.agent_framework import ToolCallLoopGuard, ToolResultCache
         loop_guard = ToolCallLoopGuard(repeat_threshold=3, window=5)
         loop_warning_already_injected = False
+        # Phase L (L1): per-run tool result cache. Skill must opt in via
+        # idempotent flag in skill_manifest entry. Each run gets its own
+        # cache so stale data can't leak across users / sessions.
+        tool_cache = ToolResultCache()
+        # Build a quick lookup of which skill slugs are idempotent
+        idempotent_slugs = {
+            s.get("slug")
+            for s in (composed.skill_manifest or [])
+            if s.get("idempotent") is True and s.get("slug")
+        }
 
         # Step A milestone: trace each Skill / Delegate dispatch made
         # during this turn. The chat service surfaces this list so the
@@ -327,10 +337,26 @@ class AgentRunner:
                         args = pre_result.modified_args
 
                 # ── Tool dispatch ──────────────────────────────────────────
+                # Phase L (L1): cache check — only for idempotent skills.
+                cache_key: Optional[str] = None
+                cached_result: Optional[dict] = None
                 if tool_name == "Skill":
+                    skill_slug = args.get("skill")
+                    if skill_slug and skill_slug in idempotent_slugs:
+                        cache_key = ToolResultCache.key(tool_name, args)
+                        cached_result = tool_cache.get(cache_key)
+
+                if cached_result is not None:
+                    result = cached_result
+                    from app.agent_framework._metrics_helper import inc_metric
+                    inc_metric("tool_cache_hit")
+                elif tool_name == "Skill":
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
                     result = await self.skill_tool.execute(args)
+                    # Cache result if this skill is idempotent
+                    if cache_key is not None and isinstance(result, dict) and not result.get("error"):
+                        tool_cache.put(cache_key, result)
                 else:  # tool_name == "Delegate"
                     if self.delegate_tool is None:
                         result = {

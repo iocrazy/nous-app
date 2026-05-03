@@ -50,6 +50,9 @@ _HELP: dict[str, str] = {
     "streaming_aborted_mid": "Streaming turns aborted mid-stream",
     "link_injection_fetched": "URLs successfully fetched by link injection",
     "link_injection_failed": "URLs link injection failed to fetch",
+    "tool_cache_hit": "Tool dispatches served from idempotent-skill result cache",
+    "agent_todo_replaced": "Times agent rewrote its internal todo list",
+    "agent_todo_completed": "Todo items marked completed",
 }
 
 
