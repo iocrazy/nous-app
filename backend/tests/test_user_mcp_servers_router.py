@@ -198,6 +198,10 @@ async def test_update_returns_fresh_row():
         out = await router_module.update_mcp_server(row_id, payload, auth)
 
     assert out["url"] == "https://new.com"
+    # M3: owner_user_id must be passed to repo.update
+    fake_repo.update.assert_awaited_once()
+    _, kwargs = fake_repo.update.call_args
+    assert kwargs["owner_user_id"] == user_id
 
 
 @pytest.mark.unit
@@ -223,3 +227,89 @@ async def test_delete_404s_when_not_owner():
         assert exc_info.value.status_code == 404
     # The actual delete must NOT have been called
     fake_repo.delete.assert_not_called()
+
+
+# ─── M3: defensive owner_user_id filter at repo level ───────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_repo_delete_includes_owner_user_id_filter():
+    """M3: even when called directly (bypassing endpoint ownership check)
+    the SQL filter on user_id ensures another user's row stays put."""
+    from app.repositories.user_mcp_servers_repository import (
+        UserMCPServersRepository,
+    )
+
+    captured_filters: list[tuple[str, str]] = []
+
+    class _FakeQuery:
+        def __init__(self):
+            self.kind = None
+
+        def delete(self):
+            self.kind = "delete"
+            return self
+
+        def update(self, _patch):
+            self.kind = "update"
+            return self
+
+        def eq(self, col, val):
+            captured_filters.append((col, val))
+            return self
+
+        async def execute(self):
+            return MagicMock(data=[])
+
+    fake_client = MagicMock()
+    fake_client.table = MagicMock(return_value=_FakeQuery())
+
+    repo = UserMCPServersRepository()
+    repo._client = AsyncMock(return_value=fake_client)
+
+    server_id = uuid4()
+    owner = uuid4()
+
+    await repo.delete(server_id, owner_user_id=owner)
+    # Must have BOTH filters applied
+    cols = [c for c, _ in captured_filters]
+    assert "id" in cols
+    assert "user_id" in cols
+    user_filter_value = next(v for c, v in captured_filters if c == "user_id")
+    assert user_filter_value == str(owner)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_repo_update_includes_owner_user_id_filter():
+    from app.repositories.user_mcp_servers_repository import (
+        UserMCPServersRepository,
+    )
+
+    captured_filters: list[tuple[str, str]] = []
+
+    class _FakeQuery:
+        def update(self, _patch):
+            return self
+
+        def eq(self, col, val):
+            captured_filters.append((col, val))
+            return self
+
+        async def execute(self):
+            return MagicMock(data=[])
+
+    fake_client = MagicMock()
+    fake_client.table = MagicMock(return_value=_FakeQuery())
+
+    repo = UserMCPServersRepository()
+    repo._client = AsyncMock(return_value=fake_client)
+
+    server_id = uuid4()
+    owner = uuid4()
+
+    await repo.update(server_id, owner_user_id=owner, enabled=False)
+    cols = [c for c, _ in captured_filters]
+    assert "id" in cols
+    assert "user_id" in cols

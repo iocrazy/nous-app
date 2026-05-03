@@ -1975,12 +1975,14 @@ async def update_mcp_server(
     from app.repositories.user_mcp_servers_repository import (
         UserMCPServersRepository,
     )
+    user_uuid = _coerce_user_uuid(auth.user_id)
     repo = UserMCPServersRepository()
     existing = await repo.get_by_id(server_id)
-    if not existing or existing.user_id != _coerce_user_uuid(auth.user_id):
+    if not existing or existing.user_id != user_uuid:
         raise HTTPException(status_code=404, detail="MCP server not found")
     ok = await repo.update(
         server_id,
+        owner_user_id=user_uuid,
         url=payload.url,
         bearer_token=payload.bearer_token,
         description=payload.description,
@@ -1999,11 +2001,12 @@ async def delete_mcp_server(server_id: UUID, auth: AuthDep) -> None:
     from app.repositories.user_mcp_servers_repository import (
         UserMCPServersRepository,
     )
+    user_uuid = _coerce_user_uuid(auth.user_id)
     repo = UserMCPServersRepository()
     existing = await repo.get_by_id(server_id)
-    if not existing or existing.user_id != _coerce_user_uuid(auth.user_id):
+    if not existing or existing.user_id != user_uuid:
         raise HTTPException(status_code=404, detail="MCP server not found")
-    await repo.delete(server_id)
+    await repo.delete(server_id, owner_user_id=user_uuid)
 
 
 # ─── B: Chat attachment upload (temp storage for one-off chat use) ────

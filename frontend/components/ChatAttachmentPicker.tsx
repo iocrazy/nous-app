@@ -13,6 +13,12 @@ import React, { useCallback, useRef, useState } from 'react';
 import { Paperclip, X, Image as ImageIcon, Film, FileText, Loader2 } from 'lucide-react';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from './Toast';
+import {
+  ACCEPT_ATTR,
+  MAX_FILES_AT_ONCE,
+  formatBytes as _formatBytes,
+  validateFileBatch,
+} from './ChatAttachmentPicker.helpers';
 
 export interface StagedAttachment {
   kind: 'image' | 'video' | 'pdf';
@@ -24,10 +30,6 @@ export interface StagedAttachment {
   preview_data_url?: string;
 }
 
-const ACCEPT_ATTR = '.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp4,.mov,.webm,.mkv,.avi,.pdf';
-const MAX_FILES_AT_ONCE = 4;
-const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
-
 interface ChatAttachmentPickerProps {
   attachments: StagedAttachment[];
   onChange: (next: StagedAttachment[]) => void;
@@ -38,12 +40,6 @@ function _kindIcon(kind: StagedAttachment['kind']): React.ReactNode {
   if (kind === 'image') return <ImageIcon className="w-3 h-3" />;
   if (kind === 'video') return <Film className="w-3 h-3" />;
   return <FileText className="w-3 h-3" />;
-}
-
-function _formatBytes(n: number): string {
-  if (n < 1024) return `${n}B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)}KB`;
-  return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
 async function _readAsDataUrl(file: File): Promise<string> {
@@ -74,14 +70,10 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
       const files = Array.from(fileList).slice(0, MAX_FILES_AT_ONCE);
 
       // Pre-validate sizes
-      for (const f of files) {
-        if (f.size > MAX_FILE_SIZE_BYTES) {
-          addToast(
-            `${f.name} is too large (${_formatBytes(f.size)} > 50MB)`,
-            'error',
-          );
-          return;
-        }
+      const err = validateFileBatch(files);
+      if (err) {
+        addToast(err, 'error');
+        return;
       }
 
       setUploading(true);
