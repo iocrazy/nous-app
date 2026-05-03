@@ -40,6 +40,13 @@ jobs:
       - name: Build (includes TypeScript check)
         run: npm run build
 
+      # Phase S (S1): run vitest suite. Currently 8+ tests in
+      # services/aiLibraryService.test.ts (O1) plus existing component
+      # tests. Non-blocking until legacy test failures cleared.
+      - name: Vitest unit tests
+        run: npx vitest run --reporter=default
+        continue-on-error: true
+
   backend:
     name: Backend Lint & Deps
     runs-on: ubuntu-latest
