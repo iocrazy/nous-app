@@ -92,6 +92,25 @@ export function AIChatPanel({
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  // O3: plan-mode toggle. 'auto' = normal execute; 'prompt_user' = LLM
+  // emits a plan first; 'dry_run' = plan without ever executing.
+  // Persisted in localStorage so the user's choice survives reloads.
+  const [planMode, setPlanMode] = useState<'auto' | 'prompt_user' | 'dry_run'>(
+    () => {
+      try {
+        const v = localStorage.getItem('ai_chat_plan_mode');
+        if (v === 'auto' || v === 'prompt_user' || v === 'dry_run') return v;
+      } catch { /* ignore */ }
+      return 'auto';
+    },
+  );
+  const handlePlanModeChange = useCallback(
+    (next: 'auto' | 'prompt_user' | 'dry_run') => {
+      setPlanMode(next);
+      try { localStorage.setItem('ai_chat_plan_mode', next); } catch { /* ignore */ }
+    },
+    [],
+  );
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -249,7 +268,10 @@ export function AIChatPanel({
       setMessages((prev) => [...prev, tempUser]);
 
       try {
-        await aiLibraryService.sendChatMessage(activeSessionId, text);
+        // O3: pass plan_mode only when non-default. Backend swaps in
+        // plan-prompt instructions for prompt_user / dry_run.
+        const opts = planMode !== 'auto' ? { plan_mode: planMode } : undefined;
+        await aiLibraryService.sendChatMessage(activeSessionId, text, opts);
         // Refetch full history so IDs + timestamps are server-authoritative.
         await loadSessionMessages(activeSessionId);
       } catch (err) {
@@ -390,6 +412,39 @@ export function AIChatPanel({
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* O3: PlanMode toggle bar */}
+      {activeSessionId && selectedAgentSlug && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 text-xs text-zinc-400 bg-zinc-900/50">
+          <span className="font-medium text-zinc-500">Mode:</span>
+          {(['auto', 'prompt_user', 'dry_run'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => handlePlanModeChange(m)}
+              className={`px-2 py-0.5 rounded transition-colors ${
+                planMode === m
+                  ? 'bg-blue-600 text-white'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+              }`}
+              title={
+                m === 'auto'
+                  ? 'Execute directly (default)'
+                  : m === 'prompt_user'
+                    ? 'Show plan first; user approves before execution'
+                    : 'Plan only — never execute side effects'
+              }
+            >
+              {m === 'auto' ? 'Execute' : m === 'prompt_user' ? 'Plan First' : 'Dry Run'}
+            </button>
+          ))}
+          {planMode !== 'auto' && (
+            <span className="ml-auto text-amber-400 text-[10px] uppercase tracking-wide">
+              ⚠ {planMode === 'dry_run' ? 'No side effects' : 'Awaiting plan'}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Chat input */}
       <ChatInput
