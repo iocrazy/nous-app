@@ -19,6 +19,7 @@ from typing import Callable, Coroutine, List, Optional, Tuple
 
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
 from app.repositories.resources_repository import ResourcesRepository
 
@@ -102,6 +103,7 @@ class TranscodeService:
                 "-encoders",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, _ = await proc.communicate()
             return encoder_name in stdout.decode()
@@ -500,6 +502,7 @@ class TranscodeService:
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -529,6 +532,7 @@ class TranscodeService:
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -553,6 +557,7 @@ class TranscodeService:
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -583,6 +588,7 @@ class TranscodeService:
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -749,6 +755,7 @@ class TranscodeService:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
 
             # Read stderr incrementally to parse ffmpeg progress
@@ -839,6 +846,7 @@ class TranscodeService:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             _, stderr = await proc.communicate()
 

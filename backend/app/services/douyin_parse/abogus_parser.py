@@ -28,6 +28,7 @@ from urllib.parse import urlencode
 import httpx
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.boundary import safe_async_client
 
 SignEngine = Literal["python", "node"]
@@ -200,6 +201,7 @@ class ABogusDouyinParser:
             timeout=cls.SIGN_TIMEOUT,
             check=False,
             env={**os.environ, "DOUYIN_UA": ua},
+            **safe_popen_kwargs(),
         )
         if completed.returncode != 0:
             raise RuntimeError(

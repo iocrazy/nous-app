@@ -16,13 +16,15 @@ Usage at spawn site:
     from app.agent_framework.subprocess_registry import (
         register_subprocess, unregister_subprocess
     )
+    from app.agent_framework.process_lifecycle import safe_popen_kwargs
 
     proc = await asyncio.create_subprocess_exec(
         "yt-dlp", url,
-        # MUST use start_new_session=True so kill_process_tree's
-        # killpg signals the whole subprocess tree, not just the
-        # parent (otherwise yt-dlp's children — ffmpeg etc. — leak)
-        start_new_session=True,
+        # safe_popen_kwargs() sets up new process group (so
+        # kill_process_tree's killpg can signal yt-dlp's children too,
+        # not just the parent) AND binds child to parent SIGKILL on
+        # Linux (PR_SET_PDEATHSIG).
+        **safe_popen_kwargs(),
     )
     register_subprocess(workflow_id, proc.pid)
     try:

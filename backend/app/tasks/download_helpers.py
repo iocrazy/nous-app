@@ -11,6 +11,7 @@ import os
 
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.utils import Utils
 from app.tasks.utils import run_async
 
@@ -560,6 +561,7 @@ def extract_audio_from_video(platform_id: str) -> bool:
             capture_output=True,
             text=True,
             timeout=30,  # Should be < 1s for stream copy
+            **safe_popen_kwargs(),
         )
 
         if result.returncode != 0:

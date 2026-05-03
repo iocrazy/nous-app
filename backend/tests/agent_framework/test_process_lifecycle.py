@@ -116,32 +116,41 @@ def test_cleanup_all_swallows_subprocess_failure():
 
 
 @pytest.mark.unit
-def test_bind_to_parent_death_returns_false_on_non_linux():
-    """R2: macOS / Windows have no PR_SET_PDEATHSIG — must return False
-    (not raise) and let caller continue with reduced safety."""
-    import sys as _sys
-    from app.agent_framework.process_lifecycle import bind_to_parent_death
+def test_bind_to_parent_death_handles_all_platforms(monkeypatch):
+    """R2: returns bool, never raises. macOS gets process-group only
+    (True), Linux gets process-group + PDEATHSIG (True), Windows
+    refuses (False).
 
-    if _sys.platform != "linux":
-        assert bind_to_parent_death() is False
+    Note: we mock os.setsid so the test process itself doesn't get a
+    new session — that would orphan pytest from its terminal.
+    """
+    import sys as _sys
+    import os as _os
+    from app.agent_framework import process_lifecycle as pl
+
+    setsid_calls = []
+    def _fake_setsid():
+        setsid_calls.append(1)
+    monkeypatch.setattr(_os, "setsid", _fake_setsid)
+
+    result = pl.bind_to_parent_death()
+    assert isinstance(result, bool)
+    if _sys.platform == "win32":
+        assert result is False
+        assert setsid_calls == []  # short-circuit before setsid
     else:
-        # On Linux: should succeed (returns True) when not running as PID 1
-        # in a contrived environment — best-effort only.
-        result = bind_to_parent_death()
-        # Don't assert True — kernel may refuse in some sandboxes; assert
-        # that it returns a bool and doesn't raise.
-        assert isinstance(result, bool)
+        assert setsid_calls == [1]  # POSIX always tries setsid
 
 
 @pytest.mark.unit
-def test_safe_popen_kwargs_empty_on_non_linux():
-    """R2: macOS / Windows callers get an empty dict so their Popen
-    call is a passthrough."""
+def test_safe_popen_kwargs_empty_on_windows():
+    """R2: Windows has neither setsid nor PR_SET_PDEATHSIG → passthrough.
+    POSIX (Linux + macOS) gets at least process-group setup."""
     import sys as _sys
     from app.agent_framework.process_lifecycle import safe_popen_kwargs
 
     kwargs = safe_popen_kwargs()
-    if _sys.platform != "linux":
+    if _sys.platform == "win32":
         assert kwargs == {}
     else:
         assert "preexec_fn" in kwargs
@@ -149,17 +158,37 @@ def test_safe_popen_kwargs_empty_on_non_linux():
 
 
 @pytest.mark.unit
-def test_bind_to_parent_death_swallows_exceptions(monkeypatch):
+def test_bind_to_parent_death_swallows_libc_failure(monkeypatch):
     """R2: any internal failure (missing libc / locked-down env) returns
     False; never propagates."""
     import sys as _sys
     if _sys.platform != "linux":
-        pytest.skip("Linux-only path")
+        pytest.skip("Linux-only path (mocks libc which only matters on Linux)")
+
+    import os as _os
+    monkeypatch.setattr(_os, "setsid", lambda: None)
 
     import ctypes
     def _broken_cdll(*_a, **_k):
         raise OSError("no libc here")
     monkeypatch.setattr(ctypes, "CDLL", _broken_cdll)
+
+    from app.agent_framework.process_lifecycle import bind_to_parent_death
+    assert bind_to_parent_death() is False
+
+
+@pytest.mark.unit
+def test_bind_to_parent_death_swallows_setsid_failure(monkeypatch):
+    """R2: setsid() can fail if we're already a process group leader
+    (rare but happens in some test runners). Return False, don't crash."""
+    import sys as _sys
+    if _sys.platform == "win32":
+        pytest.skip("setsid is POSIX-only")
+
+    import os as _os
+    def _broken_setsid():
+        raise OSError("already process group leader")
+    monkeypatch.setattr(_os, "setsid", _broken_setsid)
 
     from app.agent_framework.process_lifecycle import bind_to_parent_death
     assert bind_to_parent_death() is False

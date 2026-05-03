@@ -21,6 +21,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -251,6 +253,7 @@ class StoryboardImageService:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             if result.returncode != 0:
                 err = result.stderr.decode(errors="replace")[:500]

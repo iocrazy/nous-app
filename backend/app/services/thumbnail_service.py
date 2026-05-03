@@ -27,6 +27,7 @@ from typing import Optional
 from loguru import logger
 from PIL import Image, ImageDraw
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
 from app.repositories.resources_repository import ResourcesRepository
 
@@ -147,6 +148,7 @@ class ThumbnailService:
                 dst_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             _, stderr = await proc.communicate()
 
@@ -211,6 +213,7 @@ class ThumbnailService:
                     str(frame_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    **safe_popen_kwargs(),
                 )
                 await proc.communicate()
                 if frame_path.exists() and frame_path.stat().st_size > 0:
@@ -255,6 +258,7 @@ class ThumbnailService:
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, _ = await proc.communicate()
             if proc.returncode == 0:
@@ -356,6 +360,7 @@ class ThumbnailService:
                 "pipe:1",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, stderr = await proc.communicate()
 

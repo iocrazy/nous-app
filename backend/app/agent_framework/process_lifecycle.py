@@ -181,25 +181,47 @@ def _cleanup_multiprocessing_children() -> None:
 
 
 def bind_to_parent_death() -> bool:
-    """R2: Bind this process to the parent — kernel will SIGKILL us
-    when the parent dies, even if parent dies via SIGKILL/OOM/panic.
+    """R2: Bind this process to the parent + create a new process group.
 
-    Linux-only (uses prctl PR_SET_PDEATHSIG). Returns True on success,
-    False on non-Linux or any error (callers must not rely on it).
+    Two effects, both pre-exec safe:
 
-    Call as the FIRST line in a multiprocessing target / forked child:
+      1. ``os.setsid()`` — new session/process group. Required for
+         ``kill_tree.kill_process_tree(pid)`` to actually hit all
+         descendants (ffmpeg → av_demux thread, yt-dlp → curl child,
+         whisper → CUDA workers). Without setsid, killpg target the
+         PARENT's group → kills mediahub itself.
 
-        def child_main():
-            from app.agent_framework.process_lifecycle import bind_to_parent_death
-            bind_to_parent_death()
-            ...
+      2. PR_SET_PDEATHSIG — kernel will SIGKILL this child when the
+         parent dies, even via SIGKILL/OOM/panic. Without this,
+         atexit/signal handlers don't fire → orphans accumulate.
 
-    Implementation note: must be called from the child after fork —
-    setting PR_SET_PDEATHSIG before fork would bind the parent itself,
-    not the child.
+    POSIX (Linux + macOS) supports setsid; PR_SET_PDEATHSIG is Linux-only.
+    Returns True on full success, False on Windows/error (callers
+    must treat as best-effort).
+
+    Call from a preexec_fn (subprocess.Popen / asyncio.create_subprocess_exec):
+
+        proc = subprocess.Popen([...], **safe_popen_kwargs())
+
+    Implementation note: PR_SET_PDEATHSIG must be set in the child
+    after fork; setting it in the parent would bind the parent.
+    preexec_fn satisfies this — it runs in the child between fork
+    and exec.
     """
-    if sys.platform != "linux":
+    if sys.platform == "win32":
         return False
+
+    # 1) New process group / session — POSIX (Linux + macOS)
+    try:
+        os.setsid()
+    except (OSError, AttributeError) as exc:
+        logger.warning(f"[process_lifecycle] os.setsid failed: {exc}")
+        return False
+
+    # 2) PR_SET_PDEATHSIG — Linux only
+    if sys.platform != "linux":
+        return True  # macOS gets process group only; that's the best we can do
+
     try:
         import ctypes
         libc = ctypes.CDLL("libc.so.6", use_errno=True)
@@ -213,13 +235,17 @@ def bind_to_parent_death() -> bool:
             return False
         return True
     except Exception as exc:
-        logger.warning(f"[process_lifecycle] bind_to_parent_death failed: {exc}")
+        logger.warning(f"[process_lifecycle] PR_SET_PDEATHSIG failed: {exc}")
         return False
 
 
 def safe_popen_kwargs() -> dict:
-    """R2: returns kwargs to splat into subprocess.Popen / subprocess.run
-    so the spawned child auto-dies with the parent on Linux.
+    """R2: returns kwargs to splat into subprocess.Popen / subprocess.run /
+    asyncio.create_subprocess_exec so the spawned child:
+
+      - lives in its own process group → kill_tree.kill_process_tree
+        works correctly
+      - auto-dies on parent SIGKILL/OOM (Linux only via PR_SET_PDEATHSIG)
 
     Usage:
 
@@ -227,14 +253,15 @@ def safe_popen_kwargs() -> dict:
         from app.agent_framework.process_lifecycle import safe_popen_kwargs
         proc = subprocess.Popen(["yt-dlp", url], **safe_popen_kwargs())
 
-    On non-Linux (mac dev / Windows): returns empty dict — caller's
-    Popen call is unchanged. On Linux: passes ``preexec_fn`` that binds
-    the child to the parent via PR_SET_PDEATHSIG.
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-i", src, dst, **safe_popen_kwargs()
+        )
 
-    Note: ``preexec_fn`` runs after fork in the child but before exec,
-    which is exactly when the child needs to set its own death signal.
+    On Windows: returns empty dict (passthrough).
+    On Linux/macOS: passes ``preexec_fn`` (sets up new process group +
+    binds-to-parent-death where supported).
     """
-    if sys.platform != "linux":
+    if sys.platform == "win32":
         return {}
     return {"preexec_fn": bind_to_parent_death}
 
