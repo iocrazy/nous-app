@@ -164,3 +164,8 @@ api_router.include_router(router=script_export_router, tags=["Script Export"])
 api_router.include_router(router=ai_library_router, tags=["AI Library"])
 
 api_router.include_router(router=workforce_router, tags=["Workforce"])
+
+# Phase N (N5) / D10-8: per-subsystem deep health probe.
+from app.api.health_router import router as deep_health_router  # noqa: E402
+
+api_router.include_router(router=deep_health_router, tags=["Health"])

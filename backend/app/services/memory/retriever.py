@@ -95,12 +95,29 @@ class MemoryRetriever:
         agent_id: UUID,
         session_id: Optional[UUID],
         user_query: str,
+        agent_row: Optional[dict] = None,
     ) -> list[MemoryRecord]:
         """Return up to ``top_n`` memory records ranked by relevance.
 
         Empty list if no memories exist or all were filtered out. Never
         raises — every failure mode degrades to "no recall this turn".
+
+        Phase N (N3): when ``agent_row`` is supplied, reads
+        ``memory_injection_top_n`` per-agent override; falls back to
+        instance ``top_n`` when unset.
         """
+        # N3: per-agent budget override
+        effective_top_n = self.top_n
+        if agent_row is not None:
+            try:
+                from app.services.memory.budget import resolve_top_n
+                effective_top_n = resolve_top_n(
+                    agent_row, code_default=self.top_n
+                )
+                if effective_top_n == 0:
+                    return []  # agent opted out of memory recall
+            except Exception:
+                pass
         cache_key = self._build_cache_key(
             user_id=user_id,
             agent_id=agent_id,
@@ -131,9 +148,67 @@ class MemoryRetriever:
             await self._cache_set(cache_key, [])
             return []
 
+        # Phase N (N4): thread roll-up — for each hit, pull siblings in
+        # the same thread + dedupe. Bounded so a single hit doesn't
+        # flood context with unrelated thread members.
+        try:
+            final = await self._roll_up_threads(
+                final, user_id=user_id, max_total=effective_top_n * 2
+            )
+        except Exception:
+            pass  # best-effort
+
         await self._reinforce(final)
         await self._cache_set(cache_key, [r.id for r in final])
         return final
+
+    async def _roll_up_threads(
+        self,
+        seeds: list[MemoryRecord],
+        *,
+        user_id: UUID,
+        max_total: int,
+    ) -> list[MemoryRecord]:
+        """Phase N (N4): pull thread siblings for each seed; dedupe;
+        cap total at ``max_total``. Seeds without thread_id passed through.
+        """
+        if not seeds:
+            return seeds
+
+        seed_ids = {r.id for r in seeds}
+        out: list[MemoryRecord] = list(seeds)
+
+        for seed in seeds:
+            thread_id = getattr(seed, "thread_id", None)
+            if not thread_id:
+                continue
+            try:
+                client = self.supabase_client
+                result = (
+                    await client.table("agent_memories")
+                    .select("*")
+                    .eq("thread_id", str(thread_id))
+                    .eq("user_id", str(user_id))
+                    .eq("status", "active")
+                    .order("created_at", desc=False)
+                    .limit(10)
+                    .execute()
+                )
+            except Exception:
+                continue
+            for row in result.data or []:
+                rec_id = row.get("id")
+                if not rec_id or rec_id in seed_ids:
+                    continue
+                try:
+                    sibling = _row_to_record(row)
+                except (KeyError, ValueError):
+                    continue
+                out.append(sibling)
+                seed_ids.add(rec_id)
+                if len(out) >= max_total:
+                    return out
+        return out
 
     # ------------------------------------------------------------------
     # pgvector + salience
