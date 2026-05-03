@@ -77,6 +77,15 @@ from app.agent_framework.lane_queue import (
     LaneQueue,
     LaneTaskTimeout,
 )
+from app.agent_framework.mcp_client import (
+    MCPClient,
+    MCPClientError,
+    MCPServerConfig,
+)
+from app.agent_framework.mcp_outbound_registry import (
+    MCPOutboundRegistry,
+    QualifiedTool,
+)
 from app.agent_framework.mcp_stdio import serve as serve_mcp_stdio
 from app.agent_framework.mcp_descriptor import (
     DuplicateToolError,
