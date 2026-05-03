@@ -3,13 +3,39 @@
 All adapters must expose an async `call(composed, messages) -> dict` method
 that returns OpenAI-compatible response JSON (so AgentRunner can parse
 `choices[0].message.tool_calls` the same way for any provider).
+
+Wave H (B): adapters MAY also expose ``stream(composed, messages)`` →
+``AsyncIterator[StreamChunk]`` for incremental output. Adapters that
+don't implement streaming raise ``StreamingNotSupported``; caller falls
+back to ``call()``.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Protocol
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Dict, List, Optional, Protocol
 
 from app.schemas.ai_library import ComposedSystemPrompt
+
+
+class StreamingNotSupported(Exception):
+    """Adapter doesn't implement stream(). Caller may fall back to call()."""
+
+
+@dataclass(frozen=True)
+class StreamChunk:
+    """One delta from streaming response.
+
+    Adapters normalize whatever their provider sends into this shape.
+    On the FINAL chunk (when finish_reason is set), usage info SHOULD
+    be populated if the provider supplies it. AgentRunner uses
+    finish_reason='length' to drive auto-continue (Wave 5c C2).
+    """
+
+    delta_text: Optional[str] = None
+    tool_call_delta: Optional[Dict[str, Any]] = None
+    finish_reason: Optional[str] = None
+    usage: Optional[Dict[str, Any]] = None
 
 
 class AIAdapter(Protocol):
@@ -52,3 +78,25 @@ class AIAdapter(Protocol):
         composed: ComposedSystemPrompt,
         messages: List[Dict[str, Any]],
     ) -> Dict[str, Any]: ...
+
+
+class StreamingAIAdapter(Protocol):
+    """Optional protocol — adapter that supports incremental streaming.
+
+    ``stream()`` MUST yield StreamChunk instances ending with one where
+    finish_reason is set. Implementations should also satisfy the base
+    AIAdapter protocol so callers can fall back to buffered ``call()``
+    when streaming isn't desired.
+    """
+
+    async def call(
+        self,
+        composed: ComposedSystemPrompt,
+        messages: List[Dict[str, Any]],
+    ) -> Dict[str, Any]: ...
+
+    def stream(
+        self,
+        composed: ComposedSystemPrompt,
+        messages: List[Dict[str, Any]],
+    ) -> AsyncIterator[StreamChunk]: ...
