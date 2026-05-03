@@ -253,6 +253,11 @@ async def fetch_and_render(
         blocks.append(block)
         if reason is not None:
             failures.append((url, reason))
+    # J1 telemetry
+    from app.agent_framework._metrics_helper import inc_metric
+    inc_metric("link_injection_fetched", by=len(blocks) - len(failures))
+    if failures:
+        inc_metric("link_injection_failed", by=len(failures))
     return LinkInjectionResult(urls=urls, blocks=blocks, failures=failures)
 
 

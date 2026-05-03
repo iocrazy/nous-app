@@ -226,7 +226,11 @@ class SessionMemoryService:
         )
         current = compute_metrics(messages, model)
 
+        from app.agent_framework._metrics_helper import inc_metric
+        inc_metric("session_memory_update_attempted")
+
         if not force and not self.trigger.should_update(current, baseline):
+            inc_metric("session_memory_update_skipped_no_trigger")
             return None
 
         previous_md = (existing.body_md if existing else "") or ""
@@ -243,7 +247,7 @@ class SessionMemoryService:
             return None  # best-effort; chat path must not break
 
         sections = parse_md_sections(updated_md)
-        return await self.repo.upsert(
+        result = await self.repo.upsert(
             session_id,
             body_md=updated_md,
             sections_json=sections,
@@ -251,6 +255,9 @@ class SessionMemoryService:
             tool_calls_at_update=current.tool_calls,
             turns_at_update=current.turn_count,
         )
+        if result is not None:
+            inc_metric("session_memory_update_persisted")
+        return result
 
 
 def _render_messages_for_summarizer(

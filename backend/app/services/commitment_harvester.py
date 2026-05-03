@@ -216,6 +216,8 @@ async def harvest_commitments(
     aggregate "% of turns that triggered LLM call" cheaply.
     """
     if not has_commitment_cues(response_text):
+        from app.agent_framework._metrics_helper import inc_metric
+        inc_metric("commitment_harvest_skipped_no_cues")
         return HarvestResult(candidate_text_had_cues=False)
 
     prompt = build_harvest_prompt(response_text=response_text, now=now)
@@ -236,6 +238,12 @@ async def harvest_commitments(
             continue  # one bad commitment shouldn't sink the rest
         if cid:
             persisted_ids.append(str(cid))
+
+    from app.agent_framework._metrics_helper import inc_metric
+    if extracted:
+        inc_metric("commitment_harvest_extracted", by=len(extracted))
+    if persisted_ids:
+        inc_metric("commitment_harvest_persisted", by=len(persisted_ids))
 
     return HarvestResult(
         candidate_text_had_cues=True,

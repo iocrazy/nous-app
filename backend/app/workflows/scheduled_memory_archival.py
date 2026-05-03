@@ -104,6 +104,9 @@ async def archive_decayed_memories_step(
         except Exception:  # noqa: BLE001 — single-row failure shouldn't stop sweep
             logger.exception("[memory.archival] failed to archive %s", mem_id)
 
+    if archived:
+        from app.agent_framework._metrics_helper import inc_metric
+        inc_metric("memory_archived", by=archived)
     return {"checked": len(rows), "archived": archived}
 
 

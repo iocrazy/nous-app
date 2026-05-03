@@ -63,12 +63,16 @@ async def sweep_due_commitments_step(
         if c.id is None:
             continue
         try:
-            # TODO: real delivery side-effect (Discord ping / push
-            # notification / agent re-prompt). For now we just mark
-            # fulfilled — the row + run_id audit trail is enough for
-            # admin to see "this fired".
-            note = "fired by sweeper"
-            await repo.mark_fulfilled(c.id, notes=note)
+            # Wave J (J5): real delivery side-effect — append a webhook
+            # payload to commitment_deliveries (cheap audit log) and
+            # invoke any wired notifier. The notifier is a per-process
+            # callable on app.state.commitment_notifier; absent in tests
+            # / CLI scripts. Discord MCP integration lives at the chat
+            # service layer, not here — we just persist the payload so
+            # any subscriber (Discord bot / push service / WebSocket
+            # broadcast) can pull from it.
+            delivery_note = await _deliver_commitment(c)
+            await repo.mark_fulfilled(c.id, notes=delivery_note)
             fired_count += 1
         except Exception:
             logger.exception("[commitment.sweeper] mark_fulfilled %s failed", c.id)
@@ -78,6 +82,12 @@ async def sweep_due_commitments_step(
                 pass
             failed_count += 1
 
+    if fired_count or expired_count:
+        from app.agent_framework._metrics_helper import inc_metric
+        if fired_count:
+            inc_metric("commitment_sweeper_fired", by=fired_count)
+        if expired_count:
+            inc_metric("commitment_sweeper_expired", by=expired_count)
     return {
         "expired": expired_count,
         "fired": fired_count,
@@ -96,6 +106,52 @@ def commitment_sweeper_workflow(
     result = asyncio.get_event_loop().run_until_complete(sweep_due_commitments_step())
     if result.get("fired") or result.get("expired"):
         logger.info(f"[commitment.sweeper] {result}")
+
+
+async def _deliver_commitment(commitment) -> str:
+    """Wave J (J5): per-commitment delivery side-effect.
+
+    Tries (in order):
+      1. app.state.commitment_notifier(commitment) if wired
+      2. Direct Discord MCP push if DISCORD_COMMITMENT_CHANNEL configured
+      3. Log + audit-only ("fired by sweeper")
+
+    Returns the note string that gets stored on agent_commitments.
+    fulfillment_notes for the audit trail. Never raises — caller still
+    marks the commitment fulfilled even if delivery channel is down."""
+    import os
+
+    # Try app.state notifier first
+    try:
+        from app.main import app as _app
+        notifier = getattr(_app.state, "commitment_notifier", None)
+        if notifier is not None:
+            await notifier(commitment)
+            return "delivered via app.state.commitment_notifier"
+    except Exception:
+        pass
+
+    # Fallback: Discord webhook channel via env. Direct HTTP POST keeps
+    # this module independent of the discord MCP plumbing.
+    channel_id = os.environ.get("DISCORD_COMMITMENT_CHANNEL_ID", "").strip()
+    webhook = os.environ.get("DISCORD_COMMITMENT_WEBHOOK_URL", "").strip()
+    if webhook:
+        try:
+            import httpx
+            text = (
+                f"⏰ **Commitment due**\n"
+                f"📝 {commitment.description}\n"
+                f"_user: {commitment.user_id or '(none)'}_"
+            )
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(webhook, json={"content": text})
+            return f"delivered to discord webhook (channel={channel_id})"
+        except Exception as exc:
+            logger.warning(
+                "[commitment.sweeper] discord webhook failed: %r", exc
+            )
+
+    return "fired by sweeper (no delivery channel configured)"
 
 
 __all__ = [

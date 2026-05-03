@@ -84,6 +84,10 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # cheap-model merges similar memories into super-memories. Off-chat-
     # path, scheduled job — telemetry via DBOS workflow status.
     "workflows/scheduled_memory_consolidation.py": "memory consolidation auxiliary LLM, scheduled DBOS workflow",
+    # Wave J (J6) active_remember contradiction check: cheap-LLM
+    # classifier inside the built-in 'remember' skill path. Side-effect
+    # of a tool call, not a primary chat completion.
+    "services/skill_tool_service.py": "active_remember contradiction classifier, side-effect of remember()",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a
