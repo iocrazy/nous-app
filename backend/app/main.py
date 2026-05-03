@@ -62,6 +62,32 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to load transcode config from database: {e}")
 
+    # P0-1: schema sanity probe — warn (don't block) if migrations the
+    # current code depends on haven't been applied. Quick + cheap query;
+    # failure here just means operator missed a `psql -f migrations/N.sql`
+    # step. We log loudly so the gap is visible, but startup proceeds —
+    # the affected feature paths will fail individually at first call.
+    try:
+        from app.db import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        required_tables = ["agent_commitments"]  # extend on each migration
+        for table in required_tables:
+            probe = await (
+                sb.table(table).select("*", count="exact").limit(0).execute()
+            )
+            if not hasattr(probe, "data"):
+                logger.warning(
+                    f"Schema probe: table '{table}' is unreachable — "
+                    f"check that the corresponding migration was applied"
+                )
+    except Exception as e:
+        # Most likely cause: PostgREST returns 42P01 when the table is missing.
+        # Surface the table name so operator can grep for the migration.
+        logger.warning(
+            f"Schema probe failed (likely missing migration): {e}"
+        )
+
     # Load AI Library seeds (agents + skills) from backend/seeds/.
     # Wrapped defensively: a seed failure must not block server startup.
     # Breadcrumb logs below are load-bearing for post-incident diagnosis —
@@ -232,10 +258,15 @@ async def lifespan(app: FastAPI):
             ContextEngineRegistry,
             LaneQueue,
             LifecycleBus,
+            ModelHealthRegistry,
         )
 
         app.state.lifecycle_bus = LifecycleBus()
         app.state.lane_queue = LaneQueue()
+        # P1-5: per-process ModelHealthRegistry. Fallback chain caller
+        # (ai_library_chat_wiring) reads it from app.state when building
+        # the chain, so cooled-down models are skipped on retry.
+        app.state.model_health = ModelHealthRegistry()
         # Sprint 6: per-process context-engine registry. Surfaces (chat,
         # search, storyboard) self-register their engines at startup so
         # callers can fetch by surface name.
@@ -315,12 +346,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Agent framework primitive setup failed: {e}")
 
-    # Sprint 5.5: bounds heartbeat — refresh last_seen every 30s so the
-    # registry's stale-prune (90s default) doesn't garbage-collect us.
-    # Only on processes that registered themselves (i.e. workers).
+    # Sprint 5.5 + P0-3: bounds heartbeat — refresh last_seen every 30s
+    # so the registry's stale-prune (90s default) doesn't garbage-collect
+    # us. If pruned anyway (clock skew, registry rebuild), reconstruct the
+    # bound from cached state and re-register so we don't go silent
+    # forever. Only on processes that registered themselves (workers).
     bounds_heartbeat_task = None
     if getattr(app.state, "bounds_self_id", None):
         import asyncio as _asyncio
+
+        # Cache the bound built at startup so a re-register doesn't have
+        # to re-do all the inventory I/O (DB read for agent slugs etc).
+        cached_bound = next(
+            (
+                b
+                for b in app.state.bounds_registry.live_bounds()
+                if b.worker_id == app.state.bounds_self_id
+            ),
+            None,
+        )
+        app.state.bounds_self_bound = cached_bound
 
         async def _heartbeat() -> None:
             wid = app.state.bounds_self_id
@@ -328,14 +373,20 @@ async def lifespan(app: FastAPI):
                 try:
                     await _asyncio.sleep(30.0)
                     if not app.state.bounds_registry.heartbeat(wid):
-                        # Registry pruned us between ticks; re-register.
-                        # Caller's bound dataclass was frozen — rebuild
-                        # via the same inventory call would be more correct
-                        # but for this minimal heartbeat we just log.
-                        logger.warning(
-                            f"Bounds heartbeat: {wid} not found in registry; "
-                            "re-register on next inventory pass"
-                        )
+                        # Pruned between ticks — re-register from cache so
+                        # gateway's view of live workers heals next tick.
+                        bound = app.state.bounds_self_bound
+                        if bound is not None:
+                            app.state.bounds_registry.register(bound)
+                            logger.warning(
+                                f"Bounds heartbeat: {wid} was pruned; "
+                                "re-registered from cached bound"
+                            )
+                        else:
+                            logger.error(
+                                f"Bounds heartbeat: {wid} pruned AND no "
+                                "cached bound to re-register from"
+                            )
                 except _asyncio.CancelledError:
                     break
                 except Exception as hb_exc:

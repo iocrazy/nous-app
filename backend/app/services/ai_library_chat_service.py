@@ -290,26 +290,82 @@ class AILibraryChatService:
         # <available_workers>. Without this hint the LLM tends to do the
         # work itself even when a better specialist exists. Use await=true
         # if you need the result in the same turn.
-        composer = PromptComposer(agent_repo, skill_repo)
-        composed = await composer.compose(
-            ComposerInput(
-                agent_slug=agent_slug,
-                request_instructions=(
-                    "You are in an interactive chat session with the user. "
-                    "Respond conversationally. Use the Skill tool when a "
-                    "bound skill is clearly applicable; otherwise answer "
-                    "directly in natural language. "
-                    "If <available_workers> lists a specialist agent that's "
-                    "a clearly better fit for the request than you are "
-                    "(e.g. summarize for transcript condensation, analyze "
-                    "for visual analysis), call Delegate(agent_slug=..., "
-                    "prompt=..., await=true) and weave the returned result "
-                    "into your reply. Use Delegate only when the specialist "
-                    "is a clear win — for general chat, just answer directly."
-                ),
-                recalled_memories=stack.recalled_memories,
-            )
+        #
+        # P1-4: route through ContextEngineRegistry when available
+        # (Sprint 6.5 wire-up). Falls back to direct PromptComposer when
+        # the registry isn't on app.state — keeps unit tests + scripts
+        # that don't go through FastAPI lifespan working unchanged.
+        request_instructions = (
+            "You are in an interactive chat session with the user. "
+            "Respond conversationally. Use the Skill tool when a "
+            "bound skill is clearly applicable; otherwise answer "
+            "directly in natural language. "
+            "If <available_workers> lists a specialist agent that's "
+            "a clearly better fit for the request than you are "
+            "(e.g. summarize for transcript condensation, analyze "
+            "for visual analysis), call Delegate(agent_slug=..., "
+            "prompt=..., await=true) and weave the returned result "
+            "into your reply. Use Delegate only when the specialist "
+            "is a clear win — for general chat, just answer directly."
         )
+
+        # P1-6: link-injection wire-up. Pull URLs out of the latest user
+        # message, fetch via boundary-safe link_understanding, prepend
+        # rendered blocks to request_instructions. Failures (4xx/5xx,
+        # boundary reject, timeout) get explicit placeholder blocks so
+        # the agent doesn't hallucinate URL contents.
+        # Best-effort: any error here just skips link injection — the
+        # chat must never break because URL fetch failed.
+        try:
+            from app.services.link_injection import (
+                extract_urls,
+                fetch_and_render,
+            )
+
+            urls = extract_urls(content, max_urls=3)
+            if urls:
+                injection = await fetch_and_render(urls)
+                if injection.has_content:
+                    request_instructions = (
+                        injection.joined + "\n\n" + request_instructions
+                    )
+                    logger.info(
+                        f"link_injection: injected {len(injection.blocks)} "
+                        f"block(s) for {len(urls)} URL(s); "
+                        f"failures={len(injection.failures)}"
+                    )
+        except Exception as li_exc:
+            logger.warning(f"link_injection failed (non-fatal): {li_exc}")
+        composed = None
+        engine = None
+        try:
+            from app.main import app as _app  # late import to avoid cycle
+
+            engine = getattr(_app.state, "context_engines", None)
+            if engine is not None:
+                engine = engine.get("chat")
+        except Exception:
+            engine = None
+
+        if engine is not None:
+            payload = await engine.assemble(
+                {
+                    "agent_slug": agent_slug,
+                    "request_instructions": request_instructions,
+                    "session_id": session_id,
+                    "recalled_memories": stack.recalled_memories,
+                }
+            )
+            composed = payload.metadata["composed"]
+        else:
+            composer = PromptComposer(agent_repo, skill_repo)
+            composed = await composer.compose(
+                ComposerInput(
+                    agent_slug=agent_slug,
+                    request_instructions=request_instructions,
+                    recalled_memories=stack.recalled_memories,
+                )
+            )
 
         runner = stack.runner
 
