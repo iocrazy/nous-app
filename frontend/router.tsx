@@ -63,6 +63,7 @@ const AgentsPage = lazyWithRetry(() => import('./pages/AgentsPage').then(m => ({
 const SkillsPage = lazyWithRetry(() => import('./pages/SkillsPage').then(m => ({ default: m.SkillsPage })));
 const UsagePage = lazyWithRetry(() => import('./pages/UsagePage').then(m => ({ default: m.UsagePage })));
 const WorkforcePage = lazyWithRetry(() => import('./pages/WorkforcePage').then(m => ({ default: m.WorkforcePage })));
+const MemoryViewerPage = lazyWithRetry(() => import('./pages/MemoryViewerPage').then(m => ({ default: m.MemoryViewerPage })));
 const IssuesPage = lazyWithRetry(() => import('./pages/IssuesPage').then(m => ({ default: m.IssuesPage })));
 const AILibraryLayout = lazyWithRetry(() =>
   import('./components/AILibrary/AILibraryLayout').then(m => ({ default: m.AILibraryLayout })),
@@ -187,6 +188,7 @@ export const router = createBrowserRouter([
               },
               { path: 'usage', element: <SuspenseWrap><UsagePage /></SuspenseWrap> },
               { path: 'workforce', element: <SuspenseWrap><WorkforcePage /></SuspenseWrap> },
+              { path: 'memory', element: <SuspenseWrap><MemoryViewerPage /></SuspenseWrap> },
             ],
           },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
