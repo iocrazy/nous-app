@@ -385,7 +385,9 @@ class AILibraryChatService:
         # threshold. Compactor preserves tool_use/result pairs so the
         # next API call won't 400. Failure degrades to "send full history
         # and let the model deal with it" — never breaks the chat.
-        user_messages = await self._maybe_compact(user_messages)
+        user_messages = await self._maybe_compact(
+            user_messages, session_id=session_id
+        )
 
         model = composed.model or ""
         try:
@@ -488,6 +490,35 @@ class AILibraryChatService:
             .execute()
         )
 
+        # Wave 5b (B4): fire-and-forget session-memory updater. Doesn't
+        # await — we return to the user immediately. The updater itself
+        # handles errors silently (see SessionMemoryService docstring).
+        # All-messages list = full history + new user + new assistant.
+        try:
+            import asyncio as _asyncio
+
+            from app.repositories.session_memory_repository import (
+                SessionMemoryRepository,
+            )
+            from app.services.session_memory_runner import maybe_update_session_memory
+
+            full_messages = user_messages + [
+                {"role": "assistant", "content": assistant_content}
+            ]
+            _asyncio.create_task(
+                maybe_update_session_memory(
+                    session_id=str(session_id),
+                    messages=full_messages,
+                    model=model,
+                    repo=SessionMemoryRepository(),
+                ),
+                name=f"session-memory-update-{session_id}",
+            )
+        except Exception as sm_exc:
+            logger.warning(
+                f"session_memory dispatch skipped (non-fatal): {sm_exc}"
+            )
+
         return {
             "user_message": user_msg,
             "assistant_message": asst_msg,
@@ -497,7 +528,10 @@ class AILibraryChatService:
         }
 
     async def _maybe_compact(
-        self, messages: List[Dict[str, Any]]
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        session_id: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """Compact long histories. Failure → return original messages.
 
@@ -505,6 +539,11 @@ class AILibraryChatService:
         head; degrading on failure is fine since the LLM call itself
         will eventually 400 if context truly overflows, and the user
         will see a clear error instead of a silent corruption.
+
+        Wave 5b (B5): when ``session_id`` is provided, looks up the
+        cached session_memory and uses it as the head summary instead
+        of calling the cheap LLM — saves a round-trip + makes the
+        summary structurally consistent (fixed schema).
         """
         from app.services.llm_compactor import (
             DEFAULT_AUTO_COMPACTION_INPUT_TOKENS,
@@ -514,6 +553,22 @@ class AILibraryChatService:
 
         if estimate_tokens(messages) < DEFAULT_AUTO_COMPACTION_INPUT_TOKENS:
             return messages
+
+        # Wave 5b (B5): build session_memory_loader closure if we have a
+        # session_id. Loader returns body_md or None; compactor decides.
+        session_memory_loader = None
+        if session_id is not None:
+            from app.repositories.session_memory_repository import (
+                SessionMemoryRepository,
+            )
+
+            _sm_repo = SessionMemoryRepository()
+
+            async def _load_session_memory() -> Optional[str]:
+                row = await _sm_repo.load(session_id)
+                return row.body_md if row else None
+
+            session_memory_loader = _load_session_memory
 
         async def _summarizer(head: List[Dict[str, Any]]) -> str:
             try:
@@ -550,7 +605,11 @@ class AILibraryChatService:
                 return "[history truncated for context length]"
 
         try:
-            result = await compact_messages(messages, summarizer=_summarizer)
+            result = await compact_messages(
+                messages,
+                summarizer=_summarizer,
+                session_memory_loader=session_memory_loader,
+            )
             if result.compacted:
                 logger.info(
                     "[chat] compacted: %d → %d tokens (%d head messages summarised)",

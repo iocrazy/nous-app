@@ -75,6 +75,11 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # M1.5 chat compactor: cheap-model summarizer for history compaction.
     # Side-channel from the main agent run; cost tracked separately.
     "services/ai_library_chat_service.py": "compaction summariser auxiliary LLM, side-channel",
+    # Wave 5b (B4) session-memory updater: cheap-model maintenance call
+    # for the running session-memory.md document. Off-chat-path,
+    # fire-and-forget — telemetry tracked via session_memory.version
+    # bumps + last_updated_at, not RunRecorder.
+    "services/session_memory_runner.py": "session-memory maintenance auxiliary LLM, fire-and-forget",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a
