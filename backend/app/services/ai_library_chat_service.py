@@ -211,6 +211,50 @@ class AILibraryChatService:
     # Chat
     # ------------------------------------------------------------------
 
+    async def chat_stream(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        content: str,
+    ):
+        """Wave I (I2): streaming variant of chat.
+
+        Yields event dicts: {type: 'delta' | 'done' | 'error', data: {...}}.
+
+        Implementation: this is a thin SSE-friendly wrapper. For now it
+        simply runs the buffered chat() and emits the full content as a
+        single delta + done event. A future revision will plumb
+        AgentRunner.stream_turn through the entire chat lifecycle so
+        characters arrive as the model emits them.
+
+        The thin-wrapper approach is deliberate — it keeps message
+        persistence + commitment harvest + session_memory dispatch all
+        intact while giving callers an SSE shape to integrate against
+        immediately.
+        """
+        try:
+            result = await self.chat(session_id, user_id=user_id, content=content)
+        except Exception as exc:
+            yield {"type": "error", "data": {"error": f"{type(exc).__name__}: {exc}"}}
+            return
+
+        message = result.get("assistant_message") or {}
+        text = message.get("content") or ""
+        # Emit content in one delta. (Future: chunk on token boundaries
+        # once we plumb stream_turn end-to-end.)
+        if text:
+            yield {"type": "delta", "data": {"text": text}}
+        yield {
+            "type": "done",
+            "data": {
+                "message_id": message.get("id"),
+                "usage": result.get("usage"),
+                "run_id": result.get("run_id"),
+                "tool_calls": result.get("tool_calls", []),
+            },
+        }
+
     async def chat(
         self,
         session_id: UUID,

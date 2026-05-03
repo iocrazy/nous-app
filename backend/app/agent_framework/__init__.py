@@ -24,6 +24,7 @@ from app.agent_framework.bounds import (
     BoundsAdvertisement,
     BoundsRegistry,
 )
+from app.agent_framework.bounds_redis import RedisBoundsRegistry
 from app.agent_framework.bounds_inventory import (
     inventory_agent_slugs,
     inventory_providers,
@@ -112,6 +113,8 @@ from app.agent_framework.output_budget import (
     should_auto_continue,
 )
 from app.agent_framework.role import ProcessRole, role_from_env
+from app.agent_framework.root_abort_registry import RootAbortRegistry
+from app.agent_framework.telemetry import COUNTER_NAMES, AgentMetrics
 from app.agent_framework.session_memory import (
     SECTION_ORDER,
     SessionMemoryService,
@@ -158,9 +161,11 @@ from app.agent_framework.lifecycle_bus import (
 
 __all__ = [
     "AbortController",
+    "AgentMetrics",
     "AllKeysCooledDown",
     "BoundsAdvertisement",
     "BoundsRegistry",
+    "COUNTER_NAMES",
     "Commitment",
     "CommitmentStatus",
     "ContextEngine",
@@ -202,6 +207,8 @@ __all__ = [
     "OutputBudget",
     "ProcessRole",
     "PruneStats",
+    "RedisBoundsRegistry",
+    "RootAbortRegistry",
     "RotatingAdapter",
     "RunAborted",
     "SECTION_ORDER",
