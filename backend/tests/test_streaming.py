@@ -167,3 +167,102 @@ def test_stream_chunk_immutable():
     c = StreamChunk(delta_text="x")
     with pytest.raises((AttributeError, Exception)):
         c.delta_text = "y"  # type: ignore[misc]
+
+
+# ─── Phase P (P1): tool_calls in stream ──────────────────────────────
+
+
+from app.services.agent_runner import _merge_tool_call_deltas
+
+
+@pytest.mark.unit
+def test_merge_tool_call_deltas_basic():
+    buf: dict = {}
+    _merge_tool_call_deltas(buf, [
+        {"index": 0, "id": "call_1", "function": {"name": "Skill", "arguments": ""}},
+    ])
+    _merge_tool_call_deltas(buf, [
+        {"index": 0, "function": {"arguments": '{"sk'}},
+    ])
+    _merge_tool_call_deltas(buf, [
+        {"index": 0, "function": {"arguments": 'ill":"x"}'}},
+    ])
+    assert buf[0]["id"] == "call_1"
+    assert buf[0]["function"]["name"] == "Skill"
+    assert buf[0]["function"]["arguments"] == '{"skill":"x"}'
+
+
+@pytest.mark.unit
+def test_merge_handles_multiple_calls_by_index():
+    buf: dict = {}
+    _merge_tool_call_deltas(buf, [
+        {"index": 0, "id": "a", "function": {"name": "Skill"}},
+        {"index": 1, "id": "b", "function": {"name": "Delegate"}},
+    ])
+    assert buf[0]["id"] == "a"
+    assert buf[1]["id"] == "b"
+
+
+@pytest.mark.unit
+def test_merge_empty_input_no_change():
+    buf: dict = {}
+    _merge_tool_call_deltas(buf, [])
+    assert buf == {}
+
+
+class _StreamingAdapterWithToolCall:
+    """Emits tool_call deltas in iter 1; final text in iter 2."""
+
+    def __init__(self):
+        self.iter = 0
+
+    async def call(self, composed, messages):
+        return {"choices": [{"message": {"content": "fallback"}}]}
+
+    async def stream(self, composed, messages):
+        self.iter += 1
+        if self.iter == 1:
+            yield StreamChunk(tool_call_delta={"tool_calls": [
+                {"index": 0, "id": "c1", "function": {"name": "Skill", "arguments": ""}},
+            ]})
+            yield StreamChunk(tool_call_delta={"tool_calls": [
+                {"index": 0, "function": {"arguments": '{"skill":"foo"}'}},
+            ]})
+            yield StreamChunk(
+                finish_reason="tool_calls",
+                usage={"prompt_tokens": 10, "completion_tokens": 3},
+            )
+        else:
+            yield StreamChunk(delta_text="Done with foo result")
+            yield StreamChunk(
+                finish_reason="stop",
+                usage={"prompt_tokens": 30, "completion_tokens": 5},
+            )
+
+
+class _StubSkillTool:
+    async def execute(self, args):
+        return {"skill": args.get("skill"), "prompt": "tool ran"}
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_executes_tool_calls_and_continues():
+    """End-to-end P1: tool_call deltas stitched + executed; second
+    iteration emits final text."""
+    runner = AgentRunner(
+        adapter=_StreamingAdapterWithToolCall(),
+        skill_tool=_StubSkillTool(),
+    )
+    pieces = []
+    finish = None
+    async for chunk in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "do foo"}]
+    ):
+        if chunk.delta_text:
+            pieces.append(chunk.delta_text)
+        if chunk.finish_reason:
+            finish = chunk.finish_reason
+    full = "".join(pieces)
+    assert "Running Skill" in full or "→ Running" in full
+    assert "Done with foo" in full
+    assert finish == "stop"
