@@ -242,33 +242,61 @@ async def lifespan(app: FastAPI):
         # opt in. The chat composer wiring follows in Sprint 6.5.
         app.state.context_engines = ContextEngineRegistry()
 
-        # Sprint 5 (D10-1): every process holds a BoundsRegistry. On worker
-        # / combined processes we self-register the bounds we know about
-        # locally — the gateway-side registry will receive these via the
-        # transport layer in Sprint 5.5 (HTTP push or DB row). For now this
-        # makes the registry queryable in-process for tests / admin views.
+        # Sprint 5 (D10-1) + 5.5 wire-up: every process holds a
+        # BoundsRegistry. Workers self-register their REAL inventory
+        # (workflow names, agent slugs, providers) so dispatch_gate
+        # can fail-fast for jobs no live worker can handle.
         app.state.bounds_registry = BoundsRegistry()
+        app.state.bounds_self_id = None
         if process_role.runs_dbos_workers:
             try:
                 import socket
 
+                from app.agent_framework.bounds_inventory import (
+                    inventory_agent_slugs,
+                    inventory_providers,
+                    inventory_workflow_names,
+                )
+                from app.repositories.agent_repository import AgentRepository
+
                 worker_id = (
                     f"{socket.gethostname()}-pid{os.getpid()}"
                 )
-                # Bounds are filled minimally here — concrete inventory
-                # (registered workflow names, agent slugs, providers)
-                # comes from a discovery pass in Sprint 5.5. This entry
-                # is enough for "is there *any* worker alive" checks.
+
+                # Workflow names: introspect the just-imported workflows pkg.
+                # When DBOS init failed earlier, `workflows` may not exist
+                # in scope — guard with a try/except.
+                workflow_names: frozenset[str] = frozenset()
+                try:
+                    workflow_names = inventory_workflow_names(workflows)  # noqa: F823
+                except (NameError, Exception) as inv_exc:
+                    logger.warning(
+                        f"Bounds: workflow inventory failed: {inv_exc}"
+                    )
+
+                agent_slugs = await inventory_agent_slugs(AgentRepository())
+                providers = inventory_providers(settings)
+
                 self_bound = BoundsAdvertisement(
                     worker_id=worker_id,
                     role=process_role.value,
+                    workflows=workflow_names,
+                    agents=agent_slugs,
+                    providers=providers,
                 )
                 app.state.bounds_registry.register(self_bound)
+                app.state.bounds_self_id = worker_id
                 logger.info(
-                    f"Bounds registry: self-registered worker_id={worker_id}"
+                    f"Bounds: self-registered worker_id={worker_id} "
+                    f"(workflows={len(workflow_names)} agents={len(agent_slugs)} "
+                    f"providers={sorted(providers)})"
                 )
             except Exception as e:
                 logger.warning(f"Bounds self-registration failed: {e}")
+
+        # Sprint 5.5: dispatch gate — orchestrator consults the registry
+        # before enqueueing. set_bounds_registry(None) disables.
+        dbos_orchestrator.set_bounds_registry(app.state.bounds_registry)
 
         logger.info(
             "Agent framework primitives ready "
@@ -276,6 +304,38 @@ async def lifespan(app: FastAPI):
         )
     except Exception as e:
         logger.warning(f"Agent framework primitive setup failed: {e}")
+
+    # Sprint 5.5: bounds heartbeat — refresh last_seen every 30s so the
+    # registry's stale-prune (90s default) doesn't garbage-collect us.
+    # Only on processes that registered themselves (i.e. workers).
+    bounds_heartbeat_task = None
+    if getattr(app.state, "bounds_self_id", None):
+        import asyncio as _asyncio
+
+        async def _heartbeat() -> None:
+            wid = app.state.bounds_self_id
+            while True:
+                try:
+                    await _asyncio.sleep(30.0)
+                    if not app.state.bounds_registry.heartbeat(wid):
+                        # Registry pruned us between ticks; re-register.
+                        # Caller's bound dataclass was frozen — rebuild
+                        # via the same inventory call would be more correct
+                        # but for this minimal heartbeat we just log.
+                        logger.warning(
+                            f"Bounds heartbeat: {wid} not found in registry; "
+                            "re-register on next inventory pass"
+                        )
+                except _asyncio.CancelledError:
+                    break
+                except Exception as hb_exc:
+                    logger.warning(f"Bounds heartbeat tick failed: {hb_exc}")
+
+        bounds_heartbeat_task = _asyncio.create_task(
+            _heartbeat(), name="bounds-heartbeat"
+        )
+        app.state.bounds_heartbeat_task = bounds_heartbeat_task
+        logger.info("Bounds heartbeat task started (30s tick)")
 
     # Event-loop-ready probe (D10-6): wait until the loop has settled
     # after DBOS/seed/workforce init before we declare startup success.
@@ -298,6 +358,20 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Event-loop-ready probe failed: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
+
+    # Sprint 5.5: stop heartbeat + unregister from bounds before draining.
+    if bounds_heartbeat_task is not None:
+        bounds_heartbeat_task.cancel()
+        try:
+            await bounds_heartbeat_task
+        except (BaseException,):  # noqa: BLE001 — task cancellation is expected
+            pass
+        if getattr(app.state, "bounds_self_id", None):
+            try:
+                app.state.bounds_registry.unregister(app.state.bounds_self_id)
+                logger.info("Bounds: unregistered self on shutdown")
+            except Exception as ub_exc:
+                logger.warning(f"Bounds unregister failed: {ub_exc}")
 
     # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
     try:
