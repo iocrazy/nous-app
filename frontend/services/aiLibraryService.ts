@@ -400,7 +400,10 @@ export const aiLibraryService = {
   async sendChatMessage(
     sessionId: string,
     content: string,
+    options: { plan_mode?: 'auto' | 'prompt_user' | 'dry_run' } = {},
   ): Promise<ChatResponse> {
+    const body: Record<string, unknown> = { content };
+    if (options.plan_mode) body.plan_mode = options.plan_mode;
     const resp = await fetch(
       `${base()}/sessions/${encodeURIComponent(sessionId)}/chat`,
       {
@@ -409,9 +412,85 @@ export const aiLibraryService = {
           ...(await getAuthHeaders()),
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
       },
     );
     return handle<ChatResponse>(resp);
+  },
+
+  /**
+   * Phase O (O1): SSE streaming variant of sendChatMessage.
+   *
+   * Returns a per-event async iterator. Backend currently does
+   * "buffered call + chunked emit" (Phase L L3) — frontend sees
+   * delta events with (text, offset) and a final done event with
+   * (message_id, usage, run_id, tool_calls, total_chars).
+   *
+   * Caller pattern:
+   *   for await (const evt of streamChatMessage(sid, "hi")) {
+   *     if (evt.type === 'delta') append(evt.data.text);
+   *     if (evt.type === 'done') finalize(evt.data);
+   *     if (evt.type === 'error') showError(evt.data.error);
+   *   }
+   *
+   * Uses fetch + ReadableStream rather than EventSource because we
+   * need POST + auth headers; EventSource only supports GET.
+   */
+  async *streamChatMessage(
+    sessionId: string,
+    content: string,
+    options: { plan_mode?: 'auto' | 'prompt_user' | 'dry_run'; signal?: AbortSignal } = {},
+  ): AsyncGenerator<{ type: string; data: any }> {
+    const body: Record<string, unknown> = { content };
+    if (options.plan_mode) body.plan_mode = options.plan_mode;
+    const resp = await fetch(
+      `${base()}/sessions/${encodeURIComponent(sessionId)}/chat-stream`,
+      {
+        method: 'POST',
+        headers: {
+          ...(await getAuthHeaders()),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: options.signal,
+      },
+    );
+    if (!resp.ok || !resp.body) {
+      const errText = await resp.text().catch(() => '');
+      throw new Error(`stream HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+    }
+    // Parse SSE: events separated by \n\n; each event has "event: NAME\n" + "data: JSON\n"
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Drain complete events
+        let nl;
+        while ((nl = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 2);
+          let evtName = 'message';
+          let dataPayload = '';
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) evtName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataPayload += line.slice(5).trim();
+          }
+          let data: any = {};
+          try {
+            data = dataPayload ? JSON.parse(dataPayload) : {};
+          } catch {
+            data = { _raw: dataPayload };
+          }
+          yield { type: evtName, data };
+          if (evtName === 'done' || evtName === 'error') return;
+        }
+      }
+    } finally {
+      try { await reader.cancel(); } catch { /* ignore */ }
+    }
   },
 };
