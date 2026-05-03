@@ -19,6 +19,7 @@ import type {
   AgentRunListResponse,
   AILibraryAgent,
   AILibraryCommitment,
+  AILibraryMCPServer,
   AILibraryMemory,
   AILibrarySkill,
   AILibrarySkillFile,
@@ -462,6 +463,59 @@ export const aiLibraryService = {
       { headers: await getAuthHeaders() },
     );
     return handle(resp);
+  },
+
+  /**
+   * G1+G5 / A: per-user MCP server registrations.
+   */
+  async listMCPServers(): Promise<{ items: AILibraryMCPServer[]; count: number }> {
+    const resp = await fetch(`${base()}/mcp-servers`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle(resp);
+  },
+
+  async createMCPServer(input: {
+    name: string;
+    url: string;
+    bearer_token?: string;
+    description?: string;
+    enabled?: boolean;
+  }): Promise<AILibraryMCPServer> {
+    const resp = await fetch(`${base()}/mcp-servers`, {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    return handle(resp);
+  },
+
+  async updateMCPServer(
+    id: string,
+    patch: {
+      url?: string;
+      bearer_token?: string;
+      description?: string;
+      enabled?: boolean;
+    },
+  ): Promise<AILibraryMCPServer> {
+    const resp = await fetch(`${base()}/mcp-servers/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    return handle(resp);
+  },
+
+  async deleteMCPServer(id: string): Promise<void> {
+    const resp = await fetch(`${base()}/mcp-servers/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: await getAuthHeaders(),
+    });
+    if (!resp.ok && resp.status !== 204) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
   },
 
   async archiveMemory(memoryId: string): Promise<void> {

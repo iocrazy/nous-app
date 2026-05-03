@@ -32,6 +32,7 @@ import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibr
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi, getNousModels } from '../services/aiService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
+import { MCPServersPanel } from './MCPServersPanel';
 import { useSettingsStore } from '../stores/settingsStore';
 
 interface AISettingsProps {
@@ -1184,6 +1185,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           {saveSuccess ? 'Settings Saved!' : 'Save Settings'}
         </button>
       </div>
+
+      {/* A: MCP Servers section — independent of LLM provider settings,
+          but shown here since both are agent-runtime configs. */}
+      <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
+        <MCPServersPanel />
+      </section>
     </div>
   );
 };

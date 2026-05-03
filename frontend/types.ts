@@ -1257,6 +1257,17 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
+/** A: AI Library MCP server registration row.
+ *  bearer_token is never returned — only has_bearer_token boolean. */
+export interface AILibraryMCPServer {
+  id: string;
+  name: string;
+  url: string;
+  description: string | null;
+  enabled: boolean;
+  has_bearer_token?: boolean;
+}
+
 /** O5: AI Library memory row, as returned by GET /memories. */
 export interface AILibraryMemory {
   id: string;
