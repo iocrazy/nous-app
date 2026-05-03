@@ -158,6 +158,8 @@ class HookRegistry:
             if res.note:
                 last_note = res.note
             if res.decision == HookDecision.ABORT_RUN:
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("hook_aborted_run")
                 return HookResult.abort(
                     res.note or f"hook '{hook.name}' aborted the run"
                 )

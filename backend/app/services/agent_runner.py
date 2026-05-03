@@ -114,9 +114,12 @@ class AgentRunner:
             )
             return
 
+        from app.agent_framework._metrics_helper import inc_metric
+        inc_metric("streaming_started")
         try:
             async for chunk in stream_method(composed, user_messages):
                 if abort is not None and abort.is_aborted():
+                    inc_metric("streaming_aborted_mid")
                     raise RunAborted("user cancel mid-stream")
                 yield chunk
                 if chunk.finish_reason:
@@ -228,6 +231,8 @@ class AgentRunner:
                     composed_for_call = composed.model_copy(
                         update={"max_tokens": budget.max_tokens}
                     )
+                    from app.agent_framework._metrics_helper import inc_metric
+                    inc_metric("output_budget_tightened")
                     logger.debug(
                         f"[AgentRunner] output budget tightened: "
                         f"{composed.max_tokens} → {budget.max_tokens} "
@@ -360,6 +365,9 @@ class AgentRunner:
                 except (TypeError, ValueError):
                     args_repr = repr(args)
                 loop_guard.observe(tool_name, args_repr)
+                # J1 telemetry
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("loop_guard_observed")
 
                 messages.append(
                     {
@@ -382,6 +390,7 @@ class AgentRunner:
                     if warning:
                         messages.append({"role": "system", "content": warning})
                         loop_warning_already_injected = True
+                        inc_metric("loop_guard_tripped")
                         logger.warning(
                             f"[AgentRunner] loop_guard tripped at iter={iteration}"
                         )

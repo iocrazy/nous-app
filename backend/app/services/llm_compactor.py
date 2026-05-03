@@ -132,6 +132,9 @@ async def compact_messages(
         if prune_stats.duplicates_replaced or prune_stats.aged_results:
             messages = pruned
             estimated_before = estimate_tokens(messages, model)
+            from app.agent_framework._metrics_helper import inc_metric
+            inc_metric("compaction_pre_pass_pruned",
+                       by=prune_stats.duplicates_replaced + prune_stats.aged_results)
             logger.info(
                 "[Compactor] pre-pass pruned %d dups + %d aged "
                 "(%d chars dropped); new estimate=%d",
@@ -213,19 +216,14 @@ async def compact_messages(
     new_messages = [summary_message, *tail]
     estimated_after = estimate_tokens(new_messages, model)
 
-    # Wave I (I3): telemetry. Read app.state.agent_metrics if available;
-    # late import to avoid pulling FastAPI into this primitive's module.
-    try:
-        from app.main import app as _app
-        _metrics = getattr(_app.state, "agent_metrics", None)
-        if _metrics is not None:
-            _metrics.inc("compaction_triggered")
-            if used_session_memory:
-                _metrics.inc("compaction_used_session_memory")
-            else:
-                _metrics.inc("compaction_used_fresh_summarizer")
-    except Exception:
-        pass
+    # Wave I (I3) + J1: telemetry via helper.
+    from app.agent_framework._metrics_helper import inc_metric
+    inc_metric("compaction_triggered")
+    inc_metric(
+        "compaction_used_session_memory"
+        if used_session_memory
+        else "compaction_used_fresh_summarizer"
+    )
 
     return CompactionResult(
         messages=new_messages,

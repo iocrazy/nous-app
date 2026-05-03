@@ -232,6 +232,33 @@ class DelegateToolService:
                 "agent_slug": slug,
             }
 
+        # Wave J (J3): register the child run in the root abort registry
+        # so cancelling the root run fans out to this subagent. Best-effort:
+        # registry only present in FastAPI process; CLI / tests skip.
+        try:
+            from app.main import app as _app
+            from uuid import UUID as _UUID
+
+            registry = getattr(_app.state, "root_abort_registry", None)
+            if (
+                registry is not None
+                and self.parent_run_id is not None
+                and inbox_row.get("id")
+            ):
+                # The child "run_id" we want to register is the new
+                # subagent's eventual agent_runs row id. We don't have
+                # one yet at enqueue time — the runner allocates it
+                # later. As a stand-in we register the inbox_message_id
+                # so any caller with a way to map can fire later.
+                # When the runner does spawn a real run, it should also
+                # register that run_id against the same root.
+                registry.register_child(
+                    parent_run_id=str(self.parent_run_id),
+                    child_run_id=str(inbox_row["id"]),
+                )
+        except Exception:
+            pass  # never break dispatch on telemetry failure
+
         logger.info(
             f"[delegate] {self.caller_agent_id} → {target_agent_id} "
             f"(slug={slug}, depth={self.agent_depth + 1}, "

@@ -187,6 +187,8 @@ class MemoryWriter:
                         .eq("id", old_id)
                         .execute()
                     )
+                    from app.agent_framework._metrics_helper import inc_metric
+                    inc_metric("memory_superseded_by_contradiction")
                 except Exception:
                     logger.exception(
                         "[memory.writer] failed to mark %s superseded by %s",

@@ -153,7 +153,31 @@ class SkillToolService:
                     .execute()
                 )
                 rows = result.data or []
-                return str(rows[0]["id"]) if rows else None
+                if not rows:
+                    return None
+                new_id = str(rows[0]["id"])
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("memory_active_remember_persisted")
+
+                # Wave J (J6): post-insert contradiction check.
+                # Same logic as MemoryWriter F3 — find HIGH-similarity
+                # neighbors + classify; replaces / contradicts mark old
+                # superseded_by=new. Skip silently if no Qwen key (cheap
+                # LLM unavailable) — the memory is already saved.
+                try:
+                    await _active_remember_contradiction_check(
+                        sb=sb,
+                        new_id=new_id,
+                        new_summary=request.summary,
+                        new_embedding=embedding,
+                        agent_id=str(UUID(context.agent_id)),
+                        user_id=str(UUID(context.user_id)),
+                        scope=request.scope,
+                    )
+                except Exception:
+                    pass  # never block insert on contradiction-check fail
+
+                return new_id
             except Exception:
                 return None
 
@@ -178,3 +202,119 @@ class SkillToolService:
             ),
             "memory_id": result.memory_id,
         }
+
+
+async def _active_remember_contradiction_check(
+    *,
+    sb: Any,
+    new_id: str,
+    new_summary: str,
+    new_embedding: list,
+    agent_id: str,
+    user_id: str,
+    scope: str,
+) -> None:
+    """Wave J (J6): mirror of MemoryWriter F3 contradiction check for
+    the active_remember tool path. Same logic, just inlined here so
+    the SkillToolService doesn't have to construct a full MemoryWriter."""
+    from app.core.config import settings
+    from app.services.memory.contradiction import (
+        HIGH_SIMILARITY,
+        classify_pair,
+        select_supersede_targets,
+    )
+
+    api_key = (
+        getattr(settings, "DASHSCOPE_API_KEY", None)
+        or getattr(settings, "QWEN_API_KEY", None)
+    )
+    if not api_key:
+        return  # no cheap LLM available — skip contradiction check
+
+    # Pull HIGH-similarity neighbors (cosine in Python; same shape as
+    # MemoryWriter._nearest_existing).
+    try:
+        result = (
+            await sb.table("agent_memories")
+            .select("id, summary, embedding")
+            .eq("agent_id", agent_id)
+            .eq("user_id", user_id)
+            .eq("scope", scope)
+            .eq("status", "active")
+            .neq("id", new_id)
+            .limit(50)
+            .execute()
+        )
+    except Exception:
+        return
+
+    rows = result.data or []
+    scored = []
+    for row in rows:
+        emb = row.get("embedding")
+        if not emb:
+            continue
+        sim = _cosine_helper(new_embedding, emb)
+        if sim >= HIGH_SIMILARITY:
+            scored.append((sim, row))
+    scored.sort(reverse=True, key=lambda t: t[0])
+    neighbors = [r for _, r in scored[:3]]
+    if not neighbors:
+        return
+
+    # Cheap classifier closure
+    async def _classifier(prompt: str) -> str:
+        try:
+            from app.schemas.ai_library import ComposedSystemPrompt
+            from app.services.ai_provider import QwenAdapter
+            adapter = QwenAdapter(api_key=api_key, model="qwen-turbo")
+            cs = ComposedSystemPrompt(
+                agent_id=None,  # type: ignore[arg-type]
+                agent_slug="active_remember_classifier",
+                model="qwen-turbo",
+                temperature=0.0,
+                max_tokens=128,
+                system_message="Classify two memories. Output one word.",
+                tools=[], skill_manifest=[],
+                cache_fingerprint="active_remember_classifier_v1",
+            )
+            resp = await adapter.call(cs, [{"role": "user", "content": prompt}])
+            return resp.get("content") or ""
+        except Exception:
+            return ""
+
+    decisions = []
+    for old in neighbors:
+        d = await classify_pair(
+            old_summary=old["summary"],
+            old_id=old["id"],
+            new_summary=new_summary,
+            classifier=_classifier,
+        )
+        if d is not None:
+            decisions.append(d)
+
+    target_ids = select_supersede_targets(decisions)
+    for old_id in target_ids:
+        try:
+            await (
+                sb.table("agent_memories")
+                .update({"status": "superseded", "superseded_by": new_id})
+                .eq("id", old_id)
+                .execute()
+            )
+            from app.agent_framework._metrics_helper import inc_metric
+            inc_metric("memory_superseded_by_contradiction")
+        except Exception:
+            pass
+
+
+def _cosine_helper(a: list, b: list) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(x * x for x in b) ** 0.5
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)

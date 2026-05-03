@@ -186,6 +186,9 @@ async def consolidate_namespaces_step(
                 clusters_merged += 1
                 rows_superseded += len(decision.cluster_member_ids)
 
+    if clusters_merged:
+        from app.agent_framework._metrics_helper import inc_metric
+        inc_metric("memory_consolidated", by=clusters_merged)
     return {
         "namespaces": namespaces_processed,
         "clusters_merged": clusters_merged,

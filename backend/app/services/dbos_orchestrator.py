@@ -260,12 +260,17 @@ async def start_workflow_routed(
             if workflow_name and not _bounds_registry.can_dispatch_workflow(
                 workflow_name
             ):
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("dispatch_gate_blocked")
                 raise RuntimeError(
                     f"no live worker advertises workflow '{workflow_name}' — "
                     f"refusing to enqueue (would sit indefinitely). "
                     f"Live workers: {len(live)}. "
                     f"Set BOUNDS_GATE_ENABLED=false to bypass."
                 )
+            elif workflow_name:
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("dispatch_gate_passed")
 
     from contextlib import nullcontext
 
