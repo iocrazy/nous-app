@@ -26,6 +26,12 @@ services:
     image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
     container_name: mediahub-app-backend
     restart: unless-stopped
+    # R2: Use docker-init (tini) as PID 1 so signals (SIGTERM from
+    # `docker stop`) are forwarded to uvicorn instead of being absorbed
+    # by Python; tini also reaps zombie children of crashed subprocs.
+    # Pairs with backend's PR_SET_PDEATHSIG safe_popen_kwargs() to
+    # eliminate orphans across SIGKILL / OOM.
+    init: true
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     ports:
@@ -67,6 +73,7 @@ services:
   #   image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
   #   container_name: mediahub-app-worker
   #   restart: unless-stopped
+  #   init: true   # R2: tini PID 1 for signal forwarding + zombie reaping
   #   labels:
   #     - "com.centurylinklabs.watchtower.enable=true"
   #   # No published port — worker only serves /health internally.

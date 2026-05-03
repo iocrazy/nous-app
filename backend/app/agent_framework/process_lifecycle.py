@@ -1,4 +1,4 @@
-"""D10-7: process exit cleanup — kill all spawned children before
+"""D10-7 + R2: process exit cleanup — kill all spawned children before
 the parent dies.
 
 Problem: pytest / uvicorn / dev scripts spawn multiprocessing workers
@@ -9,17 +9,34 @@ requests. Eventually max_connections / FD limit hits and operator
 gets cryptic "remaining connection slots reserved" errors with no
 clue why.
 
-This module installs:
+Coverage matrix (which exit modes leave NO orphans):
+
+  exit mode                    | atexit | signal | PR_SET_PDEATHSIG
+  -----------------------------|--------|--------|------------------
+  sys.exit() / normal          |   ✓    |   —    |   ✓ (already dead)
+  SIGINT (Ctrl-C)              |   ✓    |   ✓    |   ✓
+  SIGTERM (kill, docker stop)  |   ✓    |   ✓    |   ✓
+  SIGKILL (kill -9, OOM kill)  |   ✗    |   ✗    |   ✓  ← R2 only
+  power loss                   |   ✗    |   ✗    |   ✗
+
+This module installs three layers:
 
   1. atexit handler — fires on normal interpreter exit. Walks the
      subprocess_registry + multiprocessing._children + kills everything
-     SIGTERM → 1s grace → SIGKILL.
+     SIGTERM → 0.5s grace → SIGKILL.
 
   2. Signal handlers (SIGINT, SIGTERM) — same cleanup before the
      process dies. Re-raises the signal so default behavior (exit code)
      stays correct.
 
-Both are best-effort and idempotent — calling install_cleanup_handlers()
+  3. R2: ``bind_to_parent_death()`` — Linux-only PR_SET_PDEATHSIG
+     helper for spawned children. Calling it as the first line in a
+     multiprocessing target (or via os.fork() child branch) makes the
+     kernel send SIGKILL to the child the instant the parent dies —
+     even if the parent died via SIGKILL / OOM / panic. This is the
+     only way to defend against SIGKILL of the parent.
+
+All best-effort and idempotent — calling install_cleanup_handlers()
 twice is safe.
 
 For multiprocessing.Process children: we use multiprocessing._children
@@ -163,4 +180,67 @@ def _cleanup_multiprocessing_children() -> None:
             pass
 
 
-__all__ = ["install_cleanup_handlers"]
+def bind_to_parent_death() -> bool:
+    """R2: Bind this process to the parent — kernel will SIGKILL us
+    when the parent dies, even if parent dies via SIGKILL/OOM/panic.
+
+    Linux-only (uses prctl PR_SET_PDEATHSIG). Returns True on success,
+    False on non-Linux or any error (callers must not rely on it).
+
+    Call as the FIRST line in a multiprocessing target / forked child:
+
+        def child_main():
+            from app.agent_framework.process_lifecycle import bind_to_parent_death
+            bind_to_parent_death()
+            ...
+
+    Implementation note: must be called from the child after fork —
+    setting PR_SET_PDEATHSIG before fork would bind the parent itself,
+    not the child.
+    """
+    if sys.platform != "linux":
+        return False
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        PR_SET_PDEATHSIG = 1  # from <sys/prctl.h>
+        rc = libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+        if rc != 0:
+            err = ctypes.get_errno()
+            logger.warning(
+                f"[process_lifecycle] prctl(PR_SET_PDEATHSIG) failed: errno={err}"
+            )
+            return False
+        return True
+    except Exception as exc:
+        logger.warning(f"[process_lifecycle] bind_to_parent_death failed: {exc}")
+        return False
+
+
+def safe_popen_kwargs() -> dict:
+    """R2: returns kwargs to splat into subprocess.Popen / subprocess.run
+    so the spawned child auto-dies with the parent on Linux.
+
+    Usage:
+
+        import subprocess
+        from app.agent_framework.process_lifecycle import safe_popen_kwargs
+        proc = subprocess.Popen(["yt-dlp", url], **safe_popen_kwargs())
+
+    On non-Linux (mac dev / Windows): returns empty dict — caller's
+    Popen call is unchanged. On Linux: passes ``preexec_fn`` that binds
+    the child to the parent via PR_SET_PDEATHSIG.
+
+    Note: ``preexec_fn`` runs after fork in the child but before exec,
+    which is exactly when the child needs to set its own death signal.
+    """
+    if sys.platform != "linux":
+        return {}
+    return {"preexec_fn": bind_to_parent_death}
+
+
+__all__ = [
+    "install_cleanup_handlers",
+    "bind_to_parent_death",
+    "safe_popen_kwargs",
+]

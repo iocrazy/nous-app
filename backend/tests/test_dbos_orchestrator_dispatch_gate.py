@@ -19,10 +19,8 @@ def registered_workflow_callable():
 
 @pytest.fixture(autouse=True)
 def _reset_state(monkeypatch):
-    """Each test starts with no bounds registry + DBOS-disabled by default
-    (we'll re-enable per test as needed). Gate kept ENABLED for the gate
-    test suite — production default is OFF (see BOUNDS_GATE_ENABLED env)."""
-    monkeypatch.setenv("BOUNDS_GATE_ENABLED", "true")
+    """Each test starts with no bounds registry. After R1 the gate is
+    always-on; no env flag to set."""
     dbos_orchestrator.set_bounds_registry(None)
     yield
     dbos_orchestrator.set_bounds_registry(None)
@@ -166,18 +164,17 @@ async def test_registry_with_live_worker_advertising_workflow_passes(
 
 
 @pytest.mark.asyncio
-async def test_gate_disabled_skips_check(
+async def test_combined_mode_self_bound_passes_naturally(
     monkeypatch, registered_workflow_callable
 ):
-    """BOUNDS_GATE_ENABLED=false (production default) skips the gate
-    even with a registry that would otherwise reject."""
-    monkeypatch.setenv("BOUNDS_GATE_ENABLED", "false")
+    """R1 — Combined-mode worker self-registers all local workflows in
+    its bound; the gate finds it can_dispatch, no env flag needed."""
     reg = BoundsRegistry()
     reg.register(
         BoundsAdvertisement(
-            worker_id="w-1",
-            role="worker",
-            workflows=frozenset({"some_other_workflow"}),  # would block if gate on
+            worker_id="combined-self",
+            role="combined",
+            workflows=frozenset({"my_workflow"}),
         )
     )
     dbos_orchestrator.set_bounds_registry(reg)
@@ -189,7 +186,7 @@ async def test_gate_disabled_skips_check(
     monkeypatch.setattr(dbos_orchestrator, "is_enabled", lambda: True)
 
     class _Handle:
-        workflow_id = "wf-bypass"
+        workflow_id = "wf-combined"
 
     class _DBOS:
         @staticmethod
@@ -209,11 +206,10 @@ async def test_gate_disabled_skips_check(
     fake_dbos.DBOSContextSetAuth = _Ctx
     monkeypatch.setitem(sys.modules, "dbos", fake_dbos)
 
-    # Should NOT raise — gate is off
     result = await dbos_orchestrator.start_workflow_routed(
         "x", dbos_workflow_callable=registered_workflow_callable
     )
-    assert result["dbos_workflow_id"] == "wf-bypass"
+    assert result["dbos_workflow_id"] == "wf-combined"
 
 
 @pytest.mark.asyncio

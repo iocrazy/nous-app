@@ -245,6 +245,69 @@ class _StubSkillTool:
         return {"skill": args.get("skill"), "prompt": "tool ran"}
 
 
+# ─── R4: stream_turn auto_recorder ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_auto_recorder_skipped_without_user_id():
+    """When user_id missing, auto_recorder is silently no-op (no crash)."""
+    runner = AgentRunner(adapter=_BufferedOnlyAdapter(), skill_tool=None)
+    chunks = []
+    async for chunk in runner.stream_turn(
+        _composed(),
+        [{"role": "user", "content": "hi"}],
+        auto_recorder=True,  # default; should still work without user_id
+    ):
+        chunks.append(chunk)
+    assert len(chunks) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_auto_recorder_disabled_explicitly():
+    """auto_recorder=False with user_id provided also bypasses."""
+    runner = AgentRunner(adapter=_BufferedOnlyAdapter(), skill_tool=None)
+    chunks = []
+    async for chunk in runner.stream_turn(
+        _composed(),
+        [{"role": "user", "content": "hi"}],
+        auto_recorder=False,
+        user_id=UUID(int=1),
+    ):
+        chunks.append(chunk)
+    assert len(chunks) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_caller_recorder_overrides_auto(monkeypatch):
+    """If caller supplies recorder explicitly, auto path is not entered
+    (verified by checking we don't try to construct a new RunRecorder)."""
+    sentinel_calls = []
+
+    class _SentinelRecorder:
+        async def __aenter__(self):
+            sentinel_calls.append("enter")
+            return self
+        async def __aexit__(self, *a):
+            sentinel_calls.append("exit")
+            return False
+        def record_usage(self, **k): ...
+        def record_skill(self, *a): ...
+
+    runner = AgentRunner(adapter=_BufferedOnlyAdapter(), skill_tool=None)
+    rec = _SentinelRecorder()
+    chunks = []
+    async for chunk in runner.stream_turn(
+        _composed(),
+        [{"role": "user", "content": "hi"}],
+        recorder=rec,  # explicit; auto path should not engage
+        user_id=UUID(int=1),
+    ):
+        chunks.append(chunk)
+    # Caller's own recorder context-manage is caller's job; we should
+    # NOT have entered/exited it for them
+    assert sentinel_calls == []
+
+
 @pytest.mark.asyncio
 async def test_stream_turn_executes_tool_calls_and_continues():
     """End-to-end P1: tool_call deltas stitched + executed; second
