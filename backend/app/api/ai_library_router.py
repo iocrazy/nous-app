@@ -2231,3 +2231,110 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
         "mime": mime_guess,
         "filename": filename,
     }
+
+
+# ─── G1: Approval requests (human-in-loop gates) ──────────────────────
+
+
+@router.get("/approval-requests", summary="List the caller's pending approval requests")
+async def list_approval_requests(auth: AuthDep, limit: int = 50) -> Dict[str, Any]:
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    from app.repositories.approval_requests_repository import (
+        ApprovalRequestsRepository,
+    )
+    repo = ApprovalRequestsRepository()
+    rows = await repo.list_pending_for_user(_coerce_user_uuid(auth.user_id), limit=limit)
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+                "agent_id": str(r.agent_id),
+                "session_id": str(r.session_id) if r.session_id else None,
+                "run_id": str(r.run_id) if r.run_id else None,
+                "hook_name": r.hook_name,
+                "reason": r.reason,
+                "payload": r.payload,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            }
+            for r in rows
+        ],
+        "count": len(rows),
+    }
+
+
+class _ApprovalDecision(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/approval-requests/{request_id}/approve",
+             summary="Approve a pending request")
+async def approve_approval_request(
+    request_id: UUID, payload: _ApprovalDecision, auth: AuthDep,
+) -> Dict[str, Any]:
+    from app.repositories.approval_requests_repository import (
+        ApprovalRequestsRepository,
+    )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    repo = ApprovalRequestsRepository()
+    existing = await repo.get_by_id(request_id)
+    if not existing or existing.user_id != user_uuid:
+        raise HTTPException(status_code=404, detail="approval request not found")
+    if existing.status != "pending":
+        raise HTTPException(status_code=409, detail=f"already {existing.status}")
+    ok = await repo.decide(
+        request_id, owner_user_id=user_uuid, approve=True, note=payload.note,
+    )
+    if not ok:
+        raise HTTPException(status_code=409, detail="decide failed")
+    return {"id": str(request_id), "status": "approved"}
+
+
+@router.post("/approval-requests/{request_id}/reject",
+             summary="Reject a pending request")
+async def reject_approval_request(
+    request_id: UUID, payload: _ApprovalDecision, auth: AuthDep,
+) -> Dict[str, Any]:
+    from app.repositories.approval_requests_repository import (
+        ApprovalRequestsRepository,
+    )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    repo = ApprovalRequestsRepository()
+    existing = await repo.get_by_id(request_id)
+    if not existing or existing.user_id != user_uuid:
+        raise HTTPException(status_code=404, detail="approval request not found")
+    if existing.status != "pending":
+        raise HTTPException(status_code=409, detail=f"already {existing.status}")
+    ok = await repo.decide(
+        request_id, owner_user_id=user_uuid, approve=False, note=payload.note,
+    )
+    if not ok:
+        raise HTTPException(status_code=409, detail="decide failed")
+    return {"id": str(request_id), "status": "rejected"}
+
+
+# ─── G3: Lane queue snapshot for ops ──────────────────────────────────
+
+
+@router.get("/admin/lanes/snapshot", summary="Per-lane queue depth snapshot")
+async def admin_lane_snapshot(auth: AdminAuthDep) -> Dict[str, Any]:
+    """Returns current depth of each LaneQueue partition. Lets ops see
+    which lane is backed up (User vs Background vs Scheduled vs Subagent).
+    """
+    from app.main import app as _app
+    lq = getattr(_app.state, "lane_queue", None)
+    if lq is None:
+        return {"available": False, "reason": "lane_queue not wired on this process"}
+
+    queues = getattr(lq, "_queues", {})
+    snapshot: Dict[str, Any] = {}
+    for lane, q in queues.items():
+        try:
+            lane_name = lane.value if hasattr(lane, "value") else str(lane)
+            snapshot[lane_name] = {
+                "depth": q.qsize() if hasattr(q, "qsize") else 0,
+            }
+        except Exception:
+            continue
+    return {"available": True, "lanes": snapshot}
