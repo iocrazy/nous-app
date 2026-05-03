@@ -218,20 +218,25 @@ class AILibraryChatService:
         user_id: UUID,
         content: str,
     ):
-        """Wave I (I2): streaming variant of chat.
+        """Phase L (L3): SSE streaming variant of chat.
 
         Yields event dicts: {type: 'delta' | 'done' | 'error', data: {...}}.
 
-        Implementation: this is a thin SSE-friendly wrapper. For now it
-        simply runs the buffered chat() and emits the full content as a
-        single delta + done event. A future revision will plumb
-        AgentRunner.stream_turn through the entire chat lifecycle so
-        characters arrive as the model emits them.
+        Strategy:
+          - Always run the full chat() pipeline (handles tool_calls +
+            persistence + harvest + session_memory dispatch correctly).
+          - Then chunk the response text into ~80-char delta events on
+            whitespace boundaries so the client gets incremental output
+            even when the upstream LLM call was buffered.
 
-        The thin-wrapper approach is deliberate — it keeps message
-        persistence + commitment harvest + session_memory dispatch all
-        intact while giving callers an SSE shape to integrate against
-        immediately.
+        Real adapter-level token streaming exists at
+        ``AgentRunner.stream_turn`` but doesn't yet execute tool_calls
+        mid-stream. Until tool execution is plumbed through streaming,
+        we deliberately do "buffered call + chunked emit" so frontends
+        get a usable streaming UX without breaking tool-using turns.
+
+        Each delta carries (text, offset). ``done`` has usage + run_id +
+        tool_calls trace + total_chars.
         """
         try:
             result = await self.chat(session_id, user_id=user_id, content=content)
@@ -241,10 +246,25 @@ class AILibraryChatService:
 
         message = result.get("assistant_message") or {}
         text = message.get("content") or ""
-        # Emit content in one delta. (Future: chunk on token boundaries
-        # once we plumb stream_turn end-to-end.)
-        if text:
-            yield {"type": "delta", "data": {"text": text}}
+
+        DELTA_CHARS = 80
+        offset = 0
+        n = len(text)
+        while offset < n:
+            end = min(offset + DELTA_CHARS, n)
+            # Try to break on whitespace if not at end
+            if end < n:
+                for probe in range(end, min(end + 20, n)):
+                    if text[probe].isspace():
+                        end = probe + 1
+                        break
+            chunk = text[offset:end]
+            yield {
+                "type": "delta",
+                "data": {"text": chunk, "offset": offset},
+            }
+            offset = end
+
         yield {
             "type": "done",
             "data": {
@@ -252,6 +272,7 @@ class AILibraryChatService:
                 "usage": result.get("usage"),
                 "run_id": result.get("run_id"),
                 "tool_calls": result.get("tool_calls", []),
+                "total_chars": n,
             },
         }
 

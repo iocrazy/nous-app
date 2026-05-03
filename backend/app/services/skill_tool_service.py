@@ -28,6 +28,10 @@ _BINARY_NOTE = (
 class SkillToolService:
     def __init__(self, skill_repo: SkillRepository) -> None:
         self.skill_repo = skill_repo
+        # Phase L (L2): per-instance AgentTodoList. AgentRunner builds
+        # a fresh SkillToolService per run — its todo_list lives only for
+        # that run and is reset at run start. Set lazily on first use.
+        self.todo_list: Optional[Any] = None
 
     async def execute(self, args: dict[str, Any]) -> dict[str, Any]:
         slug = (args.get("skill") or "").strip()
@@ -38,6 +42,13 @@ class SkillToolService:
         # memory remember tool instead of looking up a DB skill row.
         if slug == "remember":
             return await self._execute_remember(args)
+
+        # Phase L (L2): built-in 'todo' skill — agent maintains a
+        # per-turn task list. Args: op + (items|id) per agent_todo
+        # contract. Per-instance via SkillToolService.todo_list, which
+        # AgentRunner attaches before each turn.
+        if slug == "todo":
+            return await self._execute_todo(args)
 
         skill = await self.skill_repo.get_by_slug(slug)
         if not skill:
@@ -318,3 +329,91 @@ def _cosine_helper(a: list, b: list) -> float:
     if na == 0 or nb == 0:
         return 0.0
     return dot / (na * nb)
+
+
+# ─── Built-in 'todo' skill (Phase L / L2) ─────────────────────────────
+
+
+def _execute_todo_impl(svc, args: dict) -> dict:
+    """Pure helper extracted for testability. Operates on svc.todo_list.
+
+    Args contract:
+      op: 'replace' | 'complete' | 'in_progress' | 'pending' | 'show'
+      items (op=replace): list of {content, active_form?}
+      id (op != replace and != show): int
+
+    Returns standard skill envelope: {skill, description, prompt, ...}.
+    """
+    from app.agent_framework.agent_todo import (
+        AgentTodoList,
+        TodoStatus,
+        TodoValidationError,
+    )
+    from app.agent_framework._metrics_helper import inc_metric
+
+    if svc.todo_list is None:
+        svc.todo_list = AgentTodoList()
+    todos = svc.todo_list
+
+    op = (args.get("op") or "").lower()
+
+    try:
+        if op == "replace":
+            items = args.get("items")
+            if items is None:
+                return {"skill": "todo", "error": "op=replace requires 'items' list"}
+            new_items = todos.replace(items)
+            inc_metric("agent_todo_replaced")
+            return {
+                "skill": "todo",
+                "description": "Replaced internal todo list.",
+                "prompt": todos.render_for_prompt(),
+                "item_count": len(new_items),
+            }
+        if op == "show":
+            return {
+                "skill": "todo",
+                "description": "Current internal todo list.",
+                "prompt": todos.render_for_prompt() or "(empty)",
+                "item_count": len(todos.items),
+            }
+        if op in {"complete", "in_progress", "pending"}:
+            item_id = args.get("id")
+            if not isinstance(item_id, int):
+                return {
+                    "skill": "todo",
+                    "error": f"op={op} requires integer 'id'",
+                }
+            status_map = {
+                "complete": TodoStatus.COMPLETED,
+                "in_progress": TodoStatus.IN_PROGRESS,
+                "pending": TodoStatus.PENDING,
+            }
+            updated = todos.update_status(item_id, status_map[op])
+            if op == "complete":
+                inc_metric("agent_todo_completed")
+            return {
+                "skill": "todo",
+                "description": f"Marked todo {item_id} as {op}.",
+                "prompt": todos.render_for_prompt(),
+                "updated_id": updated.id,
+                "all_done": todos.all_done(),
+            }
+        return {
+            "skill": "todo",
+            "error": (
+                f"unknown op={op!r}; supported: replace / complete / "
+                "in_progress / pending / show"
+            ),
+        }
+    except TodoValidationError as exc:
+        return {"skill": "todo", "error": str(exc)}
+
+
+# Method binding — patch onto SkillToolService so the dispatcher
+# can call self._execute_todo() like other built-ins.
+async def _execute_todo(self, args: dict) -> dict:
+    return _execute_todo_impl(self, args)
+
+
+SkillToolService._execute_todo = _execute_todo  # type: ignore[attr-defined]
