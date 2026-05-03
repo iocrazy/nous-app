@@ -1471,12 +1471,14 @@ async def send_chat_message(
         user_id=user_uuid,
         content=payload.content,
         plan_mode=payload.plan_mode,
+        attachments=payload.attachments or None,  # G2
     )
     return {
         "message": result["assistant_message"],
         "usage": result["usage"],
         "run_id": result["run_id"],
         "tool_calls": result.get("tool_calls", []),
+        "attachment_failures": result.get("attachment_failures", []),  # G2
     }
 
 
@@ -1511,7 +1513,11 @@ async def send_chat_message_stream(
     async def _generator():
         try:
             async for evt in svc.chat_stream(
-                session_id, user_id=user_uuid, content=payload.content
+                session_id,
+                user_id=user_uuid,
+                content=payload.content,
+                plan_mode=payload.plan_mode,
+                attachments=payload.attachments or None,  # G2
             ):
                 # evt: dict with type + payload
                 event_name = evt.get("type", "delta")
