@@ -218,6 +218,7 @@ class AILibraryChatService:
         user_id: UUID,
         content: str,
         plan_mode: Optional[str] = None,
+        attachments: Optional[list] = None,
     ):
         """P2: real streaming variant of chat.
 
@@ -253,6 +254,7 @@ class AILibraryChatService:
                 content=content,
                 plan_mode=plan_mode,
                 chunk_callback=_on_chunk,
+                attachments=attachments,
             ),
             name=f"chat-stream-{session_id}",
         )
@@ -316,6 +318,7 @@ class AILibraryChatService:
         content: str,
         plan_mode: Optional[str] = None,
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        attachments: Optional[list] = None,
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
 
@@ -536,7 +539,37 @@ class AILibraryChatService:
             if role not in ("user", "assistant", "system"):
                 continue
             user_messages.append({"role": role, "content": msg.get("content") or ""})
-        user_messages.append({"role": "user", "content": content})
+
+        # G2: resolve attachments → multimodal Attachment[] → vision-aware
+        # user message. Failures degrade gracefully (text-only message
+        # with placeholder describing what was skipped).
+        new_user_msg: Dict[str, Any]
+        attachment_failures: list = []
+        if attachments:
+            try:
+                from app.services.chat_attachment_resolver import resolve_attachments
+                from app.agent_framework.multimodal import build_user_message
+                resolved = await resolve_attachments(attachments)
+                attachment_failures = list(resolved.failures)
+                new_user_msg = build_user_message(
+                    content,
+                    resolved.attachments,
+                    target_model=composed.model,
+                )
+                if attachment_failures:
+                    logger.info(
+                        f"[chat] G2 attachment failures: "
+                        f"{len(attachment_failures)} of {len(attachments)} "
+                        f"could not be resolved"
+                    )
+            except Exception as att_exc:
+                logger.warning(
+                    f"[chat] attachment resolution failed (text-only fallback): {att_exc}"
+                )
+                new_user_msg = {"role": "user", "content": content}
+        else:
+            new_user_msg = {"role": "user", "content": content}
+        user_messages.append(new_user_msg)
 
         # Wave G (G5): per-message size cap. Defends against the
         # "user pasted 200k log line" case that bypasses compaction
@@ -839,6 +872,12 @@ class AILibraryChatService:
             "usage": usage_snapshot,
             "run_id": str(run_id) if run_id else None,
             "tool_calls": tool_calls_trace,
+            # G2: surface any attachment failures so the chat UI can
+            # show "I couldn't read X.pdf" — empty list on success.
+            "attachment_failures": [
+                {"index": f.request_index, "kind": f.kind, "reason": f.reason}
+                for f in attachment_failures
+            ],
         }
 
     async def _maybe_compact(
