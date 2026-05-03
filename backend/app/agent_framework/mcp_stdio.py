@@ -47,6 +47,26 @@ PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "mediahub"
 SERVER_VERSION = "0.1"
 
+# P2-8: shared-secret auth. When MCP_SHARED_SECRET env is set, the
+# initialize handshake MUST include a matching `clientInfo.token`
+# value or all subsequent non-initialize requests are rejected with
+# UNAUTHORIZED. Empty/unset secret = legacy "no auth" mode (suitable
+# for trusted-process-supervised use, e.g. Claude Desktop on the
+# same machine). Errors NEVER echo the configured secret value.
+import os as _os
+
+_AUTH_REQUIRED_SENTINEL = object()
+
+
+def _expected_secret() -> Optional[str]:
+    val = _os.environ.get("MCP_SHARED_SECRET", "").strip()
+    return val or None
+
+
+# Custom JSON-RPC error code for auth failure. Outside the reserved
+# -32768..-32000 range so clients can distinguish from protocol errors.
+UNAUTHORIZED = -32001
+
 
 # ─── JSON-RPC primitives ──────────────────────────────────────────────
 
@@ -74,14 +94,19 @@ INTERNAL_ERROR = -32603
 
 
 async def _dispatch(
-    request: dict[str, Any], registry: MCPToolRegistry
+    request: dict[str, Any],
+    registry: MCPToolRegistry,
+    *,
+    session_state: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     """Return a JSON-RPC response dict, or None for notifications.
 
-    Handles malformed-but-parseable requests (missing method, bad params)
-    by returning an error response. Truly malformed JSON is caught upstream
-    before this is called.
+    ``session_state`` carries cross-request bookkeeping (currently just
+    the auth-OK flag set by initialize). Pass None for stateless tests.
     """
+    if session_state is None:
+        session_state = {}
+
     rid = request.get("id")
     method = request.get("method")
     params = request.get("params") or {}
@@ -97,6 +122,16 @@ async def _dispatch(
         return None
 
     if method == "initialize":
+        # P2-8: validate shared secret if configured.
+        expected = _expected_secret()
+        if expected:
+            client_info = params.get("clientInfo") or {}
+            token = client_info.get("token") if isinstance(client_info, dict) else None
+            if token != expected:
+                # Generic message — don't reveal whether secret is required
+                # or what the expected value looks like.
+                return _err(rid, UNAUTHORIZED, "authentication required")
+        session_state["authenticated"] = True
         return _ok(
             rid,
             {
@@ -105,6 +140,10 @@ async def _dispatch(
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
             },
         )
+
+    # Post-initialize methods: enforce auth if a secret is configured.
+    if _expected_secret() and not session_state.get("authenticated"):
+        return _err(rid, UNAUTHORIZED, "authentication required")
 
     if method == "tools/list":
         return _ok(rid, {"tools": registry.list_descriptors()})
@@ -183,6 +222,9 @@ async def serve(
     if writer is None:
         writer = sys.stdout
 
+    # Per-connection state carried across dispatches (P2-8: auth flag).
+    session_state: dict[str, Any] = {}
+
     while True:
         line = await reader.readline()
         if not line:
@@ -200,7 +242,9 @@ async def serve(
         if request.get("method") == "exit":
             break
 
-        response = await _dispatch(request, registry)
+        response = await _dispatch(
+            request, registry, session_state=session_state
+        )
         if response is not None:
             _write(writer, response)
 
@@ -218,20 +262,27 @@ def _write(writer: Any, payload: dict[str, Any]) -> None:
 # ─── Entry point ──────────────────────────────────────────────────────
 
 
-def _build_default_registry() -> MCPToolRegistry:
+async def _build_default_registry_async() -> MCPToolRegistry:
     """Construct the registry the standalone entry point publishes.
 
-    Empty by default — concrete tool registration (skill.* / agent.*)
-    happens via app.state when running embedded in FastAPI, and via
-    a not-yet-written CLI flag when running as a stdio sidecar. Keeping
-    the default empty means `python -m app.agent_framework.mcp_stdio`
-    is safe to run for protocol-level smoke testing.
+    P1-7 wire-up: pulls real skills + persistent agents via the
+    services/mcp_tool_registration helper. Empty registry on import
+    failure — keeps `python -m app.agent_framework.mcp_stdio` runnable
+    even when the DB is unreachable (useful for protocol smoke tests).
     """
-    return MCPToolRegistry()
+    try:
+        from app.services.mcp_tool_registration import build_mcp_registry
+        return await build_mcp_registry()
+    except Exception:
+        return MCPToolRegistry()
 
 
 def main() -> None:  # pragma: no cover — entry point shim
-    asyncio.run(serve(_build_default_registry()))
+    async def _runner():
+        registry = await _build_default_registry_async()
+        await serve(registry)
+
+    asyncio.run(_runner())
 
 
 if __name__ == "__main__":  # pragma: no cover

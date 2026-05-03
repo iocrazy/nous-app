@@ -244,10 +244,16 @@ async def start_workflow_routed(
             "init failed). Cannot dispatch any workflow."
         )
 
-    # Sprint 5.5: bounds dispatch gate. Only enforces when registry has
-    # at least one live bound — empty registry = combined-mode or pre-
-    # discovery, so we don't block.
-    if _bounds_registry is not None:
+    # Sprint 5.5: bounds dispatch gate. Two layers of opt-in protection:
+    #   1. BOUNDS_GATE_ENABLED env flag (default 'false') — kill switch
+    #      while we validate the gate's __name__ matching against every
+    #      production caller. Flip to 'true' once verified end-to-end.
+    #   2. Empty registry = combined-mode / pre-discovery — skip even
+    #      when flag is on, so the gate never blocks single-process dev.
+    gate_enabled = os.environ.get("BOUNDS_GATE_ENABLED", "").lower() in (
+        "1", "true", "yes"
+    )
+    if gate_enabled and _bounds_registry is not None:
         live = _bounds_registry.live_bounds()
         if live:
             workflow_name = getattr(dbos_workflow_callable, "__name__", "")
@@ -257,7 +263,8 @@ async def start_workflow_routed(
                 raise RuntimeError(
                     f"no live worker advertises workflow '{workflow_name}' — "
                     f"refusing to enqueue (would sit indefinitely). "
-                    f"Live workers: {len(live)}"
+                    f"Live workers: {len(live)}. "
+                    f"Set BOUNDS_GATE_ENABLED=false to bypass."
                 )
 
     from contextlib import nullcontext

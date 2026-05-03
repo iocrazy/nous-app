@@ -299,3 +299,116 @@ def test_internal_error_constant_present():
     accidentally renumbered."""
     assert INTERNAL_ERROR == -32603
     assert PARSE_ERROR == -32700
+
+
+# ─── Auth (P2-8) ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_no_auth_when_secret_unset(monkeypatch):
+    """Default behavior: no MCP_SHARED_SECRET → no auth. Back-compat."""
+    monkeypatch.delenv("MCP_SHARED_SECRET", raising=False)
+    reg = MCPToolRegistry()
+    state: dict = {}
+    resp = await _dispatch(
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        reg,
+        session_state=state,
+    )
+    assert "result" in resp
+    # No-auth mode: tools/list works without any handshake state
+    state2: dict = {}
+    resp2 = await _dispatch(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        reg,
+        session_state=state2,
+    )
+    assert "result" in resp2
+
+
+@pytest.mark.asyncio
+async def test_auth_required_initialize_without_token_rejected(monkeypatch):
+    monkeypatch.setenv("MCP_SHARED_SECRET", "the-secret")
+    reg = MCPToolRegistry()
+    resp = await _dispatch(
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        reg,
+    )
+    assert "error" in resp
+    assert resp["error"]["code"] == -32001  # UNAUTHORIZED
+    # Must NOT echo the secret in the error message
+    assert "the-secret" not in resp["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_auth_required_initialize_with_wrong_token_rejected(monkeypatch):
+    monkeypatch.setenv("MCP_SHARED_SECRET", "the-secret")
+    reg = MCPToolRegistry()
+    resp = await _dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"clientInfo": {"token": "guess"}},
+        },
+        reg,
+    )
+    assert "error" in resp
+    assert resp["error"]["code"] == -32001
+
+
+@pytest.mark.asyncio
+async def test_auth_required_initialize_with_correct_token_succeeds(monkeypatch):
+    monkeypatch.setenv("MCP_SHARED_SECRET", "the-secret")
+    reg = MCPToolRegistry()
+    state: dict = {}
+    resp = await _dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"clientInfo": {"token": "the-secret"}},
+        },
+        reg,
+        session_state=state,
+    )
+    assert "result" in resp
+    assert state["authenticated"] is True
+
+
+@pytest.mark.asyncio
+async def test_auth_required_tools_list_without_init_rejected(monkeypatch):
+    """tools/list without prior successful initialize → unauthorized."""
+    monkeypatch.setenv("MCP_SHARED_SECRET", "the-secret")
+    reg = MCPToolRegistry()
+    resp = await _dispatch(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        reg,
+        session_state={},  # never initialized
+    )
+    assert resp["error"]["code"] == -32001
+
+
+@pytest.mark.asyncio
+async def test_auth_required_tools_list_after_init_succeeds(monkeypatch):
+    """End-to-end: initialize with token → tools/list works."""
+    monkeypatch.setenv("MCP_SHARED_SECRET", "the-secret")
+    reg = MCPToolRegistry()
+    state: dict = {}
+    init = await _dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"clientInfo": {"token": "the-secret"}},
+        },
+        reg,
+        session_state=state,
+    )
+    assert "result" in init
+    listing = await _dispatch(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        reg,
+        session_state=state,
+    )
+    assert "result" in listing

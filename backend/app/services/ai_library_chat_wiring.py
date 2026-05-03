@@ -170,10 +170,21 @@ async def build_agent_runner_stack(
     def _adapter_factory(model: str):
         return get_adapter_for_user(model, user_provider_config, settings)
 
+    # P1-5: pull the per-process ModelHealthRegistry off app.state if
+    # available so cooled-down models are skipped on subsequent calls.
+    # No registry → legacy linear behavior (try every model in order).
+    health_registry = None
+    try:
+        from app.main import app as _app  # late import to avoid cycle
+        health_registry = getattr(_app.state, "model_health", None)
+    except Exception:
+        health_registry = None
+
     fallback_chain = LLMFallbackChain(
         primary_model=primary_model,
         fallback_models=fallback_models,
         adapter_factory=_adapter_factory,
+        health_registry=health_registry,
     )
 
     # ── 4. Delegate tool (M2.5 wiring) ──────────────────────────────
