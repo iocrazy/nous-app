@@ -17,6 +17,7 @@ from typing import Optional
 import aiofiles
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
 from app.repositories.projects_repository import ProjectsRepository
 
@@ -727,6 +728,7 @@ class ProjectsService:
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:

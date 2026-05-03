@@ -18,6 +18,7 @@ from typing import Callable, Optional
 import httpx
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.boundary import ValidatedURL, safe_async_client
 from app.core.utils import Utils
 from app.services.url_router import URLRouter
@@ -139,6 +140,7 @@ class YtdlpService:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             # Keep timeout < Celery's soft_time_limit (120s) so we surface the
             # real stderr instead of getting killed with SoftTimeLimitExceeded.
@@ -239,6 +241,7 @@ class YtdlpService:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
 
             stderr_lines = []
@@ -364,6 +367,7 @@ class YtdlpService:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
         except asyncio.TimeoutError:
