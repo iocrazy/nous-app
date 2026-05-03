@@ -1257,6 +1257,23 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
+/** Phase 3: AI Library version history item (agent / skill / skill_file).
+ *  List view shape — only metadata. Full body via the detail endpoint. */
+export interface AILibraryVersionItem {
+  id: string;
+  version_number: number;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  /** agent-only */
+  model?: string | null;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  /** skill_file-only */
+  path?: string;
+  file_type?: string;
+}
+
 /** G1: Approval request row from agent_approval_requests (mig 198).
  *  Surfaced to the user when an agent hook returns await_approval.
  *  All times ISO strings. payload is hook-defined JSON. */

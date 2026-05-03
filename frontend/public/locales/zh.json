@@ -1325,6 +1325,21 @@
     },
     "helpText": "Outbound MCP servers 提供 agent 可调用的工具。Server name 会作为工具名的命名空间前缀（如 notion.create_page）。仅注册可信的 server — agent 可能会调用有副作用的工具。"
   },
+  "versionHistory": {
+    "title": "版本历史",
+    "currentLabel": "当前",
+    "loading": "加载中...",
+    "loadFailed": "加载版本历史失败",
+    "empty": "暂无历史版本",
+    "refresh": "刷新",
+    "expand": "展开",
+    "collapse": "收起",
+    "rollback": "回滚",
+    "rollbackConfirm": "回滚到 v{{version}}？将创建新版本保留旧内容（审计可追溯）。",
+    "rollbackDone": "已回滚",
+    "rollbackFailed": "回滚失败：{{message}}",
+    "rollbackNotSupported": "目前仅 agent 支持回滚"
+  },
   "approvals": {
     "title": "待审批",
     "empty": "无待审批项",
