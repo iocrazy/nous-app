@@ -24,6 +24,8 @@ from uuid import UUID
 
 from loguru import logger
 
+from app.core.secret_box import decrypt as _decrypt_secret
+from app.core.secret_box import encrypt as _encrypt_secret
 from app.db.supabase_client import get_async_supabase_admin
 
 
@@ -33,18 +35,29 @@ class UserMCPServer:
     user_id: UUID
     name: str
     url: str
-    bearer_token: Optional[str]
+    bearer_token: Optional[str]    # plain text in memory; encrypted at rest
     description: Optional[str]
     enabled: bool
 
     @classmethod
     def from_row(cls, row: dict) -> "UserMCPServer":
+        """Decrypt bearer_token on read. Legacy plain-text values pass
+        through unchanged (secret_box.decrypt handles back-compat)."""
+        raw_token = row.get("bearer_token")
+        try:
+            decrypted = _decrypt_secret(raw_token) if raw_token else None
+        except Exception as exc:
+            logger.warning(
+                f"[UserMCPServer.from_row] failed to decrypt bearer_token "
+                f"for row {row.get('id')}: {exc}"
+            )
+            decrypted = None
         return cls(
             id=UUID(str(row["id"])),
             user_id=UUID(str(row["user_id"])),
             name=row["name"],
             url=row["url"],
-            bearer_token=row.get("bearer_token"),
+            bearer_token=decrypted,
             description=row.get("description"),
             enabled=bool(row.get("enabled", True)),
         )
@@ -110,13 +123,15 @@ class UserMCPServersRepository:
     ) -> Optional[UserMCPServer]:
         try:
             client = await self._client()
+            # P7: encrypt at write — bearer_token is None-passthrough
+            stored_token = _encrypt_secret(bearer_token) if bearer_token else None
             result = (
                 await client.table(self.TABLE)
                 .insert({
                     "user_id": str(user_id),
                     "name": name,
                     "url": url,
-                    "bearer_token": bearer_token,
+                    "bearer_token": stored_token,
                     "description": description,
                     "enabled": enabled,
                 })
@@ -147,7 +162,10 @@ class UserMCPServersRepository:
         if url is not None:
             patch["url"] = url
         if bearer_token is not None:
-            patch["bearer_token"] = bearer_token
+            # P7: encrypt at write
+            patch["bearer_token"] = (
+                _encrypt_secret(bearer_token) if bearer_token else None
+            )
         if description is not None:
             patch["description"] = description
         if enabled is not None:

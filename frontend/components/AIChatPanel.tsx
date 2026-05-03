@@ -458,7 +458,7 @@ export function AIChatPanel({
       {/* O3: PlanMode toggle bar */}
       {activeSessionId && selectedAgentSlug && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 text-xs text-zinc-400 bg-zinc-900/50">
-          <span className="font-medium text-zinc-500">Mode:</span>
+          <span className="font-medium text-zinc-500">{t('chat.planMode.label')}</span>
           {(['auto', 'prompt_user', 'dry_run'] as const).map((m) => (
             <button
               key={m}
@@ -471,18 +471,18 @@ export function AIChatPanel({
               }`}
               title={
                 m === 'auto'
-                  ? 'Execute directly (default)'
+                  ? t('chat.planMode.auto_tooltip')
                   : m === 'prompt_user'
-                    ? 'Show plan first; user approves before execution'
-                    : 'Plan only — never execute side effects'
+                    ? t('chat.planMode.promptUser_tooltip')
+                    : t('chat.planMode.dryRun_tooltip')
               }
             >
-              {m === 'auto' ? 'Execute' : m === 'prompt_user' ? 'Plan First' : 'Dry Run'}
+              {m === 'auto' ? t('chat.planMode.execute') : m === 'prompt_user' ? t('chat.planMode.planFirst') : t('chat.planMode.dryRun')}
             </button>
           ))}
           {planMode !== 'auto' && (
             <span className="ml-auto text-amber-400 text-[10px] uppercase tracking-wide">
-              ⚠ {planMode === 'dry_run' ? 'No side effects' : 'Awaiting plan'}
+              ⚠ {planMode === 'dry_run' ? t('chat.planMode.warning_dryRun') : t('chat.planMode.warning_planning')}
             </span>
           )}
         </div>

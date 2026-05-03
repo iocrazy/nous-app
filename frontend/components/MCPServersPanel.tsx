@@ -12,6 +12,7 @@
  *  - List shows 🔒 indicator when has_bearer_token=true, no token text
  */
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Plug,
   Plus,
@@ -35,6 +36,7 @@ import {
 } from './MCPServersPanel.helpers';
 
 export const MCPServersPanel: React.FC = () => {
+  const { t } = useTranslation();
   const { addToast } = useToast();
   const [items, setItems] = useState<AILibraryMCPServer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,11 +52,11 @@ export const MCPServersPanel: React.FC = () => {
       setItems(resp.items);
     } catch (err) {
       console.error('[MCPServersPanel] load failed:', err);
-      addToast('Load MCP servers failed', 'error');
+      addToast(t('mcp.loadFailed'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, t]);
 
   useEffect(() => {
     void reload();
@@ -92,7 +94,7 @@ export const MCPServersPanel: React.FC = () => {
   const handleSubmit = useCallback(async () => {
     const err = validate();
     if (err) {
-      addToast(err, 'error');
+      addToast(t(err), 'error');
       return;
     }
     setSubmitting(true);
@@ -105,43 +107,43 @@ export const MCPServersPanel: React.FC = () => {
           description: form.description.trim() || undefined,
           enabled: form.enabled,
         });
-        addToast('MCP server added', 'success');
+        addToast(t('mcp.addedToast'), 'success');
       } else if (editingId) {
         await aiLibraryService.updateMCPServer(
           editingId,
           buildMCPServerUpdatePayload(form),
         );
-        addToast('MCP server updated', 'success');
+        addToast(t('mcp.updatedToast'), 'success');
       }
       cancelForm();
       await reload();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      addToast(`Save failed: ${msg}`, 'error');
+      addToast(t('mcp.saveFailed', { message: msg }), 'error');
     } finally {
       setSubmitting(false);
     }
-  }, [creating, editingId, form, validate, reload, cancelForm, addToast]);
+  }, [creating, editingId, form, validate, reload, cancelForm, addToast, t]);
 
   const handleDelete = useCallback(
     async (server: AILibraryMCPServer) => {
       if (
         !window.confirm(
-          `Delete MCP server "${server.name}"? Tools from this server will no longer be available to your agents.`,
+          t('mcp.deleteConfirm', { name: server.name }),
         )
       ) {
         return;
       }
       try {
         await aiLibraryService.deleteMCPServer(server.id);
-        addToast('MCP server deleted', 'info');
+        addToast(t('mcp.deletedToast'), 'info');
         await reload();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        addToast(`Delete failed: ${msg}`, 'error');
+        addToast(t('mcp.deleteFailed', { message: msg }), 'error');
       }
     },
-    [addToast, reload],
+    [addToast, reload, t],
   );
 
   const handleToggleEnabled = useCallback(
@@ -162,10 +164,10 @@ export const MCPServersPanel: React.FC = () => {
           ),
         );
         const msg = e instanceof Error ? e.message : String(e);
-        addToast(`Toggle failed: ${msg}`, 'error');
+        addToast(t('mcp.toggleFailed', { message: msg }), 'error');
       }
     },
-    [addToast],
+    [addToast, t],
   );
 
   const showForm = creating || editingId !== null;
@@ -176,7 +178,7 @@ export const MCPServersPanel: React.FC = () => {
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <Plug className="w-4 h-4 text-blue-400" />
-          <h2 className="text-sm font-semibold text-zinc-200">MCP Servers</h2>
+          <h2 className="text-sm font-semibold text-zinc-200">{t('mcp.title')}</h2>
           {items.length > 0 && (
             <span className="text-xs text-zinc-500">({items.length})</span>
           )}
@@ -186,7 +188,7 @@ export const MCPServersPanel: React.FC = () => {
             type="button"
             onClick={reload}
             className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
-            title="Refresh"
+            title={t('mcp.refresh')}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -197,7 +199,7 @@ export const MCPServersPanel: React.FC = () => {
               className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white transition-colors"
             >
               <Plus className="w-3 h-3" />
-              Add Server
+              {t('mcp.addServer')}
             </button>
           )}
         </div>
@@ -205,23 +207,20 @@ export const MCPServersPanel: React.FC = () => {
 
       {/* Help text */}
       <div className="px-4 py-2 bg-zinc-900/50 border-b border-zinc-800 text-[11px] text-zinc-500">
-        Outbound MCP servers expose tools your agents can call. Server name
-        becomes a namespace prefix on tool names (e.g.{' '}
-        <code className="text-zinc-400">notion.create_page</code>). Use only
-        servers you trust — agents may invoke tools that have side effects.
+        {t('mcp.helpText')}
       </div>
 
       {/* Add/Edit form */}
       {showForm && (
         <div className="border-b border-zinc-800 bg-zinc-900/30 p-4 space-y-3">
           <div className="text-xs font-medium text-zinc-400">
-            {creating ? 'Add MCP Server' : 'Edit MCP Server'}
+            {creating ? t('mcp.addModalTitle') : t('mcp.editModalTitle')}
           </div>
 
           {creating && (
             <div>
               <label className="block text-[11px] text-zinc-500 mb-1">
-                Name (namespace) *
+                {t('mcp.namespaceLabel')} *
               </label>
               <input
                 type="text"
@@ -231,13 +230,13 @@ export const MCPServersPanel: React.FC = () => {
                 className="w-full px-2 py-1 text-sm rounded bg-zinc-900 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-blue-600"
               />
               <div className="text-[10px] text-zinc-600 mt-0.5">
-                Alphanumeric + underscore only. Cannot be changed later.
+                {t('mcp.namespaceHint')}
               </div>
             </div>
           )}
 
           <div>
-            <label className="block text-[11px] text-zinc-500 mb-1">URL *</label>
+            <label className="block text-[11px] text-zinc-500 mb-1">{t('mcp.urlLabel')} *</label>
             <input
               type="url"
               value={form.url}
@@ -249,7 +248,7 @@ export const MCPServersPanel: React.FC = () => {
 
           <div>
             <label className="block text-[11px] text-zinc-500 mb-1">
-              Bearer Token {!creating && '(blank = keep existing)'}
+              {creating ? t('mcp.tokenLabel') : t('mcp.tokenLabelEdit')}
             </label>
             <input
               type="password"
@@ -257,14 +256,14 @@ export const MCPServersPanel: React.FC = () => {
               onChange={(e) =>
                 setForm((f) => ({ ...f, bearer_token: e.target.value }))
               }
-              placeholder="optional"
+              placeholder={t('mcp.tokenPlaceholder')}
               className="w-full px-2 py-1 text-sm rounded bg-zinc-900 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-blue-600"
             />
           </div>
 
           <div>
             <label className="block text-[11px] text-zinc-500 mb-1">
-              Description
+              {t('mcp.descriptionLabel')}
             </label>
             <input
               type="text"
@@ -272,7 +271,7 @@ export const MCPServersPanel: React.FC = () => {
               onChange={(e) =>
                 setForm((f) => ({ ...f, description: e.target.value }))
               }
-              placeholder="Personal Notion workspace"
+              placeholder={t('mcp.descriptionPlaceholder')}
               className="w-full px-2 py-1 text-sm rounded bg-zinc-900 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-blue-600"
             />
           </div>
@@ -285,7 +284,7 @@ export const MCPServersPanel: React.FC = () => {
                 setForm((f) => ({ ...f, enabled: e.target.checked }))
               }
             />
-            Enabled (server's tools available to agents)
+            {t('mcp.enabledLabel')}
           </label>
 
           <div className="flex items-center gap-2 pt-1">
@@ -296,7 +295,7 @@ export const MCPServersPanel: React.FC = () => {
               className="flex items-center gap-1 px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
             >
               <Check className="w-3 h-3" />
-              {creating ? 'Add' : 'Save'}
+              {creating ? t('mcp.add') : t('mcp.save')}
             </button>
             <button
               type="button"
@@ -305,7 +304,7 @@ export const MCPServersPanel: React.FC = () => {
               className="flex items-center gap-1 px-3 py-1 text-xs rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors disabled:opacity-50"
             >
               <X className="w-3 h-3" />
-              Cancel
+              {t('mcp.cancel')}
             </button>
           </div>
         </div>
@@ -318,9 +317,9 @@ export const MCPServersPanel: React.FC = () => {
         ) : items.length === 0 ? (
           <div className="text-center py-12 text-sm text-zinc-500">
             <Plug className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            <p>No MCP servers registered yet.</p>
+            <p>{t('mcp.emptyTitle')}</p>
             <p className="text-xs text-zinc-600 mt-1">
-              Click "Add Server" to register an outbound MCP endpoint.
+              {t('mcp.emptyHint')}
             </p>
           </div>
         ) : (
@@ -343,12 +342,12 @@ export const MCPServersPanel: React.FC = () => {
                       {server.has_bearer_token && (
                         <Lock
                           className="w-3 h-3 text-amber-500"
-                          title="Bearer token configured"
+                          title={t('mcp.tokenConfigured')}
                         />
                       )}
                       {!server.enabled && (
                         <span className="text-[10px] uppercase text-zinc-600 tracking-wider">
-                          disabled
+                          {t('mcp.disabledLabel')}
                         </span>
                       )}
                     </div>
@@ -366,7 +365,7 @@ export const MCPServersPanel: React.FC = () => {
                       type="button"
                       onClick={() => handleToggleEnabled(server)}
                       className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
-                      title={server.enabled ? 'Disable' : 'Enable'}
+                      title={server.enabled ? t('mcp.disable') : t('mcp.enable')}
                     >
                       {server.enabled ? (
                         <Power className="w-3.5 h-3.5 text-green-500" />
@@ -378,7 +377,7 @@ export const MCPServersPanel: React.FC = () => {
                       type="button"
                       onClick={() => startEdit(server)}
                       className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
-                      title="Edit"
+                      title={t('mcp.edit')}
                     >
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
@@ -386,7 +385,7 @@ export const MCPServersPanel: React.FC = () => {
                       type="button"
                       onClick={() => handleDelete(server)}
                       className="p-1.5 rounded hover:bg-red-900/30 text-zinc-500 hover:text-red-400 transition-colors"
-                      title="Delete"
+                      title={t('mcp.delete')}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

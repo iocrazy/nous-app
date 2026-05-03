@@ -71,7 +71,11 @@ async def lifespan(app: FastAPI):
         from app.db import get_async_supabase_admin
 
         sb = await get_async_supabase_admin()
-        required_tables = ["agent_commitments"]  # extend on each migration
+        required_tables = [
+            "agent_commitments",   # mig 186
+            "ai_session_memory",   # mig 187
+            "user_mcp_servers",    # mig 194
+        ]  # extend on each migration that adds a hard-required table
         for table in required_tables:
             probe = await (
                 sb.table(table).select("*", count="exact").limit(0).execute()

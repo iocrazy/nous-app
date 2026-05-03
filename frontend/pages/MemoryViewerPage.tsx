@@ -12,6 +12,7 @@
  *    reinforce_count, thread/session refs)
  */
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Brain,
   Archive,
@@ -44,6 +45,7 @@ interface Stats {
 }
 
 export const MemoryViewerPage: React.FC = () => {
+  const { t } = useTranslation();
   const { addToast } = useToast();
   const [items, setItems] = useState<AILibraryMemory[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -64,11 +66,11 @@ export const MemoryViewerPage: React.FC = () => {
       setStats(resp.stats);
     } catch (err) {
       console.error('[MemoryViewerPage] load failed:', err);
-      addToast('Load memories failed', 'error');
+      addToast(t('memoryViewer.loadFailed'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [filterKind, filterStatus, addToast]);
+  }, [filterKind, filterStatus, addToast, t]);
 
   useEffect(() => {
     void reload();
@@ -76,7 +78,7 @@ export const MemoryViewerPage: React.FC = () => {
 
   const handleArchive = useCallback(
     async (memoryId: string) => {
-      if (!window.confirm('Archive this memory? It will be excluded from future recall.')) {
+      if (!window.confirm(t('memoryViewer.archiveConfirm'))) {
         return;
       }
       setArchiving(memoryId);
@@ -85,15 +87,15 @@ export const MemoryViewerPage: React.FC = () => {
         setItems((prev) =>
           prev.map((m) => (m.id === memoryId ? { ...m, status: 'archived' } : m)),
         );
-        addToast('Memory archived', 'success');
+        addToast(t('memoryViewer.archivedToast'), 'success');
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        addToast(`Archive failed: ${msg}`, 'error');
+        addToast(t('memoryViewer.archiveFailed', { message: msg }), 'error');
       } finally {
         setArchiving(null);
       }
     },
-    [addToast],
+    [addToast, t],
   );
 
   const totalCount = items.length;
@@ -108,16 +110,16 @@ export const MemoryViewerPage: React.FC = () => {
       <div className="flex items-center gap-3 px-6 py-4 border-b border-zinc-800 flex-shrink-0">
         <Brain className="w-5 h-5 text-blue-400" />
         <div className="flex-1">
-          <h1 className="text-lg font-semibold">My Memory</h1>
+          <h1 className="text-lg font-semibold">{t('memoryViewer.title')}</h1>
           <p className="text-xs text-zinc-500">
-            What the agents have learned about you across sessions
+            {t('memoryViewer.subtitle')}
           </p>
         </div>
         <button
           type="button"
           onClick={reload}
           className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400"
-          title="Refresh"
+          title={t('memoryViewer.refresh')}
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
@@ -128,13 +130,13 @@ export const MemoryViewerPage: React.FC = () => {
         <div className="grid grid-cols-4 gap-3 px-6 py-4 flex-shrink-0">
           <div className="bg-zinc-900 rounded-lg p-3 border border-zinc-800">
             <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-              Total
+              {t('memoryViewer.stat_total')}
             </div>
             <div className="text-2xl font-bold mt-1">{totalCount}</div>
           </div>
           <div className="bg-zinc-900 rounded-lg p-3 border border-zinc-800">
             <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-              Declarative
+              {t('memoryViewer.stat_declarative')}
             </div>
             <div className="text-2xl font-bold mt-1 text-blue-300">
               {stats.by_kind.declarative ?? 0}
@@ -142,7 +144,7 @@ export const MemoryViewerPage: React.FC = () => {
           </div>
           <div className="bg-zinc-900 rounded-lg p-3 border border-zinc-800">
             <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-              Procedural
+              {t('memoryViewer.stat_procedural')}
             </div>
             <div className="text-2xl font-bold mt-1 text-amber-300">
               {stats.by_kind.procedural ?? 0}
@@ -150,7 +152,7 @@ export const MemoryViewerPage: React.FC = () => {
           </div>
           <div className="bg-zinc-900 rounded-lg p-3 border border-zinc-800">
             <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-              Episodic
+              {t('memoryViewer.stat_episodic')}
             </div>
             <div className="text-2xl font-bold mt-1 text-purple-300">
               {stats.by_kind.episodic ?? 0}
@@ -162,10 +164,10 @@ export const MemoryViewerPage: React.FC = () => {
       {/* Filter bar */}
       <div className="flex items-center gap-3 px-6 py-2 border-y border-zinc-800 bg-zinc-900/50 flex-shrink-0">
         <Filter className="w-3.5 h-3.5 text-zinc-500" />
-        <span className="text-xs text-zinc-500">Filter:</span>
+        <span className="text-xs text-zinc-500">{t('memoryViewer.filter')}</span>
 
         <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-600">Kind</span>
+          <span className="text-xs text-zinc-600">{t('memoryViewer.filter_kind')}</span>
           {(['all', 'declarative', 'procedural', 'episodic'] as const).map((k) => (
             <button
               key={k}
@@ -183,7 +185,7 @@ export const MemoryViewerPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1 ml-3">
-          <span className="text-xs text-zinc-600">Status</span>
+          <span className="text-xs text-zinc-600">{t('memoryViewer.filter_status')}</span>
           {(['all', 'active', 'archived', 'superseded'] as const).map((s) => (
             <button
               key={s}
@@ -204,10 +206,10 @@ export const MemoryViewerPage: React.FC = () => {
       {/* Memory list */}
       <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
         {loading && items.length === 0 ? (
-          <div className="text-center py-12 text-zinc-500 text-sm">Loading...</div>
+          <div className="text-center py-12 text-zinc-500 text-sm">{t('memoryViewer.loading')}</div>
         ) : visibleItems.length === 0 ? (
           <div className="text-center py-12 text-zinc-500 text-sm">
-            No memories match the current filter
+            {t('memoryViewer.noMatch')}
           </div>
         ) : (
           <ul className="space-y-2">
@@ -239,27 +241,27 @@ export const MemoryViewerPage: React.FC = () => {
                         <div className="mt-2 pt-2 border-t border-zinc-800 space-y-1 text-xs text-zinc-400">
                           {m.when_to_use && (
                             <div>
-                              <span className="text-zinc-500">When to use:</span>{' '}
+                              <span className="text-zinc-500">{t('memoryViewer.whenToUse')}</span>{' '}
                               {m.when_to_use}
                             </div>
                           )}
                           <div className="flex flex-wrap gap-3">
                             <span>
-                              <span className="text-zinc-500">Scope:</span> {m.scope}
+                              <span className="text-zinc-500">{t('memoryViewer.scope')}</span> {m.scope}
                             </span>
                             <span>
-                              <span className="text-zinc-500">Reinforced:</span>{' '}
+                              <span className="text-zinc-500">{t('memoryViewer.reinforced')}</span>{' '}
                               {m.reinforce_count}×
                             </span>
                             {m.decay_score !== null && (
                               <span>
-                                <span className="text-zinc-500">Decay:</span>{' '}
+                                <span className="text-zinc-500">{t('memoryViewer.decay')}</span>{' '}
                                 {m.decay_score.toFixed(2)}
                               </span>
                             )}
                             {m.extracted_from && (
                               <span>
-                                <span className="text-zinc-500">From:</span>{' '}
+                                <span className="text-zinc-500">{t('memoryViewer.from')}</span>{' '}
                                 {m.extracted_from}
                               </span>
                             )}
@@ -295,7 +297,7 @@ export const MemoryViewerPage: React.FC = () => {
                         disabled={archiving === m.id}
                         onClick={() => handleArchive(m.id)}
                         className="text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 p-1.5 rounded transition-colors disabled:opacity-40"
-                        title="Archive"
+                        title={t('memoryViewer.archive')}
                       >
                         <Archive className="w-3.5 h-3.5" />
                       </button>

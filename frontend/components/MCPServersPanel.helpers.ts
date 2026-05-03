@@ -26,7 +26,9 @@ export const EMPTY_MCP_FORM: MCPServerFormValues = {
 };
 
 /**
- * Validate the form. Returns null on success, error string on failure.
+ * Validate the form. Returns null on success, OR an i18n KEY on failure
+ * (caller passes through t()). Keys live under "mcp.errors.*" in the
+ * locale files.
  *
  * - When ``creating`` is true, name must be present and match the
  *   alphanumeric+underscore regex (server uses '.' as namespace separator,
@@ -41,13 +43,11 @@ export function validateMCPServerForm(
   creating: boolean,
 ): string | null {
   if (creating) {
-    if (!form.name.trim()) return 'Name is required';
-    if (!MCP_SERVER_NAME_RE.test(form.name))
-      return 'Name must be alphanumeric + underscore (no dots)';
+    if (!form.name.trim()) return 'mcp.errors.nameRequired';
+    if (!MCP_SERVER_NAME_RE.test(form.name)) return 'mcp.errors.nameInvalid';
   }
-  if (!form.url.trim()) return 'URL is required';
-  if (!/^https?:\/\//.test(form.url))
-    return 'URL must start with http:// or https://';
+  if (!form.url.trim()) return 'mcp.errors.urlRequired';
+  if (!/^https?:\/\//.test(form.url)) return 'mcp.errors.urlScheme';
   return null;
 }
 
