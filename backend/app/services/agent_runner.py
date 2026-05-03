@@ -77,34 +77,32 @@ class AgentRunner:
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
     ):
-        """Wave H (B): incremental streaming variant of run_turn.
+        """Wave H (B) + Phase P (P1): incremental streaming with tool_calls.
 
-        Yields StreamChunk instances as the model emits them. Falls back
-        to a single buffered chunk when the adapter doesn't implement
-        stream(). The caller MUST consume the generator fully — pending
-        on it mid-iteration leaks the underlying httpx connection.
+        Yields StreamChunk instances as the model emits them. When the
+        model emits tool_call deltas, we collect them, execute the tools
+        on completion (between LLM iterations), and re-enter the stream
+        loop with the tool results in messages.
 
-        Limitations of this initial implementation:
-          - Text-only path. If the model emits tool_calls during stream,
-            we collect the deltas but DO NOT execute them mid-stream;
-            the caller can fall back to run_turn() for tool-using turns.
-          - Per-turn output budget (Wave 5c C2 / G4) still applies via
-            composed.max_tokens.
-          - AbortController interrupts AT chunk boundaries (not mid-byte
-            from upstream — httpx + asyncio cancel will get there next
-            yield point).
+        Yields:
+          - delta_text chunks during text generation
+          - StreamChunk with tool_call_delta during tool emission
+          - synthetic StreamChunk with delta_text describing each tool
+            execution (so caller's UI can show "→ ran skill X")
+          - final chunk with finish_reason on completion
 
-        Usage:
-            async for chunk in runner.stream_turn(composed, msgs):
-                if chunk.delta_text: send_to_user(chunk.delta_text)
-                if chunk.finish_reason: break
+        Falls back to a single buffered chunk when the adapter doesn't
+        implement stream().
+
+        Per-turn output budget + AbortController + loop_guard all apply
+        same as run_turn().
         """
-        from app.agent_framework import RunAborted
+        from app.agent_framework import RunAborted, ToolCallLoopGuard
         from app.services.ai_adapters.base import StreamChunk, StreamingNotSupported
+        from app.agent_framework._metrics_helper import inc_metric
 
         stream_method = getattr(self.adapter, "stream", None)
         if stream_method is None:
-            # Adapter doesn't support streaming → emit one buffered chunk
             resp = await self.adapter.call(composed, user_messages)
             msg = resp["choices"][0]["message"]
             yield StreamChunk(
@@ -114,32 +112,141 @@ class AgentRunner:
             )
             return
 
-        from app.agent_framework._metrics_helper import inc_metric
         inc_metric("streaming_started")
-        try:
-            async for chunk in stream_method(composed, user_messages):
-                if abort is not None and abort.is_aborted():
-                    inc_metric("streaming_aborted_mid")
-                    raise RunAborted("user cancel mid-stream")
-                yield chunk
-                if chunk.finish_reason:
-                    if recorder is not None and chunk.usage:
-                        recorder.record_usage(
-                            prompt_tokens=int(chunk.usage.get("prompt_tokens") or 0),
-                            completion_tokens=int(
-                                chunk.usage.get("completion_tokens") or 0
-                            ),
+
+        # P1: per-run loop guard same as run_turn
+        loop_guard = ToolCallLoopGuard(repeat_threshold=3, window=5)
+
+        messages = list(user_messages)
+        iteration = 0
+        MAX_STREAM_ITERATIONS = 10
+
+        while iteration < MAX_STREAM_ITERATIONS:
+            iteration += 1
+            if abort is not None and abort.is_aborted():
+                inc_metric("streaming_aborted_mid")
+                raise RunAborted("user cancel between stream iterations")
+
+            # Per-iteration tool_call accumulation. Provider sends each
+            # tool_call as deltas across multiple chunks; we stitch them.
+            tool_call_buf: dict[int, dict] = {}
+            final_finish: Optional[str] = None
+            final_usage: Optional[dict] = None
+
+            try:
+                async for chunk in stream_method(composed, messages):
+                    if abort is not None and abort.is_aborted():
+                        inc_metric("streaming_aborted_mid")
+                        raise RunAborted("user cancel mid-stream")
+
+                    # Forward text delta as-is to caller
+                    if chunk.delta_text or chunk.tool_call_delta:
+                        yield chunk
+
+                    # Stitch tool_call deltas
+                    if chunk.tool_call_delta:
+                        _merge_tool_call_deltas(
+                            tool_call_buf,
+                            chunk.tool_call_delta.get("tool_calls") or [],
                         )
-                    break
-        except StreamingNotSupported:
-            # Provider exposed stream() but raised at runtime → fall back
-            resp = await self.adapter.call(composed, user_messages)
-            msg = resp["choices"][0]["message"]
-            yield StreamChunk(
-                delta_text=msg.get("content") or "",
-                finish_reason=resp["choices"][0].get("finish_reason") or "stop",
-                usage=resp.get("usage"),
-            )
+
+                    if chunk.finish_reason:
+                        final_finish = chunk.finish_reason
+                        final_usage = chunk.usage
+                        if recorder is not None and chunk.usage:
+                            recorder.record_usage(
+                                prompt_tokens=int(chunk.usage.get("prompt_tokens") or 0),
+                                completion_tokens=int(chunk.usage.get("completion_tokens") or 0),
+                            )
+                        break
+            except StreamingNotSupported:
+                resp = await self.adapter.call(composed, messages)
+                msg = resp["choices"][0]["message"]
+                yield StreamChunk(
+                    delta_text=msg.get("content") or "",
+                    finish_reason=resp["choices"][0].get("finish_reason") or "stop",
+                    usage=resp.get("usage"),
+                )
+                return
+
+            # If finish_reason is 'tool_calls' (or we collected calls
+            # despite a 'stop'), execute them + re-enter loop.
+            tool_calls_to_run = list(tool_call_buf.values()) if tool_call_buf else []
+            if not tool_calls_to_run:
+                # No tool calls — turn complete. Always yield terminal
+                # finish chunk (inner loop's finish chunk wasn't yielded
+                # when it lacked delta_text/tool_call_delta).
+                yield StreamChunk(
+                    finish_reason=final_finish or "stop",
+                    usage=final_usage,
+                )
+                return
+
+            # Append assistant tool-use message
+            assistant_msg = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls_to_run,
+            }
+            messages.append(assistant_msg)
+
+            # Execute each tool, append tool reply, yield synthetic
+            # delta describing each.
+            import json as _json
+            for call in tool_calls_to_run:
+                fn = call.get("function") or {}
+                tool_name = fn.get("name", "")
+                if tool_name not in SUPPORTED_TOOLS:
+                    continue
+                try:
+                    args = _json.loads(fn.get("arguments") or "{}")
+                except _json.JSONDecodeError:
+                    args = {}
+
+                # Yield synthetic UI hint
+                yield StreamChunk(
+                    delta_text=f"\n\n→ Running {tool_name}({args.get('skill', '')})...\n",
+                )
+
+                try:
+                    args_repr = _json.dumps(args, sort_keys=True, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    args_repr = repr(args)
+                loop_guard.observe(tool_name, args_repr)
+                inc_metric("loop_guard_observed")
+
+                if tool_name == "Skill":
+                    if recorder is not None and args.get("skill"):
+                        recorder.record_skill(str(args["skill"]))
+                    result = await self.skill_tool.execute(args)
+                else:  # Delegate
+                    if self.delegate_tool is None:
+                        result = {"error": "Delegate tool not configured"}
+                    else:
+                        result = await self.delegate_tool.execute(args)
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id"),
+                    "name": tool_name,
+                    "content": _json.dumps(result, ensure_ascii=False),
+                })
+
+                if loop_guard.is_looping():
+                    warning = loop_guard.render_warning()
+                    if warning:
+                        messages.append({"role": "system", "content": warning})
+                        inc_metric("loop_guard_tripped")
+                        break  # Out of inner for; back to LLM with warning
+
+            # Loop continues — next iteration calls stream_method again
+            # with the updated messages
+
+        # Hit MAX_STREAM_ITERATIONS — yield terminal chunk
+        yield StreamChunk(
+            finish_reason="length",
+            usage={"warning": "max_stream_iterations_exceeded"},
+        )
 
     async def run_turn(
         self,
@@ -639,3 +746,31 @@ class AgentRunner:
             "approval_reason": approval.reason if approval else "",
             "approval_payload": approval.payload if approval else {},
         }
+
+
+# ─── Phase P (P1) helpers ─────────────────────────────────────────────
+
+
+def _merge_tool_call_deltas(
+    buf: dict, deltas: list[dict]
+) -> None:
+    """Merge OpenAI-style tool_call deltas into ``buf`` keyed by index.
+
+    Each delta carries ``index`` (which tool slot) + partial ``id`` /
+    ``function.name`` / ``function.arguments`` (a string fragment).
+    Stitch arguments by appending; latch id + name on first delta.
+    """
+    for d in deltas or []:
+        idx = d.get("index", 0)
+        slot = buf.setdefault(idx, {
+            "id": "",
+            "type": "function",
+            "function": {"name": "", "arguments": ""},
+        })
+        if d.get("id"):
+            slot["id"] = d["id"]
+        fn_delta = d.get("function") or {}
+        if fn_delta.get("name"):
+            slot["function"]["name"] = fn_delta["name"]
+        if fn_delta.get("arguments"):
+            slot["function"]["arguments"] += fn_delta["arguments"]
