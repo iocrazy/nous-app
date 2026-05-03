@@ -507,6 +507,34 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
+  /**
+   * B: upload a one-off chat attachment. 24h TTL on the server.
+   * Returns { kind, url, size_bytes, mime, filename } — pass the kind+url
+   * straight into ChatRequest.attachments.
+   */
+  async uploadChatAttachment(file: File): Promise<{
+    kind: 'image' | 'video' | 'pdf';
+    url: string;
+    size_bytes: number;
+    mime: string | null;
+    filename: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers: Record<string, string> = {};
+    const auth = await getAuthHeaders();
+    Object.entries(auth).forEach(([k, v]) => {
+      // multipart needs browser-set boundary — drop Content-Type
+      if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
+    });
+    const resp = await fetch(`${base()}/chat-attachments/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    return handle(resp);
+  },
+
   async deleteMCPServer(id: string): Promise<void> {
     const resp = await fetch(`${base()}/mcp-servers/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -532,10 +560,22 @@ export const aiLibraryService = {
   async sendChatMessage(
     sessionId: string,
     content: string,
-    options: { plan_mode?: 'auto' | 'prompt_user' | 'dry_run' } = {},
+    options: {
+      plan_mode?: 'auto' | 'prompt_user' | 'dry_run';
+      attachments?: Array<{
+        kind: 'image' | 'video' | 'pdf';
+        url?: string;
+        data_url?: string;
+        mime?: string;
+        alt_text?: string;
+      }>;
+    } = {},
   ): Promise<ChatResponse> {
     const body: Record<string, unknown> = { content };
     if (options.plan_mode) body.plan_mode = options.plan_mode;
+    if (options.attachments && options.attachments.length > 0) {
+      body.attachments = options.attachments;
+    }
     const resp = await fetch(
       `${base()}/sessions/${encodeURIComponent(sessionId)}/chat`,
       {

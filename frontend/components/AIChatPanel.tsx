@@ -31,6 +31,7 @@ import { MessageBubble } from './chat/MessageBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
 import { ChatInput } from './chat/ChatInput';
 import { CommitmentsPanel } from './CommitmentsPanel';
+import { ChatAttachmentPicker, type StagedAttachment } from './ChatAttachmentPicker';
 import { EmptyState } from './chat/EmptyState';
 import { useToast } from './Toast';
 
@@ -112,6 +113,9 @@ export function AIChatPanel({
     },
     [],
   );
+
+  // B: staged attachments (uploaded but not yet sent). Cleared on send.
+  const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -271,8 +275,20 @@ export function AIChatPanel({
       try {
         // O3: pass plan_mode only when non-default. Backend swaps in
         // plan-prompt instructions for prompt_user / dry_run.
-        const opts = planMode !== 'auto' ? { plan_mode: planMode } : undefined;
+        // B: send staged attachments alongside (kind+url). Clear on
+        // success — failed sends keep them so the user can retry.
+        const opts: Parameters<typeof aiLibraryService.sendChatMessage>[2] = {};
+        if (planMode !== 'auto') opts.plan_mode = planMode;
+        if (stagedAttachments.length > 0) {
+          opts.attachments = stagedAttachments.map((a) => ({
+            kind: a.kind,
+            url: a.url,
+            mime: a.mime ?? undefined,
+            alt_text: a.filename,
+          }));
+        }
         await aiLibraryService.sendChatMessage(activeSessionId, text, opts);
+        setStagedAttachments([]);
         // Refetch full history so IDs + timestamps are server-authoritative.
         await loadSessionMessages(activeSessionId);
       } catch (err) {
@@ -423,6 +439,18 @@ export function AIChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* B: Attachment chip strip — only render when staged or actively
+          uploading. The picker button itself lives next to ChatInput. */}
+      {activeSessionId && selectedAgentSlug && stagedAttachments.length > 0 && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 bg-zinc-900/30">
+          <ChatAttachmentPicker
+            attachments={stagedAttachments}
+            onChange={setStagedAttachments}
+            disabled={sending}
+          />
+        </div>
+      )}
+
       {/* O3: PlanMode toggle bar */}
       {activeSessionId && selectedAgentSlug && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 text-xs text-zinc-400 bg-zinc-900/50">
@@ -456,18 +484,31 @@ export function AIChatPanel({
         </div>
       )}
 
-      {/* Chat input */}
-      <ChatInput
-        onSend={handleSend}
-        disabled={sending || !activeSessionId || !selectedAgentSlug}
-        placeholder={
-          !selectedAgentSlug
-            ? t('chat.placeholderNoAgent', 'Select an agent to start')
-            : !activeSessionId
-              ? t('chat.placeholderNoSession', 'Create a session first')
-              : t('chat.placeholder', 'Type a message...')
-        }
-      />
+      {/* Chat input + B: attachment picker (when no staged chips above) */}
+      <div className="flex items-end gap-1 bg-zinc-900 border-t border-zinc-700/50">
+        {activeSessionId && selectedAgentSlug && stagedAttachments.length === 0 && (
+          <div className="pl-2 pb-2">
+            <ChatAttachmentPicker
+              attachments={[]}
+              onChange={setStagedAttachments}
+              disabled={sending}
+            />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <ChatInput
+            onSend={handleSend}
+            disabled={sending || !activeSessionId || !selectedAgentSlug}
+            placeholder={
+              !selectedAgentSlug
+                ? t('chat.placeholderNoAgent', 'Select an agent to start')
+                : !activeSessionId
+                  ? t('chat.placeholderNoSession', 'Create a session first')
+                  : t('chat.placeholder', 'Type a message...')
+            }
+          />
+        </div>
+      </div>
     </div>
   );
 }

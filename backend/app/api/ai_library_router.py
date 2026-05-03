@@ -2004,3 +2004,141 @@ async def delete_mcp_server(server_id: UUID, auth: AuthDep) -> None:
     if not existing or existing.user_id != _coerce_user_uuid(auth.user_id):
         raise HTTPException(status_code=404, detail="MCP server not found")
     await repo.delete(server_id)
+
+
+# ─── B: Chat attachment upload (temp storage for one-off chat use) ────
+
+
+from pathlib import Path as _Path
+import shutil as _shutil
+import time as _time
+import uuid as _uuid
+
+
+# Per-user temp storage. Files older than 24h are reaped on each upload
+# (cheap O(N) sweep — fine for small N, replace with a cron later if it
+# grows). Each file becomes server-readable via the path returned, which
+# the chat attachment resolver consumes directly.
+_CHAT_ATTACHMENTS_BASE = _Path("/tmp/mediahub_chat_attachments")
+_CHAT_ATTACHMENT_TTL_SECONDS = 24 * 3600
+
+# Per-attachment hard cap (keeps a single upload from filling /tmp)
+_CHAT_ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+_ALLOWED_EXTS = {
+    # image
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+    # video
+    ".mp4", ".mov", ".webm", ".mkv", ".avi",
+    # pdf
+    ".pdf",
+}
+
+
+def _user_attachment_dir(user_id: UUID) -> _Path:
+    d = _CHAT_ATTACHMENTS_BASE / str(user_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _reap_old_attachments(user_dir: _Path) -> None:
+    """Best-effort sweep — drop files older than TTL."""
+    cutoff = _time.time() - _CHAT_ATTACHMENT_TTL_SECONDS
+    try:
+        for p in user_dir.iterdir():
+            try:
+                if p.is_file() and p.stat().st_mtime < cutoff:
+                    p.unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.debug(f"[chat_attachments] reap failed: {exc}")
+
+
+@router.post(
+    "/chat-attachments/upload",
+    summary="Upload a one-off chat attachment (image/video/pdf, 24h TTL)",
+)
+async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, Any]:
+    """Multipart upload for chat attachments.
+
+    Returns: { kind, url, size_bytes, mime, filename }
+      - kind: image | video | pdf (inferred from content-type / extension)
+      - url:  server-local filesystem path. The chat attachment resolver
+              reads this path directly when building multimodal content.
+      - 24h TTL — files older than that are reaped lazily on next upload.
+    """
+    from fastapi import UploadFile, File  # local import — avoids circular
+    user_id = _coerce_user_uuid(auth.user_id)
+
+    # FastAPI doesn't auto-bind UploadFile when the route param is just
+    # `request: Request`. Use the lower-level form() API.
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "filename"):
+        raise HTTPException(status_code=400, detail="missing 'file' field")
+
+    filename = upload.filename or "upload"
+    ext = _Path(filename).suffix.lower()
+    if ext not in _ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"unsupported file type {ext!r}; allowed: "
+            f"{sorted(_ALLOWED_EXTS)}",
+        )
+
+    # Reject oversize before reading the body fully (defensive — also
+    # check after read in case content-length was lying).
+    cl = request.headers.get("content-length")
+    if cl and int(cl) > _CHAT_ATTACHMENT_MAX_BYTES * 1.1:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file too large; max {_CHAT_ATTACHMENT_MAX_BYTES} bytes",
+        )
+
+    user_dir = _user_attachment_dir(user_id)
+    _reap_old_attachments(user_dir)
+
+    # Save with random filename (ext preserved for downstream tools)
+    new_id = _uuid.uuid4().hex
+    out_path = user_dir / f"{new_id}{ext}"
+    try:
+        # Stream copy so we don't load the whole file into memory at once
+        with out_path.open("wb") as f:
+            chunk_total = 0
+            while True:
+                chunk = await upload.read(64 * 1024)
+                if not chunk:
+                    break
+                chunk_total += len(chunk)
+                if chunk_total > _CHAT_ATTACHMENT_MAX_BYTES:
+                    out_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"file exceeds {_CHAT_ATTACHMENT_MAX_BYTES} bytes",
+                    )
+                f.write(chunk)
+        size_bytes = out_path.stat().st_size
+    finally:
+        try:
+            await upload.close()
+        except Exception:
+            pass
+
+    # Map extension → kind
+    if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
+        kind = "image"
+    elif ext in {".mp4", ".mov", ".webm", ".mkv", ".avi"}:
+        kind = "video"
+    else:
+        kind = "pdf"
+
+    mime_guess = (upload.content_type if hasattr(upload, "content_type") else None)
+
+    return {
+        "kind": kind,
+        "url": str(out_path),
+        "size_bytes": size_bytes,
+        "mime": mime_guess,
+        "filename": filename,
+    }
