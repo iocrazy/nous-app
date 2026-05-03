@@ -113,6 +113,15 @@ class AgentRunner:
 
         messages = list(user_messages)
         iteration = 0
+
+        # Wave G (G3): per-run loop guard. Detects "same (tool, args)
+        # called >= N times in last M calls" and warns the LLM mid-run
+        # rather than letting it burn the iteration budget on a stuck
+        # repeat. Per-instance state — different runs are independent.
+        from app.agent_framework import ToolCallLoopGuard
+        loop_guard = ToolCallLoopGuard(repeat_threshold=3, window=5)
+        loop_warning_already_injected = False
+
         # Step A milestone: trace each Skill / Delegate dispatch made
         # during this turn. The chat service surfaces this list so the
         # frontend can render sub-task cards inline ("→ summarize, 24s,
@@ -130,6 +139,35 @@ class AgentRunner:
                 if await recorder.check_cancelled():
                     return {"content": "", "raw": None, "cancelled": True}
 
+            # Wave G (G4): per-call output budget. Compute a max_tokens
+            # cap based on remaining window. If smaller than what
+            # composed declared, build a copy with the tighter cap so
+            # the adapter doesn't request more than will fit.
+            composed_for_call = composed
+            try:
+                from app.agent_framework import (
+                    count_messages_tokens,
+                    derive_output_budget,
+                )
+
+                consumed_input = count_messages_tokens(messages, composed.model)
+                budget = derive_output_budget(
+                    model=composed.model,
+                    consumed_input_tokens=consumed_input,
+                )
+                if budget.max_tokens < composed.max_tokens:
+                    composed_for_call = composed.model_copy(
+                        update={"max_tokens": budget.max_tokens}
+                    )
+                    logger.debug(
+                        f"[AgentRunner] output budget tightened: "
+                        f"{composed.max_tokens} → {budget.max_tokens} "
+                        f"(consumed_input={consumed_input}, model={composed.model})"
+                    )
+            except Exception as bg_exc:
+                # Non-fatal — fall back to the agent's configured max_tokens.
+                logger.debug(f"output budget derive failed (non-fatal): {bg_exc}")
+
             # Sprint 2 #3: race adapter.call against AbortController so
             # pressing cancel mid-LLM-call interrupts within seconds
             # instead of waiting for the full request to complete.
@@ -138,7 +176,7 @@ class AgentRunner:
 
                 try:
                     resp = await race_until_abort(
-                        self.adapter.call(composed, messages),
+                        self.adapter.call(composed_for_call, messages),
                         abort,
                     )
                 except RunAborted as exc:
@@ -152,7 +190,7 @@ class AgentRunner:
                         "abort_reason": str(exc),
                     }
             else:
-                resp = await self.adapter.call(composed, messages)
+                resp = await self.adapter.call(composed_for_call, messages)
 
             if recorder is not None:
                 usage = resp.get("usage") or {}
@@ -246,6 +284,14 @@ class AgentRunner:
                     }
                 )
 
+                # Wave G (G3): observe for loop detection. Args
+                # canonicalized to a stable string (sorted keys).
+                try:
+                    args_repr = json.dumps(args, sort_keys=True, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    args_repr = repr(args)
+                loop_guard.observe(tool_name, args_repr)
+
                 messages.append(
                     {
                         "role": "tool",
@@ -254,6 +300,22 @@ class AgentRunner:
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
+
+                # Wave G (G3): if the guard says we're looping, inject
+                # ONE system warning into messages. Subsequent iterations
+                # don't re-inject (avoid repeated warnings polluting the
+                # context). LLM must self-correct on next turn.
+                if (
+                    not loop_warning_already_injected
+                    and loop_guard.is_looping()
+                ):
+                    warning = loop_guard.render_warning()
+                    if warning:
+                        messages.append({"role": "system", "content": warning})
+                        loop_warning_already_injected = True
+                        logger.warning(
+                            f"[AgentRunner] loop_guard tripped at iter={iteration}"
+                        )
 
                 # ── PostToolUse chain ──────────────────────────────────────
                 post_result = await self._run_post_hooks(

@@ -309,6 +309,51 @@ class AILibraryChatService:
             "is a clear win — for general chat, just answer directly."
         )
 
+        # Wave G (G8): on the FIRST turn of a session, fire any
+        # pending NEXT_SESSION commitments and inject reminders into
+        # request_instructions. Best-effort — failure logs + skips.
+        is_first_turn = len(history) == 0
+        if is_first_turn and user_id:
+            try:
+                from app.repositories.commitment_repository import (
+                    CommitmentRepository,
+                )
+
+                _crepo = CommitmentRepository()
+                pending = await _crepo.list_next_session(
+                    agent_id=str(composed.agent_id),
+                    user_id=str(user_id),
+                )
+                if pending:
+                    reminder_lines = [
+                        "<pending_followups>",
+                        f"You committed to {len(pending)} follow-up(s) "
+                        "in earlier sessions. Surface them naturally in "
+                        "your first reply if relevant:",
+                    ]
+                    for c in pending[:5]:  # cap on UI noise
+                        reminder_lines.append(f"  - {c.description}")
+                    reminder_lines.append("</pending_followups>")
+                    request_instructions = (
+                        "\n".join(reminder_lines) + "\n\n" + request_instructions
+                    )
+                    # Mark them fulfilled so they don't fire again.
+                    for c in pending[:5]:
+                        if c.id is not None:
+                            try:
+                                await _crepo.mark_fulfilled(
+                                    c.id, notes="surfaced at session open"
+                                )
+                            except Exception:
+                                pass
+                    logger.info(
+                        f"[chat] G8 surfaced {len(pending)} next_session commitments"
+                    )
+            except Exception as g8_exc:
+                logger.warning(
+                    f"next_session surface skipped (non-fatal): {g8_exc}"
+                )
+
         # P1-6: link-injection wire-up. Pull URLs out of the latest user
         # message, fetch via boundary-safe link_understanding, prepend
         # rendered blocks to request_instructions. Failures (4xx/5xx,
@@ -380,6 +425,28 @@ class AILibraryChatService:
                 continue
             user_messages.append({"role": role, "content": msg.get("content") or ""})
         user_messages.append({"role": "user", "content": content})
+
+        # Wave G (G5): per-message size cap. Defends against the
+        # "user pasted 200k log line" case that bypasses compaction
+        # entirely (compaction works at message-list level, not single-
+        # message level). Default cap = 50k tokens ≈ 200KB; rare and
+        # typically machine-generated when triggered.
+        try:
+            from app.agent_framework import cap_messages_tokens
+            outcomes = cap_messages_tokens(
+                user_messages,
+                model=model_for_estimate(composed) if False else "",  # noqa
+            )
+            # Replace the message list with possibly-truncated versions
+            user_messages = [o.message for o in outcomes]
+            truncated_count = sum(1 for o in outcomes if o.truncated)
+            if truncated_count:
+                logger.info(
+                    f"[chat] per-message cap truncated {truncated_count} "
+                    f"oversized message(s)"
+                )
+        except Exception as cap_exc:
+            logger.warning(f"per-message cap skipped (non-fatal): {cap_exc}")
 
         # M1.5 wiring: compact the message list if it has grown past the
         # threshold. Compactor preserves tool_use/result pairs so the

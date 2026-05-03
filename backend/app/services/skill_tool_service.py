@@ -81,7 +81,7 @@ class SkillToolService:
         }
 
     async def _execute_remember(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Wave F (F7): handle the built-in 'remember' tool.
+        """Wave F (F7) + Wave G (G1): handle the built-in 'remember' tool.
 
         args contract:
           summary (str, required): the fact to remember
@@ -92,9 +92,10 @@ class SkillToolService:
           user_id (str, required): identity context
           session_id (str, optional)
 
-        Returns the standard skill tool envelope so AgentRunner can
-        render it the same way as other skill calls.
+        G1 wires the persistor through to the real MemoryWriter — agent
+        can now actually persist a memory mid-turn (extracted_from='active_call').
         """
+        from uuid import UUID
         from app.services.memory.active_remember import (
             RememberContext,
             handle_remember,
@@ -112,6 +113,11 @@ class SkillToolService:
                 "skill": "remember",
                 "error": "agent_id required for remember()",
             }
+        if not user_id:
+            return {
+                "skill": "remember",
+                "error": "user_id required for remember()",
+            }
 
         ctx = RememberContext(
             agent_id=agent_id,
@@ -119,19 +125,44 @@ class SkillToolService:
             session_id=session_id,
         )
 
-        # Persistor stub — real wiring (writer.write with extracted_from=
-        # 'active_call') deferred to integration follow-up. For now we
-        # return a placeholder result so the agent gets feedback.
-        async def _no_op_persistor(request, context):
-            # TODO: wire MemoryWriter.write with single fact
-            return None
+        async def _real_persistor(request, context):
+            """Embed when_to_use → INSERT one row into agent_memories."""
+            from app.db.supabase_client import get_async_supabase_admin
+            from app.services.embedding_service import EmbeddingService
+
+            try:
+                embedder = EmbeddingService()
+                embedding = await embedder.generate_embedding(request.when_to_use)
+                if embedding is None:
+                    return None
+                sb = await get_async_supabase_admin()
+                result = await (
+                    sb.table("agent_memories")
+                    .insert(
+                        {
+                            "agent_id": str(UUID(context.agent_id)),
+                            "user_id": str(UUID(context.user_id)),
+                            "scope": request.scope,
+                            "summary": request.summary,
+                            "when_to_use": request.when_to_use,
+                            "extracted_from": request.extracted_from,
+                            "embedding": embedding,
+                            "metadata_json": {},
+                        }
+                    )
+                    .execute()
+                )
+                rows = result.data or []
+                return str(rows[0]["id"]) if rows else None
+            except Exception:
+                return None
 
         result = await handle_remember(
             summary=summary,
             when_to_use=when_to_use,
             scope=scope,
             context=ctx,
-            persistor=_no_op_persistor,
+            persistor=_real_persistor,
         )
         if not result.success:
             return {
