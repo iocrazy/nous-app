@@ -16,7 +16,7 @@ Session storage still lives in the shared ``ai_sessions`` /
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -217,54 +217,86 @@ class AILibraryChatService:
         *,
         user_id: UUID,
         content: str,
+        plan_mode: Optional[str] = None,
     ):
-        """Phase L (L3): SSE streaming variant of chat.
+        """P2: real streaming variant of chat.
 
         Yields event dicts: {type: 'delta' | 'done' | 'error', data: {...}}.
 
         Strategy:
-          - Always run the full chat() pipeline (handles tool_calls +
-            persistence + harvest + session_memory dispatch correctly).
-          - Then chunk the response text into ~80-char delta events on
-            whitespace boundaries so the client gets incremental output
-            even when the upstream LLM call was buffered.
+          - Drive ``self.chat`` with a chunk_callback that pushes each
+            adapter-level delta onto an asyncio.Queue.
+          - Concurrently consume the queue and yield SSE deltas.
+          - When chat() returns, drain remaining queue items, yield 'done'.
 
-        Real adapter-level token streaming exists at
-        ``AgentRunner.stream_turn`` but doesn't yet execute tool_calls
-        mid-stream. Until tool execution is plumbed through streaming,
-        we deliberately do "buffered call + chunked emit" so frontends
-        get a usable streaming UX without breaking tool-using turns.
+        TTFT (time-to-first-token) is now bounded by the model's first
+        token emission, not the full turn. Tool-using turns still work —
+        runner.stream_turn executes tool_calls between iterations and
+        re-streams; synthetic "→ Running skill..." text arrives as
+        delta chunks.
 
-        Each delta carries (text, offset). ``done`` has usage + run_id +
-        tool_calls trace + total_chars.
+        Each ``delta`` event carries (text, offset). ``done`` has usage
+        + run_id + assistant message id + tool_calls trace + total_chars.
         """
+        import asyncio as _asyncio
+
+        queue: _asyncio.Queue[Optional[str]] = _asyncio.Queue()
+
+        async def _on_chunk(text: str) -> None:
+            await queue.put(text)
+
+        # Run chat() in the background; consume queue as deltas arrive.
+        chat_task = _asyncio.create_task(
+            self.chat(
+                session_id,
+                user_id=user_id,
+                content=content,
+                plan_mode=plan_mode,
+                chunk_callback=_on_chunk,
+            ),
+            name=f"chat-stream-{session_id}",
+        )
+
+        # Sentinel-on-done: when chat completes, push None so the
+        # consumer loop exits.
+        async def _close_queue() -> None:
+            try:
+                await chat_task
+            except Exception:
+                # exception will be re-raised below when we await chat_task
+                pass
+            finally:
+                await queue.put(None)
+
+        closer_task = _asyncio.create_task(_close_queue(), name="chat-stream-closer")
+
+        offset = 0
         try:
-            result = await self.chat(session_id, user_id=user_id, content=content)
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield {
+                    "type": "delta",
+                    "data": {"text": item, "offset": offset},
+                }
+                offset += len(item)
+        except _asyncio.CancelledError:
+            chat_task.cancel()
+            raise
+        finally:
+            # Make sure background tasks finish cleanly
+            await closer_task
+
+        # Surface chat()'s outcome
+        try:
+            result = await chat_task
         except Exception as exc:
             yield {"type": "error", "data": {"error": f"{type(exc).__name__}: {exc}"}}
             return
 
         message = result.get("assistant_message") or {}
-        text = message.get("content") or ""
-
-        DELTA_CHARS = 80
-        offset = 0
-        n = len(text)
-        while offset < n:
-            end = min(offset + DELTA_CHARS, n)
-            # Try to break on whitespace if not at end
-            if end < n:
-                for probe in range(end, min(end + 20, n)):
-                    if text[probe].isspace():
-                        end = probe + 1
-                        break
-            chunk = text[offset:end]
-            yield {
-                "type": "delta",
-                "data": {"text": chunk, "offset": offset},
-            }
-            offset = end
-
+        full_text = message.get("content") or ""
         yield {
             "type": "done",
             "data": {
@@ -272,7 +304,7 @@ class AILibraryChatService:
                 "usage": result.get("usage"),
                 "run_id": result.get("run_id"),
                 "tool_calls": result.get("tool_calls", []),
-                "total_chars": n,
+                "total_chars": len(full_text),
             },
         }
 
@@ -283,6 +315,7 @@ class AILibraryChatService:
         user_id: UUID,
         content: str,
         plan_mode: Optional[str] = None,
+        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
 
@@ -544,6 +577,11 @@ class AILibraryChatService:
         # Wrap in RunRecorder. agent_id comes from ``composed`` so we
         # don't re-query. team_id / project_id tag the run for Usage's
         # team/project scope queries.
+        # P2: when chunk_callback is provided, drive runner.stream_turn
+        # and emit deltas to the callback as they arrive — TTFT drops
+        # from "after model finishes" to "as model emits". Tool-using
+        # turns still work (stream_turn executes tool_calls between
+        # iterations and re-streams).
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
@@ -557,11 +595,41 @@ class AILibraryChatService:
                 input_summary=content,
                 metadata={"full_input": content},
             ) as recorder:
-                result = await runner.run_turn(
-                    composed,
-                    user_messages=user_messages,
-                    recorder=recorder,
-                )
+                if chunk_callback is None:
+                    # Buffered path — unchanged
+                    result = await runner.run_turn(
+                        composed,
+                        user_messages=user_messages,
+                        recorder=recorder,
+                    )
+                    assistant_content = result.get("content") or ""
+                    tool_calls_trace = result.get("tool_calls") or []
+                else:
+                    # Streaming path: accumulate chunks + forward to caller
+                    accumulated: list[str] = []
+                    tool_calls_trace = []
+                    async for chunk in runner.stream_turn(
+                        composed,
+                        user_messages=user_messages,
+                        recorder=recorder,
+                        auto_recorder=False,  # we already own the context
+                    ):
+                        if chunk.delta_text:
+                            accumulated.append(chunk.delta_text)
+                            try:
+                                await chunk_callback(chunk.delta_text)
+                            except Exception as cb_exc:
+                                # Callback failure must not kill the turn
+                                logger.warning(
+                                    f"[chat] chunk_callback raised: {cb_exc}"
+                                )
+                        if chunk.tool_call_delta:
+                            # Surface tool-call-start hints to UI; the
+                            # synthetic "→ Running X..." text comes
+                            # through delta_text on the next chunk
+                            pass
+                    assistant_content = "".join(accumulated)
+
                 run_id = recorder.run_id
                 # Pull usage off the recorder — that's the single source
                 # of truth for what just got written to agent_runs.
@@ -569,13 +637,21 @@ class AILibraryChatService:
                     "prompt_tokens": recorder.prompt_tokens,
                     "completion_tokens": recorder.completion_tokens,
                 }
-                assistant_content = result.get("content") or ""
                 # Tool call trace from this turn (Skill / Delegate
                 # dispatches in LLM emission order) — surfaced into the
                 # response so the chat UI can render sub-task cards
                 # inline. Empty list when the LLM answered directly.
-                tool_calls_trace = result.get("tool_calls") or []
+                # Note: stream_turn doesn't yet aggregate tool_calls into
+                # a final dict like run_turn does; tool calls are visible
+                # via the synthetic delta_text in the streaming path.
+                if chunk_callback is None:
+                    # tool_calls_trace already set from result above
+                    pass
                 recorder.set_summaries(output_summary=assistant_content)
+                # In the streaming path, ``result`` was never built; backfill
+                # what downstream code references.
+                if chunk_callback is not None:
+                    result = {"content": assistant_content, "tool_calls": tool_calls_trace}
         except AgentPausedError as err:
             logger.warning(f"[ChatService] agent paused: {err}")
             # Mark the user message with a hint so the UI can show "the
