@@ -238,9 +238,19 @@ async def lifespan(app: FastAPI):
         app.state.lane_queue = LaneQueue()
         # Sprint 6: per-process context-engine registry. Surfaces (chat,
         # search, storyboard) self-register their engines at startup so
-        # callers can fetch by surface name. Empty by default — engines
-        # opt in. The chat composer wiring follows in Sprint 6.5.
+        # callers can fetch by surface name.
         app.state.context_engines = ContextEngineRegistry()
+
+        # Sprint 6.5 wire-up: register the chat context engine. Wrapped
+        # PromptComposer; callers fetch via require('chat'). Search /
+        # Storyboard register their own engines from feature modules.
+        try:
+            from app.services.chat_context_engine import ChatContextEngine
+
+            app.state.context_engines.register(ChatContextEngine())
+            logger.info("ContextEngine registered: chat")
+        except Exception as ce_exc:
+            logger.warning(f"ChatContextEngine registration failed: {ce_exc}")
 
         # Sprint 5 (D10-1) + 5.5 wire-up: every process holds a
         # BoundsRegistry. Workers self-register their REAL inventory
