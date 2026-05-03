@@ -49,7 +49,57 @@ MAX_TOOL_ITERATIONS = 5
 
 # Tool names recognised by the runner. Anything else is silently ignored
 # (forward-compat with future caller-provided tools).
+# Q5: MCP-routed tools are matched by ``"." in name`` separately — they
+# don't need to be listed here.
 SUPPORTED_TOOLS: frozenset[str] = frozenset({"Skill", "Delegate"})
+
+
+def _is_mcp_tool_name(name: str, mcp_registry) -> bool:
+    """Q5: check if a tool name maps to a registered MCP server.
+
+    Returns True iff (a) name contains exactly one '.' separator,
+    (b) the prefix matches one of the registry's registered server
+    names. Returns False when registry is None or name shape mismatches.
+    """
+    if mcp_registry is None or not name or "." not in name:
+        return False
+    server_name, _, raw = name.partition(".")
+    if not raw:
+        return False
+    return server_name in mcp_registry.server_names()
+
+
+def _mcp_tools_to_openai_format(qualified_tools) -> list[dict]:
+    """Q5: convert MCPOutboundRegistry.QualifiedTool[] → OpenAI tools[].
+
+    The OpenAI function-calling spec is what every chat-completions
+    adapter expects in ``composed.tools``:
+
+        {
+          "type": "function",
+          "function": {
+            "name": "notion.create_page",
+            "description": "...",
+            "parameters": { "type": "object", ... }   # JSONSchema
+          }
+        }
+
+    MCP's ``inputSchema`` already matches the JSONSchema shape, so the
+    adapter is a thin wrapper.
+    """
+    out = []
+    for qt in qualified_tools:
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": qt.qualified_name,
+                    "description": qt.description or "",
+                    "parameters": qt.input_schema or {"type": "object"},
+                },
+            }
+        )
+    return out
 
 
 class AgentRunner:
@@ -60,6 +110,7 @@ class AgentRunner:
         *,
         hooks: Optional[HookRegistry] = None,
         delegate_tool: Optional[Any] = None,
+        mcp_registry: Optional[Any] = None,
     ) -> None:
         self.adapter = adapter
         self.skill_tool = skill_tool
@@ -68,6 +119,13 @@ class AgentRunner:
         # are answered with an explicit "tool not configured" so the LLM
         # gets useful feedback instead of silent skip behaviour.
         self.delegate_tool = delegate_tool
+        # Q5: optional outbound MCP registry. When set, tools advertised
+        # by registered MCP servers are injected into composed.tools at
+        # turn-start, and tool_calls whose name matches a server prefix
+        # are routed via mcp_registry.call(qualified_name, args). Server
+        # names are sanitized — no '.' allowed — so the prefix split is
+        # unambiguous (e.g. 'notion.create_page' → server 'notion').
+        self.mcp_registry = mcp_registry
 
     async def stream_turn(
         self,
@@ -366,6 +424,26 @@ class AgentRunner:
         # the response payload).
         tool_call_trace: list[dict[str, Any]] = []
 
+        # Q5: discover MCP tools once per turn + augment composed.tools.
+        # Failures isolated — if discovery breaks, the turn proceeds
+        # without MCP tools (back-compat).
+        mcp_tool_names: set[str] = set()
+        if self.mcp_registry is not None:
+            try:
+                qualified = await self.mcp_registry.all_tools()
+                if qualified:
+                    extra_tools = _mcp_tools_to_openai_format(qualified)
+                    composed = composed.model_copy(update={
+                        "tools": list(composed.tools or []) + extra_tools,
+                    })
+                    mcp_tool_names = {qt.qualified_name for qt in qualified}
+                    from app.agent_framework._metrics_helper import inc_metric
+                    inc_metric("mcp_tools_injected", by=len(extra_tools))
+            except Exception as exc:
+                logger.warning(
+                    f"[AgentRunner] MCP tool discovery failed (non-fatal): {exc}"
+                )
+
         for _ in range(MAX_TOOL_ITERATIONS):
             iteration += 1
 
@@ -459,7 +537,13 @@ class AgentRunner:
             for call in tool_calls:
                 fn = call.get("function") or {}
                 tool_name = fn.get("name")
-                if tool_name not in SUPPORTED_TOOLS:
+                # Q5: MCP tools have a server-prefixed name (e.g.
+                # 'notion.create_page'). Allow them in addition to the
+                # built-in Skill / Delegate.
+                is_mcp = tool_name in mcp_tool_names or _is_mcp_tool_name(
+                    tool_name or "", self.mcp_registry
+                )
+                if not is_mcp and tool_name not in SUPPORTED_TOOLS:
                     # Unknown tool — skip (caller-provided tools handled elsewhere in future)
                     continue
                 try:
@@ -510,6 +594,25 @@ class AgentRunner:
                     # Cache result if this skill is idempotent
                     if cache_key is not None and isinstance(result, dict) and not result.get("error"):
                         tool_cache.put(cache_key, result)
+                elif is_mcp:
+                    # Q5: route to outbound MCP server. Tool errors
+                    # (server returned isError=true) come back as a
+                    # normal result dict with error info. Transport
+                    # failures (network down, 4xx) → MCPClientError
+                    # which we catch and convert to a result dict so
+                    # the LLM gets feedback instead of crashing the run.
+                    from app.agent_framework._metrics_helper import inc_metric
+                    try:
+                        result = await self.mcp_registry.call(tool_name, args)
+                        inc_metric("mcp_tool_call")
+                        if result.get("isError"):
+                            inc_metric("mcp_tool_call_error")
+                    except Exception as exc:
+                        inc_metric("mcp_tool_call_transport_error")
+                        result = {
+                            "error": f"MCP transport failure: {exc}",
+                            "tool": tool_name,
+                        }
                 else:  # tool_name == "Delegate"
                     if self.delegate_tool is None:
                         result = {
