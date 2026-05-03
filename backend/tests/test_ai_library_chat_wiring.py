@@ -247,3 +247,151 @@ async def test_recall_returns_empty_when_supabase_unavailable():
             session_id=None, user_query="hi", settings=MagicMock(),
         )
     assert result == []
+
+
+# ─── G1+G5: MCP registry wiring ─────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_chat_wiring_constructs_mcp_registry_from_user_servers():
+    """build_agent_runner_stack pulls user's MCP servers + builds an
+    MCPOutboundRegistry that's passed to AgentRunner."""
+    from app.repositories.user_mcp_servers_repository import UserMCPServer
+    from app.services.ai_library_chat_wiring import build_agent_runner_stack
+
+    user_id = uuid4()
+    fake_servers = [
+        UserMCPServer(
+            id=uuid4(), user_id=user_id, name="notion",
+            url="https://mcp.notion.test/jsonrpc",
+            bearer_token="tok123",
+            description="Notion workspace",
+            enabled=True,
+        ),
+        UserMCPServer(
+            id=uuid4(), user_id=user_id, name="linear",
+            url="https://mcp.linear.test/jsonrpc",
+            bearer_token=None,
+            description=None,
+            enabled=True,
+        ),
+    ]
+
+    captured_kwargs = {}
+
+    def _capture_runner(**kwargs):
+        captured_kwargs.update(kwargs)
+        return MagicMock()
+
+    fake_repo = MagicMock()
+    fake_repo.list_for_user = AsyncMock(return_value=fake_servers)
+
+    with patch(
+        "app.repositories.user_mcp_servers_repository.UserMCPServersRepository",
+        return_value=fake_repo,
+    ), patch(
+        "app.services.ai_library_chat_wiring.LLMFallbackChain",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.ai_library_chat_wiring.AgentRunner",
+        side_effect=_capture_runner,
+    ):
+        await build_agent_runner_stack(
+            agent={"id": str(uuid4()), "slug": "x", "model": "qwen-max",
+                   "budget_per_run_cents": None, "fallback_models": []},
+            skill_repo=MagicMock(),
+            user_id=user_id,
+            session_id=None,
+            user_query="hi",
+            settings=MagicMock(),
+        )
+
+    mcp = captured_kwargs.get("mcp_registry")
+    assert mcp is not None, "expected MCPOutboundRegistry to be passed"
+    # Two servers registered
+    assert sorted(mcp.server_names()) == ["linear", "notion"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_chat_wiring_no_mcp_when_user_has_no_servers():
+    """No rows → mcp_registry=None (zero overhead path)."""
+    from app.services.ai_library_chat_wiring import build_agent_runner_stack
+
+    captured_kwargs = {}
+
+    def _capture_runner(**kwargs):
+        captured_kwargs.update(kwargs)
+        return MagicMock()
+
+    fake_repo = MagicMock()
+    fake_repo.list_for_user = AsyncMock(return_value=[])
+
+    with patch(
+        "app.repositories.user_mcp_servers_repository.UserMCPServersRepository",
+        return_value=fake_repo,
+    ), patch(
+        "app.services.ai_library_chat_wiring.LLMFallbackChain",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.ai_library_chat_wiring.AgentRunner",
+        side_effect=_capture_runner,
+    ):
+        await build_agent_runner_stack(
+            agent={"id": str(uuid4()), "slug": "x", "model": "qwen-max",
+                   "budget_per_run_cents": None, "fallback_models": []},
+            skill_repo=MagicMock(),
+            user_id=uuid4(),
+            session_id=None,
+            user_query="hi",
+            settings=MagicMock(),
+        )
+    assert captured_kwargs.get("mcp_registry") is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_chat_wiring_mcp_repo_failure_isolated():
+    """Exception loading MCP rows → registry stays None, chat continues."""
+    from app.services.ai_library_chat_wiring import build_agent_runner_stack
+
+    captured_kwargs = {}
+
+    def _capture_runner(**kwargs):
+        captured_kwargs.update(kwargs)
+        return MagicMock()
+
+    fake_repo = MagicMock()
+    fake_repo.list_for_user = AsyncMock(side_effect=RuntimeError("db down"))
+
+    with patch(
+        "app.repositories.user_mcp_servers_repository.UserMCPServersRepository",
+        return_value=fake_repo,
+    ), patch(
+        "app.services.ai_library_chat_wiring.LLMFallbackChain",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        AsyncMock(return_value=[]),
+    ), patch(
+        "app.services.ai_library_chat_wiring.AgentRunner",
+        side_effect=_capture_runner,
+    ):
+        # Should not raise
+        await build_agent_runner_stack(
+            agent={"id": str(uuid4()), "slug": "x", "model": "qwen-max",
+                   "budget_per_run_cents": None, "fallback_models": []},
+            skill_repo=MagicMock(),
+            user_id=uuid4(),
+            session_id=None,
+            user_query="hi",
+            settings=MagicMock(),
+        )
+    assert captured_kwargs.get("mcp_registry") is None
