@@ -118,6 +118,10 @@ class SkillFileOut(BaseModel):
     file_type: Literal["markdown", "script", "text-asset", "binary-ref"]
     binary_url: Optional[str] = None
     updated_at: datetime
+    # Skill scanner findings (only populated on upsert response — empty
+    # on read paths). Surfaced so the UI can show a security badge on
+    # the file. Each item: {line, category, severity, snippet, message}.
+    security_findings: list[dict] = []
 
 
 class SkillFileUpsert(BaseModel):
