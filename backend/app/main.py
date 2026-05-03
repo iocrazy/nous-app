@@ -334,13 +334,17 @@ async def lifespan(app: FastAPI):
                     f"{socket.gethostname()}-pid{os.getpid()}"
                 )
 
-                # Workflow names: introspect the just-imported workflows pkg.
-                # When DBOS init failed earlier, `workflows` may not exist
-                # in scope — guard with a try/except.
+                # Workflow names: introspect the workflows pkg. Re-import
+                # locally so this block doesn't depend on whether the
+                # earlier DBOS init's `from app import workflows` made
+                # it into this scope (it doesn't, in current Python rules
+                # — names imported in conditional blocks are scope-local
+                # per CPython's compile-time symbol table; see issue G2-FIX).
                 workflow_names: frozenset[str] = frozenset()
                 try:
-                    workflow_names = inventory_workflow_names(workflows)  # noqa: F823
-                except (NameError, Exception) as inv_exc:
+                    from app import workflows as _wf  # noqa: F401
+                    workflow_names = inventory_workflow_names(_wf)
+                except Exception as inv_exc:
                     logger.warning(
                         f"Bounds: workflow inventory failed: {inv_exc}"
                     )
