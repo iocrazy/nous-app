@@ -119,3 +119,11 @@ admin_router.include_router(
     prefix="/boundary-audit",
     tags=["Admin - Boundary Audit"],
 )
+
+# Wave I (I3): agent harness telemetry snapshot
+from .agent_telemetry_router import router as agent_telemetry_router  # noqa: E402
+
+admin_router.include_router(
+    agent_telemetry_router,
+    tags=["Admin - Agent Telemetry"],
+)

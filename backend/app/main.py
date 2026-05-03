@@ -267,6 +267,16 @@ async def lifespan(app: FastAPI):
         # (ai_library_chat_wiring) reads it from app.state when building
         # the chain, so cooled-down models are skipped on retry.
         app.state.model_health = ModelHealthRegistry()
+        # Wave I (I1): per-process RootAbortRegistry. Subagent dispatches
+        # register children against the parent's abort controller so root
+        # cancel fans out to the entire delegation tree.
+        from app.agent_framework.root_abort_registry import RootAbortRegistry
+        app.state.root_abort_registry = RootAbortRegistry()
+
+        # Wave I (I3): per-process AgentMetrics counters. Admin / health
+        # endpoints read .snapshot() for ops dashboards.
+        from app.agent_framework.telemetry import AgentMetrics
+        app.state.agent_metrics = AgentMetrics()
 
         # Wave G (G2): per-process HookRegistry seeded with bridge-wrapped
         # legacy hooks (BudgetGuard / CostAuditor / MemoryHarvester).

@@ -1473,3 +1473,54 @@ async def send_chat_message(
         "run_id": result["run_id"],
         "tool_calls": result.get("tool_calls", []),
     }
+
+
+@router.post(
+    "/sessions/{session_id}/chat-stream",
+    summary="Send a user turn and stream the assistant response (SSE)",
+)
+async def send_chat_message_stream(
+    session_id: UUID, payload: ChatRequest, auth: AuthDep
+):
+    """Wave I (I2): Server-Sent Events streaming variant.
+
+    Emits incremental text chunks as `event: delta` SSE frames; ends
+    with `event: done` carrying usage + run_id. On any error emits
+    `event: error` and closes.
+
+    Frontend should treat unknown event types as no-op (forward-compat
+    when we add `event: tool_call_delta` later).
+
+    NOTE: Tool-using turns currently degrade to one-shot — the streaming
+    path doesn't execute tool_calls mid-stream yet (text-first MVP).
+    Frontends should fall back to /chat (non-streaming) when they need
+    full tool execution semantics.
+    """
+    import json
+
+    from fastapi.responses import StreamingResponse
+
+    svc = AILibraryChatService()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+
+    async def _generator():
+        try:
+            async for evt in svc.chat_stream(
+                session_id, user_id=user_uuid, content=payload.content
+            ):
+                # evt: dict with type + payload
+                event_name = evt.get("type", "delta")
+                data = json.dumps(evt.get("data") or {}, ensure_ascii=False)
+                yield f"event: {event_name}\ndata: {data}\n\n"
+        except Exception as exc:
+            data = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+            yield f"event: error\ndata: {data}\n\n"
+
+    return StreamingResponse(
+        _generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )
