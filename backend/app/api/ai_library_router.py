@@ -898,7 +898,27 @@ async def upsert_skill_file(
     # to keep routing + persistence in lockstep.
     skill_id = int(skill["id"])
     user_uuid = _coerce_user_uuid(auth.user_id)
-    return await skill_repo.upsert_file_versioned(
+
+    # Skill scanner: non-blocking warning for now. Findings are logged
+    # + surfaced in the response so the UI can show a security badge.
+    # A future deployment can enable strict-block by checking
+    # has_blocking_findings() and raising 422 here.
+    scan_findings: List[Dict[str, Any]] = []
+    if payload.content:
+        try:
+            from app.boundary import skill_scanner
+            findings = skill_scanner.scan(payload.content)
+            scan_findings = skill_scanner.to_dict_list(findings)
+            if findings:
+                logger.warning(
+                    f"[skill_scanner] {slug}/{path}: {len(findings)} finding(s) "
+                    f"(highest={findings[0].severity.value}); upload allowed"
+                )
+        except Exception as exc:
+            # Scanner failure must not block legitimate uploads
+            logger.warning(f"[skill_scanner] failed (non-fatal): {exc}")
+
+    result = await skill_repo.upsert_file_versioned(
         skill_id=skill_id,
         path=path,
         content=payload.content,
@@ -906,6 +926,11 @@ async def upsert_skill_file(
         binary_url=payload.binary_url,
         created_by=user_uuid,
     )
+    # Tack scanner findings onto the response (extra field — caller
+    # can ignore safely if not present)
+    if isinstance(result, dict):
+        result = {**result, "security_findings": scan_findings}
+    return result
 
 
 @router.delete(
