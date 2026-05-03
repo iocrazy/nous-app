@@ -309,7 +309,11 @@ export function AIChatPanel({
           .catch((err) => console.error('[AIChatPanel] refresh sessions failed:', err));
       }
     },
-    [activeSessionId, sending, selectedAgentSlug, numericProjectId, addToast],
+    // C3 fix: include planMode + stagedAttachments so the closure
+    // doesn't capture stale values when the user changes mode or
+    // adds/removes attachments between renders.
+    [activeSessionId, sending, selectedAgentSlug, numericProjectId,
+     addToast, planMode, stagedAttachments],
   );
 
   const handleSuggest = useCallback(

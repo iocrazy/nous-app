@@ -85,10 +85,14 @@ async def test_image_with_no_url_or_data_url_is_failure():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_video_calls_extract_frames():
+async def test_video_calls_extract_frames(monkeypatch):
     """Video resolves via Q2's extract_frames."""
+    from pathlib import Path as _P
     from app.agent_framework.multimodal import Attachment, AttachmentKind
     from app.services.video_frame_extractor import FrameExtractionResult
+
+    # C1: guard requires url to live under base — point base at /tmp
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     fake_attachments = [
         Attachment(kind=AttachmentKind.VIDEO_THUMBNAIL,
@@ -115,8 +119,10 @@ async def test_video_calls_extract_frames():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_video_failure_recorded_not_raised():
+async def test_video_failure_recorded_not_raised(monkeypatch):
+    from pathlib import Path as _P
     from app.services.video_frame_extractor import FrameExtractionResult
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     fake_result = FrameExtractionResult(
         attachments=[], duration_seconds=None, sampled_at_seconds=[],
@@ -149,9 +155,11 @@ async def test_video_without_url_is_failure():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_pdf_calls_render_pdf():
+async def test_pdf_calls_render_pdf(monkeypatch):
+    from pathlib import Path as _P
     from app.agent_framework.multimodal import Attachment, AttachmentKind
     from app.services.pdf_renderer import PdfRenderResult
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     fake_attachments = [
         Attachment(kind=AttachmentKind.PDF_PAGE, data_url="data:image/jpeg;base64,p1"),
@@ -173,8 +181,10 @@ async def test_pdf_calls_render_pdf():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_pdf_failure_recorded_not_raised():
+async def test_pdf_failure_recorded_not_raised(monkeypatch):
+    from pathlib import Path as _P
     from app.services.pdf_renderer import PdfRenderResult
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     fake_result = PdfRenderResult(
         attachments=[], page_count=0, rendered_pages=[],
@@ -209,9 +219,11 @@ async def test_unknown_kind_recorded_as_failure():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_partial_failure_others_succeed():
+async def test_partial_failure_others_succeed(monkeypatch):
     """Mixed batch: image OK + bad video → image still resolves."""
+    from pathlib import Path as _P
     from app.services.video_frame_extractor import FrameExtractionResult
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     img_req = AttachmentRequest(kind="image", url="https://x.com/i.png")
     vid_req = AttachmentRequest(kind="video", url="/tmp/broken.mp4")
@@ -230,3 +242,65 @@ async def test_partial_failure_others_succeed():
     assert result.attachments[0].kind == AttachmentKind.IMAGE
     assert len(result.failures) == 1
     assert result.failures[0].kind == "video"
+
+
+# ─── C1: Path-traversal / SSRF guard ─────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_video_path_outside_base_is_rejected(monkeypatch, tmp_path):
+    """Critical security path — arbitrary filesystem read via video kind."""
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
+    req = AttachmentRequest(kind="video", url="/etc/passwd")
+    result = await resolver.resolve_attachments([req])
+    assert result.attachments == []
+    assert len(result.failures) == 1
+    assert "outside chat attachment base" in result.failures[0].reason
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_video_path_traversal_is_rejected(monkeypatch, tmp_path):
+    """`..` traversal out of base also rejected."""
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path / "base")
+    (tmp_path / "base").mkdir()
+    req = AttachmentRequest(
+        kind="video", url=str(tmp_path / "base" / ".." / "secret.mp4"),
+    )
+    result = await resolver.resolve_attachments([req])
+    assert result.attachments == []
+    assert len(result.failures) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_pdf_path_outside_base_is_rejected(monkeypatch, tmp_path):
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
+    req = AttachmentRequest(kind="pdf", url="/etc/shadow")
+    result = await resolver.resolve_attachments([req])
+    assert result.attachments == []
+    assert len(result.failures) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_video_path_inside_base_passes_guard(monkeypatch, tmp_path):
+    """Legit upload path under base passes the guard (and reaches the
+    extractor — which we mock to confirm it WAS called)."""
+    from app.services.video_frame_extractor import FrameExtractionResult
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
+    legit = tmp_path / "user1" / "abc.mp4"
+    legit.parent.mkdir()
+    legit.write_bytes(b"fake")
+
+    fake_result = FrameExtractionResult(
+        attachments=[], duration_seconds=10.0, sampled_at_seconds=[],
+    )
+    with patch(
+        "app.services.video_frame_extractor.extract_frames",
+        AsyncMock(return_value=fake_result),
+    ) as m:
+        req = AttachmentRequest(kind="video", url=str(legit))
+        await resolver.resolve_attachments([req])
+        m.assert_awaited_once()  # guard let it through

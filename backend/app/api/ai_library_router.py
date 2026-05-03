@@ -2035,6 +2035,48 @@ _ALLOWED_EXTS = {
 }
 
 
+# C2: magic-byte signatures keyed by extension. Defends against
+# extension-spoofing (uploading malicious binary as .jpg). Schema:
+#   ext → list[Signature]   where Signature = list[(offset, bytes)]
+# Outer list is OR (any signature matches → accept). Inner list is
+# AND (every (offset, bytes) pair within a signature must match).
+# This lets us express e.g. WEBP = "RIFF at 0 AND WEBP at 8" without
+# accidentally accepting AVI files (which also have RIFF at 0).
+_MAGIC_BYTES: dict[str, list[list[tuple[int, bytes]]]] = {
+    ".jpg":  [[(0, b"\xff\xd8\xff")]],
+    ".jpeg": [[(0, b"\xff\xd8\xff")]],
+    ".png":  [[(0, b"\x89PNG\r\n\x1a\n")]],
+    ".gif":  [[(0, b"GIF87a")], [(0, b"GIF89a")]],
+    ".webp": [[(0, b"RIFF"), (8, b"WEBP")]],
+    ".bmp":  [[(0, b"BM")]],
+    ".mp4":  [[(4, b"ftyp")]],
+    ".mov":  [[(4, b"ftyp")]],
+    ".webm": [[(0, b"\x1a\x45\xdf\xa3")]],  # EBML / Matroska
+    ".mkv":  [[(0, b"\x1a\x45\xdf\xa3")]],
+    ".avi":  [[(0, b"RIFF"), (8, b"AVI ")]],
+    ".pdf":  [[(0, b"%PDF-")]],
+}
+
+
+def _check_magic_bytes(ext: str, head: bytes) -> bool:
+    """Return True iff the first bytes match one of the signatures
+    registered for this extension. Unknown extensions accept (caller
+    has already filtered via _ALLOWED_EXTS)."""
+    signatures = _MAGIC_BYTES.get(ext)
+    if not signatures:
+        return True
+    for sig in signatures:
+        # Inner AND: every (offset, expected) within this signature
+        # must match for the signature to count.
+        if all(
+            len(head) >= offset + len(expected)
+            and head[offset:offset + len(expected)] == expected
+            for offset, expected in sig
+        ):
+            return True
+    return False
+
+
 def _user_attachment_dir(user_id: UUID) -> _Path:
     d = _CHAT_ATTACHMENTS_BASE / str(user_id)
     d.mkdir(parents=True, exist_ok=True)
@@ -2067,8 +2109,16 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
       - url:  server-local filesystem path. The chat attachment resolver
               reads this path directly when building multimodal content.
       - 24h TTL — files older than that are reaped lazily on next upload.
+
+    Single-container assumption (H1): the returned ``url`` is a path
+    on THIS container's filesystem. The resolver later reads it from
+    the same container during the chat turn. If the deployment scales
+    to multiple backend replicas WITHOUT a shared volume, uploads on
+    replica A become unreadable from replica B. Today's docker-compose
+    is single-replica so this is fine; multi-replica deploys must
+    either (a) share a volume mounted at CHAT_ATTACHMENT_BASE_DIR or
+    (b) move to Supabase Storage with a signed URL.
     """
-    from fastapi import UploadFile, File  # local import — avoids circular
     user_id = _coerce_user_uuid(auth.user_id)
 
     # FastAPI doesn't auto-bind UploadFile when the route param is just
@@ -2103,13 +2153,24 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
     new_id = _uuid.uuid4().hex
     out_path = user_dir / f"{new_id}{ext}"
     try:
-        # Stream copy so we don't load the whole file into memory at once
+        # Stream copy so we don't load the whole file into memory at once.
+        # First chunk is also checked against magic bytes (C2) — extension
+        # alone is not a trust boundary.
         with out_path.open("wb") as f:
             chunk_total = 0
+            magic_checked = False
             while True:
                 chunk = await upload.read(64 * 1024)
                 if not chunk:
                     break
+                if not magic_checked:
+                    if not _check_magic_bytes(ext, chunk[:32]):
+                        out_path.unlink(missing_ok=True)
+                        raise HTTPException(
+                            status_code=415,
+                            detail=f"file content does not match {ext} format",
+                        )
+                    magic_checked = True
                 chunk_total += len(chunk)
                 if chunk_total > _CHAT_ATTACHMENT_MAX_BYTES:
                     out_path.unlink(missing_ok=True)
