@@ -110,3 +110,56 @@ def test_cleanup_all_swallows_subprocess_failure():
     ):
         # Should not raise
         _cleanup_all_children()
+
+
+# ─── R2: bind_to_parent_death ─────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_bind_to_parent_death_returns_false_on_non_linux():
+    """R2: macOS / Windows have no PR_SET_PDEATHSIG — must return False
+    (not raise) and let caller continue with reduced safety."""
+    import sys as _sys
+    from app.agent_framework.process_lifecycle import bind_to_parent_death
+
+    if _sys.platform != "linux":
+        assert bind_to_parent_death() is False
+    else:
+        # On Linux: should succeed (returns True) when not running as PID 1
+        # in a contrived environment — best-effort only.
+        result = bind_to_parent_death()
+        # Don't assert True — kernel may refuse in some sandboxes; assert
+        # that it returns a bool and doesn't raise.
+        assert isinstance(result, bool)
+
+
+@pytest.mark.unit
+def test_safe_popen_kwargs_empty_on_non_linux():
+    """R2: macOS / Windows callers get an empty dict so their Popen
+    call is a passthrough."""
+    import sys as _sys
+    from app.agent_framework.process_lifecycle import safe_popen_kwargs
+
+    kwargs = safe_popen_kwargs()
+    if _sys.platform != "linux":
+        assert kwargs == {}
+    else:
+        assert "preexec_fn" in kwargs
+        assert callable(kwargs["preexec_fn"])
+
+
+@pytest.mark.unit
+def test_bind_to_parent_death_swallows_exceptions(monkeypatch):
+    """R2: any internal failure (missing libc / locked-down env) returns
+    False; never propagates."""
+    import sys as _sys
+    if _sys.platform != "linux":
+        pytest.skip("Linux-only path")
+
+    import ctypes
+    def _broken_cdll(*_a, **_k):
+        raise OSError("no libc here")
+    monkeypatch.setattr(ctypes, "CDLL", _broken_cdll)
+
+    from app.agent_framework.process_lifecycle import bind_to_parent_death
+    assert bind_to_parent_death() is False

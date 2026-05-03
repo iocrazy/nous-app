@@ -76,13 +76,24 @@ class AgentRunner:
         *,
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
+        auto_recorder: bool = True,
+        user_id: Optional["UUID"] = None,
+        session_id: Optional["UUID"] = None,
+        trigger: str = "chat_stream",
     ):
-        """Wave H (B) + Phase P (P1): incremental streaming with tool_calls.
+        """Wave H (B) + Phase P (P1) + R4: incremental streaming with tool_calls.
 
         Yields StreamChunk instances as the model emits them. When the
         model emits tool_call deltas, we collect them, execute the tools
         on completion (between LLM iterations), and re-enter the stream
         loop with the tool results in messages.
+
+        R4: when ``recorder`` is None and ``auto_recorder=True`` (default),
+        an internal RunRecorder is constructed + context-managed for the
+        duration of the stream. Caller need only pass ``user_id``
+        (and optionally session_id). This guarantees telemetry
+        (agent_runs row + status + duration + cost) is never silently
+        dropped because the caller forgot the wrapper.
 
         Yields:
           - delta_text chunks during text generation
@@ -97,6 +108,41 @@ class AgentRunner:
         Per-turn output budget + AbortController + loop_guard all apply
         same as run_turn().
         """
+        from contextlib import AsyncExitStack
+        from app.agent_framework import RunAborted, ToolCallLoopGuard
+        from app.services.ai_adapters.base import StreamChunk, StreamingNotSupported
+        from app.agent_framework._metrics_helper import inc_metric
+
+        # R4: optionally wrap in RunRecorder when caller didn't supply one
+        async with AsyncExitStack() as _stack:
+            if recorder is None and auto_recorder and user_id is not None:
+                recorder = await _stack.enter_async_context(
+                    RunRecorder(
+                        agent_id=composed.agent_id,
+                        user_id=user_id,
+                        trigger=trigger,
+                        session_id=session_id,
+                        model=composed.model,
+                    )
+                )
+                inc_metric("stream_turn_auto_recorder")
+
+            async for _chunk in self._stream_turn_inner(
+                composed, user_messages,
+                recorder=recorder, abort=abort,
+            ):
+                yield _chunk
+
+    async def _stream_turn_inner(
+        self,
+        composed: ComposedSystemPrompt,
+        user_messages: list[dict],
+        *,
+        recorder: Optional[RunRecorder],
+        abort: Optional["AbortController"],
+    ):
+        """R4: extracted inner generator so stream_turn can wrap us in
+        an optional RunRecorder context without nesting concerns."""
         from app.agent_framework import RunAborted, ToolCallLoopGuard
         from app.services.ai_adapters.base import StreamChunk, StreamingNotSupported
         from app.agent_framework._metrics_helper import inc_metric

@@ -48,17 +48,12 @@ After uncommenting, the worker container will:
 - Skip HTTP API mounting (only serves `/health` + `/internal/bounds`)
 - Share the same DBOS PG queue with gateway
 
-### 3. Set `BOUNDS_GATE_ENABLED=true` (optional, recommended)
+### 3. (Removed in R1) Dispatch gate is always-on
 
-Once a worker is live + advertising bounds, enable the dispatch gate:
-
-```yaml
-    environment:
-      - BOUNDS_GATE_ENABLED=true       # gateway only
-```
-
-The gateway will fail-fast when no worker advertises a workflow it's
-about to dispatch (vs queuing forever).
+After R1 the gate runs whenever the bounds registry has live entries.
+Combined-mode self-registers all local workflows, so single-process
+deploys always pass naturally. Split mode fails fast when no worker
+advertises the requested workflow.
 
 ### 4. Restart
 
@@ -93,9 +88,12 @@ Each worker registers its own bounds; gateway sees the full pool.
 If something misbehaves:
 
 1. Set `MEDIAHUB_ROLE=combined` on gateway (or unset)
-2. Set `BOUNDS_GATE_ENABLED=false`
-3. Stop worker container(s)
-4. `docker compose up -d --force-recreate mediahub`
+2. Stop worker container(s)
+3. `docker compose up -d --force-recreate mediahub`
+
+(After R1 there is no env flag to flip — the gate self-disables when
+the registry only contains the combined-mode self-bound, which by
+definition advertises every local workflow.)
 
 Result: combined-mode behavior restored, no data loss.
 
