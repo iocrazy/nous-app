@@ -22,6 +22,33 @@ from app.core.admin_deps import AdminAuthDep
 router = APIRouter()
 
 
+@router.get(
+    "/agent-metrics/prometheus",
+    summary="Prometheus text-format counters (for scrape)",
+)
+async def agent_metrics_prometheus(request: Request, _auth: AdminAuthDep):
+    """Phase K (K4): Prometheus expfmt 0.0.4 output of AgentMetrics.
+
+    Plain-text content type so a Prometheus scrape job can pull this
+    endpoint directly (no JSON parsing). Header set per Prometheus spec
+    so scrapers detect format correctly."""
+    from fastapi.responses import Response
+
+    from app.agent_framework.prometheus_exporter import render_prometheus
+
+    metrics = getattr(request.app.state, "agent_metrics", None)
+    if metrics is None:
+        return Response(
+            content="# agent_metrics not initialized\n",
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+    body = render_prometheus(metrics)
+    return Response(
+        content=body,
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 @router.get("/agent-metrics", summary="Snapshot of agent harness counters")
 async def agent_metrics(request: Request, _auth: AdminAuthDep) -> dict:
     """Return the in-process counter store + related registry snapshots.
