@@ -76,6 +76,7 @@ from app.agent_framework.lane_queue import (
     LaneQueue,
     LaneTaskTimeout,
 )
+from app.agent_framework.mcp_stdio import serve as serve_mcp_stdio
 from app.agent_framework.mcp_descriptor import (
     DuplicateToolError,
     MCPToolRegistry,
@@ -154,6 +155,7 @@ __all__ = [
     "inventory_workflow_names",
     "merge_lane_capacity",
     "role_from_env",
+    "serve_mcp_stdio",
     "skill_to_tool",
     "cancel_workflow_subprocesses",
     "check_context_budget",
