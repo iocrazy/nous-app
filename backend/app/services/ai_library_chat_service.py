@@ -703,6 +703,37 @@ class AILibraryChatService:
                 detail=f"agent runner error: {result.get('error')}",
             )
 
+        # G1: hook-induced await_approval — persist the request so the
+        # frontend can show it in an approvals UI and resume the run
+        # later. Without this row, the runner's awaiting_approval=true
+        # signal is invisible to the user.
+        approval_row_id = None
+        if result.get("awaiting_approval"):
+            try:
+                from app.repositories.approval_requests_repository import (
+                    ApprovalRequestsRepository,
+                )
+                _ar_repo = ApprovalRequestsRepository()
+                _row = await _ar_repo.create(
+                    user_id=user_id,
+                    agent_id=composed.agent_id,
+                    hook_name=str(result.get("hook_name") or "unknown"),
+                    reason=str(result.get("approval_reason") or ""),
+                    payload=result.get("approval_payload") or {},
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+                if _row:
+                    approval_row_id = str(_row.id)
+                    logger.info(
+                        f"[chat] G1 await_approval persisted id={_row.id} "
+                        f"reason={_row.reason!r}"
+                    )
+            except Exception as ar_exc:
+                logger.warning(
+                    f"[chat] persist await_approval failed (non-fatal): {ar_exc}"
+                )
+
         # Persist the assistant turn. We fold the tool_calls trace into
         # metadata_json so a fresh page-load (which refetches history)
         # still renders the sub-task cards. Top-level ``tool_calls`` in
@@ -881,6 +912,10 @@ class AILibraryChatService:
                 {"index": f.request_index, "kind": f.kind, "reason": f.reason}
                 for f in attachment_failures
             ],
+            # G1: when the run paused for human approval, this is the
+            # row id the frontend can subscribe / poll for resolution.
+            # None on the common case (turn ran to completion).
+            "approval_request_id": approval_row_id,
         }
 
     async def _maybe_compact(
