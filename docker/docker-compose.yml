@@ -51,7 +51,14 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      # P5: use deep health probe so downstream HEALTHY status reflects
+      # subsystem state (DBOS / Supabase / Redis), not just FastAPI alive.
+      # If the JSON aggregate status is 'unhealthy' the curl returns
+      # a 200 with JSON body status=unhealthy — we grep for it. If we
+      # need stricter (HTTP-status-based), back-end can return 503 on
+      # 'unhealthy'; for now we keep the response 200 + content check
+      # because Prometheus scrape consumers prefer that shape.
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/api/v1/health/deep | grep -q '\"status\":\"healthy\"' || curl -fs http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -19,13 +19,13 @@ describe('MCP_SERVER_NAME_RE', () => {
   });
 });
 
-describe('validateMCPServerForm — create mode', () => {
+describe('validateMCPServerForm — create mode (returns i18n keys)', () => {
   it('rejects empty name', () => {
     const err = validateMCPServerForm(
       { ...EMPTY_MCP_FORM, name: '', url: 'https://x.com' },
       true,
     );
-    expect(err).toMatch(/name is required/i);
+    expect(err).toBe('mcp.errors.nameRequired');
   });
 
   it('rejects name with dots (would clash with namespace separator)', () => {
@@ -33,7 +33,7 @@ describe('validateMCPServerForm — create mode', () => {
       { ...EMPTY_MCP_FORM, name: 'bad.name', url: 'https://x.com' },
       true,
     );
-    expect(err).toMatch(/no dots/i);
+    expect(err).toBe('mcp.errors.nameInvalid');
   });
 
   it('accepts valid create form', () => {
@@ -62,16 +62,16 @@ describe('validateMCPServerForm — edit mode (skips name check)', () => {
         { ...EMPTY_MCP_FORM, name: 'foo', url: '' },
         false,
       ),
-    ).toMatch(/url is required/i);
+    ).toBe('mcp.errors.urlRequired');
   });
 
   it('rejects ftp:// url scheme (edit mode, name not required)', () => {
     expect(
       validateMCPServerForm(
         { ...EMPTY_MCP_FORM, url: 'ftp://x.com' },
-        false,  // edit mode skips name check; test url validation in isolation
+        false,
       ),
-    ).toMatch(/http/i);
+    ).toBe('mcp.errors.urlScheme');
   });
 });
 

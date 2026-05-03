@@ -10,6 +10,7 @@
  * sweeper handles that).
  */
 import React, { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Paperclip, X, Image as ImageIcon, Film, FileText, Loader2 } from 'lucide-react';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from './Toast';
@@ -56,6 +57,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
   onChange,
   disabled = false,
 }) => {
+  const { t } = useTranslation();
   const { addToast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -72,7 +74,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
       // Pre-validate sizes
       const err = validateFileBatch(files);
       if (err) {
-        addToast(err, 'error');
+        addToast(t(err), 'error');
         return;
       }
 
@@ -127,7 +129,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
         type="button"
         onClick={handlePick}
         disabled={isDisabled}
-        title="Attach image, video, or PDF"
+        title={t('chat.attachments.attachTooltip')}
         className="flex-shrink-0 p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <Paperclip className="w-4 h-4" />
@@ -167,7 +169,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
             onClick={() => removeAt(idx)}
             disabled={isDisabled}
             className="text-zinc-500 hover:text-red-400 transition-colors"
-            title="Remove"
+            title={t('chat.attachments.remove')}
           >
             <X className="w-3 h-3" />
           </button>
@@ -178,7 +180,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
         type="button"
         onClick={handlePick}
         disabled={isDisabled}
-        title="Attach more"
+        title={t('chat.attachments.attachMore')}
         className="flex-shrink-0 p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {uploading ? (
