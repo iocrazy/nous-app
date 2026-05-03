@@ -329,3 +329,130 @@ async def test_stream_turn_executes_tool_calls_and_continues():
     assert "Running Skill" in full or "→ Running" in full
     assert "Done with foo" in full
     assert finish == "stop"
+
+
+# ─── G3: stream_turn routes MCP tool calls ──────────────────────────
+
+
+class _StreamingAdapterWithMCPCall:
+    """Emits a 'notion.create_page' MCP tool_call in iter 1, final text in iter 2."""
+
+    def __init__(self):
+        self.iter = 0
+
+    async def call(self, composed, messages):
+        return {"choices": [{"message": {"content": "fallback"}}]}
+
+    async def stream(self, composed, messages):
+        self.iter += 1
+        if self.iter == 1:
+            yield StreamChunk(tool_call_delta={"tool_calls": [
+                {"index": 0, "id": "c1", "function": {
+                    "name": "notion.create_page", "arguments": ""
+                }},
+            ]})
+            yield StreamChunk(tool_call_delta={"tool_calls": [
+                {"index": 0, "function": {
+                    "arguments": '{"title":"my doc"}',
+                }},
+            ]})
+            yield StreamChunk(
+                finish_reason="tool_calls",
+                usage={"prompt_tokens": 10, "completion_tokens": 3},
+            )
+        else:
+            yield StreamChunk(delta_text="Page is created.")
+            yield StreamChunk(
+                finish_reason="stop",
+                usage={"prompt_tokens": 30, "completion_tokens": 5},
+            )
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_dispatches_mcp_tool_call():
+    """G3: stream_turn discovers MCP tools + routes prefixed tool_calls
+    to mcp_registry.call. End-to-end mirrors run_turn behavior."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.agent_framework.mcp_outbound_registry import QualifiedTool
+
+    qualified = [QualifiedTool(
+        qualified_name="notion.create_page",
+        server_name="notion",
+        raw_name="create_page",
+        description="Create page",
+        input_schema={},
+    )]
+    mcp_reg = AsyncMock()
+    mcp_reg.all_tools = AsyncMock(return_value=qualified)
+    mcp_reg.server_names = MagicMock(return_value=["notion"])
+    mcp_reg.call = AsyncMock(return_value={
+        "content": [{"type": "text", "text": "ok"}], "isError": False,
+    })
+
+    runner = AgentRunner(
+        adapter=_StreamingAdapterWithMCPCall(),
+        skill_tool=None,
+        mcp_registry=mcp_reg,
+    )
+    pieces = []
+    async for chunk in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "make a page"}]
+    ):
+        if chunk.delta_text:
+            pieces.append(chunk.delta_text)
+
+    full = "".join(pieces)
+    # Synthetic UI hint surfaced
+    assert "Running notion.create_page" in full
+    # Final text from iter 2 made it through
+    assert "Page is created." in full
+    # MCP call actually dispatched with parsed args
+    mcp_reg.call.assert_awaited_once_with("notion.create_page", {"title": "my doc"})
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_mcp_transport_error_does_not_crash():
+    from unittest.mock import AsyncMock, MagicMock
+    from app.agent_framework.mcp_client import MCPClientError
+    from app.agent_framework.mcp_outbound_registry import QualifiedTool
+
+    qualified = [QualifiedTool(
+        qualified_name="srv.broken", server_name="srv", raw_name="broken",
+        description="", input_schema={},
+    )]
+    mcp_reg = AsyncMock()
+    mcp_reg.all_tools = AsyncMock(return_value=qualified)
+    mcp_reg.server_names = MagicMock(return_value=["srv"])
+    mcp_reg.call = AsyncMock(side_effect=MCPClientError("boom"))
+
+    class _Adapter:
+        def __init__(self): self.iter = 0
+        async def call(self, c, m):
+            return {"choices": [{"message": {"content": "fb"}}]}
+        async def stream(self, c, m):
+            self.iter += 1
+            if self.iter == 1:
+                yield StreamChunk(tool_call_delta={"tool_calls": [
+                    {"index": 0, "id": "c1", "function": {
+                        "name": "srv.broken", "arguments": "{}"
+                    }},
+                ]})
+                yield StreamChunk(finish_reason="tool_calls",
+                                  usage={"prompt_tokens": 1, "completion_tokens": 1})
+            else:
+                yield StreamChunk(delta_text="acknowledged")
+                yield StreamChunk(finish_reason="stop")
+
+    runner = AgentRunner(adapter=_Adapter(), skill_tool=None, mcp_registry=mcp_reg)
+    pieces = []
+    finish = None
+    async for chunk in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "go"}]
+    ):
+        if chunk.delta_text:
+            pieces.append(chunk.delta_text)
+        if chunk.finish_reason:
+            finish = chunk.finish_reason
+    # Did NOT crash; final text flowed through
+    assert "acknowledged" in "".join(pieces)
+    assert finish == "stop"
