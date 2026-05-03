@@ -2288,6 +2288,7 @@ async def approve_approval_request(
     )
     if not ok:
         raise HTTPException(status_code=409, detail="decide failed")
+    _signal_dbos_workflow_if_any(existing, approved=True, note=payload.note)
     return {"id": str(request_id), "status": "approved"}
 
 
@@ -2311,7 +2312,33 @@ async def reject_approval_request(
     )
     if not ok:
         raise HTTPException(status_code=409, detail="decide failed")
+    _signal_dbos_workflow_if_any(existing, approved=False, note=payload.note)
     return {"id": str(request_id), "status": "rejected"}
+
+
+def _signal_dbos_workflow_if_any(
+    existing, *, approved: bool, note: Optional[str],
+) -> None:
+    """G2: when an approval row was created from inside a DBOS
+    workflow (payload includes ``workflow_id``), wake the paused
+    workflow via DBOS.send. No-op for chat-style approvals where
+    no workflow is waiting — those rely on G1's next-turn-replay."""
+    workflow_id = (existing.payload or {}).get("workflow_id")
+    if not workflow_id:
+        return
+    try:
+        from app.agent_framework.approval_gate import signal_approval_decision
+        signal_approval_decision(
+            workflow_id=str(workflow_id),
+            approval_id=str(existing.id),
+            approved=approved,
+            note=note,
+        )
+    except Exception as exc:
+        logger.warning(
+            f"[approval] DBOS signal failed for workflow={workflow_id} "
+            f"(non-fatal — chat path unaffected): {exc}"
+        )
 
 
 # ─── G3: Lane queue snapshot for ops ──────────────────────────────────
