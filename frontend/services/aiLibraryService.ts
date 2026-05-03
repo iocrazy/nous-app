@@ -18,6 +18,7 @@ import type {
   AgentRunDetail,
   AgentRunListResponse,
   AILibraryAgent,
+  AILibraryApprovalRequest,
   AILibraryCommitment,
   AILibraryMCPServer,
   AILibraryMemory,
@@ -544,6 +545,38 @@ export const aiLibraryService = {
       const text = await resp.text().catch(() => '');
       throw new Error(`${resp.status}: ${text}`);
     }
+  },
+
+  /**
+   * G1: Approval requests (human-in-loop hook gates).
+   */
+  async listApprovalRequests(limit = 50): Promise<{
+    items: AILibraryApprovalRequest[];
+    count: number;
+  }> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    const resp = await fetch(`${base()}/approval-requests?${params}`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle(resp);
+  },
+
+  async approveRequest(id: string, note?: string): Promise<{ id: string; status: string }> {
+    const resp = await fetch(`${base()}/approval-requests/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+    return handle(resp);
+  },
+
+  async rejectRequest(id: string, note?: string): Promise<{ id: string; status: string }> {
+    const resp = await fetch(`${base()}/approval-requests/${encodeURIComponent(id)}/reject`, {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+    return handle(resp);
   },
 
   async archiveMemory(memoryId: string): Promise<void> {

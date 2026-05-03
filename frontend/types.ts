@@ -1257,6 +1257,21 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
+/** G1: Approval request row from agent_approval_requests (mig 198).
+ *  Surfaced to the user when an agent hook returns await_approval.
+ *  All times ISO strings. payload is hook-defined JSON. */
+export interface AILibraryApprovalRequest {
+  id: string;
+  agent_id: string;
+  session_id: string | null;
+  run_id: string | null;
+  hook_name: string;
+  reason: string;
+  payload: Record<string, unknown>;
+  created_at: string | null;
+  expires_at: string | null;
+}
+
 /** A: AI Library MCP server registration row.
  *  bearer_token is never returned — only has_bearer_token boolean. */
 export interface AILibraryMCPServer {

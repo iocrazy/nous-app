@@ -33,6 +33,7 @@ import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnecti
 import { aiLibraryService } from '../services/aiLibraryService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { MCPServersPanel } from './MCPServersPanel';
+import { ApprovalsPanel } from './ApprovalsPanel';
 import { useSettingsStore } from '../stores/settingsStore';
 
 interface AISettingsProps {
@@ -1190,6 +1191,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           but shown here since both are agent-runtime configs. */}
       <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
         <MCPServersPanel />
+      </section>
+
+      {/* G1-UI: Pending approvals — auto-hides when empty */}
+      <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
+        <ApprovalsPanel hideWhenEmpty />
       </section>
     </div>
   );

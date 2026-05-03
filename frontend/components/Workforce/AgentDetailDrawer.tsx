@@ -19,6 +19,13 @@ import {
   RefreshCw,
   X,
   XCircle,
+  ListTodo,
+  HelpCircle,
+  ShieldAlert,
+  Bell,
+  Slash,
+  Search,
+  Inbox as InboxIcon,
 } from 'lucide-react';
 import {
   workforceService,
@@ -263,36 +270,135 @@ const RunsList: React.FC<{ runs: WorkforceDetailRun[] }> = ({ runs }) => {
   );
 };
 
+// G4: per-message-type styling. Each type gets its own icon + accent
+// so an operator scanning the list can spot e.g. an approval_request
+// among 50 routine task messages.
+const MESSAGE_TYPE_META: Record<
+  string,
+  { icon: React.ReactNode; label: string; accent: string }
+> = {
+  task: {
+    icon: <ListTodo className="w-3 h-3" />,
+    label: 'Task',
+    accent: 'bg-blue-600/20 text-blue-300 border-blue-700/40',
+  },
+  question: {
+    icon: <HelpCircle className="w-3 h-3" />,
+    label: 'Question',
+    accent: 'bg-cyan-600/20 text-cyan-300 border-cyan-700/40',
+  },
+  approval_request: {
+    icon: <ShieldAlert className="w-3 h-3" />,
+    label: 'Approval',
+    accent: 'bg-amber-600/20 text-amber-300 border-amber-700/40',
+  },
+  notification: {
+    icon: <Bell className="w-3 h-3" />,
+    label: 'Notification',
+    accent: 'bg-zinc-700/40 text-zinc-300 border-zinc-700',
+  },
+  cancel: {
+    icon: <Slash className="w-3 h-3" />,
+    label: 'Cancel',
+    accent: 'bg-red-600/20 text-red-300 border-red-700/40',
+  },
+  status_query: {
+    icon: <Search className="w-3 h-3" />,
+    label: 'Status query',
+    accent: 'bg-purple-600/20 text-purple-300 border-purple-700/40',
+  },
+};
+
+function _typeMeta(t: string) {
+  return (
+    MESSAGE_TYPE_META[t] || {
+      icon: <InboxIcon className="w-3 h-3" />,
+      label: t,
+      accent: 'bg-zinc-700/40 text-zinc-300 border-zinc-700',
+    }
+  );
+}
+
 const InboxList: React.FC<{ rows: WorkforceInboxRow[] }> = ({ rows }) => {
+  // G4: filter chips above the list so operator can isolate a single type
+  const allTypes = React.useMemo(
+    () => Array.from(new Set(rows.map((r) => r.message_type))).sort(),
+    [rows],
+  );
+  const [filter, setFilter] = useState<string | null>(null);
+  const filtered = filter ? rows.filter((r) => r.message_type === filter) : rows;
+
   if (!rows.length) {
     return <Empty label="No inbox messages." />;
   }
   return (
-    <ul className="divide-y divide-zinc-800/40">
-      {rows.map((row) => (
-        <li key={row.id} className="px-5 py-3 hover:bg-zinc-900/40">
-          <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-            <StatusBadge value={row.status} />
-            <span className="text-zinc-300">{row.message_type}</span>
-            <span>·</span>
-            <span>from {row.sender_kind}</span>
-            <span>·</span>
-            <span>p{row.priority ?? 5}</span>
-            <span>·</span>
-            <span>{fmtTime(row.created_at)}</span>
-            {row.processed_at && (
-              <>
+    <div>
+      {allTypes.length > 1 && (
+        <div className="flex items-center gap-1 flex-wrap px-5 py-2 border-b border-zinc-800/40 bg-zinc-900/30">
+          <span className="text-[10px] text-zinc-600 mr-1">Filter:</span>
+          <button
+            type="button"
+            onClick={() => setFilter(null)}
+            className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+              filter === null
+                ? 'bg-zinc-700 text-zinc-100'
+                : 'text-zinc-500 hover:bg-zinc-800'
+            }`}
+          >
+            All ({rows.length})
+          </button>
+          {allTypes.map((t) => {
+            const meta = _typeMeta(t);
+            const count = rows.filter((r) => r.message_type === t).length;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setFilter(t)}
+                className={`px-1.5 py-0.5 text-[10px] rounded border flex items-center gap-1 transition-colors ${
+                  filter === t ? meta.accent : 'text-zinc-500 border-transparent hover:bg-zinc-800'
+                }`}
+              >
+                {meta.icon}
+                {meta.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <ul className="divide-y divide-zinc-800/40">
+        {filtered.map((row) => {
+          const meta = _typeMeta(row.message_type);
+          return (
+            <li key={row.id} className="px-5 py-3 hover:bg-zinc-900/40">
+              <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                <StatusBadge value={row.status} />
+                <span
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${meta.accent}`}
+                  title={row.message_type}
+                >
+                  {meta.icon}
+                  {meta.label}
+                </span>
                 <span>·</span>
-                <span>processed {fmtTime(row.processed_at)}</span>
-              </>
-            )}
-          </div>
-          {row.payload && (
-            <PayloadPreview payload={row.payload} max={240} />
-          )}
-        </li>
-      ))}
-    </ul>
+                <span>from {row.sender_kind}</span>
+                <span>·</span>
+                <span>p{row.priority ?? 5}</span>
+                <span>·</span>
+                <span>{fmtTime(row.created_at)}</span>
+                {row.processed_at && (
+                  <>
+                    <span>·</span>
+                    <span>processed {fmtTime(row.processed_at)}</span>
+                  </>
+                )}
+              </div>
+              {row.payload && <PayloadPreview payload={row.payload} max={240} />}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 };
 
@@ -304,9 +410,16 @@ const OutboxList: React.FC<{ rows: WorkforceOutboxRow[] }> = ({ rows }) => {
     <ul className="divide-y divide-zinc-800/40">
       {rows.map((row) => (
         <li key={row.id} className="px-5 py-3 hover:bg-zinc-900/40">
+          {(() => { const meta = _typeMeta(row.message_type); return (
           <div className="flex items-center gap-2 text-[11px] text-zinc-500">
             <StatusBadge value={row.delivered ? 'delivered' : 'pending'} />
-            <span className="text-zinc-300">{row.message_type}</span>
+            <span
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${meta.accent}`}
+              title={row.message_type}
+            >
+              {meta.icon}
+              {meta.label}
+            </span>
             <span>·</span>
             <span>to {row.recipient_kind}</span>
             <span>·</span>
@@ -318,6 +431,7 @@ const OutboxList: React.FC<{ rows: WorkforceOutboxRow[] }> = ({ rows }) => {
               </>
             )}
           </div>
+          ); })()}
           {row.payload && (
             <PayloadPreview payload={row.payload} max={240} />
           )}

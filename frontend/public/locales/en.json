@@ -1325,6 +1325,18 @@
     },
     "helpText": "Outbound MCP servers expose tools your agents can call. Server name becomes a namespace prefix on tool names (e.g. notion.create_page). Use only servers you trust — agents may invoke tools that have side effects."
   },
+  "approvals": {
+    "title": "Pending Approvals",
+    "empty": "No pending approvals",
+    "loading": "Loading...",
+    "refresh": "Refresh",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approvedToast": "Approved",
+    "rejectedToast": "Rejected",
+    "approveFailed": "Approve failed: {{message}}",
+    "rejectFailed": "Reject failed: {{message}}"
+  },
   "memoryViewer": {
     "title": "My Memory",
     "subtitle": "What the agents have learned about you across sessions",
