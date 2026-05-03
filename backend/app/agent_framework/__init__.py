@@ -24,6 +24,12 @@ from app.agent_framework.bounds import (
     BoundsAdvertisement,
     BoundsRegistry,
 )
+from app.agent_framework.bounds_inventory import (
+    inventory_agent_slugs,
+    inventory_providers,
+    inventory_workflow_names,
+    merge_lane_capacity,
+)
 from app.agent_framework.cancel_watcher import watch_cancel_loop
 from app.agent_framework.commitments import (
     Commitment,
@@ -143,6 +149,10 @@ __all__ = [
     "ToolInputSchema",
     "TriggerType",
     "agent_to_tool",
+    "inventory_agent_slugs",
+    "inventory_providers",
+    "inventory_workflow_names",
+    "merge_lane_capacity",
     "role_from_env",
     "skill_to_tool",
     "cancel_workflow_subprocesses",
