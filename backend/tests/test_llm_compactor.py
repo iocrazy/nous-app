@@ -490,6 +490,63 @@ async def test_session_memory_loader_returns_none_falls_back_to_summarizer():
 
 
 @pytest.mark.asyncio
+async def test_pre_prune_reduces_token_count_below_threshold():
+    """Wave F (F2): tool_result dedupe + age may bring conversation
+    BACK under threshold so no compaction LLM call is needed at all."""
+
+    def _tcall(tcid):
+        return {"id": tcid, "type": "function", "function": {"name": "read", "arguments": '{"path":"x.py"}'}}
+
+    big_body = "y" * 50_000  # ~12.5k tokens
+    msgs = []
+    # 5 duplicate (read x.py) tool_call → tool_reply pairs, each with big body
+    for i in range(5):
+        msgs.append({"role": "assistant", "content": "", "tool_calls": [_tcall(f"c{i}")]})
+        msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": big_body})
+
+    summarizer_called = {"n": 0}
+
+    async def _summ(head):
+        summarizer_called["n"] += 1
+        return "summary"
+
+    # Threshold ≈ total/2: prune should kick in (>= 70% of threshold)
+    # and dedupe 4 duplicates (~50k tokens dropped) → drops below threshold
+    result = await compact_messages(
+        msgs, summarizer=_summ, max_input_tokens=20_000
+    )
+    # Pre-prune kept conversation under threshold → no full compaction
+    assert result.compacted is False or result.head_message_count == 0
+    # Summarizer NOT called (or called with much smaller head)
+    assert summarizer_called["n"] <= 1
+
+
+@pytest.mark.asyncio
+async def test_pre_prune_disabled_when_flag_off():
+    """prune_tool_results=False skips the pre-pass entirely."""
+
+    def _tcall(tcid):
+        return {"id": tcid, "type": "function", "function": {"name": "read", "arguments": '{}'}}
+
+    msgs = []
+    for i in range(5):
+        msgs.append({"role": "assistant", "content": "", "tool_calls": [_tcall(f"c{i}")]})
+        msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": "y" * 50_000})
+
+    async def _summ(head):
+        return "summary"
+
+    result = await compact_messages(
+        msgs,
+        summarizer=_summ,
+        max_input_tokens=20_000,
+        prune_tool_results=False,
+    )
+    # Without pre-prune the conversation is huge → compaction fires
+    assert result.compacted is True
+
+
+@pytest.mark.asyncio
 async def test_session_memory_loader_error_falls_back_gracefully():
     """Loader raises → log + fall back to summarizer. Compaction still succeeds."""
     summarizer_called = {"n": 0}

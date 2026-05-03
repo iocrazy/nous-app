@@ -95,6 +95,8 @@ async def compact_messages(
     model: str = "",
     tail_token_budget: Optional[int] = None,
     session_memory_loader: Optional[Callable[[], Awaitable[Optional[str]]]] = None,
+    prune_tool_results: bool = True,
+    prune_aging_after_turns: int = 10,
 ) -> CompactionResult:
     """Compact ``messages`` if they exceed ``max_input_tokens``.
 
@@ -113,6 +115,32 @@ async def compact_messages(
       - Pair-preservation walk-back consumed everything (rare; defensive).
     """
     estimated_before = estimate_tokens(messages, model)
+
+    # Wave F (F2): cheap pre-pass — dedupe + age tool_results BEFORE the
+    # threshold check. Two big wins:
+    #   1. Many "near-overflow" conversations drop back UNDER threshold
+    #      after dedupe (no compaction LLM call needed at all).
+    #   2. When compaction does fire, head/tail are already ~30% smaller
+    #      so the LLM summary is cheaper + tighter.
+    # Pure functions; safe to skip via prune_tool_results=False.
+    if prune_tool_results and estimated_before >= int(max_input_tokens * 0.7):
+        from app.agent_framework.tool_result_pruner import prune as _prune
+
+        pruned, prune_stats = _prune(
+            messages, aging_after_turns=prune_aging_after_turns
+        )
+        if prune_stats.duplicates_replaced or prune_stats.aged_results:
+            messages = pruned
+            estimated_before = estimate_tokens(messages, model)
+            logger.info(
+                "[Compactor] pre-pass pruned %d dups + %d aged "
+                "(%d chars dropped); new estimate=%d",
+                prune_stats.duplicates_replaced,
+                prune_stats.aged_results,
+                prune_stats.chars_dropped,
+                estimated_before,
+            )
+
     if estimated_before < max_input_tokens:
         return CompactionResult(
             messages=messages,

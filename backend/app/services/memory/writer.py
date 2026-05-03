@@ -36,7 +36,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class MemoryWriter:
-    """Orchestrates extract → embed → insert. Caller injects all I/O."""
+    """Orchestrates extract → embed → insert. Caller injects all I/O.
+
+    Wave F (F3): optional contradiction_classifier hook. When set, after
+    each successful insert we look up nearest existing memories in the
+    same namespace and ask the cheap LLM to classify replaces /
+    contradicts / supplements / unrelated. REPLACES + CONTRADICTS
+    trigger a status='superseded' + superseded_by=new.id update on the
+    old row.
+
+    Caller wires the classifier closure (typically a cheap-LLM call).
+    Default None = legacy behavior (no contradiction check).
+    """
 
     user_extractor: UserMemoryExtractor
     assistant_extractor: AssistantMemoryExtractor
@@ -46,6 +57,8 @@ class MemoryWriter:
     supabase_client: (
         Any  # async client, exposes table('agent_memories').insert().execute()
     )
+    # Wave F (F3): optional. If set, must be `async (prompt: str) -> str`.
+    contradiction_classifier: Optional[Any] = None
 
     async def write(
         self,
@@ -79,14 +92,151 @@ class MemoryWriter:
             return 0
 
         try:
-            await self.supabase_client.table("agent_memories").insert(rows).execute()
-            return len(rows)
+            insert_result = (
+                await self.supabase_client.table("agent_memories")
+                .insert(rows)
+                .execute()
+            )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "[memory.writer] batch insert failed; dropped %d candidate fact(s)",
                 len(rows),
             )
             return 0
+
+        # Wave F (F3): post-insert contradiction check. Best-effort —
+        # any failure here just means we don't mark old memories
+        # superseded (worst case: duplicate semantics in retrieval, the
+        # consolidation sweeper will eventually merge them).
+        if self.contradiction_classifier is not None:
+            try:
+                inserted_rows = list(insert_result.data or [])
+                await self._supersede_contradicting(
+                    inserted_rows,
+                    agent_id=agent_id,
+                    user_id=user_id,
+                    scope=scope,
+                )
+            except Exception:
+                logger.exception(
+                    "[memory.writer] contradiction post-pass failed (non-fatal)"
+                )
+
+        return len(rows)
+
+    async def _supersede_contradicting(
+        self,
+        inserted_rows: list[dict],
+        *,
+        agent_id: UUID,
+        user_id: UUID,
+        scope: MemoryScope,
+    ) -> None:
+        """For each newly-inserted memory, find HIGH-similarity existing
+        rows + ask classifier; mark replaces/contradicts old as superseded."""
+        from app.services.memory.contradiction import (
+            HIGH_SIMILARITY,
+            classify_pair,
+            select_supersede_targets,
+        )
+
+        for new_row in inserted_rows:
+            new_id = new_row.get("id")
+            new_summary = new_row.get("summary") or ""
+            new_embedding = new_row.get("embedding")
+            if not (new_id and new_summary and new_embedding):
+                continue
+
+            # Pull nearest existing active memories in same namespace.
+            # Uses the cosine RPC if available, else cheap fallback to
+            # pure SQL list+score (acceptable for typical N).
+            neighbors = await self._nearest_existing(
+                agent_id=agent_id,
+                user_id=user_id,
+                scope=scope,
+                exclude_id=new_id,
+                embedding=new_embedding,
+                threshold=HIGH_SIMILARITY,
+                limit=3,
+            )
+            if not neighbors:
+                continue
+
+            decisions = []
+            for old in neighbors:
+                d = await classify_pair(
+                    old_summary=old["summary"],
+                    old_id=old["id"],
+                    new_summary=new_summary,
+                    classifier=self.contradiction_classifier,
+                )
+                if d is not None:
+                    decisions.append(d)
+
+            target_ids = select_supersede_targets(decisions)
+            for old_id in target_ids:
+                try:
+                    await (
+                        self.supabase_client.table("agent_memories")
+                        .update(
+                            {
+                                "status": "superseded",
+                                "superseded_by": str(new_id),
+                            }
+                        )
+                        .eq("id", old_id)
+                        .execute()
+                    )
+                except Exception:
+                    logger.exception(
+                        "[memory.writer] failed to mark %s superseded by %s",
+                        old_id, new_id,
+                    )
+
+    async def _nearest_existing(
+        self,
+        *,
+        agent_id: UUID,
+        user_id: UUID,
+        scope: MemoryScope,
+        exclude_id: Any,
+        embedding: list[float],
+        threshold: float,
+        limit: int,
+    ) -> list[dict]:
+        """Find existing memories with cosine >= threshold to ``embedding``.
+
+        Best-effort: returns [] on any failure. Uses a simple top-K read
+        + cosine in Python (acceptable for typical N). A future optimization
+        could route through a pgvector RPC, but this keeps the contradiction
+        path self-contained without a new SQL function.
+        """
+        try:
+            result = (
+                await self.supabase_client.table("agent_memories")
+                .select("id, summary, embedding")
+                .eq("agent_id", str(agent_id))
+                .eq("user_id", str(user_id))
+                .eq("scope", scope.value)
+                .eq("status", "active")
+                .neq("id", str(exclude_id))
+                .limit(50)
+                .execute()
+            )
+        except Exception:
+            return []
+
+        rows = result.data or []
+        scored: list[tuple[float, dict]] = []
+        for row in rows:
+            emb = row.get("embedding")
+            if not emb:
+                continue
+            sim = _cosine(embedding, emb)
+            if sim >= threshold:
+                scored.append((sim, row))
+        scored.sort(reverse=True, key=lambda t: t[0])
+        return [r for _, r in scored[:limit]]
 
     async def _build_row(
         self,
@@ -121,6 +271,18 @@ class MemoryWriter:
         except Exception:  # noqa: BLE001
             logger.exception("[memory.writer] embedding call failed; skipping fact")
             return None
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity for embedding lists. Defensive against zero / mismatched."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(x * x for x in b) ** 0.5
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
 
 
 __all__ = ["MemoryWriter"]

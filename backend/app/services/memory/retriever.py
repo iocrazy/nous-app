@@ -183,15 +183,45 @@ class MemoryRetriever:
     def _apply_salience(
         self, candidates: list[tuple[MemoryRecord, float]]
     ) -> list[tuple[MemoryRecord, float]]:
-        """Re-score candidates: 0.7*cosine + 0.3*log(1+reinforcement_count)."""
-        scored = [
-            (
-                rec,
-                _COSINE_WEIGHT * cosine
-                + _SALIENCE_WEIGHT * math.log(1 + max(0, rec.reinforcement_count)),
-            )
-            for rec, cosine in candidates
-        ]
+        """Re-score candidates with decay (Wave F / F4).
+
+        Replaces legacy 0.7·cosine + 0.3·log(reinforce) with the
+        decay-aware composite: stale memories with high reinforce_count
+        no longer outrank fresh memories. Falls back to legacy formula
+        when MemoryRecord lacks the timestamp fields the decay calc needs.
+        """
+        from app.services.memory.decay import (
+            MemoryDecayInput,
+            decay_score,
+            score_with_decay,
+        )
+
+        scored: list[tuple[MemoryRecord, float]] = []
+        for rec, cosine in candidates:
+            created_at = getattr(rec, "created_at", None)
+            if created_at is None:
+                # Fallback to legacy formula — keeps tests / older data
+                # paths working.
+                s = (
+                    _COSINE_WEIGHT * cosine
+                    + _SALIENCE_WEIGHT
+                    * math.log(1 + max(0, rec.reinforcement_count))
+                )
+            else:
+                last_recalled = getattr(rec, "last_recalled_at", None)
+                decay = decay_score(
+                    MemoryDecayInput(
+                        created_at=created_at,
+                        last_recalled_at=last_recalled,
+                        reinforcement_count=rec.reinforcement_count,
+                    )
+                )
+                s = score_with_decay(
+                    cosine=cosine,
+                    reinforcement_count=rec.reinforcement_count,
+                    decay=decay,
+                )
+            scored.append((rec, s))
         scored.sort(key=lambda t: t[1], reverse=True)
         return scored
 

@@ -80,6 +80,10 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # fire-and-forget — telemetry tracked via session_memory.version
     # bumps + last_updated_at, not RunRecorder.
     "services/session_memory_runner.py": "session-memory maintenance auxiliary LLM, fire-and-forget",
+    # Wave F (F6) memory consolidation sweeper: weekly DBOS workflow.
+    # cheap-model merges similar memories into super-memories. Off-chat-
+    # path, scheduled job — telemetry via DBOS workflow status.
+    "workflows/scheduled_memory_consolidation.py": "memory consolidation auxiliary LLM, scheduled DBOS workflow",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a
