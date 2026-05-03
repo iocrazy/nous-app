@@ -267,6 +267,36 @@ async def lifespan(app: FastAPI):
         # (ai_library_chat_wiring) reads it from app.state when building
         # the chain, so cooled-down models are skipped on retry.
         app.state.model_health = ModelHealthRegistry()
+
+        # Wave G (G2): per-process HookRegistry seeded with bridge-wrapped
+        # legacy hooks (BudgetGuard / CostAuditor / MemoryHarvester).
+        # New hooks added later just `register()` directly.
+        try:
+            from app.agent_framework import (
+                HookRegistry,
+                wrap_legacy_post,
+                wrap_legacy_pre,
+            )
+            from app.services.hooks.cost_auditor import CostAuditorHook
+            from app.services.hooks.memory_harvester import MemoryHarvesterHook
+
+            hook_registry = HookRegistry()
+            try:
+                hook_registry.register(wrap_legacy_post(CostAuditorHook()))
+            except Exception as cae:
+                logger.warning(f"hook register CostAuditor failed: {cae}")
+            try:
+                hook_registry.register(wrap_legacy_post(MemoryHarvesterHook()))
+            except Exception as mhe:
+                logger.warning(f"hook register MemoryHarvester failed: {mhe}")
+            # BudgetGuard takes constructor args (budget_cents) — caller
+            # constructs a per-run instance, not a global one. Skip here.
+            app.state.hook_registry = hook_registry
+            logger.info(
+                f"HookRegistry seeded with {len(hook_registry)} legacy hooks"
+            )
+        except Exception as he:
+            logger.warning(f"HookRegistry seed failed: {he}")
         # Sprint 6: per-process context-engine registry. Surfaces (chat,
         # search, storyboard) self-register their engines at startup so
         # callers can fetch by surface name.
