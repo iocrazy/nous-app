@@ -69,8 +69,14 @@ class MemoryWriter:
         user_messages: list[str],
         assistant_messages: list[str],
         scope: MemoryScope = MemoryScope.AGENT_USER,
+        session_id: Optional[UUID] = None,
     ) -> int:
-        """Run extraction → embedding → insert. Returns count of rows inserted."""
+        """Run extraction → embedding → insert. Returns count of rows inserted.
+
+        Phase N (N1): when ``session_id`` is provided, batch shares one
+        thread_id (newly minted or reused from recent siblings via
+        threading.assign_thread_for).
+        """
         user_facts, asst_facts = await asyncio.gather(
             self.user_extractor.extract(user_messages),
             self.assistant_extractor.extract(assistant_messages),
@@ -79,10 +85,49 @@ class MemoryWriter:
         if not all_facts:
             return 0
 
+        # N1: resolve thread_id once for the whole batch (all facts in
+        # one harvest share the same conversational moment).
+        thread_id: Optional[UUID] = None
+        if session_id is not None:
+            try:
+                from datetime import datetime, timezone
+                from app.services.memory.threading import assign_thread_for
+
+                async def _fetch_recent(aid, uid, sid, limit):
+                    sb = self.supabase_client
+                    result = await (
+                        sb.table("agent_memories")
+                        .select("created_at, thread_id")
+                        .eq("agent_id", str(aid))
+                        .eq("user_id", str(uid))
+                        .eq("session_id", str(sid))
+                        .eq("status", "active")
+                        .order("created_at", desc=True)
+                        .limit(limit)
+                        .execute()
+                    )
+                    return result.data or []
+
+                thread_id = await assign_thread_for(
+                    agent_id=str(agent_id),
+                    user_id=str(user_id),
+                    session_id=str(session_id),
+                    created_at=datetime.now(timezone.utc),
+                    fetch_recent_in_session=_fetch_recent,
+                )
+            except Exception:
+                thread_id = None  # best-effort
+
         rows = await asyncio.gather(
             *(
                 self._build_row(
-                    fact, agent_id=agent_id, user_id=user_id, run_id=run_id, scope=scope
+                    fact,
+                    agent_id=agent_id,
+                    user_id=user_id,
+                    run_id=run_id,
+                    scope=scope,
+                    thread_id=thread_id,
+                    session_id=session_id,
                 )
                 for fact in all_facts
             )
@@ -248,6 +293,8 @@ class MemoryWriter:
         user_id: UUID,
         run_id: Optional[UUID],
         scope: MemoryScope,
+        thread_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
     ) -> Optional[dict]:
         embedding = await self._embed(fact.when_to_use)
         if embedding is None:
@@ -255,7 +302,12 @@ class MemoryWriter:
             # without an embedding because retriever can't find it later.
             return None
 
-        return {
+        # Phase N (N2): cheap heuristic kind classification at write time.
+        # The retriever uses kind for per-kind weight modifiers (M2).
+        from app.services.memory.kind_classifier import classify_heuristic
+        kind = classify_heuristic(fact.summary).value
+
+        row = {
             "agent_id": str(agent_id),
             "user_id": str(user_id),
             "run_id": str(run_id) if run_id else None,
@@ -265,7 +317,13 @@ class MemoryWriter:
             "extracted_from": fact.extracted_from.value,
             "embedding": embedding,
             "metadata_json": {},
+            "kind": kind,
         }
+        if thread_id is not None:
+            row["thread_id"] = str(thread_id)
+        if session_id is not None:
+            row["session_id"] = str(session_id)
+        return row
 
     async def _embed(self, text: str) -> Optional[list[float]]:
         try:
