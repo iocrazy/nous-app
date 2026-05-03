@@ -171,6 +171,17 @@ async def lifespan(app: FastAPI):
     app.state.process_role = process_role
     logger.info(f"Process role: {process_role.value}")
 
+    # D10-7: install atexit + SIGINT/SIGTERM handlers that kill all
+    # spawned subprocess + multiprocessing children before the parent
+    # exits. Defends against orphan children holding DB connections /
+    # file descriptors after pytest crash / dev script Ctrl-C.
+    try:
+        from app.agent_framework.process_lifecycle import install_cleanup_handlers
+        install_cleanup_handlers()
+        logger.info("D10-7 process cleanup handlers installed")
+    except Exception as plc_exc:
+        logger.warning(f"D10-7 cleanup install failed: {plc_exc}")
+
     # PR-D5: DBOS launch moved BEFORE workforce scheduler so the scheduler
     # can pick DbosAgentWorkforcePool when WORKFORCE_USE_DBOS_QUEUE is on.
     try:
@@ -277,6 +288,19 @@ async def lifespan(app: FastAPI):
         # endpoints read .snapshot() for ops dashboards.
         from app.agent_framework.telemetry import AgentMetrics
         app.state.agent_metrics = AgentMetrics()
+
+        # D10-14: optional Prometheus pushgateway agent. Only fires
+        # when PROMETHEUS_PUSHGATEWAY_URL env is set; default off.
+        try:
+            from app.agent_framework.prometheus_pusher import (
+                from_env as _pp_from_env,
+            )
+            pusher = _pp_from_env(app.state.agent_metrics)
+            if pusher is not None:
+                await pusher.start()
+                app.state.prometheus_pusher = pusher
+        except Exception as pp_exc:
+            logger.warning(f"D10-14 pusher start failed: {pp_exc}")
 
         # Wave G (G2): per-process HookRegistry seeded with bridge-wrapped
         # legacy hooks (BudgetGuard / CostAuditor / MemoryHarvester).
@@ -477,6 +501,16 @@ async def lifespan(app: FastAPI):
                 logger.info("Bounds: unregistered self on shutdown")
             except Exception as ub_exc:
                 logger.warning(f"Bounds unregister failed: {ub_exc}")
+
+    # D10-14: stop the Prometheus pusher before draining anything else
+    # so its background loop doesn't try to push half-shutdown state.
+    pusher = getattr(app.state, "prometheus_pusher", None)
+    if pusher is not None:
+        try:
+            await pusher.stop()
+            logger.info("D10-14 PrometheusPusher stopped")
+        except Exception as e:
+            logger.warning(f"PrometheusPusher stop raised {e!r}")
 
     # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
     try:
