@@ -53,6 +53,13 @@ _HELP: dict[str, str] = {
     "tool_cache_hit": "Tool dispatches served from idempotent-skill result cache",
     "agent_todo_replaced": "Times agent rewrote its internal todo list",
     "agent_todo_completed": "Todo items marked completed",
+    "commitment_demoted_fuzzy_time": "Time-trigger commitments demoted to next_session due to fuzzy timestamp",
+    "stream_turn_auto_recorder": "stream_turn invocations that auto-constructed a RunRecorder",
+    "chat_mcp_registry_built": "Chat turns where the per-user MCP registry was built (count = servers loaded)",
+    "mcp_tools_injected": "MCP tool descriptors injected into composed.tools (cumulative tool count)",
+    "mcp_tool_call": "MCP tool calls dispatched via outbound registry",
+    "mcp_tool_call_error": "MCP tool calls returning isError=true",
+    "mcp_tool_call_transport_error": "MCP tool calls failing at transport (network/4xx)",
 }
 
 

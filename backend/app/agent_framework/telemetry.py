@@ -68,6 +68,17 @@ COUNTER_NAMES: tuple[str, ...] = (
     # Phase L (L2): agent todo
     "agent_todo_replaced",
     "agent_todo_completed",
+    # R3: commitment fuzzy time → next_session demotion
+    "commitment_demoted_fuzzy_time",
+    # R4: stream_turn auto-recorder use
+    "stream_turn_auto_recorder",
+    # G1+G5: per-user MCP registry built at chat start
+    "chat_mcp_registry_built",
+    # Q5+G3: outbound MCP tool injection + dispatch
+    "mcp_tools_injected",
+    "mcp_tool_call",
+    "mcp_tool_call_error",
+    "mcp_tool_call_transport_error",
 )
 
 
