@@ -44,7 +44,8 @@ async def test_upload_image_routes_to_image_kind(tmp_path, monkeypatch):
     auth = MagicMock()
     auth.user_id = str(user_id)
 
-    payload = b"\xff\xd8\xff\xe0fakejpegdata" * 10
+    # Real JPEG magic bytes (FF D8 FF) at offset 0
+    payload = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01" + b"x" * 100
     upload = _FakeUpload("photo.jpg", payload, content_type="image/jpeg")
     req = _fake_request(content_length=len(payload))
 
@@ -70,7 +71,7 @@ async def test_upload_pdf_routes_to_pdf_kind(tmp_path, monkeypatch):
     auth = MagicMock()
     auth.user_id = str(user_id)
 
-    payload = b"%PDF-1.4\nfake pdf content"
+    payload = b"%PDF-1.4\nfake pdf content"  # real PDF magic bytes
     upload = _FakeUpload("doc.pdf", payload, content_type="application/pdf")
     req = _fake_request(content_length=len(payload))
     async def _form(): return {"file": upload}
@@ -89,7 +90,8 @@ async def test_upload_video_routes_to_video_kind(tmp_path, monkeypatch):
     auth = MagicMock()
     auth.user_id = str(user_id)
 
-    payload = b"fake mp4 bytes"
+    # Real MP4 ftyp box: 4 size bytes then 'ftyp' at offset 4
+    payload = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00mp42mp41"
     upload = _FakeUpload("clip.mp4", payload, content_type="video/mp4")
     req = _fake_request(content_length=len(payload))
     async def _form(): return {"file": upload}
@@ -99,6 +101,53 @@ async def test_upload_video_routes_to_video_kind(tmp_path, monkeypatch):
 
     result = await router_module.upload_chat_attachment(auth, req)
     assert result["kind"] == "video"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upload_rejects_extension_spoofing_via_magic_bytes(tmp_path, monkeypatch):
+    """C2: .jpg with non-JPEG magic bytes is rejected even though
+    extension is in allow-list."""
+    from fastapi import HTTPException
+
+    user_id = uuid4()
+    auth = MagicMock()
+    auth.user_id = str(user_id)
+
+    # Looks like an executable header, named .jpg
+    payload = b"MZ\x90\x00\x03\x00\x00\x00fake exe payload"
+    upload = _FakeUpload("malware.jpg", payload, content_type="image/jpeg")
+    req = _fake_request(content_length=len(payload))
+    async def _form(): return {"file": upload}
+    req.form = _form
+
+    monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router_module.upload_chat_attachment(auth, req)
+    assert exc_info.value.status_code == 415
+    assert "does not match" in str(exc_info.value.detail).lower()
+
+
+@pytest.mark.unit
+def test_check_magic_bytes_unknown_extension_accepts():
+    """Unknown extensions accept (caller already filtered via _ALLOWED_EXTS)."""
+    assert router_module._check_magic_bytes(".unknown", b"any") is True
+
+
+@pytest.mark.unit
+def test_check_magic_bytes_too_short_rejects():
+    """Buffer shorter than the signature length → reject."""
+    assert router_module._check_magic_bytes(".png", b"\x89PN") is False
+
+
+@pytest.mark.unit
+def test_check_magic_bytes_webp_offset_8_signature():
+    """WEBP signature is at offset 8 — verify offset matching works."""
+    head = b"RIFF\x00\x00\x00\x00WEBPVP8 fake"
+    assert router_module._check_magic_bytes(".webp", head) is True
+    # Wrong offset payload
+    assert router_module._check_magic_bytes(".webp", b"RIFF\x00\x00\x00\x00FAKE") is False
 
 
 @pytest.mark.unit
@@ -179,8 +228,9 @@ async def test_upload_reaps_old_files(tmp_path, monkeypatch):
 
     auth = MagicMock()
     auth.user_id = str(user_id)
-    upload = _FakeUpload("new.jpg", b"\xff\xd8new", content_type="image/jpeg")
-    req = _fake_request(content_length=4)
+    new_payload = b"\xff\xd8\xff\xe0fresh"
+    upload = _FakeUpload("new.jpg", new_payload, content_type="image/jpeg")
+    req = _fake_request(content_length=len(new_payload))
     async def _form(): return {"file": upload}
     req.form = _form
 

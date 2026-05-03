@@ -307,6 +307,9 @@ class AILibraryChatService:
                 "run_id": result.get("run_id"),
                 "tool_calls": result.get("tool_calls", []),
                 "total_chars": len(full_text),
+                # M2: surface attachment failures so streaming UI can show
+                # "couldn't read X.pdf" — empty list on success.
+                "attachment_failures": result.get("attachment_failures", []),
             },
         }
 

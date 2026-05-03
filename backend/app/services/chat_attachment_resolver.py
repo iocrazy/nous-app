@@ -10,11 +10,21 @@ Failure isolation: any single attachment's resolution failure is
 logged + skipped. The chat turn proceeds with the remaining ones.
 A small failure summary is returned alongside so the chat service
 can surface "I couldn't read 1 of your 3 attachments" if desired.
+
+C1 SECURITY: video/pdf attachments pass req.url to ffmpeg/pdfium as
+filesystem paths. Without validation a malicious caller could probe
+arbitrary files (/etc/passwd, /proc/self/environ, secret files in
+project mounts). resolve_attachments enforces that any url-as-path
+lives strictly under CHAT_ATTACHMENT_BASE_DIR and contains no '..'
+traversal. Image attachments are url/data_url only — those go to the
+LLM which fetches them itself, so the constraint doesn't apply.
 """
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
 
 from loguru import logger
@@ -28,6 +38,35 @@ from app.schemas.ai_library_chat import AttachmentRequest
 MAX_VIDEO_FRAMES_PER_ATTACHMENT = 6
 MAX_PDF_PAGES_PER_ATTACHMENT = 8
 MAX_ATTACHMENTS_PER_TURN = 8
+
+# C1: video/pdf url must live under this base. Mirrors the constant
+# in api/ai_library_router.py — kept in sync via env override for tests.
+CHAT_ATTACHMENT_BASE_DIR = Path(
+    os.environ.get(
+        "CHAT_ATTACHMENT_BASE_DIR",
+        "/tmp/mediahub_chat_attachments",
+    )
+).resolve()
+
+
+def _path_is_inside_base(candidate: str, base: Path) -> bool:
+    """Return True iff ``candidate`` resolves to a path strictly under
+    ``base`` after symlink resolution. Returns False on any failure
+    (missing file, traversal, absolute path outside base).
+
+    Both candidate and base are resolved before comparison so that
+    macOS symlinks like /tmp → /private/tmp don't cause false negatives.
+    """
+    try:
+        resolved = Path(candidate).resolve(strict=False)
+        resolved_base = base.resolve(strict=False)
+    except (OSError, RuntimeError):
+        return False
+    try:
+        resolved.relative_to(resolved_base)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -123,11 +162,18 @@ async def _resolve_one(req: AttachmentRequest) -> List[Attachment]:
     if kind == "video":
         if not req.url:
             return []
+        # C1: video url is treated as a filesystem path → must live
+        # under CHAT_ATTACHMENT_BASE_DIR. Reject anything else to
+        # block path traversal / arbitrary file probing.
+        if not _path_is_inside_base(req.url, CHAT_ATTACHMENT_BASE_DIR):
+            raise ValueError(
+                f"video path outside chat attachment base dir: {req.url!r}"
+            )
         # Run frame extraction in a thread (ffmpeg is blocking via
         # subprocess.communicate)
         from app.services.video_frame_extractor import extract_frames
         result = await extract_frames(
-            req.url,  # treat as filesystem path
+            req.url,
             num_frames=MAX_VIDEO_FRAMES_PER_ATTACHMENT,
         )
         if result.error:
@@ -137,6 +183,11 @@ async def _resolve_one(req: AttachmentRequest) -> List[Attachment]:
     if kind == "pdf":
         if not req.url:
             return []
+        # C1: same path-traversal defense for pdf
+        if not _path_is_inside_base(req.url, CHAT_ATTACHMENT_BASE_DIR):
+            raise ValueError(
+                f"pdf path outside chat attachment base dir: {req.url!r}"
+            )
         from app.services.pdf_renderer import render_pdf
         # Sync (CPU-bound pdfium decode); thread-pool offload
         result = await asyncio.to_thread(
