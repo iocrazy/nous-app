@@ -90,6 +90,12 @@ from app.agent_framework.model_health import (
     ModelHealth,
     ModelHealthRegistry,
 )
+from app.agent_framework.hooks_bridge import (
+    LegacyPostToolUseHook,
+    LegacyPreToolUseHook,
+    wrap_legacy_post,
+    wrap_legacy_pre,
+)
 from app.agent_framework.hooks_protocol import (
     DuplicateHookError,
     Hook,
@@ -185,6 +191,8 @@ __all__ = [
     "Lane",
     "LaneQueue",
     "LaneTaskTimeout",
+    "LegacyPostToolUseHook",
+    "LegacyPreToolUseHook",
     "LifecycleBus",
     "LifecycleEvent",
     "MCPToolRegistry",
@@ -225,6 +233,8 @@ __all__ = [
     "render_session_memory",
     "role_from_env",
     "should_auto_continue",
+    "wrap_legacy_post",
+    "wrap_legacy_pre",
     "serve_mcp_stdio",
     "skill_to_tool",
     "cancel_workflow_subprocesses",

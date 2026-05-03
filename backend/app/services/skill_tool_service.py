@@ -34,6 +34,11 @@ class SkillToolService:
         if not slug:
             return {"error": "skill name required"}
 
+        # Wave F (F7): built-in 'remember' skill — invokes the active
+        # memory remember tool instead of looking up a DB skill row.
+        if slug == "remember":
+            return await self._execute_remember(args)
+
         skill = await self.skill_repo.get_by_slug(slug)
         if not skill:
             return {"error": f"unknown skill: {slug}"}
@@ -73,4 +78,72 @@ class SkillToolService:
             "skill": slug,
             "description": skill.get("description", ""),
             "prompt": skill.get("body_md") or "",
+        }
+
+    async def _execute_remember(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Wave F (F7): handle the built-in 'remember' tool.
+
+        args contract:
+          summary (str, required): the fact to remember
+          when_to_use (str, required): retrieval cue (embedding source)
+          scope (str, optional): one of session/agent_user/user_global/
+                                 team_agent/root_tree (default agent_user)
+          agent_id (str, required): identity context
+          user_id (str, required): identity context
+          session_id (str, optional)
+
+        Returns the standard skill tool envelope so AgentRunner can
+        render it the same way as other skill calls.
+        """
+        from app.services.memory.active_remember import (
+            RememberContext,
+            handle_remember,
+        )
+
+        summary = args.get("summary") or ""
+        when_to_use = args.get("when_to_use") or ""
+        scope = args.get("scope") or "agent_user"
+        agent_id = args.get("agent_id") or ""
+        user_id = args.get("user_id")
+        session_id = args.get("session_id")
+
+        if not agent_id:
+            return {
+                "skill": "remember",
+                "error": "agent_id required for remember()",
+            }
+
+        ctx = RememberContext(
+            agent_id=agent_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+        # Persistor stub — real wiring (writer.write with extracted_from=
+        # 'active_call') deferred to integration follow-up. For now we
+        # return a placeholder result so the agent gets feedback.
+        async def _no_op_persistor(request, context):
+            # TODO: wire MemoryWriter.write with single fact
+            return None
+
+        result = await handle_remember(
+            summary=summary,
+            when_to_use=when_to_use,
+            scope=scope,
+            context=ctx,
+            persistor=_no_op_persistor,
+        )
+        if not result.success:
+            return {
+                "skill": "remember",
+                "error": result.error or "remember failed",
+            }
+        return {
+            "skill": "remember",
+            "description": "Stored memory for future recall.",
+            "prompt": (
+                f"Memory recorded (id={result.memory_id}). "
+                "It will be available in future sessions when relevant."
+            ),
+            "memory_id": result.memory_id,
         }

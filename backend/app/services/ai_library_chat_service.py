@@ -519,6 +519,98 @@ class AILibraryChatService:
                 f"session_memory dispatch skipped (non-fatal): {sm_exc}"
             )
 
+        # Wave F (F8): fire-and-forget commitment harvester. Pre-filter
+        # makes ~95% of turns skip without an LLM call. Real persistor
+        # writes to agent_commitments via CommitmentRepository.
+        try:
+            import asyncio as _asyncio
+
+            from app.repositories.commitment_repository import (
+                CommitmentRepository,
+            )
+            from app.services.commitment_harvester import (
+                HarvestContext,
+                HarvestedCommitment,
+                harvest_commitments,
+            )
+
+            commitment_ctx = HarvestContext(
+                agent_id=str(composed.agent_id),
+                user_id=str(user_id) if user_id else None,
+                session_id=str(session_id),
+                run_id=str(run_id) if run_id else None,
+            )
+            commitment_repo = CommitmentRepository()
+
+            # Cheap-LLM extraction summarizer + persistor closures. Both
+            # capture by name so the asyncio.create_task dispatch is clean.
+            async def _harvest_summarizer(prompt: str) -> str:
+                try:
+                    from app.schemas.ai_library import ComposedSystemPrompt
+                    from app.services.ai_provider import QwenAdapter
+
+                    api_key = (
+                        getattr(settings, "DASHSCOPE_API_KEY", None)
+                        or getattr(settings, "QWEN_API_KEY", None)
+                    )
+                    if not api_key:
+                        return ""
+                    adapter = QwenAdapter(api_key=api_key, model="qwen-turbo")
+                    cs = ComposedSystemPrompt(
+                        agent_id=composed.agent_id,
+                        agent_slug="commitment_harvester",
+                        model="qwen-turbo",
+                        temperature=0.0,
+                        max_tokens=512,
+                        system_message="Extract commitments. Output strict JSON.",
+                        tools=[],
+                        skill_manifest=[],
+                        cache_fingerprint="commitment_harvester_v1",
+                    )
+                    resp = await adapter.call(
+                        cs, [{"role": "user", "content": prompt}]
+                    )
+                    return resp.get("content") or ""
+                except Exception:
+                    return ""
+
+            async def _harvest_persistor(
+                commitment: HarvestedCommitment, context: HarvestContext
+            ):
+                from app.agent_framework.commitments import (
+                    Commitment,
+                    TriggerType,
+                )
+
+                try:
+                    obj = Commitment(
+                        agent_id=context.agent_id,
+                        user_id=context.user_id,
+                        session_id=context.session_id,
+                        description=commitment.description,
+                        trigger_type=TriggerType(commitment.trigger_type),
+                        trigger_at=commitment.trigger_at,
+                        trigger_event=commitment.trigger_event,
+                    )
+                    created = await commitment_repo.create(obj)
+                    return str(created.id) if created and created.id else None
+                except Exception:
+                    return None
+
+            _asyncio.create_task(
+                harvest_commitments(
+                    response_text=assistant_content or "",
+                    context=commitment_ctx,
+                    summarizer=_harvest_summarizer,
+                    persistor=_harvest_persistor,
+                ),
+                name=f"commitment-harvest-{session_id}",
+            )
+        except Exception as ch_exc:
+            logger.warning(
+                f"commitment harvester dispatch skipped (non-fatal): {ch_exc}"
+            )
+
         return {
             "user_message": user_msg,
             "assistant_message": asst_msg,
