@@ -251,22 +251,29 @@ class SkillRepository(BaseRepository):
         content: Optional[str],
         file_type: str,
         binary_url: Optional[str] = None,
+        seed_hash: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Insert or update a skill file keyed on ``(skill_id, path)``.
 
         Relies on the unique index ``ux_skill_files_path`` created in
         migration 139; conflict resolution happens Postgres-side.
         Writes raise on error so the caller can surface a 5xx.
+
+        ``seed_hash`` is optional and only set by the seed loader for
+        idempotent re-runs (mig 199). User-driven writes leave it NULL
+        so the next loader pass sees "unknown — re-PATCH" and refreshes.
         """
         try:
             client = await self._get_client()
-            row = {
+            row: Dict[str, Any] = {
                 "skill_id": skill_id,
                 "path": path,
                 "content": content,
                 "file_type": file_type,
                 "binary_url": binary_url,
             }
+            if seed_hash is not None:
+                row["seed_hash"] = seed_hash
             result = (
                 await client.table(self.FILES_TABLE)
                 .upsert(row, on_conflict=_SKILL_FILES_CONFLICT)
