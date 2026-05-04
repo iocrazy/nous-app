@@ -478,6 +478,21 @@ async def lifespan(app: FastAPI):
         app.state.bounds_heartbeat_task = bounds_heartbeat_task
         logger.info("Bounds heartbeat task started (30s tick)")
 
+    # ── A8: Lifecycle Bus Redis listener ──────────────────────────
+    # Subscribe to mediahub:lifecycle channel so this process receives
+    # events emitted by other processes (gateway ↔ worker, multi-replica
+    # workers). Local subscribers fire on cross-process events the same
+    # way they fire on local emits — producers don't need to know about
+    # subscribers, and subscribers don't need to know which process the
+    # producer ran in. See app/services/lifecycle_bus.py for details.
+    try:
+        from app.services.lifecycle_bus import get_bus as _get_bus
+
+        await _get_bus().start_redis_listener()
+        logger.info("Lifecycle bus redis listener started")
+    except Exception as lb_exc:
+        logger.warning(f"Lifecycle bus listener failed to start: {lb_exc}")
+
     # Event-loop-ready probe (D10-6): short bounded wait so first request
     # doesn't hit a still-loaded loop. Capped at 2s (was 10s) — anything
     # longer suggests a sweeper is hogging the loop, which is its own bug
@@ -522,6 +537,15 @@ async def lifespan(app: FastAPI):
                 logger.info("Bounds: unregistered self on shutdown")
             except Exception as ub_exc:
                 logger.warning(f"Bounds unregister failed: {ub_exc}")
+
+    # A8: stop the lifecycle bus redis listener so we don't keep emitting
+    # to a half-shutdown process.
+    try:
+        from app.services.lifecycle_bus import get_bus as _get_bus
+
+        await _get_bus().stop_redis_listener(timeout=2.0)
+    except Exception as lb_exc:
+        logger.warning(f"Lifecycle bus shutdown raised: {lb_exc}")
 
     # D10-14: stop the Prometheus pusher before draining anything else
     # so its background loop doesn't try to push half-shutdown state.
