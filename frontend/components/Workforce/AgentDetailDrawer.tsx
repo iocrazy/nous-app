@@ -82,17 +82,18 @@ export const AgentDetailDrawer: React.FC<AgentDetailDrawerProps> = ({
   useEffect(() => {
     const supabase = getSupabaseClient();
     const channel = supabase.channel(`workforce-detail-${slug}`);
+    // A4 (migration 200): agent_tasks → task_tracking[task_kind='agent_task'].
+    // Subscribe to task_tracking sans filter — extra refresh chatter from
+    // workflow rows is debounced + the board API already filters server-side.
     for (const table of [
       'agent_workers',
       'agent_inbox',
       'agent_outbox',
       'agent_state_history',
-      'agent_tasks',
+      'task_tracking',
       'agent_runs',
     ] as const) {
       channel.on(
-        // @ts-expect-error — see WorkforcePage for the same supabase-js
-        // type/runtime divergence on '*' postgres_changes events.
         'postgres_changes',
         { event: '*', schema: 'public', table },
         () => {

@@ -46,12 +46,15 @@ import { AgentDetailDrawer } from '../components/Workforce/AgentDetailDrawer';
 // change should already arrive via the channel within a second.
 const SAFETY_POLL_MS = 30_000;
 const REALTIME_DEBOUNCE_MS = 200;
+// A4 (migration 200): agent_tasks → task_tracking[task_kind='agent_task'].
+// Subscribe to task_tracking sans filter — extra refresh chatter from
+// workflow rows is debounced + the board API already filters server-side.
 const WATCHED_TABLES = [
   'agent_workers',
   'agent_inbox',
   'agent_outbox',
   'agent_state_history',
-  'agent_tasks',
+  'task_tracking',
 ] as const;
 
 export const WorkforcePage: React.FC = () => {
@@ -105,10 +108,6 @@ export const WorkforcePage: React.FC = () => {
     const channel = supabase.channel('workforce-board-page');
     for (const table of WATCHED_TABLES) {
       channel.on(
-        // @ts-expect-error — supabase-js types for postgres_changes
-        // event don't recognise '*' but the runtime accepts it (any
-        // INSERT/UPDATE/DELETE). Splitting into three .on() calls
-        // works too but quadruples the chatter for no benefit.
         'postgres_changes',
         { event: '*', schema: 'public', table },
         () => scheduleRefresh(),

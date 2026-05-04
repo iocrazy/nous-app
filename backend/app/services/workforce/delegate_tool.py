@@ -37,7 +37,11 @@ from uuid import UUID
 from loguru import logger
 
 from app.repositories.agent_repository import AgentRepository
-from app.repositories.agent_workforce_repository import AgentWorkforceRepository
+from app.repositories.agent_workforce_repository import (
+    AgentWorkforceRepository,
+    TASK_KIND_AGENT,
+    tt_row_to_task_shape,
+)
 
 # Maximum delegation depth from a single root run. 3 levels is enough for
 # meaningful workforce composition (planner → executor → critic) without
@@ -386,21 +390,30 @@ class DelegateToolService:
     async def _lookup_task_by_inbox(
         self, caller_inbox_id: UUID
     ) -> Optional[Dict[str, Any]]:
-        """Find the agent_task that the target's inbox processor created
+        """Find the agent task that the target's inbox processor created
         for our inbox row. Returns None if the row hasn't been picked up
-        yet (dispatcher still warming up) or if the lookup fails."""
+        yet (dispatcher still warming up) or if the lookup fails.
+
+        A4: agent_tasks → task_tracking WHERE task_kind='agent_task'.
+        Returns the agent_tasks-shape dict so callers continue reading
+        ``lifecycle_status`` / ``result`` / ``error_code`` / ``error_message``
+        as before."""
         try:
             from app.db.supabase_client import get_async_supabase_admin
 
             client = await get_async_supabase_admin()
             result = (
-                await client.table("agent_tasks")
-                .select("id,lifecycle_status,result,error_code,error_message")
+                await client.table("task_tracking")
+                .select(
+                    "dbos_workflow_id,phase,error_code,error_msg,metadata"
+                )
+                .eq("task_kind", TASK_KIND_AGENT)
                 .eq("inbox_message_id", str(caller_inbox_id))
                 .maybe_single()
                 .execute()
             )
-            return result.data if result and result.data else None
+            raw = result.data if result and result.data else None
+            return tt_row_to_task_shape(raw)
         except Exception as err:
             logger.debug(f"[delegate] task lookup transient: {err}")
             return None

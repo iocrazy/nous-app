@@ -158,16 +158,23 @@ function useDelegateLiveStatus(
       .on(
         'postgres_changes',
         {
+          // A4 (migration 200): agent_tasks 合并入 task_tracking。
+          // inbox_message_id 仅在 task_kind='agent_task' 行有值，
+          // 单 filter 已足够过滤 agent_task 行。
           event: '*',
           schema: 'public',
-          table: 'agent_tasks',
+          table: 'task_tracking',
           filter: `inbox_message_id=eq.${inboxMessageId}`,
         },
         (payload) => {
           const next = (payload.new ?? payload.old) as
-            | { lifecycle_status?: TaskLifecycle }
+            | { phase?: TaskLifecycle; lifecycle_status?: TaskLifecycle }
             | undefined;
-          const lifecycle = next?.lifecycle_status ?? null;
+          // task_tracking.phase 保留 8-state lifecycle precision
+          // (queued / assigned / in_progress / waiting_for_other / blocked /
+          //  done / failed / cancelled). agent_tasks.lifecycle_status fallback
+          // for transition period.
+          const lifecycle = next?.phase ?? next?.lifecycle_status ?? null;
           // Terminal? Refetch once for the outbox payload + final
           // task.result, then leave the channel open until unmount —
           // it's cheap and an idempotent retry handles any flakes.

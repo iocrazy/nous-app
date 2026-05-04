@@ -27,7 +27,11 @@ from pydantic import BaseModel
 from app.core.deps import get_current_user
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
-from app.repositories.agent_workforce_repository import AgentWorkforceRepository
+from app.repositories.agent_workforce_repository import (
+    AgentWorkforceRepository,
+    TASK_KIND_AGENT,
+    tt_row_to_task_shape,
+)
 
 router = APIRouter(prefix="/workforce", tags=["workforce"])
 
@@ -586,17 +590,19 @@ async def get_task_by_inbox(
     # Look up the task — may not exist yet if the recipient hasn't
     # ticked. Return None rather than 404 so the frontend can show
     # "queued" until the worker picks it up.
+    # A4: agent_tasks → task_tracking WHERE task_kind='agent_task'.
     task_q = await (
-        client.table("agent_tasks")
+        client.table("task_tracking")
         .select(
-            "id,agent_id,lifecycle_status,started_at,ended_at,"
-            "error_code,error_message,created_at,inbox_message_id,result"
+            "dbos_workflow_id,agent_id,phase,started_at,completed_at,"
+            "error_code,error_msg,created_at,inbox_message_id,metadata"
         )
+        .eq("task_kind", TASK_KIND_AGENT)
         .eq("inbox_message_id", str(inbox_message_id))
         .maybe_single()
         .execute()
     )
-    task = task_q.data if task_q else None
+    task = tt_row_to_task_shape(task_q.data if task_q else None)
 
     # Sub-agent's reply (if any). The sub-agent writes to outbox with
     # ``reply_to_message_id`` pointing back at our inbox row, so we can

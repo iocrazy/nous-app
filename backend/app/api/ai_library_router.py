@@ -36,6 +36,10 @@ from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.agent_runs_repository import AgentRunsRepository
+from app.repositories.agent_workforce_repository import (
+    TASK_KIND_AGENT,
+    tt_row_to_task_shape,
+)
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.agent_runs import (
     RunDetail,
@@ -1143,32 +1147,38 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     run_activity_14d = [{"date": d, "count": activity_buckets.get(d, 0)} for d in days]
     success_rate_14d = [{"date": d, **success_buckets[d]} for d in days]
 
-    # Tasks: status counts over 14d. Tasks live in agent_tasks scoped
-    # by user_id (Delegate from chat carries the caller's user_id, and
-    # direct dispatches get their owner stamped). Match the same
-    # window so the dashboard tells one consistent story.
+    # Tasks: status counts over 14d. A4: tasks live in task_tracking
+    # WHERE task_kind='agent_task' scoped by user_id (Delegate from chat
+    # carries the caller's user_id, and direct dispatches get their owner
+    # stamped). Match the same window so the dashboard tells one
+    # consistent story.
     tasks_q = await (
-        client.table("agent_tasks")
-        .select("id,lifecycle_status,created_at,title")
+        client.table("task_tracking")
+        .select("dbos_workflow_id,phase,created_at,title,metadata")
+        .eq("task_kind", TASK_KIND_AGENT)
         .eq("agent_id", str(agent_uuid))
         .eq("user_id", str(user_uuid))
         .gte("created_at", iso_start)
         .order("created_at", desc=True)
         .execute()
     )
-    tasks_14d: List[Dict[str, Any]] = tasks_q.data or []
+    tasks_14d_raw = tasks_q.data or []
+    tasks_14d: List[Dict[str, Any]] = [
+        tt_row_to_task_shape(r) for r in tasks_14d_raw
+    ]
     status_counts: Counter[str] = Counter(
         (t.get("lifecycle_status") or "unknown") for t in tasks_14d
     )
 
-    # Recent agent_tasks (5) — pulled separately in case the 14d
+    # Recent agent tasks (5) — pulled separately in case the 14d
     # window is empty but older tasks still matter for context.
     recent_tasks_q = await (
-        client.table("agent_tasks")
+        client.table("task_tracking")
         .select(
-            "id,lifecycle_status,created_at,started_at,ended_at,title,"
-            "error_code,error_message"
+            "dbos_workflow_id,phase,created_at,started_at,completed_at,title,"
+            "error_code,error_msg,metadata"
         )
+        .eq("task_kind", TASK_KIND_AGENT)
         .eq("agent_id", str(agent_uuid))
         .eq("user_id", str(user_uuid))
         .order("created_at", desc=True)
@@ -1212,7 +1222,9 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
             "total_cost_cents": round(sum_cost_cents, 4),
             "run_count": len(runs_14d),
         },
-        "recent_tasks": recent_tasks_q.data or [],
+        "recent_tasks": [
+            tt_row_to_task_shape(r) for r in (recent_tasks_q.data or [])
+        ],
         "recent_runs": recent_runs_q.data or [],
     }
 
