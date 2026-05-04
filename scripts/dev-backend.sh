@@ -19,6 +19,13 @@
 #      failures (wedged process, no file change to trigger restart),
 #      kills the watchexec tree and restarts it.
 #
+# PR-D8 Phase 1 — role parameterization:
+#   MEDIAHUB_ROLE env (gateway / worker / combined) is exported into the
+#   uvicorn child so app/main.py can decide whether to mount the public
+#   API and whether to launch DBOS workers. Default = combined so the
+#   single-script "everything in one process" workflow keeps working.
+#   See scripts/dev-gateway.sh + scripts/dev-worker.sh for split-mode.
+#
 # Logs go to /tmp/dev-backend.log (override with BACKEND_LOG=...).
 #
 # Usage:
@@ -28,28 +35,32 @@
 set -u
 
 PORT="${BACKEND_PORT:-8082}"
+ROLE="${MEDIAHUB_ROLE:-combined}"
+TAG="${SUPERVISOR_TAG:-dev-backend}"
 HEALTH_URL="http://localhost:${PORT}/api/v1/healthz"
-LOG_FILE="${BACKEND_LOG:-/tmp/dev-backend.log}"
+LOG_FILE="${BACKEND_LOG:-/tmp/${TAG}.log}"
 PROBE_INTERVAL="${PROBE_INTERVAL:-30}"
 UNHEALTHY_LIMIT="${UNHEALTHY_LIMIT:-3}"
 PROBE_TIMEOUT="${PROBE_TIMEOUT:-5}"
+
+export MEDIAHUB_ROLE="${ROLE}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="${SCRIPT_DIR}/../backend"
 ENV_FILE="${BACKEND_DIR}/.env"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
-  echo "[dev-backend] missing ${ENV_FILE}" >&2
+  echo "[${TAG}] missing ${ENV_FILE}" >&2
   exit 1
 fi
 
 if ! command -v watchexec >/dev/null 2>&1; then
-  echo "[dev-backend] watchexec not installed. Run: brew install watchexec" >&2
+  echo "[${TAG}] watchexec not installed. Run: brew install watchexec" >&2
   exit 1
 fi
 
 cleanup() {
-  echo "[dev-backend] shutting down (parent pid=$$)"
+  echo "[${TAG}] shutting down (parent pid=$$)"
   if [[ -n "${WATCHEXEC_PID:-}" ]]; then
     pkill -TERM -P "${WATCHEXEC_PID}" 2>/dev/null || true
     kill -TERM "${WATCHEXEC_PID}" 2>/dev/null || true
@@ -63,7 +74,7 @@ cleanup() {
 trap cleanup INT TERM
 
 start_watchexec() {
-  echo "[dev-backend] starting watchexec → uvicorn on :${PORT} (logs → ${LOG_FILE})"
+  echo "[${TAG}] starting watchexec → uvicorn on :${PORT} role=${ROLE} (logs → ${LOG_FILE})"
   set -a
   # shellcheck disable=SC1090
   . "${ENV_FILE}"
@@ -87,11 +98,11 @@ start_watchexec() {
     -- uv run uvicorn app.main:app --host 0.0.0.0 --port "${PORT}" \
     >> "${LOG_FILE}" 2>&1 &
   WATCHEXEC_PID=$!
-  echo "[dev-backend] watchexec pid=${WATCHEXEC_PID}"
+  echo "[${TAG}] watchexec pid=${WATCHEXEC_PID}"
 }
 
 kill_watchexec() {
-  echo "[dev-backend] killing watchexec tree pid=${WATCHEXEC_PID}"
+  echo "[${TAG}] killing watchexec tree pid=${WATCHEXEC_PID}"
   pkill -KILL -P "${WATCHEXEC_PID}" 2>/dev/null || true
   kill -KILL "${WATCHEXEC_PID}" 2>/dev/null || true
   lsof -ti tcp:"${PORT}" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
@@ -110,7 +121,7 @@ while true; do
   warmup_deadline=$(( $(date +%s) + 90 ))
   while (( $(date +%s) < warmup_deadline )); do
     if [[ "$(probe)" == "200" ]]; then
-      echo "[dev-backend] healthy"
+      echo "[${TAG}] healthy"
       break
     fi
     sleep 2
@@ -125,14 +136,14 @@ while true; do
       continue
     fi
     failures=$(( failures + 1 ))
-    echo "[dev-backend] unhealthy (probe ${failures}/${UNHEALTHY_LIMIT}, code=${code:-timeout})"
+    echo "[${TAG}] unhealthy (probe ${failures}/${UNHEALTHY_LIMIT}, code=${code:-timeout})"
     if (( failures >= UNHEALTHY_LIMIT )); then
-      echo "[dev-backend] wedged → restarting watchexec tree"
+      echo "[${TAG}] wedged → restarting watchexec tree"
       break
     fi
   done
 
   kill_watchexec
-  echo "[dev-backend] respawning in 2s"
+  echo "[${TAG}] respawning in 2s"
   sleep 2
 done

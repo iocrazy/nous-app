@@ -13,7 +13,9 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from app.agent_framework import role_from_env
 from app.api import api_router
+from app.api.lifespan_router import router as lifespan_router
 from app.api.ws_router import router as ws_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
@@ -738,8 +740,28 @@ app.add_middleware(RequestLoggingMiddleware)
 # Global exception handlers — unified ErrorResponse envelope for all errors.
 register_exception_handlers(app)
 
-app.include_router(api_router, prefix="/api/v1")
-app.include_router(ws_router)
+# Role-aware router mount (Sprint 5 D10-A wired up here).
+#
+# MEDIAHUB_ROLE controls what HTTP surface this process exposes:
+#   gateway/combined → full /api/v1 + /ws (HTTP API + websocket)
+#   worker           → only /api/v1/healthz + /api/v1/readyz (probes)
+#
+# `lifespan_router` is mounted unconditionally so worker pods/processes
+# can be probed by k8s / dev-backend.sh / autoheal even though they
+# don't serve the public API. Module-level role read (env-only, no I/O)
+# matches the lifespan-side gating that decides whether to launch DBOS
+# workers, so HTTP surface and worker behavior stay in sync.
+_module_role = role_from_env()
+app.include_router(lifespan_router, prefix="/api/v1")
+if _module_role.serves_http_api:
+    app.include_router(api_router, prefix="/api/v1")
+    app.include_router(ws_router)
+    logger.info(f"HTTP routes mounted: full API surface (role={_module_role.value})")
+else:
+    logger.info(
+        f"HTTP routes mounted: probes only (role={_module_role.value}) — "
+        f"public API surface skipped"
+    )
 
 # 媒体文件服务 - 用于访问下载的视频和封面
 # 使用普通路由而非 StaticFiles 子应用，确保 CORS 中间件覆盖
