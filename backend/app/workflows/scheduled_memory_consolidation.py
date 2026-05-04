@@ -282,7 +282,7 @@ def memory_consolidation_workflow(
     """Weekly memory consolidation pass."""
     import asyncio
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         consolidate_namespaces_step()
     )
     logger.info(f"[memory.consolidation] sweep complete: {result}")
