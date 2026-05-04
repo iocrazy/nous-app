@@ -175,3 +175,15 @@ api_router.include_router(router=workforce_router, tags=["Workforce"])
 from app.api.health_router import router as deep_health_router  # noqa: E402
 
 api_router.include_router(router=deep_health_router, tags=["Health"])
+
+# A 路线 (2026-05-04, session 2/3): 任务集 / 用户定时 / 4-Lane 优先级 / WS ticket
+# Imports from feat/a3 + feat/a5 + feat/a7 + feat/a9 (PR 队列 #158/159/160/161)
+from app.api.flows_router import router as flows_router  # noqa: E402
+from app.api.lanes_router import router as lanes_router  # noqa: E402
+from app.api.schedules_router import router as schedules_router  # noqa: E402
+from app.api.ws_ticket_router import router as ws_ticket_router  # noqa: E402
+
+api_router.include_router(router=flows_router, tags=["Flows"])
+api_router.include_router(router=schedules_router, tags=["Schedules"])
+api_router.include_router(router=lanes_router, tags=["Lanes"])
+api_router.include_router(router=ws_ticket_router, tags=["WS Ticket"])

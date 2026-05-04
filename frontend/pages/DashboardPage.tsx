@@ -7,6 +7,8 @@ import { LogsPanel } from '../components/LogsPanel';
 import { SystemMonitorPanel } from '../components/SystemMonitorPanel';
 import { AdminNousModelsPage } from './admin/AdminNousModelsPage';
 import { AdminDeploymentLogsPage } from './admin/AdminDeploymentLogsPage';
+import { AdminLanesPage } from './admin/AdminLanesPage';
+import { SchedulesPage } from './SchedulesPage';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../hooks/useNavigation';
 import { useTeamContext } from '../contexts/TeamContext';
@@ -98,6 +100,8 @@ export function DashboardPage() {
       {dashboardSubView === 'monitor' && userProfile.role === 'admin' && <SystemMonitorPanel />}
       {dashboardSubView === 'nous-models' && userProfile.role === 'admin' && <AdminNousModelsPage />}
       {dashboardSubView === 'deployment-logs' && userProfile.role === 'admin' && <AdminDeploymentLogsPage />}
+      {dashboardSubView === 'schedules' && <SchedulesPage />}
+      {dashboardSubView === 'lanes' && userProfile.role === 'admin' && <AdminLanesPage />}
     </div>
   );
 }

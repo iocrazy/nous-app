@@ -1,6 +1,6 @@
-// components/TasksPanel.tsx — Unified task history (all task types) + AI Tasks tab
+// components/TasksPanel.tsx — Unified task history (all task types) + AI Tasks tab + Flows tab (A6)
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   ListTodo,
   Clock,
@@ -18,7 +18,10 @@ import {
   Loader2,
   Mic,
   FileText,
+  Workflow,
 } from 'lucide-react';
+import { FlowCard } from './TaskManager/FlowCard';
+import { flowService, type FlowResponse } from '../services/flowService';
 import {
   useTaskManager,
   TaskType,
@@ -35,7 +38,7 @@ import {
 } from '../contexts/TaskManagerContext';
 // ─── Helpers ──────────────────────────────────────────
 
-type MainTab = 'history' | 'transfer' | 'ai';
+type MainTab = 'history' | 'transfer' | 'ai' | 'flows';
 type SubFilter = string; // 'all' | specific task_type
 type StatusFilterValue = 'all' | TaskStatus;
 
@@ -68,6 +71,13 @@ const MAIN_TABS: TabConfig[] = [
     icon: <Brain size={15} />,
     activeClass: 'bg-purple-500/15 text-purple-400 ring-1 ring-purple-500/30',
     inactiveClass: 'text-zinc-500 hover:text-purple-400/70 hover:bg-purple-500/5',
+  },
+  {
+    value: 'flows',
+    label: 'Flows',
+    icon: <Workflow size={15} />,
+    activeClass: 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30',
+    inactiveClass: 'text-zinc-500 hover:text-emerald-400/70 hover:bg-emerald-500/5',
   },
 ];
 
@@ -179,6 +189,30 @@ const UnifiedTasksView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // A6 Flows tab state — lazily fetched when user switches to the tab.
+  const [flows, setFlows] = useState<FlowResponse[]>([]);
+  const [flowsLoading, setFlowsLoading] = useState(false);
+  const [flowsError, setFlowsError] = useState<string | null>(null);
+
+  const refreshFlows = useCallback(async () => {
+    setFlowsLoading(true);
+    setFlowsError(null);
+    try {
+      const list = await flowService.list();
+      setFlows(list);
+    } catch (err) {
+      setFlowsError(err instanceof Error ? err.message : 'Failed to load flows');
+    } finally {
+      setFlowsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mainTab === 'flows') {
+      void refreshFlows();
+    }
+  }, [mainTab, refreshFlows]);
+
   // Reset sub-filter when switching main tab
   const handleTabChange = (tab: MainTab) => {
     setMainTab(tab);
@@ -263,6 +297,68 @@ const UnifiedTasksView: React.FC = () => {
     );
   }
 
+  // A6 Flows tab: completely separate render path — flow-grouped UI with FlowCard.
+  // Renders the same header (tabs + refresh) but skips status/sub-filter pills since
+  // a flow's lifecycle is aggregated, not filtered by individual task status.
+  if (mainTab === 'flows') {
+    return (
+      <div className="space-y-4 md:space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-lg border border-zinc-800">
+            {MAIN_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => handleTabChange(tab.value)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  mainTab === tab.value ? tab.activeClass : tab.inactiveClass
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-zinc-500">{flows.length} flows</p>
+            <button
+              onClick={() => { void refreshFlows(); }}
+              disabled={flowsLoading}
+              className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"
+              title="Refresh"
+            >
+              <RefreshCw size={18} className={`text-zinc-400 ${flowsLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {flowsError && (
+          <div className="text-xs text-rose-400 bg-rose-900/20 px-3 py-2 rounded">
+            {flowsError}
+          </div>
+        )}
+        {flowsLoading && flows.length === 0 ? (
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw size={24} className="animate-spin text-emerald-500" />
+          </div>
+        ) : flows.length === 0 ? (
+          <div className="text-sm text-zinc-500 italic px-3 py-12 text-center">
+            No flows yet. Flows group related tasks (e.g. parse → download → transcribe → summary).
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {flows.map((f) => (
+              <FlowCard
+                key={f.id}
+                flow={f}
+                onCancelled={() => { void refreshFlows(); }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Header with Main Tabs */}
@@ -283,6 +379,7 @@ const UnifiedTasksView: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <p className="text-xs text-zinc-500">
+            {/* Flows tab handled by the early-return branch above; here mainTab ∈ history|transfer|ai */}
             {activeTasks.length > 0
               ? `${activeTasks.length} active · ${tabTasks.length} total`
               : `${tabTasks.length} tasks`}
