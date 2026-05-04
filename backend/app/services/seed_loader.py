@@ -1,7 +1,21 @@
-"""Load agent & skill seed content from backend/seeds/ into DB (idempotent)."""
+"""Load agent & skill seed content from backend/seeds/ into DB (idempotent).
+
+Idempotency
+-----------
+Each row stores a ``seed_hash`` (sha256 of canonical content; see
+mig 199). On startup the loader recomputes the hash for what's on disk
+and skips the PATCH when the DB hash matches. Steady-state cost is
+~5 GETs (no writes), so cold start is sub-second after the first run.
+
+A NULL hash on the DB side (or our side) falls through to the existing
+upsert path, so the migration is safe to apply before deploying this
+loader change.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
@@ -15,6 +29,21 @@ from app.repositories.skill_repository import SkillRepository
 SCRIPT_EXTS = {".py", ".sh", ".js", ".ts"}
 TEXT_ASSET_EXTS = {".json", ".yaml", ".yml", ".txt"}
 SCRIPT_AI_SKILL_SLUGS = ["script-outline", "script-expand", "script-branch"]
+
+
+def _sha(*chunks: Any) -> str:
+    """sha256 of pipe-joined str(chunk). NULL → empty so identical content
+    with absent vs empty fields hashes the same."""
+    h = hashlib.sha256()
+    for c in chunks:
+        if c is None:
+            h.update(b"")
+        elif isinstance(c, (dict, list)):
+            h.update(json.dumps(c, sort_keys=True, ensure_ascii=False).encode())
+        else:
+            h.update(str(c).encode())
+        h.update(b"|")
+    return h.hexdigest()
 
 
 def _format_error(exc: BaseException) -> dict[str, Any]:
@@ -55,7 +84,15 @@ class SeedLoader:
         self.skill_repo = skill_repo
         self.seeds_root = seeds_root
 
+    def __post_init_counters__(self) -> None:
+        # Hash-skip vs real-upsert tally — surfaced in load_all() result so
+        # ops can confirm "no changes detected" runs are doing the cheap
+        # path, not silently re-PATCHing every entity.
+        self._skipped: dict[str, int] = {"agents": 0, "skills": 0, "skill_files": 0}
+        self._upserted: dict[str, int] = {"agents": 0, "skills": 0, "skill_files": 0}
+
     async def load_all(self) -> dict[str, Any]:
+        self.__post_init_counters__()
         errors: list[dict[str, Any]] = []
         agents_loaded = await self._load_agents(errors)
         skills_loaded = await self._load_skills(errors)
@@ -64,6 +101,8 @@ class SeedLoader:
             "agents": agents_loaded,
             "skills": skills_loaded,
             "agent_skill_bindings": bindings_set,
+            "skipped": self._skipped,
+            "upserted": self._upserted,
             "errors": errors,
         }
 
@@ -109,15 +148,27 @@ class SeedLoader:
         }
 
     async def _upsert_agent(self, slug: str, fields: dict[str, Any]) -> None:
+        seed_hash = _sha(
+            fields.get("identity_md"),
+            fields.get("soul_md"),
+            fields.get("agent_md"),
+            fields.get("name"),
+        )
+        fields_with_hash = {**fields, "seed_hash": seed_hash}
+
         existing = await self.agent_repo.get_by_slug(slug)
         if existing:
-            # Strip immutable identity fields before updating
-            update_fields = {k: v for k, v in fields.items() if k != "slug"}
+            if existing.get("seed_hash") == seed_hash:
+                self._skipped["agents"] += 1
+                logger.debug(f"seed_loader: agent {slug} unchanged (skip)")
+                return
+            update_fields = {k: v for k, v in fields_with_hash.items() if k != "slug"}
             await self.agent_repo.update_fields(UUID(existing["id"]), update_fields)
+            self._upserted["agents"] += 1
             logger.info(f"seed_loader: updated agent {slug}")
         else:
-            # Insert via raw client (repo has no insert method — rely on client directly)
-            await self._insert_agent_row(fields)
+            await self._insert_agent_row(fields_with_hash)
+            self._upserted["agents"] += 1
             logger.info(f"seed_loader: inserted agent {slug}")
 
     async def _insert_agent_row(self, fields: dict[str, Any]) -> None:
@@ -172,16 +223,30 @@ class SeedLoader:
         return count
 
     async def _upsert_skill(self, slug: str, fields: dict[str, Any]) -> int:
+        seed_hash = _sha(
+            fields.get("body_md"),
+            fields.get("frontmatter_json"),
+            fields.get("name"),
+            fields.get("description"),
+        )
+        fields_with_hash = {**fields, "seed_hash": seed_hash}
+
         existing = await self.skill_repo.get_by_slug(slug)
         if existing:
             skill_id = int(existing["id"])
-            update_fields = {k: v for k, v in fields.items() if k != "slug"}
+            if existing.get("seed_hash") == seed_hash:
+                self._skipped["skills"] += 1
+                logger.debug(f"seed_loader: skill {slug} unchanged (skip)")
+                return skill_id
+            update_fields = {k: v for k, v in fields_with_hash.items() if k != "slug"}
             await self.skill_repo.update_fields(skill_id, update_fields)
+            self._upserted["skills"] += 1
             logger.info(f"seed_loader: updated skill {slug} (id={skill_id})")
             return skill_id
         client = await self.skill_repo._get_client()
-        resp = await client.table("skills").insert(fields).execute()
+        resp = await client.table("skills").insert(fields_with_hash).execute()
         skill_id = int(resp.data[0]["id"])
+        self._upserted["skills"] += 1
         logger.info(f"seed_loader: inserted skill {slug} (id={skill_id})")
         return skill_id
 
@@ -199,6 +264,17 @@ class SeedLoader:
         ``assets/`` subtrees; the top-level ``SKILL.md`` lives on
         ``skills.body_md``, not ``skill_files``.
         """
+        # Pre-load existing files keyed by path so we can hash-skip
+        # unchanged ones without an extra round-trip per file.
+        existing_by_path: dict[str, dict[str, Any]] = {}
+        try:
+            for row in await self.skill_repo.list_files(skill_id):
+                p = row.get("path")
+                if isinstance(p, str):
+                    existing_by_path[p] = row
+        except Exception as e:
+            logger.warning(f"seed_loader: prefetch skill_files failed: {e}")
+
         disk_paths: set[str] = set()
         for sub_path in ("references", "scripts", "assets"):
             sub_dir = skill_dir / sub_path
@@ -223,9 +299,21 @@ class SeedLoader:
                 except UnicodeDecodeError:
                     logger.warning(f"seed_loader: cannot read {rel} as text, skipping")
                     continue
+
+                file_hash = _sha(content, file_type)
+                prev = existing_by_path.get(rel)
+                if prev is not None and prev.get("seed_hash") == file_hash:
+                    self._skipped["skill_files"] += 1
+                    disk_paths.add(rel)
+                    continue
                 await self.skill_repo.upsert_file(
-                    skill_id, path=rel, content=content, file_type=file_type
+                    skill_id,
+                    path=rel,
+                    content=content,
+                    file_type=file_type,
+                    seed_hash=file_hash,
                 )
+                self._upserted["skill_files"] += 1
                 disk_paths.add(rel)
 
         # Reconcile: remove DB rows whose source file vanished from disk.
