@@ -38,6 +38,7 @@ from app.api.sb_canvas_router import router as sb_canvas_router
 from app.api.sb_characters_router import router as sb_characters_router
 from app.api.sb_export_router import router as sb_export_router
 from app.api.sb_projects_router import router as sb_projects_router
+from app.api.schedules_router import router as schedules_router
 from app.api.script_ai_router import router as script_ai_router
 from app.api.script_assets_router import router as script_assets_router
 from app.api.script_canvas_router import router as script_canvas_router
@@ -120,6 +121,10 @@ api_router.include_router(router=libraries_router, tags=["Libraries"])
 api_router.include_router(router=reviews_router, tags=["Reviews"])
 
 api_router.include_router(router=task_manager_router, tags=["Task Manager"])
+
+# A5: User-defined cron schedules — backed by user_schedules table
+# (mig 204) + master scheduler workflow (scheduled_master.py).
+api_router.include_router(router=schedules_router)
 
 api_router.include_router(router=teams_router, tags=["Teams"])
 
