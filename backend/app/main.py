@@ -478,6 +478,22 @@ async def lifespan(app: FastAPI):
         app.state.bounds_heartbeat_task = bounds_heartbeat_task
         logger.info("Bounds heartbeat task started (30s tick)")
 
+    # ── A10: Abort registry — subscribe to cross-process cancels ──
+    # When any process emits task.cancel_requested via the bus, this
+    # process's local AbortRegistry flips its token so workflow code
+    # paths polling the token can exit cleanly. Without this, a cancel
+    # hit on the gateway wouldn't reach the worker that's actually
+    # running the task. Depends on the lifecycle bus redis listener
+    # being started by the A8 wiring (separate PR; safe ordering — if
+    # A8 not deployed yet, this just registers a local subscriber that
+    # only sees in-process cancels).
+    try:
+        from app.services.abort_registry import get_registry as _get_abort_registry
+
+        _get_abort_registry().install_bus_subscriber()
+    except Exception as ar_exc:
+        logger.warning(f"Abort registry bus subscribe failed: {ar_exc}")
+
     # Event-loop-ready probe (D10-6): short bounded wait so first request
     # doesn't hit a still-loaded loop. Capped at 2s (was 10s) — anything
     # longer suggests a sweeper is hogging the loop, which is its own bug

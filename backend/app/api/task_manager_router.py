@@ -61,14 +61,39 @@ async def get_task_stats(auth: AuthDep):
 
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str, auth: AuthDep):
-    """Cancel a pending/processing task and revoke its Celery job."""
+    """Cancel a pending/processing task.
+
+    Two-step:
+      1. Mark the task_tracking row cancelled (the legacy code path
+         the UI already polls for visible state).
+      2. Signal the AbortRegistry (A10) so any worker process running
+         this task's workflow body can exit cooperatively. The signal
+         is broadcast across processes via the lifecycle bus
+         (`task.cancel_requested` event) so it reaches the worker that
+         actually owns the run, regardless of which gateway received
+         the cancel call.
+    """
     tracker = get_task_manager()
     try:
         await tracker.cancel(task_id, auth.user_id)
-        return {"success": True}
     except Exception as e:
-        logger.error(f"Failed to cancel task {task_id}: {e}")
+        logger.exception(f"Failed to cancel task {task_id}: {e}")
         raise HTTPException(500, f"Failed to cancel task: {e}")
+
+    # Best-effort abort signal — a missing token just means no worker
+    # picked the task up yet (or already finished). Don't fail the
+    # cancel call on this; the row is already marked cancelled which
+    # is the user-visible truth.
+    try:
+        from app.services.abort_registry import get_registry
+
+        await get_registry().signal(task_id, broadcast=True)
+    except Exception as ar_exc:
+        logger.opt(exception=True).debug(
+            f"Abort signal for task {task_id} failed (non-fatal): {ar_exc}"
+        )
+
+    return {"success": True}
 
 
 @router.post("/tasks/{task_id}/retry")
