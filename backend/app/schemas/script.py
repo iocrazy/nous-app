@@ -117,7 +117,7 @@ class GenerateOutlineRequest(BaseModel):
     """Request body for AI-generated story outline."""
 
     script_id: str
-    premise: str = Field(..., min_length=10, max_length=10000)
+    premise: str = Field(..., min_length=1, max_length=10000)
     chapter_count: int = Field(default=5, ge=2, le=20)
     style_guide: Optional[str] = Field(None, max_length=2000)
 
