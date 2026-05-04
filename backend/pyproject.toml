@@ -51,6 +51,7 @@ dependencies = [
     "python-frontmatter>=1.1.0",
     "dbos>=2.19.0",  # PoC #1-12 validated on 2.19.0; pin major version
     "pypdfium2>=5.7.1",
+    "brotli>=1.2.0",
 ]
 
 [project.optional-dependencies]
