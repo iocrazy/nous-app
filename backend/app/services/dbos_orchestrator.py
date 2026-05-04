@@ -126,13 +126,96 @@ def init_dbos() -> None:
 def launch_dbos() -> None:
     """Start the DBOS worker pool + run pending-workflow recovery. Call AFTER
     all `@DBOS.workflow` modules have been imported.
+
+    Also runs a pre-launch sweep of stale internal scheduled workflows
+    (see `_pre_launch_sweep_stale_scheduled`) to prevent recovery storms.
+    DBOS's recovery on startup tries to re-execute every workflow that
+    was RUNNING when the previous worker died; if the previous worker
+    accumulated a large backlog of stuck PENDING workflows from earlier
+    crashes, the recovery storm exhausts the executor's thread pool and
+    every subsequent dispatch (including new user requests) gets stuck
+    in PENDING forever — diagnosed on 2026-05-04 dev session.
+
+    The pre-launch sweep cancels DBOS-internal `sched-*` workflows
+    older than a safe cutoff so they don't pile into recovery. User-
+    facing workflows are NEVER touched by this sweep — they go through
+    the workflow_health_sweeper (PR #151) which respects
+    do_not_auto_cancel.
     """
     if _dbos is None:
         return
     from dbos import DBOS
 
+    _pre_launch_sweep_stale_scheduled()
+
     DBOS.launch()
     logger.info("[dbos] launched (worker pool started, recovery complete)")
+
+
+def _pre_launch_sweep_stale_scheduled() -> None:
+    """Cancel internal scheduled workflows (`sched-*`) that have been
+    PENDING/ENQUEUED for more than the safe-cutoff window.
+
+    Why only `sched-*` (DBOS-internal)?
+      * Each `@DBOS.scheduled` decorator generates a workflow per cron
+        tick. If the previous worker died with N ticks queued, the new
+        worker will recover all of them in a burst. None of them
+        carries user state — they're meant to fire once per tick and
+        succeeding ticks supersede them anyway.
+      * User-facing workflows (parse, download, transcribe, agent_run)
+        carry irreplaceable state and MUST NOT be auto-cancelled here.
+        The PR #151 workflow_health_sweeper handles those with the
+        do_not_auto_cancel safeguard the user requested.
+
+    Cutoff: 30 minutes. Anything older is presumed dead — newer ticks
+    have already replaced it functionally.
+
+    Sync function on purpose so launch_dbos can call it before
+    DBOS.launch (which is also sync).
+    """
+    cutoff_minutes = int(os.environ.get("DBOS_STALE_SCHED_CUTOFF_MINUTES", "30"))
+    db_url = os.environ.get("DBOS_DATABASE_URL", "")
+    if not db_url:
+        return
+
+    try:
+        # Direct psycopg call so we don't depend on DBOS being initialised.
+        import psycopg
+
+        # Strip sqlalchemy-specific query params before psycopg connect.
+        cleaned_url = db_url.replace("postgresql+psycopg2://", "postgresql://")
+
+        with psycopg.connect(cleaned_url, connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE dbos.workflow_status
+                    SET status = 'CANCELLED',
+                        updated_at = EXTRACT(EPOCH FROM now()) * 1000
+                    WHERE status IN ('PENDING', 'ENQUEUED')
+                      AND (name LIKE 'sched-%%' OR workflow_uuid LIKE 'sched-%%')
+                      AND updated_at / 1000.0
+                          < EXTRACT(EPOCH FROM now() - make_interval(mins => %s))
+                    RETURNING workflow_uuid, name;
+                    """,
+                    (cutoff_minutes,),
+                )
+                cancelled = cur.fetchall()
+                conn.commit()
+        if cancelled:
+            logger.warning(
+                f"[dbos] pre-launch sweep cancelled {len(cancelled)} stale "
+                f"scheduled workflow(s) older than {cutoff_minutes} min — "
+                "preventing recovery storm. Examples: "
+                f"{[r[1] for r in cancelled[:3]]}"
+            )
+        else:
+            logger.info("[dbos] pre-launch sweep: no stale scheduled workflows")
+    except Exception as exc:
+        # Sweep failure is not fatal — DBOS will still launch, just may
+        # hit the recovery storm we tried to prevent. Logged loud so
+        # operator notices when sweep can't run (e.g., PG unreachable).
+        logger.warning(f"[dbos] pre-launch sweep failed: {exc!r}")
 
 
 def shutdown_dbos(timeout_seconds: float = 5.0) -> None:
