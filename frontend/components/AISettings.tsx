@@ -34,6 +34,7 @@ import { aiLibraryService } from '../services/aiLibraryService';
 import { StoryboardApiSettings } from './StoryboardApiSettings';
 import { MCPServersPanel } from './MCPServersPanel';
 import { ApprovalsPanel } from './ApprovalsPanel';
+import { TokenBillingDashboard } from './TokenBillingDashboard';
 import { useSettingsStore } from '../stores/settingsStore';
 
 interface AISettingsProps {
@@ -1196,6 +1197,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       {/* G1-UI: Pending approvals — auto-hides when empty */}
       <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
         <ApprovalsPanel hideWhenEmpty />
+      </section>
+
+      {/* Phase 3: Token usage dashboard */}
+      <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
+        <TokenBillingDashboard />
       </section>
     </div>
   );

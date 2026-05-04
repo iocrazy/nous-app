@@ -334,6 +334,38 @@ class RunRecorder:
             .execute()
         )
 
+        # Phase 3 Token Billing: reconcile usage on terminal status only.
+        # Failure here is logged but never raised — billing must not be
+        # able to roll back a finished agent_runs row.
+        if status == "completed" and cost_cents is not None and cost_cents > 0:
+            try:
+                from app.services.token_billing import reconcile_run
+                # cost_cents is the cents amount; PointsService treats
+                # cost_points as the same scalar (1 cent ≈ 1 point in
+                # the current billing model). If a future change splits
+                # them, this conversion happens here.
+                await reconcile_run(
+                    run_id=self.run_id,
+                    user_id=self.user_id,
+                    team_id=self.team_id,
+                    project_id=self.project_id,
+                    session_id=self.session_id,
+                    agent_id=self.agent_id,
+                    model=self.model or "?",
+                    prompt_tokens=self._prompt_tokens,
+                    completion_tokens=self._completion_tokens,
+                    cost_points=float(cost_cents),
+                    byo_key=False,  # platform-model run; BYO-key runs
+                    # set this true via a future RunRecorder kwarg or
+                    # by inspecting the model string against the user's
+                    # registered keys (Phase 3.1 work)
+                    action=self.trigger,
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[RunRecorder] reconcile_run failed (non-fatal): {exc}"
+                )
+
 
 def _truncate(text: str, max_chars: int) -> str:
     """Codepoint-safe truncation. Full content belongs in metadata_json."""

@@ -1257,6 +1257,29 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
+/** Phase 3: per-user token usage summary (driven by ai_usage_logs). */
+export interface AILibraryUsageSummary {
+  window_start: string;
+  window_end: string;
+  overall: {
+    total_tokens: number;
+    cost_points: number;
+    run_count: number;
+  };
+  by_model: Array<{
+    model: string;
+    total_tokens: number;
+    cost_points: number;
+    run_count: number;
+  }>;
+  by_day: Array<{
+    date: string;
+    total_tokens: number;
+    cost_points: number;
+    run_count: number;
+  }>;
+}
+
 /** Phase 3: AI Library version history item (agent / skill / skill_file).
  *  List view shape — only metadata. Full body via the detail endpoint. */
 export interface AILibraryVersionItem {

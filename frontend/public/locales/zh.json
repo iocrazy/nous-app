@@ -1340,6 +1340,23 @@
     "rollbackFailed": "回滚失败：{{message}}",
     "rollbackNotSupported": "目前仅 agent 支持回滚"
   },
+  "billing": {
+    "title": "Token 消费",
+    "lastNDays": "最近 {{count}} 天",
+    "refresh": "刷新",
+    "loading": "加载中...",
+    "loadFailed": "加载消费数据失败",
+    "noUsage": "此区间无消费记录",
+    "statTokens": "Tokens",
+    "statPoints": "已消耗积分",
+    "statRuns": "运行次数",
+    "byModel": "按模型",
+    "byDay": "按日期",
+    "colModel": "模型",
+    "colRuns": "运行",
+    "colTokens": "Tokens",
+    "colCost": "成本"
+  },
   "approvals": {
     "title": "待审批",
     "empty": "无待审批项",
