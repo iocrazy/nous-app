@@ -337,13 +337,22 @@ def parse_workflow(
     parsed_data["user_id"] = user_id
 
     # 3. Save metadata
+    #
+    # If save_media_step returns None we MUST raise. Returning a failed
+    # dict makes DBOS record the workflow as SUCCESS (function exited
+    # cleanly), then the lifecycle trigger marks
+    # task_tracking.status='completed' which lies to the UI. Raising
+    # lets DBOS record ERROR; the trigger then mirrors that to
+    # task_tracking.status='failed' / phase='failed' so operator + UI
+    # both see the truth. Caller surfaces the exception via
+    # /workflows/<id>/sse.
     saved_video = save_media_step(parsed_data, platform_id, video_bool)
     if not saved_video:
-        return {
-            "status": "failed",
-            "url": valid_url,
-            "error": "Data validation failed",
-        }
+        raise RuntimeError(
+            f"save_media_step returned None for platform_id={platform_id}; "
+            "parse data validation failed (see preceding ERROR logs in "
+            "media_repository / media_service for the underlying cause)"
+        )
     video_db_id = saved_video.get("id")
     resource_id = saved_video.get("resource_id")
 
