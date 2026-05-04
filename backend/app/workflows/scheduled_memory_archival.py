@@ -116,7 +116,7 @@ def memory_archival_workflow(scheduled_time: datetime, actual_time: datetime) ->
     """Weekly memory archival pass."""
     import asyncio
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         archive_decayed_memories_step()
     )
     logger.info(f"[memory.archival] sweep complete: {result}")

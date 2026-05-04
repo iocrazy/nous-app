@@ -100,10 +100,18 @@ async def sweep_due_commitments_step(
 def commitment_sweeper_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    """Per-minute commitment sweep."""
+    """Per-minute commitment sweep.
+
+    Uses asyncio.run() instead of asyncio.get_event_loop() because DBOS
+    runs scheduled workflows on a fresh executor thread that has no
+    current event loop on Python 3.10+; get_event_loop() raises there
+    (DeprecationWarning on 3.10-3.11, RuntimeError on 3.12+).
+    asyncio.run() creates and tears down a loop per call, which is the
+    correct pattern for one-shot @DBOS.scheduled bodies.
+    """
     import asyncio
 
-    result = asyncio.get_event_loop().run_until_complete(sweep_due_commitments_step())
+    result = asyncio.run(sweep_due_commitments_step())
     if result.get("fired") or result.get("expired"):
         logger.info(f"[commitment.sweeper] {result}")
 
