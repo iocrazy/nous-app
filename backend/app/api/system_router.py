@@ -58,17 +58,41 @@ class SystemStatusResponse(BaseModel):
 
 
 @router.get("/status", tags=TAGS, response_model=SystemStatusResponse)
-async def get_system_status(auth: AuthDep):
+async def get_system_status(auth: AuthDep, fresh: bool = False):
     """
     Get system status.
 
-    Returns real-time queue, storage, and network status.
-    Requires authentication: Bearer Token or API Key.
+    Backed by the Redis snapshot written by `update_system_status_workflow`
+    (cadence 30s, see app/services/system_status_redis.py). Falls back to
+    a live computation when Redis has no snapshot — happens when no worker
+    has run the collector in the last 90 seconds (writer dead).
+
+    `?fresh=true` forces a live re-computation and overwrites the Redis
+    snapshot (use sparingly — it bypasses the throttle).
     """
+    from app.services.system_status_redis import get_snapshot, set_snapshot
+
     try:
-        queue_data = await get_queue_status()
-        storage_data = get_storage_status()
-        network_data = get_network_status()
+        snapshot = None if fresh else await get_snapshot()
+        if snapshot is None:
+            # Cache miss / explicit refresh — recompute live and refresh
+            # the Redis HASH so the next reader gets it cheap.
+            queue_data = await get_queue_status()
+            storage_data = get_storage_status()
+            network_data = get_network_status()
+            snapshot = {
+                "queue": queue_data,
+                "storage": storage_data,
+                "network": network_data,
+            }
+            await set_snapshot(snapshot, force_publish=fresh)
+        else:
+            # Pull queue/storage/network out of the cached snapshot. Older
+            # writers may not have populated all keys; default to live
+            # compute for any that are missing.
+            queue_data = snapshot.get("queue") or await get_queue_status()
+            storage_data = snapshot.get("storage") or get_storage_status()
+            network_data = snapshot.get("network") or get_network_status()
 
         return SystemStatusResponse(
             queue=QueueStatus(**queue_data),
@@ -78,7 +102,7 @@ async def get_system_status(auth: AuthDep):
         )
 
     except Exception as e:
-        logger.error(f"Failed to get system status: {e}")
+        logger.exception(f"Failed to get system status: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to get system status: {str(e)}"
         )
