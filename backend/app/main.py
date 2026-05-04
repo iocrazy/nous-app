@@ -219,42 +219,30 @@ async def lifespan(app: FastAPI):
             f"DBOS orchestrator startup failed: {e!r} — continuing without DBOS"
         )
 
-    # ── M3 / D5: workforce scheduler — in-process asyncio tick loop ──
-    # Inbox/outbox dispatch loop. Pool selection:
-    #   WORKFORCE_USE_DBOS_QUEUE=true + DBOS enabled →
-    #     DbosAgentWorkforcePool (cluster-wide concurrency, partitioned
-    #     per-agent serialization, durable retry)
-    #   otherwise → AgentWorkerPool (in-process asyncio, M3 default)
-    workforce_scheduler = None
-    if not process_role.runs_inprocess_schedulers:
-        logger.info(
-            f"Workforce scheduler skipped (role={process_role.value} — "
-            f"schedulers run on worker side only)"
-        )
-    else:
-        try:
-            from app.services.workforce.scheduler import WorkforceScheduler
-
-            use_dbos_queue = (
-                os.environ.get("WORKFORCE_USE_DBOS_QUEUE", "").lower()
-                in ("1", "true", "yes")
-                and dbos_orchestrator.is_enabled()
-            )
-            pool = None
-            if use_dbos_queue:
-                from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
-
-                pool = DbosAgentWorkforcePool()
-                logger.info("Workforce: using DbosAgentWorkforcePool (DBOS queue)")
-            else:
-                logger.info("Workforce: using AgentWorkerPool (in-process)")
-
-            workforce_scheduler = WorkforceScheduler(pool=pool)
-            workforce_scheduler.start()
-            app.state.workforce_scheduler = workforce_scheduler
-            logger.info("Workforce scheduler started")
-        except Exception as e:
-            logger.warning(f"Failed to start workforce scheduler: {e}")
+    # ── PR-D8 Phase 3: WorkforceScheduler removed from lifespan ──
+    #
+    # Inbox/outbox dispatch is now driven by two @DBOS.scheduled workflows
+    # (see app/workflows/workforce_dispatch.py) which were already imported
+    # via `from app import workflows` above. No in-process tick loop, no
+    # pool wiring, no app.state.workforce_scheduler.
+    #
+    # Why this is strictly an upgrade:
+    #   - Cluster-wide single-fire: DBOS dedups @scheduled workflows by
+    #     workflow_id. With N worker pods running, only one fires the
+    #     dispatch tick per scheduled time; the legacy scheduler ran on
+    #     every replica that had role.runs_inprocess_schedulers=True,
+    #     duplicating outbox scans in multi-worker setups.
+    #   - Durable retry / replay: DBOS step semantics handle PG hiccups
+    #     for free; the legacy loop just logged + waited for next tick.
+    #   - One less in-process state machine to coordinate with
+    #     graceful shutdown (the cancel-safe sweeper conundrum from PR
+    #     d86bb7ec disappears for this code path).
+    #
+    # Cadence: outbox 5s, inbox 10s — preserves legacy 5s fast tick
+    # with inbox running every other tick. For sub-second latency, a
+    # follow-up will add PG NOTIFY on agent_outbox INSERT + LISTEN in
+    # workers as a path that complements the cron safety net.
+    workforce_scheduler = None  # kept as a name for the shutdown branch
 
     # Boundary layer (B9-D/E): SsrfProxy for subprocess + browser clients
     # (yt-dlp, DrissionPage, ffmpeg). Populates settings.SSRF_PROXY_URL so
@@ -539,8 +527,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"DBOS shutdown raised {e!r}")
 
-    # Stop workforce scheduler before other teardown — drains in-flight
-    # agent runs gracefully.
+    # PR-D8 Phase 3: workforce_scheduler is always None now (replaced by
+    # @DBOS.scheduled in workforce_dispatch.py). Branch kept for one rev
+    # so a quick rollback that re-introduces the scheduler doesn't need
+    # to also re-add the shutdown call.
     if workforce_scheduler is not None:
         try:
             await workforce_scheduler.stop(drain_timeout=5.0)

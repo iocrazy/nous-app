@@ -59,6 +59,10 @@ from app.workflows.storyboard import (  # noqa: F401
 )
 from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
 from app.workflows.transcode import transcode_workflow  # noqa: F401
+from app.workflows.workforce_dispatch import (  # noqa: F401
+    inbox_dispatch_workflow,
+    outbox_dispatch_workflow,
+)
 from app.workflows.write_memory import write_memory_workflow  # noqa: F401
 
 # Import workflow modules so their @DBOS.workflow decorators register.
@@ -100,4 +104,6 @@ __all__ = [
     "storyboard_annotation_workflow",
     "agent_workforce_workflow",
     "agent_workforce_queue",
+    "outbox_dispatch_workflow",
+    "inbox_dispatch_workflow",
 ]
