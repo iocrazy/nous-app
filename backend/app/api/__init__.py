@@ -58,6 +58,7 @@ from app.api.temp_token_router import router as temp_token_router
 from app.api.user_settings_router import router as settings_router
 from app.api.video_collections_router import router as video_collections_router
 from app.api.workforce_router import router as workforce_router
+from app.api.ws_ticket_router import router as ws_ticket_router
 
 api_router = APIRouter()
 
@@ -170,6 +171,9 @@ api_router.include_router(router=script_export_router, tags=["Script Export"])
 api_router.include_router(router=ai_library_router, tags=["AI Library"])
 
 api_router.include_router(router=workforce_router, tags=["Workforce"])
+
+# A7: WS short-lived ticket auth (replaces JWT-in-URL for /ws/* endpoints).
+api_router.include_router(router=ws_ticket_router)
 
 # Phase N (N5) / D10-8: per-subsystem deep health probe.
 from app.api.health_router import router as deep_health_router  # noqa: E402

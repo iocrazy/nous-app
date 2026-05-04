@@ -31,16 +31,41 @@ async def _authenticate_ws(token: str) -> str | None:
 
 
 @router.websocket("/ws/task-progress")
-async def ws_task_progress(websocket: WebSocket, token: str = Query(...)):
+async def ws_task_progress(
+    websocket: WebSocket,
+    ticket: str | None = Query(None),
+    token: str | None = Query(None),
+):
     """WebSocket endpoint that streams task progress from Redis pub/sub.
 
-    Connect: ``ws(s)://<host>/ws/task-progress?token=<jwt>``
+    Auth (preferred): ``?ticket=<short-random>``
+        One-shot 30s-valid handle minted by ``POST /api/v1/ws/ticket``.
+        Consumed via Redis GETDEL so the same ticket can't be replayed.
+        The JWT never appears in the URL → server access logs / browser
+        history / Sentry breadcrumbs don't leak it. See A7 of the A-route
+        plan and ``app/api/ws_ticket_router.py``.
+
+    Auth (deprecated, 6-month migration window): ``?token=<jwt>``
+        Kept for backwards compatibility while frontend migrates. New
+        clients should use ticket only. Server access logs DO contain
+        the JWT for this path — treat as a known liability until the
+        flag day.
 
     Messages are JSON objects with fields:
     ``unified_task_id``, ``dbos_workflow_id``, ``status``, ``percent``,
     ``speed``, ``downloaded``, ``total``, and optionally ``error``.
     """
-    user_id = await _authenticate_ws(token)
+    user_id: str | None = None
+    if ticket:
+        from app.api.ws_ticket_router import consume_ticket
+
+        user_id = await consume_ticket(ticket)
+    elif token:
+        logger.debug(
+            "[WS] using legacy ?token= auth — client should migrate to ?ticket="
+        )
+        user_id = await _authenticate_ws(token)
+
     if not user_id:
         await websocket.close(code=4001, reason="Authentication failed")
         return
