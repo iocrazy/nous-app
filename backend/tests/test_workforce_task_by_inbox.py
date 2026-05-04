@@ -62,17 +62,20 @@ async def test_returns_task_and_outbox_when_done() -> None:
 
     user_id = uuid4()
     inbox_id = uuid4()
+    # A4 (migration 200): task_tracking row shape (dbos_workflow_id PK,
+    # phase column for 8-state, completed_at / error_msg renames, result
+    # nested under metadata.agent_result).
     task_row = {
-        "id": str(uuid4()),
+        "dbos_workflow_id": str(uuid4()),
         "agent_id": str(uuid4()),
-        "lifecycle_status": "done",
+        "phase": "done",
         "started_at": "2026-04-26T10:00:00Z",
-        "ended_at": "2026-04-26T10:00:24Z",
+        "completed_at": "2026-04-26T10:00:24Z",
         "error_code": None,
-        "error_message": None,
+        "error_msg": None,
         "created_at": "2026-04-26T10:00:00Z",
         "inbox_message_id": str(inbox_id),
-        "result": {"summary": "All done."},
+        "metadata": {"agent_result": {"summary": "All done."}},
     }
     outbox_row = {
         "id": str(uuid4()),
@@ -96,7 +99,7 @@ async def test_returns_task_and_outbox_when_done() -> None:
                     "reply_to_message_id": None,
                 },
             ],
-            "agent_tasks": [task_row],
+            "task_tracking": [task_row],
             "agent_outbox": [[outbox_row]],
         }
     )
@@ -134,8 +137,8 @@ async def test_no_task_yet_when_recipient_hasnt_ticked() -> None:
                     "reply_to_message_id": None,
                 },
             ],
-            # agent_tasks lookup returns None
-            "agent_tasks": [None],
+            # A4: task_tracking lookup returns None
+            "task_tracking": [None],
         }
     )
 
@@ -157,17 +160,18 @@ async def test_outbox_skipped_when_task_in_progress() -> None:
 
     user_id = uuid4()
     inbox_id = uuid4()
+    # A4: task_tracking row shape.
     task_row = {
-        "id": str(uuid4()),
+        "dbos_workflow_id": str(uuid4()),
         "agent_id": str(uuid4()),
-        "lifecycle_status": "in_progress",
+        "phase": "in_progress",
         "started_at": "2026-04-26T10:00:00Z",
-        "ended_at": None,
+        "completed_at": None,
         "error_code": None,
-        "error_message": None,
+        "error_msg": None,
         "created_at": "2026-04-26T10:00:00Z",
         "inbox_message_id": str(inbox_id),
-        "result": None,
+        "metadata": {},
     }
     client = _client_for(
         {
@@ -181,7 +185,7 @@ async def test_outbox_skipped_when_task_in_progress() -> None:
                     "reply_to_message_id": None,
                 },
             ],
-            "agent_tasks": [task_row],
+            "task_tracking": [task_row],
         }
     )
 
