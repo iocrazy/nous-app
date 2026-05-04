@@ -20,6 +20,7 @@ from app.api.error_report_router import router as error_report_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.invites_router import router as invites_router
 from app.api.libraries_router import router as libraries_router
+from app.api.lifespan_router import router as lifespan_router
 from app.api.logs_router import router as logs_router
 from app.api.media_auth import router as media_auth_router
 from app.api.media_router import legacy_router as legacy_douyin_router
@@ -59,6 +60,11 @@ from app.api.video_collections_router import router as video_collections_router
 from app.api.workforce_router import router as workforce_router
 
 api_router = APIRouter()
+
+# Liveness/readiness probes — mounted first so they are reachable even if
+# downstream routers fail to import. Match k8s probe semantics; see
+# `lifespan_router.py` for the rationale on splitting from /health.
+api_router.include_router(router=lifespan_router)
 
 api_router.include_router(router=auth_router, tags=["Authentication"])
 
