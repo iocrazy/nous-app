@@ -115,7 +115,7 @@ def dispatch_download_step(
     import uuid as _uuid
 
     from app.services.dbos_orchestrator import start_workflow_routed
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.task_tracking_manager import get_task_manager
     from app.workflows.download import download_workflow
 
     wf_id = str(_uuid.uuid4())
@@ -174,7 +174,7 @@ def dispatch_l1_analysis_step(
 
     try:
         from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.task_tracking_manager import get_task_manager
         from app.workflows.analyze_l1 import analyze_l1_workflow
 
         wf_id = str(_uuid.uuid4())
@@ -226,7 +226,7 @@ def update_parse_tracking_step(
     this update the parse task stays without a media_id and the result
     card never appears (legacy parse_tasks.py used to do the same write
     via `manager._atomic_update`)."""
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.task_tracking_manager import get_task_manager
 
     async def _do() -> None:
         try:

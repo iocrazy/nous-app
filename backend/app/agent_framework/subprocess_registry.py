@@ -33,7 +33,7 @@ Usage at spawn site:
         unregister_subprocess(workflow_id, proc.pid)
 
 Usage at cancel site (typically inside DBOS cancel hook or
-unified_task_manager.cancel):
+task_tracking_manager.cancel):
 
     from app.agent_framework.subprocess_registry import (
         cancel_workflow_subprocesses

@@ -201,7 +201,7 @@ async def trigger_analysis(
         # Pre-create task_tracking row with title (trigger handles lifecycle).
         import uuid as _uuid
 
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.task_tracking_manager import get_task_manager
 
         wf_id = str(_uuid.uuid4())
         try:
@@ -281,7 +281,7 @@ async def trigger_batch_analysis(
 
     import uuid as _uuid
 
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.task_tracking_manager import get_task_manager
 
     media_repo = AnalysisRepository()
     mgr = get_task_manager()

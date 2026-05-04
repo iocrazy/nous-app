@@ -11,7 +11,7 @@ from loguru import logger
 
 
 class UnifiedProgressTracker:
-    """Progress tracker that writes to Redis (real-time) + UnifiedTaskManager (Supabase lifecycle).
+    """Progress tracker that writes to Redis (real-time) + TaskTrackingManager (Supabase lifecycle).
 
     Real-time progress is published via Redis pub/sub to channel
     ``task_progress:{user_id}`` so the WebSocket endpoint can push it

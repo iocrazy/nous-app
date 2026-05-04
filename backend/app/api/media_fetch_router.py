@@ -334,7 +334,7 @@ async def extract_audio(
 
         video_title = media.get("title", platform_id)[:30]
 
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.task_tracking_manager import get_task_manager
 
         tracker = get_task_manager()
         unified_task_id = None

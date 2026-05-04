@@ -1,6 +1,6 @@
 """download DBOS workflow — port of `download_tasks.download_unified_task`.
 
-The legacy file is 484 LOC; about 60% is unified_task_manager
+The legacy file is 484 LOC; about 60% is task_tracking_manager
 lifecycle glue + Celery retry boilerplate that DBOS handles natively.
 The actual download work delegates to:
     - download_strategies._do_douyin_download (no url; reads URLs from DB)

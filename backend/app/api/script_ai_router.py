@@ -14,7 +14,7 @@ from app.schemas.script import (
 )
 from app.services.script_ai_service import ScriptAIService
 from app.services.script_service import ScriptService
-from app.services.unified_task_manager import get_task_manager
+from app.services.task_tracking_manager import get_task_manager
 
 router = APIRouter(prefix="/scripts")
 

@@ -129,7 +129,7 @@ async def upload_resource(
     file: UploadFile = File(...),
 ):
     """Upload a file to the resource library."""
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.task_tracking_manager import get_task_manager
 
     tracker = get_task_manager()
     unified_task_id = None

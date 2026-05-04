@@ -151,7 +151,7 @@ async def dedup_and_dispatch(
     """Per-type Orchestrator dedup check + DBOS workflow dispatch.
     PR-D7 phase 3: was Celery .delay()."""
     from app.services.dbos_orchestrator import start_workflow_routed
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.task_tracking_manager import get_task_manager
     from app.workflows.download import download_workflow
 
     is_image_type = int(media_type) in (2, 68)
@@ -413,7 +413,7 @@ async def handle_media_fetch_dispatch(
     PR-D7 phase 3: was Celery `parse_media_task.delay`. Now dispatches
     `parse_workflow` via DBOS."""
     from app.services.dbos_orchestrator import start_workflow_routed
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.task_tracking_manager import get_task_manager
     from app.workflows.parse import parse_workflow
 
     mgr = get_task_manager()

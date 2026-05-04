@@ -76,7 +76,7 @@ b. **Backend** — leave `app/celery_app.py` import-clean (already done
    - `app/celery_app.py` itself (will need to find/replace remaining
      `from app.celery_app import celery_app` callers — there are still
      ~20 of these in the legacy task files).
-   - `app/tasks/signals.py` — the Celery → unified_task_manager bridge.
+   - `app/tasks/signals.py` — the Celery → task_tracking_manager bridge.
      Frontend should be on D4 SSE for any DBOS-routed task; legacy
      tasks no longer fire after step (3a).
    - `app/tasks/scheduled_tasks.py` — task functions only, no schedule

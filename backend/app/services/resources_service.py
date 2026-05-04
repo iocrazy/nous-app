@@ -830,7 +830,7 @@ class ResourcesService:
         except Exception as e:
             logger.warning(f"[Transcode] Gating check failed, proceeding: {e}")
 
-        # PR-D7 phase 3: legacy unified_task_manager.acquire_or_subscribe
+        # PR-D7 phase 3: legacy task_tracking_manager.acquire_or_subscribe
         # dedup is no longer needed — DBOS workflow_id memoization
         # provides equivalent dedup via the workflow_id derived from
         # version_id. Two simultaneous dispatches for the same version

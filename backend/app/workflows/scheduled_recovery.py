@@ -180,7 +180,7 @@ def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
 
     Becomes obsolete in D3d (DBOS workflow_id replaces this)."""
     from app.agent_framework import is_stuck
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.task_tracking_manager import get_task_manager
 
     async def _do() -> int:
         mgr = get_task_manager()

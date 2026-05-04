@@ -1,7 +1,7 @@
-# app/services/unified_task_manager.py
+# app/services/task_tracking_manager.py
 
 """
-UnifiedTaskManager — Single source of truth for task_tracking lifecycle.
+TaskTrackingManager — Single source of truth for task_tracking lifecycle.
 
 Merges the former TaskTracker (status/progress) and TaskOrchestrator
 (phase/dedup/subscribers) into one class.  ``phase`` is the canonical
@@ -131,10 +131,10 @@ _PHASE_TO_STATUS = {
 }
 
 
-# ─── UnifiedTaskManager ──────────────────────────────────────────────
+# ─── TaskTrackingManager ──────────────────────────────────────────────
 
 
-class UnifiedTaskManager:
+class TaskTrackingManager:
     """Unified task lifecycle manager with phase state machine, dedup, and subscriber fan-out."""
 
     THROTTLE_INTERVAL = 1.0  # seconds between progress writes
@@ -883,14 +883,14 @@ class UnifiedTaskManager:
 
 # ─── Singleton ────────────────────────────────────────────────────────
 
-_manager: Optional[UnifiedTaskManager] = None
+_manager: Optional[TaskTrackingManager] = None
 
 
-def get_task_manager() -> UnifiedTaskManager:
-    """Get the module-level UnifiedTaskManager singleton."""
+def get_task_manager() -> TaskTrackingManager:
+    """Get the module-level TaskTrackingManager singleton."""
     global _manager
     if _manager is None:
-        _manager = UnifiedTaskManager()
+        _manager = TaskTrackingManager()
     return _manager
 
 

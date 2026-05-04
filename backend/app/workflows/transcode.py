@@ -1,6 +1,6 @@
 """transcode DBOS workflow — port of `transcode_tasks.transcode_to_hls`.
 
-The legacy file is 427 LOC but most of it is unified_task_manager
+The legacy file is 427 LOC but most of it is task_tracking_manager
 lifecycle glue + Celery retry boilerplate that DBOS handles natively:
     - workflow_id memoization replaces the orchestrator dedup lock
       (`acquire_or_subscribe` / `_dedup_key` plumbing)

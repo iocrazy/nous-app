@@ -26,7 +26,7 @@ from app.schemas.storyboard import (
 )
 from app.services.dbos_orchestrator import start_workflow_routed
 from app.services.storyboard_service import StoryboardService
-from app.services.unified_task_manager import get_task_manager
+from app.services.task_tracking_manager import get_task_manager
 from app.workflows.storyboard import (
     storyboard_image_workflow,
     storyboard_script_split_workflow,
