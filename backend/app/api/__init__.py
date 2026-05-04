@@ -17,6 +17,7 @@ from app.api.api_key_router import router as api_key_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.error_report_router import router as error_report_router
+from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.invites_router import router as invites_router
 from app.api.libraries_router import router as libraries_router
@@ -120,6 +121,10 @@ api_router.include_router(router=libraries_router, tags=["Libraries"])
 api_router.include_router(router=reviews_router, tags=["Reviews"])
 
 api_router.include_router(router=task_manager_router, tags=["Task Manager"])
+
+# A3: Task Flows — group child tasks (parse → download → transcribe →
+# summary) under one user-visible flow with cascade cancel.
+api_router.include_router(router=flows_router)
 
 api_router.include_router(router=teams_router, tags=["Teams"])
 
