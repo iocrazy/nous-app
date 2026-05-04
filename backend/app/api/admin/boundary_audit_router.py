@@ -52,7 +52,7 @@ async def list_boundary_audit(
             "offset": offset,
         }
     except Exception as e:
-        logger.error(f"[admin/boundary-audit] list failed: {e}")
+        logger.exception(f"[admin/boundary-audit] list failed: {e}")
         return {"items": [], "total": 0, "limit": limit, "offset": offset, "error": str(e)}
 
 
@@ -81,7 +81,7 @@ async def boundary_audit_summary(admin: AdminAuthDep) -> dict[str, Any]:
         )
         rows = result.data or []
     except Exception as e:
-        logger.error(f"[admin/boundary-audit] summary failed: {e}")
+        logger.exception(f"[admin/boundary-audit] summary failed: {e}")
         return {"by_layer": {}, "by_reason": {}, "total_7d": 0, "error": str(e)}
 
     by_layer: dict[str, int] = {}

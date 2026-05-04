@@ -67,7 +67,7 @@ async def cancel_task(task_id: str, auth: AuthDep):
         await tracker.cancel(task_id, auth.user_id)
         return {"success": True}
     except Exception as e:
-        logger.error(f"Failed to cancel task {task_id}: {e}")
+        logger.exception(f"Failed to cancel task {task_id}: {e}")
         raise HTTPException(500, f"Failed to cancel task: {e}")
 
 

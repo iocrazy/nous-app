@@ -382,7 +382,7 @@ def log_download_outcome_step(
                     details={"error": (error or "unknown")[:200]},
                 )
         except Exception as e:
-            logger.warning(f"[download.log] {e}")
+            logger.opt(exception=True).warning(f"[download.log] {e}")
 
     asyncio.run(_do())
 

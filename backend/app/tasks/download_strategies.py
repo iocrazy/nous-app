@@ -455,7 +455,7 @@ def _do_ytdlp_download(
     try:
         validated_url = validate_url(url)
     except URLBlockedError as e:
-        logger.warning(f"[Download/Exec] yt-dlp URL blocked by boundary: {e}")
+        logger.opt(exception=True).warning(f"[Download/Exec] yt-dlp URL blocked by boundary: {e}")
         results["video"] = "failed"
         return results
 

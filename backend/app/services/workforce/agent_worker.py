@@ -233,7 +233,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             recorder.set_summaries(output_summary=assistant_content)
 
     except AgentPausedError as err:
-        logger.warning(f"[agent-worker] agent paused: {err}")
+        logger.opt(exception=True).warning(f"[agent-worker] agent paused: {err}")
         await workforce.update_task_status(
             task_id=task_id,
             lifecycle_status="failed",
@@ -358,7 +358,7 @@ async def _lookup_inbox_message(
         )
         return result.data if result and result.data else None
     except Exception as err:
-        logger.warning(f"[agent-worker] inbox lookup failed: {err}")
+        logger.opt(exception=True).warning(f"[agent-worker] inbox lookup failed: {err}")
         return None
 
 

@@ -235,7 +235,7 @@ async def build_agent_runner_stack(
     except Exception as exc:
         # MCP wiring failures are non-fatal — chat continues without MCP
         from loguru import logger as _logger
-        _logger.warning(f"[chat_wiring] MCP registry build skipped: {exc}")
+        _logger.opt(exception=True).warning(f"[chat_wiring] MCP registry build skipped: {exc}")
         mcp_registry = None
 
     # ── 5. AgentRunner ──────────────────────────────────────────────
@@ -375,7 +375,7 @@ async def _load_user_provider_config(user_id: UUID) -> dict[str, Any]:
         ai_settings = settings_json.get("ai_settings") or {}
         return ai_settings.get("ai_providers") or {}
     except Exception as err:
-        logger.warning(f"[wiring] user_settings lookup failed for {user_id}: {err}")
+        logger.opt(exception=True).warning(f"[wiring] user_settings lookup failed for {user_id}: {err}")
         return {}
 
 

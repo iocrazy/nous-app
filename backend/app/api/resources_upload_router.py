@@ -45,7 +45,7 @@ async def get_effective_permissions(
         )
         return {"success": True, "data": result}
     except Exception as e:
-        logger.error(f"Failed to get permissions: {e}")
+        logger.exception(f"Failed to get permissions: {e}")
         raise HTTPException(status_code=500, detail="Failed to get permissions")
 
 
@@ -71,7 +71,7 @@ async def check_duplicate(
             "existing": exact[0] if exact else None,
         }
     except Exception as e:
-        logger.error(f"Failed to check duplicate: {e}")
+        logger.exception(f"Failed to check duplicate: {e}")
         raise HTTPException(status_code=500, detail="Failed to check duplicate")
 
 
@@ -110,7 +110,7 @@ async def link_existing_resource(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to link existing resource: {e}")
+        logger.exception(f"Failed to link existing resource: {e}")
         raise HTTPException(status_code=500, detail="Failed to link existing resource")
 
 
@@ -150,7 +150,7 @@ async def upload_resource(
             )
             await tracker.start(unified_task_id)
         except Exception as e:
-            logger.warning(f"[TaskManager] Failed to track upload: {e}")
+            logger.opt(exception=True).warning(f"[TaskManager] Failed to track upload: {e}")
 
         svc = ResourcesService()
         result = await svc.upload_resource(
@@ -186,7 +186,7 @@ async def upload_resource(
                 if thumb_path:
                     result["thumbnail_path"] = thumb_path
             except Exception as e:
-                logger.warning(f"Thumbnail generation failed (non-fatal): {e}")
+                logger.opt(exception=True).warning(f"Thumbnail generation failed (non-fatal): {e}")
 
         return {"success": True, "data": result}
     except HTTPException:
@@ -197,7 +197,7 @@ async def upload_resource(
                 pass
         raise
     except Exception as e:
-        logger.error(f"Failed to upload resource: {e}")
+        logger.exception(f"Failed to upload resource: {e}")
         if unified_task_id:
             try:
                 await tracker.fail(unified_task_id, str(e)[:500])

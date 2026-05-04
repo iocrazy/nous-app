@@ -104,7 +104,7 @@ class PaymentService:
             return {"success": True, "data": order}
 
         except Exception as e:
-            logger.error(f"Failed to create order: {e}")
+            logger.exception(f"Failed to create order: {e}")
             return {"success": False, "error": str(e)}
 
     # ------------------------------------------------------------------ #
@@ -231,7 +231,7 @@ class PaymentService:
             }
 
         except Exception as e:
-            logger.error(f"Failed to handle callback for trade_no={trade_no}: {e}")
+            logger.exception(f"Failed to handle callback for trade_no={trade_no}: {e}")
             return {
                 "success": False,
                 "message": str(e),

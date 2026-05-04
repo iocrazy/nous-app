@@ -171,7 +171,7 @@ class YtdlpService:
         try:
             info = json.loads(stdout.decode("utf-8", errors="replace"))
         except json.JSONDecodeError as e:
-            logger.error(f"[yt-dlp] Failed to parse JSON output: {e}")
+            logger.exception(f"[yt-dlp] Failed to parse JSON output: {e}")
             raise RuntimeError(f"yt-dlp returned invalid JSON: {e}")
 
         logger.success(f"[yt-dlp] Metadata fetched: {info.get('title', 'unknown')}")
@@ -517,7 +517,7 @@ class YtdlpService:
                 if data.get("code") == 0:
                     return data.get("data", {})
         except Exception as e:
-            logger.warning(f"[yt-dlp] Failed to fetch Bilibili stats for {bvid}: {e}")
+            logger.opt(exception=True).warning(f"[yt-dlp] Failed to fetch Bilibili stats for {bvid}: {e}")
         return None
 
     @staticmethod

@@ -42,7 +42,7 @@ class PermissionRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get access override: {e}")
+            logger.exception(f"Failed to get access override: {e}")
             return None
 
     async def get_folder_by_id(self, folder_id: str) -> Optional[Dict[str, Any]]:
@@ -58,7 +58,7 @@ class PermissionRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get folder {folder_id}: {e}")
+            logger.exception(f"Failed to get folder {folder_id}: {e}")
             return None
 
     async def get_library_by_id(self, library_id: str) -> Optional[Dict[str, Any]]:
@@ -81,7 +81,7 @@ class PermissionRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get library {library_id}: {e}")
+            logger.exception(f"Failed to get library {library_id}: {e}")
             return None
 
     async def get_team_member_role(self, user_id: str, team_id: str) -> Optional[str]:
@@ -100,7 +100,7 @@ class PermissionRepository:
                 return result.data[0]["role"]
             return None
         except Exception as e:
-            logger.error(f"Failed to get team role for user {user_id}: {e}")
+            logger.exception(f"Failed to get team role for user {user_id}: {e}")
             return None
 
     async def get_resource_item_scope(
@@ -118,5 +118,5 @@ class PermissionRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get resource scope for {resource_id}: {e}")
+            logger.exception(f"Failed to get resource scope for {resource_id}: {e}")
             return None

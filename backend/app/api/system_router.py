@@ -78,7 +78,7 @@ async def get_system_status(auth: AuthDep):
         )
 
     except Exception as e:
-        logger.error(f"Failed to get system status: {e}")
+        logger.exception(f"Failed to get system status: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to get system status: {str(e)}"
         )
@@ -222,7 +222,7 @@ async def get_backend_health(auth: AdminAuthDep):
         checks.append(await _check_dbos_engine())
         checks.append(await _check_redis())
     except Exception as e:
-        logger.error(f"Health check assembly failed: {e}")
+        logger.exception(f"Health check assembly failed: {e}")
         checks.append(
             HealthCheck(name="Health probe", status="down", detail=str(e)[:140])
         )

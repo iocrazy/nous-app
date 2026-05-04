@@ -81,7 +81,7 @@ async def get_user_settings(auth: AuthDep):
         )
 
     except Exception as e:
-        logger.error(f"获取用户设置失败: {e}")
+        logger.exception(f"获取用户设置失败: {e}")
         raise HTTPException(status_code=500, detail="获取用户设置失败")
 
 
@@ -129,7 +129,7 @@ async def update_user_settings(request: UserSettingsRequest, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新用户设置失败: {e}")
+        logger.exception(f"更新用户设置失败: {e}")
         raise HTTPException(status_code=500, detail="更新用户设置失败")
 
 
@@ -154,7 +154,7 @@ async def delete_user_settings(auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"删除用户设置失败: {e}")
+        logger.exception(f"删除用户设置失败: {e}")
         raise HTTPException(status_code=500, detail="删除用户设置失败")
 
 
@@ -205,7 +205,7 @@ async def get_parse_mode(auth: AuthDep):
         )
 
     except Exception as e:
-        logger.error(f"获取解析模式失败: {e}")
+        logger.exception(f"获取解析模式失败: {e}")
         raise HTTPException(status_code=500, detail="获取解析模式失败")
 
 
@@ -255,7 +255,7 @@ async def set_parse_mode(request: ParseModeRequest, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"设置解析模式失败: {e}")
+        logger.exception(f"设置解析模式失败: {e}")
         raise HTTPException(status_code=500, detail="设置解析模式失败")
 
 
@@ -333,7 +333,7 @@ async def list_cookies(auth: AuthDep):
         return CookieListResponse(cookies=items)
 
     except Exception as e:
-        logger.error(f"获取 Cookie 列表失败: {e}")
+        logger.exception(f"获取 Cookie 列表失败: {e}")
         raise HTTPException(status_code=500, detail="获取 Cookie 列表失败")
 
 
@@ -379,7 +379,7 @@ async def set_cookie(platform: str, request: CookieUpsertRequest, auth: AuthDep)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"保存 Cookie 失败: platform={platform}, error={e}")
+        logger.exception(f"保存 Cookie 失败: platform={platform}, error={e}")
         raise HTTPException(status_code=500, detail="保存 Cookie 失败")
 
 
@@ -409,7 +409,7 @@ async def delete_cookie(platform: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"删除 Cookie 失败: platform={platform}, error={e}")
+        logger.exception(f"删除 Cookie 失败: platform={platform}, error={e}")
         raise HTTPException(status_code=500, detail="删除 Cookie 失败")
 
 
@@ -435,7 +435,7 @@ async def get_headers(platform: str, auth: AuthDep):
             "headers_text": row.get("custom_headers", "") if row else "",
         }
     except Exception as e:
-        logger.error(f"获取 Headers 失败: {e}")
+        logger.exception(f"获取 Headers 失败: {e}")
         raise HTTPException(status_code=500, detail="Failed to get headers")
 
 
@@ -451,5 +451,5 @@ async def set_headers(platform: str, request: HeadersUpsertRequest, auth: AuthDe
         )
         return {"success": True, "platform": platform}
     except Exception as e:
-        logger.error(f"保存 Headers 失败: {e}")
+        logger.exception(f"保存 Headers 失败: {e}")
         raise HTTPException(status_code=500, detail="Failed to save headers")

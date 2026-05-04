@@ -73,7 +73,7 @@ async def create_comment(body: CreateCommentRequest, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to create comment: {e}")
+        logger.exception(f"Failed to create comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to create comment")
 
 
@@ -94,7 +94,7 @@ async def list_comments(
         )
         return {"success": True, "data": comments}
     except Exception as e:
-        logger.error(f"Failed to list comments: {e}")
+        logger.exception(f"Failed to list comments: {e}")
         raise HTTPException(status_code=500, detail="Failed to list comments")
 
 
@@ -110,7 +110,7 @@ async def get_comment(comment_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get comment: {e}")
+        logger.exception(f"Failed to get comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to get comment")
 
 
@@ -131,7 +131,7 @@ async def update_comment(comment_id: str, body: UpdateCommentRequest, auth: Auth
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update comment: {e}")
+        logger.exception(f"Failed to update comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to update comment")
 
 
@@ -145,7 +145,7 @@ async def resolve_comment(comment_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to resolve comment: {e}")
+        logger.exception(f"Failed to resolve comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to resolve comment")
 
 
@@ -159,7 +159,7 @@ async def reopen_comment(comment_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to reopen comment: {e}")
+        logger.exception(f"Failed to reopen comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to reopen comment")
 
 
@@ -175,7 +175,7 @@ async def delete_comment(comment_id: str, auth: AuthDep):
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to delete comment: {e}")
+        logger.exception(f"Failed to delete comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete comment")
 
 
@@ -191,7 +191,7 @@ async def get_comment_count(
         count = await svc.get_comment_count(resource_id, version_id)
         return {"success": True, "data": {"count": count}}
     except Exception as e:
-        logger.error(f"Failed to get comment count: {e}")
+        logger.exception(f"Failed to get comment count: {e}")
         raise HTTPException(status_code=500, detail="Failed to get comment count")
 
 
@@ -214,7 +214,7 @@ async def set_review_status(body: SetReviewStatusRequest, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to set review status: {e}")
+        logger.exception(f"Failed to set review status: {e}")
         raise HTTPException(status_code=500, detail="Failed to set review status")
 
 
@@ -230,5 +230,5 @@ async def get_review_statuses(
         statuses = await svc.get_review_statuses(resource_id, version_id)
         return {"success": True, "data": statuses}
     except Exception as e:
-        logger.error(f"Failed to get review statuses: {e}")
+        logger.exception(f"Failed to get review statuses: {e}")
         raise HTTPException(status_code=500, detail="Failed to get review statuses")

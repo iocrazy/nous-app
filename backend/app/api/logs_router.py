@@ -175,7 +175,7 @@ async def get_logs(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get logs: {e}")
+        logger.exception(f"Failed to get logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve logs")
 
 
@@ -270,5 +270,5 @@ async def export_logs(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to export logs: {e}")
+        logger.exception(f"Failed to export logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to export logs")

@@ -271,7 +271,7 @@ async def list_resources(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to list resources: {e}")
+        logger.exception(f"Failed to list resources: {e}")
         raise HTTPException(status_code=500, detail="Failed to list resources")
 
 
@@ -287,7 +287,7 @@ async def list_trashed_resources(
         items = await repo.get_trashed_resources(scope_type, scope_id)
         return {"success": True, "data": items}
     except Exception as e:
-        logger.error(f"Failed to list trashed resources: {e}")
+        logger.exception(f"Failed to list trashed resources: {e}")
         raise HTTPException(status_code=500, detail="Failed to list trashed resources")
 
 
@@ -303,7 +303,7 @@ async def list_trashed_folders(
         folders = await repo.get_trashed_folders(scope_type, scope_id)
         return {"success": True, "data": folders}
     except Exception as e:
-        logger.error(f"Failed to list trashed folders: {e}")
+        logger.exception(f"Failed to list trashed folders: {e}")
         raise HTTPException(status_code=500, detail="Failed to list trashed folders")
 
 
@@ -340,7 +340,7 @@ async def batch_transcode(auth: AuthDep):
         logger.info(f"[Transcode/Batch] Queued {queued}/{len(versions)} versions")
         return {"success": True, "queued": queued, "total_found": len(versions)}
     except Exception as e:
-        logger.error(f"Failed to batch transcode: {e}")
+        logger.exception(f"Failed to batch transcode: {e}")
         raise HTTPException(status_code=500, detail="Failed to batch transcode")
 
 
@@ -362,7 +362,7 @@ async def get_resource(resource_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get resource {resource_id}: {e}")
+        logger.exception(f"Failed to get resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get resource")
 
 
@@ -455,7 +455,7 @@ async def serve_resource_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve file for resource {resource_id}: {e}")
+        logger.exception(f"Failed to serve file for resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve file")
 
 
@@ -547,7 +547,7 @@ async def serve_resource_cover(resource_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve cover for resource {resource_id}: {e}")
+        logger.exception(f"Failed to serve cover for resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve cover image")
 
 
@@ -579,7 +579,7 @@ async def serve_preview_sprite(resource_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve sprite for resource {resource_id}: {e}")
+        logger.exception(f"Failed to serve sprite for resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve preview sprite")
 
 
@@ -607,7 +607,7 @@ async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update resource {resource_id}: {e}")
+        logger.exception(f"Failed to update resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update resource")
 
 
@@ -660,7 +660,7 @@ async def trash_resource_by_platform_id(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to trash resource by platform_id {platform_id}: {e}")
+        logger.exception(f"Failed to trash resource by platform_id {platform_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to trash resource")
 
 
@@ -709,7 +709,7 @@ async def trash_resource_by_media_id(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to trash resource by media_id {media_id}: {e}")
+        logger.exception(f"Failed to trash resource by media_id {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to trash resource")
 
 
@@ -758,7 +758,7 @@ async def unlink_resource_by_platform_id(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to unlink resource by platform_id {platform_id}: {e}")
+        logger.exception(f"Failed to unlink resource by platform_id {platform_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to unlink resource")
 
 
@@ -788,7 +788,7 @@ async def delete_resource(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to remove resource {resource_id}: {e}")
+        logger.exception(f"Failed to remove resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to remove resource")
 
 
@@ -804,7 +804,7 @@ async def restore_resource(resource_id: str, auth: AuthDep):
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to restore resource {resource_id}: {e}")
+        logger.exception(f"Failed to restore resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to restore resource")
 
 
@@ -820,7 +820,7 @@ async def permanent_delete_resource(resource_id: str, auth: AuthDep):
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to permanently delete resource {resource_id}: {e}")
+        logger.exception(f"Failed to permanently delete resource {resource_id}: {e}")
         raise HTTPException(
             status_code=500, detail="Failed to permanently delete resource"
         )
@@ -847,7 +847,7 @@ async def move_resource(resource_id: str, data: ResourceMoveRequest, auth: AuthD
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to move resource {resource_id}: {e}")
+        logger.exception(f"Failed to move resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to move resource")
 
 
@@ -864,7 +864,7 @@ async def list_resource_tags(resource_id: str, auth: AuthDep):
         tags = await repo.get_resource_tags(resource_id)
         return {"success": True, "data": tags}
     except Exception as e:
-        logger.error(f"Failed to list tags for resource {resource_id}: {e}")
+        logger.exception(f"Failed to list tags for resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list resource tags")
 
 
@@ -886,7 +886,7 @@ async def add_resource_tag(resource_id: str, data: ResourceTagRequest, auth: Aut
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to add tag to resource {resource_id}: {e}")
+        logger.exception(f"Failed to add tag to resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to add tag")
 
 
@@ -898,5 +898,5 @@ async def remove_resource_tag(resource_id: str, tag_id: str, auth: AuthDep):
         await repo.remove_resource_tag(resource_id, tag_id)
         return {"success": True, "message": "Tag removed"}
     except Exception as e:
-        logger.error(f"Failed to remove tag {tag_id} from resource {resource_id}: {e}")
+        logger.exception(f"Failed to remove tag {tag_id} from resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to remove tag")

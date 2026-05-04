@@ -48,7 +48,7 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
         )
         return {"success": True, "data": folder}
     except Exception as e:
-        logger.error(f"Failed to create smart folder: {e}")
+        logger.exception(f"Failed to create smart folder: {e}")
         raise HTTPException(status_code=500, detail="Failed to create smart folder")
 
 
@@ -64,7 +64,7 @@ async def list_smart_folders(
         folders = await repo.get_smart_folders(scope_type, scope_id)
         return {"success": True, "data": folders}
     except Exception as e:
-        logger.error(f"Failed to list smart folders: {e}")
+        logger.exception(f"Failed to list smart folders: {e}")
         raise HTTPException(status_code=500, detail="Failed to list smart folders")
 
 
@@ -89,7 +89,7 @@ async def update_smart_folder(folder_id: str, data: SmartFolderUpdate, auth: Aut
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update smart folder {folder_id}: {e}")
+        logger.exception(f"Failed to update smart folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update smart folder")
 
 
@@ -109,7 +109,7 @@ async def delete_smart_folder(folder_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete smart folder {folder_id}: {e}")
+        logger.exception(f"Failed to delete smart folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete smart folder")
 
 
@@ -138,7 +138,7 @@ async def smart_folder_results(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to execute smart folder {folder_id}: {e}")
+        logger.exception(f"Failed to execute smart folder {folder_id}: {e}")
         raise HTTPException(
             status_code=500, detail="Failed to execute smart folder rules"
         )
@@ -161,7 +161,7 @@ async def list_folders(
         folders = await repo.get_folders(scope_type, scope_id)
         return {"success": True, "data": folders}
     except Exception as e:
-        logger.error(f"Failed to list folders: {e}")
+        logger.exception(f"Failed to list folders: {e}")
         raise HTTPException(status_code=500, detail="Failed to list folders")
 
 
@@ -183,7 +183,7 @@ async def create_folder(data: FolderCreate, auth: AuthDep):
         )
         return {"success": True, "data": folder}
     except Exception as e:
-        logger.error(f"Failed to create folder: {e}")
+        logger.exception(f"Failed to create folder: {e}")
         raise HTTPException(status_code=500, detail="Failed to create folder")
 
 
@@ -208,7 +208,7 @@ async def update_folder(folder_id: str, data: FolderUpdate, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update folder {folder_id}: {e}")
+        logger.exception(f"Failed to update folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update folder")
 
 
@@ -228,7 +228,7 @@ async def get_folder_content_count(folder_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to count folder contents {folder_id}: {e}")
+        logger.exception(f"Failed to count folder contents {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to count folder contents")
 
 
@@ -246,7 +246,7 @@ async def trash_folder_cascade(folder_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to trash folder cascade {folder_id}: {e}")
+        logger.exception(f"Failed to trash folder cascade {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to trash folder")
 
 
@@ -264,7 +264,7 @@ async def restore_folder_cascade(folder_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to restore folder cascade {folder_id}: {e}")
+        logger.exception(f"Failed to restore folder cascade {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to restore folder")
 
 
@@ -287,5 +287,5 @@ async def delete_folder(folder_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete folder {folder_id}: {e}")
+        logger.exception(f"Failed to delete folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete folder")

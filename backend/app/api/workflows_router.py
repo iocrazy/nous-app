@@ -203,7 +203,7 @@ async def cancel_workflow(
     try:
         await DBOS.cancel_workflow_async(workflow_id)
     except Exception as e:
-        logger.warning(f"[workflows] cancel({workflow_id}): {e}")
+        logger.opt(exception=True).warning(f"[workflows] cancel({workflow_id}): {e}")
         raise HTTPException(400, detail=str(e))
     return {"status": "cancel_requested", "workflow_id": workflow_id}
 
@@ -221,7 +221,7 @@ async def resume_workflow(
     try:
         await DBOS.resume_workflow_async(workflow_id)
     except Exception as e:
-        logger.warning(f"[workflows] resume({workflow_id}): {e}")
+        logger.opt(exception=True).warning(f"[workflows] resume({workflow_id}): {e}")
         raise HTTPException(400, detail=str(e))
     return {"status": "resumed", "workflow_id": workflow_id}
 
@@ -247,7 +247,7 @@ async def restart_workflow(
         # let user pick the step.
         new_handle = await DBOS.fork_workflow_async(workflow_id, start_step=1)
     except Exception as e:
-        logger.warning(f"[workflows] restart({workflow_id}): {e}")
+        logger.opt(exception=True).warning(f"[workflows] restart({workflow_id}): {e}")
         raise HTTPException(400, detail=str(e))
     return {
         "status": "restarted",
@@ -293,7 +293,7 @@ async def list_workflows(
             load_output=False,  # output can be large; fetch via /status
         )
     except Exception as e:
-        logger.warning(f"[workflows] list({auth.user_id[:8]}): {e}")
+        logger.opt(exception=True).warning(f"[workflows] list({auth.user_id[:8]}): {e}")
         raise HTTPException(500, detail=str(e))
 
     return {

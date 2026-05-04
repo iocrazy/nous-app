@@ -243,4 +243,4 @@ async def _write_log(
             }
         ).execute()
     except Exception as e:
-        logger.warning(f"Failed to write request log: {e}")
+        logger.opt(exception=True).warning(f"Failed to write request log: {e}")

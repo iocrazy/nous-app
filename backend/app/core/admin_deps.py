@@ -20,7 +20,7 @@ async def get_admin_auth(
     try:
         supabase = await get_async_supabase_admin()
     except Exception as e:
-        logger.error(f"[AdminAuth] Failed to get Supabase admin client: {e}")
+        logger.exception(f"[AdminAuth] Failed to get Supabase admin client: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Admin service unavailable: {type(e).__name__}",

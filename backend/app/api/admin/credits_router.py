@@ -626,7 +626,7 @@ async def batch_gift(
             )
             gifted_count += 1
         except Exception as e:
-            logger.warning(f"[Admin] Batch gift failed for team {tid}: {e}")
+            logger.opt(exception=True).warning(f"[Admin] Batch gift failed for team {tid}: {e}")
             errors.append({"team_id": tid, "error": str(e)})
 
     await create_audit_log(

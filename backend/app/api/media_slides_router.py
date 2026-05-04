@@ -84,7 +84,7 @@ async def list_slides(media_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to list slides for media {media_id}: {e}")
+        logger.exception(f"Failed to list slides for media {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list slides")
 
 
@@ -131,7 +131,7 @@ async def serve_slide_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve slide {filename} for media {media_id}: {e}")
+        logger.exception(f"Failed to serve slide {filename} for media {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve slide file")
 
 
@@ -179,5 +179,5 @@ async def serve_audio_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve audio for media {media_id}: {e}")
+        logger.exception(f"Failed to serve audio for media {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve audio file")

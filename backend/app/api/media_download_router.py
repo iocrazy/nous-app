@@ -45,7 +45,7 @@ async def get_pending_downloads(auth: AuthDep, limit: int = Query(100, ge=1, le=
         )
         return {"success": True, "count": len(videos), "videos": videos}
     except Exception as e:
-        logger.error(f"Failed to get pending downloads list: {e}")
+        logger.exception(f"Failed to get pending downloads list: {e}")
         raise HTTPException(
             status_code=500, detail="Failed to get pending downloads list"
         )
@@ -140,7 +140,7 @@ async def retry_download(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to retry download: {e}")
+        logger.exception(f"Failed to retry download: {e}")
         raise HTTPException(status_code=500, detail="Failed to retry download")
 
 
@@ -186,7 +186,7 @@ async def download_video_file(platform_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to download video file: {e}")
+        logger.exception(f"Failed to download video file: {e}")
         raise HTTPException(status_code=500, detail="Failed to download video file")
 
 
@@ -232,7 +232,7 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to download cover file: {e}")
+        logger.exception(f"Failed to download cover file: {e}")
         raise HTTPException(status_code=500, detail="Failed to download cover file")
 
 
@@ -342,7 +342,7 @@ async def download_music_file(platform_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to download music file: {e}")
+        logger.exception(f"Failed to download music file: {e}")
         raise HTTPException(status_code=500, detail="Failed to download music file")
 
 
@@ -443,5 +443,5 @@ async def download_gallery_zip(platform_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to zip gallery for {platform_id}: {e}")
+        logger.exception(f"Failed to zip gallery for {platform_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to package gallery")

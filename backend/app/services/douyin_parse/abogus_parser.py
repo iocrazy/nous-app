@@ -133,7 +133,7 @@ class ABogusDouyinParser:
 
             return await cls._fetch_detail(signed_url, ua, cookie, extra_headers)
         except Exception as err:
-            logger.error(f"[ABogus] parse failed (engine={eng}): {err}")
+            logger.exception(f"[ABogus] parse failed (engine={eng}): {err}")
             return None
 
     # ───────────────── internals ─────────────────
@@ -155,7 +155,7 @@ class ABogusDouyinParser:
                 tail = final_url.split("?")[0].rstrip("/").split("/")[-1]
                 return tail if tail.isdigit() else None
         except Exception as err:
-            logger.error(f"[ABogus] resolve_aweme_id failed: {err}")
+            logger.exception(f"[ABogus] resolve_aweme_id failed: {err}")
             return None
 
     @classmethod

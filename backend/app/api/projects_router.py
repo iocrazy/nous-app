@@ -71,7 +71,7 @@ async def list_projects(
 
         return {"success": True, "data": projects}
     except Exception as e:
-        logger.error(f"Failed to list projects: {e}")
+        logger.exception(f"Failed to list projects: {e}")
         raise HTTPException(status_code=500, detail="Failed to list projects")
 
 
@@ -86,7 +86,7 @@ async def create_project(data: ProjectCreate, auth: AuthDep):
         )
         return {"success": True, "data": project}
     except Exception as e:
-        logger.error(f"Failed to create project: {e}")
+        logger.exception(f"Failed to create project: {e}")
         raise HTTPException(status_code=500, detail="Failed to create project")
 
 
@@ -100,7 +100,7 @@ async def get_project(project_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to get project {project_id}: {e}")
+        logger.exception(f"Failed to get project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get project")
 
 
@@ -120,7 +120,7 @@ async def update_project(project_id: str, data: ProjectUpdate, auth: AuthDep):
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to update project {project_id}: {e}")
+        logger.exception(f"Failed to update project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update project")
 
 
@@ -136,7 +136,7 @@ async def delete_project(project_id: str, auth: AuthDep):
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to delete project {project_id}: {e}")
+        logger.exception(f"Failed to delete project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete project")
 
 
@@ -160,7 +160,7 @@ async def list_files(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to list files for project {project_id}: {e}")
+        logger.exception(f"Failed to list files for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list files")
 
 
@@ -195,7 +195,7 @@ async def upload_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to upload file to project {project_id}: {e}")
+        logger.exception(f"Failed to upload file to project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload file")
 
 
@@ -213,7 +213,7 @@ async def link_media(project_id: str, data: LinkMediaRequest, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to link media to project {project_id}: {e}")
+        logger.exception(f"Failed to link media to project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to link media")
 
 
@@ -227,7 +227,7 @@ async def get_file_info(project_id: str, file_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to get file {file_id}: {e}")
+        logger.exception(f"Failed to get file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get file info")
 
 
@@ -245,7 +245,7 @@ async def update_file(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to update file {file_id}: {e}")
+        logger.exception(f"Failed to update file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update file")
 
 
@@ -259,7 +259,7 @@ async def restore_file(project_id: str, file_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to restore file {file_id}: {e}")
+        logger.exception(f"Failed to restore file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to restore file")
 
 
@@ -271,7 +271,7 @@ async def list_project_shares(project_id: str, auth: AuthDep):
         shares = await svc.list_shares(project_id)
         return {"success": True, "data": shares}
     except Exception as e:
-        logger.error(f"Failed to list shares for project {project_id}: {e}")
+        logger.exception(f"Failed to list shares for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list project shares")
 
 
@@ -287,7 +287,7 @@ async def create_share(project_id: str, data: CreateShareRequest, auth: AuthDep)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to create share for project {project_id}: {e}")
+        logger.exception(f"Failed to create share for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create share")
 
 
@@ -310,7 +310,7 @@ async def list_folders(
         folders = await svc.list_folders(project_id, parent_id)
         return {"success": True, "data": folders}
     except Exception as e:
-        logger.error(f"Failed to list folders for project {project_id}: {e}")
+        logger.exception(f"Failed to list folders for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list folders")
 
 
@@ -324,7 +324,7 @@ async def create_folder(project_id: str, data: CreateFolderRequest, auth: AuthDe
         )
         return {"success": True, "data": folder}
     except Exception as e:
-        logger.error(f"Failed to create folder in project {project_id}: {e}")
+        logger.exception(f"Failed to create folder in project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create folder")
 
 
@@ -340,7 +340,7 @@ async def rename_folder(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to rename folder {folder_id}: {e}")
+        logger.exception(f"Failed to rename folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to rename folder")
 
 
@@ -354,7 +354,7 @@ async def delete_folder(project_id: str, folder_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to delete folder {folder_id}: {e}")
+        logger.exception(f"Failed to delete folder {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete folder")
 
 
@@ -370,7 +370,7 @@ async def move_file(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to move file {file_id}: {e}")
+        logger.exception(f"Failed to move file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to move file")
 
 
@@ -384,7 +384,7 @@ async def delete_file(project_id: str, file_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to delete file {file_id}: {e}")
+        logger.exception(f"Failed to delete file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete file")
 
 
@@ -403,7 +403,7 @@ async def list_versions(project_id: str, file_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to list versions for file {file_id}: {e}")
+        logger.exception(f"Failed to list versions for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list versions")
 
 
@@ -435,7 +435,7 @@ async def upload_version(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to upload version for file {file_id}: {e}")
+        logger.exception(f"Failed to upload version for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload version")
 
 
@@ -459,7 +459,7 @@ async def list_comments(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to list comments for file {file_id}: {e}")
+        logger.exception(f"Failed to list comments for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list comments")
 
 
@@ -486,7 +486,7 @@ async def add_comment(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to add comment to file {file_id}: {e}")
+        logger.exception(f"Failed to add comment to file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to add comment")
 
 
@@ -502,7 +502,7 @@ async def delete_comment(project_id: str, file_id: str, comment_id: str, auth: A
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to delete comment {comment_id}: {e}")
+        logger.exception(f"Failed to delete comment {comment_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete comment")
 
 
@@ -528,7 +528,7 @@ async def update_review_status(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to update review status for file {file_id}: {e}")
+        logger.exception(f"Failed to update review status for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update review status")
 
 
@@ -545,7 +545,7 @@ async def list_tasks(project_id: str, auth: AuthDep):
         tasks = await svc.list_tasks(project_id)
         return {"success": True, "data": tasks}
     except Exception as e:
-        logger.error(f"Failed to list tasks for project {project_id}: {e}")
+        logger.exception(f"Failed to list tasks for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list tasks")
 
 
@@ -559,7 +559,7 @@ async def create_task(project_id: str, data: TaskCreateRequest, auth: AuthDep):
         )
         return {"success": True, "data": task}
     except Exception as e:
-        logger.error(f"Failed to create task in project {project_id}: {e}")
+        logger.exception(f"Failed to create task in project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create task")
 
 
@@ -578,7 +578,7 @@ async def update_task(
         status = 400 if "No fields" in str(e) else 404
         raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to update task {task_id}: {e}")
+        logger.exception(f"Failed to update task {task_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update task")
 
 
@@ -590,7 +590,7 @@ async def delete_task(project_id: str, task_id: str, auth: AuthDep):
         await svc.delete_task(project_id, task_id)
         return {"success": True, "message": "Task deleted"}
     except Exception as e:
-        logger.error(f"Failed to delete task {task_id}: {e}")
+        logger.exception(f"Failed to delete task {task_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete task")
 
 
@@ -607,7 +607,7 @@ async def list_members(project_id: str, auth: AuthDep):
         members = await svc.list_members(project_id)
         return {"success": True, "data": members}
     except Exception as e:
-        logger.error(f"Failed to list members for project {project_id}: {e}")
+        logger.exception(f"Failed to list members for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list members")
 
 
@@ -624,7 +624,7 @@ async def add_member(project_id: str, data: AddMemberRequest, auth: AuthDep):
             raise HTTPException(
                 status_code=409, detail="User is already a member of this project"
             )
-        logger.error(f"Failed to add member to project {project_id}: {e}")
+        logger.exception(f"Failed to add member to project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to add member")
 
 
@@ -640,7 +640,7 @@ async def update_member_role(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to update member {member_id}: {e}")
+        logger.exception(f"Failed to update member {member_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update member role")
 
 
@@ -652,7 +652,7 @@ async def remove_member(project_id: str, member_id: str, auth: AuthDep):
         await svc.remove_member(project_id, member_id)
         return {"success": True, "message": "Member removed"}
     except Exception as e:
-        logger.error(f"Failed to remove member {member_id}: {e}")
+        logger.exception(f"Failed to remove member {member_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to remove member")
 
 
@@ -669,7 +669,7 @@ async def list_collections(project_id: str, auth: AuthDep):
         collections = await svc.list_collections(project_id)
         return {"success": True, "data": collections}
     except Exception as e:
-        logger.error(f"Failed to list collections for project {project_id}: {e}")
+        logger.exception(f"Failed to list collections for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list collections")
 
 
@@ -685,7 +685,7 @@ async def create_collection(
         )
         return {"success": True, "data": collection}
     except Exception as e:
-        logger.error(f"Failed to create collection for project {project_id}: {e}")
+        logger.exception(f"Failed to create collection for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to create collection")
 
 
@@ -697,5 +697,5 @@ async def delete_collection(project_id: str, collection_id: str, auth: AuthDep):
         await svc.delete_collection(project_id, collection_id)
         return {"success": True, "message": "Collection deleted"}
     except Exception as e:
-        logger.error(f"Failed to delete collection {collection_id}: {e}")
+        logger.exception(f"Failed to delete collection {collection_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete collection")

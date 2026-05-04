@@ -217,5 +217,5 @@ class VolcengineASRService:
             return result
 
         except Exception as e:
-            logger.error(f"[VolcASR] Failed for resource {resource_id}: {e}")
+            logger.exception(f"[VolcASR] Failed for resource {resource_id}: {e}")
             raise

@@ -37,7 +37,7 @@ async def create_audit_log(
             }
         ).execute()
     except Exception as e:
-        logger.error(f"Failed to create audit log: {e}")
+        logger.exception(f"Failed to create audit log: {e}")
 
 
 # ============================================
@@ -54,7 +54,7 @@ async def get_user_email_by_id(user_id: str) -> Optional[str]:
             return response.user.email
         return None
     except Exception as e:
-        logger.warning(f"Failed to get user email for {user_id}: {e}")
+        logger.opt(exception=True).warning(f"Failed to get user email for {user_id}: {e}")
         return None
 
 
@@ -73,7 +73,7 @@ async def get_user_username_by_id(user_id: str) -> Optional[str]:
             return result.data.get("username")
         return None
     except Exception as e:
-        logger.warning(f"Failed to get username for {user_id}: {e}")
+        logger.opt(exception=True).warning(f"Failed to get username for {user_id}: {e}")
         return None
 
 
@@ -103,7 +103,7 @@ async def get_user_auth_info(user_id: str) -> tuple[Optional[str], Optional[str]
             return response.user.email, response.user.last_sign_in_at
         return None, None
     except Exception as e:
-        logger.warning(f"Failed to get auth info for user {user_id}: {e}")
+        logger.opt(exception=True).warning(f"Failed to get auth info for user {user_id}: {e}")
         return None, None
 
 
@@ -201,7 +201,7 @@ async def get_user_video_count(user_id: str) -> int:
         )
         return result.count or 0
     except Exception as e:
-        logger.warning(f"Failed to get video count for {user_id}: {e}")
+        logger.opt(exception=True).warning(f"Failed to get video count for {user_id}: {e}")
         return 0
 
 
@@ -217,7 +217,7 @@ async def get_user_team_count(user_id: str) -> int:
         )
         return result.count or 0
     except Exception as e:
-        logger.warning(f"Failed to get team count for {user_id}: {e}")
+        logger.opt(exception=True).warning(f"Failed to get team count for {user_id}: {e}")
         return 0
 
 
@@ -233,7 +233,7 @@ async def get_team_member_count(team_id: str) -> int:
         )
         return result.count or 0
     except Exception as e:
-        logger.warning(f"Failed to get member count for team {team_id}: {e}")
+        logger.opt(exception=True).warning(f"Failed to get member count for team {team_id}: {e}")
         return 0
 
 

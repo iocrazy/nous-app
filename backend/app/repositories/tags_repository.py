@@ -142,7 +142,7 @@ class TagsRepository:
                 if result and result.data and len(result.data) > 0:
                     return result.data[0]
         except Exception as e:
-            logger.error(f"Error in get_tag_by_name: {e}")
+            logger.exception(f"Error in get_tag_by_name: {e}")
 
         return None
 

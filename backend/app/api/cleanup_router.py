@@ -228,7 +228,7 @@ async def batch_cleanup_action(
                 results["failed"].append(media_id)
 
         except Exception as e:
-            logger.error(f"Batch action failed for media {media_id}: {e}")
+            logger.exception(f"Batch action failed for media {media_id}: {e}")
             results["failed"].append(media_id)
 
     return {

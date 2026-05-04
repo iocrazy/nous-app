@@ -291,7 +291,7 @@ class ResourcesService:
                     shutil.rmtree(version_dir)
                     logger.info(f"Deleted version directory: {version_dir}")
                 except Exception as e:
-                    logger.warning(f"Failed to delete version dir {version_dir}: {e}")
+                    logger.opt(exception=True).warning(f"Failed to delete version dir {version_dir}: {e}")
 
         await self.repo.delete_version(version_id)
 
@@ -360,7 +360,7 @@ class ResourcesService:
                             h.update(chunk)
                     file_hash = h.hexdigest()
                 except Exception as e:
-                    logger.warning(f"Failed to compute file hash for {abs_path}: {e}")
+                    logger.opt(exception=True).warning(f"Failed to compute file hash for {abs_path}: {e}")
 
         # Create new resource
         resource_data = {
@@ -599,7 +599,7 @@ class ResourcesService:
 
                 cleaned += 1
             except Exception as e:
-                logger.error(f"Failed to cleanup resource {resource['id']}: {e}")
+                logger.exception(f"Failed to cleanup resource {resource['id']}: {e}")
 
         if cleaned:
             logger.info(f"Cleaned up {cleaned} expired trashed resources")
@@ -633,13 +633,13 @@ class ResourcesService:
                     shutil.rmtree(target_dir)
                     logger.info(f"Deleted resource directory: {target_dir}")
                 except Exception as e:
-                    logger.warning(f"Failed to delete directory {target_dir}: {e}")
+                    logger.opt(exception=True).warning(f"Failed to delete directory {target_dir}: {e}")
             elif full_path.exists():
                 try:
                     full_path.unlink()
                     logger.info(f"Deleted file: {full_path}")
                 except Exception as e:
-                    logger.warning(f"Failed to delete file {full_path}: {e}")
+                    logger.opt(exception=True).warning(f"Failed to delete file {full_path}: {e}")
 
             # Prune empty ancestor directories up to base
             self._prune_empty_parents(target_dir or full_path, base)
@@ -652,7 +652,7 @@ class ResourcesService:
                     cover_full.unlink()
                     logger.info(f"Deleted cover: {cover_full}")
                 except Exception as e:
-                    logger.warning(f"Failed to delete cover {cover_full}: {e}")
+                    logger.opt(exception=True).warning(f"Failed to delete cover {cover_full}: {e}")
 
     @staticmethod
     def _find_resource_dir(file_path: Path, base: Path) -> Optional[Path]:
@@ -696,7 +696,7 @@ class ResourcesService:
             await client.table("parsed_media").delete().eq("id", media_id).execute()
             logger.info(f"Deleted media record: {media_id}")
         except Exception as e:
-            logger.warning(f"Failed to delete media record {media_id}: {e}")
+            logger.opt(exception=True).warning(f"Failed to delete media record {media_id}: {e}")
 
     # ------------------------------------------------------------------ #
     # Move resource to folder
@@ -765,7 +765,7 @@ class ResourcesService:
                 )
             )
         except Exception as e:
-            logger.warning(f"Failed to trigger transcode for {resource_id}: {e}")
+            logger.opt(exception=True).warning(f"Failed to trigger transcode for {resource_id}: {e}")
 
     async def _trigger_transcode_async(
         self, resource_id: str, version_id: str, mime_type: str, user_id: str = None
@@ -828,7 +828,7 @@ class ResourcesService:
                 f"{duration_sec or '?'}s — version {version_id}"
             )
         except Exception as e:
-            logger.warning(f"[Transcode] Gating check failed, proceeding: {e}")
+            logger.opt(exception=True).warning(f"[Transcode] Gating check failed, proceeding: {e}")
 
         # PR-D7 phase 3: legacy unified_task_manager.acquire_or_subscribe
         # dedup is no longer needed — DBOS workflow_id memoization
@@ -896,5 +896,5 @@ class ResourcesService:
 
             return result
         except Exception as e:
-            logger.warning(f"ffprobe failed for {filepath}: {e}")
+            logger.opt(exception=True).warning(f"ffprobe failed for {filepath}: {e}")
             return {}

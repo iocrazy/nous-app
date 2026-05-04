@@ -55,7 +55,7 @@ async def create_collection(collection: VideoCollectionCreate, auth: AuthDep):
             name=collection.name, owner_id=auth.user_id, team_id=collection.team_id
         )
     except Exception as e:
-        logger.error(f"Failed to create collection: {e}")
+        logger.exception(f"Failed to create collection: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create collection",

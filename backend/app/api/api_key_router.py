@@ -90,7 +90,7 @@ async def create_api_key(request: ApiKeyCreate, auth: AuthDep):
         )
 
     except Exception as e:
-        logger.error(f"创建 API 密钥失败: {e}")
+        logger.exception(f"创建 API 密钥失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建密钥失败: {str(e)}",
@@ -209,7 +209,7 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新 API 密钥失败: {e}")
+        logger.exception(f"更新 API 密钥失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新密钥失败: {str(e)}",

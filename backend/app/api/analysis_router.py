@@ -213,7 +213,7 @@ async def trigger_analysis(
                 dbos_workflow_id=wf_id,
             )
         except Exception as e:
-            logger.warning(f"[Analysis] pre-create unified_task failed: {e}")
+            logger.opt(exception=True).warning(f"[Analysis] pre-create unified_task failed: {e}")
 
         await start_workflow_routed(
             "ai_extract",

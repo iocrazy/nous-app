@@ -172,7 +172,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     self._page.run_js(stealth_js)
                     logger.debug("反检测脚本执行成功")
                 except Exception as e:
-                    logger.warning(f"反检测脚本执行失败: {e}")
+                    logger.opt(exception=True).warning(f"反检测脚本执行失败: {e}")
                     # 不影响主流程，继续执行
 
                 self._initialized = True
@@ -297,7 +297,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
                         f"[DrissionPage] UA override applied: {user_agent[:60]}..."
                     )
                 except Exception as e:
-                    logger.warning(f"[DrissionPage] UA override failed: {e}")
+                    logger.opt(exception=True).warning(f"[DrissionPage] UA override failed: {e}")
 
                 # 开始监听API请求
                 logger.debug("开始监听API请求...")
@@ -314,7 +314,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     instance.page.get(url, timeout=5)
                     logger.success(f"抖音链接访问成功，当前URL: {instance.page.url}")
                 except Exception as e:
-                    logger.error(f"访问抖音链接失败: {e}")
+                    logger.exception(f"访问抖音链接失败: {e}")
                     # 尝试刷新页面
                     try:
                         instance.page.refresh()
@@ -513,7 +513,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
                             continue  # 继续等待下一个响应，而不是break
 
                 except Exception as e:
-                    logger.error(f"等待API响应失败: {e}")
+                    logger.exception(f"等待API响应失败: {e}")
                     # 如果等待API响应失败，应该返回None表示获取失败
                     return None
 
@@ -523,7 +523,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     return None
 
             except Exception as e:
-                logger.error(f"获取抖音视频数据失败: {e}")
+                logger.exception(f"获取抖音视频数据失败: {e}")
                 return None
 
         # 在单独的线程中执行同步操作

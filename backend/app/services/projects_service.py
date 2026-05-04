@@ -81,7 +81,7 @@ class ProjectsService:
                     project["id"], {"display_code": display_code}
                 )
             except Exception as exc:
-                logger.warning(f"Failed to generate display_code: {exc}")
+                logger.opt(exception=True).warning(f"Failed to generate display_code: {exc}")
 
         return project
 
@@ -774,5 +774,5 @@ class ProjectsService:
 
             return result
         except Exception as e:
-            logger.warning(f"ffprobe failed for {filepath}: {e}")
+            logger.opt(exception=True).warning(f"ffprobe failed for {filepath}: {e}")
             return {}

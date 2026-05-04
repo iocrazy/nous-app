@@ -102,7 +102,7 @@ class MediaRepository:
             logger.info(f"创建视频记录成功: {data.get('platform_id')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"创建视频记录失败: {e}")
+            logger.exception(f"创建视频记录失败: {e}")
             raise
 
     async def get_by_platform_id(self, platform_id: str) -> Optional[Dict[str, Any]]:
@@ -184,7 +184,7 @@ class MediaRepository:
             logger.info(f"Updated parsed_media: {platform_id}")
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to update parsed_media: {e}")
+            logger.exception(f"Failed to update parsed_media: {e}")
             raise
 
     async def mark_stale_downloads_failed(self, timeout_minutes: int = 30) -> int:
@@ -266,7 +266,7 @@ class MediaRepository:
             logger.info(f"Deleted parsed_media: {platform_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete parsed_media: {e}")
+            logger.exception(f"Failed to delete parsed_media: {e}")
             return False
 
     async def get_downloaded_by_platform_id(
@@ -423,7 +423,7 @@ class MediaRepository:
             result = await query.limit(limit).execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"获取待下载列表失败: {e}")
+            logger.exception(f"获取待下载列表失败: {e}")
             return []
 
     async def get_all(
@@ -449,7 +449,7 @@ class MediaRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"获取视频列表失败: {e}")
+            logger.exception(f"获取视频列表失败: {e}")
             return []
 
     async def get_user_media_list(
@@ -491,7 +491,7 @@ class MediaRepository:
                 videos.append(media)
             return videos
         except Exception as e:
-            logger.error(f"Failed to get user media list: {e}")
+            logger.exception(f"Failed to get user media list: {e}")
             return []
 
     async def search(
@@ -555,7 +555,7 @@ class MediaRepository:
                 videos.append(media)
             return videos
         except Exception as e:
-            logger.error(f"搜索视频失败: {e}")
+            logger.exception(f"搜索视频失败: {e}")
             return []
 
     async def get_statistics(self, user_id: str) -> Dict[str, Any]:
@@ -617,7 +617,7 @@ class MediaRepository:
                 "unique_authors": unique_authors,
             }
         except Exception as e:
-            logger.error(f"获取统计信息失败: {e}")
+            logger.exception(f"获取统计信息失败: {e}")
             return {
                 "total": 0,
                 "pending": 0,

@@ -54,7 +54,7 @@ async def create_issue(payload: IssueCreate, auth: AuthDep) -> Issue:
     try:
         row = await issue_repository.atomic_create(body)
     except Exception as e:
-        logger.warning(f"[issues] create failed: {e}")
+        logger.opt(exception=True).warning(f"[issues] create failed: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return Issue.model_validate(_normalise_uuid_strs(row))
 
@@ -142,7 +142,7 @@ async def update_issue(issue_id: int, payload: IssueUpdate, auth: AuthDep) -> Is
     try:
         row = await issue_repository.update(issue_id, patch)
     except Exception as e:
-        logger.warning(f"[issues] update {issue_id} failed: {e}")
+        logger.opt(exception=True).warning(f"[issues] update {issue_id} failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     return Issue.model_validate(_normalise_uuid_strs(row))
 
@@ -161,7 +161,7 @@ async def transition_status(
     try:
         row = await issue_repository.transition_status(issue_id, body.status.value)
     except Exception as e:
-        logger.warning(f"[issues] transition {issue_id} failed: {e}")
+        logger.opt(exception=True).warning(f"[issues] transition {issue_id} failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     return Issue.model_validate(_normalise_uuid_strs(row))
 
@@ -200,7 +200,7 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
             "already exists" not in repr(e).lower()
             and "duplicate" not in repr(e).lower()
         ):
-            logger.warning(f"[issues] dispatch {issue_id} failed: {e}")
+            logger.opt(exception=True).warning(f"[issues] dispatch {issue_id} failed: {e}")
             raise HTTPException(status_code=500, detail=f"DBOS dispatch failed: {e}")
 
     # Persist workflow_id so the UI can find it without re-deriving.

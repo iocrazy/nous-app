@@ -45,7 +45,7 @@ class NousRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list enabled nous models: {e}")
+            logger.exception(f"Failed to list enabled nous models: {e}")
             return []
 
     async def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
@@ -61,7 +61,7 @@ class NousRepository:
             )
             return result.data
         except Exception as e:
-            logger.error(f"Failed to get nous model '{name}': {e}")
+            logger.exception(f"Failed to get nous model '{name}': {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -77,7 +77,7 @@ class NousRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list all nous models: {e}")
+            logger.exception(f"Failed to list all nous models: {e}")
             return []
 
     async def create(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -87,7 +87,7 @@ class NousRepository:
             result = await client.table(self.TABLE).insert(data).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to create nous model: {e}")
+            logger.exception(f"Failed to create nous model: {e}")
             return None
 
     async def update(
@@ -104,7 +104,7 @@ class NousRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to update nous model {model_id}: {e}")
+            logger.exception(f"Failed to update nous model {model_id}: {e}")
             return None
 
     async def delete(self, model_id: str) -> bool:
@@ -114,5 +114,5 @@ class NousRepository:
             await client.table(self.TABLE).delete().eq("id", model_id).execute()
             return True
         except Exception as e:
-            logger.error(f"Failed to delete nous model {model_id}: {e}")
+            logger.exception(f"Failed to delete nous model {model_id}: {e}")
             return False

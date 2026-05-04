@@ -31,7 +31,7 @@ def generate_thumbnail_step(resource_id: str, file_path: str, mime_type: str) ->
         logger.info(f"[Thumbnail] resource={resource_id} generated")
         return True
     except Exception as e:
-        logger.warning(f"[Thumbnail] resource={resource_id} failed: {e}")
+        logger.opt(exception=True).warning(f"[Thumbnail] resource={resource_id} failed: {e}")
         # Match Celery's "return False on non-retried failure" — DBOS will not
         # retry on the False return; it retries on raised exceptions only.
         return False

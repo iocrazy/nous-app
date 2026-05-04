@@ -48,7 +48,7 @@ class StoryboardProjectRepository:
             logger.info(f"Created storyboard project: {data.get('name')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create storyboard project: {e}")
+            logger.exception(f"Failed to create storyboard project: {e}")
             raise
 
     async def update(self, project_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -73,7 +73,7 @@ class StoryboardProjectRepository:
             logger.info(f"Updated storyboard project {project_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update storyboard project {project_id}: {e}")
+            logger.exception(f"Failed to update storyboard project {project_id}: {e}")
             raise
 
     async def update_viewport(
@@ -99,7 +99,7 @@ class StoryboardProjectRepository:
                 .execute()
             )
         except Exception as e:
-            logger.error(f"Failed to update viewport for project {project_id}: {e}")
+            logger.exception(f"Failed to update viewport for project {project_id}: {e}")
             raise
 
     async def soft_delete(self, project_id: str) -> None:
@@ -119,7 +119,7 @@ class StoryboardProjectRepository:
             )
             logger.info(f"Soft-deleted storyboard project {project_id}")
         except Exception as e:
-            logger.error(f"Failed to soft-delete storyboard project {project_id}: {e}")
+            logger.exception(f"Failed to soft-delete storyboard project {project_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -146,7 +146,7 @@ class StoryboardProjectRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get storyboard project {project_id}: {e}")
+            logger.exception(f"Failed to get storyboard project {project_id}: {e}")
             return None
 
     async def list_by_team(
@@ -218,7 +218,7 @@ class StoryboardProjectRepository:
                 "limit": limit,
             }
         except Exception as e:
-            logger.error(f"Failed to list storyboard projects for team {team_id}: {e}")
+            logger.exception(f"Failed to list storyboard projects for team {team_id}: {e}")
             return {"items": [], "total": 0, "page": page, "limit": limit}
 
 
@@ -263,7 +263,7 @@ class StoryboardNodeRepository:
             logger.info(f"Bulk-upserted {len(rows)} nodes for project {project_id}")
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to bulk-upsert nodes for project {project_id}: {e}")
+            logger.exception(f"Failed to bulk-upsert nodes for project {project_id}: {e}")
             raise
 
     async def update(self, node_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -288,7 +288,7 @@ class StoryboardNodeRepository:
             logger.info(f"Updated storyboard node {node_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update storyboard node {node_id}: {e}")
+            logger.exception(f"Failed to update storyboard node {node_id}: {e}")
             raise
 
     async def delete(self, node_id: str) -> None:
@@ -303,7 +303,7 @@ class StoryboardNodeRepository:
             await client.table(self.TABLE_NAME).delete().eq("id", node_id).execute()
             logger.info(f"Deleted storyboard node {node_id}")
         except Exception as e:
-            logger.error(f"Failed to delete storyboard node {node_id}: {e}")
+            logger.exception(f"Failed to delete storyboard node {node_id}: {e}")
             raise
 
     async def delete_by_project(self, project_id: str) -> None:
@@ -323,7 +323,7 @@ class StoryboardNodeRepository:
             )
             logger.info(f"Deleted all nodes for project {project_id}")
         except Exception as e:
-            logger.error(f"Failed to delete nodes for project {project_id}: {e}")
+            logger.exception(f"Failed to delete nodes for project {project_id}: {e}")
             raise
 
     async def get_by_project(self, project_id: str) -> List[Dict[str, Any]]:
@@ -346,7 +346,7 @@ class StoryboardNodeRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get nodes for project {project_id}: {e}")
+            logger.exception(f"Failed to get nodes for project {project_id}: {e}")
             return []
 
 
@@ -391,7 +391,7 @@ class StoryboardEdgeRepository:
             logger.info(f"Bulk-upserted {len(rows)} edges for project {project_id}")
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to bulk-upsert edges for project {project_id}: {e}")
+            logger.exception(f"Failed to bulk-upsert edges for project {project_id}: {e}")
             raise
 
     async def delete(self, edge_id: str) -> None:
@@ -406,7 +406,7 @@ class StoryboardEdgeRepository:
             await client.table(self.TABLE_NAME).delete().eq("id", edge_id).execute()
             logger.info(f"Deleted storyboard edge {edge_id}")
         except Exception as e:
-            logger.error(f"Failed to delete storyboard edge {edge_id}: {e}")
+            logger.exception(f"Failed to delete storyboard edge {edge_id}: {e}")
             raise
 
     async def delete_by_project(self, project_id: str) -> None:
@@ -426,7 +426,7 @@ class StoryboardEdgeRepository:
             )
             logger.info(f"Deleted all edges for project {project_id}")
         except Exception as e:
-            logger.error(f"Failed to delete edges for project {project_id}: {e}")
+            logger.exception(f"Failed to delete edges for project {project_id}: {e}")
             raise
 
     async def get_by_project(self, project_id: str) -> List[Dict[str, Any]]:
@@ -449,7 +449,7 @@ class StoryboardEdgeRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get edges for project {project_id}: {e}")
+            logger.exception(f"Failed to get edges for project {project_id}: {e}")
             return []
 
 
@@ -482,7 +482,7 @@ class StoryboardFrameRepository:
             logger.info(f"Created storyboard frame: index={data.get('frame_index')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create storyboard frame: {e}")
+            logger.exception(f"Failed to create storyboard frame: {e}")
             raise
 
     async def bulk_upsert(
@@ -513,7 +513,7 @@ class StoryboardFrameRepository:
             logger.info(f"Bulk-upserted {len(rows)} frames for node {node_id}")
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to bulk-upsert frames for node {node_id}: {e}")
+            logger.exception(f"Failed to bulk-upsert frames for node {node_id}: {e}")
             raise
 
     async def update(self, frame_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -538,7 +538,7 @@ class StoryboardFrameRepository:
             logger.info(f"Updated storyboard frame {frame_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update storyboard frame {frame_id}: {e}")
+            logger.exception(f"Failed to update storyboard frame {frame_id}: {e}")
             raise
 
     async def reorder(self, frame_ids: List[str]) -> None:
@@ -577,7 +577,7 @@ class StoryboardFrameRepository:
                     )
             logger.info(f"Reordered {len(frame_ids)} storyboard frames")
         except Exception as e:
-            logger.error(f"Failed to reorder storyboard frames: {e}")
+            logger.exception(f"Failed to reorder storyboard frames: {e}")
             raise
 
     async def get_by_node(self, node_id: str) -> List[Dict[str, Any]]:
@@ -601,7 +601,7 @@ class StoryboardFrameRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get frames for node {node_id}: {e}")
+            logger.exception(f"Failed to get frames for node {node_id}: {e}")
             return []
 
     async def get_by_project(self, project_id: str) -> List[Dict[str, Any]]:
@@ -625,7 +625,7 @@ class StoryboardFrameRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get frames for project {project_id}: {e}")
+            logger.exception(f"Failed to get frames for project {project_id}: {e}")
             return []
 
 
@@ -658,7 +658,7 @@ class StoryboardCharacterRepository:
             logger.info(f"Created storyboard character: {data.get('name')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create storyboard character: {e}")
+            logger.exception(f"Failed to create storyboard character: {e}")
             raise
 
     async def update(self, character_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -683,7 +683,7 @@ class StoryboardCharacterRepository:
             logger.info(f"Updated storyboard character {character_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update storyboard character {character_id}: {e}")
+            logger.exception(f"Failed to update storyboard character {character_id}: {e}")
             raise
 
     async def delete(self, character_id: str) -> None:
@@ -700,7 +700,7 @@ class StoryboardCharacterRepository:
             )
             logger.info(f"Deleted storyboard character {character_id}")
         except Exception as e:
-            logger.error(f"Failed to delete storyboard character {character_id}: {e}")
+            logger.exception(f"Failed to delete storyboard character {character_id}: {e}")
             raise
 
     async def get_by_id(self, character_id: str) -> Optional[Dict[str, Any]]:
@@ -724,7 +724,7 @@ class StoryboardCharacterRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get character {character_id}: {e}")
+            logger.exception(f"Failed to get character {character_id}: {e}")
             return None
 
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:
@@ -748,7 +748,7 @@ class StoryboardCharacterRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list characters for project {project_id}: {e}")
+            logger.exception(f"Failed to list characters for project {project_id}: {e}")
             return []
 
 
@@ -781,7 +781,7 @@ class StoryboardAssetRepository:
             logger.info(f"Created storyboard asset: {data.get('filename')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create storyboard asset: {e}")
+            logger.exception(f"Failed to create storyboard asset: {e}")
             raise
 
     async def find_by_hash(
@@ -812,7 +812,7 @@ class StoryboardAssetRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to find asset by hash in project {project_id}: {e}")
+            logger.exception(f"Failed to find asset by hash in project {project_id}: {e}")
             return None
 
     async def delete(self, asset_id: str) -> None:
@@ -827,7 +827,7 @@ class StoryboardAssetRepository:
             await client.table(self.TABLE_NAME).delete().eq("id", asset_id).execute()
             logger.info(f"Deleted storyboard asset {asset_id}")
         except Exception as e:
-            logger.error(f"Failed to delete storyboard asset {asset_id}: {e}")
+            logger.exception(f"Failed to delete storyboard asset {asset_id}: {e}")
             raise
 
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:
@@ -851,5 +851,5 @@ class StoryboardAssetRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list assets for project {project_id}: {e}")
+            logger.exception(f"Failed to list assets for project {project_id}: {e}")
             return []

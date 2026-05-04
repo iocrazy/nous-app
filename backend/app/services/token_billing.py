@@ -99,7 +99,7 @@ async def summarize_user_usage(
         )
         rows = result.data or []
     except Exception as exc:
-        logger.warning(f"[token_billing] summarize failed: {exc}")
+        logger.opt(exception=True).warning(f"[token_billing] summarize failed: {exc}")
         rows = []
 
     by_model_buckets: dict[str, dict] = {}
@@ -225,7 +225,7 @@ async def reconcile_run(
         )
         usage_logged = True
     except Exception as exc:
-        logger.warning(f"[token_billing] ai_usage_logs insert failed: {exc}")
+        logger.opt(exception=True).warning(f"[token_billing] ai_usage_logs insert failed: {exc}")
         usage_logged = False
 
     # 2. Charge points (platform-model + non-zero cost only)
@@ -268,7 +268,7 @@ async def reconcile_run(
             note=None if ok else "PointsService.check_and_consume returned False",
         )
     except Exception as exc:
-        logger.warning(f"[token_billing] points consume failed: {exc}")
+        logger.opt(exception=True).warning(f"[token_billing] points consume failed: {exc}")
         return ReconcileResult(
             charged=False,
             charged_points=0.0,

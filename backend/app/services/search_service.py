@@ -429,7 +429,7 @@ class SearchService:
             return dot_product / (norm1 * norm2)
 
         except Exception as e:
-            logger.error(f"Error calculating similarity: {e}")
+            logger.exception(f"Error calculating similarity: {e}")
             return 0.0
 
     def _parse_embedding(self, embedding_str: str) -> Optional[List[float]]:
@@ -444,5 +444,5 @@ class SearchService:
             return values
 
         except Exception as e:
-            logger.error(f"Error parsing embedding: {e}")
+            logger.exception(f"Error parsing embedding: {e}")
             return None

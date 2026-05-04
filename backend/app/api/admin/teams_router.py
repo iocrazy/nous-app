@@ -261,7 +261,7 @@ async def delete_team(
     try:
         await repo.unlink_collections(team_id)
     except Exception as e:
-        logger.warning(f"Failed to unlink collections from team {team_id}: {e}")
+        logger.opt(exception=True).warning(f"Failed to unlink collections from team {team_id}: {e}")
 
     await repo.delete(team_id)
 

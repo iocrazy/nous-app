@@ -67,7 +67,7 @@ class AgentRunsRepository:
             )
             return {"items": result.data or [], "total": total}
         except Exception as e:
-            logger.error(f"Failed to list runs (agent={agent_id}, user={user_id}): {e}")
+            logger.exception(f"Failed to list runs (agent={agent_id}, user={user_id}): {e}")
             return {"items": [], "total": 0}
 
     async def get_by_id(
@@ -90,7 +90,7 @@ class AgentRunsRepository:
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(f"Failed to get run {run_id}: {e}")
+            logger.exception(f"Failed to get run {run_id}: {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -116,7 +116,7 @@ class AgentRunsRepository:
             )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"Failed to request cancel for run {run_id}: {e}")
+            logger.exception(f"Failed to request cancel for run {run_id}: {e}")
             return False
 
     # ------------------------------------------------------------------
@@ -147,7 +147,7 @@ class AgentRunsRepository:
             )
             return len(result.data or [])
         except Exception as e:
-            logger.error(f"Failed to mark heartbeat_lost: {e}")
+            logger.exception(f"Failed to mark heartbeat_lost: {e}")
             return 0
 
     async def monthly_usage_by_agent(
@@ -180,5 +180,5 @@ class AgentRunsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to load monthly usage: {e}")
+            logger.exception(f"Failed to load monthly usage: {e}")
             return []

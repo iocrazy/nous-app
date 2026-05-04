@@ -286,7 +286,7 @@ class LLMAnalysisService:
             logger.info(f"Summary saved for resource {resource_id}")
             return result
         except Exception as e:
-            logger.error(f"Summary generation failed for resource {resource_id}: {e}")
+            logger.exception(f"Summary generation failed for resource {resource_id}: {e}")
             raise
 
     def _parse_summary_response(self, text: str) -> SummaryResult:

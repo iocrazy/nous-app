@@ -62,7 +62,7 @@ class PaymentRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create order: {e}")
+            logger.exception(f"Failed to create order: {e}")
             raise
 
     async def get_order_by_id(self, order_id: str) -> Optional[Dict[str, Any]]:
@@ -80,7 +80,7 @@ class PaymentRepository:
             result = await table.select("*").eq("id", order_id).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get order {order_id}: {e}")
+            logger.exception(f"Failed to get order {order_id}: {e}")
             return None
 
     async def get_order_by_trade_no(self, trade_no: str) -> Optional[Dict[str, Any]]:
@@ -101,7 +101,7 @@ class PaymentRepository:
             result = await table.select("*").eq("trade_no", trade_no).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get order by trade_no {trade_no}: {e}")
+            logger.exception(f"Failed to get order by trade_no {trade_no}: {e}")
             return None
 
     async def update_order(self, order_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -129,7 +129,7 @@ class PaymentRepository:
             logger.info(f"Updated order: {order_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update order {order_id}: {e}")
+            logger.exception(f"Failed to update order {order_id}: {e}")
             raise
 
     # ------------------------------------------------------------------
@@ -164,7 +164,7 @@ class PaymentRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get orders for team {team_id}: {e}")
+            logger.exception(f"Failed to get orders for team {team_id}: {e}")
             return []
 
     async def expire_pending_orders(self) -> int:
@@ -195,5 +195,5 @@ class PaymentRepository:
                 logger.info(f"Expired {count} pending order(s)")
             return count
         except Exception as e:
-            logger.error(f"Failed to expire pending orders: {e}")
+            logger.exception(f"Failed to expire pending orders: {e}")
             return 0

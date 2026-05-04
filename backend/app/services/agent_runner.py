@@ -425,7 +425,7 @@ class AgentRunner:
                 model=composed.model,
             )
         except ContextWindowError as exc:
-            logger.warning(f"[AgentRunner] context budget rejected: {exc}")
+            logger.opt(exception=True).warning(f"[AgentRunner] context budget rejected: {exc}")
             return {
                 "content": "",
                 "raw": None,

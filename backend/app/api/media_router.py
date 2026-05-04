@@ -78,7 +78,7 @@ async def cleanup_stale_downloads(
         count = await repo.mark_stale_downloads_failed(timeout_minutes)
         return {"success": True, "cleaned": count}
     except Exception as e:
-        logger.error(f"Stale download cleanup failed: {e}")
+        logger.exception(f"Stale download cleanup failed: {e}")
         raise HTTPException(status_code=500, detail="Cleanup failed")
 
 
@@ -106,7 +106,7 @@ async def list_videos(
         )
         return {"success": True, "count": len(videos), "videos": videos}
     except Exception as e:
-        logger.error(f"Failed to get video list: {e}")
+        logger.exception(f"Failed to get video list: {e}")
         raise HTTPException(status_code=500, detail="Failed to get video list")
 
 
@@ -150,7 +150,7 @@ async def get_video(platform_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get video details: {e}")
+        logger.exception(f"Failed to get video details: {e}")
         raise HTTPException(status_code=500, detail="Failed to get video details")
 
 
@@ -230,7 +230,7 @@ async def delete_video(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete video: {e}")
+        logger.exception(f"Failed to delete video: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete video")
 
 
@@ -271,7 +271,7 @@ async def search_videos(
 
         return {"success": True, "count": len(videos), "videos": videos}
     except Exception as e:
-        logger.error(f"Failed to search videos: {e}")
+        logger.exception(f"Failed to search videos: {e}")
         raise HTTPException(status_code=500, detail="Failed to search videos")
 
 
@@ -287,7 +287,7 @@ async def get_statistics(auth: AuthDep):
         stats = await repo.get_statistics(user_id=auth.user_id)
         return {"success": True, "statistics": stats}
     except Exception as e:
-        logger.error(f"Failed to get statistics: {e}")
+        logger.exception(f"Failed to get statistics: {e}")
         raise HTTPException(status_code=500, detail="Failed to get statistics")
 
 
@@ -321,7 +321,7 @@ async def get_user_logs(
         )
         return {"success": True, **result}
     except Exception as e:
-        logger.error(f"Failed to get user logs: {e}")
+        logger.exception(f"Failed to get user logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user logs")
 
 

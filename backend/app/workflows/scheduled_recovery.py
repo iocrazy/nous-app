@@ -79,7 +79,7 @@ def retry_failed_downloads_step() -> dict[str, Any]:
                 )
                 retried += 1
             except Exception as e:
-                logger.warning(f"[retry_failed_downloads] {platform_id}: {e}")
+                logger.opt(exception=True).warning(f"[retry_failed_downloads] {platform_id}: {e}")
 
         return {
             "total_failed": len(failed),

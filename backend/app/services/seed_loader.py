@@ -273,7 +273,7 @@ class SeedLoader:
                 if isinstance(p, str):
                     existing_by_path[p] = row
         except Exception as e:
-            logger.warning(f"seed_loader: prefetch skill_files failed: {e}")
+            logger.opt(exception=True).warning(f"seed_loader: prefetch skill_files failed: {e}")
 
         disk_paths: set[str] = set()
         for sub_path in ("references", "scripts", "assets"):

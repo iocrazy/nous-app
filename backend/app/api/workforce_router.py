@@ -195,7 +195,7 @@ async def _count_inbox(client, agent_ids: list[str], status: str) -> dict[str, i
         )
         return _bucket_count(result.data or [], "recipient_agent_id")
     except Exception as err:
-        logger.warning(f"[workforce] inbox count failed (status={status}): {err}")
+        logger.opt(exception=True).warning(f"[workforce] inbox count failed (status={status}): {err}")
         return {}
 
 
@@ -211,7 +211,7 @@ async def _count_outbox_undelivered(client, agent_ids: list[str]) -> dict[str, i
         )
         return _bucket_count(result.data or [], "sender_agent_id")
     except Exception as err:
-        logger.warning(f"[workforce] outbox count failed: {err}")
+        logger.opt(exception=True).warning(f"[workforce] outbox count failed: {err}")
         return {}
 
 

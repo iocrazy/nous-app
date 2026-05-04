@@ -99,7 +99,7 @@ class ApprovalRequestsRepository:
                 return None
             return ApprovalRequest.from_row(result.data[0])
         except Exception as exc:
-            logger.warning(f"[ApprovalRequestsRepo] create failed: {exc}")
+            logger.opt(exception=True).warning(f"[ApprovalRequestsRepo] create failed: {exc}")
             raise
 
     async def list_pending_for_user(
@@ -121,7 +121,7 @@ class ApprovalRequestsRepository:
             )
             return [ApprovalRequest.from_row(r) for r in (result.data or [])]
         except Exception as exc:
-            logger.warning(f"[ApprovalRequestsRepo] list_pending failed: {exc}")
+            logger.opt(exception=True).warning(f"[ApprovalRequestsRepo] list_pending failed: {exc}")
             return []
 
     async def get_by_id(self, request_id: UUID) -> Optional[ApprovalRequest]:
@@ -138,7 +138,7 @@ class ApprovalRequestsRepository:
                 return None
             return ApprovalRequest.from_row(result.data)
         except Exception as exc:
-            logger.warning(f"[ApprovalRequestsRepo] get_by_id failed: {exc}")
+            logger.opt(exception=True).warning(f"[ApprovalRequestsRepo] get_by_id failed: {exc}")
             return None
 
     async def decide(
@@ -169,7 +169,7 @@ class ApprovalRequestsRepository:
             )
             return True
         except Exception as exc:
-            logger.warning(f"[ApprovalRequestsRepo] decide failed: {exc}")
+            logger.opt(exception=True).warning(f"[ApprovalRequestsRepo] decide failed: {exc}")
             return False
 
     async def mark_expired(self, *, now: Optional[datetime] = None) -> int:
@@ -189,7 +189,7 @@ class ApprovalRequestsRepository:
             )
             return len(result.data or [])
         except Exception as exc:
-            logger.warning(f"[ApprovalRequestsRepo] mark_expired failed: {exc}")
+            logger.opt(exception=True).warning(f"[ApprovalRequestsRepo] mark_expired failed: {exc}")
             return 0
 
 

@@ -90,7 +90,7 @@ class UserLogsRepository:
             return None
 
         except Exception as e:
-            logger.error(f"创建日志记录失败: {e}")
+            logger.exception(f"创建日志记录失败: {e}")
             return None
 
     async def get_recent(
@@ -123,7 +123,7 @@ class UserLogsRepository:
             return result.data or []
 
         except Exception as e:
-            logger.error(f"获取日志记录失败: {e}")
+            logger.exception(f"获取日志记录失败: {e}")
             return []
 
     async def get_paginated(
@@ -204,7 +204,7 @@ class UserLogsRepository:
             }
 
         except Exception as e:
-            logger.error(f"获取分页日志失败: {e}")
+            logger.exception(f"获取分页日志失败: {e}")
             return {
                 "logs": [],
                 "total": 0,
@@ -240,7 +240,7 @@ class UserLogsRepository:
             return result.data or []
 
         except Exception as e:
-            logger.error(f"获取视频日志失败: {e}")
+            logger.exception(f"获取视频日志失败: {e}")
             return []
 
 

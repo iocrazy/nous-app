@@ -69,7 +69,7 @@ async def _validate_share_token(
         return True
 
     except Exception as e:
-        logger.error(f"Share token validation failed: {e}")
+        logger.exception(f"Share token validation failed: {e}")
         return False
 
 
@@ -150,7 +150,7 @@ async def _get_resource_id_for_media(media_id: str) -> Optional[str]:
             if res.data:
                 return str(res.data["id"])
         except Exception as e:
-            logger.warning(f"Resource ID lookup ({id_column}={media_id}) failed: {e}")
+            logger.opt(exception=True).warning(f"Resource ID lookup ({id_column}={media_id}) failed: {e}")
 
     return None
 
@@ -208,7 +208,7 @@ async def check_media_access(
             if res.data:
                 return True
         except Exception as e:
-            logger.error(f"Team membership check failed: {e}")
+            logger.exception(f"Team membership check failed: {e}")
 
     # Priority 5: denied
     return False

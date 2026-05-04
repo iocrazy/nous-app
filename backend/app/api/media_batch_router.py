@@ -82,7 +82,7 @@ async def fetch_videos_batch(
                 if wid:
                     wf_ids.append(wid)
             except Exception as exc:
-                logger.warning(f"[BatchFetch] dispatch failed for {u}: {exc}")
+                logger.opt(exception=True).warning(f"[BatchFetch] dispatch failed for {u}: {exc}")
 
         background_tasks.add_task(
             log_user_action,
@@ -115,7 +115,7 @@ async def fetch_videos_batch(
             )
         logger.info(f"[Batch Parse] User {auth.user_id} parse mode: {user_parse_mode}")
     except Exception as e:
-        logger.warning(f"Failed to read user parse mode, using default: {e}")
+        logger.opt(exception=True).warning(f"Failed to read user parse mode, using default: {e}")
 
     for raw_url in request.urls:
         url = raw_url
@@ -140,12 +140,12 @@ async def fetch_videos_batch(
                         url, user_agent=item_ua
                     )
                 except Exception as e:
-                    logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
+                    logger.opt(exception=True).warning(f"[Batch Parse] Browser parsing failed: {e}")
             else:
                 try:
                     aweme_detail = await IesDouyinParser.parse(url, user_agent=item_ua)
                 except Exception as e:
-                    logger.warning(f"[Batch Parse] Lightweight parsing failed: {e}")
+                    logger.opt(exception=True).warning(f"[Batch Parse] Lightweight parsing failed: {e}")
 
                 if not aweme_detail:
                     try:
@@ -153,7 +153,7 @@ async def fetch_videos_batch(
                             url, user_agent=item_ua
                         )
                     except Exception as e:
-                        logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
+                        logger.opt(exception=True).warning(f"[Batch Parse] Browser parsing failed: {e}")
 
             if aweme_detail:
                 parsed_data = await DouyinFormatter.parse_aweme_detail(

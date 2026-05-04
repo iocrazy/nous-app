@@ -131,7 +131,7 @@ async def build_mcp_registry(
                     )
             logger.info(f"MCP: registered {len(skills)} skill tools")
         except Exception as exc:
-            logger.warning(f"MCP: skill registration pass failed: {exc}")
+            logger.opt(exception=True).warning(f"MCP: skill registration pass failed: {exc}")
 
     if include_agents:
         try:
@@ -154,7 +154,7 @@ async def build_mcp_registry(
                     )
             logger.info(f"MCP: registered {len(agents)} agent tools")
         except Exception as exc:
-            logger.warning(f"MCP: agent registration pass failed: {exc}")
+            logger.opt(exception=True).warning(f"MCP: agent registration pass failed: {exc}")
 
     return registry
 

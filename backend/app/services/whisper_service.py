@@ -109,5 +109,5 @@ class WhisperService:
             return result
 
         except Exception as e:
-            logger.error(f"Transcription failed for resource {resource_id}: {e}")
+            logger.exception(f"Transcription failed for resource {resource_id}: {e}")
             raise

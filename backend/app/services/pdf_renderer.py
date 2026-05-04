@@ -57,7 +57,7 @@ def _image_to_data_url(img, jpeg_quality: int) -> Optional[str]:
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
         return f"data:image/jpeg;base64,{b64}"
     except Exception as exc:
-        logger.warning(f"[PdfRenderer] image encode failed: {exc}")
+        logger.opt(exception=True).warning(f"[PdfRenderer] image encode failed: {exc}")
         return None
 
 

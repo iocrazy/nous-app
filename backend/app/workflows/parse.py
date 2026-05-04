@@ -137,7 +137,7 @@ def dispatch_download_step(
                 dbos_workflow_id=wf_id,
             )
         except Exception as e:
-            logger.warning(f"[parse] pre-create download task_tracking: {e}")
+            logger.opt(exception=True).warning(f"[parse] pre-create download task_tracking: {e}")
 
         return await start_workflow_routed(
             "download",
@@ -190,7 +190,7 @@ def dispatch_l1_analysis_step(
                     dbos_workflow_id=wf_id,
                 )
             except Exception as e:
-                logger.warning(f"[parse] pre-create analyze task_tracking: {e}")
+                logger.opt(exception=True).warning(f"[parse] pre-create analyze task_tracking: {e}")
 
             return await start_workflow_routed(
                 "ai_extract",
@@ -207,7 +207,7 @@ def dispatch_l1_analysis_step(
 
         return asyncio.run(_do())
     except Exception as e:
-        logger.warning(f"[parse] L1 analysis dispatch failed: {e}")
+        logger.opt(exception=True).warning(f"[parse] L1 analysis dispatch failed: {e}")
         return {"mode": "skipped", "error": str(e)}
 
 
@@ -235,7 +235,7 @@ def update_parse_tracking_step(
                 {"media_id": str(platform_id), "subtitle": subtitle[:120]},
             )
         except Exception as e:
-            logger.warning(f"[parse] update_parse_tracking failed: {e}")
+            logger.opt(exception=True).warning(f"[parse] update_parse_tracking failed: {e}")
 
     asyncio.run(_do())
 
@@ -273,7 +273,7 @@ def log_parse_outcome_step(
                     details={"error": (error or "unknown")[:200]},
                 )
         except Exception as e:
-            logger.warning(f"[parse.log] {e}")
+            logger.opt(exception=True).warning(f"[parse.log] {e}")
 
     asyncio.run(_do())
 
@@ -293,7 +293,7 @@ def attach_tags_step(*, resource_id: str, tag_ids: list[str]) -> int:
             )
             return len(tag_ids)
         except Exception as e:
-            logger.warning(f"[parse] attach_tags_step failed: {e}")
+            logger.opt(exception=True).warning(f"[parse] attach_tags_step failed: {e}")
             return 0
 
     return asyncio.run(_do())

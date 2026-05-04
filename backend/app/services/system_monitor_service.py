@@ -121,7 +121,7 @@ async def get_queue_status() -> dict:
         _queue_cache.update(data=result, timestamp=current_time)
         return result
     except Exception as e:
-        logger.warning(f"get_queue_status failed: {e}")
+        logger.opt(exception=True).warning(f"get_queue_status failed: {e}")
         result = {"active": 0, "pending": 0, "scheduled": 0, "status": "offline"}
         _queue_cache.update(data=result, timestamp=current_time)
         return result
@@ -162,7 +162,7 @@ def get_storage_status() -> dict:
         }
 
     except Exception as e:
-        logger.warning(f"get_storage_status failed: {e}")
+        logger.opt(exception=True).warning(f"get_storage_status failed: {e}")
         return {
             "total_bytes": 0,
             "used_bytes": 0,
@@ -201,7 +201,7 @@ def get_network_status() -> dict:
         return {"speed": "0 B/s", "status": "idle"}
 
     except Exception as e:
-        logger.warning(f"get_network_status failed: {e}")
+        logger.opt(exception=True).warning(f"get_network_status failed: {e}")
         return {"speed": "0 B/s", "status": "error"}
 
 
@@ -231,7 +231,7 @@ async def get_worker_stats() -> list[dict]:
             }
         ]
     except Exception as e:
-        logger.warning(f"get_worker_stats failed: {e}")
+        logger.opt(exception=True).warning(f"get_worker_stats failed: {e}")
         return []
 
 
@@ -259,5 +259,5 @@ async def get_active_tasks() -> list[dict]:
             for w in running
         ]
     except Exception as e:
-        logger.warning(f"get_active_tasks failed: {e}")
+        logger.opt(exception=True).warning(f"get_active_tasks failed: {e}")
         return []

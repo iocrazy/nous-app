@@ -49,7 +49,7 @@ class RealtimeManager:
                 client = await get_async_supabase_admin()
                 await client.remove_channel(channel)
             except Exception as e:
-                logger.warning(f"Error removing channel for user {user_id}: {e}")
+                logger.opt(exception=True).warning(f"Error removing channel for user {user_id}: {e}")
             del self.subscriptions[user_id]
 
     async def _setup_supabase_subscription(self, user_id: str, queue: asyncio.Queue):
@@ -217,7 +217,7 @@ async def subscribe_to_realtime(
             if user:
                 user_id = user.get("id")
         except Exception as e:
-            logger.warning(f"Token verification failed: {e}")
+            logger.opt(exception=True).warning(f"Token verification failed: {e}")
 
     if not user_id:
         raise HTTPException(

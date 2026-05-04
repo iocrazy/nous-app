@@ -51,7 +51,7 @@ class AIRepository:
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"Failed to save transcript for resource {resource_id}: {e}")
+            logger.exception(f"Failed to save transcript for resource {resource_id}: {e}")
             return None
 
     async def get_transcript(self, resource_id: str) -> Optional[Dict]:
@@ -67,7 +67,7 @@ class AIRepository:
             )
             return result.data if result else None
         except Exception as e:
-            logger.error(f"Failed to get transcript for resource {resource_id}: {e}")
+            logger.exception(f"Failed to get transcript for resource {resource_id}: {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -97,7 +97,7 @@ class AIRepository:
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"Failed to save summary for resource {resource_id}: {e}")
+            logger.exception(f"Failed to save summary for resource {resource_id}: {e}")
             return None
 
     async def get_summary(self, resource_id: str) -> Optional[Dict]:
@@ -113,7 +113,7 @@ class AIRepository:
             )
             return result.data if result else None
         except Exception as e:
-            logger.error(f"Failed to get summary for resource {resource_id}: {e}")
+            logger.exception(f"Failed to get summary for resource {resource_id}: {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -147,7 +147,7 @@ class AIRepository:
             logger.info(f"Updated media {media_id} {field} = {status}")
             return True
         except Exception as e:
-            logger.error(f"Failed to update {field} for media {media_id}: {e}")
+            logger.exception(f"Failed to update {field} for media {media_id}: {e}")
             return False
 
     async def get_videos_needing_transcription(self, limit: int = 20) -> List[Dict]:
@@ -166,7 +166,7 @@ class AIRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get videos needing transcription: {e}")
+            logger.exception(f"Failed to get videos needing transcription: {e}")
             return []
 
     async def get_videos_needing_summary(self, limit: int = 20) -> List[Dict]:
@@ -183,5 +183,5 @@ class AIRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get videos needing summary: {e}")
+            logger.exception(f"Failed to get videos needing summary: {e}")
             return []

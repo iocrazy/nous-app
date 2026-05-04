@@ -29,7 +29,7 @@ async def get_celery_workers():
 
         running = DBOS.list_workflows(status="RUNNING") or []
     except Exception as e:
-        logger.warning(f"DBOS workflow list failed: {e}")
+        logger.opt(exception=True).warning(f"DBOS workflow list failed: {e}")
         running = []
 
     workers = [
@@ -64,5 +64,5 @@ async def get_celery_queues():
             )
             queues.append({"name": "agent_workforce", "messages": len(enqueued)})
         except Exception as e:
-            logger.warning(f"DBOS queue depth read failed: {e}")
+            logger.opt(exception=True).warning(f"DBOS queue depth read failed: {e}")
     return {"queues": queues}

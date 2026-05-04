@@ -114,10 +114,10 @@ class VisualAnalysisService:
                 if response.status_code == 200:
                     return base64.b64encode(response.content).decode("utf-8")
         except URLBlockedError as e:
-            logger.warning(f"Image URL blocked by boundary: {e}")
+            logger.opt(exception=True).warning(f"Image URL blocked by boundary: {e}")
         except Exception as e:
             # Log redacted by loguru patcher (Phase D); do not echo full URL
-            logger.error(f"Failed to download image: {type(e).__name__}: {e}")
+            logger.exception(f"Failed to download image: {type(e).__name__}: {e}")
         return None
 
     async def _encode_image_from_file(self, file_path: str) -> Optional[str]:
@@ -129,7 +129,7 @@ class VisualAnalysisService:
                 data = await f.read()
             return base64.b64encode(data).decode("utf-8")
         except Exception as e:
-            logger.error(f"Failed to read image from {file_path}: {e}")
+            logger.exception(f"Failed to read image from {file_path}: {e}")
         return None
 
     # ── Result assembly ───────────────────────────────────────────────
@@ -172,7 +172,7 @@ class VisualAnalysisService:
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as err:
-            logger.warning(f"[VisualAnalysis] JSON parse failed: {err}")
+            logger.opt(exception=True).warning(f"[VisualAnalysis] JSON parse failed: {err}")
             return {}
 
     # ── Adapter assembly (BYO-aware) ──────────────────────────────────
@@ -284,7 +284,7 @@ class VisualAnalysisService:
             try:
                 return await _run()
             except Exception as e:
-                logger.error(f"[VisualAnalysis] bare run failed: {e}")
+                logger.exception(f"[VisualAnalysis] bare run failed: {e}")
                 return None
 
         uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
@@ -325,10 +325,10 @@ class VisualAnalysisService:
                 )
                 return self._result_from_json(data, cost)
         except AgentPausedError as err:
-            logger.warning(f"[VisualAnalysis] agent paused: {err}")
+            logger.opt(exception=True).warning(f"[VisualAnalysis] agent paused: {err}")
             return None
         except Exception as e:
-            logger.error(f"[VisualAnalysis] {trigger} failed: {e}")
+            logger.exception(f"[VisualAnalysis] {trigger} failed: {e}")
             return None
 
     # ── Public API ────────────────────────────────────────────────────

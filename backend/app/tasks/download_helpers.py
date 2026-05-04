@@ -68,7 +68,7 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
             )
         )
     except Exception as e:
-        logger.error(f"[Transcode/Chain] Failed for {platform_id}: {e}", exc_info=True)
+        logger.exception(f"[Transcode/Chain] Failed for {platform_id}: {e}", exc_info=True)
 
 
 def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
@@ -417,7 +417,7 @@ def ensure_download_urls(
             )
 
     except Exception as e:
-        logger.error(f"[Download/URL] Re-parse failed for {platform_id}: {e}")
+        logger.exception(f"[Download/URL] Re-parse failed for {platform_id}: {e}")
 
     return media
 
@@ -607,5 +607,5 @@ def extract_audio_from_video(platform_id: str) -> bool:
         logger.warning("[Audio/Extract] ffmpeg not found in PATH")
         return False
     except Exception as e:
-        logger.warning(f"[Audio/Extract] Error for {platform_id}: {e}")
+        logger.opt(exception=True).warning(f"[Audio/Extract] Error for {platform_id}: {e}")
         return False

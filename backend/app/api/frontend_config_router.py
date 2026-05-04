@@ -79,7 +79,7 @@ def _load_config_from_disk() -> dict:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
-        logger.error(f"加载前端配置失败: {e}")
+        logger.exception(f"加载前端配置失败: {e}")
         return {}
 
 
@@ -164,7 +164,7 @@ transcode:
         logger.info("前端配置已保存")
         return True
     except Exception as e:
-        logger.error(f"保存前端配置失败: {e}")
+        logger.exception(f"保存前端配置失败: {e}")
         return False
 
 
@@ -197,7 +197,7 @@ async def get_frontend_config():
             transcode_parallel_tiers=settings.TRANSCODE_PARALLEL_TIERS,
         )
     except Exception as e:
-        logger.error(f"获取前端配置失败: {e}")
+        logger.exception(f"获取前端配置失败: {e}")
         raise HTTPException(status_code=500, detail="获取配置失败")
 
 
@@ -275,5 +275,5 @@ async def update_frontend_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新前端配置失败: {e}")
+        logger.exception(f"更新前端配置失败: {e}")
         raise HTTPException(status_code=500, detail="更新配置失败")

@@ -55,7 +55,7 @@ def cleanup_temp_files_step() -> dict[str, Any]:
                     file_path.unlink()
                     files_deleted += 1
             except Exception as e:
-                logger.warning(f"[cleanup_temp_files] {file_path}: {e}")
+                logger.opt(exception=True).warning(f"[cleanup_temp_files] {file_path}: {e}")
         for dir_name in dirs:
             dir_path = root_path / dir_name
             try:
@@ -63,7 +63,7 @@ def cleanup_temp_files_step() -> dict[str, Any]:
                     dir_path.rmdir()
                     dirs_deleted += 1
             except Exception as e:
-                logger.warning(f"[cleanup_temp_files] {dir_path}: {e}")
+                logger.opt(exception=True).warning(f"[cleanup_temp_files] {dir_path}: {e}")
 
     return {
         "status": "success",

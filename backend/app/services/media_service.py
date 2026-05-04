@@ -366,7 +366,7 @@ class MediaService:
             logger.success(f"Video:{platform_id}_{title} 所有下载任务已完成")
         except* Exception as exc_group:
             for exc in exc_group.exceptions:
-                logger.error(f"下载任务异常: {exc}")
+                logger.exception(f"下载任务异常: {exc}")
 
     @staticmethod
     async def save_metadata_only(platform_id: str, parsed_data: dict) -> Dict[str, Any]:

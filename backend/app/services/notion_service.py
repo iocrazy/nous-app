@@ -58,7 +58,7 @@ class NotionService:
                 logger.info("Notion客户端初始化成功")
 
             except Exception as e:
-                logger.error(f"Notion客户端初始化失败: {e}")
+                logger.exception(f"Notion客户端初始化失败: {e}")
                 # 如果初始化失败，可以将 _initialized 设为 False，或抛出异常
                 # 确保下次调用 initialize() 时会重试
                 self._client = None  # 清理掉可能部分创建的客户端

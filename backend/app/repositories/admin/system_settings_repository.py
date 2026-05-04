@@ -45,7 +45,7 @@ class SystemSettingsRepository:
             )
             return result.data is not None
         except Exception as e:
-            logger.warning(f"[SystemSettings] exists({key}) failed: {e}")
+            logger.opt(exception=True).warning(f"[SystemSettings] exists({key}) failed: {e}")
             return False
 
     async def update(

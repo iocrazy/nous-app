@@ -183,7 +183,7 @@ class SsrfProxy:
             await self._reply(client_writer, 403, "Forbidden")
             return
         except Exception as e:
-            logger.warning(f"[boundary] SsrfProxy CONNECT resolve error: {e}")
+            logger.opt(exception=True).warning(f"[boundary] SsrfProxy CONNECT resolve error: {e}")
             await self._reply(client_writer, 502, "Bad Gateway")
             return
 
@@ -192,7 +192,7 @@ class SsrfProxy:
                 asyncio.open_connection(ip, port), timeout=10.0
             )
         except (OSError, asyncio.TimeoutError) as e:
-            logger.warning(f"[boundary] SsrfProxy CONNECT upstream failed: {e}")
+            logger.opt(exception=True).warning(f"[boundary] SsrfProxy CONNECT upstream failed: {e}")
             await self._reply(client_writer, 502, "Bad Gateway")
             return
 
@@ -278,7 +278,7 @@ class SsrfProxy:
             await self._reply(writer, 403, "Forbidden")
             return
         except (httpx.HTTPError, httpx.InvalidURL) as e:
-            logger.warning(f"[boundary] SsrfProxy upstream error: {e}")
+            logger.opt(exception=True).warning(f"[boundary] SsrfProxy upstream error: {e}")
             await self._reply(writer, 502, "Bad Gateway")
             return
 

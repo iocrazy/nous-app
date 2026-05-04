@@ -201,7 +201,7 @@ async def get_tag_statistics(
             total_tagged_videos=total_tagged,
         )
     except Exception as e:
-        logger.error(f"Failed to get tag statistics: {e}")
+        logger.exception(f"Failed to get tag statistics: {e}")
         return TagStatisticsResponse(success=False, top_tags=[], total_tagged_videos=0)
 
 

@@ -136,7 +136,7 @@ class IesDouyinParser:
             return aweme_detail
 
         except Exception as e:
-            logger.error(f"[IesDouyinParser] 解析失败: {e}")
+            logger.exception(f"[IesDouyinParser] 解析失败: {e}")
             return None
 
     @classmethod
@@ -191,7 +191,7 @@ class IesDouyinParser:
                 return None
 
         except Exception as e:
-            logger.error(f"[IesDouyinParser] 获取视频 ID 失败: {e}")
+            logger.exception(f"[IesDouyinParser] 获取视频 ID 失败: {e}")
             return None
 
     @classmethod
@@ -336,10 +336,10 @@ class IesDouyinParser:
             logger.error(f"[IesDouyinParser] HTTP 错误: {e.response.status_code}")
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"[IesDouyinParser] JSON 解析错误: {e}")
+            logger.exception(f"[IesDouyinParser] JSON 解析错误: {e}")
             return None
         except Exception as e:
-            logger.error(f"[IesDouyinParser] 获取分享页面失败: {e}")
+            logger.exception(f"[IesDouyinParser] 获取分享页面失败: {e}")
             return None
 
     @classmethod
@@ -379,7 +379,7 @@ class IesDouyinParser:
                         br_play_addr["url_list"] = br_processed
 
         except Exception as e:
-            logger.warning(f"[IesDouyinParser] 处理视频 URL 时出错: {e}")
+            logger.opt(exception=True).warning(f"[IesDouyinParser] 处理视频 URL 时出错: {e}")
 
 
 # 便捷函数

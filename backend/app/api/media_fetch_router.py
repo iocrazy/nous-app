@@ -151,7 +151,7 @@ async def fetch_video(
                 logger.info(f"Refunded {_points_cost} points for failed video parse")
             except Exception as refund_err:
                 logger.error(f"Failed to refund points: {refund_err}")
-        logger.error(f"Failed to fetch video: {e}")
+        logger.exception(f"Failed to fetch video: {e}")
         background_tasks.add_task(
             log_user_action,
             user_id=auth.user_id,
@@ -306,7 +306,7 @@ async def fetch_media_by_type(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[Download/Init] Failed: {platform_id}, error: {e}")
+        logger.exception(f"[Download/Init] Failed: {platform_id}, error: {e}")
         raise HTTPException(status_code=500, detail=f"Fetch failed: {str(e)}")
 
 
@@ -348,7 +348,7 @@ async def extract_audio(
             )
             await tracker.start(unified_task_id)
         except Exception as e:
-            logger.warning(f"[ExtractAudio] Failed to create unified task: {e}")
+            logger.opt(exception=True).warning(f"[ExtractAudio] Failed to create unified task: {e}")
 
         async def _do_extract(pid: str, task_id: str | None):
             """PR-D7 phase 3: ffmpeg subprocess inlined here. The legacy
@@ -394,7 +394,7 @@ async def extract_audio(
                     else:
                         await _tracker.fail(task_id, "Audio extraction failed")
             except Exception as e:
-                logger.error(f"[ExtractAudio] Failed for {pid}: {e}")
+                logger.exception(f"[ExtractAudio] Failed for {pid}: {e}")
                 if task_id:
                     await _tracker.fail(task_id, str(e)[:500])
 
@@ -410,5 +410,5 @@ async def extract_audio(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[ExtractAudio] Error: {e}")
+        logger.exception(f"[ExtractAudio] Error: {e}")
         raise HTTPException(status_code=500, detail=f"Extract audio failed: {str(e)}")

@@ -50,7 +50,7 @@ async def get_ai_settings(auth: AuthDep):
         )
 
     except Exception as e:
-        logger.error(f"Failed to get AI settings: {e}")
+        logger.exception(f"Failed to get AI settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to get AI settings")
 
 
@@ -102,7 +102,7 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to save AI settings: {e}")
+        logger.exception(f"Failed to save AI settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to save AI settings")
 
 

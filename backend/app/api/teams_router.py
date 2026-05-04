@@ -49,7 +49,7 @@ async def create_team(team: TeamCreate, auth: AuthDep):
     try:
         created = await repo.create_team(team.name, auth.user_id)
     except Exception as e:
-        logger.error(f"Failed to create team: {e}")
+        logger.exception(f"Failed to create team: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create team",

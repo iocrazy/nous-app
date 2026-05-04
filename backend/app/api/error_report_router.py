@@ -45,4 +45,4 @@ async def report_frontend_error(
             }
         ).execute()
     except Exception as e:
-        logger.warning(f"Failed to write frontend error log: {e}")
+        logger.opt(exception=True).warning(f"Failed to write frontend error log: {e}")

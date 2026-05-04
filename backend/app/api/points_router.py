@@ -74,7 +74,7 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
         if result.data:
             return str(result.data[0]["team_id"])
     except Exception as e:
-        logger.error(f"Failed to resolve team_id for user {user_id}: {e}")
+        logger.exception(f"Failed to resolve team_id for user {user_id}: {e}")
 
     # Auto-create a personal team for the user
     team_id = await _auto_create_personal_team(user_id)
@@ -135,7 +135,7 @@ async def _auto_create_personal_team(user_id: str) -> str:
                     {"id": user_id, "username": username, "role": "user"}
                 ).execute()
     except Exception as e:
-        logger.warning(f"Failed to resolve username for {user_id}: {e}")
+        logger.opt(exception=True).warning(f"Failed to resolve username for {user_id}: {e}")
 
     # Generate a random invite code
     invite_code = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
@@ -192,7 +192,7 @@ async def _check_admin_role(user_id: str) -> bool:
         if result.data:
             return result.data[0].get("role") == "admin"
     except Exception as e:
-        logger.error(f"Failed to check admin role for user {user_id}: {e}")
+        logger.exception(f"Failed to check admin role for user {user_id}: {e}")
     return False
 
 
@@ -226,7 +226,7 @@ async def get_balance(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get points balance: {e}")
+        logger.exception(f"Failed to get points balance: {e}")
         raise HTTPException(status_code=500, detail="Failed to get points balance")
 
 
@@ -283,7 +283,7 @@ async def get_transactions(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get transactions: {e}")
+        logger.exception(f"Failed to get transactions: {e}")
         raise HTTPException(status_code=500, detail="Failed to get transactions")
 
 
@@ -301,7 +301,7 @@ async def get_pricing(auth: AuthDep):
         pricing = await repo.get_all_pricing()
         return {"success": True, "pricing": pricing}
     except Exception as e:
-        logger.error(f"Failed to get pricing: {e}")
+        logger.exception(f"Failed to get pricing: {e}")
         raise HTTPException(status_code=500, detail="Failed to get pricing")
 
 
@@ -330,7 +330,7 @@ async def get_usage_stats(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get usage stats: {e}")
+        logger.exception(f"Failed to get usage stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to get usage stats")
 
 
@@ -377,7 +377,7 @@ async def check_quota(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to check quota: {e}")
+        logger.exception(f"Failed to check quota: {e}")
         raise HTTPException(status_code=500, detail="Failed to check quota")
 
 
@@ -466,7 +466,7 @@ async def admin_adjust_points(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to adjust points: {e}")
+        logger.exception(f"Failed to adjust points: {e}")
         raise HTTPException(status_code=500, detail="Failed to adjust points")
 
 
@@ -493,5 +493,5 @@ async def admin_overview(auth: AuthDep):
         overview = await repo.get_admin_overview()
         return {"success": True, "data": overview}
     except Exception as e:
-        logger.error(f"Failed to get admin overview: {e}")
+        logger.exception(f"Failed to get admin overview: {e}")
         raise HTTPException(status_code=500, detail="Failed to get admin overview")

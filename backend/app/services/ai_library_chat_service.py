@@ -689,7 +689,7 @@ class AILibraryChatService:
                 if chunk_callback is not None:
                     result = {"content": assistant_content, "tool_calls": tool_calls_trace}
         except AgentPausedError as err:
-            logger.warning(f"[ChatService] agent paused: {err}")
+            logger.opt(exception=True).warning(f"[ChatService] agent paused: {err}")
             # Mark the user message with a hint so the UI can show "the
             # agent is paused" without a separate error path.
             raise HTTPException(

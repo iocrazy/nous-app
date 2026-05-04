@@ -256,7 +256,7 @@ class InboxProcessor:
                     seen.append(UUID(rid))
             return seen
         except Exception as err:
-            logger.error(f"[inbox] failed to load agents-with-unread: {err}")
+            logger.exception(f"[inbox] failed to load agents-with-unread: {err}")
             return []
 
     async def _lookup_agent_owner(self, agent_id: UUID) -> Optional[str]:
@@ -273,5 +273,5 @@ class InboxProcessor:
                 return result.data.get("user_id")
             return None
         except Exception as err:
-            logger.warning(f"[inbox] agent-owner lookup failed: {err}")
+            logger.opt(exception=True).warning(f"[inbox] agent-owner lookup failed: {err}")
             return None

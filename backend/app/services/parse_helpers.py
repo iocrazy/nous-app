@@ -63,7 +63,7 @@ def _get_douyin_method_flags() -> dict[str, bool]:
             if short:
                 flags[short] = row["value"] is True or row["value"] == "true"
     except Exception as e:
-        logger.warning(f"[Douyin] Failed to read method flags, using defaults: {e}")
+        logger.opt(exception=True).warning(f"[Douyin] Failed to read method flags, using defaults: {e}")
     return flags
 
 
@@ -95,7 +95,7 @@ def _try_lighthttp(
             if parsed:
                 return aweme_detail, parsed
     except Exception as e:
-        logger.warning(f"[Douyin] LightHTTP failed: {e}")
+        logger.opt(exception=True).warning(f"[Douyin] LightHTTP failed: {e}")
     return None
 
 
@@ -127,7 +127,7 @@ def _try_abogus(
             if parsed:
                 return aweme_detail, parsed
     except Exception as e:
-        logger.warning(f"[Douyin] ABogus failed: {e}")
+        logger.opt(exception=True).warning(f"[Douyin] ABogus failed: {e}")
     return None
 
 
@@ -161,7 +161,7 @@ def _try_drissionpage(
             if parsed:
                 return aweme_detail, parsed
     except Exception as e:
-        logger.warning(f"[Douyin] DrissionPage failed: {e}")
+        logger.opt(exception=True).warning(f"[Douyin] DrissionPage failed: {e}")
     return None
 
 
@@ -294,4 +294,4 @@ def auto_tag_media(
                 f"[Parse] Auto-tagged {platform_id} with {len(added_tags)} tags"
             )
     except Exception as e:
-        logger.warning(f"[Parse] Auto-tagging failed for {platform_id}: {e}")
+        logger.opt(exception=True).warning(f"[Parse] Auto-tagging failed for {platform_id}: {e}")

@@ -118,7 +118,7 @@ class ThumbnailService:
             return thumb_relative
 
         except Exception as e:
-            logger.error(f"Thumbnail generation failed for resource {resource_id}: {e}")
+            logger.exception(f"Thumbnail generation failed for resource {resource_id}: {e}")
             return None
 
     # ------------------------------------------------------------------ #
@@ -168,7 +168,7 @@ class ThumbnailService:
             return True
 
         except Exception as e:
-            logger.warning(f"Video thumbnail failed for {src_path}: {e}")
+            logger.opt(exception=True).warning(f"Video thumbnail failed for {src_path}: {e}")
             return False
 
     # ------------------------------------------------------------------ #
@@ -241,7 +241,7 @@ class ThumbnailService:
             return ok
 
         except Exception as e:
-            logger.warning(f"Sprite generation failed for {src_path}: {e}")
+            logger.opt(exception=True).warning(f"Sprite generation failed for {src_path}: {e}")
             return False
 
     async def _get_video_duration(self, filepath: str) -> Optional[float]:
@@ -286,7 +286,7 @@ class ThumbnailService:
             sprite.close()
             return True
         except Exception as e:
-            logger.warning(f"Sprite combine failed: {e}")
+            logger.opt(exception=True).warning(f"Sprite combine failed: {e}")
             return False
 
     # ------------------------------------------------------------------ #
@@ -298,7 +298,7 @@ class ThumbnailService:
         try:
             return await asyncio.to_thread(self._resize_image, src_path, dst_path)
         except Exception as e:
-            logger.warning(f"Image thumbnail failed for {src_path}: {e}")
+            logger.opt(exception=True).warning(f"Image thumbnail failed for {src_path}: {e}")
             return False
 
     def _is_animated(self, img: Image.Image) -> bool:
@@ -335,7 +335,7 @@ class ThumbnailService:
                 return True
 
         except Exception as e:
-            logger.warning(f"Pillow resize failed for {src_path}: {e}")
+            logger.opt(exception=True).warning(f"Pillow resize failed for {src_path}: {e}")
             return False
 
     # ------------------------------------------------------------------ #
@@ -390,7 +390,7 @@ class ThumbnailService:
             return ok
 
         except Exception as e:
-            logger.warning(f"Audio thumbnail failed for {src_path}: {e}")
+            logger.opt(exception=True).warning(f"Audio thumbnail failed for {src_path}: {e}")
             return False
 
     def _draw_waveform(self, samples: tuple, dst_path: str) -> bool:
@@ -468,5 +468,5 @@ class ThumbnailService:
             return True
 
         except Exception as e:
-            logger.warning(f"Waveform draw failed: {e}")
+            logger.opt(exception=True).warning(f"Waveform draw failed: {e}")
             return False

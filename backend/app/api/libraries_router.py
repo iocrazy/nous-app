@@ -27,7 +27,7 @@ async def list_libraries(
         libraries = await svc.list_libraries(scope_id)
         return {"success": True, "data": libraries}
     except Exception as e:
-        logger.error(f"Failed to list libraries: {e}")
+        logger.exception(f"Failed to list libraries: {e}")
         raise HTTPException(status_code=500, detail="Failed to list libraries")
 
 
@@ -45,7 +45,7 @@ async def create_library(data: LibraryCreate, auth: AuthDep):
         )
         return {"success": True, "data": library}
     except Exception as e:
-        logger.error(f"Failed to create library: {e}")
+        logger.exception(f"Failed to create library: {e}")
         raise HTTPException(status_code=500, detail="Failed to create library")
 
 
@@ -61,7 +61,7 @@ async def get_library(library_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get library {library_id}: {e}")
+        logger.exception(f"Failed to get library {library_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get library")
 
 
@@ -83,7 +83,7 @@ async def update_library(library_id: str, data: LibraryUpdate, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update library {library_id}: {e}")
+        logger.exception(f"Failed to update library {library_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update library")
 
 
@@ -101,5 +101,5 @@ async def delete_library(library_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete library {library_id}: {e}")
+        logger.exception(f"Failed to delete library {library_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete library")

@@ -36,7 +36,7 @@ class LibrariesRepository:
             logger.info(f"Created library: {data.get('name')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create library: {e}")
+            logger.exception(f"Failed to create library: {e}")
             raise
 
     async def get_by_id(self, library_id: str) -> Optional[Dict[str, Any]]:
@@ -50,7 +50,7 @@ class LibrariesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get library {library_id}: {e}")
+            logger.exception(f"Failed to get library {library_id}: {e}")
             raise
 
     async def list_by_scope(
@@ -69,7 +69,7 @@ class LibrariesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list libraries: {e}")
+            logger.exception(f"Failed to list libraries: {e}")
             raise
 
     async def update(self, library_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -83,7 +83,7 @@ class LibrariesRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update library {library_id}: {e}")
+            logger.exception(f"Failed to update library {library_id}: {e}")
             raise
 
     async def delete(self, library_id: str) -> bool:
@@ -93,5 +93,5 @@ class LibrariesRepository:
             logger.info(f"Deleted library: {library_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete library {library_id}: {e}")
+            logger.exception(f"Failed to delete library {library_id}: {e}")
             raise

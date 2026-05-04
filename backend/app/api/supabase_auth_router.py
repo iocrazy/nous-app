@@ -51,7 +51,7 @@ async def _require_admin(auth: AuthDep) -> None:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Admin role check failed: {e}")
+        logger.exception(f"Admin role check failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
@@ -93,7 +93,7 @@ async def _create_team_quota_for_new_user(user_id: str) -> None:
             f"team {team_id}"
         )
     except Exception as e:
-        logger.error(f"Failed to create team quota for user {user_id}: {e}")
+        logger.exception(f"Failed to create team quota for user {user_id}: {e}")
 
 
 # ============================================
@@ -286,7 +286,7 @@ async def get_current_user(authorization: str = Header(...)):
         return {"success": True, "user": user}
 
     except Exception as e:
-        logger.error(f"获取用户信息失败: {e}")
+        logger.exception(f"获取用户信息失败: {e}")
         raise HTTPException(status_code=401, detail="认证失败")
 
 
@@ -356,7 +356,7 @@ async def update_user(request: UpdateUserRequest, authorization: str = Header(..
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新用户失败: {e}")
+        logger.exception(f"更新用户失败: {e}")
         raise HTTPException(status_code=500, detail="更新失败")
 
 

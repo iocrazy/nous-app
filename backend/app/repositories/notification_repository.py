@@ -89,7 +89,7 @@ class NotificationRepository:
             ).execute()
             return True
         except Exception as e:
-            logger.error(f"Failed to mark notification as read: {e}")
+            logger.exception(f"Failed to mark notification as read: {e}")
             return False
 
     async def mark_all_as_read(self, user_id: str) -> int:
@@ -117,7 +117,7 @@ class NotificationRepository:
             await client.table("user_notifications").upsert(upserts).execute()
             return len(upserts)
         except Exception as e:
-            logger.error(f"Failed to mark all notifications as read: {e}")
+            logger.exception(f"Failed to mark all notifications as read: {e}")
             return 0
 
     async def get_unread_count(self, user_id: str) -> int:
@@ -141,5 +141,5 @@ class NotificationRepository:
             ).execute()
             return True
         except Exception as e:
-            logger.error(f"Failed to delete notification: {e}")
+            logger.exception(f"Failed to delete notification: {e}")
             return False

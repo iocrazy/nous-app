@@ -383,7 +383,7 @@ class TranscodeService:
             return relative_hls
 
         except Exception as e:
-            logger.error(f"Transcode failed for version {version_id}: {e}")
+            logger.exception(f"Transcode failed for version {version_id}: {e}")
             await self.repo.update_version(version_id, {"transcode_status": "failed"})
             return None
 
@@ -516,7 +516,7 @@ class TranscodeService:
                     return int(w), int(h)
             return None, None
         except Exception as e:
-            logger.warning(f"ffprobe failed for {filepath}: {e}")
+            logger.opt(exception=True).warning(f"ffprobe failed for {filepath}: {e}")
             return None, None
 
     async def _probe_duration(self, filepath: str) -> Optional[float]:
@@ -541,7 +541,7 @@ class TranscodeService:
             dur = info.get("format", {}).get("duration")
             return float(dur) if dur else None
         except Exception as e:
-            logger.warning(f"ffprobe duration failed for {filepath}: {e}")
+            logger.opt(exception=True).warning(f"ffprobe duration failed for {filepath}: {e}")
             return None
 
     async def _probe_codecs(self, filepath: str) -> tuple[Optional[str], Optional[str]]:
@@ -572,7 +572,7 @@ class TranscodeService:
                     audio_codec = stream.get("codec_name")
             return video_codec, audio_codec
         except Exception as e:
-            logger.warning(f"ffprobe codec detection failed for {filepath}: {e}")
+            logger.opt(exception=True).warning(f"ffprobe codec detection failed for {filepath}: {e}")
             return None, None
 
     async def _probe_bitrate(self, filepath: str) -> Optional[int]:
@@ -597,7 +597,7 @@ class TranscodeService:
             br = info.get("format", {}).get("bit_rate")
             return int(br) if br else None
         except Exception as e:
-            logger.warning(f"ffprobe bitrate failed for {filepath}: {e}")
+            logger.opt(exception=True).warning(f"ffprobe bitrate failed for {filepath}: {e}")
             return None
 
     # ------------------------------------------------------------------ #
@@ -636,7 +636,7 @@ class TranscodeService:
             if result.data:
                 return result.data.get("value")
         except Exception as e:
-            logger.warning(f"[Transcode] Failed to read system_settings.{key}: {e}")
+            logger.opt(exception=True).warning(f"[Transcode] Failed to read system_settings.{key}: {e}")
         return None
 
     # ------------------------------------------------------------------ #
@@ -861,7 +861,7 @@ class TranscodeService:
             logger.info(f"Passthrough tier (Original) created → {playlist_path}")
             return True
         except Exception as e:
-            logger.warning(f"Passthrough execution error: {e}")
+            logger.opt(exception=True).warning(f"Passthrough execution error: {e}")
             shutil.rmtree(out_dir, ignore_errors=True)
             return False
 

@@ -56,7 +56,7 @@ class EmbeddingService:
             return embedding
 
         except Exception as e:
-            logger.error(f"Embedding generation failed: {e}")
+            logger.exception(f"Embedding generation failed: {e}")
             return None
 
     def build_embedding_text(

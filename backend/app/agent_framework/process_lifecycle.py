@@ -114,13 +114,13 @@ def _cleanup_all_children() -> None:
     try:
         _cleanup_subprocess_registry()
     except Exception as exc:
-        logger.warning(f"[process_lifecycle] subprocess_registry cleanup failed: {exc}")
+        logger.opt(exception=True).warning(f"[process_lifecycle] subprocess_registry cleanup failed: {exc}")
 
     # 2) multiprocessing children — pytest workers, etc.
     try:
         _cleanup_multiprocessing_children()
     except Exception as exc:
-        logger.warning(f"[process_lifecycle] multiprocessing cleanup failed: {exc}")
+        logger.opt(exception=True).warning(f"[process_lifecycle] multiprocessing cleanup failed: {exc}")
 
 
 def _cleanup_subprocess_registry() -> None:
@@ -215,7 +215,7 @@ def bind_to_parent_death() -> bool:
     try:
         os.setsid()
     except (OSError, AttributeError) as exc:
-        logger.warning(f"[process_lifecycle] os.setsid failed: {exc}")
+        logger.opt(exception=True).warning(f"[process_lifecycle] os.setsid failed: {exc}")
         return False
 
     # 2) PR_SET_PDEATHSIG — Linux only
@@ -235,7 +235,7 @@ def bind_to_parent_death() -> bool:
             return False
         return True
     except Exception as exc:
-        logger.warning(f"[process_lifecycle] PR_SET_PDEATHSIG failed: {exc}")
+        logger.opt(exception=True).warning(f"[process_lifecycle] PR_SET_PDEATHSIG failed: {exc}")
         return False
 
 

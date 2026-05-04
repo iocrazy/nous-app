@@ -133,7 +133,7 @@ async def create_media_session(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create media session: {e}")
+        logger.exception(f"Failed to create media session: {e}")
         raise HTTPException(status_code=500, detail="Failed to create media session")
 
 
@@ -181,5 +181,5 @@ async def create_media_token(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create media token: {e}")
+        logger.exception(f"Failed to create media token: {e}")
         raise HTTPException(status_code=500, detail="Failed to create media token")

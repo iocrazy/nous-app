@@ -916,7 +916,7 @@ async def upsert_skill_file(
                 )
         except Exception as exc:
             # Scanner failure must not block legitimate uploads
-            logger.warning(f"[skill_scanner] failed (non-fatal): {exc}")
+            logger.opt(exception=True).warning(f"[skill_scanner] failed (non-fatal): {exc}")
 
     result = await skill_repo.upsert_file_versioned(
         skill_id=skill_id,
@@ -1374,7 +1374,7 @@ async def get_usage(
                 bucket["agent_slug"] = agent.get("slug")
                 bucket["agent_name"] = agent.get("name")
         except Exception as exc:
-            logger.warning(f"[usage] failed to enrich agent {aid}: {exc}")
+            logger.opt(exception=True).warning(f"[usage] failed to enrich agent {aid}: {exc}")
         enriched.append(bucket)
 
     return {

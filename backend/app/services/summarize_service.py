@@ -204,7 +204,7 @@ class SummarizeService:
                     self._parse_json(result.get("content") or ""), 0.0
                 )
             except Exception as e:
-                logger.error(f"[Summarize] bare run failed: {e}")
+                logger.exception(f"[Summarize] bare run failed: {e}")
                 return None
 
         uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
@@ -241,8 +241,8 @@ class SummarizeService:
                     return None
                 return self._to_result(self._parse_json(content), 0.0)
         except AgentPausedError as err:
-            logger.warning(f"[Summarize] agent paused: {err}")
+            logger.opt(exception=True).warning(f"[Summarize] agent paused: {err}")
             return None
         except Exception as e:
-            logger.error(f"[Summarize] run failed: {e}")
+            logger.exception(f"[Summarize] run failed: {e}")
             return None

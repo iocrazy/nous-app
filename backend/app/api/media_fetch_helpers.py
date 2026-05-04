@@ -192,7 +192,7 @@ async def dedup_and_dispatch(
             else:
                 types_skipped.append(dtype)
         except Exception as e:
-            logger.warning(f"[Download/Dedup] {dtype} dedup failed, proceeding: {e}")
+            logger.opt(exception=True).warning(f"[Download/Dedup] {dtype} dedup failed, proceeding: {e}")
             types_to_download.append(dtype)
 
     task_id = None
@@ -222,7 +222,7 @@ async def dedup_and_dispatch(
                 dbos_workflow_id=task_id,
             )
         except Exception as e:
-            logger.warning(f"[Download/Dedup] Pre-create unified_task failed: {e}")
+            logger.opt(exception=True).warning(f"[Download/Dedup] Pre-create unified_task failed: {e}")
 
         try:
             logger.info(
@@ -300,7 +300,7 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
             )
         logger.info(f"[Douyin Fallback] User {user_id} parse_mode: {user_parse_mode}")
     except Exception as e:
-        logger.warning(f"Failed to read user parse mode, using default: {e}")
+        logger.opt(exception=True).warning(f"Failed to read user parse mode, using default: {e}")
 
     # Pick a Douyin UA once per request so LightHTTP + BrowserAuto share it.
     from app.services.douyin_parse.ua_pool import pick_ua
@@ -318,7 +318,7 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
                 parse_method_name = "BrowserAuto"
                 logger.success("[BrowserAuto] Parse successful")
         except Exception as e:
-            logger.error(f"[BrowserAuto] Parse failed: {e}")
+            logger.exception(f"[BrowserAuto] Parse failed: {e}")
             fallback_reason = f"BrowserAuto error: {str(e)[:50]}"
     else:
         try:
@@ -332,7 +332,7 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
                 fallback_reason = "LightHTTP returned empty result"
         except Exception as e:
             fallback_reason = f"LightHTTP error: {str(e)[:50]}"
-            logger.warning(f"[LightHTTP] Parse failed: {e}")
+            logger.opt(exception=True).warning(f"[LightHTTP] Parse failed: {e}")
 
         if not aweme_detail:
             try:
@@ -345,7 +345,7 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
                     parse_method_name = "BrowserAuto"
                     logger.success("[BrowserAuto] Parse successful")
             except Exception as e:
-                logger.error(f"[BrowserAuto] Parse failed: {e}")
+                logger.exception(f"[BrowserAuto] Parse failed: {e}")
 
     if not aweme_detail:
         raise HTTPException(
@@ -380,7 +380,7 @@ async def mark_cookie_if_auth_failure(user_id: str, platform: str, error: str) -
                 f"{error[:80]}"
             )
         except Exception as e:
-            logger.warning(f"[Cookie] Failed to mark cookie invalid: {e}")
+            logger.opt(exception=True).warning(f"[Cookie] Failed to mark cookie invalid: {e}")
 
 
 # ============================================
@@ -427,7 +427,7 @@ async def handle_media_fetch_dispatch(
                 f"has_cookie={has_cookie}"
             )
         except Exception as e:
-            logger.warning(f"[Cookie] Cookie check failed, proceeding without: {e}")
+            logger.opt(exception=True).warning(f"[Cookie] Cookie check failed, proceeding without: {e}")
 
     skip_ytdlp = platform == "douyin" and not has_cookie
 
@@ -481,7 +481,7 @@ async def handle_media_fetch_dispatch(
             }
         dedup_key = result.get("dedup_key")
     except Exception as e:
-        logger.warning(f"[Parse/Dedup] check failed, proceeding: {e}")
+        logger.opt(exception=True).warning(f"[Parse/Dedup] check failed, proceeding: {e}")
 
     # ── L3 idempotency: deterministic DBOS workflow_id ──
     # Build the workflow_id from (user_id, sha1(url), 30-second bucket)
@@ -519,7 +519,7 @@ async def handle_media_fetch_dispatch(
                 f"[L3/Parse] idempotent re-submit, reusing wf_id={dbos_wf_id[:32]}"
             )
         else:
-            logger.warning(f"[Parse] Pre-create unified_task failed: {e}")
+            logger.opt(exception=True).warning(f"[Parse] Pre-create unified_task failed: {e}")
 
     await start_workflow_routed(
         "parse",

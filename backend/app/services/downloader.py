@@ -111,7 +111,7 @@ class DownloaderService:
             logger.warning("ffmpeg not found, skipping video optimization")
             return False
         except Exception as e:
-            logger.warning(f"视频优化出错: {e}")
+            logger.opt(exception=True).warning(f"视频优化出错: {e}")
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             return False
@@ -178,7 +178,7 @@ class DownloaderService:
             logger.warning("ffmpeg not found, skipping video integrity check")
             return True  # Skip check if ffmpeg not installed
         except Exception as e:
-            logger.warning(f"视频验证出错: {e}")
+            logger.opt(exception=True).warning(f"视频验证出错: {e}")
             return True  # Don't fail on unknown errors
 
     @staticmethod
@@ -261,7 +261,7 @@ class DownloaderService:
                             )
                             os.remove(file_path)
                     except Exception as e:
-                        logger.warning(f"无法验证文件完整性，重新下载: {e}")
+                        logger.opt(exception=True).warning(f"无法验证文件完整性，重新下载: {e}")
                         os.remove(file_path)
                 # Get expected size via HEAD request first
                 expected_size = 0
@@ -271,7 +271,7 @@ class DownloaderService:
                     )
                     expected_size = int(head_resp.headers.get("content-length", 0))
                 except Exception as e:
-                    logger.warning(f"无法获取预期文件大小: {e}")
+                    logger.opt(exception=True).warning(f"无法获取预期文件大小: {e}")
 
                 # Use streaming if progress tracker is provided
                 if progress_tracker:
@@ -708,7 +708,7 @@ class DownloaderService:
                 ):
                     return {"success": True, "path": file_path}
             except Exception as e:
-                logger.warning(f"Slide {filename} URL {j} failed: {e}")
+                logger.opt(exception=True).warning(f"Slide {filename} URL {j} failed: {e}")
                 continue
 
         return {
@@ -949,7 +949,7 @@ class DownloaderService:
                         if task_result and task_result.get("success", False):
                             downloaded_count += 1
                     except Exception as e:
-                        logger.error(f"Slide download task result error: {e}")
+                        logger.exception(f"Slide download task result error: {e}")
 
                 logger.info(
                     f"{platform_id} slides download: {downloaded_count}/{total_expected}"
@@ -1075,7 +1075,7 @@ class DownloaderService:
                 }
                 logger.debug(f" {platform_id} music data: {shortened_data}")
             except ValueError as e:
-                logger.error(f"Failed to retrieve music data: {e}")
+                logger.exception(f"Failed to retrieve music data: {e}")
                 result.error = str(e)
                 result.music_download_status = DownloadStatus.FAILED
                 return result
@@ -1281,7 +1281,7 @@ class DownloaderService:
                             },
                         )
                     except Exception as e:
-                        logger.error(f"更新封面下载状态失败: {e}")
+                        logger.exception(f"更新封面下载状态失败: {e}")
 
                     result.cover_download_status = DownloadStatus.COMPLETED
                     result.cover_path = cover_relative_path  # Return relative path

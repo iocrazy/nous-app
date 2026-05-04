@@ -111,7 +111,7 @@ class SkillRepository(BaseRepository):
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(f"Failed to get skill by slug '{slug}': {e}")
+            logger.exception(f"Failed to get skill by slug '{slug}': {e}")
             return None
 
     async def get_by_id(  # type: ignore[override]
@@ -133,7 +133,7 @@ class SkillRepository(BaseRepository):
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(f"Failed to get skill by id {skill_id}: {e}")
+            logger.exception(f"Failed to get skill by id {skill_id}: {e}")
             return None
 
     async def list_by_ids(self, skill_ids: List[int]) -> List[Dict[str, Any]]:
@@ -154,7 +154,7 @@ class SkillRepository(BaseRepository):
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list skills by ids {skill_ids}: {e}")
+            logger.exception(f"Failed to list skills by ids {skill_ids}: {e}")
             return []
 
     async def list_accessible(
@@ -202,7 +202,7 @@ class SkillRepository(BaseRepository):
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list accessible skills for user {user_id}: {e}")
+            logger.exception(f"Failed to list accessible skills for user {user_id}: {e}")
             return []
 
     # ------------------------------------------------------------------
@@ -223,7 +223,7 @@ class SkillRepository(BaseRepository):
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list files for skill {skill_id}: {e}")
+            logger.exception(f"Failed to list files for skill {skill_id}: {e}")
             return []
 
     async def get_file(self, skill_id: int, path: str) -> Optional[Dict[str, Any]]:
@@ -240,7 +240,7 @@ class SkillRepository(BaseRepository):
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(f"Failed to get file {path!r} for skill {skill_id}: {e}")
+            logger.exception(f"Failed to get file {path!r} for skill {skill_id}: {e}")
             return None
 
     async def upsert_file(
@@ -286,7 +286,7 @@ class SkillRepository(BaseRepository):
                 )
             return result.data[0]
         except Exception as e:
-            logger.error(f"Failed to upsert file {path!r} for skill {skill_id}: {e}")
+            logger.exception(f"Failed to upsert file {path!r} for skill {skill_id}: {e}")
             raise
 
     async def delete_file(self, skill_id: int, path: str) -> None:
@@ -302,7 +302,7 @@ class SkillRepository(BaseRepository):
             )
             logger.info("Deleted skill_files row skill_id=%s path=%s", skill_id, path)
         except Exception as e:
-            logger.error(f"Failed to delete file {path!r} for skill {skill_id}: {e}")
+            logger.exception(f"Failed to delete file {path!r} for skill {skill_id}: {e}")
             raise
 
     # ------------------------------------------------------------------
@@ -323,7 +323,7 @@ class SkillRepository(BaseRepository):
                 raise RuntimeError("insert skill returned no data")
             return result.data[0]
         except Exception as e:
-            logger.error(f"Failed to insert skill: {e}")
+            logger.exception(f"Failed to insert skill: {e}")
             raise
 
     async def delete(self, skill_id: int) -> None:
@@ -338,7 +338,7 @@ class SkillRepository(BaseRepository):
             await client.table(self.TABLE).delete().eq("id", skill_id).execute()
             logger.info("Deleted skill id=%s", skill_id)
         except Exception as e:
-            logger.error(f"Failed to delete skill {skill_id}: {e}")
+            logger.exception(f"Failed to delete skill {skill_id}: {e}")
             raise
 
     async def update_fields(
@@ -355,7 +355,7 @@ class SkillRepository(BaseRepository):
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update skill {skill_id}: {e}")
+            logger.exception(f"Failed to update skill {skill_id}: {e}")
             raise
 
     # Fields snapshotted into skill_versions. Narrower than update_fields'

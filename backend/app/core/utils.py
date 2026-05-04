@@ -264,7 +264,7 @@ class Utils:
                     if download_path and download_path.strip():
                         return download_path.strip()
             except Exception as e:
-                logger.warning(f"读取 frontend_config.yml 失败: {e}")
+                logger.opt(exception=True).warning(f"读取 frontend_config.yml 失败: {e}")
 
         # 2. 后备：从 .env 读取 DOWNLOAD_PATH
         if settings.DOWNLOAD_PATH and settings.DOWNLOAD_PATH.strip():
@@ -473,7 +473,7 @@ class Utils:
                 return aweme_id
 
         except Exception as e:
-            logger.error(f"提取aweme_id失败: {e}")
+            logger.exception(f"提取aweme_id失败: {e}")
             raise ValueError("提取aweme_id失败") from e
 
     @classmethod

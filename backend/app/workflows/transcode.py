@@ -146,7 +146,7 @@ def log_transcode_outcome_step(
                         },
                     )
                 except Exception as e:
-                    logger.warning(f"[transcode] log_user_action: {e}")
+                    logger.opt(exception=True).warning(f"[transcode] log_user_action: {e}")
             return
 
         # failed
@@ -154,7 +154,7 @@ def log_transcode_outcome_step(
             repo = ResourcesRepository()
             await repo.update_version(version_id, {"transcode_status": "failed"})
         except Exception as e:
-            logger.warning(f"[transcode] update_version on failure: {e}")
+            logger.opt(exception=True).warning(f"[transcode] update_version on failure: {e}")
         if user_id:
             try:
                 await log_user_action(
@@ -169,7 +169,7 @@ def log_transcode_outcome_step(
                     },
                 )
             except Exception as e:
-                logger.warning(f"[transcode] log_user_action on failure: {e}")
+                logger.opt(exception=True).warning(f"[transcode] log_user_action on failure: {e}")
 
     asyncio.run(_do())
 

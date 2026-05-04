@@ -71,7 +71,7 @@ class AgentWorkforceRepository:
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(f"Failed to get worker {agent_id}: {e}")
+            logger.exception(f"Failed to get worker {agent_id}: {e}")
             return None
 
     async def upsert_worker(
@@ -101,7 +101,7 @@ class AgentWorkforceRepository:
             )
             return (result.data or [None])[0]
         except Exception as e:
-            logger.error(f"Failed to upsert worker {agent_id}: {e}")
+            logger.exception(f"Failed to upsert worker {agent_id}: {e}")
             return None
 
     async def update_worker_state(
@@ -130,7 +130,7 @@ class AgentWorkforceRepository:
             )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"Failed to update worker state {agent_id}: {e}")
+            logger.exception(f"Failed to update worker state {agent_id}: {e}")
             return False
 
     async def heartbeat(self, agent_id: UUID) -> bool:
@@ -145,7 +145,7 @@ class AgentWorkforceRepository:
             )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"Failed heartbeat {agent_id}: {e}")
+            logger.exception(f"Failed heartbeat {agent_id}: {e}")
             return False
 
     async def list_stale_workers(
@@ -165,7 +165,7 @@ class AgentWorkforceRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list stale workers: {e}")
+            logger.exception(f"Failed to list stale workers: {e}")
             return []
 
     # ═════════════════════════════════════════════════════════════
@@ -219,7 +219,7 @@ class AgentWorkforceRepository:
                 return await self._find_inbox_by_dedup(
                     recipient_agent_id=recipient_agent_id, dedup_key=dedup_key
                 )
-            logger.error(f"Failed to enqueue inbox for {recipient_agent_id}: {e}")
+            logger.exception(f"Failed to enqueue inbox for {recipient_agent_id}: {e}")
             return None
 
     async def _find_inbox_by_dedup(
@@ -238,7 +238,7 @@ class AgentWorkforceRepository:
             )
             return (result.data or [None])[0]
         except Exception as e:
-            logger.error(f"Failed inbox dedup lookup: {e}")
+            logger.exception(f"Failed inbox dedup lookup: {e}")
             return None
 
     async def claim_next_unread(
@@ -286,7 +286,7 @@ class AgentWorkforceRepository:
             )
             return (updated.data or [None])[0]
         except Exception as e:
-            logger.error(f"Failed to claim unread (agent={recipient_agent_id}): {e}")
+            logger.exception(f"Failed to claim unread (agent={recipient_agent_id}): {e}")
             return None
 
     async def mark_inbox_processed(
@@ -313,7 +313,7 @@ class AgentWorkforceRepository:
             )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"Failed to mark inbox {message_id} {status}: {e}")
+            logger.exception(f"Failed to mark inbox {message_id} {status}: {e}")
             return False
 
     async def list_inbox(
@@ -340,7 +340,7 @@ class AgentWorkforceRepository:
             )
             return {"items": result.data or [], "total": result.count or 0}
         except Exception as e:
-            logger.error(f"Failed to list inbox {recipient_agent_id}: {e}")
+            logger.exception(f"Failed to list inbox {recipient_agent_id}: {e}")
             return {"items": [], "total": 0}
 
     # ═════════════════════════════════════════════════════════════
@@ -379,7 +379,7 @@ class AgentWorkforceRepository:
                 row["root_task_id"] = row["id"]
             return row
         except Exception as e:
-            logger.error(f"Failed to create task (agent={agent_id}): {e}")
+            logger.exception(f"Failed to create task (agent={agent_id}): {e}")
             return None
 
     async def claim_next_queued(self, *, agent_id: UUID) -> Optional[Dict[str, Any]]:
@@ -414,7 +414,7 @@ class AgentWorkforceRepository:
             )
             return (updated.data or [None])[0]
         except Exception as e:
-            logger.error(f"Failed to claim queued task (agent={agent_id}): {e}")
+            logger.exception(f"Failed to claim queued task (agent={agent_id}): {e}")
             return None
 
     async def update_task_status(
@@ -458,7 +458,7 @@ class AgentWorkforceRepository:
             )
             return bool(result_resp.data)
         except Exception as e:
-            logger.error(f"Failed to update task {task_id} → {lifecycle_status}: {e}")
+            logger.exception(f"Failed to update task {task_id} → {lifecycle_status}: {e}")
             return False
 
     async def get_task(self, task_id: UUID) -> Optional[Dict[str, Any]]:
@@ -473,7 +473,7 @@ class AgentWorkforceRepository:
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(f"Failed to get task {task_id}: {e}")
+            logger.exception(f"Failed to get task {task_id}: {e}")
             return None
 
     async def list_tasks(
@@ -501,7 +501,7 @@ class AgentWorkforceRepository:
             )
             return {"items": result.data or [], "total": result.count or 0}
         except Exception as e:
-            logger.error(f"Failed to list tasks: {e}")
+            logger.exception(f"Failed to list tasks: {e}")
             return {"items": [], "total": 0}
 
     async def requeue_task(self, task_id: UUID) -> bool:
@@ -525,7 +525,7 @@ class AgentWorkforceRepository:
             )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"Failed to requeue task {task_id}: {e}")
+            logger.exception(f"Failed to requeue task {task_id}: {e}")
             return False
 
     # ═════════════════════════════════════════════════════════════
@@ -557,7 +557,7 @@ class AgentWorkforceRepository:
             )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"Failed to log state transition for {agent_id}: {e}")
+            logger.exception(f"Failed to log state transition for {agent_id}: {e}")
             return False
 
     async def list_state_history(
@@ -578,7 +578,7 @@ class AgentWorkforceRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list state history {agent_id}: {e}")
+            logger.exception(f"Failed to list state history {agent_id}: {e}")
             return []
 
     # ═════════════════════════════════════════════════════════════
@@ -612,7 +612,7 @@ class AgentWorkforceRepository:
             result = await client.table(self.OUTBOX_TABLE).insert(record).execute()
             return (result.data or [None])[0]
         except Exception as e:
-            logger.error(f"Failed to enqueue outbox from {sender_agent_id}: {e}")
+            logger.exception(f"Failed to enqueue outbox from {sender_agent_id}: {e}")
             return None
 
     async def mark_outbox_delivered(self, message_id: UUID) -> bool:
@@ -631,7 +631,7 @@ class AgentWorkforceRepository:
             )
             return bool(result.data)
         except Exception as e:
-            logger.error(f"Failed to mark outbox {message_id} delivered: {e}")
+            logger.exception(f"Failed to mark outbox {message_id} delivered: {e}")
             return False
 
     async def list_undelivered_outbox(
@@ -651,5 +651,5 @@ class AgentWorkforceRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list undelivered outbox: {e}")
+            logger.exception(f"Failed to list undelivered outbox: {e}")
             return []

@@ -168,7 +168,7 @@ async def create_share(data: ShareCreate, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create share: {e}")
+        logger.exception(f"Failed to create share: {e}")
         raise HTTPException(status_code=500, detail="Failed to create share")
 
 
@@ -231,7 +231,7 @@ async def list_shares(
         }
 
     except Exception as e:
-        logger.error(f"Failed to list shares: {e}")
+        logger.exception(f"Failed to list shares: {e}")
         raise HTTPException(status_code=500, detail="Failed to list shares")
 
 
@@ -277,7 +277,7 @@ async def get_share(share_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get share {share_id}: {e}")
+        logger.exception(f"Failed to get share {share_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get share")
 
 
@@ -352,7 +352,7 @@ async def update_share(share_id: str, data: ShareUpdate, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update share {share_id}: {e}")
+        logger.exception(f"Failed to update share {share_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update share")
 
 
@@ -400,7 +400,7 @@ async def toggle_share_status(share_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to toggle share {share_id}: {e}")
+        logger.exception(f"Failed to toggle share {share_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update share")
 
 
@@ -437,7 +437,7 @@ async def delete_share_permanent(share_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete share {share_id}: {e}")
+        logger.exception(f"Failed to delete share {share_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete share")
 
 
@@ -594,7 +594,7 @@ async def access_share_by_code(
                         ),
                     }
             except Exception as e:
-                logger.warning(f"Failed to fetch resource metadata for share: {e}")
+                logger.opt(exception=True).warning(f"Failed to fetch resource metadata for share: {e}")
 
         # Build the response (strip sensitive fields)
         share["view_count"] = new_view_count
@@ -623,7 +623,7 @@ async def access_share_by_code(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to access share {share_code}: {e}")
+        logger.exception(f"Failed to access share {share_code}: {e}")
         raise HTTPException(status_code=500, detail="Failed to access share")
 
 
@@ -679,7 +679,7 @@ async def get_share_comments(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get share comments: {e}")
+        logger.exception(f"Failed to get share comments: {e}")
         raise HTTPException(status_code=500, detail="Failed to get comments")
 
 
@@ -760,5 +760,5 @@ async def create_share_comment(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create share comment: {e}")
+        logger.exception(f"Failed to create share comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to create comment")

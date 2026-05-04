@@ -77,7 +77,7 @@ async def _probe_duration(video_path: str) -> Optional[float]:
         text = stdout.decode().strip()
         return float(text) if text else None
     except (asyncio.TimeoutError, ValueError, Exception) as exc:
-        logger.warning(f"[VideoFrameExtractor] probe_duration failed: {exc}")
+        logger.opt(exception=True).warning(f"[VideoFrameExtractor] probe_duration failed: {exc}")
         return None
 
 
@@ -90,7 +90,7 @@ def _frame_to_data_url(frame_path: Path) -> Optional[str]:
         b64 = base64.b64encode(raw).decode("ascii")
         return f"data:image/jpeg;base64,{b64}"
     except Exception as exc:
-        logger.warning(f"[VideoFrameExtractor] read frame failed: {frame_path}: {exc}")
+        logger.opt(exception=True).warning(f"[VideoFrameExtractor] read frame failed: {frame_path}: {exc}")
         return None
 
 

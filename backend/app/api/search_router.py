@@ -235,7 +235,7 @@ async def semantic_search(
         )
 
     except Exception as e:
-        logger.error(f"Semantic search failed: {e}")
+        logger.exception(f"Semantic search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
@@ -304,7 +304,7 @@ async def hybrid_search(
         )
 
     except Exception as e:
-        logger.error(f"Hybrid search failed: {e}")
+        logger.exception(f"Hybrid search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
@@ -445,7 +445,7 @@ async def text_search(
                 if r.get("media_id"):
                     extra_media_ids.add(int(r["media_id"]))
     except Exception as e:
-        logger.error(f"Text search side-query failed: {e}")
+        logger.exception(f"Text search side-query failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
@@ -500,7 +500,7 @@ async def text_search(
                 seen_ids.add(rid)
                 rows.append(row)
     except Exception as e:
-        logger.error(f"Text search failed: {e}")
+        logger.exception(f"Text search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
@@ -622,7 +622,7 @@ async def find_similar_media(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Similar media search failed: {e}")
+        logger.exception(f"Similar media search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
@@ -665,5 +665,5 @@ async def quick_search(
         }
 
     except Exception as e:
-        logger.error(f"Quick search failed: {e}")
+        logger.exception(f"Quick search failed: {e}")
         return {"results": [], "total": 0}

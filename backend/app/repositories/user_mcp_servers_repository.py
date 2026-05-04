@@ -108,7 +108,7 @@ class UserMCPServersRepository:
                 return None
             return UserMCPServer.from_row(result.data)
         except Exception as exc:
-            logger.warning(f"[UserMCPServersRepo] get_by_id failed: {exc}")
+            logger.opt(exception=True).warning(f"[UserMCPServersRepo] get_by_id failed: {exc}")
             return None
 
     async def create(
@@ -141,7 +141,7 @@ class UserMCPServersRepository:
                 return None
             return UserMCPServer.from_row(result.data[0])
         except Exception as exc:
-            logger.warning(f"[UserMCPServersRepo] create failed: {exc}")
+            logger.opt(exception=True).warning(f"[UserMCPServersRepo] create failed: {exc}")
             raise
 
     async def update(
@@ -183,7 +183,7 @@ class UserMCPServersRepository:
             )
             return True
         except Exception as exc:
-            logger.warning(f"[UserMCPServersRepo] update failed: {exc}")
+            logger.opt(exception=True).warning(f"[UserMCPServersRepo] update failed: {exc}")
             return False
 
     async def delete(self, server_id: UUID, *, owner_user_id: UUID) -> bool:
@@ -201,7 +201,7 @@ class UserMCPServersRepository:
             )
             return True
         except Exception as exc:
-            logger.warning(f"[UserMCPServersRepo] delete failed: {exc}")
+            logger.opt(exception=True).warning(f"[UserMCPServersRepo] delete failed: {exc}")
             return False
 
 

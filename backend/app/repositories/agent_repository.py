@@ -41,7 +41,7 @@ class AgentRepository:
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(f"Failed to get agent by slug '{slug}': {e}")
+            logger.exception(f"Failed to get agent by slug '{slug}': {e}")
             return None
 
     async def get_by_id(self, agent_id: UUID) -> Optional[Dict[str, Any]]:
@@ -57,7 +57,7 @@ class AgentRepository:
             )
             return result.data if result and result.data else None
         except Exception as e:
-            logger.error(f"Failed to get agent by id {agent_id}: {e}")
+            logger.exception(f"Failed to get agent by id {agent_id}: {e}")
             return None
 
     async def list_persistent(self) -> List[Dict[str, Any]]:
@@ -80,7 +80,7 @@ class AgentRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list persistent agents: {e}")
+            logger.exception(f"Failed to list persistent agents: {e}")
             return []
 
     async def list_accessible(
@@ -122,7 +122,7 @@ class AgentRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to list accessible agents for user {user_id}: {e}")
+            logger.exception(f"Failed to list accessible agents for user {user_id}: {e}")
             return []
 
     async def get_skill_ids(self, agent_id: UUID) -> List[int]:
@@ -142,7 +142,7 @@ class AgentRepository:
             )
             return [int(row["skill_id"]) for row in (result.data or [])]
         except Exception as e:
-            logger.error(f"Failed to get skill ids for agent {agent_id}: {e}")
+            logger.exception(f"Failed to get skill ids for agent {agent_id}: {e}")
             return []
 
     # ------------------------------------------------------------------
@@ -181,7 +181,7 @@ class AgentRepository:
                 len(skill_ids),
             )
         except Exception as e:
-            logger.error(f"Failed to update skill bindings for agent {agent_id}: {e}")
+            logger.exception(f"Failed to update skill bindings for agent {agent_id}: {e}")
             raise
 
     async def update_fields(
@@ -198,7 +198,7 @@ class AgentRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update agent {agent_id}: {e}")
+            logger.exception(f"Failed to update agent {agent_id}: {e}")
             raise
 
     async def insert(self, fields: Dict[str, Any]) -> Dict[str, Any]:

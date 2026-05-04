@@ -104,7 +104,7 @@ class CleanupService:
                                 categories.get("duplicate_content", 0) + 1
                             )
                 except Exception as e:
-                    logger.warning(f"Duplicate detection failed: {e}")
+                    logger.opt(exception=True).warning(f"Duplicate detection failed: {e}")
 
             return {
                 "suggestions": suggestions,
@@ -113,7 +113,7 @@ class CleanupService:
             }
 
         except Exception as e:
-            logger.warning(f"Combined RPC failed, falling back: {e}")
+            logger.opt(exception=True).warning(f"Combined RPC failed, falling back: {e}")
             # Fallback to separate calls
             suggestions, categories = await self.get_suggestions(
                 user_id, limit, include_duplicates
@@ -208,7 +208,7 @@ class CleanupService:
                         category_counts["duplicate_content"] += 1
 
         except Exception as e:
-            logger.error(f"Error getting cleanup suggestions: {e}")
+            logger.exception(f"Error getting cleanup suggestions: {e}")
             # Fallback to old method if RPC fails
             return await self._get_suggestions_legacy(
                 user_id, limit, include_duplicates
@@ -460,7 +460,7 @@ class CleanupService:
                     "reclaimable_bytes": stats.get("reclaimable_bytes", 0),
                 }
         except Exception as e:
-            logger.warning(f"RPC get_cleanup_stats failed, using fallback: {e}")
+            logger.opt(exception=True).warning(f"RPC get_cleanup_stats failed, using fallback: {e}")
 
         # Fallback to direct query
         return await self._get_cleanup_stats_fallback(user_id)

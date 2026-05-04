@@ -119,7 +119,7 @@ class ApiKeyRepository:
             raise Exception("创建 API 密钥失败：无返回数据")
 
         except Exception as e:
-            logger.error(f"创建 API 密钥失败: {e}")
+            logger.exception(f"创建 API 密钥失败: {e}")
             raise
 
     async def get_by_key_hash(self, key_hash: str) -> Optional[Dict[str, Any]]:
@@ -137,7 +137,7 @@ class ApiKeyRepository:
             result = await table.select("*").eq("key_hash", key_hash).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"查询 API 密钥失败: {e}")
+            logger.exception(f"查询 API 密钥失败: {e}")
             return None
 
     async def get_by_key_id(self, key_id: str) -> Optional[Dict[str, Any]]:
@@ -155,7 +155,7 @@ class ApiKeyRepository:
             result = await table.select("*").eq("key_id", key_id).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"查询 API 密钥失败: {e}")
+            logger.exception(f"查询 API 密钥失败: {e}")
             return None
 
     async def get_user_keys(
@@ -183,7 +183,7 @@ class ApiKeyRepository:
             return result.data or []
 
         except Exception as e:
-            logger.error(f"获取用户 API 密钥列表失败: {e}")
+            logger.exception(f"获取用户 API 密钥列表失败: {e}")
             return []
 
     async def update(
@@ -217,7 +217,7 @@ class ApiKeyRepository:
             return None
 
         except Exception as e:
-            logger.error(f"更新 API 密钥失败: {e}")
+            logger.exception(f"更新 API 密钥失败: {e}")
             raise
 
     async def delete(self, key_id: str, user_id: str) -> bool:
@@ -239,7 +239,7 @@ class ApiKeyRepository:
             return True
 
         except Exception as e:
-            logger.error(f"删除 API 密钥失败: {e}")
+            logger.exception(f"删除 API 密钥失败: {e}")
             return False
 
     async def revoke(self, key_id: str, user_id: str) -> Optional[Dict[str, Any]]:
@@ -268,7 +268,7 @@ class ApiKeyRepository:
             await client.rpc("increment_api_key_usage", {"p_key_id": key_id}).execute()
         except Exception as e:
             # 使用统计失败不应影响请求
-            logger.warning(f"更新 API 密钥使用统计失败: {e}")
+            logger.opt(exception=True).warning(f"更新 API 密钥使用统计失败: {e}")
 
     async def validate_key(self, full_key: str) -> Optional[Dict[str, Any]]:
         """
@@ -315,7 +315,7 @@ class ApiKeyRepository:
                     logger.debug("API 密钥已过期")
                     return None
             except Exception as e:
-                logger.warning(f"解析过期时间失败: {e}")
+                logger.opt(exception=True).warning(f"解析过期时间失败: {e}")
 
         return key_data
 
@@ -341,5 +341,5 @@ class ApiKeyRepository:
             return result.count or 0
 
         except Exception as e:
-            logger.error(f"统计用户 API 密钥数量失败: {e}")
+            logger.exception(f"统计用户 API 密钥数量失败: {e}")
             return 0

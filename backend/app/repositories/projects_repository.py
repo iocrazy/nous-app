@@ -71,7 +71,7 @@ class ProjectsRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get projects for user {user_id}: {e}")
+            logger.exception(f"Failed to get projects for user {user_id}: {e}")
             return []
 
     async def get_project_by_id(self, project_id: str) -> Optional[Dict[str, Any]]:
@@ -94,7 +94,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get project {project_id}: {e}")
+            logger.exception(f"Failed to get project {project_id}: {e}")
             return None
 
     async def create_project(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,7 +113,7 @@ class ProjectsRepository:
             logger.info(f"Created project: {data.get('name')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create project: {e}")
+            logger.exception(f"Failed to create project: {e}")
             raise
 
     async def update_project(
@@ -140,7 +140,7 @@ class ProjectsRepository:
             logger.info(f"Updated project {project_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update project {project_id}: {e}")
+            logger.exception(f"Failed to update project {project_id}: {e}")
             raise
 
     async def delete_project(self, project_id: str) -> bool:
@@ -164,7 +164,7 @@ class ProjectsRepository:
             logger.info(f"Deleted project {project_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete project {project_id}: {e}")
+            logger.exception(f"Failed to delete project {project_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -192,7 +192,7 @@ class ProjectsRepository:
             )
             return result.count or 0
         except Exception as e:
-            logger.error(f"Failed to get file count for project {project_id}: {e}")
+            logger.exception(f"Failed to get file count for project {project_id}: {e}")
             return 0
 
     # ------------------------------------------------------------------ #
@@ -223,7 +223,7 @@ class ProjectsRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get files for project {project_id}: {e}")
+            logger.exception(f"Failed to get files for project {project_id}: {e}")
             return []
 
     async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
@@ -246,7 +246,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get file {file_id}: {e}")
+            logger.exception(f"Failed to get file {file_id}: {e}")
             return None
 
     async def create_file(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -267,7 +267,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create file: {e}")
+            logger.exception(f"Failed to create file: {e}")
             raise
 
     async def update_file(self, file_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -292,7 +292,7 @@ class ProjectsRepository:
             logger.info(f"Updated file {file_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update file {file_id}: {e}")
+            logger.exception(f"Failed to update file {file_id}: {e}")
             raise
 
     async def delete_file(self, file_id: str) -> bool:
@@ -311,7 +311,7 @@ class ProjectsRepository:
             logger.info(f"Deleted file {file_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete file {file_id}: {e}")
+            logger.exception(f"Failed to delete file {file_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -338,7 +338,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get media metadata {media_id}: {e}")
+            logger.exception(f"Failed to get media metadata {media_id}: {e}")
             return None
 
     # ------------------------------------------------------------------ #
@@ -358,7 +358,7 @@ class ProjectsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get versions for file {file_id}: {e}")
+            logger.exception(f"Failed to get versions for file {file_id}: {e}")
             return []
 
     async def get_next_version_number(self, file_id: str) -> int:
@@ -377,7 +377,7 @@ class ProjectsRepository:
                 return result.data[0]["version_number"] + 1
             return 1
         except Exception as e:
-            logger.error(f"Failed to get next version for file {file_id}: {e}")
+            logger.exception(f"Failed to get next version for file {file_id}: {e}")
             return 1
 
     async def create_version(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -390,7 +390,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create version: {e}")
+            logger.exception(f"Failed to create version: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -414,7 +414,7 @@ class ProjectsRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get comments for file {file_id}: {e}")
+            logger.exception(f"Failed to get comments for file {file_id}: {e}")
             return []
 
     async def create_comment(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -425,7 +425,7 @@ class ProjectsRepository:
             logger.info(f"Created comment on file {data.get('file_id')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create comment: {e}")
+            logger.exception(f"Failed to create comment: {e}")
             raise
 
     async def get_comment_by_id(self, comment_id: str) -> Optional[Dict[str, Any]]:
@@ -440,7 +440,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get comment {comment_id}: {e}")
+            logger.exception(f"Failed to get comment {comment_id}: {e}")
             return None
 
     async def delete_comment(self, comment_id: str) -> bool:
@@ -456,7 +456,7 @@ class ProjectsRepository:
             logger.info(f"Deleted comment {comment_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete comment {comment_id}: {e}")
+            logger.exception(f"Failed to delete comment {comment_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -478,7 +478,7 @@ class ProjectsRepository:
             logger.info(f"Updated review status for file {file_id} to {status}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update review status for file {file_id}: {e}")
+            logger.exception(f"Failed to update review status for file {file_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -503,7 +503,7 @@ class ProjectsRepository:
             result = await query.order("name").execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get folders for project {project_id}: {e}")
+            logger.exception(f"Failed to get folders for project {project_id}: {e}")
             return []
 
     async def get_folder(
@@ -521,7 +521,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get folder {folder_id}: {e}")
+            logger.exception(f"Failed to get folder {folder_id}: {e}")
             return None
 
     async def create_folder(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -531,7 +531,7 @@ class ProjectsRepository:
             result = await client.table(self.TABLE_FOLDERS).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create folder: {e}")
+            logger.exception(f"Failed to create folder: {e}")
             raise
 
     async def update_folder(
@@ -549,7 +549,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to update folder {folder_id}: {e}")
+            logger.exception(f"Failed to update folder {folder_id}: {e}")
             raise
 
     async def delete_folder_record(self, folder_id: str, project_id: str) -> bool:
@@ -565,7 +565,7 @@ class ProjectsRepository:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to delete folder {folder_id}: {e}")
+            logger.exception(f"Failed to delete folder {folder_id}: {e}")
             raise
 
     async def reparent_folder_children(
@@ -587,7 +587,7 @@ class ProjectsRepository:
                 .execute()
             )
         except Exception as e:
-            logger.error(f"Failed to reparent children of folder {folder_id}: {e}")
+            logger.exception(f"Failed to reparent children of folder {folder_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -616,7 +616,7 @@ class ProjectsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get shares for project {project_id}: {e}")
+            logger.exception(f"Failed to get shares for project {project_id}: {e}")
             return []
 
     async def get_file_in_project(
@@ -634,7 +634,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get file {file_id} in project {project_id}: {e}")
+            logger.exception(f"Failed to get file {file_id} in project {project_id}: {e}")
             return None
 
     async def create_share(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -644,7 +644,7 @@ class ProjectsRepository:
             result = await client.table(self.TABLE_SHARES).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create share: {e}")
+            logger.exception(f"Failed to create share: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -664,7 +664,7 @@ class ProjectsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get tasks for project {project_id}: {e}")
+            logger.exception(f"Failed to get tasks for project {project_id}: {e}")
             return []
 
     async def create_task(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -674,7 +674,7 @@ class ProjectsRepository:
             result = await client.table(self.TABLE_TASKS).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create task: {e}")
+            logger.exception(f"Failed to create task: {e}")
             raise
 
     async def update_task(
@@ -692,7 +692,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to update task {task_id}: {e}")
+            logger.exception(f"Failed to update task {task_id}: {e}")
             raise
 
     async def delete_task(self, task_id: str, project_id: str) -> bool:
@@ -708,7 +708,7 @@ class ProjectsRepository:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to delete task {task_id}: {e}")
+            logger.exception(f"Failed to delete task {task_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -728,7 +728,7 @@ class ProjectsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get members for project {project_id}: {e}")
+            logger.exception(f"Failed to get members for project {project_id}: {e}")
             return []
 
     async def create_member(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -738,7 +738,7 @@ class ProjectsRepository:
             result = await client.table(self.TABLE_MEMBERS).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create member: {e}")
+            logger.exception(f"Failed to create member: {e}")
             raise
 
     async def update_member(
@@ -756,7 +756,7 @@ class ProjectsRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to update member {member_id}: {e}")
+            logger.exception(f"Failed to update member {member_id}: {e}")
             raise
 
     async def delete_member(self, member_id: str, project_id: str) -> bool:
@@ -772,7 +772,7 @@ class ProjectsRepository:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to delete member {member_id}: {e}")
+            logger.exception(f"Failed to delete member {member_id}: {e}")
             raise
 
     async def enrich_members_with_email(
@@ -792,7 +792,7 @@ class ProjectsRepository:
                 m["email"] = user_map.get(m["user_id"], "")
             return members
         except Exception as e:
-            logger.warning(f"Failed to enrich members with email: {e}")
+            logger.opt(exception=True).warning(f"Failed to enrich members with email: {e}")
             return members
 
     async def get_user_email(self, user_id: str) -> str:
@@ -821,7 +821,7 @@ class ProjectsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get collections for project {project_id}: {e}")
+            logger.exception(f"Failed to get collections for project {project_id}: {e}")
             return []
 
     async def create_collection(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -831,7 +831,7 @@ class ProjectsRepository:
             result = await client.table(self.TABLE_COLLECTIONS).insert(data).execute()
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create collection: {e}")
+            logger.exception(f"Failed to create collection: {e}")
             raise
 
     async def delete_collection(self, collection_id: str, project_id: str) -> bool:
@@ -847,5 +847,5 @@ class ProjectsRepository:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to delete collection {collection_id}: {e}")
+            logger.exception(f"Failed to delete collection {collection_id}: {e}")
             raise

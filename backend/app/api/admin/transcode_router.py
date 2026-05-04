@@ -241,7 +241,7 @@ async def batch_transcode(
             )
             queued += 1
         except Exception as e:
-            logger.warning(f"[Admin] Batch transcode failed for version {v['id']}: {e}")
+            logger.opt(exception=True).warning(f"[Admin] Batch transcode failed for version {v['id']}: {e}")
 
     # Audit log
     await create_audit_log(

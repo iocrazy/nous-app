@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
             f"min_size_mb={settings.TRANSCODE_MIN_SIZE_MB}"
         )
     except Exception as e:
-        logger.warning(f"Failed to load transcode config from database: {e}")
+        logger.opt(exception=True).warning(f"Failed to load transcode config from database: {e}")
 
     # ── Background bucket: spawned non-blocking, finished after yield ──
     #
@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             # PostgREST returns 42P01 when the table is missing. Surface the
             # table name so operator can grep for the migration.
-            logger.warning(f"Schema probe failed (likely missing migration): {e}")
+            logger.opt(exception=True).warning(f"Schema probe failed (likely missing migration): {e}")
 
     async def _bg_seed_loader() -> None:
         """Load AI Library seeds (agents + skills) from backend/seeds/.
@@ -254,7 +254,7 @@ async def lifespan(app: FastAPI):
             app.state.workforce_scheduler = workforce_scheduler
             logger.info("Workforce scheduler started")
         except Exception as e:
-            logger.warning(f"Failed to start workforce scheduler: {e}")
+            logger.opt(exception=True).warning(f"Failed to start workforce scheduler: {e}")
 
     # Boundary layer (B9-D/E): SsrfProxy for subprocess + browser clients
     # (yt-dlp, DrissionPage, ffmpeg). Populates settings.SSRF_PROXY_URL so
@@ -269,7 +269,7 @@ async def lifespan(app: FastAPI):
         app.state.ssrf_proxy = ssrf_proxy
         logger.info(f"Boundary SsrfProxy started at {ssrf_proxy.url}")
     except Exception as e:
-        logger.warning(f"Failed to start SsrfProxy: {e}")
+        logger.opt(exception=True).warning(f"Failed to start SsrfProxy: {e}")
 
     # Agent framework D10 primitives: per-process LifecycleBus + LaneQueue
     # held on app.state for any code that wants to publish events / route
@@ -413,7 +413,7 @@ async def lifespan(app: FastAPI):
                     f"providers={sorted(providers)})"
                 )
             except Exception as e:
-                logger.warning(f"Bounds self-registration failed: {e}")
+                logger.opt(exception=True).warning(f"Bounds self-registration failed: {e}")
 
         # Sprint 5.5: dispatch gate — orchestrator consults the registry
         # before enqueueing. set_bounds_registry(None) disables.
@@ -424,7 +424,7 @@ async def lifespan(app: FastAPI):
             "(LifecycleBus + LaneQueue + BoundsRegistry + ContextEngineRegistry)"
         )
     except Exception as e:
-        logger.warning(f"Agent framework primitive setup failed: {e}")
+        logger.opt(exception=True).warning(f"Agent framework primitive setup failed: {e}")
 
     # Sprint 5.5 + P0-3: bounds heartbeat — refresh last_seen every 30s
     # so the registry's stale-prune (90s default) doesn't garbage-collect
@@ -497,7 +497,7 @@ async def lifespan(app: FastAPI):
                 "Event loop did not settle within 2s — accepting traffic anyway"
             )
     except Exception as e:
-        logger.warning(f"Event-loop-ready probe failed: {e}")
+        logger.opt(exception=True).warning(f"Event-loop-ready probe failed: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
@@ -546,7 +546,7 @@ async def lifespan(app: FastAPI):
             await workforce_scheduler.stop(drain_timeout=5.0)
             logger.info("Workforce scheduler stopped")
         except Exception as e:
-            logger.warning(f"Workforce scheduler shutdown error: {e}")
+            logger.opt(exception=True).warning(f"Workforce scheduler shutdown error: {e}")
 
     # Stop SsrfProxy after workforce so any in-flight subprocess clients
     # (yt-dlp etc) can finish current requests through the proxy.
@@ -555,7 +555,7 @@ async def lifespan(app: FastAPI):
             await ssrf_proxy.stop()
             logger.info("Boundary SsrfProxy stopped")
         except Exception as e:
-            logger.warning(f"SsrfProxy shutdown error: {e}")
+            logger.opt(exception=True).warning(f"SsrfProxy shutdown error: {e}")
 
     try:
         # 关闭 DrissionPageParser 浏览器资源
@@ -570,7 +570,7 @@ async def lifespan(app: FastAPI):
         await close_async_redis()
         logger.info("Async Redis connection closed")
     except Exception as e:
-        logger.warning(f"Failed to close async Redis: {e}")
+        logger.opt(exception=True).warning(f"Failed to close async Redis: {e}")
 
     logger.info(f"{settings.APP_NAME}关闭成功")
 
@@ -846,7 +846,7 @@ try:
                     _media_path_cache[cache_key] = entry
                     return entry.file_path, entry.creator_id, entry.team_ids
             except Exception as e:
-                logger.warning(f"Resource lookup failed for {media_id}: {e}")
+                logger.opt(exception=True).warning(f"Resource lookup failed for {media_id}: {e}")
 
         # 2. Try parsed_media table (no ownership info — legacy)
         try:
@@ -863,7 +863,7 @@ try:
                 _media_path_cache[cache_key] = entry
                 return entry.file_path, entry.creator_id, entry.team_ids
         except Exception as e:
-            logger.warning(f"ParsedMedia lookup failed for {media_id}: {e}")
+            logger.opt(exception=True).warning(f"ParsedMedia lookup failed for {media_id}: {e}")
 
         raise HTTPException(status_code=404, detail="Media not found")
 
@@ -884,7 +884,7 @@ try:
                     if item.get("scope_id")
                 )
         except Exception as e:
-            logger.warning(f"Team scope lookup failed for resource {resource_id}: {e}")
+            logger.opt(exception=True).warning(f"Team scope lookup failed for resource {resource_id}: {e}")
         return ()
 
     def _serve_file(file_path: str, cache_immutable: bool = False) -> FileResponse:
@@ -971,7 +971,7 @@ try:
                 if res.data:
                     return
             except Exception as e:
-                logger.error(f"Team membership check failed: {e}")
+                logger.exception(f"Team membership check failed: {e}")
 
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -1037,7 +1037,7 @@ except ValueError:
         "未配置下载路径，媒体文件路由未注册。请在设置中配置 Default Download Path。"
     )
 except Exception as e:
-    logger.warning(f"媒体文件路由注册失败: {e}")
+    logger.opt(exception=True).warning(f"媒体文件路由注册失败: {e}")
 
 
 @app.get("/health")

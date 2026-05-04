@@ -328,7 +328,7 @@ class DelegateToolService:
             try:
                 task = await self._lookup_task_by_inbox(caller_inbox_id)
             except Exception as err:  # pragma: no cover — defensive
-                logger.warning(f"[delegate] await poll failed: {err}")
+                logger.opt(exception=True).warning(f"[delegate] await poll failed: {err}")
                 task = None
 
             if task is not None:
@@ -434,7 +434,7 @@ class DelegateToolService:
 
             client = await get_async_supabase_admin()
         except Exception as err:
-            logger.warning(f"[delegate] cycle-walk: admin client unavailable ({err})")
+            logger.opt(exception=True).warning(f"[delegate] cycle-walk: admin client unavailable ({err})")
             return None
 
         current = self.parent_run_id

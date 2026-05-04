@@ -91,7 +91,7 @@ class SupabaseAuthService:
                 return {"success": False, "message": "注册失败"}
 
         except Exception as e:
-            logger.error(f"用户注册失败: {e}")
+            logger.exception(f"用户注册失败: {e}")
             return {"success": False, "message": str(e)}
 
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
@@ -131,7 +131,7 @@ class SupabaseAuthService:
                 return {"success": False, "message": "登录失败"}
 
         except Exception as e:
-            logger.error(f"用户登录失败: {e}")
+            logger.exception(f"用户登录失败: {e}")
             return {"success": False, "message": str(e)}
 
     async def sign_out(self) -> Dict[str, Any]:
@@ -142,7 +142,7 @@ class SupabaseAuthService:
             logger.info("用户登出成功")
             return {"success": True, "message": "登出成功"}
         except Exception as e:
-            logger.error(f"用户登出失败: {e}")
+            logger.exception(f"用户登出失败: {e}")
             return {"success": False, "message": str(e)}
 
     async def get_user(self, access_token: str) -> Optional[Dict[str, Any]]:
@@ -172,7 +172,7 @@ class SupabaseAuthService:
                 }
             return None
         except Exception as e:
-            logger.error(f"获取用户信息失败: {e}")
+            logger.exception(f"获取用户信息失败: {e}")
             return None
 
     async def refresh_session(self, refresh_token: str) -> Dict[str, Any]:
@@ -199,7 +199,7 @@ class SupabaseAuthService:
                 }
             return {"success": False, "message": "刷新会话失败"}
         except Exception as e:
-            logger.error(f"刷新会话失败: {e}")
+            logger.exception(f"刷新会话失败: {e}")
             return {"success": False, "message": str(e)}
 
     async def reset_password(self, email: str) -> Dict[str, Any]:
@@ -218,7 +218,7 @@ class SupabaseAuthService:
             logger.info(f"密码重置邮件已发送: {email}")
             return {"success": True, "message": "密码重置邮件已发送"}
         except Exception as e:
-            logger.error(f"发送密码重置邮件失败: {e}")
+            logger.exception(f"发送密码重置邮件失败: {e}")
             return {"success": False, "message": str(e)}
 
     async def update_user(
@@ -266,7 +266,7 @@ class SupabaseAuthService:
                 }
             return {"success": False, "message": "更新失败"}
         except Exception as e:
-            logger.error(f"更新用户信息失败: {e}")
+            logger.exception(f"更新用户信息失败: {e}")
             return {"success": False, "message": str(e)}
 
 
@@ -294,7 +294,7 @@ class SupabaseAdminAuthService:
                 }
             return None
         except Exception as e:
-            logger.error(f"获取用户信息失败: {e}")
+            logger.exception(f"获取用户信息失败: {e}")
             return None
 
     async def list_users(self, page: int = 1, per_page: int = 50) -> Dict[str, Any]:
@@ -314,7 +314,7 @@ class SupabaseAdminAuthService:
                 )
             return {"success": True, "users": users}
         except Exception as e:
-            logger.error(f"获取用户列表失败: {e}")
+            logger.exception(f"获取用户列表失败: {e}")
             return {"success": False, "message": str(e), "users": []}
 
     async def delete_user(self, user_id: str) -> Dict[str, Any]:
@@ -325,7 +325,7 @@ class SupabaseAdminAuthService:
             logger.info(f"用户已删除: {user_id}")
             return {"success": True, "message": "用户已删除"}
         except Exception as e:
-            logger.error(f"删除用户失败: {e}")
+            logger.exception(f"删除用户失败: {e}")
             return {"success": False, "message": str(e)}
 
     async def update_user_role(self, user_id: str, role: str) -> Dict[str, Any]:
@@ -340,5 +340,5 @@ class SupabaseAdminAuthService:
                 return {"success": True, "message": f"用户角色已更新为 {role}"}
             return {"success": False, "message": "更新失败"}
         except Exception as e:
-            logger.error(f"更新用户角色失败: {e}")
+            logger.exception(f"更新用户角色失败: {e}")
             return {"success": False, "message": str(e)}

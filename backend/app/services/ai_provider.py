@@ -164,7 +164,7 @@ class OpenAICompatibleProvider(AIProvider):
             models = await self._client.models.list()
             return sorted([m.id for m in models.data])
         except Exception as e:
-            logger.warning(f"Failed to list models from {self.base_url}: {e}")
+            logger.opt(exception=True).warning(f"Failed to list models from {self.base_url}: {e}")
             return []
 
 
@@ -328,7 +328,7 @@ class AIProviderFactory:
             models = await provider.list_models()
             return {"success": True, "models": models, "error": None}
         except Exception as e:
-            logger.warning(f"Connection test failed for {provider_key}: {e}")
+            logger.opt(exception=True).warning(f"Connection test failed for {provider_key}: {e}")
             return {"success": False, "models": None, "error": str(e)}
 
     @classmethod

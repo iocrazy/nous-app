@@ -111,7 +111,7 @@ class ResourcesRepository:
             logger.info(f"Created resource: {data.get('filename')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create resource: {e}")
+            logger.exception(f"Failed to create resource: {e}")
             raise
 
     async def get_resource_by_id(self, resource_id: str) -> Optional[Dict[str, Any]]:
@@ -125,7 +125,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get resource {resource_id}: {e}")
+            logger.exception(f"Failed to get resource {resource_id}: {e}")
             return None
 
     async def get_resource_by_media_id(self, media_id: str) -> Optional[Dict[str, Any]]:
@@ -140,7 +140,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get resource by media_id {media_id}: {e}")
+            logger.exception(f"Failed to get resource by media_id {media_id}: {e}")
             return None
 
     async def get_resource_by_platform_id(
@@ -166,7 +166,7 @@ class ResourcesRepository:
             # Step 2: find the resource by media_id
             return await self.get_resource_by_media_id(media_uuid)
         except Exception as e:
-            logger.error(f"Failed to get resource by platform_id {platform_id}: {e}")
+            logger.exception(f"Failed to get resource by platform_id {platform_id}: {e}")
             return None
 
     async def get_resource_by_media_id_and_creator(
@@ -247,7 +247,7 @@ class ResourcesRepository:
             logger.info(f"Updated resource {resource_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update resource {resource_id}: {e}")
+            logger.exception(f"Failed to update resource {resource_id}: {e}")
             raise
 
     async def delete_resource(self, resource_id: str) -> bool:
@@ -262,7 +262,7 @@ class ResourcesRepository:
             logger.info(f"Deleted resource {resource_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete resource {resource_id}: {e}")
+            logger.exception(f"Failed to delete resource {resource_id}: {e}")
             raise
 
     async def count_resources_by_media_id(self, media_id: str) -> int:
@@ -277,7 +277,7 @@ class ResourcesRepository:
             )
             return result.count or 0
         except Exception as e:
-            logger.error(f"Failed to count resources for media {media_id}: {e}")
+            logger.exception(f"Failed to count resources for media {media_id}: {e}")
             return 0
 
     # ------------------------------------------------------------------ #
@@ -301,7 +301,7 @@ class ResourcesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to find resources by hash: {e}")
+            logger.exception(f"Failed to find resources by hash: {e}")
             return []
 
     async def find_resource_item(
@@ -328,7 +328,7 @@ class ResourcesRepository:
             result = await query.limit(1).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to find resource_item: {e}")
+            logger.exception(f"Failed to find resource_item: {e}")
             return None
 
     # ------------------------------------------------------------------ #
@@ -345,7 +345,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create resource_item: {e}")
+            logger.exception(f"Failed to create resource_item: {e}")
             raise
 
     async def get_resource_items(
@@ -528,7 +528,7 @@ class ResourcesRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get resource items: {e}")
+            logger.exception(f"Failed to get resource items: {e}")
             return []
 
     async def _resource_ids_for_platforms(self, platforms: List[str]) -> List[str]:
@@ -561,7 +561,7 @@ class ResourcesRepository:
             )
             return [str(row["id"]) for row in (resource_rows.data or [])]
         except Exception as e:
-            logger.error(f"Failed to resolve resource ids for platforms: {e}")
+            logger.exception(f"Failed to resolve resource ids for platforms: {e}")
             return []
 
     async def _resource_ids_with_all_tags(self, tag_ids: List[str]) -> List[str]:
@@ -592,7 +592,7 @@ class ResourcesRepository:
                     return []
             return list(result_set or [])
         except Exception as e:
-            logger.error(f"Failed to intersect resource tag ids: {e}")
+            logger.exception(f"Failed to intersect resource tag ids: {e}")
             return []
 
     async def get_resource_item(
@@ -611,7 +611,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get resource_item: {e}")
+            logger.exception(f"Failed to get resource_item: {e}")
             return None
 
     async def get_resource_item_in_folder(
@@ -634,7 +634,7 @@ class ResourcesRepository:
             result = await query.limit(1).execute()
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get resource_item in folder: {e}")
+            logger.exception(f"Failed to get resource_item in folder: {e}")
             return None
 
     async def get_first_resource_item(
@@ -652,7 +652,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get first resource_item: {e}")
+            logger.exception(f"Failed to get first resource_item: {e}")
             return None
 
     async def update_resource_item(
@@ -668,7 +668,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update resource_item {item_id}: {e}")
+            logger.exception(f"Failed to update resource_item {item_id}: {e}")
             raise
 
     async def delete_resource_item(self, item_id: str) -> bool:
@@ -680,7 +680,7 @@ class ResourcesRepository:
             logger.info(f"Deleted resource_item {item_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete resource_item {item_id}: {e}")
+            logger.exception(f"Failed to delete resource_item {item_id}: {e}")
             raise
 
     async def count_resource_items(self, resource_id: str) -> int:
@@ -695,7 +695,7 @@ class ResourcesRepository:
             )
             return result.count or 0
         except Exception as e:
-            logger.error(f"Failed to count items for resource {resource_id}: {e}")
+            logger.exception(f"Failed to count items for resource {resource_id}: {e}")
             return 0
 
     async def get_expired_trashed_resources(
@@ -716,7 +716,7 @@ class ResourcesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get expired trashed resources: {e}")
+            logger.exception(f"Failed to get expired trashed resources: {e}")
             return []
 
     async def get_trashed_resources(
@@ -735,7 +735,7 @@ class ResourcesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get trashed resources: {e}")
+            logger.exception(f"Failed to get trashed resources: {e}")
             return []
 
     # ------------------------------------------------------------------ #
@@ -752,7 +752,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create version: {e}")
+            logger.exception(f"Failed to create version: {e}")
             raise
 
     async def get_versions(self, resource_id: str) -> List[Dict[str, Any]]:
@@ -767,7 +767,7 @@ class ResourcesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get versions for resource {resource_id}: {e}")
+            logger.exception(f"Failed to get versions for resource {resource_id}: {e}")
             return []
 
     async def get_version_by_id(self, version_id: str) -> Optional[Dict[str, Any]]:
@@ -781,7 +781,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get version {version_id}: {e}")
+            logger.exception(f"Failed to get version {version_id}: {e}")
             return None
 
     async def get_version_by_number(
@@ -816,7 +816,7 @@ class ResourcesRepository:
             logger.info(f"Deleted version {version_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete version {version_id}: {e}")
+            logger.exception(f"Failed to delete version {version_id}: {e}")
             raise
 
     async def update_version(
@@ -832,7 +832,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update version {version_id}: {e}")
+            logger.exception(f"Failed to update version {version_id}: {e}")
             raise
 
     async def get_untranscoded_video_versions(self) -> List[Dict[str, Any]]:
@@ -849,7 +849,7 @@ class ResourcesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get untranscoded video versions: {e}")
+            logger.exception(f"Failed to get untranscoded video versions: {e}")
             return []
 
     async def get_next_version_number(self, resource_id: str) -> int:
@@ -867,7 +867,7 @@ class ResourcesRepository:
                 return result.data[0]["version_number"] + 1
             return 1
         except Exception as e:
-            logger.error(f"Failed to get next version for resource {resource_id}: {e}")
+            logger.exception(f"Failed to get next version for resource {resource_id}: {e}")
             return 1
 
     # ------------------------------------------------------------------ #
@@ -881,7 +881,7 @@ class ResourcesRepository:
             logger.info(f"Created folder: {data.get('name')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create folder: {e}")
+            logger.exception(f"Failed to create folder: {e}")
             raise
 
     async def get_trashed_folders(
@@ -901,7 +901,7 @@ class ResourcesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get trashed folders: {e}")
+            logger.exception(f"Failed to get trashed folders: {e}")
             return []
 
     async def restore_folder_cascade(self, folder_id: str) -> Dict[str, int]:
@@ -970,7 +970,7 @@ class ResourcesRepository:
                 "restored_resources": restored_resources,
             }
         except Exception as e:
-            logger.error(f"Failed to cascade-restore folder {folder_id}: {e}")
+            logger.exception(f"Failed to cascade-restore folder {folder_id}: {e}")
             raise
 
     async def get_folders(
@@ -990,7 +990,7 @@ class ResourcesRepository:
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get folders: {e}")
+            logger.exception(f"Failed to get folders: {e}")
             return []
 
     async def get_folder_by_id(self, folder_id: str) -> Optional[Dict[str, Any]]:
@@ -1004,7 +1004,7 @@ class ResourcesRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to get folder {folder_id}: {e}")
+            logger.exception(f"Failed to get folder {folder_id}: {e}")
             return None
 
     async def update_folder(
@@ -1021,7 +1021,7 @@ class ResourcesRepository:
             logger.info(f"Updated folder {folder_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to update folder {folder_id}: {e}")
+            logger.exception(f"Failed to update folder {folder_id}: {e}")
             raise
 
     async def get_descendant_folder_ids(self, folder_id: str) -> List[str]:
@@ -1045,7 +1045,7 @@ class ResourcesRepository:
                     queue.append(child_id)
             return all_ids
         except Exception as e:
-            logger.error(f"Failed to get descendant folders for {folder_id}: {e}")
+            logger.exception(f"Failed to get descendant folders for {folder_id}: {e}")
             return []
 
     async def count_folder_contents(self, folder_ids: List[str]) -> Dict[str, int]:
@@ -1069,7 +1069,7 @@ class ResourcesRepository:
                 "subfolder_count": subfolder_count,
             }
         except Exception as e:
-            logger.error(f"Failed to count folder contents: {e}")
+            logger.exception(f"Failed to count folder contents: {e}")
             return {"resource_count": 0, "subfolder_count": 0}
 
     async def trash_folder_cascade(self, folder_id: str) -> Dict[str, int]:
@@ -1132,7 +1132,7 @@ class ResourcesRepository:
                 "trashed_resources": trashed_resources,
             }
         except Exception as e:
-            logger.error(f"Failed to cascade-trash folder {folder_id}: {e}")
+            logger.exception(f"Failed to cascade-trash folder {folder_id}: {e}")
             raise
 
     async def delete_folder(self, folder_id: str) -> bool:
@@ -1144,7 +1144,7 @@ class ResourcesRepository:
             logger.info(f"Deleted folder {folder_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete folder {folder_id}: {e}")
+            logger.exception(f"Failed to delete folder {folder_id}: {e}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -1170,7 +1170,7 @@ class ResourcesRepository:
             logger.info(f"Tagged resource {resource_id} with tag {tag_id}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to tag resource {resource_id}: {e}")
+            logger.exception(f"Failed to tag resource {resource_id}: {e}")
             raise
 
     async def remove_resource_tag(self, resource_id: str, tag_id: str) -> bool:
@@ -1186,7 +1186,7 @@ class ResourcesRepository:
             logger.info(f"Removed tag {tag_id} from resource {resource_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to remove tag from resource {resource_id}: {e}")
+            logger.exception(f"Failed to remove tag from resource {resource_id}: {e}")
             raise
 
     async def get_resource_tags(self, resource_id: str) -> List[Dict[str, Any]]:
@@ -1200,7 +1200,7 @@ class ResourcesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get tags for resource {resource_id}: {e}")
+            logger.exception(f"Failed to get tags for resource {resource_id}: {e}")
             return []
 
     # ------------------------------------------------------------------ #
@@ -1225,7 +1225,7 @@ class ResourcesRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Failed to get smart folders: {e}")
+            logger.exception(f"Failed to get smart folders: {e}")
             return []
 
     async def create_smart_folder(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1236,7 +1236,7 @@ class ResourcesRepository:
             logger.info(f"Created smart folder: {data.get('name')}")
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error(f"Failed to create smart folder: {e}")
+            logger.exception(f"Failed to create smart folder: {e}")
             raise
 
     async def execute_smart_rules(
@@ -1315,7 +1315,7 @@ class ResourcesRepository:
 
             return items
         except Exception as e:
-            logger.error(f"Failed to execute smart rules: {e}")
+            logger.exception(f"Failed to execute smart rules: {e}")
             return []
 
     def _apply_condition(self, query, cond: Dict[str, Any]):

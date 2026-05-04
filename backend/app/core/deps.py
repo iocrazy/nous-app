@@ -193,7 +193,7 @@ async def _validate_api_key(request: Request, api_key: str) -> AuthContext:
     try:
         await repo.update_usage(key_data["key_id"])
     except Exception as e:
-        logger.warning(f"更新 API Key 使用统计失败: {e}")
+        logger.opt(exception=True).warning(f"更新 API Key 使用统计失败: {e}")
 
     return AuthContext(
         user_id=key_data["user_id"],
@@ -249,7 +249,7 @@ async def _validate_bearer_token(authorization: str) -> AuthContext:
         # for what is just "user logged out an hour ago and their cached
         # tab tried again". WARNING is the right level: visible in logs
         # for diagnosis, doesn't trip alerting thresholds.
-        logger.warning(f"JWT 验证失败: {e}")
+        logger.opt(exception=True).warning(f"JWT 验证失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=f"认证失败: {str(e)}"
         )

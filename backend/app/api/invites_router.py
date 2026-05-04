@@ -68,7 +68,7 @@ async def create_invite(invite: InviteCreate, auth: AuthDep):
             max_uses=invite.max_uses,
         )
     except Exception as e:
-        logger.error(f"Failed to create invite: {e}")
+        logger.exception(f"Failed to create invite: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create invite",

@@ -132,7 +132,7 @@ class RunRecorder:
                     status="failed", error_code=error_code, error_message=error_message
                 )
         except Exception as err:
-            logger.error(f"[RunRecorder] finish failed for run {self.run_id}: {err}")
+            logger.exception(f"[RunRecorder] finish failed for run {self.run_id}: {err}")
 
         # Never swallow user exceptions — propagate them out.
         return False
@@ -194,7 +194,7 @@ class RunRecorder:
                 .execute()
             )
         except Exception as err:
-            logger.warning(f"[RunRecorder] heartbeat failed for {self.run_id}: {err}")
+            logger.opt(exception=True).warning(f"[RunRecorder] heartbeat failed for {self.run_id}: {err}")
 
     async def check_cancelled(self) -> bool:
         """Poll cancel_requested. Runner should break out of its loop when true."""

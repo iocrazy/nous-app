@@ -44,7 +44,7 @@ class CookiesRepository:
             result = await table.select("*").eq("user_id", user_id).execute()
             return result.data if result.data else []
         except Exception as e:
-            logger.error(f"获取用户 Cookie 列表失败: user_id={user_id}, error={e}")
+            logger.exception(f"获取用户 Cookie 列表失败: user_id={user_id}, error={e}")
             return []
 
     async def get_by_user_and_platform(

@@ -45,7 +45,7 @@ async def list_versions(resource_id: str, auth: AuthDep):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to list versions for resource {resource_id}: {e}")
+        logger.exception(f"Failed to list versions for resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list versions")
 
 
@@ -93,7 +93,7 @@ async def upload_version(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to upload version for resource {resource_id}: {e}")
+        logger.exception(f"Failed to upload version for resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload version")
 
 
@@ -109,7 +109,7 @@ async def set_current_version(resource_id: str, version_number: int, auth: AuthD
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to set current version: {e}")
+        logger.exception(f"Failed to set current version: {e}")
         raise HTTPException(status_code=500, detail="Failed to set current version")
 
 
@@ -123,7 +123,7 @@ async def delete_version(resource_id: str, version_id: str, auth: AuthDep):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to delete version: {e}")
+        logger.exception(f"Failed to delete version: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete version")
 
 
@@ -201,7 +201,7 @@ async def serve_hls_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve HLS file: {e}")
+        logger.exception(f"Failed to serve HLS file: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve HLS file")
 
 
@@ -244,7 +244,7 @@ async def retry_transcode(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to trigger transcode: {e}")
+        logger.exception(f"Failed to trigger transcode: {e}")
         raise HTTPException(status_code=500, detail="Failed to trigger transcoding")
 
 
@@ -289,5 +289,5 @@ async def serve_version_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to serve version file: {e}")
+        logger.exception(f"Failed to serve version file: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve version file")

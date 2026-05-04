@@ -38,7 +38,7 @@ class UserSettingsRepository:
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"获取用户设置失败: {e}")
+            logger.exception(f"获取用户设置失败: {e}")
             return None
 
     async def get_by_user_id(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -86,7 +86,7 @@ class UserSettingsRepository:
                 return result.data[0]
             return None
         except Exception as e:
-            logger.error(f"保存用户设置失败: {e}")
+            logger.exception(f"保存用户设置失败: {e}")
             return None
 
     async def delete(self, user_id: str) -> bool:
@@ -106,5 +106,5 @@ class UserSettingsRepository:
             logger.info(f"用户设置已删除: user_id={user_id}")
             return True
         except Exception as e:
-            logger.error(f"删除用户设置失败: {e}")
+            logger.exception(f"删除用户设置失败: {e}")
             return False
