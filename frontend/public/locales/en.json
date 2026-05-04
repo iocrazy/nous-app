@@ -1340,6 +1340,23 @@
     "rollbackFailed": "Rollback failed: {{message}}",
     "rollbackNotSupported": "Rollback only supported for agents currently"
   },
+  "billing": {
+    "title": "Token Usage",
+    "lastNDays": "Last {{count}} days",
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "loadFailed": "Load usage failed",
+    "noUsage": "No usage in this window",
+    "statTokens": "Tokens",
+    "statPoints": "Points spent",
+    "statRuns": "Runs",
+    "byModel": "By model",
+    "byDay": "By day",
+    "colModel": "Model",
+    "colRuns": "Runs",
+    "colTokens": "Tokens",
+    "colCost": "Cost"
+  },
   "approvals": {
     "title": "Pending Approvals",
     "empty": "No pending approvals",

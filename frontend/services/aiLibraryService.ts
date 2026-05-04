@@ -23,6 +23,7 @@ import type {
   AILibraryMCPServer,
   AILibraryMemory,
   AILibrarySkill,
+  AILibraryUsageSummary,
   AILibraryVersionItem,
   AILibrarySkillFile,
   ChatResponse,
@@ -606,6 +607,16 @@ export const aiLibraryService = {
       `${base()}/agents/${encodeURIComponent(slug)}/rollback/${versionNumber}`,
       { method: 'POST', headers: await getAuthHeaders() },
     );
+    return handle(resp);
+  },
+
+  /**
+   * Phase 3: Per-user token-cost summary for the Billing dashboard.
+   */
+  async getUsageSummary(days = 30): Promise<AILibraryUsageSummary> {
+    const resp = await fetch(`${base()}/usage/summary?days=${days}`, {
+      headers: await getAuthHeaders(),
+    });
     return handle(resp);
   },
 

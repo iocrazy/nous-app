@@ -33,6 +33,7 @@ import {
   Code2,
   Eye,
   GitFork,
+  History,
   Package,
   Pencil,
   Save,
@@ -47,6 +48,7 @@ import { useToast } from '../Toast';
 import { MarkdownBody } from './MarkdownBody';
 import { MarkdownEditor } from './MarkdownEditor';
 import { NewSkillModal } from './NewSkillModal';
+import { VersionHistoryPanel } from './VersionHistoryPanel';
 
 interface SkillEditorProps {
   slug: string;
@@ -132,6 +134,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
   const [allSkills, setAllSkills] = useState<AILibrarySkill[]>([]);
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const [editMode, setEditMode] = useState(false);
@@ -348,6 +351,19 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                   : t('aiLibrary.skills.remove', 'Remove')}
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setShowVersions((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                showVersions
+                  ? 'bg-blue-600/20 text-blue-300'
+                  : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100'
+              }`}
+              title={t('versionHistory.title', 'Version History')}
+            >
+              <History className="h-3.5 w-3.5" />
+              {t('versionHistory.title', 'Versions')}
+            </button>
             {editable ? (
               <button
                 type="button"
@@ -476,7 +492,11 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
 
       {/* ── Content ───────────────────────────────────────────────── */}
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        {editMode && editable ? (
+        {showVersions ? (
+          <div className="max-w-2xl">
+            <VersionHistoryPanel kind="skill" slug={skill.slug ?? String(skill.id)} />
+          </div>
+        ) : editMode && editable ? (
           isMarkdown ? (
             <MarkdownEditor
               value={activeDraft}
