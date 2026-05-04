@@ -65,6 +65,9 @@ from app.workflows.storyboard import (  # noqa: F401
 )
 from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
 from app.workflows.transcode import transcode_workflow  # noqa: F401
+from app.workflows.workflow_health_sweeper import (  # noqa: F401
+    workflow_health_sweeper_workflow,
+)
 from app.workflows.workforce_dispatch import (  # noqa: F401
     inbox_dispatch_workflow,
     outbox_dispatch_workflow,
@@ -112,4 +115,5 @@ __all__ = [
     "agent_workforce_queue",
     "outbox_dispatch_workflow",
     "inbox_dispatch_workflow",
+    "workflow_health_sweeper_workflow",
 ]
