@@ -19,6 +19,7 @@ from app.api.collections_router import router as collections_router
 from app.api.error_report_router import router as error_report_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.invites_router import router as invites_router
+from app.api.lanes_router import router as lanes_router
 from app.api.libraries_router import router as libraries_router
 from app.api.lifespan_router import router as lifespan_router
 from app.api.logs_router import router as logs_router
@@ -120,6 +121,9 @@ api_router.include_router(router=libraries_router, tags=["Libraries"])
 api_router.include_router(router=reviews_router, tags=["Reviews"])
 
 api_router.include_router(router=task_manager_router, tags=["Task Manager"])
+
+# A9: 4-lane priority queue snapshot for admin dashboard.
+api_router.include_router(router=lanes_router)
 
 api_router.include_router(router=teams_router, tags=["Teams"])
 
