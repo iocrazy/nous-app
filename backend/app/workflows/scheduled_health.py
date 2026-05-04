@@ -23,13 +23,22 @@ from loguru import logger
 
 @DBOS.step()
 async def collect_system_status_step() -> dict[str, Any]:
-    """Snapshot queue/storage/network/workers/active_tasks; upsert
-    single-row system_status. The fixed UUID id matches the legacy
-    Celery task so the Realtime channel doesn't double up.
+    """Snapshot queue/storage/network/workers/active_tasks; write to
+    Redis HASH instead of the legacy Postgres single-row table.
 
-    Async because get_queue_status now awaits DBOS.list_workflows_async
-    (the sync DBOS API refuses to run in an event-loop context)."""
-    from app.db.supabase_client import get_async_supabase_admin
+    Why Redis instead of system_status table:
+      * Old: 30s cron INSERT/UPDATE → ~43,200 writes/day on a hot row
+        + 30-100ms per upsert through the Postgres connection pool +
+        Realtime broadcast on every tick (most ticks = no real change).
+      * New: Redis HSET ~1ms; CHANGED pubsub event fires only when a
+        metric meaningfully shifts (5% relative change or any non-
+        numeric flip). Subscribers (admin / TaskCenter) push-on-change
+        instead of poll-every-30s. The HASH carries a 90s TTL so a
+        dead writer surfaces as "no data" rather than stale data.
+
+    Async because get_queue_status awaits DBOS.list_workflows_async
+    (the sync DBOS API refuses to run in an event-loop context).
+    """
     from app.services.infra.system_monitor_service import (
         get_active_tasks,
         get_network_status,
@@ -37,18 +46,16 @@ async def collect_system_status_step() -> dict[str, Any]:
         get_storage_status,
         get_worker_stats,
     )
+    from app.services.system_status_redis import set_snapshot
 
-    data = {
-        "id": "00000000-0000-0000-0000-000000000001",
+    snapshot = {
         "queue": await get_queue_status(),
         "storage": get_storage_status(),
         "network": get_network_status(),
         "workers": await get_worker_stats(),
         "active_tasks": await get_active_tasks(),
     }
-
-    supabase = await get_async_supabase_admin()
-    await supabase.table("system_status").upsert(data).execute()
+    await set_snapshot(snapshot)
     return {"status": "success"}
 
 
