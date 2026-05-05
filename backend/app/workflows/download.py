@@ -35,6 +35,7 @@ ported) — D4 wiring will swap parse → download chain.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from dbos import DBOS
@@ -387,6 +388,53 @@ def log_download_outcome_step(
     asyncio.run(_do())
 
 
+@DBOS.step()
+def mark_task_user_visible_complete_step(
+    *,
+    workflow_id: str,
+    subtitle: str,
+) -> None:
+    """Patch task_tracking row to phase=completed AS SOON AS the file is
+    on disk and visible in 资源库.
+
+    Background:
+    `download_workflow` finalize_post_download_step writes parsed_media +
+    resources + resource_versions, which is the moment the user can open
+    the file in 资源库. But the workflow still has 1-2 more steps to run
+    (audit log + chain_followups), so DBOS doesn't mark the workflow
+    SUCCESS until those finish. Without this step, mirror_dbos_lifecycle
+    wouldn't flip task_tracking.phase to 'completed' for another
+    minute-or-two, leaving the Task Center showing "downloading…" while
+    the user already sees the file in 资源库 — which is the "Task Center
+    is slower than reality" complaint we tracked down on 2026-05-05.
+
+    Anti-regression in mirror_dbos_lifecycle_to_tracking guards against
+    a SUCCESS transition demoting an already-failed/cancelled phase, so
+    landing 'completed' here early can never be silently overwritten.
+    """
+    from app.services.unified_task_manager import get_task_manager
+
+    async def _do() -> None:
+        try:
+            await get_task_manager()._atomic_update(
+                workflow_id,
+                {
+                    "phase": "completed",
+                    "status": "completed",
+                    "progress": 100,
+                    "subtitle": subtitle[:120],
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                f"[download.mark_complete] failed to early-mark "
+                f"task_tracking complete for {workflow_id}: {e}"
+            )
+
+    asyncio.run(_do())
+
+
 @DBOS.workflow()
 def download_workflow(
     platform_id: str,
@@ -436,6 +484,10 @@ def download_workflow(
             download_cover=download_cover,
             media_type=media_type,
             results=synthetic_results,
+        )
+        mark_task_user_visible_complete_step(
+            workflow_id=DBOS.workflow_id,
+            subtitle=f"{video_title or 'Cached'} (cache hit)",
         )
         log_download_outcome_step(
             user_id=user_id,
@@ -512,6 +564,15 @@ def download_workflow(
         download_cover=download_cover,
         media_type=media_type,
         results=results,
+    )
+
+    # 3b. Early-mark task_tracking complete the moment the file is on
+    # disk and visible in 资源库. The remaining steps (audit log + chain
+    # follow-ups) take 30s+ and would otherwise leave the Task Center
+    # showing "downloading…" while 资源库 already shows the file.
+    mark_task_user_visible_complete_step(
+        workflow_id=DBOS.workflow_id,
+        subtitle=video_title or "Downloaded",
     )
 
     # 4. Audit log
