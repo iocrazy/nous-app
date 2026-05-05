@@ -1,10 +1,9 @@
 import React from 'react';
 import {
-  Activity, ListTodo, ScrollText, Cpu, Brain, FileText, Calendar, Layers,
+  Activity, ScrollText, Cpu, Brain, FileText, Calendar, Layers,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StatsChart } from '../components/StatsChart';
-import { TasksPanel } from '../components/TasksPanel';
 import { LogsPanel } from '../components/LogsPanel';
 import { SystemMonitorPanel } from '../components/SystemMonitorPanel';
 import { AdminNousModelsPage } from './admin/AdminNousModelsPage';
@@ -15,8 +14,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../hooks/useNavigation';
 import { useTeamContext } from '../contexts/TeamContext';
 
+// A7: 'tasks' moved out of dashboard to its own page (TodolistPage at
+// /team/:teamId/todolist). Sidebar nav 待办事项 routes there.
 type SubView =
-  | 'overview' | 'tasks' | 'logs' | 'monitor'
+  | 'overview' | 'logs' | 'monitor'
   | 'schedules' | 'lanes' | 'nous-models' | 'deployment-logs';
 
 interface SubViewTab {
@@ -28,7 +29,6 @@ interface SubViewTab {
 
 const SUBVIEW_TABS: SubViewTab[] = [
   { value: 'overview',        label: 'Overview',        icon: <Activity size={14} /> },
-  { value: 'tasks',           label: 'Tasks',           icon: <ListTodo size={14} /> },
   { value: 'logs',            label: 'Logs',            icon: <ScrollText size={14} /> },
   { value: 'schedules',       label: 'Schedules',       icon: <Calendar size={14} /> },
   { value: 'monitor',         label: 'Monitor',         icon: <Cpu size={14} />,           adminOnly: true },
@@ -140,7 +140,6 @@ export function DashboardPage() {
         </div>
       )}
 
-      {dashboardSubView === 'tasks' && <TasksPanel />}
       {dashboardSubView === 'logs' && <LogsPanel />}
       {dashboardSubView === 'monitor' && userProfile.role === 'admin' && <SystemMonitorPanel />}
       {dashboardSubView === 'nous-models' && userProfile.role === 'admin' && <AdminNousModelsPage />}

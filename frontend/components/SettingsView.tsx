@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
-import { TasksPanel } from './TasksPanel';
+// A7: TasksPanel removed — task management moved to its own page (TodolistPage at /team/:teamId/todolist).
 import { TagsSettings } from './TagsSettings';
 import { ApiDocsPanel } from './ApiDocsPanel';
 import { CookiesSettings } from './CookiesSettings';
@@ -18,7 +18,7 @@ import { useConfirm } from './ConfirmDialog';
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tags' | 'ai' | 'docs' | 'cookies';
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
   /** When true, hides the outer wrapper/header for embedding in a modal */
@@ -619,10 +619,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
         <SystemMonitorPanel />
       )}
 
-      {/* Tasks Tab */}
-      {activeTab === 'tasks' && (
-        <TasksPanel />
-      )}
+      {/* Tasks Tab — moved to /team/:teamId/todolist as the canonical task center (A7) */}
 
       {/* Tags Tab */}
       {activeTab === 'tags' && (
