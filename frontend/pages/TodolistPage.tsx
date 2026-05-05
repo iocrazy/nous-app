@@ -82,6 +82,7 @@ export function TodolistPage() {
   const [selectedError, setSelectedError] = useState<string | null>(null);
 
   const [newIssueOpen, setNewIssueOpen] = useState(false);
+  const [newIssueParentId, setNewIssueParentId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<IssueViewMode>('list');
 
   const teamIdNum = useMemo(() => {
@@ -189,12 +190,27 @@ export function TodolistPage() {
       );
     }
     return (
-      <IssueDetailView
-        issue={selectedIssue}
-        agents={agents}
-        agentsById={agentsById}
-        selfUserId={currentUserId ?? undefined}
-      />
+      <>
+        <IssueDetailView
+          issue={selectedIssue}
+          agents={agents}
+          agentsById={agentsById}
+          selfUserId={currentUserId ?? undefined}
+          onCreateSubIssue={(parentId) => {
+            setNewIssueParentId(parentId);
+            setNewIssueOpen(true);
+          }}
+        />
+        {newIssueOpen && (
+          <NewIssueDialog
+            agents={agents}
+            teamId={teamIdNum}
+            parentId={newIssueParentId}
+            onClose={() => { setNewIssueOpen(false); setNewIssueParentId(null); }}
+            onSubmit={handleCreate}
+          />
+        )}
+      </>
     );
   }
 
@@ -213,7 +229,8 @@ export function TodolistPage() {
         <NewIssueDialog
           agents={agents}
           teamId={teamIdNum}
-          onClose={() => setNewIssueOpen(false)}
+          parentId={newIssueParentId}
+          onClose={() => { setNewIssueOpen(false); setNewIssueParentId(null); }}
           onSubmit={handleCreate}
         />
       )}

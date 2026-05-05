@@ -11,11 +11,13 @@ import { PRIORITY_LABEL, PRIORITY_ORDER, PriorityIcon } from './IssueStatusIcon'
 interface NewIssueDialogProps {
   agents: AgentRef[];
   teamId: number | null;
+  /** When set, the dialog opens in "sub-issue" mode and writes parent_id on submit. */
+  parentId?: number | null;
   onClose: () => void;
   onSubmit: (payload: IssueCreatePayload) => Promise<void>;
 }
 
-export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ agents, teamId, onClose, onSubmit }) => {
+export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ agents, teamId, parentId, onClose, onSubmit }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [agentId, setAgentId] = useState<string | null>(null);
@@ -33,6 +35,7 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ agents, teamId, 
         priority,
         team_id: teamId ?? undefined,
         assignee_agent_id: agentId ?? undefined,
+        parent_id: parentId ?? undefined,
       });
     } catch {
       // parent toasts; stay open
@@ -48,7 +51,14 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ agents, teamId, 
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">
-          <h2 className="text-sm font-semibold text-zinc-200">New Issue</h2>
+          <h2 className="text-sm font-semibold text-zinc-200">
+            {parentId ? 'New Sub-issue' : 'New Issue'}
+            {parentId && (
+              <span className="ml-2 text-[11px] font-normal text-zinc-500">
+                under #{parentId}
+              </span>
+            )}
+          </h2>
           <button onClick={onClose} className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800">
             <X size={14} />
           </button>

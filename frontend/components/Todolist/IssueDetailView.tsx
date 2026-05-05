@@ -16,6 +16,8 @@ import type { UiIssue, AgentRef } from './types';
 import type { IssueMessage } from '../../services/issueMessageService';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { IssueChatThread } from './IssueChatThread';
+import { IssueActivityTab } from './IssueActivityTab';
+import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox } from './IssueReplyBox';
 import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
 import { getSupabaseClient } from '../../supabaseClient';
@@ -26,11 +28,13 @@ interface IssueDetailViewProps {
   agents: AgentRef[];
   agentsById: Record<string, AgentRef>;
   selfUserId?: string;
+  /** Opens the New Issue dialog in "sub-issue" mode (parent_id pre-set). */
+  onCreateSubIssue: (parentId: number) => void;
 }
 
 type DetailTab = 'chat' | 'activity' | 'related';
 
-export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId }) => {
+export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const [tab, setTab] = useState<DetailTab>('chat');
   const [messages, setMessages] = useState<IssueMessage[]>([]);
@@ -152,13 +156,24 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
-            <button className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded border border-zinc-800 bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800/60" disabled>
+            <button
+              onClick={() => onCreateSubIssue(issue.id)}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded border border-zinc-800 bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800/60"
+            >
               <Plus size={12} /> New Sub-issue
             </button>
-            <button className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded border border-zinc-800 bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800/60" disabled>
+            <button
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded border border-zinc-800 bg-zinc-900/50 text-zinc-500 cursor-not-allowed"
+              disabled
+              title="Attachments backend not in place yet"
+            >
               <Paperclip size={12} /> Upload attachment
             </button>
-            <button className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded border border-zinc-800 bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800/60" disabled>
+            <button
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded border border-zinc-800 bg-zinc-900/50 text-zinc-500 cursor-not-allowed"
+              disabled
+              title="Documents backend not in place yet"
+            >
               <FileText size={12} /> New document
             </button>
           </div>
@@ -199,14 +214,10 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             </>
           )}
           {tab === 'activity' && (
-            <div className="text-sm text-zinc-500 italic px-4 py-12 text-center">
-              Activity timeline lands once status / property events are split out from the chat thread.
-            </div>
+            <IssueActivityTab messages={messages} selfUserId={selfUserId} />
           )}
           {tab === 'related' && (
-            <div className="text-sm text-zinc-500 italic px-4 py-12 text-center">
-              Related work (sub-issues, blocking links, attached documents) will surface here.
-            </div>
+            <IssueRelatedTab issue={issue} />
           )}
         </div>
       </div>
