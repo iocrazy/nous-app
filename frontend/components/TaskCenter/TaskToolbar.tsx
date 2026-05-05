@@ -6,10 +6,10 @@
  * owns the filter state and passes it down.
  */
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Search, ListFilter, ArrowDownNarrowWide, LayoutList, LayoutGrid,
-  RefreshCw, Calendar, Layers, Info,
+  RefreshCw, Calendar, Layers, Info, Check,
 } from 'lucide-react';
 import type { TaskStatus, TaskType } from '../../contexts/TaskManagerContext';
 import type { GroupBy, SortBy } from '../../utils/taskDisplay';
@@ -37,12 +37,70 @@ interface TaskToolbarProps {
 const STATUS_OPTIONS: TaskStatus[] = ['pending', 'processing', 'completed', 'failed', 'cancelled'];
 const TYPE_OPTIONS: TaskType[] = ['parse', 'download', 'upload', 'transcode', 'ai_pipeline', 'ai_extract', 'ai_transcription', 'ai_summary'];
 const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
+  { value: 'none', label: 'None' },
   { value: 'status', label: 'Status' },
   { value: 'type', label: 'Type' },
   { value: 'flow', label: 'Flow' },
   { value: 'date', label: 'Date' },
   { value: 'agent', label: 'Agent' },
 ];
+
+const GroupByPicker: React.FC<{
+  value: GroupBy;
+  onChange: (g: GroupBy) => void;
+}> = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`p-1.5 rounded border transition ${
+          open || value !== 'none'
+            ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
+            : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+        }`}
+        title={`Group by: ${GROUP_OPTIONS.find((o) => o.value === value)?.label ?? 'None'}`}
+      >
+        <Layers size={13} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-44 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl z-30 py-1">
+          {GROUP_OPTIONS.map((o) => {
+            const active = o.value === value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition ${
+                  active ? 'bg-zinc-900 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-900/60'
+                }`}
+              >
+                <span className="flex-1">{o.label}</span>
+                {active && <Check size={11} className="text-emerald-400" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 const SORT_OPTIONS: { value: SortBy; label: string }[] = [
   { value: 'created_desc', label: 'Newest first' },
   { value: 'created_asc', label: 'Oldest first' },
@@ -106,16 +164,6 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
 
         <div className="flex items-center gap-1">
           <select
-            value={groupBy}
-            onChange={(e) => onGroupByChange(e.target.value as GroupBy)}
-            className="text-xs bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-zinc-300"
-            title="Group by"
-          >
-            {GROUP_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>Group: {o.label}</option>
-            ))}
-          </select>
-          <select
             value={sortBy}
             onChange={(e) => onSortByChange(e.target.value as SortBy)}
             className="text-xs bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-zinc-300"
@@ -125,6 +173,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
+          <GroupByPicker value={groupBy} onChange={onGroupByChange} />
         </div>
 
         <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5">

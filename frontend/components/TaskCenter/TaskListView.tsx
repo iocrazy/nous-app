@@ -94,6 +94,22 @@ const GroupSection: React.FC<{
   onToggle: (t: UnifiedTask) => void;
 }> = ({ group, expandedIds, onToggle }) => {
   const [open, setOpen] = useState(true);
+  // Empty label = "no grouping" (groupBy='none' returns a single bucket
+  // with label=''). Render rows flat without a header — paperclip-style.
+  if (!group.label) {
+    return (
+      <div>
+        {group.tasks.map((t) => (
+          <TaskRow
+            key={t.id}
+            task={t}
+            expanded={expandedIds.has(t.id)}
+            onToggle={() => onToggle(t)}
+          />
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="border-b border-zinc-800/80 last:border-b-0">
       <button

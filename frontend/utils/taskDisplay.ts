@@ -71,7 +71,7 @@ export function statusVisual(status: TaskStatus | undefined): StatusVisual {
 
 // ─── Group by ───────────────────────────────────────────
 
-export type GroupBy = 'status' | 'type' | 'flow' | 'date' | 'agent';
+export type GroupBy = 'none' | 'status' | 'type' | 'flow' | 'date' | 'agent';
 
 const STATUS_ORDER: TaskStatus[] = ['processing', 'pending', 'failed', 'completed', 'cancelled'];
 
@@ -96,6 +96,12 @@ function dateBucket(iso: string | undefined): string {
 const DATE_ORDER = ['Today', 'Yesterday', 'This week', 'This month', 'Older', 'No date'];
 
 export function groupTasks(tasks: UnifiedTask[], by: GroupBy): TaskGroup[] {
+  // 'none' = no grouping; render a single bucket so callers don't have
+  // to special-case ungrouped output. The label is empty so list views
+  // can detect it and skip rendering a header row.
+  if (by === 'none') {
+    return tasks.length === 0 ? [] : [{ key: '__all__', label: '', tasks }];
+  }
   const map = new Map<string, TaskGroup>();
   const ensure = (key: string, label: string) => {
     let g = map.get(key);

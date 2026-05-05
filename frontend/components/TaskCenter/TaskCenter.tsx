@@ -33,7 +33,9 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<Set<TaskStatus>>(new Set());
   const [typeFilter, setTypeFilter] = useState<Set<TaskType>>(new Set());
-  const [groupBy, setGroupBy] = useState<GroupBy>('status');
+  // Default 'none' (no grouping, pure time-sorted list). Users opt in
+  // to grouping via the toolbar's Layers picker — paperclip-style.
+  const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [sortBy, setSortBy] = useState<SortBy>('created_desc');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   // Set of task ids whose inline detail panel is open. Multi-expand
