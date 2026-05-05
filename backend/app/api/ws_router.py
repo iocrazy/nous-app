@@ -61,8 +61,17 @@ async def ws_task_progress(
 
         user_id = await consume_ticket(ticket)
     elif token:
-        logger.debug(
-            "[WS] using legacy ?token= auth — client should migrate to ?ticket="
+        # Legacy ?token=<JWT> auth. Kept reachable so old tabs that
+        # opened before the frontend was upgraded don't get stuck — but
+        # we now log a WARNING (not DEBUG) on every use, because the JWT
+        # has just been written to nginx / uvicorn / supabase access
+        # logs and is a steal-and-replay credential until expiry. The
+        # frontend connector no longer falls back to this path; new
+        # hits here are either an old tab, a stale bundle, or someone
+        # crafting a request by hand.
+        logger.warning(
+            "[WS] DEPRECATED ?token= auth — JWT was just leaked to access logs. "
+            "Client should migrate to ?ticket= (POST /api/v1/ws/ticket)."
         )
         user_id = await _authenticate_ws(token)
 
