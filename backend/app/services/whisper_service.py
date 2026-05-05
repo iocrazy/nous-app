@@ -50,26 +50,41 @@ class WhisperService:
             FileNotFoundError: If audio_path doesn't exist.
             NotImplementedError: If the provider doesn't support transcription.
         """
-        # Fallback: download_helpers.extract_audio_from_video produces
-        # `audio.m4a`, but image-post Douyin items (note / image_text)
-        # have no extractable video — the audio comes pre-encoded as
-        # `audio.mp3` from the platform downloader. Whisper providers
-        # accept both formats, so probe the same directory for any
-        # `audio.*` file before giving up.
+        # Path resolution chain — DB stores `extract_audio_path` as a
+        # relative path like `global/resources/web/douyin/<id>/audio.m4a`,
+        # which `os.path.exists()` resolves against process CWD (not the
+        # download root) and so usually fails. Try, in order:
+        #   1. as-is (already absolute)
+        #   2. joined with settings.DOWNLOAD_PATH
+        #   3. glob the directory for any `<stem>.*` (handles the case
+        #      where extract_audio_from_video wrote audio.m4a but the
+        #      platform downloader saved audio.mp3, or vice versa)
         if not os.path.exists(audio_path):
-            import glob
+            from app.core.config import settings as _settings
 
-            parent = os.path.dirname(audio_path) or "."
-            stem = os.path.basename(audio_path).rsplit(".", 1)[0]
-            candidates = sorted(glob.glob(os.path.join(parent, f"{stem}.*")))
-            if candidates:
+            joined = os.path.join(_settings.DOWNLOAD_PATH, audio_path)
+            if os.path.exists(joined):
                 logger.info(
-                    f"Audio file at {audio_path} missing, falling back to "
-                    f"{candidates[0]}"
+                    f"Audio path {audio_path} relative; resolved to {joined}"
                 )
-                audio_path = candidates[0]
+                audio_path = joined
             else:
-                raise FileNotFoundError(f"Audio file not found: {audio_path}")
+                import glob
+
+                parent = os.path.dirname(joined) or "."
+                stem = os.path.basename(audio_path).rsplit(".", 1)[0]
+                candidates = sorted(glob.glob(os.path.join(parent, f"{stem}.*")))
+                if candidates:
+                    logger.info(
+                        f"Audio file at {audio_path} missing, falling back to "
+                        f"{candidates[0]}"
+                    )
+                    audio_path = candidates[0]
+                else:
+                    raise FileNotFoundError(
+                        f"Audio file not found: {audio_path} "
+                        f"(also tried {joined} and {parent}/{stem}.*)"
+                    )
 
         provider = AIProviderFactory.get_provider(
             self._provider_key, self._provider_config
