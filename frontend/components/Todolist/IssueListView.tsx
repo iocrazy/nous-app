@@ -299,30 +299,32 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           />
         </div>
         <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onViewModeChange('list')}
-            className={`p-1.5 rounded border transition ${
-              viewMode === 'list'
-                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
-                : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-            }`}
-            title="List view"
-          >
-            <ListViewIcon />
-          </button>
-          <button
-            type="button"
-            onClick={() => onViewModeChange('board')}
-            className={`p-1.5 rounded border transition ${
-              viewMode === 'board'
-                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
-                : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-            }`}
-            title="Board view"
-          >
-            <BoardViewIcon />
-          </button>
+          <div className="inline-flex rounded border border-zinc-800 bg-zinc-900/80 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => onViewModeChange('list')}
+              className={`p-1.5 transition ${
+                viewMode === 'list'
+                  ? 'bg-zinc-800 text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+              title="List view"
+            >
+              <ListViewIcon />
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewModeChange('board')}
+              className={`p-1.5 transition border-l border-zinc-800 ${
+                viewMode === 'board'
+                  ? 'bg-zinc-800 text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+              title="Board view"
+            >
+              <BoardViewIcon />
+            </button>
+          </div>
           <div className="relative">
             <button
               type="button"
