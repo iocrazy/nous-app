@@ -179,6 +179,46 @@ async def lifespan(app: FastAPI):
 
     app.state.bg_tasks.spawn("liveness_reconcile", _bg_liveness_reconcile())
 
+    # 2026-05-05 path C: DBOS internal-queue PENDING reaper.
+    # Background: every backend restart abandons whatever scheduled
+    # housekeeping workflows (update_system_status / commitment_sweeper
+    # / agent_runs_sweeper / scheduled_master / reap_stuck_pending_tasks)
+    # were enqueued at the time. They sit forever in dbos.workflow_status
+    # with status='PENDING' on _dbos_internal_queue, eventually polluting
+    # any code that introspects the queue. This sweep marks anything older
+    # than 5 minutes on that queue as CANCELLED so the table stops growing
+    # across restarts. User-queued workflows are left alone.
+    async def _bg_reap_internal_queue() -> None:
+        try:
+            import os
+            import psycopg
+
+            dsn = os.environ.get("DBOS_DATABASE_URL")
+            if not dsn:
+                return
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE dbos.workflow_status
+                           SET status='CANCELLED'
+                         WHERE queue_name='_dbos_internal_queue'
+                           AND status IN ('PENDING','ENQUEUED')
+                           AND created_at <
+                               (EXTRACT(EPOCH FROM NOW() - INTERVAL '5 minutes') * 1000)::bigint
+                        """
+                    )
+                    affected = cur.rowcount or 0
+            if affected:
+                logger.info(
+                    f"reap_internal_queue: cancelled {affected} stranded "
+                    f"_dbos_internal_queue PENDING/ENQUEUED rows"
+                )
+        except Exception as exc:
+            logger.warning(f"reap_internal_queue startup sweep failed: {exc!r}")
+
+    app.state.bg_tasks.spawn("reap_internal_queue", _bg_reap_internal_queue())
+
     # DBOS Orchestrator (PR-D2.2): instantiate the singleton, import workflow
     # modules so their decorators register, then launch the worker pool.
     # Failure here is non-fatal — backend keeps serving requests; only DBOS-

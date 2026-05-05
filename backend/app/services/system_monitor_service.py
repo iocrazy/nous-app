@@ -79,16 +79,21 @@ def _parse_speed(speed_str: str) -> float:
 
 
 async def get_queue_status() -> dict:
-    """Return DBOS workflow queue metrics (5-second cache).
+    """Return user-facing queue metrics from public.task_tracking (5s cache).
 
-    PR-D7: Celery introspection replaced with DBOS workflow_status
-    table aggregation. Status values:
-    - "offline" — DBOS not enabled (defensive; should never happen in
-      production since lifespan launches DBOS at startup)
-    - "online"  — DBOS launched + queue counts available
+    Architectural note (path C — 2026-05-05):
+    UI counts MUST come from `task_tracking` (the user-visible source of
+    truth), not from `dbos.workflow_status` (the engine-private execution
+    log). Querying DBOS directly conflates user tasks with engine-internal
+    scheduled workflows (update_system_status / commitment_sweeper / etc),
+    producing the "108 queued vs 38 tasks listed" mismatch the user hit
+    in dev on 2026-05-04. See CLAUDE.md "Task tracking architecture".
 
-    Async because DBOS.list_workflows() (sync) refuses to run inside an
-    asyncio event loop and FastAPI handlers always have one.
+    Status values:
+      "offline" — DB unreachable (defensive; should not happen)
+      "online"  — counts available
+
+    Active = phase 'in_progress'; Pending = phase 'queued'.
     """
     current_time = time.time()
 
@@ -98,40 +103,25 @@ async def get_queue_status() -> dict:
     ):
         return _queue_cache["data"]
 
-    from app.services import dbos_orchestrator
-
-    if not dbos_orchestrator.is_enabled():
-        result = {"active": 0, "pending": 0, "scheduled": 0, "status": "offline"}
-        _queue_cache.update(data=result, timestamp=current_time)
-        return result
-
     try:
-        from dbos import DBOS
+        from app.db import get_async_supabase_admin
 
-        running = await DBOS.list_workflows_async(status="RUNNING") or []
-        pending = await DBOS.list_workflows_async(status="PENDING") or []
-        enqueued = await DBOS.list_workflows_async(status="ENQUEUED") or []
-
-        # Filter out DBOS-internal scheduled workflows
-        # (update_system_status / commitment_sweeper / agent_runs_sweeper /
-        # reap_stuck_pending_tasks / scheduled_master / etc) — these are
-        # cron-cadence housekeeping and should NOT show up in the user-
-        # facing "Engine queued" badge. Without this filter a worker
-        # restart leaves behind dozens of orphaned PENDING rows that
-        # bloat the count to triple-digit numbers (see dev DB run on
-        # 2026-05-04: 108 PENDING, all in _dbos_internal_queue, none
-        # had a corresponding public.task_tracking row).
-        def _is_user_workflow(w) -> bool:
-            qname = getattr(w, "queue_name", None) or ""
-            return qname != "_dbos_internal_queue"
-
-        running_user = [w for w in running if _is_user_workflow(w)]
-        pending_user = [w for w in pending if _is_user_workflow(w)]
-        enqueued_user = [w for w in enqueued if _is_user_workflow(w)]
-
+        client = await get_async_supabase_admin()
+        active_resp = (
+            await client.table("task_tracking")
+            .select("dbos_workflow_id", head=True, count="exact")
+            .eq("phase", "in_progress")
+            .execute()
+        )
+        pending_resp = (
+            await client.table("task_tracking")
+            .select("dbos_workflow_id", head=True, count="exact")
+            .eq("phase", "queued")
+            .execute()
+        )
         result = {
-            "active": len(running_user),
-            "pending": len(pending_user) + len(enqueued_user),
+            "active": int(active_resp.count or 0),
+            "pending": int(pending_resp.count or 0),
             "scheduled": 0,
             "status": "online",
         }

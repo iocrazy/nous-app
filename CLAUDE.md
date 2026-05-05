@@ -242,9 +242,24 @@ supabase db push
 
 ### 任务系统（Task Center）
 
-- 前端 `TaskManagerContext` 通过 Supabase Realtime 监听 `unified_tasks` 表变化
-- DBOS workflows 和 FastAPI 后台任务均通过 `TaskTracker` 创建 `unified_tasks` 记录
-- 任务状态：`pending` → `running` → `completed` / `failed`
+- 前端 `TaskManagerContext` 通过 Supabase Realtime 监听 `task_tracking` 表变化（表名是 `task_tracking`，旧名 `unified_tasks` 已 rename）
+- DBOS workflow 是底层执行引擎，引擎私有表 `dbos.workflow_status` 通过 `mirror_dbos_lifecycle_to_tracking` trigger 把 `phase / status / progress / started_at / completed_at / error_msg` 同步到 `task_tracking`
+- 任务状态：`queued` → `in_progress` → `completed` / `failed` / `cancelled` / `lost`
+
+### 任务系统架构纪律（路线 C — 2026-05-05 立约）
+
+为了避免 `task_tracking` 和 `dbos.workflow_status` 双表导致的数据源不一致（曾因此撞上 "Engine 108 queued 但 Settings 只 38 行" + "Parse Initializing... 但任务已下载完" 两类 bug），约定：
+
+1. **`task_tracking` 是 UI 唯一数据源**。所有前端 query / 计数 / 列表 endpoint **必须**从 `task_tracking` 读取。**不得**直接 query `dbos.workflow_status`。即使是 system status badge / queue counter 也走 `SELECT COUNT(*) FROM task_tracking WHERE phase IN ('queued','in_progress')`。
+2. **`phase / status / progress / started_at / completed_at / error_msg` 由 trigger 全权同步**。业务代码**禁止 PATCH 这些列**——让 `mirror_dbos_lifecycle_to_tracking` 单向负责，保证 DBOS 视角和 task_tracking 视角永远一致。
+3. **业务装饰字段（subtitle / metadata / media_id / heartbeat_at / cost_cents / issue_id 等）由业务代码 PATCH**，DBOS workflow 不会动它们。这些字段属于 UI 显示和业务关联，跟执行引擎解耦。
+4. **DBOS workflow 的 short-circuit 失败必须 raise 而不是 return failed dict**。返回 dict 会被 DBOS 视为 SUCCESS，trigger 把 task_tracking 误标 completed，业务字段（subtitle / metadata）却没机会更新——典型表现就是 UI 看到 "phase=completed but subtitle stuck on Initializing..."。
+5. **DBOS internal queue（`_dbos_internal_queue`）孤儿 PENDING 由 startup reaper 清理**（`backend/app/main.py::_bg_reap_internal_queue`）。这些是 scheduled housekeeping workflow 在 worker 重启时遗留的，不属于用户业务任务，不进 `task_tracking`，也不该影响任何 UI 数据。
+6. **加新 workflow 时清单**：
+   - `manager.create()` 显式建 task_tracking 行
+   - `manager.start()` / `update_progress()` / `complete()` / `fail()` 都通过 manager API（绝不直接 PATCH phase 列）
+   - 失败路径用 `raise`，不用 `return {"status":"failed"}`
+   - 任何额外业务字段写到 metadata jsonb，不写 DBOS workflow input/output（DBOS input freeze 后不可改）
 
 ### 前端技术栈
 
