@@ -781,7 +781,15 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
 
 @router.get("/transcript/resource/{resource_id}", response_model=TranscriptResponse)
 async def get_transcript_by_resource(resource_id: str, auth: AuthDep):
-    """Get transcript for a resource."""
+    """Get transcript for a resource.
+
+    "Resource not transcribed yet" returns 200 with full_text=None — NOT
+    404. Returning 404 makes Chrome paint the entire request red in
+    DevTools every time the user opens the Transcript tab on an
+    un-transcribed video, even though the UI handles it correctly. The
+    poll helper looks for full_text presence, so it keeps polling on
+    null and stops on a real transcript.
+    """
     # Ownership check
     res_repo = ResourcesRepository()
     resource = await res_repo.get_resource_by_id(resource_id)
@@ -791,10 +799,7 @@ async def get_transcript_by_resource(resource_id: str, auth: AuthDep):
         raise HTTPException(status_code=403, detail="Access denied")
 
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(resource_id)
-
-    if not transcript:
-        raise HTTPException(status_code=404, detail="Transcript not found")
+    transcript = await ai_repo.get_transcript(resource_id) or {}
 
     return TranscriptResponse(
         media_id=resource_id,
@@ -822,11 +827,11 @@ async def get_transcript(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=404, detail="No resource linked to this media")
 
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(str(resource["id"]))
+    transcript = await ai_repo.get_transcript(str(resource["id"])) or {}
 
-    if not transcript:
-        raise HTTPException(status_code=404, detail="Transcript not found")
-
+    # 200 + nulls (not 404) when no transcript exists yet — same reason
+    # as the by-resource endpoint above. Stops Chrome from painting the
+    # request red on every Transcript tab open.
     return TranscriptResponse(
         media_id=media_id,
         language=transcript.get("language"),
@@ -850,10 +855,7 @@ async def get_summary_by_resource(resource_id: str, auth: AuthDep):
         raise HTTPException(status_code=403, detail="Access denied")
 
     ai_repo = AIRepository()
-    summary = await ai_repo.get_summary(resource_id)
-
-    if not summary:
-        raise HTTPException(status_code=404, detail="Summary not found")
+    summary = await ai_repo.get_summary(resource_id) or {}
 
     return SummaryResponse(
         media_id=resource_id,
@@ -882,10 +884,7 @@ async def get_summary(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=404, detail="No resource linked to this media")
 
     ai_repo = AIRepository()
-    summary = await ai_repo.get_summary(str(resource["id"]))
-
-    if not summary:
-        raise HTTPException(status_code=404, detail="Summary not found")
+    summary = await ai_repo.get_summary(str(resource["id"])) or {}
 
     return SummaryResponse(
         media_id=media_id,
