@@ -10,7 +10,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Search, LayoutList, LayoutGrid, Columns, Filter, ArrowUpDown, RotateCw } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Grid3x3, Columns, Filter, ArrowUpDown, RotateCw } from 'lucide-react';
 import type { UiIssue, AgentRef, ProjectRef } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
@@ -275,24 +275,30 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           />
         </div>
         <div className="ml-auto flex items-center gap-1">
-          <div className="flex items-center bg-zinc-900/80 border border-zinc-800 rounded">
-            <button
-              type="button"
-              onClick={() => onViewModeChange('list')}
-              className={`p-1.5 rounded-l transition ${viewMode === 'list' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-              title="List view"
-            >
-              <LayoutList size={13} />
-            </button>
-            <button
-              type="button"
-              onClick={() => onViewModeChange('board')}
-              className={`p-1.5 rounded-r transition ${viewMode === 'board' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-              title="Board view"
-            >
-              <LayoutGrid size={13} />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => onViewModeChange('list')}
+            className={`p-1.5 rounded border transition ${
+              viewMode === 'list'
+                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
+                : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+            }`}
+            title="List view"
+          >
+            <LayoutGrid size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewModeChange('board')}
+            className={`p-1.5 rounded border transition ${
+              viewMode === 'board'
+                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
+                : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+            }`}
+            title="Board view"
+          >
+            <Grid3x3 size={13} />
+          </button>
           <div className="relative">
             <button
               type="button"
