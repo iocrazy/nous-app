@@ -167,6 +167,18 @@ async def lifespan(app: FastAPI):
     app.state.bg_tasks.spawn("seed_loader", _bg_seed_loader())
     app.state.bg_tasks.spawn("deployment_log", _bg_deployment_log())
 
+    # A8.5: paperclip-style stranded-run reconcile. Backend may have crashed
+    # while agent_runs were in flight; sweep them to status=failed +
+    # liveness=dead so the chat reflects reality and the user can retry.
+    async def _bg_liveness_reconcile() -> None:
+        try:
+            from app.workflows.liveness_scanner import reconcile_stranded_runs
+            await reconcile_stranded_runs()
+        except Exception as exc:
+            logger.warning(f"liveness reconcile on startup failed: {exc!r}")
+
+    app.state.bg_tasks.spawn("liveness_reconcile", _bg_liveness_reconcile())
+
     # DBOS Orchestrator (PR-D2.2): instantiate the singleton, import workflow
     # modules so their decorators register, then launch the worker pool.
     # Failure here is non-fatal — backend keeps serving requests; only DBOS-

@@ -46,6 +46,11 @@ from app.workflows.scheduled_memory_archival import (  # noqa: F401
 from app.workflows.scheduled_memory_consolidation import (  # noqa: F401
     memory_consolidation_workflow,
 )
+# A8.5: paperclip-style liveness scanner for agent_runs.
+from app.workflows.liveness_scanner import (  # noqa: F401
+    liveness_scan_scheduled,
+    reconcile_stranded_runs,
+)
 from app.workflows.script_outline import script_outline_workflow  # noqa: F401
 from app.workflows.storyboard import (  # noqa: F401
     storyboard_annotation_workflow,

@@ -8,11 +8,32 @@
  */
 
 import React from 'react';
-import type { IssueMessage } from '../../services/issueMessageService';
+import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
 import type { AgentRef } from './types';
 import { STATUS_LABEL, STATUS_COLOR, IssueStatusIcon } from './IssueStatusIcon';
 import type { IssueStatus } from '../../services/issuesService';
 import { relativeTime } from '../../utils/taskDisplay';
+
+const LIVENESS_VISUAL: Record<AgentLivenessState, { dot: string; label: string; tooltip: string }> = {
+  running:   { dot: 'bg-emerald-500', label: 'running',   tooltip: 'Agent is making progress' },
+  silent:    { dot: 'bg-amber-400',   label: 'silent',    tooltip: 'No useful action recently — watching' },
+  stuck:     { dot: 'bg-orange-500',  label: 'stuck',     tooltip: 'Stuck long enough to attempt continuation' },
+  dead:      { dot: 'bg-rose-500',    label: 'dead',      tooltip: 'Marked dead by liveness scanner' },
+  cancelled: { dot: 'bg-zinc-500',    label: 'cancelled', tooltip: 'Cancelled by user / system' },
+};
+
+const LivenessPill: React.FC<{ state: AgentLivenessState }> = ({ state }) => {
+  const v = LIVENESS_VISUAL[state] ?? LIVENESS_VISUAL.running;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-900/60 ring-1 ring-zinc-800 text-[10px] text-zinc-300"
+      title={v.tooltip}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${v.dot}`} />
+      {v.label}
+    </span>
+  );
+};
 
 interface IssueChatThreadProps {
   messages: IssueMessage[];
@@ -70,6 +91,14 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
   const agent = msg.author_agent_id ? agentsById[msg.author_agent_id] : null;
   const initials = (agent?.name ?? '·').slice(0, 2).toUpperCase();
   const boardSignoff = (msg.meta?.board_signoff as string | undefined);
+  // Liveness comes either inlined on the row (future), or via meta.status
+  // emitted by the bridge trigger (mig 206). Display it as a pill so users
+  // can see "agent is silent / stuck / dead" without leaving the chat.
+  const liveness = (msg.liveness_state as AgentLivenessState | undefined)
+    ?? (msg.meta?.liveness_state as AgentLivenessState | undefined)
+    ?? null;
+  const metaStatus = msg.meta?.status as string | undefined;
+  const errorCode = msg.meta?.error_code as string | undefined;
   return (
     <div className="my-3">
       <div className="flex items-center gap-2 mb-1.5">
@@ -77,6 +106,15 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
         <span className="text-xs font-medium text-zinc-200">{agent?.name ?? 'Agent'}</span>
         {msg.duration_seconds != null && (
           <span className="text-[11px] text-zinc-500">worked for {formatDuration(msg.duration_seconds)}</span>
+        )}
+        {liveness && <LivenessPill state={liveness} />}
+        {metaStatus && metaStatus !== 'completed' && (
+          <span className="text-[10px] text-zinc-500 italic">({metaStatus})</span>
+        )}
+        {errorCode && (
+          <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30 text-[10px] font-mono" title="error_code">
+            {errorCode}
+          </span>
         )}
         <span className="ml-auto inline-flex items-center gap-2 text-[11px] text-zinc-500">
           {boardSignoff && (

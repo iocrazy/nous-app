@@ -70,11 +70,13 @@ BEGIN
     body_text, duration_s,
     jsonb_build_object(
       'status', NEW.status,
+      'liveness_state', NEW.liveness_state,        -- A8.5 added
       'cost_cents', NEW.cost_cents,
       'model', NEW.model,
       'prompt_tokens', NEW.prompt_tokens,
       'completion_tokens', NEW.completion_tokens,
-      'error_code', NEW.error_code
+      'error_code', NEW.error_code,
+      'continuation_attempt', NEW.continuation_attempt   -- A8.5 added
     )
   );
 

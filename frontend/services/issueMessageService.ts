@@ -13,6 +13,8 @@ import { getAuthHeaders } from './parserService';
 
 export type IssueMessageKind = 'comment' | 'agent_run' | 'system_status';
 
+export type AgentLivenessState = 'running' | 'silent' | 'stuck' | 'dead' | 'cancelled';
+
 export interface IssueMessage {
   id: string;
   issue_id: number;
@@ -23,6 +25,10 @@ export interface IssueMessage {
   meta: Record<string, unknown>;
   duration_seconds: number | null;
   agent_run_id: string | null;
+  /** Optional: surfaced when the chat row was emitted by the agent_runs
+   * bridge trigger (mig 206) AND the run carried a liveness state in
+   * meta. Null for plain comments. */
+  liveness_state?: AgentLivenessState | null;
   from_status: string | null;
   to_status: string | null;
   created_at: string;
