@@ -76,7 +76,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     _admin = await _get_admin()
     _active = (
         await _admin.table("task_tracking")
-        .select("id")
+        .select("dbos_workflow_id")
         .eq("resource_id", resource_id)
         .eq("task_type", "ai_transcription")
         .in_("status", ["pending", "processing", "running"])
@@ -253,7 +253,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     _admin = await _get_admin()
     _active = (
         await _admin.table("task_tracking")
-        .select("id")
+        .select("dbos_workflow_id")
         .eq("resource_id", resource_id)
         .eq("task_type", "ai_summary")
         .in_("status", ["pending", "processing", "running"])
