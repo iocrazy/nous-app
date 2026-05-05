@@ -73,6 +73,15 @@ def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]
     whisper_provider = ai_settings.get("whisper_provider", "openai")
     provider_cfg = providers.get(whisper_provider) or {}
 
+    # task_assignment.transcription carries the model selection like
+    # 'volcengine:bigasr' or 'volcengine:seed-asr'. Required for the
+    # Volcengine path because the API key may only have one resource
+    # granted — picking the wrong one returns 45000030 'resource not
+    # granted'. master read this same field in ai_tasks.py.
+    task_assignment = (
+        ai_settings.get("task_assignment", {}).get("transcription") or ""
+    )
+
     return {
         "audio_path": audio_path,
         "resource_id": str(media_row["resource_id"]),
@@ -80,6 +89,7 @@ def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]
         "provider_key": whisper_provider,
         "provider_config": provider_cfg,
         "language": ai_settings.get("preferred_language", "auto"),
+        "task_assignment": task_assignment,
     }
 
 
@@ -121,6 +131,7 @@ def run_whisper(
     provider_key: str,
     provider_config: dict[str, Any],
     language: str,
+    task_assignment: str = "",
 ) -> dict[str, Any]:
     """Invoke transcription synchronously inside the DBOS step.
 
@@ -142,6 +153,7 @@ def run_whisper(
             resource_id=resource_id,
             provider_config=provider_config,
             language=language,
+            task_assignment=task_assignment,
         )
 
     from app.services.whisper_service import WhisperService
@@ -170,6 +182,7 @@ def _run_volcengine_asr(
     resource_id: str,
     provider_config: dict[str, Any],
     language: str,
+    task_assignment: str = "",
 ) -> dict[str, Any]:
     """Volcengine ASR path — needs a public audio URL since the API pulls
     the file rather than receiving an upload. Reuses the HMAC-signed media
@@ -236,11 +249,22 @@ def _run_volcengine_asr(
     ext = os.path.splitext(audio_path)[1].lstrip(".").lower()
     audio_format = ext if ext in ("mp3", "wav", "ogg") else "wav"
 
+    # Pick API resource based on the model the user assigned in
+    # Settings → AI → Transcription, e.g. 'volcengine:bigasr' or
+    # 'volcengine:seed-asr'. master derived this from
+    # transcription_assignment; we now thread the same string through
+    # task_assignment. Falls back to V1 (bigasr) since most accounts
+    # only have that resource granted (V2 seed-asr requires a separate
+    # entitlement and returns 45000030 'resource not granted' otherwise).
+    model_part = (
+        task_assignment.split(":", 1)[1]
+        if ":" in task_assignment
+        else task_assignment
+    ) or (provider_config.get("model") or "")
     asr_resource = (
-        RESOURCE_V1
-        if "bigasr" in (provider_config.get("model") or "")
-        or "1.0" in (provider_config.get("model") or "")
-        else RESOURCE_V2
+        RESOURCE_V2
+        if ("seed" in model_part.lower() or "2.0" in model_part)
+        else RESOURCE_V1
     )
 
     service = VolcengineASRService(
@@ -300,6 +324,7 @@ def ai_transcription_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
             provider_key=inputs["provider_key"],
             provider_config=inputs["provider_config"],
             language=inputs["language"],
+            task_assignment=inputs.get("task_assignment", ""),
         )
         mark_transcript_completed(parsed_media_id)
         return {"parsed_media_id": parsed_media_id, **summary}
