@@ -1,15 +1,17 @@
 /**
- * Paperclip-style flat issue list (A8.3 wired to real backend via UiIssue).
+ * Paperclip-style flat issue list.
  *
- * A9.1: column visibility — toggle which fields render per row, persisted
- * in localStorage. The Title column is always shown (the issue label
- * itself); other columns toggle via IssueColumnPicker.
+ *  A8.3 — wired to real backend via UiIssue.
+ *  A9.1 — column visibility picker (persisted per-team).
+ *  A9.2 — filter popover (Quick filters + Status/Priority/Assignee/
+ *         Creator/Project/Visibility multi-selects). Filtering is
+ *         applied client-side against the already-fetched UiIssue list.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Search, ListFilter, LayoutList, LayoutGrid, Columns } from 'lucide-react';
-import type { UiIssue } from './types';
+import { Plus, Search, LayoutList, LayoutGrid, Columns, Filter } from 'lucide-react';
+import type { UiIssue, AgentRef, ProjectRef } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
 import { IssueBoardView } from './IssueBoardView';
@@ -19,6 +21,12 @@ import {
   saveVisibleColumns,
   type IssueColumnKey,
 } from './IssueColumnPicker';
+import {
+  IssueFilterPopover,
+  EMPTY_FILTERS,
+  type IssueFilters,
+  type QuickFilter,
+} from './IssueFilterPopover';
 import { relativeTime } from '../../utils/taskDisplay';
 
 export type IssueViewMode = 'list' | 'board';
@@ -31,6 +39,8 @@ interface IssueListViewProps {
   onViewModeChange: (mode: IssueViewMode) => void;
   onNewIssue: () => void;
   onRefresh: () => void;
+  agents: AgentRef[];
+  currentUserId?: string;
 }
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-zinc-600', size = 20 }) => (
@@ -107,16 +117,60 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   );
 };
 
-export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh }) => {
+function applyFilters(issues: UiIssue[], filters: IssueFilters, currentUserId: string | undefined): UiIssue[] {
+  const assigneeActive = filters.assigneeMe || filters.assigneeNone || filters.assigneeAgents.size > 0;
+  const creatorActive = filters.creatorMe || filters.creatorsAgents.size > 0;
+
+  return issues.filter((i) => {
+    if (filters.statuses.size > 0 && !filters.statuses.has(i.status)) return false;
+    if (filters.priorities.size > 0 && !filters.priorities.has(i.priority)) return false;
+    if (filters.projects.size > 0) {
+      if (i.raw.project_id == null || !filters.projects.has(i.raw.project_id)) return false;
+    }
+    if (assigneeActive) {
+      let match = false;
+      if (filters.assigneeMe && currentUserId && i.raw.assignee_user_id === currentUserId) match = true;
+      if (!match && filters.assigneeNone && !i.raw.assignee_user_id && !i.raw.assignee_agent_id) match = true;
+      if (!match && i.raw.assignee_agent_id && filters.assigneeAgents.has(i.raw.assignee_agent_id)) match = true;
+      if (!match) return false;
+    }
+    if (creatorActive) {
+      let match = false;
+      if (filters.creatorMe && currentUserId && i.raw.created_by_user_id === currentUserId) match = true;
+      if (!match && i.raw.created_by_agent_id && filters.creatorsAgents.has(i.raw.created_by_agent_id)) match = true;
+      if (!match) return false;
+    }
+    if (filters.liveRunsOnly) {
+      const live = !!i.raw.dbos_workflow_id && i.status !== 'done' && i.status !== 'cancelled';
+      if (!live) return false;
+    }
+    if (filters.hideRoutine && i.raw.origin_kind === 'routine') return false;
+    return true;
+  });
+}
+
+function activeFilterCount(filters: IssueFilters): number {
+  let n = 0;
+  if (filters.statuses.size > 0) n += 1;
+  if (filters.priorities.size > 0) n += 1;
+  if (filters.assigneeMe || filters.assigneeNone || filters.assigneeAgents.size > 0) n += 1;
+  if (filters.creatorMe || filters.creatorsAgents.size > 0) n += 1;
+  if (filters.projects.size > 0) n += 1;
+  if (filters.liveRunsOnly) n += 1;
+  if (filters.hideRoutine) n += 1;
+  return n;
+}
+
+export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<Set<IssueStatus>>(new Set());
+  const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   const colScopeKey = teamId ?? 'global';
   const [visibleCols, setVisibleCols] = useState<Set<IssueColumnKey>>(() => loadVisibleColumns(colScopeKey));
 
-  // Persist column choice whenever it changes (also re-load if team switches).
   useEffect(() => {
     saveVisibleColumns(colScopeKey, visibleCols);
   }, [colScopeKey, visibleCols]);
@@ -125,26 +179,38 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
     setVisibleCols(loadVisibleColumns(colScopeKey));
   }, [colScopeKey]);
 
-  const toggleStatus = (s: IssueStatus) => {
-    setStatusFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
+  const setQuick = (q: QuickFilter) => {
+    if (q === 'all') {
+      setFilters((prev) => ({ ...prev, statuses: new Set() }));
+    } else if (q === 'active') {
+      setFilters((prev) => ({ ...prev, statuses: new Set(['todo', 'in_progress']) }));
+    } else if (q === 'backlog') {
+      setFilters((prev) => ({ ...prev, statuses: new Set(['backlog']) }));
+    } else {
+      setFilters((prev) => ({ ...prev, statuses: new Set(['done']) }));
+    }
   };
+
+  // Derive Project list from currently-loaded issues so filter popover
+  // doesn't depend on a separate /projects fetch we don't have.
+  const projectsList: ProjectRef[] = useMemo(() => {
+    const seen = new Map<number, ProjectRef>();
+    for (const i of issues) {
+      if (i.project && !seen.has(i.project.id)) seen.set(i.project.id, i.project);
+    }
+    return Array.from(seen.values());
+  }, [issues]);
+
+  const filteredByPanel = useMemo(() => applyFilters(issues, filters, currentUserId), [issues, filters, currentUserId]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return issues.filter((i) => {
-      if (statusFilter.size > 0 && !statusFilter.has(i.status)) return false;
-      if (q) {
-        const hay = `${i.identifier} ${i.title} ${i.description ?? ''} ${i.assignee?.name ?? i.assignee_user_label ?? ''}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
+    if (!q) return filteredByPanel;
+    return filteredByPanel.filter((i) => {
+      const hay = `${i.identifier} ${i.title} ${i.description ?? ''} ${i.assignee?.name ?? i.assignee_user_label ?? ''}`.toLowerCase();
+      return hay.includes(q);
     });
-  }, [issues, search, statusFilter]);
+  }, [filteredByPanel, search]);
 
   const grouped = useMemo(() => {
     const map = new Map<IssueStatus, UiIssue[]>();
@@ -155,13 +221,13 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
     return STATUS_ORDER.filter((s) => map.has(s)).map((s) => ({ status: s, items: map.get(s)! }));
   }, [filtered]);
 
-  // O(1) parent identifier lookup so the parent column doesn't need
-  // per-row fetches. Source is the same UiIssue list passed in.
   const parentLookup = useMemo(() => {
     const m = new Map<number, UiIssue>();
     for (const i of issues) m.set(i.id, i);
     return m;
   }, [issues]);
+
+  const filterCount = activeFilterCount(filters);
 
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950 border-t border-zinc-800/80">
@@ -204,7 +270,31 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
         <div className="relative">
           <button
             type="button"
-            onClick={() => setColumnPickerOpen((v) => !v)}
+            onClick={() => { setFilterOpen((v) => !v); setColumnPickerOpen(false); }}
+            className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
+              filterOpen || filterCount > 0
+                ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-200'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+            }`}
+            title="Filters"
+          >
+            <Filter size={13} />
+            {filterCount > 0 && <span className="text-[10px] font-medium">{filterCount}</span>}
+          </button>
+          {filterOpen && (
+            <IssueFilterPopover
+              filters={filters}
+              onChange={setFilters}
+              onClose={() => setFilterOpen(false)}
+              agents={agents}
+              projects={projectsList}
+            />
+          )}
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => { setColumnPickerOpen((v) => !v); setFilterOpen(false); }}
             className={`p-1.5 rounded border transition ${
               columnPickerOpen
                 ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
@@ -237,24 +327,43 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 text-[11px] border-b border-zinc-800/60">
-        <span className="text-zinc-600 inline-flex items-center gap-1 mr-1">
-          <ListFilter size={11} /> Status:
-        </span>
-        {STATUS_ORDER.map((s) => (
+        <span className="text-zinc-600 mr-1">Quick:</span>
+        {(['all', 'active', 'backlog', 'done'] as QuickFilter[]).map((q) => {
+          const matches = (() => {
+            if (q === 'all') return filters.statuses.size === 0;
+            if (q === 'active') return filters.statuses.size === 2 && filters.statuses.has('todo') && filters.statuses.has('in_progress');
+            if (q === 'backlog') return filters.statuses.size === 1 && filters.statuses.has('backlog');
+            return filters.statuses.size === 1 && filters.statuses.has('done');
+          })();
+          return (
+            <button
+              key={q}
+              type="button"
+              onClick={() => setQuick(q)}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded transition ${
+                matches
+                  ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-500/40'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+              }`}
+            >
+              {q === 'all' ? 'All' : q === 'active' ? 'Active' : q === 'backlog' ? 'Backlog' : 'Done'}
+            </button>
+          );
+        })}
+        {filters.statuses.size > 0 && (
+          <span className="text-zinc-600 ml-3">
+            ·  {Array.from(filters.statuses).map((s) => STATUS_LABEL[s]).join(', ')}
+          </span>
+        )}
+        {filterCount > 0 && (
           <button
-            key={s}
             type="button"
-            onClick={() => toggleStatus(s)}
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded transition ${
-              statusFilter.has(s)
-                ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-500/40'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-            }`}
+            onClick={() => setFilters(EMPTY_FILTERS)}
+            className="ml-auto text-[10px] text-zinc-500 hover:text-zinc-200"
           >
-            <IssueStatusIcon status={s} size={10} />
-            {STATUS_LABEL[s]}
+            Reset filters ({filterCount})
           </button>
-        ))}
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
