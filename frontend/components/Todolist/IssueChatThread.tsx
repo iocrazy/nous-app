@@ -7,12 +7,15 @@
  * agentsMap / userLabel passed in by the parent page.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
+import { Zap } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
+import { simulateAgentRunComplete } from '../../services/issueMessageService';
 import type { AgentRef } from './types';
 import { STATUS_LABEL, STATUS_COLOR, IssueStatusIcon } from './IssueStatusIcon';
 import type { IssueStatus } from '../../services/issuesService';
 import { relativeTime } from '../../utils/taskDisplay';
+import { useToast } from '../Toast';
 
 const LIVENESS_VISUAL: Record<AgentLivenessState, { dot: string; label: string; tooltip: string }> = {
   running:   { dot: 'bg-emerald-500', label: 'running',   tooltip: 'Agent is making progress' },
@@ -99,6 +102,22 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
     ?? null;
   const metaStatus = msg.meta?.status as string | undefined;
   const errorCode = msg.meta?.error_code as string | undefined;
+  const isRunning = metaStatus === 'running';
+  const { addToast } = useToast();
+  const [simulating, setSimulating] = useState(false);
+
+  const onSimulate = async () => {
+    if (!msg.agent_run_id || simulating) return;
+    setSimulating(true);
+    try {
+      await simulateAgentRunComplete(msg.issue_id, msg.agent_run_id);
+      addToast('Simulated agent finish — row should update shortly', 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Simulate failed', 'error');
+    } finally {
+      setSimulating(false);
+    }
+  };
   return (
     <div className="my-3">
       <div className="flex items-center gap-2 mb-1.5">
@@ -110,6 +129,16 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
         {liveness && <LivenessPill state={liveness} />}
         {metaStatus && metaStatus !== 'completed' && (
           <span className="text-[10px] text-zinc-500 italic">({metaStatus})</span>
+        )}
+        {isRunning && msg.agent_run_id && (
+          <button
+            onClick={onSimulate}
+            disabled={simulating}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-50"
+            title="Dev: simulate the agent finishing this run"
+          >
+            <Zap size={9} /> {simulating ? 'Sim…' : 'Simulate finish'}
+          </button>
         )}
         {errorCode && (
           <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30 text-[10px] font-mono" title="error_code">

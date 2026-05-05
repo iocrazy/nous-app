@@ -80,3 +80,22 @@ export async function postIssueMessage(
   });
   return _json<IssueMessagePostResponse>(res);
 }
+
+/**
+ * Dev/demo helper: flip an issue-scoped agent_run from running →
+ * completed with a sample summary. The DB triggers fan out the chat
+ * row update via Realtime.
+ */
+export async function simulateAgentRunComplete(
+  issueId: number,
+  runId: string,
+  outputSummary?: string,
+): Promise<{ run_id: string; status: string; summary_preview: string }> {
+  const url = `${_base}/${issueId}/agent-runs/${runId}/simulate-complete`;
+  const params = outputSummary ? `?output_summary=${encodeURIComponent(outputSummary)}` : '';
+  const res = await fetch(`${url}${params}`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  return _json(res);
+}

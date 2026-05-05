@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ListTodo } from 'lucide-react';
-import { IssueListView } from '../components/Todolist/IssueListView';
+import { IssueListView, type IssueViewMode } from '../components/Todolist/IssueListView';
 import { IssueDetailView } from '../components/Todolist/IssueDetailView';
 import { NewIssueDialog } from '../components/Todolist/NewIssueDialog';
 import type { AgentRef, UiIssue } from '../components/Todolist/types';
@@ -82,6 +82,7 @@ export function TodolistPage() {
   const [selectedError, setSelectedError] = useState<string | null>(null);
 
   const [newIssueOpen, setNewIssueOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<IssueViewMode>('list');
 
   const teamIdNum = useMemo(() => {
     if (!teamId) return null;
@@ -203,6 +204,8 @@ export function TodolistPage() {
         issues={issues}
         loading={issuesLoading}
         error={issuesError}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
         onNewIssue={() => setNewIssueOpen(true)}
         onRefresh={() => { void refreshIssues(agentsById); }}
       />

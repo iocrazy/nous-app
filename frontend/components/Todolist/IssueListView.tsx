@@ -4,16 +4,21 @@
 
 import React, { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Search, ListFilter } from 'lucide-react';
+import { Plus, Search, ListFilter, LayoutList, LayoutGrid } from 'lucide-react';
 import type { UiIssue } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
+import { IssueBoardView } from './IssueBoardView';
 import { relativeTime } from '../../utils/taskDisplay';
+
+export type IssueViewMode = 'list' | 'board';
 
 interface IssueListViewProps {
   issues: UiIssue[];
   loading: boolean;
   error: string | null;
+  viewMode: IssueViewMode;
+  onViewModeChange: (mode: IssueViewMode) => void;
   onNewIssue: () => void;
   onRefresh: () => void;
 }
@@ -64,7 +69,7 @@ const IssueRow: React.FC<{ issue: UiIssue; teamId: string }> = ({ issue, teamId 
   );
 };
 
-export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, onNewIssue, onRefresh }) => {
+export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<Set<IssueStatus>>(new Set());
@@ -119,6 +124,24 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             className="w-full pl-7 pr-2 py-1 text-xs bg-zinc-900 border border-zinc-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-zinc-200 placeholder-zinc-600"
           />
         </div>
+        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5">
+          <button
+            type="button"
+            onClick={() => onViewModeChange('list')}
+            className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+            title="List view"
+          >
+            <LayoutList size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewModeChange('board')}
+            className={`p-1.5 rounded transition ${viewMode === 'board' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+            title="Board view"
+          >
+            <LayoutGrid size={13} />
+          </button>
+        </div>
         <button
           type="button"
           onClick={onRefresh}
@@ -164,6 +187,8 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           <div className="flex items-center justify-center py-24 text-sm text-zinc-500">
             Loading issues…
           </div>
+        ) : viewMode === 'board' ? (
+          <IssueBoardView issues={filtered} />
         ) : grouped.length === 0 ? (
           <div className="flex items-center justify-center py-24 text-sm text-zinc-500 italic">
             No issues match the current filters.

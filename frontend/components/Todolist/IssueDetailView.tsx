@@ -53,28 +53,43 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // Realtime: append new issue_messages rows on INSERT for this issue.
+  // Realtime: handle both INSERT (new comment / new agent_run dispatch)
+  // and UPDATE (agent_run lifecycle progresses — placeholder body
+  // becomes the real summary; liveness pill flips colour). REPLICA
+  // IDENTITY FULL on issue_messages (set in mig 205) means the UPDATE
+  // payload includes the full row, not just changed columns.
   useEffect(() => {
     const supa = getSupabaseClient();
     if (!supa) return;
+    const handle = (event: 'INSERT' | 'UPDATE') => (payload: { new?: unknown; old?: unknown }) => {
+      const row = (payload.new ?? payload.old) as IssueMessage | undefined;
+      if (!row) return;
+      setMessages((prev) => {
+        if (event === 'UPDATE') {
+          let touched = false;
+          const next = prev.map((m) => {
+            if (m.id !== row.id) return m;
+            touched = true;
+            return row;
+          });
+          return touched ? next : prev;
+        }
+        // INSERT: dedupe by id (POST response may have already added the row).
+        if (prev.some((m) => m.id === row.id)) return prev;
+        return [...prev, row];
+      });
+    };
     const channel = supa
       .channel(`issue-messages-${issue.id}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'issue_messages',
-          filter: `issue_id=eq.${issue.id}`,
-        },
-        (payload) => {
-          const row = payload.new as IssueMessage | undefined;
-          if (!row) return;
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === row.id)) return prev;
-            return [...prev, row];
-          });
-        },
+        { event: 'INSERT', schema: 'public', table: 'issue_messages', filter: `issue_id=eq.${issue.id}` },
+        handle('INSERT'),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'issue_messages', filter: `issue_id=eq.${issue.id}` },
+        handle('UPDATE'),
       )
       .subscribe();
     return () => { void supa.removeChannel(channel); };
