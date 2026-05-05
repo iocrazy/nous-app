@@ -50,8 +50,26 @@ class WhisperService:
             FileNotFoundError: If audio_path doesn't exist.
             NotImplementedError: If the provider doesn't support transcription.
         """
+        # Fallback: download_helpers.extract_audio_from_video produces
+        # `audio.m4a`, but image-post Douyin items (note / image_text)
+        # have no extractable video — the audio comes pre-encoded as
+        # `audio.mp3` from the platform downloader. Whisper providers
+        # accept both formats, so probe the same directory for any
+        # `audio.*` file before giving up.
         if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+            import glob
+
+            parent = os.path.dirname(audio_path) or "."
+            stem = os.path.basename(audio_path).rsplit(".", 1)[0]
+            candidates = sorted(glob.glob(os.path.join(parent, f"{stem}.*")))
+            if candidates:
+                logger.info(
+                    f"Audio file at {audio_path} missing, falling back to "
+                    f"{candidates[0]}"
+                )
+                audio_path = candidates[0]
+            else:
+                raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
         provider = AIProviderFactory.get_provider(
             self._provider_key, self._provider_config
