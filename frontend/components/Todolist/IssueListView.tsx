@@ -10,7 +10,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Search, LayoutList, LayoutGrid, Columns, Filter } from 'lucide-react';
+import { Plus, Search, LayoutList, LayoutGrid, Columns, Filter, ArrowUpDown } from 'lucide-react';
 import type { UiIssue, AgentRef, ProjectRef } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
@@ -27,6 +27,13 @@ import {
   type IssueFilters,
   type QuickFilter,
 } from './IssueFilterPopover';
+import {
+  IssueSortMenu,
+  DEFAULT_SORT,
+  compareIssues,
+  SORT_LABEL_BY_KEY,
+  type IssueSort,
+} from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
 
 export type IssueViewMode = 'list' | 'board';
@@ -167,6 +174,8 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sort, setSort] = useState<IssueSort>(DEFAULT_SORT);
 
   const colScopeKey = teamId ?? 'global';
   const [visibleCols, setVisibleCols] = useState<Set<IssueColumnKey>>(() => loadVisibleColumns(colScopeKey));
@@ -212,14 +221,30 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
     });
   }, [filteredByPanel, search]);
 
+  // For sort keys that are NOT status-related, keep the status grouping
+  // but sort within each group. For 'workflow'/'status' keys, the
+  // grouping order itself encodes the sort, so we just need direction.
   const grouped = useMemo(() => {
     const map = new Map<IssueStatus, UiIssue[]>();
     for (const i of filtered) {
       if (!map.has(i.status)) map.set(i.status, []);
       map.get(i.status)!.push(i);
     }
-    return STATUS_ORDER.filter((s) => map.has(s)).map((s) => ({ status: s, items: map.get(s)! }));
-  }, [filtered]);
+    let orderedStatuses = STATUS_ORDER.filter((s) => map.has(s));
+    if (sort.key === 'workflow' || sort.key === 'status') {
+      if (sort.dir === 'desc') orderedStatuses = orderedStatuses.slice().reverse();
+    }
+    return orderedStatuses.map((s) => {
+      const items = map.get(s)!.slice().sort((a, b) => compareIssues(a, b, sort));
+      return { status: s, items };
+    });
+  }, [filtered, sort]);
+
+  // Flat-sorted list for the Board view (no grouping there).
+  const flatSorted = useMemo(
+    () => filtered.slice().sort((a, b) => compareIssues(a, b, sort)),
+    [filtered, sort],
+  );
 
   const parentLookup = useMemo(() => {
     const m = new Map<number, UiIssue>();
@@ -270,7 +295,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
         <div className="relative">
           <button
             type="button"
-            onClick={() => { setFilterOpen((v) => !v); setColumnPickerOpen(false); }}
+            onClick={() => { setFilterOpen((v) => !v); setColumnPickerOpen(false); setSortOpen(false); }}
             className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
               filterOpen || filterCount > 0
                 ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-200'
@@ -294,7 +319,28 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
         <div className="relative">
           <button
             type="button"
-            onClick={() => { setColumnPickerOpen((v) => !v); setFilterOpen(false); }}
+            onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setColumnPickerOpen(false); }}
+            className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
+              sortOpen
+                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+            }`}
+            title={`Sort: ${SORT_LABEL_BY_KEY[sort.key]} ${sort.dir === 'asc' ? '↑' : '↓'}`}
+          >
+            <ArrowUpDown size={13} />
+          </button>
+          {sortOpen && (
+            <IssueSortMenu
+              sort={sort}
+              onChange={(s) => setSort(s)}
+              onClose={() => setSortOpen(false)}
+            />
+          )}
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => { setColumnPickerOpen((v) => !v); setFilterOpen(false); setSortOpen(false); }}
             className={`p-1.5 rounded border transition ${
               columnPickerOpen
                 ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
@@ -377,7 +423,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             Loading issues…
           </div>
         ) : viewMode === 'board' ? (
-          <IssueBoardView issues={filtered} />
+          <IssueBoardView issues={flatSorted} />
         ) : grouped.length === 0 ? (
           <div className="flex items-center justify-center py-24 text-sm text-zinc-500 italic">
             No issues match the current filters.
