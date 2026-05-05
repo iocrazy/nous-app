@@ -1,14 +1,24 @@
 /**
  * Paperclip-style flat issue list (A8.3 wired to real backend via UiIssue).
+ *
+ * A9.1: column visibility — toggle which fields render per row, persisted
+ * in localStorage. The Title column is always shown (the issue label
+ * itself); other columns toggle via IssueColumnPicker.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Search, ListFilter, LayoutList, LayoutGrid } from 'lucide-react';
+import { Plus, Search, ListFilter, LayoutList, LayoutGrid, Columns } from 'lucide-react';
 import type { UiIssue } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
 import { IssueBoardView } from './IssueBoardView';
+import {
+  IssueColumnPicker,
+  loadVisibleColumns,
+  saveVisibleColumns,
+  type IssueColumnKey,
+} from './IssueColumnPicker';
 import { relativeTime } from '../../utils/taskDisplay';
 
 export type IssueViewMode = 'list' | 'board';
@@ -32,22 +42,48 @@ const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }>
   </span>
 );
 
-const IssueRow: React.FC<{ issue: UiIssue; teamId: string }> = ({ issue, teamId }) => {
+interface IssueRowProps {
+  issue: UiIssue;
+  teamId: string;
+  visibleCols: Set<IssueColumnKey>;
+  parentLookup: Map<number, UiIssue>;
+}
+
+const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup }) => {
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
+  const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
       className="flex items-center gap-3 px-4 py-2 border-b border-zinc-900/60 hover:bg-zinc-800/30 transition text-xs group"
     >
-      <IssueStatusIcon status={issue.status} size={14} />
+      {visibleCols.has('status') && <IssueStatusIcon status={issue.status} size={14} />}
       <span className="w-4 flex justify-center" title={issue.priority}>
         <PriorityIcon priority={issue.priority} />
       </span>
-      <span className="font-mono text-[10px] text-zinc-500 w-14 shrink-0 uppercase tracking-wider">
-        {issue.identifier}
-      </span>
+      {visibleCols.has('id') && (
+        <span className="font-mono text-[10px] text-zinc-500 w-14 shrink-0 uppercase tracking-wider">
+          {issue.identifier}
+        </span>
+      )}
       <span className="flex-1 truncate text-zinc-200 group-hover:text-white">{issue.title}</span>
-      {issue.project && (
+      {visibleCols.has('parent') && parent && (
+        <Link
+          to={`/team/${teamId}/todolist/${parent.identifier}`}
+          onClick={(e) => e.stopPropagation()}
+          className="hidden lg:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800/70 text-zinc-400 text-[10px] hover:bg-zinc-700"
+          title={`Parent: ${parent.title}`}
+        >
+          ↳ {parent.identifier}
+        </Link>
+      )}
+      {visibleCols.has('tags') && (
+        <span className="hidden lg:inline-flex items-center gap-1 text-[10px] text-zinc-600 italic">
+          {/* tags schema not in place yet */}
+          —
+        </span>
+      )}
+      {visibleCols.has('project') && issue.project && (
         <span
           className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[10px]"
           title={`Project: ${issue.project.name}`}
@@ -56,15 +92,17 @@ const IssueRow: React.FC<{ issue: UiIssue; teamId: string }> = ({ issue, teamId 
           {issue.project.name}
         </span>
       )}
-      {(issue.assignee || issue.assignee_user_label) && (
+      {visibleCols.has('assignee') && (issue.assignee || issue.assignee_user_label) && (
         <AgentAvatar
           initials={initials}
           color={issue.assignee?.avatar_color ?? 'bg-zinc-600'}
         />
       )}
-      <span className="text-[10px] text-zinc-500 w-14 text-right shrink-0">
-        {relativeTime(issue.last_activity_at)}
-      </span>
+      {visibleCols.has('updated') && (
+        <span className="text-[10px] text-zinc-500 w-14 text-right shrink-0">
+          {relativeTime(issue.last_activity_at)}
+        </span>
+      )}
     </Link>
   );
 };
@@ -73,6 +111,19 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const { teamId } = useParams<{ teamId: string }>();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<Set<IssueStatus>>(new Set());
+  const [columnPickerOpen, setColumnPickerOpen] = useState(false);
+
+  const colScopeKey = teamId ?? 'global';
+  const [visibleCols, setVisibleCols] = useState<Set<IssueColumnKey>>(() => loadVisibleColumns(colScopeKey));
+
+  // Persist column choice whenever it changes (also re-load if team switches).
+  useEffect(() => {
+    saveVisibleColumns(colScopeKey, visibleCols);
+  }, [colScopeKey, visibleCols]);
+
+  useEffect(() => {
+    setVisibleCols(loadVisibleColumns(colScopeKey));
+  }, [colScopeKey]);
 
   const toggleStatus = (s: IssueStatus) => {
     setStatusFilter((prev) => {
@@ -103,6 +154,14 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
     }
     return STATUS_ORDER.filter((s) => map.has(s)).map((s) => ({ status: s, items: map.get(s)! }));
   }, [filtered]);
+
+  // O(1) parent identifier lookup so the parent column doesn't need
+  // per-row fetches. Source is the same UiIssue list passed in.
+  const parentLookup = useMemo(() => {
+    const m = new Map<number, UiIssue>();
+    for (const i of issues) m.set(i.id, i);
+    return m;
+  }, [issues]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950 border-t border-zinc-800/80">
@@ -141,6 +200,27 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           >
             <LayoutGrid size={13} />
           </button>
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setColumnPickerOpen((v) => !v)}
+            className={`p-1.5 rounded border transition ${
+              columnPickerOpen
+                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+            }`}
+            title="Column visibility"
+          >
+            <Columns size={13} />
+          </button>
+          {columnPickerOpen && (
+            <IssueColumnPicker
+              visible={visibleCols}
+              onChange={setVisibleCols}
+              onClose={() => setColumnPickerOpen(false)}
+            />
+          )}
         </div>
         <button
           type="button"
@@ -204,7 +284,13 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                 <span className="text-[10px] text-zinc-500 ml-auto">{g.items.length}</span>
               </div>
               {g.items.map((issue) => (
-                <IssueRow key={issue.id} issue={issue} teamId={teamId ?? ''} />
+                <IssueRow
+                  key={issue.id}
+                  issue={issue}
+                  teamId={teamId ?? ''}
+                  visibleCols={visibleCols}
+                  parentLookup={parentLookup}
+                />
               ))}
             </div>
           ))
