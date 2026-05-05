@@ -122,11 +122,28 @@ def run_whisper(
     provider_config: dict[str, Any],
     language: str,
 ) -> dict[str, Any]:
-    """Invoke WhisperService.transcribe_and_save synchronously inside the DBOS
-    step. The service is async; we drive it with asyncio.run because each
-    DBOS step body runs in its own thread (DBOS launches step bodies on a
-    worker thread pool — no enclosing event loop).
+    """Invoke transcription synchronously inside the DBOS step.
+
+    Volcengine has its own ASR API (bigasr / seedasr — not OpenAI-compatible),
+    so it special-cases through VolcengineASRService. All other providers
+    (OpenAI, etc) go through WhisperService → AIProviderFactory.
+
+    Reason for the split: AIProviderFactory routes 'volcengine' to
+    DoubaoProvider (火山引擎 chat = Doubao), but Doubao's chat-completion
+    API doesn't expose audio transcription. master had this same split
+    in app.tasks.ai_tasks (Celery); when D-route ported the work to a
+    DBOS workflow the volcengine branch was dropped, so every transcribe
+    click since failed with "DoubaoProvider does not support transcription"
+    until DBOSMaxStepRetriesExceeded.
     """
+    if provider_key == "volcengine":
+        return _run_volcengine_asr(
+            audio_path=audio_path,
+            resource_id=resource_id,
+            provider_config=provider_config,
+            language=language,
+        )
+
     from app.services.whisper_service import WhisperService
 
     svc = WhisperService(provider_key=provider_key, provider_config=provider_config)
@@ -140,6 +157,106 @@ def run_whisper(
     if result is None:
         raise RuntimeError("transcribe_and_save returned None")
 
+    return {
+        "language": result.language,
+        "duration_seconds": result.duration,
+        "text_len": len(result.text or ""),
+        "segments_count": len(result.segments or []),
+    }
+
+
+def _run_volcengine_asr(
+    audio_path: str,
+    resource_id: str,
+    provider_config: dict[str, Any],
+    language: str,
+) -> dict[str, Any]:
+    """Volcengine ASR path — needs a public audio URL since the API pulls
+    the file rather than receiving an upload. Reuses the HMAC-signed media
+    token (app.api.media_auth) so the URL is short-lived (1h) and tied to
+    the calling user.
+
+    Ported verbatim from master's app.tasks.ai_tasks.transcribe_audio_task
+    (the volcengine branch). The DBOS port had previously dropped this.
+    """
+    import hashlib
+    import hmac as hmac_mod
+    import time as time_mod
+
+    from app.api.media_auth import _get_secret
+    from app.core.config import settings
+    from app.services.volcengine_asr_service import (
+        RESOURCE_V1,
+        RESOURCE_V2,
+        VolcengineASRService,
+    )
+
+    # Resolve audio_path to disk so we can derive the public URL path.
+    # whisper_service has the same resolution chain; mirror it here so
+    # both providers behave identically wrt path.
+    if not os.path.exists(audio_path):
+        joined = os.path.join(settings.DOWNLOAD_PATH, audio_path)
+        if os.path.exists(joined):
+            audio_path = joined
+
+    # Pull the bound user id from the provider_config caller (load_transcribe_inputs
+    # passes provider_config without user_id; we need to recover it from the
+    # signed-token chain). The simplest path: read the resource's creator_id.
+    # Avoids threading user_id through every step signature.
+    with psycopg.connect(_dsn(), row_factory=psycopg.rows.dict_row) as conn:
+        conn.execute("SET ROLE service_role")
+        cur = conn.execute(
+            "SELECT creator_id FROM public.resources WHERE id = %s",
+            (resource_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise RuntimeError(f"resource {resource_id} not found for volcengine asr")
+    user_id = str(row["creator_id"])
+
+    # Build signed media URL (HMAC, 1h TTL — same scheme as <video src>).
+    expires_at = int(time_mod.time()) + 3600
+    payload = f"{user_id}.{expires_at}"
+    sig = hmac_mod.new(
+        _get_secret().encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()[:32]
+    media_token = f"{payload}.{sig}"
+
+    media_public_url = getattr(
+        settings, "MEDIA_PUBLIC_URL", "https://mediahubserver.heygo.cn:88"
+    )
+    # The /media route serves files by file-path under DOWNLOAD_PATH;
+    # use the path relative to download root to build the URL.
+    rel_path = audio_path
+    download_root = settings.DOWNLOAD_PATH.rstrip("/")
+    if audio_path.startswith(download_root + "/"):
+        rel_path = audio_path[len(download_root) + 1 :]
+    audio_url = f"{media_public_url}/media/{rel_path}?token={media_token}"
+
+    ext = os.path.splitext(audio_path)[1].lstrip(".").lower()
+    audio_format = ext if ext in ("mp3", "wav", "ogg") else "wav"
+
+    asr_resource = (
+        RESOURCE_V1
+        if "bigasr" in (provider_config.get("model") or "")
+        or "1.0" in (provider_config.get("model") or "")
+        else RESOURCE_V2
+    )
+
+    service = VolcengineASRService(
+        app_id=provider_config.get("app_id", ""),
+        access_token=provider_config.get("api_key", ""),
+        asr_resource_id=asr_resource,
+    )
+    result = asyncio.run(
+        service.transcribe_and_save(
+            resource_id=resource_id,
+            audio_url=audio_url,
+            audio_format=audio_format,
+        )
+    )
+    if result is None:
+        raise RuntimeError("Volcengine ASR returned None")
     return {
         "language": result.language,
         "duration_seconds": result.duration,
