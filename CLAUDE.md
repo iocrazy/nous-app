@@ -565,3 +565,30 @@ git pull && docker-compose up -d --build backend
 🔹 选项1: [选项内容]
 🔹 选项2: [选项内容]
 ```
+
+## GBrain Configuration (configured by /setup-gbrain)
+- Engine: pglite
+- Config file: ~/.gbrain/config.json (mode 0600)
+- Setup date: 2026-05-05
+- MCP registered: yes (Claude Code, user scope)
+- Memory sync: off
+- Current repo policy: read-write
+- Imported pages: 149 (mediahub markdown / docs)
+
+## GBrain Search Guidance (configured by /setup-gbrain)
+<!-- gstack-gbrain-search-guidance:start -->
+
+GBrain is configured locally (PGLite). Prefer it over Grep when the question is
+semantic or you don't yet know the exact identifier. Two indexed corpora:
+- This repo's docs/markdown (149 pages, source registered as gstack-code-mediahub).
+- ~/.gstack/ curated memory (when artifacts accumulate).
+
+Prefer gbrain when:
+- "Where is X handled?" / semantic intent: `gbrain search "<terms>"` or `gbrain query "<question>"`
+- Symbol-aware code questions: `gbrain code-def <symbol>` / `gbrain code-refs <symbol>` / `gbrain code-callers` / `gbrain code-callees`
+- "What did we decide last time?": `gbrain search "<terms>" --source gstack-brain-<user>`
+
+Grep is still right for known exact strings, regex, multiline patterns, and file globs.
+Run `/sync-gbrain` to refresh; `/sync-gbrain --full` for a full reindex.
+
+<!-- gstack-gbrain-search-guidance:end -->

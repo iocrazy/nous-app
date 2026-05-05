@@ -1,21 +1,21 @@
 /**
- * Paperclip-style flat issue list (A8 UI scaffold).
- *
- * Single column list under the existing mediahub layout. Each row
- * shows: status icon · priority · ID · title · project pill · assignee
- * avatar · last-activity timestamp. Click navigates to detail.
+ * Paperclip-style flat issue list (A8.3 wired to real backend via UiIssue).
  */
 
 import React, { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Plus, Search, ListFilter } from 'lucide-react';
-import type { Issue, IssueStatus } from './types';
+import type { UiIssue } from './types';
+import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
 import { relativeTime } from '../../utils/taskDisplay';
 
 interface IssueListViewProps {
-  issues: Issue[];
+  issues: UiIssue[];
+  loading: boolean;
+  error: string | null;
   onNewIssue: () => void;
+  onRefresh: () => void;
 }
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-zinc-600', size = 20 }) => (
@@ -27,8 +27,8 @@ const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }>
   </span>
 );
 
-const IssueRow: React.FC<{ issue: Issue; teamId: string }> = ({ issue, teamId }) => {
-  const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? '·';
+const IssueRow: React.FC<{ issue: UiIssue; teamId: string }> = ({ issue, teamId }) => {
+  const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
@@ -51,8 +51,11 @@ const IssueRow: React.FC<{ issue: Issue; teamId: string }> = ({ issue, teamId })
           {issue.project.name}
         </span>
       )}
-      {issue.assignee && (
-        <AgentAvatar initials={initials} color={issue.assignee.avatar_color} />
+      {(issue.assignee || issue.assignee_user_label) && (
+        <AgentAvatar
+          initials={initials}
+          color={issue.assignee?.avatar_color ?? 'bg-zinc-600'}
+        />
       )}
       <span className="text-[10px] text-zinc-500 w-14 text-right shrink-0">
         {relativeTime(issue.last_activity_at)}
@@ -61,7 +64,7 @@ const IssueRow: React.FC<{ issue: Issue; teamId: string }> = ({ issue, teamId })
   );
 };
 
-export const IssueListView: React.FC<IssueListViewProps> = ({ issues, onNewIssue }) => {
+export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, onNewIssue, onRefresh }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<Set<IssueStatus>>(new Set());
@@ -80,7 +83,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, onNewIssue
     return issues.filter((i) => {
       if (statusFilter.size > 0 && !statusFilter.has(i.status)) return false;
       if (q) {
-        const hay = `${i.identifier} ${i.title} ${i.description ?? ''} ${i.assignee?.name ?? ''}`.toLowerCase();
+        const hay = `${i.identifier} ${i.title} ${i.description ?? ''} ${i.assignee?.name ?? i.assignee_user_label ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -88,7 +91,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, onNewIssue
   }, [issues, search, statusFilter]);
 
   const grouped = useMemo(() => {
-    const map = new Map<IssueStatus, Issue[]>();
+    const map = new Map<IssueStatus, UiIssue[]>();
     for (const i of filtered) {
       if (!map.has(i.status)) map.set(i.status, []);
       map.get(i.status)!.push(i);
@@ -116,6 +119,15 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, onNewIssue
             className="w-full pl-7 pr-2 py-1 text-xs bg-zinc-900 border border-zinc-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-zinc-200 placeholder-zinc-600"
           />
         </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          className="text-[11px] px-2 py-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+          title="Refresh"
+        >
+          {loading ? '…' : '↻'}
+        </button>
         <span className="text-[11px] text-zinc-500 ml-auto">
           {filtered.length} issue{filtered.length === 1 ? '' : 's'}
         </span>
@@ -143,7 +155,16 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, onNewIssue
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {grouped.length === 0 ? (
+        {error && (
+          <div className="px-4 py-3 mx-4 my-3 rounded bg-rose-500/10 text-rose-300 text-xs ring-1 ring-rose-500/30">
+            {error}
+          </div>
+        )}
+        {loading && issues.length === 0 ? (
+          <div className="flex items-center justify-center py-24 text-sm text-zinc-500">
+            Loading issues…
+          </div>
+        ) : grouped.length === 0 ? (
           <div className="flex items-center justify-center py-24 text-sm text-zinc-500 italic">
             No issues match the current filters.
           </div>

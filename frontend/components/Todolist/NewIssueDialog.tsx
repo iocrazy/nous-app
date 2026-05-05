@@ -1,31 +1,44 @@
 /**
- * Paperclip-style "New Issue" dialog (A8 UI scaffold).
- * UI-only; submit is mocked until the backend layer arrives.
+ * Paperclip-style "New Issue" dialog (A8.3 wired to real createIssue).
  */
 
 import React, { useState } from 'react';
 import { X, Send } from 'lucide-react';
-import type { IssuePriority } from './types';
-import { MOCK_AGENTS, MOCK_PROJECTS } from './fixtures';
-import { PRIORITY_LABEL, PriorityIcon } from './IssueStatusIcon';
+import type { AgentRef } from './types';
+import type { IssuePriority, IssueCreatePayload } from '../../services/issuesService';
+import { PRIORITY_LABEL, PRIORITY_ORDER, PriorityIcon } from './IssueStatusIcon';
 
 interface NewIssueDialogProps {
+  agents: AgentRef[];
+  teamId: number | null;
   onClose: () => void;
-  onSubmit: (form: { title: string; description: string; agentId: string | null; projectId: string | null; priority: IssuePriority }) => void;
+  onSubmit: (payload: IssueCreatePayload) => Promise<void>;
 }
 
-const PRIORITIES: IssuePriority[] = ['no_priority', 'urgent', 'high', 'medium', 'low'];
-
-export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ onClose, onSubmit }) => {
+export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ agents, teamId, onClose, onSubmit }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [agentId, setAgentId] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [priority, setPriority] = useState<IssuePriority>('no_priority');
+  const [priority, setPriority] = useState<IssuePriority>('medium');
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = () => {
-    if (!title.trim()) return;
-    onSubmit({ title: title.trim(), description, agentId, projectId, priority });
+  const submit = async () => {
+    const t = title.trim();
+    if (!t || submitting) return;
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        title: t,
+        description: description || undefined,
+        priority,
+        team_id: teamId ?? undefined,
+        assignee_agent_id: agentId ?? undefined,
+      });
+    } catch {
+      // parent toasts; stay open
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -58,22 +71,12 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ onClose, onSubmi
           />
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-800/80">
             <select
-              value={projectId ?? ''}
-              onChange={(e) => setProjectId(e.target.value || null)}
-              className="text-[11px] bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-zinc-300"
-            >
-              <option value="">No project</option>
-              {Object.values(MOCK_PROJECTS).map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <select
               value={agentId ?? ''}
               onChange={(e) => setAgentId(e.target.value || null)}
               className="text-[11px] bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-zinc-300"
             >
               <option value="">Unassigned</option>
-              {Object.values(MOCK_AGENTS).map((a) => (
+              {agents.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
@@ -82,7 +85,7 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ onClose, onSubmi
               onChange={(e) => setPriority(e.target.value as IssuePriority)}
               className="text-[11px] bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-zinc-300"
             >
-              {PRIORITIES.map((p) => (
+              {PRIORITY_ORDER.map((p) => (
                 <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
               ))}
             </select>
@@ -95,10 +98,10 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ onClose, onSubmi
           </button>
           <button
             onClick={submit}
-            disabled={!title.trim()}
+            disabled={!title.trim() || submitting}
             className="inline-flex items-center gap-1 px-3 py-1 text-xs rounded bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Send size={11} /> Create
+            <Send size={11} /> {submitting ? 'Creating…' : 'Create'}
           </button>
         </footer>
       </div>
