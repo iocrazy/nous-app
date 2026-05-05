@@ -10,7 +10,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Search, LayoutList, LayoutGrid, Columns, Filter, ArrowUpDown } from 'lucide-react';
+import { Plus, Search, LayoutList, LayoutGrid, Columns, Filter, ArrowUpDown, RotateCw } from 'lucide-react';
 import type { UiIssue, AgentRef, ProjectRef } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
@@ -72,37 +72,37 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
-      className="flex items-center gap-3 px-4 py-2 border-b border-zinc-900/60 hover:bg-zinc-800/30 transition text-xs group"
+      className="flex items-center gap-3 px-4 py-1.5 hover:bg-zinc-800/30 transition group"
     >
       {visibleCols.has('status') && <IssueStatusIcon status={issue.status} size={14} />}
       <span className="w-4 flex justify-center" title={issue.priority}>
         <PriorityIcon priority={issue.priority} />
       </span>
       {visibleCols.has('id') && (
-        <span className="font-mono text-[10px] text-zinc-500 w-14 shrink-0 uppercase tracking-wider">
+        <span className="font-mono text-[11px] text-zinc-500 w-14 shrink-0 uppercase tracking-wider">
           {issue.identifier}
         </span>
       )}
-      <span className="flex-1 truncate text-zinc-200 group-hover:text-white">{issue.title}</span>
+      <span className="flex-1 truncate text-[13px] text-zinc-200 group-hover:text-white">{issue.title}</span>
       {visibleCols.has('parent') && parent && (
         <Link
           to={`/team/${teamId}/todolist/${parent.identifier}`}
           onClick={(e) => e.stopPropagation()}
-          className="hidden lg:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800/70 text-zinc-400 text-[10px] hover:bg-zinc-700"
+          className="hidden lg:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800/70 text-zinc-400 text-[11px] hover:bg-zinc-700"
           title={`Parent: ${parent.title}`}
         >
           ↳ {parent.identifier}
         </Link>
       )}
       {visibleCols.has('tags') && (
-        <span className="hidden lg:inline-flex items-center gap-1 text-[10px] text-zinc-600 italic">
+        <span className="hidden lg:inline-flex items-center gap-1 text-[11px] text-zinc-600 italic">
           {/* tags schema not in place yet */}
           —
         </span>
       )}
       {visibleCols.has('project') && issue.project && (
         <span
-          className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[10px]"
+          className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[11px]"
           title={`Project: ${issue.project.name}`}
         >
           <span className={`w-1.5 h-1.5 rounded-full ${issue.project.color ?? 'bg-zinc-500'}`} />
@@ -116,7 +116,7 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
         />
       )}
       {visibleCols.has('updated') && (
-        <span className="text-[10px] text-zinc-500 w-14 text-right shrink-0">
+        <span className="text-[11px] text-zinc-500 w-14 text-right shrink-0">
           {relativeTime(issue.last_activity_at)}
         </span>
       )}
@@ -255,8 +255,8 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const filterCount = activeFilterCount(filters);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950 border-t border-zinc-800/80">
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-950/40 sticky top-0 z-10">
+    <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950">
+      <div className="flex items-center gap-2 px-4 py-3 sticky top-0 z-10 bg-zinc-950">
         <button
           type="button"
           onClick={onNewIssue}
@@ -271,108 +271,110 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search issues…"
-            className="w-full pl-7 pr-2 py-1 text-xs bg-zinc-900 border border-zinc-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-zinc-200 placeholder-zinc-600"
+            className="w-full pl-7 pr-2 py-1.5 text-xs bg-zinc-900/80 border border-zinc-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-zinc-200 placeholder-zinc-600"
           />
         </div>
-        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5">
+        <div className="ml-auto flex items-center gap-1">
+          <div className="flex items-center bg-zinc-900/80 border border-zinc-800 rounded">
+            <button
+              type="button"
+              onClick={() => onViewModeChange('list')}
+              className={`p-1.5 rounded-l transition ${viewMode === 'list' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+              title="List view"
+            >
+              <LayoutList size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewModeChange('board')}
+              className={`p-1.5 rounded-r transition ${viewMode === 'board' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+              title="Board view"
+            >
+              <LayoutGrid size={13} />
+            </button>
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => { setFilterOpen((v) => !v); setColumnPickerOpen(false); setSortOpen(false); }}
+              className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
+                filterOpen || filterCount > 0
+                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-200'
+                  : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+              }`}
+              title="Filters"
+            >
+              <Filter size={13} />
+              {filterCount > 0 && <span className="text-[10px] font-medium">{filterCount}</span>}
+            </button>
+            {filterOpen && (
+              <IssueFilterPopover
+                filters={filters}
+                onChange={setFilters}
+                onClose={() => setFilterOpen(false)}
+                agents={agents}
+                projects={projectsList}
+              />
+            )}
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setColumnPickerOpen(false); }}
+              className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
+                sortOpen
+                  ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
+                  : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+              }`}
+              title={`Sort: ${SORT_LABEL_BY_KEY[sort.key]} ${sort.dir === 'asc' ? '↑' : '↓'}`}
+            >
+              <ArrowUpDown size={13} />
+            </button>
+            {sortOpen && (
+              <IssueSortMenu
+                sort={sort}
+                onChange={(s) => setSort(s)}
+                onClose={() => setSortOpen(false)}
+              />
+            )}
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => { setColumnPickerOpen((v) => !v); setFilterOpen(false); setSortOpen(false); }}
+              className={`p-1.5 rounded border transition ${
+                columnPickerOpen
+                  ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
+                  : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+              }`}
+              title="Column visibility"
+            >
+              <Columns size={13} />
+            </button>
+            {columnPickerOpen && (
+              <IssueColumnPicker
+                visible={visibleCols}
+                onChange={setVisibleCols}
+                onClose={() => setColumnPickerOpen(false)}
+              />
+            )}
+          </div>
           <button
             type="button"
-            onClick={() => onViewModeChange('list')}
-            className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-            title="List view"
+            onClick={onRefresh}
+            disabled={loading}
+            className="p-1.5 rounded border border-zinc-800 bg-zinc-900/80 text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
+            title="Refresh"
           >
-            <LayoutList size={13} />
+            <RotateCw size={13} className={loading ? 'animate-spin' : ''} />
           </button>
-          <button
-            type="button"
-            onClick={() => onViewModeChange('board')}
-            className={`p-1.5 rounded transition ${viewMode === 'board' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-            title="Board view"
-          >
-            <LayoutGrid size={13} />
-          </button>
+          <span className="text-[11px] text-zinc-500 pl-2 pr-1">
+            {filtered.length} issue{filtered.length === 1 ? '' : 's'}
+          </span>
         </div>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => { setFilterOpen((v) => !v); setColumnPickerOpen(false); setSortOpen(false); }}
-            className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
-              filterOpen || filterCount > 0
-                ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-200'
-                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-            }`}
-            title="Filters"
-          >
-            <Filter size={13} />
-            {filterCount > 0 && <span className="text-[10px] font-medium">{filterCount}</span>}
-          </button>
-          {filterOpen && (
-            <IssueFilterPopover
-              filters={filters}
-              onChange={setFilters}
-              onClose={() => setFilterOpen(false)}
-              agents={agents}
-              projects={projectsList}
-            />
-          )}
-        </div>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setColumnPickerOpen(false); }}
-            className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
-              sortOpen
-                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
-                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-            }`}
-            title={`Sort: ${SORT_LABEL_BY_KEY[sort.key]} ${sort.dir === 'asc' ? '↑' : '↓'}`}
-          >
-            <ArrowUpDown size={13} />
-          </button>
-          {sortOpen && (
-            <IssueSortMenu
-              sort={sort}
-              onChange={(s) => setSort(s)}
-              onClose={() => setSortOpen(false)}
-            />
-          )}
-        </div>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => { setColumnPickerOpen((v) => !v); setFilterOpen(false); setSortOpen(false); }}
-            className={`p-1.5 rounded border transition ${
-              columnPickerOpen
-                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
-                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-            }`}
-            title="Column visibility"
-          >
-            <Columns size={13} />
-          </button>
-          {columnPickerOpen && (
-            <IssueColumnPicker
-              visible={visibleCols}
-              onChange={setVisibleCols}
-              onClose={() => setColumnPickerOpen(false)}
-            />
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          className="text-[11px] px-2 py-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-          title="Refresh"
-        >
-          {loading ? '…' : '↻'}
-        </button>
-        <span className="text-[11px] text-zinc-500 ml-auto">
-          {filtered.length} issue{filtered.length === 1 ? '' : 's'}
-        </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 text-[11px] border-b border-zinc-800/60">
+      <div className="flex flex-wrap items-center gap-1.5 px-4 py-1.5 text-[11px]">
         <span className="text-zinc-600 mr-1">Quick:</span>
         {(['all', 'active', 'backlog', 'done'] as QuickFilter[]).map((q) => {
           const matches = (() => {
@@ -430,10 +432,10 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           </div>
         ) : (
           grouped.map((g) => (
-            <div key={g.status} className="border-b border-zinc-800/80 last:border-b-0">
-              <div className="flex items-center gap-2 px-4 py-1.5 bg-zinc-900/40 sticky top-0">
+            <div key={g.status}>
+              <div className="flex items-center gap-2 px-4 pt-3 pb-1">
                 <IssueStatusIcon status={g.status} size={11} />
-                <span className="text-[11px] font-medium text-zinc-300 uppercase tracking-wider">
+                <span className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">
                   {STATUS_LABEL[g.status]}
                 </span>
                 <span className="text-[10px] text-zinc-500 ml-auto">{g.items.length}</span>
