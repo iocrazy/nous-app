@@ -29,7 +29,7 @@ const LivenessPill: React.FC<{ state: AgentLivenessState }> = ({ state }) => {
   const v = LIVENESS_VISUAL[state] ?? LIVENESS_VISUAL.running;
   return (
     <span
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-900/60 ring-1 ring-zinc-800 text-[10px] text-zinc-300"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-900/60 ring-1 ring-zinc-800 text-[12px] text-zinc-300"
       title={v.tooltip}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${v.dot}`} />
@@ -47,7 +47,7 @@ interface IssueChatThreadProps {
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-zinc-600', size = 22 }) => (
   <span
-    className={`inline-flex items-center justify-center rounded-full text-[10px] font-semibold text-white ${color}`}
+    className={`inline-flex items-center justify-center rounded-full text-[12px] font-semibold text-white ${color}`}
     style={{ width: size, height: size }}
   >
     {initials}
@@ -67,7 +67,7 @@ const SystemStatusEvent: React.FC<{ msg: IssueMessage; selfUserId?: string }> = 
   const isSelf = msg.author_user_id && msg.author_user_id === selfUserId;
   const author = isSelf ? 'You' : msg.author_user_id ? `User ${msg.author_user_id.slice(0, 6)}` : 'System';
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 my-1 text-[11px] text-zinc-500">
+    <div className="flex items-center gap-2 px-2 py-1.5 my-1 text-[12px] text-zinc-500">
       <span className="font-medium text-zinc-400">{author}</span>
       <span>updated this task · {relativeTime(msg.created_at)}</span>
       <span className="ml-auto inline-flex items-center gap-1.5">
@@ -124,38 +124,38 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
         <AgentAvatar initials={initials} color={agent?.avatar_color} />
         <span className="text-xs font-medium text-zinc-200">{agent?.name ?? 'Agent'}</span>
         {msg.duration_seconds != null && (
-          <span className="text-[11px] text-zinc-500">worked for {formatDuration(msg.duration_seconds)}</span>
+          <span className="text-[12px] text-zinc-500">worked for {formatDuration(msg.duration_seconds)}</span>
         )}
         {liveness && <LivenessPill state={liveness} />}
         {metaStatus && metaStatus !== 'completed' && (
-          <span className="text-[10px] text-zinc-500 italic">({metaStatus})</span>
+          <span className="text-[12px] text-zinc-500 italic">({metaStatus})</span>
         )}
         {isRunning && msg.agent_run_id && (
           <button
             onClick={onSimulate}
             disabled={simulating}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-50"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-50"
             title="Dev: simulate the agent finishing this run"
           >
             <Zap size={9} /> {simulating ? 'Sim…' : 'Simulate finish'}
           </button>
         )}
         {errorCode && (
-          <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30 text-[10px] font-mono" title="error_code">
+          <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30 text-[12px] font-mono" title="error_code">
             {errorCode}
           </span>
         )}
-        <span className="ml-auto inline-flex items-center gap-2 text-[11px] text-zinc-500">
+        <span className="ml-auto inline-flex items-center gap-2 text-[12px] text-zinc-500">
           {boardSignoff && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 text-[10px]">
-              Board <span className="font-mono text-[9px]">{boardSignoff}</span>
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 text-[12px]">
+              Board <span className="font-mono text-[12px]">{boardSignoff}</span>
             </span>
           )}
           {relativeTime(msg.created_at)}
         </span>
       </div>
       {msg.body && (
-        <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/50 p-3 text-[13px] text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+        <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/50 p-3 text-[14px] text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
           {msg.body}
         </div>
       )}
@@ -174,10 +174,10 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
       <div className="flex items-center gap-2 mb-1.5">
         <AgentAvatar initials={initials} color={color} />
         <span className="text-xs font-medium text-zinc-200">{displayName}</span>
-        <span className="text-[11px] text-zinc-500">commented · {relativeTime(msg.created_at)}</span>
+        <span className="text-[12px] text-zinc-500">commented · {relativeTime(msg.created_at)}</span>
       </div>
       {msg.body && (
-        <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/30 p-3 text-[13px] text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">
+        <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/30 p-3 text-[14px] text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">
           {msg.body}
         </div>
       )}

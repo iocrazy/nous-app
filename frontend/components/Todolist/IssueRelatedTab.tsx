@@ -48,34 +48,34 @@ export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
   }, [issue.id, issue.parent_id]);
 
   if (loading) {
-    return <div className="text-sm text-zinc-500 italic px-4 py-12 text-center">Loading related work…</div>;
+    return <div className="text-[14px] text-zinc-500 italic px-4 py-12 text-center">Loading related work…</div>;
   }
 
   return (
     <div className="px-4 py-4 space-y-5">
       {parent && (
         <section>
-          <h3 className="text-[11px] uppercase tracking-wider text-zinc-500 mb-2">Parent</h3>
+          <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">Parent</h3>
           <Link
             to={`/team/${teamId}/todolist/${parent.identifier}`}
             className="block px-3 py-2 rounded border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800/60 transition"
           >
-            <div className="flex items-center gap-2 text-xs">
-              <IssueStatusIcon status={parent.status} size={12} />
-              <span className="font-mono text-[10px] text-zinc-500 uppercase">{parent.identifier}</span>
+            <div className="flex items-center gap-2 text-[13px]">
+              <IssueStatusIcon status={parent.status} size={13} />
+              <span className="font-mono text-[12px] text-zinc-500 uppercase">{parent.identifier}</span>
               <span className="text-zinc-200">{parent.title}</span>
-              <span className="ml-auto text-[10px] text-zinc-500">{relativeTime(parent.updated_at ?? parent.created_at)}</span>
+              <span className="ml-auto text-[12px] text-zinc-500">{relativeTime(parent.updated_at ?? parent.created_at)}</span>
             </div>
           </Link>
         </section>
       )}
 
       <section>
-        <h3 className="text-[11px] uppercase tracking-wider text-zinc-500 mb-2">
+        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
           Sub-issues ({children.length})
         </h3>
         {children.length === 0 ? (
-          <div className="text-xs text-zinc-500 italic px-3 py-4 border border-dashed border-zinc-800/80 rounded text-center">
+          <div className="text-[13px] text-zinc-500 italic px-3 py-4 border border-dashed border-zinc-800/80 rounded text-center">
             No sub-issues yet. Use the "+ New Sub-issue" button above to add one.
           </div>
         ) : (
@@ -84,13 +84,13 @@ export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
               <li key={c.id}>
                 <Link
                   to={`/team/${teamId}/todolist/${c.identifier}`}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded border border-zinc-800/80 bg-zinc-900/40 hover:bg-zinc-800/60 transition text-xs"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded border border-zinc-800/80 bg-zinc-900/40 hover:bg-zinc-800/60 transition text-[13px]"
                 >
-                  <IssueStatusIcon status={c.status} size={11} />
+                  <IssueStatusIcon status={c.status} size={12} />
                   <span><PriorityIcon priority={c.priority} /></span>
-                  <span className="font-mono text-[10px] text-zinc-500 uppercase">{c.identifier}</span>
+                  <span className="font-mono text-[12px] text-zinc-500 uppercase">{c.identifier}</span>
                   <span className="flex-1 truncate text-zinc-200">{c.title}</span>
-                  <span className="text-[10px] text-zinc-500">{relativeTime(c.updated_at ?? c.created_at)}</span>
+                  <span className="text-[12px] text-zinc-500">{relativeTime(c.updated_at ?? c.created_at)}</span>
                 </Link>
               </li>
             ))}
@@ -98,7 +98,7 @@ export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
         )}
       </section>
 
-      <section className="text-[11px] text-zinc-600 italic">
+      <section className="text-[12px] text-zinc-600 italic">
         Attached documents and blocked-by links land in a follow-up — schema not in place yet.
       </section>
     </div>
