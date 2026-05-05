@@ -17,10 +17,12 @@ import {
 } from '../services/schedulesService';
 import { useToast } from '../components/Toast';
 
+// Backend schedules_router whitelists task_type to specific values that map
+// to existing dispatch lanes — pick a sensible default that won't 400.
 const EMPTY_FORM: ScheduleCreatePayload = {
   name: '',
   cron_expr: '0 9 * * *',
-  task_type: 'workflow',
+  task_type: 'ai_summary',
   payload: {},
   enabled: true,
 };
