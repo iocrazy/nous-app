@@ -159,8 +159,9 @@ export interface SubscribeOptions {
  * Subscribe to DBOS workflow status changes via SSE.
  *
  * Browsers' EventSource API can't set Authorization headers, so we
- * pass the Supabase JWT as ?token=. Backend validates it through the
- * same Bearer path as header auth.
+ * pass auth as a query parameter. We use a one-shot 30s ticket
+ * (?ticket=) instead of the raw Supabase JWT (?token=) so the JWT
+ * never lands in nginx / uvicorn / Sentry access logs.
  *
  * Returns an unsubscribe function. ALWAYS call it from useEffect's
  * cleanup, otherwise the EventSource keeps polling forever.
@@ -169,12 +170,13 @@ export async function subscribeWorkflow(
   id: string,
   opts: SubscribeOptions
 ): Promise<() => void> {
-  const token = await getSupabaseAccessToken();
-  if (!token) {
+  const session = await getSupabaseAccessToken();
+  if (!session) {
     throw new Error('No Supabase session — cannot open EventSource');
   }
-
-  const params = new URLSearchParams({ token });
+  const { wsTicketService } = await import('./wsTicketService');
+  const { ticket } = await wsTicketService.acquire();
+  const params = new URLSearchParams({ ticket });
   if (opts.includeSteps) params.set('include_steps', 'true');
 
   const url = `${_base(id)}/events?${params.toString()}`;
