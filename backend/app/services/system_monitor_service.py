@@ -112,9 +112,26 @@ async def get_queue_status() -> dict:
         pending = await DBOS.list_workflows_async(status="PENDING") or []
         enqueued = await DBOS.list_workflows_async(status="ENQUEUED") or []
 
+        # Filter out DBOS-internal scheduled workflows
+        # (update_system_status / commitment_sweeper / agent_runs_sweeper /
+        # reap_stuck_pending_tasks / scheduled_master / etc) — these are
+        # cron-cadence housekeeping and should NOT show up in the user-
+        # facing "Engine queued" badge. Without this filter a worker
+        # restart leaves behind dozens of orphaned PENDING rows that
+        # bloat the count to triple-digit numbers (see dev DB run on
+        # 2026-05-04: 108 PENDING, all in _dbos_internal_queue, none
+        # had a corresponding public.task_tracking row).
+        def _is_user_workflow(w) -> bool:
+            qname = getattr(w, "queue_name", None) or ""
+            return qname != "_dbos_internal_queue"
+
+        running_user = [w for w in running if _is_user_workflow(w)]
+        pending_user = [w for w in pending if _is_user_workflow(w)]
+        enqueued_user = [w for w in enqueued if _is_user_workflow(w)]
+
         result = {
-            "active": len(running),
-            "pending": len(pending) + len(enqueued),
+            "active": len(running_user),
+            "pending": len(pending_user) + len(enqueued_user),
             "scheduled": 0,
             "status": "online",
         }
