@@ -44,7 +44,18 @@ def record_workflow_failure(
 ) -> dict[str, Any]:
     """Mark task_tracking failed + return uniform failure dict. Never raises."""
     err_type = type(error).__name__
-    err_msg = str(error)[:500] or err_type
+    # DBOSMaxStepRetriesExceeded wraps the real cause in `.errors[*]`.
+    # str(error) on the wrapper alone is just the retry-count string —
+    # which is useless to the user ("Step X exceeded its maximum of N
+    # retries" hides the actual provider 4xx that made it retry). Unwrap.
+    underlying_msg = str(error)
+    inner_errors = getattr(error, "errors", None)
+    if inner_errors:
+        last = inner_errors[-1]
+        underlying_msg = (
+            f"{type(last).__name__}: {last}" if last else underlying_msg
+        )
+    err_msg = (underlying_msg or err_type)[:500]
     ctx = context or {}
 
     logger.exception(
