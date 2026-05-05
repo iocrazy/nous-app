@@ -316,10 +316,21 @@ def parse_workflow(
     to the cached result.
     """
     # 1. URL validation (sync, fast)
+    #
+    # Short-circuit failures MUST raise so DBOS marks the workflow ERROR
+    # and the mirror_dbos_lifecycle_to_tracking trigger flips
+    # task_tracking.phase to 'failed'. Returning a {"status":"failed"}
+    # dict makes DBOS think the workflow SUCCEEDED — the row then ends
+    # up phase='completed' but subtitle still 'Initializing...' because
+    # update_parse_tracking_step never runs, which is exactly the
+    # "Parse Initializing... but the file is already in 资源库" footgun
+    # we just dug out of the logs (run 17:44:12 -> 17:46:18 NO_ROUTER_DATA
+    # then media_repository.create failed; the row still got mirrored to
+    # completed by the SUCCESS-only trigger).
     try:
         valid_url = extract_url_step(url)
     except ValueError as e:
-        return {"status": "failed", "url": url, "error": f"Invalid URL: {e}"}
+        raise RuntimeError(f"Invalid URL: {e}") from e
 
     # 2. Fetch + parse (heavy)
     from app.services.douyin_parse.ua_pool import pick_ua
@@ -336,14 +347,12 @@ def parse_workflow(
     video_title = parsed_data.get("title", "undefined")
     parsed_data["user_id"] = user_id
 
-    # 3. Save metadata
+    # 3. Save metadata — same short-circuit-by-raise rule.
     saved_video = save_media_step(parsed_data, platform_id, video_bool)
     if not saved_video:
-        return {
-            "status": "failed",
-            "url": valid_url,
-            "error": "Data validation failed",
-        }
+        raise RuntimeError(
+            f"save_metadata_only failed for {platform_id}: see media_repository.create logs"
+        )
     video_db_id = saved_video.get("id")
     resource_id = saved_video.get("resource_id")
 
