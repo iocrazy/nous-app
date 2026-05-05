@@ -159,6 +159,7 @@ export const router = createBrowserRouter([
           { path: 'members', element: <SuspenseWrap><MembersPage /></SuspenseWrap> },
           { path: 'billing', element: <SuspenseWrap><BillingPage /></SuspenseWrap> },
           { path: 'todolist', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
+          { path: 'todolist/:identifier', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
           { path: 'issues', element: <SuspenseWrap><IssuesPage /></SuspenseWrap> },
           { path: 'issues/:identifier', element: <SuspenseWrap><IssuesPage /></SuspenseWrap> },
           { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },

@@ -1,28 +1,65 @@
-import { ListTodo } from 'lucide-react';
-
 /**
- * TodolistPage — placeholder pending paperclip-style rewrite.
+ * TodolistPage — paperclip-style task tracking + chat (A8 UI scaffold).
  *
- * Earlier (A7) this was repurposed as a Linear-style task LOG, but that's
- * the wrong shape: this page is meant for task DISPATCH + conversational
- * threads with agents (paperclip MyIssues / IssueChatThread style).
- *
- * The task log A7 produced has been moved to Settings → Tasks (per-user)
- * and is mirrored by the existing Arco-based admin page at
- * `/admin/src/pages/tasks/index.tsx` (system-wide).
- *
- * The paperclip-style rewrite will land in a follow-up.
+ * Renders either the issue list (no :identifier param) or the issue
+ * detail view (with :identifier param). Backed by mock fixtures —
+ * service layer wiring lands in the next session per user direction
+ * "先做 ui，实现 ui 基础上，我们再继续".
  */
+
+import React, { useMemo, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ListTodo } from 'lucide-react';
+import { IssueListView } from '../components/Todolist/IssueListView';
+import { IssueDetailView } from '../components/Todolist/IssueDetailView';
+import { NewIssueDialog } from '../components/Todolist/NewIssueDialog';
+import { MOCK_ISSUES, findIssueByIdentifier, getMessages } from '../components/Todolist/fixtures';
+import { useToast } from '../components/Toast';
+
 export function TodolistPage() {
+  const { identifier, teamId } = useParams<{ identifier?: string; teamId: string }>();
+  const navigate = useNavigate();
+  const [newIssueOpen, setNewIssueOpen] = useState(false);
+  const { addToast } = useToast();
+
+  const issue = useMemo(() => identifier ? findIssueByIdentifier(identifier) : null, [identifier]);
+  const messages = useMemo(() => issue ? getMessages(issue.id) : [], [issue]);
+
+  if (identifier && !issue) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
+        <ListTodo size={36} className="mb-3 text-zinc-700" />
+        <p className="text-sm">Issue {identifier} not found.</p>
+        <button
+          onClick={() => navigate(`/team/${teamId}/todolist`)}
+          className="mt-3 text-xs text-indigo-400 hover:text-indigo-300"
+        >
+          ← Back to all issues
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
-      <ListTodo size={48} className="mb-4 text-zinc-600" />
-      <p className="text-lg font-medium text-zinc-400">Todolist</p>
-      <p className="text-sm mt-1">Task dispatch + conversation — coming soon</p>
-      <p className="text-xs mt-2 text-zinc-600">
-        Looking for the task execution log? Settings → Tasks.
-      </p>
-    </div>
+    <>
+      {issue
+        ? <IssueDetailView issue={issue} messages={messages} />
+        : (
+          <IssueListView
+            issues={MOCK_ISSUES}
+            onNewIssue={() => setNewIssueOpen(true)}
+          />
+        )}
+      {newIssueOpen && (
+        <NewIssueDialog
+          onClose={() => setNewIssueOpen(false)}
+          onSubmit={(form) => {
+            addToast(`(mock) Issue created: "${form.title}"`, 'success');
+            setNewIssueOpen(false);
+          }}
+        />
+      )}
+    </>
   );
 }
 
