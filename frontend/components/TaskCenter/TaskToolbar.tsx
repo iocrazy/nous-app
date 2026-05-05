@@ -9,7 +9,7 @@
 import React from 'react';
 import {
   Search, ListFilter, ArrowDownNarrowWide, LayoutList, LayoutGrid,
-  RefreshCw, Plus, Layers,
+  RefreshCw, Calendar, Layers, Info,
 } from 'lucide-react';
 import type { TaskStatus, TaskType } from '../../contexts/TaskManagerContext';
 import type { GroupBy, SortBy } from '../../utils/taskDisplay';
@@ -76,14 +76,22 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
   return (
     <div className="space-y-2 px-4 py-3 border-b border-zinc-800 bg-zinc-950/40 sticky top-0 z-10">
       <div className="flex items-center gap-3">
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30 hover:bg-indigo-500/25"
-          title="Tasks are created automatically by parser, AI pipelines, and the workforce. Manual creation arrives with the schedules feature."
-          disabled
+        {/* Tasks are auto-created by parser/AI/workforce. The user-facing
+           "create something" path is the Schedules feature — link there
+           rather than show a disabled "+ New" stub. */}
+        <a
+          href="../dashboard/schedules"
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30 hover:bg-indigo-500/25 hover:text-indigo-200"
+          title="Create a recurring schedule that fires tasks. Tasks themselves are auto-created by parser, AI pipelines, and the Workforce."
         >
-          <Plus size={13} /> New
-        </button>
+          <Calendar size={13} /> Schedule
+        </a>
+        <span
+          className="text-zinc-500 hover:text-zinc-300 cursor-help"
+          title="Tasks in this list are created automatically when you submit a URL to the parser, kick off an AI pipeline, or when an agent dispatches work. To run a task on a recurring cadence, use Schedules."
+        >
+          <Info size={12} />
+        </span>
 
         <div className="relative flex-1 max-w-md">
           <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />

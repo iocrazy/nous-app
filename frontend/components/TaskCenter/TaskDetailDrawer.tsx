@@ -36,7 +36,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClos
   return (
     <aside className="fixed top-0 right-0 h-full w-full sm:w-[420px] bg-zinc-950 border-l border-zinc-800 shadow-2xl z-30 flex flex-col">
       <header className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800">
-        <span className={`px-2 py-0.5 text-[10px] rounded ${v.bg} ${v.color} ring-1 ${v.border} uppercase tracking-wider`}>
+        <span className={`px-2 py-0.5 text-[10px] rounded ${v.badgeBg} ${v.badgeText} ring-1 ${v.border} uppercase tracking-wider font-semibold`}>
           {v.label}
         </span>
         <span className="font-mono text-[10px] text-zinc-500 uppercase">{taskIdLabel(task)}</span>

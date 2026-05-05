@@ -47,14 +47,22 @@ export type StatusVisual = {
   border: string;
   /** Display label */
   label: string;
+  /** Higher-contrast bg for the drawer header pill */
+  badgeBg: string;
+  /** Bright text color for the drawer header pill */
+  badgeText: string;
 };
 
+// `color` is for compact dots/icons (used in row + card displays — kept
+// muted to avoid a wall of bright color). `badgeBg`/`badgeText` are the
+// drawer header pill — needs higher contrast since it's the primary
+// status indicator on the focus surface.
 export const STATUS_VISUAL: Record<TaskStatus, StatusVisual> = {
-  pending:    { color: 'text-zinc-400',    bg: 'bg-zinc-500/10',    border: 'border-zinc-500/30',    label: 'Pending'    },
-  processing: { color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/30',    label: 'Processing' },
-  completed:  { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', label: 'Done'       },
-  failed:     { color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    label: 'Failed'     },
-  cancelled:  { color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   label: 'Cancelled'  },
+  pending:    { color: 'text-zinc-400',    bg: 'bg-zinc-500/10',    border: 'border-zinc-500/30',    label: 'Pending',    badgeBg: 'bg-zinc-500/25',    badgeText: 'text-zinc-100' },
+  processing: { color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/30',    label: 'Processing', badgeBg: 'bg-blue-500/25',    badgeText: 'text-blue-100' },
+  completed:  { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', label: 'Done',       badgeBg: 'bg-emerald-500/25', badgeText: 'text-emerald-100' },
+  failed:     { color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30',    label: 'Failed',     badgeBg: 'bg-rose-500/25',    badgeText: 'text-rose-100' },
+  cancelled:  { color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/30',   label: 'Cancelled',  badgeBg: 'bg-amber-500/25',   badgeText: 'text-amber-100' },
 };
 
 export function statusVisual(status: TaskStatus | undefined): StatusVisual {
