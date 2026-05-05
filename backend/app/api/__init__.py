@@ -187,3 +187,8 @@ api_router.include_router(router=flows_router, tags=["Flows"])
 api_router.include_router(router=schedules_router, tags=["Schedules"])
 api_router.include_router(router=lanes_router, tags=["Lanes"])
 api_router.include_router(router=ws_ticket_router, tags=["WS Ticket"])
+
+# A8: paperclip-style chat thread per issue (issue_messages table, mig 205).
+from app.api.issue_messages_router import router as issue_messages_router  # noqa: E402
+
+api_router.include_router(router=issue_messages_router, tags=["Issue Messages"])
