@@ -19,7 +19,6 @@ import {
 import { TaskToolbar, type ViewMode } from './TaskToolbar';
 import { TaskListView } from './TaskListView';
 import { TaskKanbanView } from './TaskKanbanView';
-import { TaskDetailDrawer } from './TaskDetailDrawer';
 
 interface TaskCenterProps {
   /** When true, the component fills its parent container without breaking
@@ -37,8 +36,19 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   const [groupBy, setGroupBy] = useState<GroupBy>('status');
   const [sortBy, setSortBy] = useState<SortBy>('created_desc');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [selected, setSelected] = useState<UnifiedTask | null>(null);
+  // Set of task ids whose inline detail panel is open. Multi-expand
+  // intentionally — admin Arco's NotionTable behaves the same way.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
+
+  const toggleExpand = (task: UnifiedTask) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(task.id)) next.delete(task.id);
+      else next.add(task.id);
+      return next;
+    });
+  };
 
   const toggleStatus = (s: TaskStatus) => {
     setStatusFilter((prev) => {
@@ -76,11 +86,6 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
     }
   };
 
-  const liveSelected = useMemo(() => {
-    if (!selected) return null;
-    return tasks.find((t) => t.id === selected.id) ?? null;
-  }, [selected, tasks]);
-
   if (isLoading && tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
@@ -117,23 +122,17 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
         {viewMode === 'list' ? (
           <TaskListView
             groups={groups}
-            selectedTaskId={liveSelected?.id ?? null}
-            onSelect={setSelected}
+            expandedIds={expandedIds}
+            onToggle={toggleExpand}
           />
         ) : (
           <TaskKanbanView
             groups={groups}
-            selectedTaskId={liveSelected?.id ?? null}
-            onSelect={setSelected}
+            selectedTaskId={null}
+            onSelect={() => { /* kanban detail intentionally noop — use list view to expand */ }}
           />
         )}
       </div>
-      {liveSelected && (
-        <TaskDetailDrawer
-          task={liveSelected}
-          onClose={() => setSelected(null)}
-        />
-      )}
     </div>
   );
 };
