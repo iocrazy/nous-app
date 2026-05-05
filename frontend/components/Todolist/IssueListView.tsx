@@ -10,7 +10,31 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Search, LayoutGrid, Grid3x3, Columns, Filter, ArrowUpDown, RotateCw } from 'lucide-react';
+import { Plus, Search, Columns, Filter, ArrowUpDown, RotateCw } from 'lucide-react';
+
+/**
+ * Paperclip-exact view-mode icons. lucide's LayoutList/LayoutGrid/Grid3x3
+ * don't match paperclip's geometry — paperclip draws a "rows with
+ * bullets" glyph for list and a clean 2x2 grid for board. These SVGs
+ * are direct ports.
+ */
+const ListViewIcon: React.FC<{ size?: number }> = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+    <rect x="2" y="3.5" width="2.5" height="2.5" rx="0.6" />
+    <rect x="6" y="3.75" width="8" height="2" rx="0.6" />
+    <rect x="2" y="10" width="2.5" height="2.5" rx="0.6" />
+    <rect x="6" y="10.25" width="8" height="2" rx="0.6" />
+  </svg>
+);
+
+const BoardViewIcon: React.FC<{ size?: number }> = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+    <rect x="2" y="2" width="5.5" height="5.5" rx="0.8" />
+    <rect x="8.5" y="2" width="5.5" height="5.5" rx="0.8" />
+    <rect x="2" y="8.5" width="5.5" height="5.5" rx="0.8" />
+    <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="0.8" />
+  </svg>
+);
 import type { UiIssue, AgentRef, ProjectRef } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
@@ -285,7 +309,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             }`}
             title="List view"
           >
-            <LayoutGrid size={13} />
+            <ListViewIcon />
           </button>
           <button
             type="button"
@@ -297,7 +321,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             }`}
             title="Board view"
           >
-            <Grid3x3 size={13} />
+            <BoardViewIcon />
           </button>
           <div className="relative">
             <button
