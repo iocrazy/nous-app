@@ -83,16 +83,20 @@ class SeedLoader:
         self.agent_repo = agent_repo
         self.skill_repo = skill_repo
         self.seeds_root = seeds_root
-
-    def __post_init_counters__(self) -> None:
         # Hash-skip vs real-upsert tally — surfaced in load_all() result so
         # ops can confirm "no changes detected" runs are doing the cheap
-        # path, not silently re-PATCHing every entity.
+        # path, not silently re-PATCHing every entity. Initialised in
+        # __init__ (not just load_all) so direct callers of _load_skills /
+        # _load_skill_subfiles in unit tests don't trip AttributeError.
         self._skipped: dict[str, int] = {"agents": 0, "skills": 0, "skill_files": 0}
         self._upserted: dict[str, int] = {"agents": 0, "skills": 0, "skill_files": 0}
 
+    def _reset_counters(self) -> None:
+        self._skipped = {"agents": 0, "skills": 0, "skill_files": 0}
+        self._upserted = {"agents": 0, "skills": 0, "skill_files": 0}
+
     async def load_all(self) -> dict[str, Any]:
-        self.__post_init_counters__()
+        self._reset_counters()
         errors: list[dict[str, Any]] = []
         agents_loaded = await self._load_agents(errors)
         skills_loaded = await self._load_skills(errors)
