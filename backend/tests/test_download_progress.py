@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from app.services.download_progress import DownloadProgressTracker
+from app.services.media.downloader.download_progress import DownloadProgressTracker
 
 
 class _FakeRedis:

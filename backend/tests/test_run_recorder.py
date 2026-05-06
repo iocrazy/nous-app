@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.run_recorder import AgentPausedError, RunRecorder, _truncate
+from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder, _truncate
 
 
 class _FakeTable:

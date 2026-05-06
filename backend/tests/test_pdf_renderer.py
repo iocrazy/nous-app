@@ -11,9 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.agent_framework.multimodal import AttachmentKind
-from app.services import pdf_renderer as pr
-
-
+from app.services.media.render import pdf_renderer as pr
 @pytest.fixture
 def tiny_pdf(tmp_path: Path) -> Path:
     """Create a real 3-page PDF on disk via pypdfium2."""

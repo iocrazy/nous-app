@@ -16,7 +16,7 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.points_repository import PointsRepository
 from app.schemas.payment import CreateOrderRequest
-from app.services.payment_service import PaymentService
+from app.services.billing.payment_service import PaymentService
 
 router = APIRouter(prefix="/payment")
 

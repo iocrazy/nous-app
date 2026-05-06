@@ -72,7 +72,7 @@ class LegacyPostToolUseHook:
 
 async def _invoke_legacy(legacy_hook: Any, ctx: NewHookContext) -> NewHookResult:
     """Translate new ctx → legacy ctx, invoke, translate result back."""
-    from app.services.hooks import HookContext as LegacyCtx
+    from app.services.infra.hooks import HookContext as LegacyCtx
 
     legacy_ctx = LegacyCtx(
         run_id=ctx.run_id,

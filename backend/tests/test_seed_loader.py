@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.seed_loader import SeedLoader
+from app.services.ai.runner.seed_loader import SeedLoader
 
 # ─── Fake repo helpers ────────────────────────────────────────────────
 #
@@ -333,7 +333,7 @@ async def test_load_skill_subfiles_preserves_user_files(tmp_path: Path) -> None:
 
 def test_format_error_plain_exception() -> None:
     """Plain Exception → message only, no code/status."""
-    from app.services.seed_loader import _format_error
+    from app.services.ai.runner.seed_loader import _format_error
 
     err = _format_error(ValueError("boom"))
     assert err["type"] == "ValueError"
@@ -344,7 +344,7 @@ def test_format_error_plain_exception() -> None:
 
 def test_format_error_postgrest_apierror_shape() -> None:
     """Postgrest-style error with code/message/details/hint → all extracted."""
-    from app.services.seed_loader import _format_error
+    from app.services.ai.runner.seed_loader import _format_error
 
     class _FakePostgrestError(Exception):
         code = "42501"
@@ -364,7 +364,7 @@ def test_format_error_postgrest_apierror_shape() -> None:
 
 def test_format_error_httpx_status() -> None:
     """Exception with `response.status_code` attr → status extracted."""
-    from app.services.seed_loader import _format_error
+    from app.services.ai.runner.seed_loader import _format_error
 
     class _FakeResp:
         status_code = 503

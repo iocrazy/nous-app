@@ -37,7 +37,7 @@ class LanesSnapshotResponse(BaseModel):
 @router.get("/snapshot", response_model=LanesSnapshotResponse)
 async def lanes_snapshot(auth: AdminAuthDep) -> LanesSnapshotResponse:
     """Per-lane in-flight / queued / saturation. Admin-only."""
-    from app.services.lane_queue import get_lane_queue
+    from app.services.infra.lane_queue import get_lane_queue
 
     return LanesSnapshotResponse(
         lanes=[LaneStatus(**s) for s in get_lane_queue().snapshot()]

@@ -20,8 +20,8 @@ from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
 from app.middleware.request_logging import RequestLoggingMiddleware
-from app.services import dbos_orchestrator
-from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
+from app.services.infra import dbos_orchestrator
+from app.services.media.parsers.douyin_parse.drissionpage_parser import DrissionPageParser
 
 # 在应用启动前设置日志
 Utils.setup_logging()
@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
         )
         from app.repositories.agent_repository import AgentRepository
         from app.repositories.skill_repository import SkillRepository
-        from app.services.seed_loader import SeedLoader
+        from app.services.ai.runner.seed_loader import SeedLoader
 
         seed_loader = SeedLoader(
             agent_repo=AgentRepository(),
@@ -375,8 +375,8 @@ async def lifespan(app: FastAPI):
                 wrap_legacy_post,
                 wrap_legacy_pre,
             )
-            from app.services.hooks.cost_auditor import CostAuditorHook
-            from app.services.hooks.memory_harvester import MemoryHarvesterHook
+            from app.services.infra.hooks.cost_auditor import CostAuditorHook
+            from app.services.infra.hooks.memory_harvester import MemoryHarvesterHook
 
             hook_registry = HookRegistry()
             try:
@@ -404,7 +404,7 @@ async def lifespan(app: FastAPI):
         # PromptComposer; callers fetch via require('chat'). Search /
         # Storyboard register their own engines from feature modules.
         try:
-            from app.services.chat_context_engine import ChatContextEngine
+            from app.services.ai.chat.chat_context_engine import ChatContextEngine
 
             app.state.context_engines.register(ChatContextEngine())
             logger.info("ContextEngine registered: chat")

@@ -21,7 +21,7 @@ from typing import Any
 
 from dbos import DBOS  # type: ignore[import-not-found]
 
-from app.services.memory.consolidation import (
+from app.services.ai.memory.consolidation import (
     DEFAULT_CLUSTER_THRESHOLD,
     Cluster,
     MemoryCandidate,
@@ -45,8 +45,8 @@ async def _cheap_summarizer(memories: list[str]) -> str:
     try:
         from app.core.config import settings
         from app.schemas.ai_library import ComposedSystemPrompt
-        from app.services.ai_provider import QwenAdapter
-        from app.services.memory.consolidation import build_consolidation_prompt
+        from app.services.ai.providers.ai_provider import QwenAdapter
+        from app.services.ai.memory.consolidation import build_consolidation_prompt
 
         api_key = (
             getattr(settings, "DASHSCOPE_API_KEY", None)

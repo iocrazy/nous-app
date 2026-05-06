@@ -19,8 +19,8 @@ from uuid import UUID
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.agent_runner import AgentRunner
-from app.services.hooks import (
+from app.services.ai.runner.agent_runner import AgentRunner
+from app.services.infra.hooks import (
     ApprovalRequest,
     HookContext,
     HookRegistry,

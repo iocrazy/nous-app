@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.memory.provenance import (
+from app.services.ai.memory.provenance import (
     VerificationDecision,
     VerificationVerdict,
     build_verification_prompt,

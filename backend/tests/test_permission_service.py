@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import pytest
 
-from app.services.permission_service import (
+from app.services.library.permission_service import (
     CAPABILITIES,
     PermissionService,
     TEAM_ROLE_MAP,

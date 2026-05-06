@@ -12,9 +12,9 @@ from app.schemas.script import (
     ExpandChapterRequest,
     GenerateOutlineRequest,
 )
-from app.services.script_ai_service import ScriptAIService
-from app.services.script_service import ScriptService
-from app.services.unified_task_manager import get_task_manager
+from app.services.storyboard.script.script_ai_service import ScriptAIService
+from app.services.storyboard.script.script_service import ScriptService
+from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/scripts")
 
@@ -49,7 +49,7 @@ async def generate_outline(
         # via its own dbos_workflow_id; task_id is still returned for
         # the legacy task_tracking UI bridge during the frontend
         # migration window.
-        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.workflows.script_outline import script_outline_workflow
 
         await start_workflow_routed(

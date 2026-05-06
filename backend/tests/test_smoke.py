@@ -18,7 +18,7 @@ def test_api_router_imports():
 
 def test_script_service_imports():
     """Verify script service imports cleanly."""
-    from app.services.script_service import ScriptService
+    from app.services.storyboard.script.script_service import ScriptService
     svc = ScriptService()
     assert svc.project_repo is not None
     assert svc.chapter_repo is not None
@@ -26,14 +26,14 @@ def test_script_service_imports():
 
 def test_script_ai_service_imports():
     """Verify script AI service imports cleanly."""
-    from app.services.script_ai_service import ScriptAIService
+    from app.services.storyboard.script.script_ai_service import ScriptAIService
     svc = ScriptAIService()
     assert svc.model is not None
 
 
 def test_display_code_service_imports():
     """Verify display code service imports cleanly."""
-    from app.services.display_code_service import generate_display_code
+    from app.services.library.display_code_service import generate_display_code
     assert callable(generate_display_code)
 
 

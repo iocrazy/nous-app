@@ -21,7 +21,7 @@ from typing import Any
 
 from dbos import DBOS  # type: ignore[import-not-found]
 
-from app.services.memory.decay import (
+from app.services.ai.memory.decay import (
     DEFAULT_ARCHIVE_THRESHOLD,
     DEFAULT_HALF_LIFE_DAYS,
     MemoryDecayInput,

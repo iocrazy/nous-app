@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.memory.active_remember import (
+from app.services.ai.memory.active_remember import (
     ALLOWED_SCOPES,
     DEFAULT_SCOPE,
     MAX_SUMMARY_LEN,

@@ -28,7 +28,7 @@ from app.schemas.resources import (
     ResourceTagRequest,
     ResourceUpdate,
 )
-from app.services.resources_service import ResourcesService
+from app.services.library.resources_service import ResourcesService
 
 router = APIRouter(prefix="/resources")
 
@@ -314,7 +314,7 @@ async def batch_transcode(auth: AuthDep):
         repo = ResourcesRepository()
         versions = await repo.get_untranscoded_video_versions()
 
-        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.workflows.transcode import transcode_workflow
 
         queued = 0

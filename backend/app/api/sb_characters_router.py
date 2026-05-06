@@ -15,7 +15,7 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.storyboard_repository import StoryboardCharacterRepository
 from app.schemas.storyboard import CharacterCreate, CharacterUpdate
-from app.services.storyboard_service import StoryboardService
+from app.services.storyboard.storyboard_service import StoryboardService
 
 router = APIRouter(prefix="/storyboard")
 

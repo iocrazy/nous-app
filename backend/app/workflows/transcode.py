@@ -62,7 +62,7 @@ def transcode_to_hls_step(
     workflow_id level (same id replays cached result); per-attempt
     retry handles transient ffmpeg/IO errors. Publishes progress to
     `task_progress:{user_id}` for the WebSocket layer."""
-    from app.services.transcode_service import TranscodeService
+    from app.services.media.transcode.transcode_service import TranscodeService
 
     async def _do() -> Optional[str]:
         svc = TranscodeService()

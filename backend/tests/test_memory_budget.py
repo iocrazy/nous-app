@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.memory.budget import MAX_INJECTION_TOP_N, resolve_top_n
-from app.services.memory.retriever import DEFAULT_TOP_N_FINAL
+from app.services.ai.memory.budget import MAX_INJECTION_TOP_N, resolve_top_n
+from app.services.ai.memory.retriever import DEFAULT_TOP_N_FINAL
 
 
 @pytest.mark.unit

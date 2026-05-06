@@ -25,8 +25,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.services import dbos_orchestrator
-
+from app.services.infra import dbos_orchestrator
 router = APIRouter(prefix="/workflows", tags=["DBOS Workflows"])
 
 # How often the SSE stream polls DBOS for status changes. 1.5s balances

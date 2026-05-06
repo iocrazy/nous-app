@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.url_router import URLRouter
+from app.services.media.parsers.url_router import URLRouter
 
 
 # ─── detect_platform ────────────────────────────────────────────────

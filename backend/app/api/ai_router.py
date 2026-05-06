@@ -20,7 +20,7 @@ from app.repositories.ai_repository import AIRepository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.ai import SummaryResponse, TranscriptResponse
-from app.services.points_service import PointsService
+from app.services.billing.points_service import PointsService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
@@ -176,8 +176,8 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         # for the post-download auto-chain).
         import uuid as _uuid
 
-        from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.ai_transcription import ai_transcription_workflow
 
         tracker = get_task_manager()
@@ -206,7 +206,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -301,8 +301,8 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
             # Transcript exists, dispatch ai_summary_workflow.
             import uuid as _uuid
 
-            from app.services.dbos_orchestrator import start_workflow_routed
-            from app.services.unified_task_manager import get_task_manager
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.unified_task_manager import get_task_manager
             from app.workflows.ai_summary import ai_summary_workflow
 
             tracker = get_task_manager()
@@ -339,7 +339,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
             # depend on transcript completion. For now we dispatch
             # transcription only; the user re-triggers summary once
             # the transcript lands (frontend polls).
-            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.ai_transcription import ai_transcription_workflow
 
             await start_workflow_routed(
@@ -358,7 +358,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -428,8 +428,8 @@ async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
     try:
         import uuid as _uuid
 
-        from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.analyze_l1 import analyze_l1_workflow
 
         tracker = get_task_manager()
@@ -465,7 +465,7 @@ async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -533,8 +533,8 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
         # Workflow takes parsed_media_id (int), so look it up.
         import uuid as _uuid
 
-        from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.ai_transcription import ai_transcription_workflow
 
         media_row = await _get_media_or_404(platform_id)
@@ -574,7 +574,7 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -650,8 +650,8 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
             # Transcript exists — dispatch ai_summary_workflow.
             import uuid as _uuid
 
-            from app.services.dbos_orchestrator import start_workflow_routed
-            from app.services.unified_task_manager import get_task_manager
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.unified_task_manager import get_task_manager
             from app.workflows.ai_summary import ai_summary_workflow
 
             tracker = get_task_manager()
@@ -680,7 +680,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
         else:
             # No transcript yet — dispatch transcription only. PR-D7
             # phase 3b: see trigger_summary_by_resource for rationale.
-            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.ai_transcription import ai_transcription_workflow
 
             await start_workflow_routed(
@@ -698,7 +698,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,

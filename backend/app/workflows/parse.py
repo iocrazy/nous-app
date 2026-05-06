@@ -37,7 +37,7 @@ from loguru import logger
 def extract_url_step(url: str) -> str:
     """Validate + canonicalise URL. Raises ValueError on bad input —
     workflow catches that and returns a failed-status dict."""
-    from app.services.parse_helpers import extract_url
+    from app.services.media.parsers.parse_helpers import extract_url
 
     return extract_url(url)
 
@@ -53,7 +53,7 @@ def fetch_and_parse_step(
 ) -> dict[str, Any]:
     """3-tier fallback parse (LightHTTP → ABogus → DrissionPage) +
     formatter. Heavy I/O — 3 retries matches legacy Celery budget."""
-    from app.services.parse_helpers import fetch_and_parse
+    from app.services.media.parsers.parse_helpers import fetch_and_parse
 
     aweme_detail, parsed_data = fetch_and_parse(
         valid_url,
@@ -71,7 +71,7 @@ def save_media_step(
     parsed_data: dict[str, Any], platform_id: str, video_bool: bool
 ) -> Optional[dict[str, Any]]:
     """Insert/update parsed_media row. Returns the saved record or None."""
-    from app.services.parse_helpers import save_media_to_db
+    from app.services.media.parsers.parse_helpers import save_media_to_db
 
     return save_media_to_db(parsed_data, platform_id, video_bool)
 
@@ -85,7 +85,7 @@ def auto_tag_step(
     description: str,
 ) -> None:
     """Best-effort hashtag → tag classification. Never raises."""
-    from app.services.parse_helpers import auto_tag_media
+    from app.services.media.parsers.parse_helpers import auto_tag_media
 
     auto_tag_media(video_db_id, platform_id, aweme_detail, title, description)
 
@@ -114,8 +114,8 @@ def dispatch_download_step(
     context."""
     import uuid as _uuid
 
-    from app.services.dbos_orchestrator import start_workflow_routed
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows.download import download_workflow
 
     wf_id = str(_uuid.uuid4())
@@ -173,8 +173,8 @@ def dispatch_l1_analysis_step(
     import uuid as _uuid
 
     try:
-        from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.analyze_l1 import analyze_l1_workflow
 
         wf_id = str(_uuid.uuid4())
@@ -226,7 +226,7 @@ def update_parse_tracking_step(
     this update the parse task stays without a media_id and the result
     card never appears (legacy parse_tasks.py used to do the same write
     via `manager._atomic_update`)."""
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.unified_task_manager import get_task_manager
 
     async def _do() -> None:
         try:
@@ -333,7 +333,7 @@ def parse_workflow(
         raise RuntimeError(f"Invalid URL: {e}") from e
 
     # 2. Fetch + parse (heavy)
-    from app.services.douyin_parse.ua_pool import pick_ua
+    from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
 
     legacy_ua = pick_ua()
     fetched = fetch_and_parse_step(

@@ -9,7 +9,7 @@ from uuid import UUID
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.llm_retry_middleware import (
+from app.services.ai.llm.llm_retry_middleware import (
     DEFAULT_BASE_DELAY_S,
     DEFAULT_JITTER_RATIO,
     LLMCallError,

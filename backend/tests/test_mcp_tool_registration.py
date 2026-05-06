@@ -7,7 +7,7 @@ from app.agent_framework.mcp_descriptor import (
     MCPToolRegistry,
     ToolCallResult,
 )
-from app.services.mcp_tool_registration import build_mcp_registry
+from app.services.ai.skills.mcp_tool_registration import build_mcp_registry
 
 
 class _StubSkillRepo:

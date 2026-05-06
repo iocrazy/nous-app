@@ -215,7 +215,7 @@ async def subscribe_to_realtime(
             "access logs. Client should migrate to ?ticket= "
             "(POST /api/v1/ws/ticket)."
         )
-        from app.services.supabase_auth_service import SupabaseAuthService
+        from app.services.infra.supabase_auth_service import SupabaseAuthService
 
         auth_service = SupabaseAuthService()
         try:

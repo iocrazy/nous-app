@@ -20,11 +20,11 @@ from app.core.utils import Utils
 from app.repositories.tags_repository import TagsRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
-from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
-from app.services.douyin_parse.formatter import DouyinFormatter
-from app.services.douyin_parse.ies_parser import IesDouyinParser
-from app.services.media_service import MediaService
-from app.services.points_service import PointsService
+from app.services.media.parsers.douyin_parse.drissionpage_parser import DrissionPageParser
+from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
+from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
+from app.services.media.parsers.media_service import MediaService
+from app.services.billing.points_service import PointsService
 
 router = APIRouter()
 
@@ -62,7 +62,7 @@ async def fetch_videos_batch(
         # PR-D7 phase 3: was Celery parse_batch_links_task. Now loops
         # parse_workflow per URL via start_workflow_routed. Per-URL
         # failures are absorbed (best-effort batch).
-        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.workflows.parse import parse_workflow
 
         wf_ids: list[str] = []
@@ -130,7 +130,7 @@ async def fetch_videos_batch(
             aweme_detail = None
 
             # One UA per URL — shared across LightHTTP + BrowserAuto fallbacks.
-            from app.services.douyin_parse.ua_pool import pick_ua
+            from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
 
             item_ua = pick_ua()
 

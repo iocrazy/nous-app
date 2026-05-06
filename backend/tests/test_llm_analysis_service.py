@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.llm_analysis_service import (
+from app.services.ai.llm.llm_analysis_service import (
     AGENT_SLUG,
     LLMAnalysisService,
     SummaryResult,

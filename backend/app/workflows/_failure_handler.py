@@ -64,7 +64,7 @@ def record_workflow_failure(
 
     if workflow_id:
         try:
-            from app.services.unified_task_manager import get_task_manager
+            from app.services.infra.unified_task_manager import get_task_manager
 
             mgr = get_task_manager()
 

@@ -6,8 +6,8 @@ import pytest
 import respx
 
 from app.boundary.types import ValidatedURL
-from app.services import link_understanding as lu
-from app.services.link_understanding import (
+from app.services.ai.prompts import link_understanding as lu
+from app.services.ai.prompts.link_understanding import (
     DEFAULT_BODY_EXCERPT_CHARS,
     LinkSummary,
     LinkUnderstandingError,

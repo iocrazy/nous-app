@@ -7,7 +7,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep, get_team_id_for_user
 from app.schemas.script import ScriptAssetCreate, ScriptAssetUpdate
-from app.services.script_service import ScriptService
+from app.services.storyboard.script.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts/projects")
 

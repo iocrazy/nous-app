@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.ai_adapters.claude import ClaudeAdapter
+from app.services.ai.adapters.claude import ClaudeAdapter
 
 
 def _make_composed(**overrides: Any) -> ComposedSystemPrompt:

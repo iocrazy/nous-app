@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.agent_runner import MAX_TOOL_ITERATIONS, AgentRunner
+from app.services.ai.runner.agent_runner import MAX_TOOL_ITERATIONS, AgentRunner
 
 
 def _composed():

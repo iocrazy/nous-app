@@ -12,16 +12,16 @@ from typing import Any, Dict
 
 import pytest
 
-from app.services.ai_adapters.claude import ClaudeAdapter
-from app.services.ai_adapters.deepseek import DeepSeekAdapter
-from app.services.ai_adapters.doubao import DoubaoAdapter
-from app.services.ai_adapters.factory import (
+from app.services.ai.adapters.claude import ClaudeAdapter
+from app.services.ai.adapters.deepseek import DeepSeekAdapter
+from app.services.ai.adapters.doubao import DoubaoAdapter
+from app.services.ai.adapters.factory import (
     get_adapter,
     get_adapter_for_user,
     provider_key_for_model,
 )
-from app.services.ai_adapters.openai import OpenAIAdapter
-from app.services.ai_adapters.qwen import QwenAdapter
+from app.services.ai.adapters.openai import OpenAIAdapter
+from app.services.ai.adapters.qwen import QwenAdapter
 
 
 def _settings(**overrides: Any) -> SimpleNamespace:
@@ -108,7 +108,7 @@ def test_user_byo_key_takes_precedence_claude(monkeypatch: pytest.MonkeyPatch) -
             captured["api_key"] = api_key
 
     monkeypatch.setattr(
-        "app.services.ai_adapters.claude.AsyncAnthropic", _FakeAnthropic
+        "app.services.ai.adapters.claude.AsyncAnthropic", _FakeAnthropic
     )
     user_cfg = {"claude": {"api_key": "sk-user-claude"}}
     a = get_adapter_for_user("claude-opus-4-5", user_cfg, _settings())
@@ -144,7 +144,7 @@ def test_user_none_provider_config_falls_back_to_settings(
             captured["api_key"] = api_key
 
     monkeypatch.setattr(
-        "app.services.ai_adapters.claude.AsyncAnthropic", _FakeAnthropic
+        "app.services.ai.adapters.claude.AsyncAnthropic", _FakeAnthropic
     )
     # user_provider_config passed as None is treated as empty
     a = get_adapter_for_user("claude-opus-4-5", None, _settings())  # type: ignore[arg-type]
@@ -159,7 +159,7 @@ def test_user_none_provider_config_falls_back_to_settings(
 
 def test_claude_prefix_returns_claude_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "app.services.ai_adapters.claude.AsyncAnthropic",
+        "app.services.ai.adapters.claude.AsyncAnthropic",
         lambda *, api_key, timeout=None: object(),
     )
     a = get_adapter_for_user("claude-haiku-4-5", {}, _settings())

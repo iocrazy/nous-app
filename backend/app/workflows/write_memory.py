@@ -68,12 +68,12 @@ def extract_and_persist_memories_step(
     """Run extractor LLM calls + persist memory rows. workflow_id
     memoization keeps replay safe (same run_id+inputs = same rows)."""
     from app.db import get_async_supabase_admin
-    from app.services.embedding_service import EmbeddingService
-    from app.services.memory.extractor import (
+    from app.services.ai.providers.embedding_service import EmbeddingService
+    from app.services.ai.memory.extractor import (
         AssistantMemoryExtractor,
         UserMemoryExtractor,
     )
-    from app.services.memory.writer import MemoryWriter
+    from app.services.ai.memory.writer import MemoryWriter
 
     async def _do() -> dict[str, Any]:
         client = await get_async_supabase_admin()
@@ -108,7 +108,7 @@ async def _build_cheap_llm_call():
     """Cheap-model extractor LLM closure. Mirrors memory_tasks._build_cheap_llm_call."""
     from app.core.config import settings
     from app.schemas.ai_library import ComposedSystemPrompt
-    from app.services.ai_adapters import get_adapter
+    from app.services.ai.adapters import get_adapter
 
     cheap_model = "qwen-turbo"
     adapter = get_adapter(cheap_model, settings)

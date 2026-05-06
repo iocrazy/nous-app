@@ -156,7 +156,7 @@ def run_whisper(
             task_assignment=task_assignment,
         )
 
-    from app.services.whisper_service import WhisperService
+    from app.services.ai.transcribe.whisper_service import WhisperService
 
     svc = WhisperService(provider_key=provider_key, provider_config=provider_config)
     result = asyncio.run(
@@ -198,7 +198,7 @@ def _run_volcengine_asr(
 
     from app.api.media_auth import _get_secret
     from app.core.config import settings
-    from app.services.volcengine_asr_service import (
+    from app.services.ai.transcribe.volcengine_asr_service import (
         RESOURCE_V1,
         RESOURCE_V2,
         VolcengineASRService,

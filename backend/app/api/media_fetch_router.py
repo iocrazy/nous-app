@@ -25,11 +25,11 @@ from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.schemas.media import MediaTypeFetchRequest
-from app.services.douyin_parse.formatter import DouyinFormatter
-from app.services.douyin_parse.ies_parser import IesDouyinParser
-from app.services.media_service import MediaService
-from app.services.points_service import PointsService
-from app.services.url_router import URLRouter
+from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
+from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
+from app.services.media.parsers.media_service import MediaService
+from app.services.billing.points_service import PointsService
+from app.services.media.parsers.url_router import URLRouter
 
 router = APIRouter()
 router.include_router(batch_router)
@@ -334,7 +334,7 @@ async def extract_audio(
 
         video_title = media.get("title", platform_id)[:30]
 
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.unified_task_manager import get_task_manager
 
         tracker = get_task_manager()
         unified_task_id = None

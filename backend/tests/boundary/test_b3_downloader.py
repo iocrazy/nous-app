@@ -18,7 +18,7 @@ def _reset_caches():
 @pytest.mark.unit
 async def test_download_file_blocks_internal_ip(tmp_path):
     """NAS IP must be rejected before any HTTP request — no file written."""
-    from app.services.downloader import DownloaderService
+    from app.services.media.downloader.downloader import DownloaderService
 
     out = tmp_path / "subdir" / "file.bin"
     ok = await DownloaderService.download_file(
@@ -32,7 +32,7 @@ async def test_download_file_blocks_internal_ip(tmp_path):
 
 @pytest.mark.unit
 async def test_download_file_blocks_decimal_ipv4(tmp_path):
-    from app.services.downloader import DownloaderService
+    from app.services.media.downloader.downloader import DownloaderService
 
     out = tmp_path / "x" / "file.bin"
     ok = await DownloaderService.download_file(
@@ -44,7 +44,7 @@ async def test_download_file_blocks_decimal_ipv4(tmp_path):
 
 @pytest.mark.unit
 async def test_download_file_blocks_localhost_suffix(tmp_path):
-    from app.services.downloader import DownloaderService
+    from app.services.media.downloader.downloader import DownloaderService
 
     out = tmp_path / "y" / "file.bin"
     ok = await DownloaderService.download_file(
@@ -58,7 +58,7 @@ async def test_download_file_blocks_localhost_suffix(tmp_path):
 async def test_download_file_progress_tracker_marked_failed(tmp_path):
     """When boundary blocks, progress_tracker.failed() must be called
     so the unified task manager sees the failure."""
-    from app.services.downloader import DownloaderService
+    from app.services.media.downloader.downloader import DownloaderService
 
     class _StubTracker:
         def __init__(self):

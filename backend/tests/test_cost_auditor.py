@@ -7,8 +7,8 @@ from uuid import UUID
 
 import pytest
 
-from app.services.hooks import HookContext
-from app.services.hooks.cost_auditor import CostAuditorHook, _summarise_args
+from app.services.infra.hooks import HookContext
+from app.services.infra.hooks.cost_auditor import CostAuditorHook, _summarise_args
 
 
 def _ctx(

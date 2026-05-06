@@ -7,13 +7,13 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.memory import ExtractedFrom, MemoryScope
-from app.services.memory.extractor import (
+from app.services.ai.memory import ExtractedFrom, MemoryScope
+from app.services.ai.memory.extractor import (
     AssistantMemoryExtractor,
     ExtractedFact,
     UserMemoryExtractor,
 )
-from app.services.memory.writer import MemoryWriter
+from app.services.ai.memory.writer import MemoryWriter
 
 
 def _make_supabase():

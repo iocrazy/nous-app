@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.visual_analysis_service import (
+from app.services.ai.visual.visual_analysis_service import (
     AGENT_SLUG,
     VisualAnalysisResult,
     VisualAnalysisService,
@@ -107,13 +107,13 @@ async def test_analyze_l1_routes_through_runner_with_l1_instruction() -> None:
             svc, "_encode_image_from_url", new=AsyncMock(return_value="BASE64DATA")
         ),
         patch(
-            "app.services.visual_analysis_service.PromptComposer",
+            "app.services.ai.visual.visual_analysis_service.PromptComposer",
             return_value=composer,
         ),
-        patch("app.services.visual_analysis_service.AgentRunner", return_value=runner),
+        patch("app.services.ai.visual.visual_analysis_service.AgentRunner", return_value=runner),
         patch.object(svc, "_build_adapter", return_value=MagicMock()),
         patch(
-            "app.services.visual_analysis_service.SkillToolService",
+            "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
         ),
     ):
@@ -172,13 +172,13 @@ async def test_analyze_l2_sends_cover_plus_keyframes() -> None:
             svc, "_encode_image_from_file", new=AsyncMock(return_value="FRAME")
         ),
         patch(
-            "app.services.visual_analysis_service.PromptComposer",
+            "app.services.ai.visual.visual_analysis_service.PromptComposer",
             return_value=composer,
         ),
-        patch("app.services.visual_analysis_service.AgentRunner", return_value=runner),
+        patch("app.services.ai.visual.visual_analysis_service.AgentRunner", return_value=runner),
         patch.object(svc, "_build_adapter", return_value=MagicMock()),
         patch(
-            "app.services.visual_analysis_service.SkillToolService",
+            "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
         ),
     ):
@@ -263,7 +263,7 @@ def test_build_adapter_empty_config_falls_back_to_generic_compat() -> None:
     svc = VisualAnalysisService()  # no provider key, no config
     adapter = svc._build_adapter("totally-unknown-vendor-x-7b")
     # OpenAICompatibleAdapter is the concrete fallback class
-    from app.services.ai_adapters.openai_compat import OpenAICompatibleAdapter
+    from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
 
     assert isinstance(adapter, OpenAICompatibleAdapter)
 
@@ -302,13 +302,13 @@ async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
             svc, "_encode_image_from_url", new=AsyncMock(return_value="IMGDATA")
         ),
         patch(
-            "app.services.visual_analysis_service.PromptComposer",
+            "app.services.ai.visual.visual_analysis_service.PromptComposer",
             return_value=composer,
         ),
-        patch("app.services.visual_analysis_service.AgentRunner", return_value=runner),
+        patch("app.services.ai.visual.visual_analysis_service.AgentRunner", return_value=runner),
         patch.object(svc, "_build_adapter", build_adapter_spy),
         patch(
-            "app.services.visual_analysis_service.SkillToolService",
+            "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
         ),
     ):

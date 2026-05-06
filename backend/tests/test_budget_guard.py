@@ -6,8 +6,8 @@ from uuid import UUID
 
 import pytest
 
-from app.services.hooks import HookContext
-from app.services.hooks.budget_guard import (
+from app.services.infra.hooks import HookContext
+from app.services.infra.hooks.budget_guard import (
     DEFAULT_BUDGET_CENTS,
     BudgetGuardHook,
     make_budget_guard,

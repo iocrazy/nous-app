@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.memory.replay import (
+from app.services.ai.memory.replay import (
     categorize_influence,
     diff_response,
     filter_excluding,

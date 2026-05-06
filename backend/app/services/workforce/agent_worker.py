@@ -52,10 +52,10 @@ from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.agent_workforce_repository import AgentWorkforceRepository
 from app.repositories.skill_repository import SkillRepository
-from app.services.ai_adapters.factory import provider_key_for_model
-from app.services.ai_library_chat_wiring import build_agent_runner_stack
-from app.services.prompt_composer import ComposerInput, PromptComposer
-from app.services.run_recorder import AgentPausedError, RunRecorder
+from app.services.ai.adapters.factory import provider_key_for_model
+from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
+from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
+from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 
 logger = logging.getLogger(__name__)
 

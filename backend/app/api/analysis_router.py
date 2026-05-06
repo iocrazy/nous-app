@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.repositories.analysis_repository import AnalysisRepository
-from app.services.dbos_orchestrator import start_workflow_routed
+from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.workflows.analyze_l1 import analyze_l1_workflow
 
 router = APIRouter(prefix="/analysis", tags=["Analysis"])
@@ -201,7 +201,7 @@ async def trigger_analysis(
         # Pre-create task_tracking row with title (trigger handles lifecycle).
         import uuid as _uuid
 
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.unified_task_manager import get_task_manager
 
         wf_id = str(_uuid.uuid4())
         try:
@@ -281,7 +281,7 @@ async def trigger_batch_analysis(
 
     import uuid as _uuid
 
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.unified_task_manager import get_task_manager
 
     media_repo = AnalysisRepository()
     mgr = get_task_manager()

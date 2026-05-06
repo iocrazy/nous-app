@@ -313,7 +313,7 @@ def chain_followups_step(
 
     if mime_type.startswith("video/"):
         try:
-            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.thumbnail import thumbnail_workflow
 
             asyncio.run(
@@ -412,7 +412,7 @@ def mark_task_user_visible_complete_step(
     a SUCCESS transition demoting an already-failed/cancelled phase, so
     landing 'completed' here early can never be silently overwritten.
     """
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.unified_task_manager import get_task_manager
 
     async def _do() -> None:
         try:

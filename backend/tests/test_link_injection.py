@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 
 from app.boundary.external_text import HARD_LIMIT_CHARS, neutralize_external_text
-from app.services import link_injection as li
-from app.services.link_understanding import LinkSummary, LinkUnderstandingError
+from app.services.ai.prompts import link_injection as li
+from app.services.ai.prompts.link_understanding import LinkSummary, LinkUnderstandingError
 
 
 # ─── extract_urls ─────────────────────────────────────────────────────

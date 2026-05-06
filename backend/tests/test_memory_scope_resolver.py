@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.memory.scope_resolver import (
+from app.services.ai.memory.scope_resolver import (
     SCOPE_PRECEDENCE,
     CallerIdentity,
     MemoryScope,

@@ -14,9 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.agent_framework.multimodal import AttachmentKind
-from app.services import video_frame_extractor as vfx
-
-
+from app.services.media.render import video_frame_extractor as vfx
 @pytest.fixture
 def fake_video(tmp_path: Path) -> Path:
     """Create a fake video file (just needs to exist for path checks)."""

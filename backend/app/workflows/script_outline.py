@@ -33,7 +33,7 @@ def generate_outline_chapters(
     style_guide: Optional[str],
 ) -> list[dict[str, Any]]:
     """Run the LLM outline call. Returns list of {title, summary} dicts."""
-    from app.services.script_ai_service import ScriptAIService
+    from app.services.storyboard.script.script_ai_service import ScriptAIService
 
     async def _call() -> list[dict[str, Any]]:
         ai_svc = ScriptAIService()
@@ -52,7 +52,7 @@ def persist_outline_chapters(
     """Create chapter nodes on the script canvas. Idempotent at the
     workflow_id level — a replay returns the cached list of created ids
     rather than re-inserting."""
-    from app.services.script_service import ScriptService
+    from app.services.storyboard.script.script_service import ScriptService
 
     async def _persist() -> list[str]:
         script_svc = ScriptService()

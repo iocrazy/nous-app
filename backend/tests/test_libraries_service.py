@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import pytest
 
-from app.services.libraries_service import LibrariesService
+from app.services.library.libraries_service import LibrariesService
 
 
 class _FakeRepo:

@@ -18,7 +18,7 @@ from app.agent_framework.hooks_protocol import (
     HookEvent,
     HookRegistry,
 )
-from app.services.hooks import HookContext as LegacyCtx
+from app.services.infra.hooks import HookContext as LegacyCtx
 
 
 @dataclass

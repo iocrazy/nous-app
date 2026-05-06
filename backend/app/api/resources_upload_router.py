@@ -13,9 +13,9 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.resources_repository import ResourcesRepository
-from app.services.permission_service import PermissionService
-from app.services.resources_service import ResourcesService
-from app.services.thumbnail_service import ThumbnailService
+from app.services.library.permission_service import PermissionService
+from app.services.library.resources_service import ResourcesService
+from app.services.media.render.thumbnail_service import ThumbnailService
 
 router = APIRouter(prefix="/resources")
 
@@ -129,7 +129,7 @@ async def upload_resource(
     file: UploadFile = File(...),
 ):
     """Upload a file to the resource library."""
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.unified_task_manager import get_task_manager
 
     tracker = get_task_manager()
     unified_task_id = None

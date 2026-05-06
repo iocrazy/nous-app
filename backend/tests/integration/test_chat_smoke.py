@@ -39,7 +39,7 @@ import pytest
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chat_full_pipeline_fires_all_side_effects() -> None:
-    from app.services.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
     # ── Set up fake supabase ─────────────────────────────────────────
     user_id = uuid4()
@@ -145,27 +145,27 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
     fake_agent_repo.get_by_slug = AsyncMock(return_value=fake_agent)
 
     with patch(
-        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
     ), patch(
-        "app.services.ai_library_chat_service.AgentRepository",
+        "app.services.ai.chat.ai_library_chat_service.AgentRepository",
         return_value=fake_agent_repo,
     ), patch(
-        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
         AsyncMock(return_value=fake_stack),
     ), patch(
-        "app.services.ai_library_chat_service.PromptComposer",
+        "app.services.ai.chat.ai_library_chat_service.PromptComposer",
         return_value=composer,
     ), patch(
-        "app.services.ai_library_chat_service.AgentRunner", return_value=runner,
+        "app.services.ai.chat.ai_library_chat_service.AgentRunner", return_value=runner,
     ), patch(
-        "app.services.ai_library_chat_service.get_adapter",
+        "app.services.ai.chat.ai_library_chat_service.get_adapter",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.SkillToolService",
+        "app.services.ai.chat.ai_library_chat_service.SkillToolService",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.RunRecorder",
+        "app.services.ai.chat.ai_library_chat_service.RunRecorder",
         return_value=_CM(),
     ), patch(
         "asyncio.create_task", side_effect=_spy_create_task,

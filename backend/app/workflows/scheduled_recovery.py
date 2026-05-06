@@ -36,7 +36,7 @@ def retry_failed_downloads_step() -> dict[str, Any]:
     routing table picks DBOS / celery / shadow per task_type."""
     from app.core.enums import DownloadStatus
     from app.repositories.media_repository import MediaRepository
-    from app.services.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
     from app.workflows.download import download_workflow
 
     async def _do() -> dict[str, int]:
@@ -180,7 +180,7 @@ def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
 
     Becomes obsolete in D3d (DBOS workflow_id replaces this)."""
     from app.agent_framework import is_stuck
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.unified_task_manager import get_task_manager
 
     async def _do() -> int:
         mgr = get_task_manager()

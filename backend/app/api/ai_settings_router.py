@@ -18,7 +18,7 @@ from app.schemas.ai import (
     TestConnectionRequest,
     TestConnectionResponse,
 )
-from app.services.ai_provider import AIProviderFactory
+from app.services.ai.providers.ai_provider import AIProviderFactory
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from app.repositories.skill_repository import SkillRepository
-from app.services.skill_tool_service import SkillToolService
+from app.services.ai.skills.skill_tool_service import SkillToolService
 
 
 def _svc() -> SkillToolService:

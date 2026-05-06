@@ -99,7 +99,7 @@ def cleanup_old_task_tracking_step() -> dict[str, Any]:
 @DBOS.step()
 def cleanup_trashed_resources_step() -> dict[str, Any]:
     """Permanently delete resources soft-deleted >15 days ago."""
-    from app.services.resources_service import ResourcesService
+    from app.services.library.resources_service import ResourcesService
 
     async def _do() -> int:
         svc = ResourcesService()

@@ -6,12 +6,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.ai_adapters.claude import ClaudeAdapter
-from app.services.ai_adapters.deepseek import DeepSeekAdapter
-from app.services.ai_adapters.doubao import DoubaoAdapter
-from app.services.ai_adapters.factory import get_adapter
-from app.services.ai_adapters.openai import OpenAIAdapter
-from app.services.ai_adapters.qwen import QwenAdapter
+from app.services.ai.adapters.claude import ClaudeAdapter
+from app.services.ai.adapters.deepseek import DeepSeekAdapter
+from app.services.ai.adapters.doubao import DoubaoAdapter
+from app.services.ai.adapters.factory import get_adapter
+from app.services.ai.adapters.openai import OpenAIAdapter
+from app.services.ai.adapters.qwen import QwenAdapter
 
 
 def _settings(**overrides) -> SimpleNamespace:

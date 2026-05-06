@@ -25,7 +25,7 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
     it lands on the DBOS transcode workflow instead of Celery."""
     try:
         from app.repositories.resources_repository import ResourcesRepository
-        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.workflows.transcode import transcode_workflow
 
         repo = ResourcesRepository()
@@ -94,7 +94,7 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
     try:
         from app.repositories.media_repository import MediaRepository
         from app.repositories.resources_repository import ResourcesRepository
-        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
 
         media = run_async(MediaRepository().get_by_platform_id(platform_id))
         parsed_media_id = (media or {}).get("id")
@@ -280,9 +280,9 @@ def ensure_download_urls(
         return media
 
     try:
-        from app.services.douyin_parse.formatter import DouyinFormatter
-        from app.services.douyin_parse.ies_parser import IesDouyinParser
-        from app.services.douyin_parse.ua_pool import pick_ua
+        from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
+        from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
+        from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
 
         # One UA for the whole re-parse sequence (LightHTTP → BrowserAuto).
         reparse_ua = pick_ua()
@@ -335,7 +335,7 @@ def ensure_download_urls(
                 f"falling back to BrowserAuto for {platform_id}"
             )
             try:
-                from app.services.douyin_parse.drissionpage_parser import (
+                from app.services.media.parsers.douyin_parse.drissionpage_parser import (
                     DrissionPageParser,
                 )
 
