@@ -167,6 +167,7 @@ class AgentRunner:
                 ContextWindowError,
                 check_context_budget,
             )
+
             check_context_budget(
                 system_prompt=composed.system_message,
                 user_messages=user_messages,
@@ -264,9 +265,7 @@ class AgentRunner:
                         abort,
                     )
                 except RunAborted as exc:
-                    logger.info(
-                        f"[AgentRunner] aborted mid-call: {exc}"
-                    )
+                    logger.info(f"[AgentRunner] aborted mid-call: {exc}")
                     return {
                         "content": "",
                         "raw": None,

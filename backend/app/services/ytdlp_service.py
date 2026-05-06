@@ -15,7 +15,6 @@ import tempfile
 from datetime import datetime
 from typing import Callable, Optional
 
-import httpx
 from loguru import logger
 
 from app.boundary import ValidatedURL, safe_async_client

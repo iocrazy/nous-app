@@ -5,6 +5,7 @@ Never echo the raw rejected input back to the client.
 
 See docs/architecture/boundary-layer.md for the contract.
 """
+
 from __future__ import annotations
 
 

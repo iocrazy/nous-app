@@ -42,9 +42,9 @@ unified_task_manager.cancel):
 Module-level dict (per-process) — all coroutines on the same loop see
 the same registry. Not thread-safe; use only from the asyncio loop.
 """
+
 from __future__ import annotations
 
-import asyncio
 from typing import Optional
 
 from loguru import logger

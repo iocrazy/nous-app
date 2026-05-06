@@ -19,7 +19,6 @@ from typing import Any, Optional
 
 import psycopg
 from dbos import DBOS
-from loguru import logger
 
 
 def _dsn() -> str:
@@ -56,8 +55,7 @@ def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
         row = cur.fetchone()
         if not row:
             raise RuntimeError(
-                f"no transcript for parsed_media={parsed_media_id} "
-                f"user={user_id}"
+                f"no transcript for parsed_media={parsed_media_id} " f"user={user_id}"
             )
 
         cur = conn.execute(
@@ -115,9 +113,7 @@ def run_summarize_agent(
     call (token cost + agent_runs row each time)."""
     from app.services.summarize_service import SummarizeService
 
-    svc = SummarizeService(
-        provider_key=provider_key, provider_config=provider_config
-    )
+    svc = SummarizeService(provider_key=provider_key, provider_config=provider_config)
     result = asyncio.run(
         svc.summarize(
             transcript=transcript,
@@ -146,12 +142,12 @@ def persist_summary(
     topics: list[str],
 ) -> dict[str, Any]:
     """Persist the structured summary in 3 places:
-      1. resource_summaries (canonical: summary_text + JSONB key_points
-         + JSONB topics) — what the API returns
-      2. parsed_media.ai_rewrite_text (legacy compat for older UI bits
-         that still read this column directly)
-      3. resources.summary_status='completed' (drives MediaCard's AI
-         Intent badge color)
+    1. resource_summaries (canonical: summary_text + JSONB key_points
+       + JSONB topics) — what the API returns
+    2. parsed_media.ai_rewrite_text (legacy compat for older UI bits
+       that still read this column directly)
+    3. resources.summary_status='completed' (drives MediaCard's AI
+       Intent badge color)
     """
     payload_kp = json.dumps(key_points or [])
     payload_tp = json.dumps(topics or [])

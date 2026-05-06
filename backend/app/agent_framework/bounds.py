@@ -27,6 +27,7 @@ follow-up. For Sprint 5 we land:
 Transport layer + actual gateway-side dispatch gating are deferred to
 Sprint 5.5 once we have one shipping worker container to test against.
 """
+
 from __future__ import annotations
 
 import time
@@ -44,8 +45,12 @@ class BoundsAdvertisement:
     # import role (avoid circularity / let bounds be usable on its own)
     workflows: frozenset[str] = field(default_factory=frozenset)
     agents: frozenset[str] = field(default_factory=frozenset)  # slugs
-    providers: frozenset[str] = field(default_factory=frozenset)  # 'qwen' / 'openai' / ...
-    lane_capacity: dict[str, int] = field(default_factory=dict)  # lane name → max parallel
+    providers: frozenset[str] = field(
+        default_factory=frozenset
+    )  # 'qwen' / 'openai' / ...
+    lane_capacity: dict[str, int] = field(
+        default_factory=dict
+    )  # lane name → max parallel
     version: Optional[str] = None  # commit sha or release tag
     started_at: float = field(default_factory=time.time)
 
@@ -83,9 +88,7 @@ class BoundsRegistry:
 
     def register(self, bound: BoundsAdvertisement) -> None:
         """Insert or replace a bound by worker_id."""
-        self._stored[bound.worker_id] = _StoredBound(
-            bound=bound, last_seen=time.time()
-        )
+        self._stored[bound.worker_id] = _StoredBound(bound=bound, last_seen=time.time())
 
     def heartbeat(self, worker_id: str) -> bool:
         """Refresh last_seen for a known worker. Returns False if the
@@ -118,7 +121,9 @@ class BoundsRegistry:
         self, workflow_name: str, *, now: Optional[float] = None
     ) -> list[BoundsAdvertisement]:
         """Live workers that can run the given workflow name."""
-        return [b for b in self.live_bounds(now=now) if b.can_handle_workflow(workflow_name)]
+        return [
+            b for b in self.live_bounds(now=now) if b.can_handle_workflow(workflow_name)
+        ]
 
     def workers_for_agent(
         self, agent_slug: str, *, now: Optional[float] = None

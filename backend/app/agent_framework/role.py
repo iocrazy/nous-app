@@ -23,6 +23,7 @@ The ``MEDIAHUB_ROLE`` env var picks the mode:
 Default is ``combined`` so existing deployments keep working unchanged
 when this primitive lands.
 """
+
 from __future__ import annotations
 
 import os

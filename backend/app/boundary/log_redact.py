@@ -21,6 +21,7 @@ The patcher walks BOTH ``record["message"]`` (the formatted string)
 AND ``record["extra"]`` dict values (Eng review E6 — bound context via
 ``logger.bind(token=...)`` lives here, not in message).
 """
+
 from __future__ import annotations
 
 import re

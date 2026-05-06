@@ -21,13 +21,13 @@ group. Otherwise SIGTERM to the group hits us too. Existing subprocess
 spawn sites in mediahub need a small audit; the helper itself handles
 either case (will just SIGTERM the single PID if no group exists).
 """
+
 from __future__ import annotations
 
 import asyncio
 import errno
 import os
 import signal
-from typing import Optional
 
 from loguru import logger
 

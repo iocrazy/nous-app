@@ -254,9 +254,7 @@ def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
                     mgr.release_lock(task["dedup_key"])
                 recovered += 1
             except Exception as e:
-                logger.warning(
-                    f"[recover_stale_orchestrator_locks] task {tid}: {e}"
-                )
+                logger.warning(f"[recover_stale_orchestrator_locks] task {tid}: {e}")
         return recovered
 
     count = asyncio.run(_do())

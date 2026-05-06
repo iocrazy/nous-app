@@ -22,6 +22,7 @@ Lifecycle:
            ├─ expired    (passed expires_at without firing)
            └─ failed     (sweeper tried but agent run failed)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -96,13 +97,9 @@ class Commitment:
         if not self.description or not self.description.strip():
             raise InvalidCommitmentError("description must be non-empty")
         if self.trigger_type == TriggerType.TIME and self.trigger_at is None:
-            raise InvalidCommitmentError(
-                "TIME trigger requires trigger_at"
-            )
+            raise InvalidCommitmentError("TIME trigger requires trigger_at")
         if self.trigger_type == TriggerType.EVENT and not self.trigger_event:
-            raise InvalidCommitmentError(
-                "EVENT trigger requires trigger_event"
-            )
+            raise InvalidCommitmentError("EVENT trigger requires trigger_event")
 
     def is_due(self, *, now: Optional[datetime] = None) -> bool:
         """True if this TIME-triggered commitment is ready to fire.
