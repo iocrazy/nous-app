@@ -20,12 +20,13 @@ Wildcard subscription:
 Sync listeners supported (wrapped at dispatch time) — pre-existing
 modules with ``def on_event(e):`` get back-compat without rewriting.
 """
+
 from __future__ import annotations
 
 import asyncio
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable, Union
+from typing import Any, Awaitable, Callable, Union
 
 from loguru import logger
 

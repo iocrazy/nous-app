@@ -110,7 +110,10 @@ class LLMFallbackChain:
             # Sprint 3: skip recently-failed models. The registry has
             # already discovered their cooldown via report_status from
             # a prior call's failure — no point burning retries on them.
-            if self.health_registry is not None and not self.health_registry.is_available(model):
+            if (
+                self.health_registry is not None
+                and not self.health_registry.is_available(model)
+            ):
                 logger.info(
                     "[Fallback] %s skipped (cooled down by health registry)",
                     model,

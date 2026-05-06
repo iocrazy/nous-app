@@ -15,6 +15,7 @@ Sprint F-1 modules:
 
 See docs/architecture/agent-harness.md (TBD) for the layered model.
 """
+
 from app.agent_framework.abort_controller import (
     AbortController,
     RunAborted,
@@ -51,22 +52,15 @@ from app.agent_framework.context_window import (
     estimate_tokens,
     model_window_size,
 )
-from app.agent_framework.key_rotation import (
-    AllKeysCooledDown,
-    KeyRotator,
-)
-from app.agent_framework.rotating_adapter import RotatingAdapter
 from app.agent_framework.event_loop_ready import (
     measure_drift_ms,
     wait_for_loop_ready,
 )
-from app.agent_framework.kill_tree import kill_process_tree
-from app.agent_framework.subprocess_registry import (
-    cancel_workflow_subprocesses,
-    register_subprocess,
-    registered_pids,
-    unregister_subprocess,
+from app.agent_framework.key_rotation import (
+    AllKeysCooledDown,
+    KeyRotator,
 )
+from app.agent_framework.kill_tree import kill_process_tree
 from app.agent_framework.lane_dispatch import (
     Origin,
     classify_lane,
@@ -76,6 +70,17 @@ from app.agent_framework.lane_queue import (
     Lane,
     LaneQueue,
     LaneTaskTimeout,
+)
+from app.agent_framework.lifecycle_bus import (
+    EVT_AGENT_RUN_COMPLETE,
+    EVT_AGENT_RUN_START,
+    EVT_BOUNDARY_BLOCKED,
+    EVT_DEPLOY_COMPLETE,
+    EVT_WORKFLOW_COMPLETE,
+    EVT_WORKFLOW_FAIL,
+    EVT_WORKFLOW_START,
+    LifecycleBus,
+    LifecycleEvent,
 )
 from app.agent_framework.mcp_client import (
     MCPClient,
@@ -123,6 +128,13 @@ from app.agent_framework.output_budget import (
 )
 from app.agent_framework.role import ProcessRole, role_from_env
 from app.agent_framework.root_abort_registry import RootAbortRegistry
+from app.agent_framework.rotating_adapter import RotatingAdapter
+from app.agent_framework.subprocess_registry import (
+    cancel_workflow_subprocesses,
+    register_subprocess,
+    registered_pids,
+    unregister_subprocess,
+)
 from app.agent_framework.telemetry import COUNTER_NAMES, AgentMetrics
 from app.agent_framework.session_memory import (
     SECTION_ORDER,
@@ -197,17 +209,6 @@ from app.agent_framework.workflow_timeout_policy import (
     is_stuck,
     timeout_for_task_type,
     timeout_minutes,
-)
-from app.agent_framework.lifecycle_bus import (
-    LifecycleBus,
-    LifecycleEvent,
-    EVT_AGENT_RUN_COMPLETE,
-    EVT_AGENT_RUN_START,
-    EVT_BOUNDARY_BLOCKED,
-    EVT_DEPLOY_COMPLETE,
-    EVT_WORKFLOW_COMPLETE,
-    EVT_WORKFLOW_FAIL,
-    EVT_WORKFLOW_START,
 )
 
 __all__ = [

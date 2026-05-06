@@ -7,6 +7,7 @@ layers.
 Server-side raw_url is shown ONLY to admins via this endpoint. The
 public API never echoes raw rejected URLs (per RFC).
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -53,7 +54,13 @@ async def list_boundary_audit(
         }
     except Exception as e:
         logger.error(f"[admin/boundary-audit] list failed: {e}")
-        return {"items": [], "total": 0, "limit": limit, "offset": offset, "error": str(e)}
+        return {
+            "items": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "error": str(e),
+        }
 
 
 @router.get("/summary")

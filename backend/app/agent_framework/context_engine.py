@@ -22,6 +22,7 @@ extend them with their own request/response shapes via narrower methods,
 because the chat / search / storyboard surfaces have nothing in common
 beyond "give me a payload to send to the model."
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

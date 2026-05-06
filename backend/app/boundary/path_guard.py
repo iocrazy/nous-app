@@ -26,6 +26,7 @@ Implementation notes:
     (rare — usually a sign you should pass a Path-already-validated-by-
     a-different-route).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -65,9 +66,7 @@ def safe_resolve(
     candidate = (base_path / untrusted_path).resolve(strict=False)
 
     if not _is_under(candidate, base_path):
-        raise PathTraversalError(
-            "resolved path escapes its allowed base directory"
-        )
+        raise PathTraversalError("resolved path escapes its allowed base directory")
     return candidate
 
 

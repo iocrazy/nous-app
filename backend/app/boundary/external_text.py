@@ -16,6 +16,7 @@ Two layered limits:
 See OpenClaw ``security/external-content.ts`` for the reference impl
 and the full instruction-literal corpus.
 """
+
 from __future__ import annotations
 
 import re
@@ -38,11 +39,9 @@ _INJECTION_PATTERNS: Final[list[str]] = [
     r"ignore\s+(all\s+)?(prior|previous|above|preceding)\s+(instructions?|rules?|prompts?)",
     r"disregard\s+(all\s+)?(the\s+)?(prior|previous|above)",
     r"forget\s+(all\s+)?(prior|previous|above)\s+(instructions?|context)",
-
     # System role spoofing
     r"system\s*:\s*you\s+are\s+now",
     r"you\s+are\s+now\s+(jailbroken|in\s+admin|free\s+to)",
-
     # ChatML / OpenAI special tokens
     r"<\|im_start\|>",
     r"<\|im_end\|>",
@@ -50,7 +49,6 @@ _INJECTION_PATTERNS: Final[list[str]] = [
     r"<\|fim_prefix\|>",
     r"<\|fim_middle\|>",
     r"<\|fim_suffix\|>",
-
     # Llama 2 / Mistral
     r"<<\s*sys\s*>>",
     r"<<\s*/\s*sys\s*>>",
@@ -58,18 +56,15 @@ _INJECTION_PATTERNS: Final[list[str]] = [
     r"\[\s*/\s*INST\s*\]",
     r"<s>\s*\[\s*INST\s*\]",
     r"</s>",
-
     # Llama 3
     r"<\|begin_of_text\|>",
     r"<\|start_header_id\|>",
     r"<\|end_header_id\|>",
     r"<\|eot_id\|>",
     r"<\|finetune_right_pad_id\|>",
-
     # Gemma
     r"<start_of_turn>",
     r"<end_of_turn>",
-
     # Anthropic / generic Human/Assistant
     r"\bHuman\s*:\s*",
     r"\bAssistant\s*:\s*",
@@ -142,9 +137,7 @@ def neutralize_external_text(raw: str, *, max_chars: int) -> NeutralizedText:
         return NeutralizedText(marker_id="", body="", wrapped="")
 
     if not isinstance(raw, str):
-        raise ExternalTextRejectedError(
-            f"expected str, got {type(raw).__name__}"
-        )
+        raise ExternalTextRejectedError(f"expected str, got {type(raw).__name__}")
 
     if len(raw) > HARD_LIMIT_CHARS:
         raise ExternalTextRejectedError(

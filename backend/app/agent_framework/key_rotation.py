@@ -11,10 +11,11 @@ forms too.
 
 Mirrors OpenClaw ``agents/api-key-rotation.ts``.
 """
+
 from __future__ import annotations
 
 import time
-from typing import List, Optional
+from typing import List
 
 # Cooldown durations per HTTP status — calibrated to provider recovery
 # windows. Short enough that legitimate users don't notice; long enough
@@ -81,9 +82,7 @@ class KeyRotator:
                 self._cursor = (idx + 1) % len(self._keys)  # advance cursor
                 return key
 
-        raise AllKeysCooledDown(
-            f"all {len(self._keys)} keys in cooldown"
-        )
+        raise AllKeysCooledDown(f"all {len(self._keys)} keys in cooldown")
 
     def mark_cooldown(self, key: str, seconds: float) -> None:
         """Put ``key`` in cooldown for ``seconds`` from now."""
@@ -113,8 +112,4 @@ class KeyRotator:
     def usable_count(self) -> int:
         """How many keys are NOT in cooldown right now."""
         now = time.time()
-        return sum(
-            1
-            for k in self._keys
-            if self._cooldown_until.get(k, 0.0) <= now
-        )
+        return sum(1 for k in self._keys if self._cooldown_until.get(k, 0.0) <= now)

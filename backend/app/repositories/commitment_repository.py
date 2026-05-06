@@ -7,18 +7,18 @@ and from the SQL row.
 Uses the service-role (admin) client because access control is enforced
 at the route layer via user-scoped clients (mirror agent_repository).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from uuid import UUID
 
 from loguru import logger
 
 from app.agent_framework.commitments import (
+    TERMINAL_STATUSES,
     Commitment,
     CommitmentStatus,
-    TERMINAL_STATUSES,
     TriggerType,
 )
 from app.db.supabase_client import get_async_supabase_admin
@@ -51,9 +51,11 @@ class CommitmentRepository:
             status=row["status"],
             created_at=_parse_ts(row.get("created_at")),
             fulfilled_at=_parse_ts(row.get("fulfilled_at")),
-            fulfillment_run_id=str(row["fulfillment_run_id"])
-            if row.get("fulfillment_run_id")
-            else None,
+            fulfillment_run_id=(
+                str(row["fulfillment_run_id"])
+                if row.get("fulfillment_run_id")
+                else None
+            ),
             fulfillment_notes=row.get("fulfillment_notes"),
         )
 
@@ -126,9 +128,7 @@ class CommitmentRepository:
         )
 
     async def mark_expired(self, commitment_id: int) -> Optional[Commitment]:
-        return await self._set_terminal_status(
-            commitment_id, CommitmentStatus.EXPIRED
-        )
+        return await self._set_terminal_status(commitment_id, CommitmentStatus.EXPIRED)
 
     async def _set_terminal_status(
         self,
