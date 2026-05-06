@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-import httpx
 from loguru import logger
 
 from app.boundary import URLBlockedError, safe_async_client

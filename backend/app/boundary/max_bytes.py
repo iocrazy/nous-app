@@ -25,12 +25,12 @@ Defense-in-depth note: this is independent of httpx ``follow_redirects``
 or content-length validation. Some upstreams lie about content-length
 or stream forever via chunked transfer; this layer catches both.
 """
+
 from __future__ import annotations
 
 from typing import AsyncIterator, BinaryIO, Iterable, Protocol
 
 from app.boundary.errors import MaxBytesExceededError
-
 
 # Default ceiling — generous for most use cases. Callers should pass a
 # tighter cap when they know the expected size (e.g. avatar upload =

@@ -154,9 +154,9 @@ def shutdown_dbos(timeout_seconds: float = 5.0) -> None:
     global _dbos
     if _dbos is None:
         return
-    from dbos import DBOS
-
     import threading
+
+    from dbos import DBOS
 
     done = threading.Event()
     err: list[BaseException] = []

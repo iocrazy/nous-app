@@ -17,6 +17,7 @@ Used by:
 
 See docs/architecture/boundary-layer.md.
 """
+
 from __future__ import annotations
 
 import time
@@ -69,6 +70,7 @@ class PinnedDNSResolver:
         # Literal IP fast path — validate directly, no DNS, no caching
         # needed (the literal IS the connect target).
         import ipaddress
+
         try:
             literal = ipaddress.ip_address(_ug._strip_ipv6_zone(host))
         except ValueError:

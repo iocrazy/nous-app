@@ -136,9 +136,7 @@ def get_adapter_for_user(
     raw_key = user_cfg.get("api_key")
     user_keys: list[str] = []
     if isinstance(raw_key, list):
-        user_keys = [
-            k.strip() for k in raw_key if isinstance(k, str) and k.strip()
-        ]
+        user_keys = [k.strip() for k in raw_key if isinstance(k, str) and k.strip()]
     elif isinstance(raw_key, str):
         single = raw_key.strip()
         if single:

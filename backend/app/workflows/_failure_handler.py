@@ -58,9 +58,7 @@ def record_workflow_failure(
     err_msg = (underlying_msg or err_type)[:500]
     ctx = context or {}
 
-    logger.exception(
-        f"[workflow.fail] wf={workflow_id} type={err_type} ctx={ctx}"
-    )
+    logger.exception(f"[workflow.fail] wf={workflow_id} type={err_type} ctx={ctx}")
 
     if workflow_id:
         try:

@@ -26,13 +26,13 @@ The ``regex`` package is optional — missing it does NOT degrade
 correctness, it just downgrades runtime protection. The static lint
 catches the high-frequency patterns either way.
 """
+
 from __future__ import annotations
 
 import re
 from typing import Optional, Pattern
 
 from app.boundary.errors import RegexComplexityError
-
 
 DEFAULT_MAX_PATTERN_LEN = 1000  # chars in the regex itself
 DEFAULT_RUNTIME_TIMEOUT_S = 1.0
@@ -58,9 +58,7 @@ except ImportError:
     _HAS_REGEX_PKG = False
 
 
-def vet_pattern(
-    pattern: str, *, max_len: int = DEFAULT_MAX_PATTERN_LEN
-) -> None:
+def vet_pattern(pattern: str, *, max_len: int = DEFAULT_MAX_PATTERN_LEN) -> None:
     """Static lint. Raises ``RegexComplexityError`` if the pattern is
     over the length cap or matches a known-dangerous shape.
 

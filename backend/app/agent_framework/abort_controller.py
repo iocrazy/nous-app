@@ -39,6 +39,7 @@ Usage from agent_runner (sketch — actual wire-up in a follow-up commit):
         # Surface to caller — already-cancelled hook chain will follow
         return {"content": "", "aborted": True, "abort_reason": str(e)}
 """
+
 from __future__ import annotations
 
 import asyncio

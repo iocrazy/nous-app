@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-import httpx
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
@@ -143,9 +142,7 @@ class ABogusDouyinParser:
         if src.isdigit():
             return src
         try:
-            async with safe_async_client(
-                timeout=cls.SHARE_REDIRECT_TIMEOUT
-            ) as client:
+            async with safe_async_client(timeout=cls.SHARE_REDIRECT_TIMEOUT) as client:
                 resp = await client.get(src, headers={"User-Agent": ua})
                 final_url = str(resp.url)
                 for pattern, _ in _ID_PATTERNS:

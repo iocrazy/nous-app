@@ -9,6 +9,7 @@ known limits); the load-bearing runtime guard is a one-line
 ``assert isinstance(url, ValidatedURL)`` at every retro-fitted method's
 first line. See docs/architecture/boundary-layer.md.
 """
+
 from __future__ import annotations
 
 

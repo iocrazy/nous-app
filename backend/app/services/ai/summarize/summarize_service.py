@@ -196,9 +196,7 @@ class SummarizeService:
                     composed, user_messages=user_messages, recorder=None
                 )
                 if result.get("error"):
-                    logger.warning(
-                        f"[Summarize] runner error: {result.get('error')}"
-                    )
+                    logger.warning(f"[Summarize] runner error: {result.get('error')}")
                     return None
                 return self._to_result(
                     self._parse_json(result.get("content") or ""), 0.0
@@ -235,9 +233,7 @@ class SummarizeService:
                 content = result.get("content") or ""
                 recorder.set_summaries(output_summary=content[:500])
                 if result.get("error"):
-                    logger.warning(
-                        f"[Summarize] runner error: {result.get('error')}"
-                    )
+                    logger.warning(f"[Summarize] runner error: {result.get('error')}")
                     return None
                 return self._to_result(self._parse_json(content), 0.0)
         except AgentPausedError as err:

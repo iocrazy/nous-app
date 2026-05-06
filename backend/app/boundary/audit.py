@@ -12,6 +12,7 @@ the request-rejection path.
 Server-side only. The raw URL is logged here but the API layer (global
 BoundaryError handler) returns a generic safe message to the client.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,8 +42,7 @@ async def _write_row(payload: dict[str, Any]) -> None:
         # Audit failures are diagnostic, not load-bearing. Loguru will
         # carry this so we know if the audit pipeline is itself broken.
         logger.debug(
-            f"boundary_audit: write failed (non-fatal): "
-            f"{type(exc).__name__}: {exc}"
+            f"boundary_audit: write failed (non-fatal): " f"{type(exc).__name__}: {exc}"
         )
 
 

@@ -428,9 +428,7 @@ async def lifespan(app: FastAPI):
                 )
                 from app.repositories.agent_repository import AgentRepository
 
-                worker_id = (
-                    f"{socket.gethostname()}-pid{os.getpid()}"
-                )
+                worker_id = f"{socket.gethostname()}-pid{os.getpid()}"
 
                 # Workflow names: introspect the workflows pkg. Re-import
                 # locally so this block doesn't depend on whether the

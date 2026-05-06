@@ -560,4 +560,6 @@ _resolve_and_attach_tags = resolve_and_attach_tags
 _dedup_and_dispatch = dedup_and_dispatch
 _douyin_parse_fallback = douyin_parse_fallback
 _mark_cookie_if_auth_failure = mark_cookie_if_auth_failure
-_handle_ytdlp_fetch = handle_media_fetch_dispatch  # legacy alias, drop after callers migrate
+_handle_ytdlp_fetch = (
+    handle_media_fetch_dispatch  # legacy alias, drop after callers migrate
+)

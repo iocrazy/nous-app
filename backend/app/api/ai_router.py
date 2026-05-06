@@ -9,7 +9,6 @@ Endpoints for triggering and retrieving AI analysis results
 Supports both platform_id-based (legacy) and resource_id-based triggers.
 """
 
-import asyncio
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -543,12 +542,12 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
         # row just won't link back to a card).
         from app.repositories.resources_repository import ResourcesRepository
 
-        owner_resource = await ResourcesRepository().get_resource_by_media_id_and_creator(
-            str(media_row["id"]), auth.user_id
+        owner_resource = (
+            await ResourcesRepository().get_resource_by_media_id_and_creator(
+                str(media_row["id"]), auth.user_id
+            )
         )
-        owner_resource_id = (
-            str(owner_resource["id"]) if owner_resource else None
-        )
+        owner_resource_id = str(owner_resource["id"]) if owner_resource else None
 
         tracker = get_task_manager()
         wf_id = str(_uuid.uuid4())

@@ -9,12 +9,12 @@ Endpoints for batch fetching media and debug raw-parse.
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from loguru import logger
 
-from app.boundary import validate_url_async
 from app.api.media_fetch_helpers import (
     BatchFetchRequest,
     resolve_and_attach_tags,
     resolve_team_id,
 )
+from app.boundary import validate_url_async
 from app.core.deps import AuthDep
 from app.core.utils import Utils
 from app.repositories.tags_repository import TagsRepository

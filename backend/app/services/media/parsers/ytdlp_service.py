@@ -15,7 +15,6 @@ import tempfile
 from datetime import datetime
 from typing import Callable, Optional
 
-import httpx
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs

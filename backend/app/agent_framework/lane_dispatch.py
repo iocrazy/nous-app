@@ -33,6 +33,7 @@ The integration is deferred per-callsite because workforce/ (2062 lines)
 needs careful refactor to slot lanes into the existing scheduler /
 inbox / outbox model. This helper unblocks the integration when ready.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -44,16 +45,16 @@ from app.agent_framework.lane_queue import Lane, LaneQueue
 class Origin(str, Enum):
     """Where the work came from. Used to pick the right Lane."""
 
-    USER_CLICK = "user_click"           # API hit from frontend interaction
-    USER_API = "user_api"               # API hit from external automation
-    BACKGROUND = "background"           # AI workflow chain
-    SCHEDULED = "scheduled"             # cron job / sweeper
-    SUBAGENT = "subagent"               # AgentRunner internal delegate
+    USER_CLICK = "user_click"  # API hit from frontend interaction
+    USER_API = "user_api"  # API hit from external automation
+    BACKGROUND = "background"  # AI workflow chain
+    SCHEDULED = "scheduled"  # cron job / sweeper
+    SUBAGENT = "subagent"  # AgentRunner internal delegate
 
 
 _ORIGIN_TO_LANE: dict[Origin, Lane] = {
     Origin.USER_CLICK: Lane.USER,
-    Origin.USER_API: Lane.USER,        # treat API calls same priority as click
+    Origin.USER_API: Lane.USER,  # treat API calls same priority as click
     Origin.BACKGROUND: Lane.BACKGROUND,
     Origin.SCHEDULED: Lane.SCHEDULED,
     Origin.SUBAGENT: Lane.SUBAGENT,
@@ -85,6 +86,7 @@ async def dispatch_in_lane(
     if queue is None:
         try:
             from app.main import app as _app
+
             queue = getattr(_app.state, "lane_queue", None)
         except (ImportError, RuntimeError):
             queue = None
