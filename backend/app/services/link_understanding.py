@@ -30,6 +30,7 @@ Limitations:
     content. Workaround is to use the existing DrissionPage parser
     (browser-based) for those — different module, different cost.
 """
+
 from __future__ import annotations
 
 import re
@@ -41,12 +42,10 @@ from loguru import logger
 from app.boundary import (
     BoundaryError,
     NeutralizedText,
-    aread_with_cap,
     neutralize_external_text,
     safe_async_client,
     validate_url_async,
 )
-
 
 # Tight cap — most useful pages render readable text in well under
 # 2 MiB. If you hit a 3 MiB blog post, that's an outlier; tighten the
@@ -61,23 +60,15 @@ DEFAULT_BODY_EXCERPT_CHARS = 8 * 1024
 # ─── Tag stripping ────────────────────────────────────────────────────
 
 
-_SCRIPT_OR_STYLE = re.compile(
-    r"<(script|style)\b.*?</\1>", re.IGNORECASE | re.DOTALL
-)
+_SCRIPT_OR_STYLE = re.compile(r"<(script|style)\b.*?</\1>", re.IGNORECASE | re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"\s+")
-_TITLE_TAG = re.compile(
-    r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL
-)
-_META_TAG = re.compile(
-    r"<meta\b[^>]*>", re.IGNORECASE
-)
+_TITLE_TAG = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_META_TAG = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
 _META_NAME_CONTENT = re.compile(
     r"""(name|property)\s*=\s*['"]([^'"]+)['"]""", re.IGNORECASE
 )
-_META_CONTENT_VALUE = re.compile(
-    r"""content\s*=\s*['"]([^'"]+)['"]""", re.IGNORECASE
-)
+_META_CONTENT_VALUE = re.compile(r"""content\s*=\s*['"]([^'"]+)['"]""", re.IGNORECASE)
 
 
 def _strip_html(html: str) -> str:
@@ -172,9 +163,7 @@ async def understand_link(
         raise LinkUnderstandingError(f"fetch failed: {type(exc).__name__}") from exc
 
     if response.status_code >= 400:
-        raise LinkUnderstandingError(
-            f"upstream returned HTTP {response.status_code}"
-        )
+        raise LinkUnderstandingError(f"upstream returned HTTP {response.status_code}")
 
     content_type = response.headers.get("content-type")
 

@@ -20,6 +20,7 @@ Usage:
     adapter = RotatingAdapter(rotator, build)
     response = await adapter.call(composed, messages)  # auto-rotates
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable
@@ -50,11 +51,11 @@ class RotatingAdapter:
         adapter_factory: Callable[[str], Any],
     ) -> None:
         """Args:
-            rotator: KeyRotator pre-configured with the user's keys.
-            adapter_factory: callable(api_key: str) -> AIAdapter.
-                Closure over the rest of the config (base_url, model,
-                etc.) supplied by the caller (typically the
-                ai_adapters factory).
+        rotator: KeyRotator pre-configured with the user's keys.
+        adapter_factory: callable(api_key: str) -> AIAdapter.
+            Closure over the rest of the config (base_url, model,
+            etc.) supplied by the caller (typically the
+            ai_adapters factory).
         """
         self._rotator = rotator
         self._factory = adapter_factory

@@ -10,6 +10,7 @@ to the shorter input.
 
 See docs/architecture/boundary-layer.md.
 """
+
 from __future__ import annotations
 
 import hmac

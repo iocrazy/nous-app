@@ -22,13 +22,13 @@ Two entry points:
 DNS resolution is cached for SSRF_DNS_CACHE_TTL_SECONDS to amortize cost
 and partially defend DNS rebinding within the cache window.
 """
+
 from __future__ import annotations
 
 import asyncio
 import ipaddress
 import socket
 import time
-from functools import lru_cache
 from urllib.parse import urlparse
 
 from app.boundary.errors import URLBlockedError
@@ -51,15 +51,19 @@ BLOCKED_SUFFIXES = (
 )
 
 # Cloud metadata server hostnames — same risk as 169.254.169.254.
-BLOCKED_METADATA_HOSTNAMES = frozenset({
-    "metadata.google.internal",
-    "metadata.goog",
-    "metadata",  # short form sometimes resolves
-    # Azure IMDS reaches via 169.254.169.254 — IP path catches it; no DNS form.
-})
+BLOCKED_METADATA_HOSTNAMES = frozenset(
+    {
+        "metadata.google.internal",
+        "metadata.goog",
+        "metadata",  # short form sometimes resolves
+        # Azure IMDS reaches via 169.254.169.254 — IP path catches it; no DNS form.
+    }
+)
 
 
-def _parse_networks(cidrs: list[str]) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+def _parse_networks(
+    cidrs: list[str],
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
     """Parse CIDR strings to network objects, skipping invalid entries with a warning."""
     nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
     for c in cidrs or []:
@@ -72,8 +76,12 @@ def _parse_networks(cidrs: list[str]) -> tuple[ipaddress.IPv4Network | ipaddress
 
 
 # Lazy-init network lists from settings so test monkeypatching works.
-_extra_blocked_cache: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] | None = None
-_dev_allow_cache: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] | None = None
+_extra_blocked_cache: (
+    tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] | None
+) = None
+_dev_allow_cache: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] | None = (
+    None
+)
 
 
 def _get_extra_blocked() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
@@ -236,6 +244,7 @@ def _audit_block(
     NEVER prevents the boundary block itself."""
     try:
         from app.boundary import audit
+
         audit.log_block(
             layer=audit.LAYER_VALIDATE,
             reason=reason,
@@ -247,7 +256,9 @@ def _audit_block(
         pass
 
 
-def _validate_url_pre_dns(raw: str) -> tuple[str, ipaddress.IPv4Address | ipaddress.IPv6Address | None]:
+def _validate_url_pre_dns(
+    raw: str,
+) -> tuple[str, ipaddress.IPv4Address | ipaddress.IPv6Address | None]:
     """Shared validation up to (but not including) DNS resolution.
 
     Returns (hostname, literal_ip_or_None). Raises URLBlockedError on reject.
