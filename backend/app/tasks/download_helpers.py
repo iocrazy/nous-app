@@ -105,9 +105,7 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
 
         res_repo = ResourcesRepository()
         resource = run_async(
-            res_repo.get_resource_by_media_id_and_creator(
-                str(parsed_media_id), user_id
-            )
+            res_repo.get_resource_by_media_id_and_creator(str(parsed_media_id), user_id)
         )
         if not resource:
             logger.debug(

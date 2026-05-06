@@ -30,6 +30,7 @@ Usage from llm_fallback_chain:
             health.report_status(model, status)
             continue
 """
+
 from __future__ import annotations
 
 import time
@@ -49,10 +50,10 @@ class ModelHealth(str, Enum):
 
 # Per-status cooldown durations. Calibrated to provider recovery windows.
 _COOLDOWN_BY_STATUS: dict[int, float] = {
-    429: 60.0,      # rate limit — usually clears in seconds
-    401: 3600.0,    # auth — operator likely needs to fix config
-    403: 3600.0,    # forbidden — same as 401
-    500: 30.0,      # transient server
+    429: 60.0,  # rate limit — usually clears in seconds
+    401: 3600.0,  # auth — operator likely needs to fix config
+    403: 3600.0,  # forbidden — same as 401
+    500: 30.0,  # transient server
     502: 30.0,
     503: 30.0,
     504: 30.0,
@@ -86,7 +87,10 @@ class ModelHealthRegistry:
         if state is None:
             return ModelHealth.AVAILABLE
         # Lazy expire: if cooldown elapsed, flip back to AVAILABLE
-        if state.health == ModelHealth.COOLED_DOWN and time.time() >= state.cooldown_until:
+        if (
+            state.health == ModelHealth.COOLED_DOWN
+            and time.time() >= state.cooldown_until
+        ):
             state.health = ModelHealth.AVAILABLE
             state.reason = None
         return state.health
@@ -129,9 +133,7 @@ class ModelHealthRegistry:
         """Convenience: classify ``status`` and apply cooldown if needed."""
         cooldown = self.cooldown_for_status(status)
         if cooldown > 0:
-            self.mark_cooled_down(
-                model, seconds=cooldown, reason=f"HTTP {status}"
-            )
+            self.mark_cooled_down(model, seconds=cooldown, reason=f"HTTP {status}")
 
     def pick_first_available(self, models: list[str]) -> Optional[str]:
         """First entry in ``models`` whose health is AVAILABLE, or None
@@ -148,7 +150,11 @@ class ModelHealthRegistry:
         for model, state in self._states.items():
             # Re-evaluate so expired cooldowns appear available
             current = self.health(model)
-            remaining = max(0.0, state.cooldown_until - now) if current == ModelHealth.COOLED_DOWN else 0.0
+            remaining = (
+                max(0.0, state.cooldown_until - now)
+                if current == ModelHealth.COOLED_DOWN
+                else 0.0
+            )
             out[model] = {
                 "health": current.value,
                 "reason": state.reason,

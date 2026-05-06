@@ -27,6 +27,7 @@ Reasons to land the shape layer first:
 Spec reference: https://modelcontextprotocol.io/specification — the
 2024-11-05 revision is the basis for these shapes.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -118,9 +119,7 @@ class MCPToolRegistry:
         if not tool.name:
             raise ValueError("tool.name must be non-empty")
         if tool.name in self._tools:
-            raise DuplicateToolError(
-                f"tool '{tool.name}' is already registered"
-            )
+            raise DuplicateToolError(f"tool '{tool.name}' is already registered")
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Optional[Tool]:

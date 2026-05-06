@@ -9,10 +9,9 @@ import json
 import os
 
 import aiofiles
-import httpx
 from loguru import logger
 
-from app.boundary import URLBlockedError, safe_async_client
+from app.boundary import safe_async_client
 
 
 class DownloadProgressTracker:

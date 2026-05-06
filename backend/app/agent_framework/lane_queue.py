@@ -33,6 +33,7 @@ Usage:
     )
     result = await queue.submit(Lane.USER, my_coroutine())
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -123,8 +124,7 @@ class LaneQueue:
                     )
                 except asyncio.TimeoutError as e:
                     raise LaneTaskTimeout(
-                        f"task on lane {lane.value!r} exceeded "
-                        f"{timeout_ms}ms"
+                        f"task on lane {lane.value!r} exceeded " f"{timeout_ms}ms"
                     ) from e
             finally:
                 state.in_flight -= 1

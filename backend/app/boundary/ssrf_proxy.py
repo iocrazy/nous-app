@@ -18,6 +18,7 @@ Architecture:
 
 See docs/architecture/boundary-layer.md (Layer 3 variant).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -104,7 +105,9 @@ class SsrfProxy:
             return
 
         try:
-            method, target, version = request_line.decode("ascii").rstrip().split(" ", 2)
+            method, target, version = (
+                request_line.decode("ascii").rstrip().split(" ", 2)
+            )
         except (ValueError, UnicodeDecodeError):
             await self._reply(writer, 400, "Bad Request")
             return
@@ -172,6 +175,7 @@ class SsrfProxy:
             logger.info(f"[boundary] SsrfProxy CONNECT blocked: {target} ({e})")
             try:
                 from app.boundary import audit
+
                 audit.log_block(
                     layer=audit.LAYER_PROXY,
                     reason="connect_blocked",
@@ -247,9 +251,16 @@ class SsrfProxy:
 
         # Strip hop-by-hop headers per RFC 7230 §6.1
         hop_by_hop = {
-            "connection", "keep-alive", "proxy-authenticate",
-            "proxy-authorization", "te", "trailers", "transfer-encoding",
-            "upgrade", "host", "proxy-connection",
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailers",
+            "transfer-encoding",
+            "upgrade",
+            "host",
+            "proxy-connection",
         }
         forward_headers = {
             k: v for k, v in headers.items() if k.lower() not in hop_by_hop
@@ -267,6 +278,7 @@ class SsrfProxy:
             logger.info(f"[boundary] SsrfProxy HTTP blocked: {target} ({e})")
             try:
                 from app.boundary import audit
+
                 audit.log_block(
                     layer=audit.LAYER_PROXY,
                     reason="http_blocked",
@@ -284,8 +296,7 @@ class SsrfProxy:
 
         # Build proxied response — strip hop-by-hop response headers too
         status_line = (
-            f"HTTP/1.1 {response.status_code} "
-            f"{response.reason_phrase or 'OK'}\r\n"
+            f"HTTP/1.1 {response.status_code} " f"{response.reason_phrase or 'OK'}\r\n"
         ).encode("ascii")
         writer.write(status_line)
         for k, v in response.headers.items():

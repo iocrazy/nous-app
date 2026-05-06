@@ -252,9 +252,7 @@ async def lifespan(app: FastAPI):
             try:
                 import socket
 
-                worker_id = (
-                    f"{socket.gethostname()}-pid{os.getpid()}"
-                )
+                worker_id = f"{socket.gethostname()}-pid{os.getpid()}"
                 # Bounds are filled minimally here — concrete inventory
                 # (registered workflow names, agent slugs, providers)
                 # comes from a discovery pass in Sprint 5.5. This entry
@@ -264,9 +262,7 @@ async def lifespan(app: FastAPI):
                     role=process_role.value,
                 )
                 app.state.bounds_registry.register(self_bound)
-                logger.info(
-                    f"Bounds registry: self-registered worker_id={worker_id}"
-                )
+                logger.info(f"Bounds registry: self-registered worker_id={worker_id}")
             except Exception as e:
                 logger.warning(f"Bounds self-registration failed: {e}")
 
