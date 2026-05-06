@@ -69,6 +69,78 @@ class AgentRunner:
         # gets useful feedback instead of silent skip behaviour.
         self.delegate_tool = delegate_tool
 
+    async def stream_turn(
+        self,
+        composed: ComposedSystemPrompt,
+        user_messages: list[dict],
+        *,
+        recorder: Optional[RunRecorder] = None,
+        abort: Optional["AbortController"] = None,
+    ):
+        """Wave H (B): incremental streaming variant of run_turn.
+
+        Yields StreamChunk instances as the model emits them. Falls back
+        to a single buffered chunk when the adapter doesn't implement
+        stream(). The caller MUST consume the generator fully — pending
+        on it mid-iteration leaks the underlying httpx connection.
+
+        Limitations of this initial implementation:
+          - Text-only path. If the model emits tool_calls during stream,
+            we collect the deltas but DO NOT execute them mid-stream;
+            the caller can fall back to run_turn() for tool-using turns.
+          - Per-turn output budget (Wave 5c C2 / G4) still applies via
+            composed.max_tokens.
+          - AbortController interrupts AT chunk boundaries (not mid-byte
+            from upstream — httpx + asyncio cancel will get there next
+            yield point).
+
+        Usage:
+            async for chunk in runner.stream_turn(composed, msgs):
+                if chunk.delta_text: send_to_user(chunk.delta_text)
+                if chunk.finish_reason: break
+        """
+        from app.agent_framework import RunAborted
+        from app.services.ai_adapters.base import StreamChunk, StreamingNotSupported
+
+        stream_method = getattr(self.adapter, "stream", None)
+        if stream_method is None:
+            # Adapter doesn't support streaming → emit one buffered chunk
+            resp = await self.adapter.call(composed, user_messages)
+            msg = resp["choices"][0]["message"]
+            yield StreamChunk(
+                delta_text=msg.get("content") or "",
+                finish_reason=resp["choices"][0].get("finish_reason") or "stop",
+                usage=resp.get("usage"),
+            )
+            return
+
+        from app.agent_framework._metrics_helper import inc_metric
+        inc_metric("streaming_started")
+        try:
+            async for chunk in stream_method(composed, user_messages):
+                if abort is not None and abort.is_aborted():
+                    inc_metric("streaming_aborted_mid")
+                    raise RunAborted("user cancel mid-stream")
+                yield chunk
+                if chunk.finish_reason:
+                    if recorder is not None and chunk.usage:
+                        recorder.record_usage(
+                            prompt_tokens=int(chunk.usage.get("prompt_tokens") or 0),
+                            completion_tokens=int(
+                                chunk.usage.get("completion_tokens") or 0
+                            ),
+                        )
+                    break
+        except StreamingNotSupported:
+            # Provider exposed stream() but raised at runtime → fall back
+            resp = await self.adapter.call(composed, user_messages)
+            msg = resp["choices"][0]["message"]
+            yield StreamChunk(
+                delta_text=msg.get("content") or "",
+                finish_reason=resp["choices"][0].get("finish_reason") or "stop",
+                usage=resp.get("usage"),
+            )
+
     async def run_turn(
         self,
         composed: ComposedSystemPrompt,
@@ -114,6 +186,25 @@ class AgentRunner:
 
         messages = list(user_messages)
         iteration = 0
+
+        # Wave G (G3): per-run loop guard. Detects "same (tool, args)
+        # called >= N times in last M calls" and warns the LLM mid-run
+        # rather than letting it burn the iteration budget on a stuck
+        # repeat. Per-instance state — different runs are independent.
+        from app.agent_framework import ToolCallLoopGuard, ToolResultCache
+        loop_guard = ToolCallLoopGuard(repeat_threshold=3, window=5)
+        loop_warning_already_injected = False
+        # Phase L (L1): per-run tool result cache. Skill must opt in via
+        # idempotent flag in skill_manifest entry. Each run gets its own
+        # cache so stale data can't leak across users / sessions.
+        tool_cache = ToolResultCache()
+        # Build a quick lookup of which skill slugs are idempotent
+        idempotent_slugs = {
+            s.get("slug")
+            for s in (composed.skill_manifest or [])
+            if s.get("idempotent") is True and s.get("slug")
+        }
+
         # Step A milestone: trace each Skill / Delegate dispatch made
         # during this turn. The chat service surfaces this list so the
         # frontend can render sub-task cards inline ("→ summarize, 24s,
@@ -131,6 +222,37 @@ class AgentRunner:
                 if await recorder.check_cancelled():
                     return {"content": "", "raw": None, "cancelled": True}
 
+            # Wave G (G4): per-call output budget. Compute a max_tokens
+            # cap based on remaining window. If smaller than what
+            # composed declared, build a copy with the tighter cap so
+            # the adapter doesn't request more than will fit.
+            composed_for_call = composed
+            try:
+                from app.agent_framework import (
+                    count_messages_tokens,
+                    derive_output_budget,
+                )
+
+                consumed_input = count_messages_tokens(messages, composed.model)
+                budget = derive_output_budget(
+                    model=composed.model,
+                    consumed_input_tokens=consumed_input,
+                )
+                if budget.max_tokens < composed.max_tokens:
+                    composed_for_call = composed.model_copy(
+                        update={"max_tokens": budget.max_tokens}
+                    )
+                    from app.agent_framework._metrics_helper import inc_metric
+                    inc_metric("output_budget_tightened")
+                    logger.debug(
+                        f"[AgentRunner] output budget tightened: "
+                        f"{composed.max_tokens} → {budget.max_tokens} "
+                        f"(consumed_input={consumed_input}, model={composed.model})"
+                    )
+            except Exception as bg_exc:
+                # Non-fatal — fall back to the agent's configured max_tokens.
+                logger.debug(f"output budget derive failed (non-fatal): {bg_exc}")
+
             # Sprint 2 #3: race adapter.call against AbortController so
             # pressing cancel mid-LLM-call interrupts within seconds
             # instead of waiting for the full request to complete.
@@ -139,7 +261,7 @@ class AgentRunner:
 
                 try:
                     resp = await race_until_abort(
-                        self.adapter.call(composed, messages),
+                        self.adapter.call(composed_for_call, messages),
                         abort,
                     )
                 except RunAborted as exc:
@@ -151,7 +273,7 @@ class AgentRunner:
                         "abort_reason": str(exc),
                     }
             else:
-                resp = await self.adapter.call(composed, messages)
+                resp = await self.adapter.call(composed_for_call, messages)
 
             if recorder is not None:
                 usage = resp.get("usage") or {}
@@ -214,10 +336,26 @@ class AgentRunner:
                         args = pre_result.modified_args
 
                 # ── Tool dispatch ──────────────────────────────────────────
+                # Phase L (L1): cache check — only for idempotent skills.
+                cache_key: Optional[str] = None
+                cached_result: Optional[dict] = None
                 if tool_name == "Skill":
+                    skill_slug = args.get("skill")
+                    if skill_slug and skill_slug in idempotent_slugs:
+                        cache_key = ToolResultCache.key(tool_name, args)
+                        cached_result = tool_cache.get(cache_key)
+
+                if cached_result is not None:
+                    result = cached_result
+                    from app.agent_framework._metrics_helper import inc_metric
+                    inc_metric("tool_cache_hit")
+                elif tool_name == "Skill":
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
                     result = await self.skill_tool.execute(args)
+                    # Cache result if this skill is idempotent
+                    if cache_key is not None and isinstance(result, dict) and not result.get("error"):
+                        tool_cache.put(cache_key, result)
                 else:  # tool_name == "Delegate"
                     if self.delegate_tool is None:
                         result = {
@@ -245,6 +383,17 @@ class AgentRunner:
                     }
                 )
 
+                # Wave G (G3): observe for loop detection. Args
+                # canonicalized to a stable string (sorted keys).
+                try:
+                    args_repr = json.dumps(args, sort_keys=True, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    args_repr = repr(args)
+                loop_guard.observe(tool_name, args_repr)
+                # J1 telemetry
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("loop_guard_observed")
+
                 messages.append(
                     {
                         "role": "tool",
@@ -253,6 +402,23 @@ class AgentRunner:
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
+
+                # Wave G (G3): if the guard says we're looping, inject
+                # ONE system warning into messages. Subsequent iterations
+                # don't re-inject (avoid repeated warnings polluting the
+                # context). LLM must self-correct on next turn.
+                if (
+                    not loop_warning_already_injected
+                    and loop_guard.is_looping()
+                ):
+                    warning = loop_guard.render_warning()
+                    if warning:
+                        messages.append({"role": "system", "content": warning})
+                        loop_warning_already_injected = True
+                        inc_metric("loop_guard_tripped")
+                        logger.warning(
+                            f"[AgentRunner] loop_guard tripped at iter={iteration}"
+                        )
 
                 # ── PostToolUse chain ──────────────────────────────────────
                 post_result = await self._run_post_hooks(

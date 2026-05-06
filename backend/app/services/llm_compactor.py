@@ -45,25 +45,24 @@ DEFAULT_AUTO_COMPACTION_INPUT_TOKENS = 100_000
 DEFAULT_KEEP_FLOOR_TURNS = 6
 
 
-# Cheap token estimator: ~4 chars per token. Good enough for the threshold
-# decision; not used for billing.
-def estimate_tokens(messages: list[dict]) -> int:
-    total_chars = 0
-    for msg in messages:
-        content = msg.get("content")
-        if isinstance(content, str):
-            total_chars += len(content)
-        elif isinstance(content, list):
-            # Multi-part content (e.g. tool_use blocks). Stringify items.
-            for part in content:
-                total_chars += len(str(part))
-        # tool_calls also contribute (function name + JSON args).
-        for call in msg.get("tool_calls") or []:
-            fn = call.get("function") or {}
-            total_chars += len(str(fn.get("name") or "")) + len(
-                str(fn.get("arguments") or "")
-            )
-    return total_chars // 4
+# Wave 5a (A1): use the model-aware tokenizer instead of chars/4.
+# Old chars/4 under-counted Chinese 4x (1 CJK char = 1 token) — caused
+# compaction to trigger LATE on Chinese-heavy conversations and fixed-tail
+# budgeting to be wildly wrong. Routes through a proper tokenizer when
+# the provider package is installed; falls back to language-aware
+# heuristic otherwise.
+from app.agent_framework.tokenizer import count_messages_tokens
+
+
+def estimate_tokens(messages: list[dict], model: str = "") -> int:
+    """Estimate prompt-side tokens for ``messages``. ``model`` selects
+    the provider tokenizer (qwen / openai / etc.); empty model = heuristic.
+
+    Kept under the original name + signature so callers don't need to
+    pass model immediately — passing model when known just makes the
+    estimate more accurate.
+    """
+    return count_messages_tokens(messages, model)
 
 
 # Summariser injected by caller. Receives the messages to summarise and
@@ -82,6 +81,9 @@ class CompactionResult:
     summary: Optional[str] = None
     estimated_input_tokens_before: int = 0
     estimated_input_tokens_after: int = 0
+    # Wave 5b (B5): True when the head summary came from the cached
+    # session-memory doc (no LLM call), False when summarizer was invoked.
+    used_session_memory: bool = False
 
 
 async def compact_messages(
@@ -90,18 +92,58 @@ async def compact_messages(
     summarizer: Summarizer,
     max_input_tokens: int = DEFAULT_AUTO_COMPACTION_INPUT_TOKENS,
     keep_floor_turns: int = DEFAULT_KEEP_FLOOR_TURNS,
+    model: str = "",
+    tail_token_budget: Optional[int] = None,
+    session_memory_loader: Optional[Callable[[], Awaitable[Optional[str]]]] = None,
+    prune_tool_results: bool = True,
+    prune_aging_after_turns: int = 10,
 ) -> CompactionResult:
     """Compact ``messages`` if they exceed ``max_input_tokens``.
 
     The returned ``messages`` is always API-safe: every tool reply has its
     paired ``tool_use`` on the same side of the boundary.
 
+    Wave 5a (A3): tail size is now token-budget-aware. ``tail_token_budget``
+    overrides the legacy ``keep_floor_turns`` when provided. We walk
+    backwards from the end accumulating turns until the budget is hit;
+    minimum tail of 2 turns regardless. ``model`` selects the tokenizer.
+    Legacy fixed-N path stays as fallback when ``tail_token_budget`` is None.
+
     No-op cases (returned ``compacted=False``):
       - Token estimate under threshold.
-      - Fewer than ``keep_floor_turns`` messages total.
+      - Fewer than ``keep_floor_turns`` messages total (legacy path).
       - Pair-preservation walk-back consumed everything (rare; defensive).
     """
-    estimated_before = estimate_tokens(messages)
+    estimated_before = estimate_tokens(messages, model)
+
+    # Wave F (F2): cheap pre-pass — dedupe + age tool_results BEFORE the
+    # threshold check. Two big wins:
+    #   1. Many "near-overflow" conversations drop back UNDER threshold
+    #      after dedupe (no compaction LLM call needed at all).
+    #   2. When compaction does fire, head/tail are already ~30% smaller
+    #      so the LLM summary is cheaper + tighter.
+    # Pure functions; safe to skip via prune_tool_results=False.
+    if prune_tool_results and estimated_before >= int(max_input_tokens * 0.7):
+        from app.agent_framework.tool_result_pruner import prune as _prune
+
+        pruned, prune_stats = _prune(
+            messages, aging_after_turns=prune_aging_after_turns
+        )
+        if prune_stats.duplicates_replaced or prune_stats.aged_results:
+            messages = pruned
+            estimated_before = estimate_tokens(messages, model)
+            from app.agent_framework._metrics_helper import inc_metric
+            inc_metric("compaction_pre_pass_pruned",
+                       by=prune_stats.duplicates_replaced + prune_stats.aged_results)
+            logger.info(
+                "[Compactor] pre-pass pruned %d dups + %d aged "
+                "(%d chars dropped); new estimate=%d",
+                prune_stats.duplicates_replaced,
+                prune_stats.aged_results,
+                prune_stats.chars_dropped,
+                estimated_before,
+            )
+
     if estimated_before < max_input_tokens:
         return CompactionResult(
             messages=messages,
@@ -119,8 +161,14 @@ async def compact_messages(
             estimated_input_tokens_after=estimated_before,
         )
 
-    # Initial candidate split: keep last ``keep_floor_turns`` messages.
-    candidate = len(messages) - keep_floor_turns
+    # Wave 5a (A3): pick split point — token-budget mode preferred when
+    # caller supplied a budget; legacy fixed-N otherwise.
+    if tail_token_budget is not None and tail_token_budget > 0:
+        candidate = _candidate_split_by_token_budget(
+            messages, tail_token_budget, model=model, min_tail_turns=2
+        )
+    else:
+        candidate = len(messages) - keep_floor_turns
     safe_split = _safe_split_index(messages, candidate)
 
     if safe_split <= 0:
@@ -139,7 +187,25 @@ async def compact_messages(
     head = messages[:safe_split]
     tail = messages[safe_split:]
 
-    summary_text = await summarizer(head)
+    # Wave 5b (B5): if a session_memory_loader is provided, prefer the
+    # already-maintained session-memory document over a fresh LLM call.
+    # The loader returns the cached body_md (or None if no memory yet).
+    summary_text: Optional[str] = None
+    used_session_memory = False
+    if session_memory_loader is not None:
+        try:
+            cached = await session_memory_loader()
+            if cached:
+                summary_text = cached
+                used_session_memory = True
+        except Exception as exc:
+            logger.warning(
+                "[Compactor] session_memory_loader failed: %s — falling back to fresh summary",
+                exc,
+            )
+
+    if summary_text is None:
+        summary_text = await summarizer(head)
 
     summary_message = {
         "role": "system",
@@ -148,7 +214,16 @@ async def compact_messages(
         ),
     }
     new_messages = [summary_message, *tail]
-    estimated_after = estimate_tokens(new_messages)
+    estimated_after = estimate_tokens(new_messages, model)
+
+    # Wave I (I3) + J1: telemetry via helper.
+    from app.agent_framework._metrics_helper import inc_metric
+    inc_metric("compaction_triggered")
+    inc_metric(
+        "compaction_used_session_memory"
+        if used_session_memory
+        else "compaction_used_fresh_summarizer"
+    )
 
     return CompactionResult(
         messages=new_messages,
@@ -157,6 +232,7 @@ async def compact_messages(
         summary=summary_text,
         estimated_input_tokens_before=estimated_before,
         estimated_input_tokens_after=estimated_after,
+        used_session_memory=used_session_memory,
     )
 
 
@@ -232,6 +308,41 @@ def _safe_split_index(messages: list[dict], candidate: int) -> int:
             return 0
 
     return candidate
+
+
+def _candidate_split_by_token_budget(
+    messages: list[dict],
+    tail_token_budget: int,
+    *,
+    model: str,
+    min_tail_turns: int = 2,
+) -> int:
+    """Wave 5a (A3): pick split index so tail fits in ``tail_token_budget``.
+
+    Walks backwards from end accumulating token counts; returns the
+    first index where adding the next-older message would push over
+    budget, BUT never returns an index that would leave fewer than
+    ``min_tail_turns`` messages in tail.
+
+    Returns 0 if the entire conversation fits in budget (caller will
+    then bail to legacy path or return as-is).
+    """
+    if not messages:
+        return 0
+    n = len(messages)
+    accumulated = 0
+    # Walk from the end; tail_start is the index of the FIRST tail msg
+    tail_start = n
+    for i in range(n - 1, -1, -1):
+        msg_tokens = estimate_tokens([messages[i]], model)
+        # min_tail_turns: force at least min_tail_turns into tail even
+        # if they exceed budget (any single huge msg already capped by A2)
+        included_so_far = n - i
+        if accumulated + msg_tokens > tail_token_budget and included_so_far > min_tail_turns:
+            break
+        accumulated += msg_tokens
+        tail_start = i
+    return tail_start
 
 
 __all__ = [

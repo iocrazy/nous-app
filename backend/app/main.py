@@ -62,6 +62,32 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to load transcode config from database: {e}")
 
+    # P0-1: schema sanity probe — warn (don't block) if migrations the
+    # current code depends on haven't been applied. Quick + cheap query;
+    # failure here just means operator missed a `psql -f migrations/N.sql`
+    # step. We log loudly so the gap is visible, but startup proceeds —
+    # the affected feature paths will fail individually at first call.
+    try:
+        from app.db import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        required_tables = ["agent_commitments"]  # extend on each migration
+        for table in required_tables:
+            probe = await (
+                sb.table(table).select("*", count="exact").limit(0).execute()
+            )
+            if not hasattr(probe, "data"):
+                logger.warning(
+                    f"Schema probe: table '{table}' is unreachable — "
+                    f"check that the corresponding migration was applied"
+                )
+    except Exception as e:
+        # Most likely cause: PostgREST returns 42P01 when the table is missing.
+        # Surface the table name so operator can grep for the migration.
+        logger.warning(
+            f"Schema probe failed (likely missing migration): {e}"
+        )
+
     # Load AI Library seeds (agents + skills) from backend/seeds/.
     # Wrapped defensively: a seed failure must not block server startup.
     # Breadcrumb logs below are load-bearing for post-incident diagnosis —
@@ -144,6 +170,17 @@ async def lifespan(app: FastAPI):
     process_role = role_from_env()
     app.state.process_role = process_role
     logger.info(f"Process role: {process_role.value}")
+
+    # D10-7: install atexit + SIGINT/SIGTERM handlers that kill all
+    # spawned subprocess + multiprocessing children before the parent
+    # exits. Defends against orphan children holding DB connections /
+    # file descriptors after pytest crash / dev script Ctrl-C.
+    try:
+        from app.agent_framework.process_lifecycle import install_cleanup_handlers
+        install_cleanup_handlers()
+        logger.info("D10-7 process cleanup handlers installed")
+    except Exception as plc_exc:
+        logger.warning(f"D10-7 cleanup install failed: {plc_exc}")
 
     # PR-D5: DBOS launch moved BEFORE workforce scheduler so the scheduler
     # can pick DbosAgentWorkforcePool when WORKFORCE_USE_DBOS_QUEUE is on.
@@ -232,39 +269,141 @@ async def lifespan(app: FastAPI):
             ContextEngineRegistry,
             LaneQueue,
             LifecycleBus,
+            ModelHealthRegistry,
         )
 
         app.state.lifecycle_bus = LifecycleBus()
         app.state.lane_queue = LaneQueue()
+        # P1-5: per-process ModelHealthRegistry. Fallback chain caller
+        # (ai_library_chat_wiring) reads it from app.state when building
+        # the chain, so cooled-down models are skipped on retry.
+        app.state.model_health = ModelHealthRegistry()
+        # Wave I (I1): per-process RootAbortRegistry. Subagent dispatches
+        # register children against the parent's abort controller so root
+        # cancel fans out to the entire delegation tree.
+        from app.agent_framework.root_abort_registry import RootAbortRegistry
+        app.state.root_abort_registry = RootAbortRegistry()
+
+        # Wave I (I3): per-process AgentMetrics counters. Admin / health
+        # endpoints read .snapshot() for ops dashboards.
+        from app.agent_framework.telemetry import AgentMetrics
+        app.state.agent_metrics = AgentMetrics()
+
+        # D10-14: optional Prometheus pushgateway agent. Only fires
+        # when PROMETHEUS_PUSHGATEWAY_URL env is set; default off.
+        try:
+            from app.agent_framework.prometheus_pusher import (
+                from_env as _pp_from_env,
+            )
+            pusher = _pp_from_env(app.state.agent_metrics)
+            if pusher is not None:
+                await pusher.start()
+                app.state.prometheus_pusher = pusher
+        except Exception as pp_exc:
+            logger.warning(f"D10-14 pusher start failed: {pp_exc}")
+
+        # Wave G (G2): per-process HookRegistry seeded with bridge-wrapped
+        # legacy hooks (BudgetGuard / CostAuditor / MemoryHarvester).
+        # New hooks added later just `register()` directly.
+        try:
+            from app.agent_framework import (
+                HookRegistry,
+                wrap_legacy_post,
+                wrap_legacy_pre,
+            )
+            from app.services.hooks.cost_auditor import CostAuditorHook
+            from app.services.hooks.memory_harvester import MemoryHarvesterHook
+
+            hook_registry = HookRegistry()
+            try:
+                hook_registry.register(wrap_legacy_post(CostAuditorHook()))
+            except Exception as cae:
+                logger.warning(f"hook register CostAuditor failed: {cae}")
+            try:
+                hook_registry.register(wrap_legacy_post(MemoryHarvesterHook()))
+            except Exception as mhe:
+                logger.warning(f"hook register MemoryHarvester failed: {mhe}")
+            # BudgetGuard takes constructor args (budget_cents) — caller
+            # constructs a per-run instance, not a global one. Skip here.
+            app.state.hook_registry = hook_registry
+            logger.info(
+                f"HookRegistry seeded with {len(hook_registry)} legacy hooks"
+            )
+        except Exception as he:
+            logger.warning(f"HookRegistry seed failed: {he}")
         # Sprint 6: per-process context-engine registry. Surfaces (chat,
         # search, storyboard) self-register their engines at startup so
-        # callers can fetch by surface name. Empty by default — engines
-        # opt in. The chat composer wiring follows in Sprint 6.5.
+        # callers can fetch by surface name.
         app.state.context_engines = ContextEngineRegistry()
 
-        # Sprint 5 (D10-1): every process holds a BoundsRegistry. On worker
-        # / combined processes we self-register the bounds we know about
-        # locally — the gateway-side registry will receive these via the
-        # transport layer in Sprint 5.5 (HTTP push or DB row). For now this
-        # makes the registry queryable in-process for tests / admin views.
+        # Sprint 6.5 wire-up: register the chat context engine. Wrapped
+        # PromptComposer; callers fetch via require('chat'). Search /
+        # Storyboard register their own engines from feature modules.
+        try:
+            from app.services.chat_context_engine import ChatContextEngine
+
+            app.state.context_engines.register(ChatContextEngine())
+            logger.info("ContextEngine registered: chat")
+        except Exception as ce_exc:
+            logger.warning(f"ChatContextEngine registration failed: {ce_exc}")
+
+        # Sprint 5 (D10-1) + 5.5 wire-up: every process holds a
+        # BoundsRegistry. Workers self-register their REAL inventory
+        # (workflow names, agent slugs, providers) so dispatch_gate
+        # can fail-fast for jobs no live worker can handle.
         app.state.bounds_registry = BoundsRegistry()
+        app.state.bounds_self_id = None
         if process_role.runs_dbos_workers:
             try:
                 import socket
 
+                from app.agent_framework.bounds_inventory import (
+                    inventory_agent_slugs,
+                    inventory_providers,
+                    inventory_workflow_names,
+                )
+                from app.repositories.agent_repository import AgentRepository
+
                 worker_id = f"{socket.gethostname()}-pid{os.getpid()}"
-                # Bounds are filled minimally here — concrete inventory
-                # (registered workflow names, agent slugs, providers)
-                # comes from a discovery pass in Sprint 5.5. This entry
-                # is enough for "is there *any* worker alive" checks.
+
+                # Workflow names: introspect the workflows pkg. Re-import
+                # locally so this block doesn't depend on whether the
+                # earlier DBOS init's `from app import workflows` made
+                # it into this scope (it doesn't, in current Python rules
+                # — names imported in conditional blocks are scope-local
+                # per CPython's compile-time symbol table; see issue G2-FIX).
+                workflow_names: frozenset[str] = frozenset()
+                try:
+                    from app import workflows as _wf  # noqa: F401
+                    workflow_names = inventory_workflow_names(_wf)
+                except Exception as inv_exc:
+                    logger.warning(
+                        f"Bounds: workflow inventory failed: {inv_exc}"
+                    )
+
+                agent_slugs = await inventory_agent_slugs(AgentRepository())
+                providers = inventory_providers(settings)
+
                 self_bound = BoundsAdvertisement(
                     worker_id=worker_id,
                     role=process_role.value,
+                    workflows=workflow_names,
+                    agents=agent_slugs,
+                    providers=providers,
                 )
                 app.state.bounds_registry.register(self_bound)
-                logger.info(f"Bounds registry: self-registered worker_id={worker_id}")
+                app.state.bounds_self_id = worker_id
+                logger.info(
+                    f"Bounds: self-registered worker_id={worker_id} "
+                    f"(workflows={len(workflow_names)} agents={len(agent_slugs)} "
+                    f"providers={sorted(providers)})"
+                )
             except Exception as e:
                 logger.warning(f"Bounds self-registration failed: {e}")
+
+        # Sprint 5.5: dispatch gate — orchestrator consults the registry
+        # before enqueueing. set_bounds_registry(None) disables.
+        dbos_orchestrator.set_bounds_registry(app.state.bounds_registry)
 
         logger.info(
             "Agent framework primitives ready "
@@ -272,6 +411,58 @@ async def lifespan(app: FastAPI):
         )
     except Exception as e:
         logger.warning(f"Agent framework primitive setup failed: {e}")
+
+    # Sprint 5.5 + P0-3: bounds heartbeat — refresh last_seen every 30s
+    # so the registry's stale-prune (90s default) doesn't garbage-collect
+    # us. If pruned anyway (clock skew, registry rebuild), reconstruct the
+    # bound from cached state and re-register so we don't go silent
+    # forever. Only on processes that registered themselves (workers).
+    bounds_heartbeat_task = None
+    if getattr(app.state, "bounds_self_id", None):
+        import asyncio as _asyncio
+
+        # Cache the bound built at startup so a re-register doesn't have
+        # to re-do all the inventory I/O (DB read for agent slugs etc).
+        cached_bound = next(
+            (
+                b
+                for b in app.state.bounds_registry.live_bounds()
+                if b.worker_id == app.state.bounds_self_id
+            ),
+            None,
+        )
+        app.state.bounds_self_bound = cached_bound
+
+        async def _heartbeat() -> None:
+            wid = app.state.bounds_self_id
+            while True:
+                try:
+                    await _asyncio.sleep(30.0)
+                    if not app.state.bounds_registry.heartbeat(wid):
+                        # Pruned between ticks — re-register from cache so
+                        # gateway's view of live workers heals next tick.
+                        bound = app.state.bounds_self_bound
+                        if bound is not None:
+                            app.state.bounds_registry.register(bound)
+                            logger.warning(
+                                f"Bounds heartbeat: {wid} was pruned; "
+                                "re-registered from cached bound"
+                            )
+                        else:
+                            logger.error(
+                                f"Bounds heartbeat: {wid} pruned AND no "
+                                "cached bound to re-register from"
+                            )
+                except _asyncio.CancelledError:
+                    break
+                except Exception as hb_exc:
+                    logger.warning(f"Bounds heartbeat tick failed: {hb_exc}")
+
+        bounds_heartbeat_task = _asyncio.create_task(
+            _heartbeat(), name="bounds-heartbeat"
+        )
+        app.state.bounds_heartbeat_task = bounds_heartbeat_task
+        logger.info("Bounds heartbeat task started (30s tick)")
 
     # Event-loop-ready probe (D10-6): wait until the loop has settled
     # after DBOS/seed/workforce init before we declare startup success.
@@ -294,6 +485,30 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Event-loop-ready probe failed: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
+
+    # Sprint 5.5: stop heartbeat + unregister from bounds before draining.
+    if bounds_heartbeat_task is not None:
+        bounds_heartbeat_task.cancel()
+        try:
+            await bounds_heartbeat_task
+        except (BaseException,):  # noqa: BLE001 — task cancellation is expected
+            pass
+        if getattr(app.state, "bounds_self_id", None):
+            try:
+                app.state.bounds_registry.unregister(app.state.bounds_self_id)
+                logger.info("Bounds: unregistered self on shutdown")
+            except Exception as ub_exc:
+                logger.warning(f"Bounds unregister failed: {ub_exc}")
+
+    # D10-14: stop the Prometheus pusher before draining anything else
+    # so its background loop doesn't try to push half-shutdown state.
+    pusher = getattr(app.state, "prometheus_pusher", None)
+    if pusher is not None:
+        try:
+            await pusher.stop()
+            logger.info("D10-14 PrometheusPusher stopped")
+        except Exception as e:
+            logger.warning(f"PrometheusPusher stop raised {e!r}")
 
     # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
     try:

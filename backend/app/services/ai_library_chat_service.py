@@ -211,14 +211,85 @@ class AILibraryChatService:
     # Chat
     # ------------------------------------------------------------------
 
+    async def chat_stream(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        content: str,
+    ):
+        """Phase L (L3): SSE streaming variant of chat.
+
+        Yields event dicts: {type: 'delta' | 'done' | 'error', data: {...}}.
+
+        Strategy:
+          - Always run the full chat() pipeline (handles tool_calls +
+            persistence + harvest + session_memory dispatch correctly).
+          - Then chunk the response text into ~80-char delta events on
+            whitespace boundaries so the client gets incremental output
+            even when the upstream LLM call was buffered.
+
+        Real adapter-level token streaming exists at
+        ``AgentRunner.stream_turn`` but doesn't yet execute tool_calls
+        mid-stream. Until tool execution is plumbed through streaming,
+        we deliberately do "buffered call + chunked emit" so frontends
+        get a usable streaming UX without breaking tool-using turns.
+
+        Each delta carries (text, offset). ``done`` has usage + run_id +
+        tool_calls trace + total_chars.
+        """
+        try:
+            result = await self.chat(session_id, user_id=user_id, content=content)
+        except Exception as exc:
+            yield {"type": "error", "data": {"error": f"{type(exc).__name__}: {exc}"}}
+            return
+
+        message = result.get("assistant_message") or {}
+        text = message.get("content") or ""
+
+        DELTA_CHARS = 80
+        offset = 0
+        n = len(text)
+        while offset < n:
+            end = min(offset + DELTA_CHARS, n)
+            # Try to break on whitespace if not at end
+            if end < n:
+                for probe in range(end, min(end + 20, n)):
+                    if text[probe].isspace():
+                        end = probe + 1
+                        break
+            chunk = text[offset:end]
+            yield {
+                "type": "delta",
+                "data": {"text": chunk, "offset": offset},
+            }
+            offset = end
+
+        yield {
+            "type": "done",
+            "data": {
+                "message_id": message.get("id"),
+                "usage": result.get("usage"),
+                "run_id": result.get("run_id"),
+                "tool_calls": result.get("tool_calls", []),
+                "total_chars": n,
+            },
+        }
+
     async def chat(
         self,
         session_id: UUID,
         *,
         user_id: UUID,
         content: str,
+        plan_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
+
+        Phase M (M4): when ``plan_mode='prompt_user'`` or 'dry_run', the
+        prompt composer prepends the PLAN_PROMPT instructing the LLM to
+        emit a structured plan instead of executing. The chat response
+        is the plan markdown; user replies approve/reject in next turn.
 
         Flow:
           1. Load session (404 if not owner)
@@ -290,26 +361,135 @@ class AILibraryChatService:
         # <available_workers>. Without this hint the LLM tends to do the
         # work itself even when a better specialist exists. Use await=true
         # if you need the result in the same turn.
-        composer = PromptComposer(agent_repo, skill_repo)
-        composed = await composer.compose(
-            ComposerInput(
-                agent_slug=agent_slug,
-                request_instructions=(
-                    "You are in an interactive chat session with the user. "
-                    "Respond conversationally. Use the Skill tool when a "
-                    "bound skill is clearly applicable; otherwise answer "
-                    "directly in natural language. "
-                    "If <available_workers> lists a specialist agent that's "
-                    "a clearly better fit for the request than you are "
-                    "(e.g. summarize for transcript condensation, analyze "
-                    "for visual analysis), call Delegate(agent_slug=..., "
-                    "prompt=..., await=true) and weave the returned result "
-                    "into your reply. Use Delegate only when the specialist "
-                    "is a clear win — for general chat, just answer directly."
-                ),
-                recalled_memories=stack.recalled_memories,
+        #
+        # P1-4: route through ContextEngineRegistry when available
+        # (Sprint 6.5 wire-up). Falls back to direct PromptComposer when
+        # the registry isn't on app.state — keeps unit tests + scripts
+        # that don't go through FastAPI lifespan working unchanged.
+        # Phase M (M4): if caller asked for plan mode, swap the entire
+        # request_instructions for the plan prompt template. The agent
+        # responds with structured JSON plan; user approves/rejects in
+        # next turn (no PlanMode flag → default execute behavior).
+        if plan_mode in ("prompt_user", "dry_run"):
+            from app.agent_framework.plan_mode import build_plan_prompt
+            request_instructions = build_plan_prompt()
+        else:
+            request_instructions = (
+                "You are in an interactive chat session with the user. "
+                "Respond conversationally. Use the Skill tool when a "
+                "bound skill is clearly applicable; otherwise answer "
+                "directly in natural language. "
+                "If <available_workers> lists a specialist agent that's "
+                "a clearly better fit for the request than you are "
+                "(e.g. summarize for transcript condensation, analyze "
+                "for visual analysis), call Delegate(agent_slug=..., "
+                "prompt=..., await=true) and weave the returned result "
+                "into your reply. Use Delegate only when the specialist "
+                "is a clear win — for general chat, just answer directly."
             )
-        )
+
+        # Wave G (G8): on the FIRST turn of a session, fire any
+        # pending NEXT_SESSION commitments and inject reminders into
+        # request_instructions. Best-effort — failure logs + skips.
+        is_first_turn = len(history) == 0
+        if is_first_turn and user_id:
+            try:
+                from app.repositories.commitment_repository import (
+                    CommitmentRepository,
+                )
+
+                _crepo = CommitmentRepository()
+                pending = await _crepo.list_next_session(
+                    agent_id=str(composed.agent_id),
+                    user_id=str(user_id),
+                )
+                if pending:
+                    reminder_lines = [
+                        "<pending_followups>",
+                        f"You committed to {len(pending)} follow-up(s) "
+                        "in earlier sessions. Surface them naturally in "
+                        "your first reply if relevant:",
+                    ]
+                    for c in pending[:5]:  # cap on UI noise
+                        reminder_lines.append(f"  - {c.description}")
+                    reminder_lines.append("</pending_followups>")
+                    request_instructions = (
+                        "\n".join(reminder_lines) + "\n\n" + request_instructions
+                    )
+                    # Mark them fulfilled so they don't fire again.
+                    for c in pending[:5]:
+                        if c.id is not None:
+                            try:
+                                await _crepo.mark_fulfilled(
+                                    c.id, notes="surfaced at session open"
+                                )
+                            except Exception:
+                                pass
+                    logger.info(
+                        f"[chat] G8 surfaced {len(pending)} next_session commitments"
+                    )
+            except Exception as g8_exc:
+                logger.warning(
+                    f"next_session surface skipped (non-fatal): {g8_exc}"
+                )
+
+        # P1-6: link-injection wire-up. Pull URLs out of the latest user
+        # message, fetch via boundary-safe link_understanding, prepend
+        # rendered blocks to request_instructions. Failures (4xx/5xx,
+        # boundary reject, timeout) get explicit placeholder blocks so
+        # the agent doesn't hallucinate URL contents.
+        # Best-effort: any error here just skips link injection — the
+        # chat must never break because URL fetch failed.
+        try:
+            from app.services.link_injection import (
+                extract_urls,
+                fetch_and_render,
+            )
+
+            urls = extract_urls(content, max_urls=3)
+            if urls:
+                injection = await fetch_and_render(urls)
+                if injection.has_content:
+                    request_instructions = (
+                        injection.joined + "\n\n" + request_instructions
+                    )
+                    logger.info(
+                        f"link_injection: injected {len(injection.blocks)} "
+                        f"block(s) for {len(urls)} URL(s); "
+                        f"failures={len(injection.failures)}"
+                    )
+        except Exception as li_exc:
+            logger.warning(f"link_injection failed (non-fatal): {li_exc}")
+        composed = None
+        engine = None
+        try:
+            from app.main import app as _app  # late import to avoid cycle
+
+            engine = getattr(_app.state, "context_engines", None)
+            if engine is not None:
+                engine = engine.get("chat")
+        except Exception:
+            engine = None
+
+        if engine is not None:
+            payload = await engine.assemble(
+                {
+                    "agent_slug": agent_slug,
+                    "request_instructions": request_instructions,
+                    "session_id": session_id,
+                    "recalled_memories": stack.recalled_memories,
+                }
+            )
+            composed = payload.metadata["composed"]
+        else:
+            composer = PromptComposer(agent_repo, skill_repo)
+            composed = await composer.compose(
+                ComposerInput(
+                    agent_slug=agent_slug,
+                    request_instructions=request_instructions,
+                    recalled_memories=stack.recalled_memories,
+                )
+            )
 
         runner = stack.runner
 
@@ -325,11 +505,35 @@ class AILibraryChatService:
             user_messages.append({"role": role, "content": msg.get("content") or ""})
         user_messages.append({"role": "user", "content": content})
 
+        # Wave G (G5): per-message size cap. Defends against the
+        # "user pasted 200k log line" case that bypasses compaction
+        # entirely (compaction works at message-list level, not single-
+        # message level). Default cap = 50k tokens ≈ 200KB; rare and
+        # typically machine-generated when triggered.
+        try:
+            from app.agent_framework import cap_messages_tokens
+            outcomes = cap_messages_tokens(
+                user_messages,
+                model=model_for_estimate(composed) if False else "",  # noqa
+            )
+            # Replace the message list with possibly-truncated versions
+            user_messages = [o.message for o in outcomes]
+            truncated_count = sum(1 for o in outcomes if o.truncated)
+            if truncated_count:
+                logger.info(
+                    f"[chat] per-message cap truncated {truncated_count} "
+                    f"oversized message(s)"
+                )
+        except Exception as cap_exc:
+            logger.warning(f"per-message cap skipped (non-fatal): {cap_exc}")
+
         # M1.5 wiring: compact the message list if it has grown past the
         # threshold. Compactor preserves tool_use/result pairs so the
         # next API call won't 400. Failure degrades to "send full history
         # and let the model deal with it" — never breaks the chat.
-        user_messages = await self._maybe_compact(user_messages)
+        user_messages = await self._maybe_compact(
+            user_messages, session_id=session_id
+        )
 
         model = composed.model or ""
         try:
@@ -432,6 +636,127 @@ class AILibraryChatService:
             .execute()
         )
 
+        # Wave 5b (B4): fire-and-forget session-memory updater. Doesn't
+        # await — we return to the user immediately. The updater itself
+        # handles errors silently (see SessionMemoryService docstring).
+        # All-messages list = full history + new user + new assistant.
+        try:
+            import asyncio as _asyncio
+
+            from app.repositories.session_memory_repository import (
+                SessionMemoryRepository,
+            )
+            from app.services.session_memory_runner import maybe_update_session_memory
+
+            full_messages = user_messages + [
+                {"role": "assistant", "content": assistant_content}
+            ]
+            _asyncio.create_task(
+                maybe_update_session_memory(
+                    session_id=str(session_id),
+                    messages=full_messages,
+                    model=model,
+                    repo=SessionMemoryRepository(),
+                ),
+                name=f"session-memory-update-{session_id}",
+            )
+        except Exception as sm_exc:
+            logger.warning(
+                f"session_memory dispatch skipped (non-fatal): {sm_exc}"
+            )
+
+        # Wave F (F8): fire-and-forget commitment harvester. Pre-filter
+        # makes ~95% of turns skip without an LLM call. Real persistor
+        # writes to agent_commitments via CommitmentRepository.
+        try:
+            import asyncio as _asyncio
+
+            from app.repositories.commitment_repository import (
+                CommitmentRepository,
+            )
+            from app.services.commitment_harvester import (
+                HarvestContext,
+                HarvestedCommitment,
+                harvest_commitments,
+            )
+
+            commitment_ctx = HarvestContext(
+                agent_id=str(composed.agent_id),
+                user_id=str(user_id) if user_id else None,
+                session_id=str(session_id),
+                run_id=str(run_id) if run_id else None,
+            )
+            commitment_repo = CommitmentRepository()
+
+            # Cheap-LLM extraction summarizer + persistor closures. Both
+            # capture by name so the asyncio.create_task dispatch is clean.
+            async def _harvest_summarizer(prompt: str) -> str:
+                try:
+                    from app.schemas.ai_library import ComposedSystemPrompt
+                    from app.services.ai_provider import QwenAdapter
+
+                    api_key = (
+                        getattr(settings, "DASHSCOPE_API_KEY", None)
+                        or getattr(settings, "QWEN_API_KEY", None)
+                    )
+                    if not api_key:
+                        return ""
+                    adapter = QwenAdapter(api_key=api_key, model="qwen-turbo")
+                    cs = ComposedSystemPrompt(
+                        agent_id=composed.agent_id,
+                        agent_slug="commitment_harvester",
+                        model="qwen-turbo",
+                        temperature=0.0,
+                        max_tokens=512,
+                        system_message="Extract commitments. Output strict JSON.",
+                        tools=[],
+                        skill_manifest=[],
+                        cache_fingerprint="commitment_harvester_v1",
+                    )
+                    resp = await adapter.call(
+                        cs, [{"role": "user", "content": prompt}]
+                    )
+                    return resp.get("content") or ""
+                except Exception:
+                    return ""
+
+            async def _harvest_persistor(
+                commitment: HarvestedCommitment, context: HarvestContext
+            ):
+                from app.agent_framework.commitments import (
+                    Commitment,
+                    TriggerType,
+                )
+
+                try:
+                    obj = Commitment(
+                        agent_id=context.agent_id,
+                        user_id=context.user_id,
+                        session_id=context.session_id,
+                        description=commitment.description,
+                        trigger_type=TriggerType(commitment.trigger_type),
+                        trigger_at=commitment.trigger_at,
+                        trigger_event=commitment.trigger_event,
+                    )
+                    created = await commitment_repo.create(obj)
+                    return str(created.id) if created and created.id else None
+                except Exception:
+                    return None
+
+            _asyncio.create_task(
+                harvest_commitments(
+                    response_text=assistant_content or "",
+                    context=commitment_ctx,
+                    summarizer=_harvest_summarizer,
+                    persistor=_harvest_persistor,
+                ),
+                name=f"commitment-harvest-{session_id}",
+            )
+        except Exception as ch_exc:
+            logger.warning(
+                f"commitment harvester dispatch skipped (non-fatal): {ch_exc}"
+            )
+
         return {
             "user_message": user_msg,
             "assistant_message": asst_msg,
@@ -441,7 +766,10 @@ class AILibraryChatService:
         }
 
     async def _maybe_compact(
-        self, messages: List[Dict[str, Any]]
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        session_id: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """Compact long histories. Failure → return original messages.
 
@@ -449,6 +777,11 @@ class AILibraryChatService:
         head; degrading on failure is fine since the LLM call itself
         will eventually 400 if context truly overflows, and the user
         will see a clear error instead of a silent corruption.
+
+        Wave 5b (B5): when ``session_id`` is provided, looks up the
+        cached session_memory and uses it as the head summary instead
+        of calling the cheap LLM — saves a round-trip + makes the
+        summary structurally consistent (fixed schema).
         """
         from app.services.llm_compactor import (
             DEFAULT_AUTO_COMPACTION_INPUT_TOKENS,
@@ -458,6 +791,22 @@ class AILibraryChatService:
 
         if estimate_tokens(messages) < DEFAULT_AUTO_COMPACTION_INPUT_TOKENS:
             return messages
+
+        # Wave 5b (B5): build session_memory_loader closure if we have a
+        # session_id. Loader returns body_md or None; compactor decides.
+        session_memory_loader = None
+        if session_id is not None:
+            from app.repositories.session_memory_repository import (
+                SessionMemoryRepository,
+            )
+
+            _sm_repo = SessionMemoryRepository()
+
+            async def _load_session_memory() -> Optional[str]:
+                row = await _sm_repo.load(session_id)
+                return row.body_md if row else None
+
+            session_memory_loader = _load_session_memory
 
         async def _summarizer(head: List[Dict[str, Any]]) -> str:
             try:
@@ -494,7 +843,11 @@ class AILibraryChatService:
                 return "[history truncated for context length]"
 
         try:
-            result = await compact_messages(messages, summarizer=_summarizer)
+            result = await compact_messages(
+                messages,
+                summarizer=_summarizer,
+                session_memory_loader=session_memory_loader,
+            )
             if result.compacted:
                 logger.info(
                     "[chat] compacted: %d → %d tokens (%d head messages summarised)",

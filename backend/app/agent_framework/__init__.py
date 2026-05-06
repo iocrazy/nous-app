@@ -25,6 +25,13 @@ from app.agent_framework.bounds import (
     BoundsAdvertisement,
     BoundsRegistry,
 )
+from app.agent_framework.bounds_redis import RedisBoundsRegistry
+from app.agent_framework.bounds_inventory import (
+    inventory_agent_slugs,
+    inventory_providers,
+    inventory_workflow_names,
+    merge_lane_capacity,
+)
 from app.agent_framework.cancel_watcher import watch_cancel_loop
 from app.agent_framework.commitments import (
     Commitment,
@@ -75,6 +82,7 @@ from app.agent_framework.lifecycle_bus import (
     LifecycleBus,
     LifecycleEvent,
 )
+from app.agent_framework.mcp_stdio import serve as serve_mcp_stdio
 from app.agent_framework.mcp_descriptor import (
     DuplicateToolError,
     MCPToolRegistry,
@@ -88,13 +96,97 @@ from app.agent_framework.model_health import (
     ModelHealth,
     ModelHealthRegistry,
 )
+from app.agent_framework.hooks_bridge import (
+    LegacyPostToolUseHook,
+    LegacyPreToolUseHook,
+    wrap_legacy_post,
+    wrap_legacy_pre,
+)
+from app.agent_framework.hooks_protocol import (
+    DuplicateHookError,
+    Hook,
+    HookContext,
+    HookDecision,
+    HookEvent,
+    HookRegistry,
+    HookResult,
+)
+from app.agent_framework.loop_guard import ToolCallLoopGuard
+from app.agent_framework.output_budget import (
+    OutputBudget,
+    derive_output_budget,
+    should_auto_continue,
+)
 from app.agent_framework.role import ProcessRole, role_from_env
+from app.agent_framework.root_abort_registry import RootAbortRegistry
 from app.agent_framework.rotating_adapter import RotatingAdapter
 from app.agent_framework.subprocess_registry import (
     cancel_workflow_subprocesses,
     register_subprocess,
     registered_pids,
     unregister_subprocess,
+)
+from app.agent_framework.telemetry import COUNTER_NAMES, AgentMetrics
+from app.agent_framework.session_memory import (
+    SECTION_ORDER,
+    SessionMemoryService,
+    SessionMemoryTrigger,
+    SessionMetrics,
+    build_update_prompt as build_session_memory_update_prompt,
+    compute_metrics as compute_session_metrics,
+    parse_md_sections as parse_session_memory_sections,
+    render_md as render_session_memory,
+)
+from app.agent_framework.message_truncation import (
+    DEFAULT_PER_MESSAGE_TOKEN_CAP,
+    TruncationOutcome,
+    cap_message_tokens,
+    cap_messages_tokens,
+)
+from app.agent_framework.tokenizer import (
+    count_messages_tokens,
+    count_tokens,
+)
+from app.agent_framework.tool_result_cache import (
+    DEFAULT_MAX_ENTRIES as DEFAULT_TOOL_CACHE_MAX_ENTRIES,
+    DEFAULT_TTL_SECONDS as DEFAULT_TOOL_CACHE_TTL_SECONDS,
+    ToolResultCache,
+)
+from app.agent_framework.tool_result_pruner import (
+    PruneStats,
+    age_old_tool_results,
+    dedupe_tool_results,
+    prune as prune_tool_results,
+)
+from app.agent_framework.agent_todo import (
+    AgentTodoList,
+    TodoItem,
+    TodoStatus,
+    TodoValidationError,
+)
+from app.agent_framework.plan_mode import (
+    ApprovalDecision,
+    PlanMode,
+    PlanStep,
+    PlanValidationError,
+    ProposedPlan,
+    build_plan_prompt,
+    parse_approval,
+    parse_plan_response,
+    render_plan_for_user,
+)
+from app.agent_framework.lifecycle_bus_redis import RedisLifecycleBus
+from app.agent_framework.model_health_redis import RedisModelHealthRegistry
+from app.agent_framework.prometheus_exporter import render_prometheus
+from app.agent_framework.prometheus_pusher import (
+    PrometheusPusher,
+    from_env as prometheus_pusher_from_env,
+)
+from app.agent_framework.process_lifecycle import install_cleanup_handlers
+from app.agent_framework.db_pool_probe import (
+    DbPoolCapacityReport,
+    log_capacity_report as log_db_pool_capacity,
+    probe_db_pool_capacity,
 )
 from app.agent_framework.workflow_timeout_policy import (
     DEFAULT_TIMEOUT_MINUTES,
@@ -105,18 +197,22 @@ from app.agent_framework.workflow_timeout_policy import (
 
 __all__ = [
     "AbortController",
+    "AgentMetrics",
     "AllKeysCooledDown",
     "BoundsAdvertisement",
     "BoundsRegistry",
+    "COUNTER_NAMES",
     "Commitment",
     "CommitmentStatus",
     "ContextEngine",
     "ContextEngineRegistry",
     "ContextPayload",
     "DuplicateContextEngineError",
+    "DuplicateHookError",
     "DuplicateToolError",
     "ContextWindowError",
     "ContextWindowWarning",
+    "DEFAULT_PER_MESSAGE_TOKEN_CAP",
     "DEFAULT_TIMEOUT_MINUTES",
     "EVT_AGENT_RUN_COMPLETE",
     "EVT_AGENT_RUN_START",
@@ -125,26 +221,64 @@ __all__ = [
     "EVT_WORKFLOW_COMPLETE",
     "EVT_WORKFLOW_FAIL",
     "EVT_WORKFLOW_START",
+    "Hook",
+    "HookContext",
+    "HookDecision",
+    "HookEvent",
+    "HookRegistry",
+    "HookResult",
     "InvalidCommitmentError",
     "KeyRotator",
     "Lane",
     "LaneQueue",
     "LaneTaskTimeout",
+    "LegacyPostToolUseHook",
+    "LegacyPreToolUseHook",
     "LifecycleBus",
     "LifecycleEvent",
     "MCPToolRegistry",
     "ModelHealth",
     "ModelHealthRegistry",
     "Origin",
+    "OutputBudget",
     "ProcessRole",
+    "PruneStats",
+    "RedisBoundsRegistry",
+    "RootAbortRegistry",
     "RotatingAdapter",
     "RunAborted",
+    "SECTION_ORDER",
+    "SessionMemoryService",
+    "SessionMemoryTrigger",
+    "SessionMetrics",
     "Tool",
+    "ToolCallLoopGuard",
+    "TruncationOutcome",
     "ToolCallResult",
     "ToolInputSchema",
     "TriggerType",
+    "age_old_tool_results",
     "agent_to_tool",
+    "build_session_memory_update_prompt",
+    "cap_message_tokens",
+    "cap_messages_tokens",
+    "compute_session_metrics",
+    "count_messages_tokens",
+    "count_tokens",
+    "dedupe_tool_results",
+    "derive_output_budget",
+    "parse_session_memory_sections",
+    "inventory_agent_slugs",
+    "inventory_providers",
+    "inventory_workflow_names",
+    "merge_lane_capacity",
+    "prune_tool_results",
+    "render_session_memory",
     "role_from_env",
+    "should_auto_continue",
+    "wrap_legacy_post",
+    "wrap_legacy_pre",
+    "serve_mcp_stdio",
     "skill_to_tool",
     "cancel_workflow_subprocesses",
     "check_context_budget",

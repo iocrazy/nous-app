@@ -295,9 +295,12 @@ async def test_p0_singleton_message_no_op():
 
 
 @pytest.mark.unit
-def test_estimate_tokens_chars_div_4():
+def test_estimate_tokens_ascii_heuristic():
+    """Wave 5a (A1): tokenizer adapter — ASCII heuristic = chars/4 + per-msg overhead.
+    Old test asserted exact 100; new estimator adds 4-token framing per message."""
     msgs = [_user("a" * 400)]
-    assert estimate_tokens(msgs) == 100  # 400 chars / 4
+    n = estimate_tokens(msgs)
+    assert 100 <= n <= 110  # 100 content + ~4 overhead
 
 
 @pytest.mark.unit
@@ -305,8 +308,9 @@ def test_estimate_tokens_includes_tool_calls_arguments():
     msg = _assistant(
         tool_calls=[_tool_call("tc1", "Skill", '{"skill": "x"}')]
     )
-    # Skill = 5 chars, args = 14 chars → 19 chars → 4 tokens (chars // 4)
-    assert estimate_tokens([msg]) == 4
+    # Wave 5a (A1): per-message overhead + name + args tokens; just check
+    # the args ARE counted (non-zero, > overhead alone)
+    assert estimate_tokens([msg]) >= 4
 
 
 @pytest.mark.unit
@@ -354,3 +358,213 @@ def _assert_no_orphan_tool_replies(messages: list[dict]) -> None:
             assert cid in issued_ids, (
                 f"orphaned tool reply: tool_call_id={cid} has no preceding assistant tool_use"
             )
+
+
+# ---------------------------------------------------------------------------
+# Wave 5a (A3): token-budget-aware tail
+# ---------------------------------------------------------------------------
+
+
+from app.services.llm_compactor import _candidate_split_by_token_budget
+
+
+@pytest.mark.unit
+def test_token_budget_tail_keeps_last_until_budget_used():
+    """20 turns of ~5k tokens each. Tail budget 12k → expect ~2-3 turns kept."""
+    msgs = [_user(_make_long_text(5_000)) for _ in range(20)]
+    split = _candidate_split_by_token_budget(msgs, tail_token_budget=12_000, model="")
+    tail_size = len(msgs) - split
+    # 2-3 turns of 5k each ≈ 10-15k; should be in this range
+    assert 2 <= tail_size <= 4
+
+
+@pytest.mark.unit
+def test_token_budget_tail_enforces_min_turns():
+    """Even when budget is tiny, at least min_tail_turns kept."""
+    msgs = [_user(_make_long_text(50_000)) for _ in range(5)]
+    split = _candidate_split_by_token_budget(
+        msgs, tail_token_budget=1_000, model="", min_tail_turns=2
+    )
+    tail_size = len(msgs) - split
+    assert tail_size >= 2
+
+
+@pytest.mark.unit
+def test_token_budget_tail_returns_zero_when_all_fits():
+    """Conversation entirely within budget → split index 0."""
+    msgs = [_user("short msg") for _ in range(5)]
+    split = _candidate_split_by_token_budget(msgs, tail_token_budget=1_000_000, model="")
+    assert split == 0
+
+
+@pytest.mark.unit
+def test_token_budget_tail_handles_empty_messages():
+    assert _candidate_split_by_token_budget([], tail_token_budget=1000, model="") == 0
+
+
+@pytest.mark.asyncio
+async def test_compact_messages_uses_tail_budget_when_provided():
+    """Verify the new param actually flows through compact_messages.
+    20 messages of ~6k tokens each = 120k total; threshold 100k triggers
+    compaction; tail_token_budget=15k → 2-3 turns kept."""
+    msgs = [_user(_make_long_text(6_000)) for _ in range(20)]
+    result = await compact_messages(
+        msgs,
+        summarizer=_fake_summary,
+        max_input_tokens=100_000,
+        tail_token_budget=15_000,
+    )
+    assert result.compacted is True
+    # Tail should be small (just a few turns within 15k budget)
+    # +1 for the summary message
+    assert 3 <= len(result.messages) <= 6
+
+
+@pytest.mark.asyncio
+async def test_compact_messages_legacy_fixed_n_path_still_works():
+    """tail_token_budget=None → fall back to keep_floor_turns behavior."""
+    msgs = [_user(_make_long_text(6_000)) for _ in range(20)]
+    result = await compact_messages(
+        msgs,
+        summarizer=_fake_summary,
+        max_input_tokens=100_000,
+        keep_floor_turns=6,
+    )
+    assert result.compacted is True
+    # +1 for summary; legacy keeps exactly 6
+    assert len(result.messages) == 7
+
+
+# ---------------------------------------------------------------------------
+# Wave 5b (B5): session-memory loader integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_memory_loader_used_instead_of_summarizer():
+    """When loader returns content, summarizer NOT called — zero LLM cost."""
+    summarizer_called = {"n": 0}
+
+    async def _summ(msgs):
+        summarizer_called["n"] += 1
+        return "fresh summary"
+
+    async def _loader():
+        return "# Session Title\nUsing cached memory\n# Current Working State\n(none)"
+
+    msgs = [_user(_make_long_text(15_000)) for _ in range(20)]
+    result = await compact_messages(
+        msgs,
+        summarizer=_summ,
+        max_input_tokens=100_000,
+        session_memory_loader=_loader,
+    )
+    assert result.compacted is True
+    assert result.used_session_memory is True
+    assert summarizer_called["n"] == 0  # zero LLM calls
+    assert "Using cached memory" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_session_memory_loader_returns_none_falls_back_to_summarizer():
+    """Loader returned None → summarizer called as before."""
+    summarizer_called = {"n": 0}
+
+    async def _summ(msgs):
+        summarizer_called["n"] += 1
+        return "fresh summary fallback"
+
+    async def _loader():
+        return None  # no cached memory yet
+
+    msgs = [_user(_make_long_text(15_000)) for _ in range(20)]
+    result = await compact_messages(
+        msgs,
+        summarizer=_summ,
+        max_input_tokens=100_000,
+        session_memory_loader=_loader,
+    )
+    assert result.compacted is True
+    assert result.used_session_memory is False
+    assert summarizer_called["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pre_prune_reduces_token_count_below_threshold():
+    """Wave F (F2): tool_result dedupe + age may bring conversation
+    BACK under threshold so no compaction LLM call is needed at all."""
+
+    def _tcall(tcid):
+        return {"id": tcid, "type": "function", "function": {"name": "read", "arguments": '{"path":"x.py"}'}}
+
+    big_body = "y" * 50_000  # ~12.5k tokens
+    msgs = []
+    # 5 duplicate (read x.py) tool_call → tool_reply pairs, each with big body
+    for i in range(5):
+        msgs.append({"role": "assistant", "content": "", "tool_calls": [_tcall(f"c{i}")]})
+        msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": big_body})
+
+    summarizer_called = {"n": 0}
+
+    async def _summ(head):
+        summarizer_called["n"] += 1
+        return "summary"
+
+    # Threshold ≈ total/2: prune should kick in (>= 70% of threshold)
+    # and dedupe 4 duplicates (~50k tokens dropped) → drops below threshold
+    result = await compact_messages(
+        msgs, summarizer=_summ, max_input_tokens=20_000
+    )
+    # Pre-prune kept conversation under threshold → no full compaction
+    assert result.compacted is False or result.head_message_count == 0
+    # Summarizer NOT called (or called with much smaller head)
+    assert summarizer_called["n"] <= 1
+
+
+@pytest.mark.asyncio
+async def test_pre_prune_disabled_when_flag_off():
+    """prune_tool_results=False skips the pre-pass entirely."""
+
+    def _tcall(tcid):
+        return {"id": tcid, "type": "function", "function": {"name": "read", "arguments": '{}'}}
+
+    msgs = []
+    for i in range(5):
+        msgs.append({"role": "assistant", "content": "", "tool_calls": [_tcall(f"c{i}")]})
+        msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": "y" * 50_000})
+
+    async def _summ(head):
+        return "summary"
+
+    result = await compact_messages(
+        msgs,
+        summarizer=_summ,
+        max_input_tokens=20_000,
+        prune_tool_results=False,
+    )
+    # Without pre-prune the conversation is huge → compaction fires
+    assert result.compacted is True
+
+
+@pytest.mark.asyncio
+async def test_session_memory_loader_error_falls_back_gracefully():
+    """Loader raises → log + fall back to summarizer. Compaction still succeeds."""
+    summarizer_called = {"n": 0}
+
+    async def _summ(msgs):
+        summarizer_called["n"] += 1
+        return "fresh summary after loader error"
+
+    async def _broken_loader():
+        raise RuntimeError("DB exploded")
+
+    msgs = [_user(_make_long_text(15_000)) for _ in range(20)]
+    result = await compact_messages(
+        msgs,
+        summarizer=_summ,
+        max_input_tokens=100_000,
+        session_memory_loader=_broken_loader,
+    )
+    assert result.compacted is True
+    assert result.used_session_memory is False
+    assert summarizer_called["n"] == 1

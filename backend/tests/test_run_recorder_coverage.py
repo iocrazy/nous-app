@@ -75,6 +75,19 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # M1.5 chat compactor: cheap-model summarizer for history compaction.
     # Side-channel from the main agent run; cost tracked separately.
     "services/ai_library_chat_service.py": "compaction summariser auxiliary LLM, side-channel",
+    # Wave 5b (B4) session-memory updater: cheap-model maintenance call
+    # for the running session-memory.md document. Off-chat-path,
+    # fire-and-forget — telemetry tracked via session_memory.version
+    # bumps + last_updated_at, not RunRecorder.
+    "services/session_memory_runner.py": "session-memory maintenance auxiliary LLM, fire-and-forget",
+    # Wave F (F6) memory consolidation sweeper: weekly DBOS workflow.
+    # cheap-model merges similar memories into super-memories. Off-chat-
+    # path, scheduled job — telemetry via DBOS workflow status.
+    "workflows/scheduled_memory_consolidation.py": "memory consolidation auxiliary LLM, scheduled DBOS workflow",
+    # Wave J (J6) active_remember contradiction check: cheap-LLM
+    # classifier inside the built-in 'remember' skill path. Side-effect
+    # of a tool call, not a primary chat completion.
+    "services/skill_tool_service.py": "active_remember contradiction classifier, side-effect of remember()",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a

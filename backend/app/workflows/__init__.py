@@ -37,6 +37,15 @@ from app.workflows.scheduled_recovery import (  # noqa: F401
     recover_stale_orchestrator_locks_workflow,
     retry_failed_downloads_workflow,
 )
+from app.workflows.scheduled_commitment_sweeper import (  # noqa: F401
+    commitment_sweeper_workflow,
+)
+from app.workflows.scheduled_memory_archival import (  # noqa: F401
+    memory_archival_workflow,
+)
+from app.workflows.scheduled_memory_consolidation import (  # noqa: F401
+    memory_consolidation_workflow,
+)
 from app.workflows.script_outline import script_outline_workflow  # noqa: F401
 from app.workflows.storyboard import (  # noqa: F401
     storyboard_annotation_workflow,

@@ -192,6 +192,18 @@ def is_enabled() -> bool:
     return _dbos is not None
 
 
+# Sprint 5.5: optional bounds registry — gateway sets this on app.state
+# at startup. When provided, dispatch fail-fasts if NO live worker
+# advertises the workflow being dispatched.
+_bounds_registry: Optional[Any] = None
+
+
+def set_bounds_registry(registry: Optional[Any]) -> None:
+    """Wire-up hook called from FastAPI lifespan. None = disable gating."""
+    global _bounds_registry
+    _bounds_registry = registry
+
+
 async def start_workflow_routed(
     task_type: str,
     *,
@@ -205,6 +217,11 @@ async def start_workflow_routed(
     if mode != 'dbos', dispatch raises (no fallback). DBOS itself must be
     enabled, otherwise we fail loudly so missing DBOS_DATABASE_URL surfaces
     immediately rather than silently masking with a Celery shadow.
+
+    Sprint 5.5: if a BoundsRegistry is wired and contains live worker(s),
+    we additionally check that at least one of them advertises the workflow
+    name. If the registry is empty (typical single-process / combined
+    deployment) the check is skipped — dispatch proceeds as before.
 
     Args:
         task_type: matched against routing table
@@ -226,6 +243,34 @@ async def start_workflow_routed(
             "DBOS orchestrator is not enabled (DBOS_DATABASE_URL missing or "
             "init failed). Cannot dispatch any workflow."
         )
+
+    # Sprint 5.5: bounds dispatch gate. Two layers of opt-in protection:
+    #   1. BOUNDS_GATE_ENABLED env flag (default 'false') — kill switch
+    #      while we validate the gate's __name__ matching against every
+    #      production caller. Flip to 'true' once verified end-to-end.
+    #   2. Empty registry = combined-mode / pre-discovery — skip even
+    #      when flag is on, so the gate never blocks single-process dev.
+    gate_enabled = os.environ.get("BOUNDS_GATE_ENABLED", "").lower() in (
+        "1", "true", "yes"
+    )
+    if gate_enabled and _bounds_registry is not None:
+        live = _bounds_registry.live_bounds()
+        if live:
+            workflow_name = getattr(dbos_workflow_callable, "__name__", "")
+            if workflow_name and not _bounds_registry.can_dispatch_workflow(
+                workflow_name
+            ):
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("dispatch_gate_blocked")
+                raise RuntimeError(
+                    f"no live worker advertises workflow '{workflow_name}' — "
+                    f"refusing to enqueue (would sit indefinitely). "
+                    f"Live workers: {len(live)}. "
+                    f"Set BOUNDS_GATE_ENABLED=false to bypass."
+                )
+            elif workflow_name:
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("dispatch_gate_passed")
 
     from contextlib import nullcontext
 
