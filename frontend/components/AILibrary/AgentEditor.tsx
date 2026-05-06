@@ -38,8 +38,9 @@ import { MarkdownEditor } from './MarkdownEditor';
 import { NewAgentModal } from './NewAgentModal';
 import { AgentIconPicker } from './AgentIconPicker';
 import { AgentDashboardTab } from './AgentDashboardTab';
+import { VersionHistoryPanel } from './VersionHistoryPanel';
 
-type SubTab = 'dashboard' | 'overview' | 'files' | 'skills' | 'runs';
+type SubTab = 'dashboard' | 'overview' | 'files' | 'skills' | 'runs' | 'versions';
 
 const RUNS_PAGE_SIZE = 25;
 const RUNS_POLL_INTERVAL_MS = 10_000;
@@ -265,7 +266,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     onAgentForked?.(newSlug);
   };
 
-  const subTabs: SubTab[] = ['dashboard', 'overview', 'files', 'skills', 'runs'];
+  const subTabs: SubTab[] = ['dashboard', 'overview', 'files', 'skills', 'runs', 'versions'];
 
   return (
     <div>
@@ -523,6 +524,20 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       )}
 
       {sub === 'runs' && <RunsSection slug={slug} />}
+
+      {sub === 'versions' && (
+        <VersionHistoryPanel
+          kind="agent"
+          slug={slug}
+          onRollback={() => {
+            // Refetch agent so the form picks up the rolled-back content
+            void aiLibraryService.getAgent(slug).then((a) => {
+              setAgent(a);
+              setDraft(buildDraft(a));
+            });
+          }}
+        />
+      )}
 
       {forkModalOpen && (
         <NewAgentModal

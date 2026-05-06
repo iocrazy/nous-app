@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import psycopg
+import psycopg.rows
 from dbos import DBOS
 from loguru import logger
 
@@ -112,6 +113,45 @@ def clear_lock(issue_id: int) -> None:
 
 
 @DBOS.step()
+def create_agent_run_for_issue(
+    issue_id: int, agent_id: str, user_id: str, dbos_workflow_id: str
+) -> Optional[str]:
+    """A8.7: when an issue has assignee_agent_id, create an agent_runs
+    row with issue_id linked. The DB triggers (mig 208) emit a chat
+    row immediately, and the bridge updates it on terminal status.
+
+    Returns the new run id, or None if the insert failed (we don't
+    block the workflow on it — the user-visible chat already shows the
+    issue moved to in_progress)."""
+    import uuid
+
+    run_id = str(uuid.uuid4())
+    now_utc = datetime.now(timezone.utc).isoformat()
+    try:
+        with psycopg.connect(_dsn()) as conn:
+            conn.execute("SET ROLE service_role")
+            conn.execute(
+                """INSERT INTO public.agent_runs (
+                       id, agent_id, user_id, issue_id, status, trigger,
+                       started_at, heartbeat_at, last_useful_action_at
+                   ) VALUES (%s, %s, %s, %s, 'running', 'issue_dispatch',
+                             %s, %s, %s)""",
+                (run_id, agent_id, user_id, issue_id, now_utc, now_utc, now_utc),
+            )
+            conn.commit()
+        logger.info(
+            f"[execute_issue] created agent_run {run_id} for issue {issue_id} "
+            f"(agent={agent_id}, dbos_wf={dbos_workflow_id})"
+        )
+        return run_id
+    except Exception as exc:
+        logger.warning(
+            f"[execute_issue] agent_run insert failed for issue {issue_id}: {exc}"
+        )
+        return None
+
+
+@DBOS.step()
 def load_issue(issue_id: int) -> dict[str, Any]:
     """Read issue row as plain dict (so it serializes through DBOS step memo)."""
     with psycopg.connect(_dsn(), row_factory=psycopg.rows.dict_row) as conn:
@@ -153,18 +193,37 @@ def execute_issue(issue_id: int) -> dict[str, Any]:
     set_status(issue_id, "in_progress")
 
     try:
-        # PR-D2.2 scaffold — actual agent dispatch wired in PR-D5.
-        # For now: this parent workflow demonstrates the full lifecycle pattern
-        # but doesn't dispatch real children. Leaf workflows (ai_summary etc)
-        # are invoked directly by handlers, not via execute_issue, until D5.
+        # A8.7: if the issue has assignee_agent_id, register the dispatch
+        # as an agent_runs row with issue_id linked. Triggers (mig 208)
+        # emit a chat row "Agent picking up…" immediately. The actual
+        # agent execution stack lives outside this workflow — it
+        # eventually flips status to completed/failed and the bridge
+        # trigger updates the same chat row in place. Until that runtime
+        # is wired up, the chat row stays at "running" and the
+        # liveness scanner will eventually mark it dead via the 5-minute
+        # stuck threshold (which is the correct visible behaviour).
+        issue_row = load_issue(issue_id)
+        agent_id = issue_row.get("assignee_agent_id")
+        user_id = issue_row.get("created_by_user_id") or issue_row.get(
+            "assignee_user_id"
+        )
+        agent_run_id: Optional[str] = None
+        if agent_id and user_id:
+            agent_run_id = create_agent_run_for_issue(
+                issue_id, agent_id, user_id, workflow_id
+            )
+
         result: dict[str, Any] = {
             "issue_id": issue_id,
-            "noop": "PR-D5 will wire agent dispatch",
+            "agent_run_id": agent_run_id,
         }
 
-        # Default to in_review (user reviews agent output) unless skill marks auto_complete.
-        # Until skill metadata wires up, default to 'done' for the no-op path.
-        set_status(issue_id, "done")
+        # If we registered an agent_run, leave the issue in 'in_progress'
+        # — it's the agent runtime's job (or the simulate-finish helper)
+        # to decide done / in_review. If no agent assigned, fall through
+        # to 'done' (no-op path).
+        if agent_run_id is None:
+            set_status(issue_id, "done")
         return result
 
     except Exception as exc:  # noqa: BLE001

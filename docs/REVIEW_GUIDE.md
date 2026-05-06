@@ -1,5 +1,16 @@
 # Review Guide — `feat/dbos-pr-d2` split into 5 navigation branches
 
+> ⚠️ **PARTIALLY DEPRECATED (2026-05-04)** — written when this branch was
+> ~30 commits ahead of master. It is now 160+ commits ahead with
+> dependencies across the supposed "review categories" (memory wires
+> into chat-service which wires into agent_runner...). The grep recipes
+> below still work as a category tour, but the framing of 5 disjoint
+> review surfaces no longer holds. For a fresh review prefer focused
+> path queries directly on `feat/dbos-pr-d2`:
+>
+>     git diff origin/master..HEAD -- backend/app/agent_framework/
+>     git log origin/master..HEAD --oneline -- backend/app/services/memory/
+
 All 5 branches point at the **same HEAD** as `feat/dbos-pr-d2`. They are
 review-navigation aids, NOT independent merges. The work is too coupled
 to cherry-pick into truly independent PRs without breaking compilation.

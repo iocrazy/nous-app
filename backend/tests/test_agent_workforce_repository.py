@@ -3,11 +3,15 @@
 Mocks Supabase async client/chain. Covers the contract corners that the
 state machine and dispatcher depend on:
     - claim_next_unread  → CAS guard on status='unread'
-    - claim_next_queued  → CAS guard on lifecycle_status='queued'
+    - claim_next_queued  → CAS guard on phase='queued'
     - enqueue_inbox      → dedup collision falls back to lookup
     - create_task        → self-references root_task_id when tree root
-    - update_task_status → terminal status sets ended_at
+    - update_task_status → terminal status sets completed_at
     - requeue_task       → only acts on assigned/in_progress
+
+A4 (migration 200) note: tasks live in task_tracking[task_kind='agent_task'];
+8-state lifecycle precision is preserved in the `phase` column while the
+trigger/applayer-shared `status` column carries the 5-state mirror.
 """
 
 from __future__ import annotations
@@ -241,74 +245,90 @@ async def test_mark_inbox_processed_attaches_task_id():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_create_task_self_references_root_task_id():
-    """When parent_task_id/root_task_id are not provided, the new task's
-    root_task_id must be set to its own id."""
-    new_id = str(uuid4())
-    insert_chain = MagicMock()
-    insert_chain.insert.return_value = insert_chain
-    insert_chain.execute = AsyncMock(
-        return_value=_result([{"id": new_id, "agent_id": str(uuid4())}])
+    """A4: when parent_task_id/root_task_id are not provided, root_task_id
+    is computed before INSERT (= the new task's dbos_workflow_id). Single
+    INSERT — no INSERT-then-UPDATE round-trip anymore."""
+    captured: dict[str, Any] = {"insert": None}
+
+    chain = MagicMock()
+
+    def _insert(record):
+        captured["insert"] = record
+        return chain
+
+    chain.insert = _insert
+    # Server echoes back the row (Supabase default behaviour).
+    chain.execute = AsyncMock(
+        return_value=_result(
+            [
+                {
+                    # dbos_workflow_id is the PK after migration 200; client
+                    # generates it before INSERT, so the echo just reflects.
+                    "dbos_workflow_id": None,  # filled below
+                    "agent_id": str(uuid4()),
+                    "phase": "queued",
+                    "metadata": {},
+                }
+            ]
+        )
     )
 
-    update_chain = MagicMock()
-    update_chain.update.return_value = update_chain
-    update_chain.eq.return_value = update_chain
-    update_chain.execute = AsyncMock(return_value=_result([{"id": new_id}]))
-
-    repo = AgentWorkforceRepository()
-    n = {"i": 0}
-
-    async def _client():
-        client = MagicMock()
-
-        def _table(name):
-            n["i"] += 1
-            return insert_chain if n["i"] == 1 else update_chain
-
-        client.table.side_effect = _table
-        return client
-
-    repo._get_client = _client  # type: ignore[method-assign]
-
+    repo = _make_repo({"task_tracking": chain})
     out = await repo.create_task(
         agent_id=uuid4(), user_id=uuid4(), payload={"prompt": "hi"}
     )
     assert out is not None
-    assert out["root_task_id"] == new_id
+    assert captured["insert"] is not None
+    inserted = captured["insert"]
+    new_id = inserted["dbos_workflow_id"]
+    assert new_id, "create_task must self-generate dbos_workflow_id"
+    assert inserted["task_kind"] == "agent_task"
+    assert inserted["root_task_id"] == new_id, "tree root self-references"
+    assert inserted["parent_task_id"] is None
+    assert inserted["status"] == "pending" and inserted["phase"] == "queued"
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_create_task_preserves_explicit_root():
-    new_id = str(uuid4())
-    parent = str(uuid4())
-    root = str(uuid4())
+    captured: dict[str, Any] = {"insert": None}
 
     chain = MagicMock()
-    chain.insert.return_value = chain
-    # Repo returns the row as-is; only self-references when root is empty.
+
+    def _insert(record):
+        captured["insert"] = record
+        return chain
+
+    chain.insert = _insert
     chain.execute = AsyncMock(
-        return_value=_result(
-            [{"id": new_id, "parent_task_id": parent, "root_task_id": root}]
-        )
+        return_value=_result([{"dbos_workflow_id": "ignored", "phase": "queued"}])
     )
 
-    repo = _make_repo({"agent_tasks": chain})
+    repo = _make_repo({"task_tracking": chain})
+    explicit_parent = uuid4()
+    explicit_root = uuid4()
     out = await repo.create_task(
         agent_id=uuid4(),
         user_id=uuid4(),
         payload={},
-        parent_task_id=uuid4(),
-        root_task_id=uuid4(),
+        parent_task_id=explicit_parent,
+        root_task_id=explicit_root,
     )
     assert out is not None
-    assert out["root_task_id"] == root
+    inserted = captured["insert"]
+    assert inserted["parent_task_id"] == str(explicit_parent)
+    assert inserted["root_task_id"] == str(explicit_root)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_claim_next_queued_uses_cas_guard():
-    select_chain = _exec_chain(_result([{"id": str(uuid4())}]))
+    """A4: CAS guard moved from lifecycle_status='queued' (agent_tasks) to
+    phase='queued' (task_tracking) — phase column preserves the 8-state
+    lifecycle precision after the merge."""
+    select_chain = _exec_chain(
+        _result([{"dbos_workflow_id": str(uuid4()), "metadata": {}}])
+    )
     update_chain = MagicMock()
     update_chain.update.return_value = update_chain
     eq_calls: list[tuple[str, Any]] = []
@@ -318,7 +338,11 @@ async def test_claim_next_queued_uses_cas_guard():
         return update_chain
 
     update_chain.eq = _eq
-    update_chain.execute = AsyncMock(return_value=_result([{"id": "task"}]))
+    update_chain.execute = AsyncMock(
+        return_value=_result(
+            [{"dbos_workflow_id": "task", "phase": "assigned", "metadata": {}}]
+        )
+    )
 
     repo = AgentWorkforceRepository()
     n = {"i": 0}
@@ -336,71 +360,108 @@ async def test_claim_next_queued_uses_cas_guard():
     repo._get_client = _client  # type: ignore[method-assign]
 
     await repo.claim_next_queued(agent_id=uuid4())
-    assert ("lifecycle_status", "queued") in eq_calls
+    # After A4: CAS guard is on phase column.
+    assert ("phase", "queued") in eq_calls
+
+
+def _update_chain_with_metadata_select(
+    captured: dict[str, Any], existing_metadata: dict | None = None
+) -> MagicMock:
+    """Build a chain that handles update_task_status's SELECT(metadata) +
+    UPDATE pattern. captured['payload'] receives the UPDATE record.
+
+    update_task_status (post-A4) does:
+      1. SELECT metadata FROM task_tracking WHERE … .maybe_single()
+      2. UPDATE task_tracking SET … WHERE …
+    Both calls hit the same chain in this fake (one-shot operations all
+    return self), so we make .execute() yield the SELECT row first, then
+    the UPDATE row on the second invocation.
+    """
+    chain = MagicMock()
+    chain.select.return_value = chain
+    chain.eq.return_value = chain
+    chain.maybe_single.return_value = chain
+    chain.in_.return_value = chain
+
+    def _update(record):
+        captured["payload"] = record
+        return chain
+
+    chain.update = _update
+
+    side_effects = iter(
+        [
+            _result({"metadata": existing_metadata or {}}),  # SELECT
+            _result([{"dbos_workflow_id": "t", "phase": "queued"}]),  # UPDATE
+        ]
+    )
+
+    async def _execute(*a, **kw):
+        try:
+            return next(side_effects)
+        except StopIteration:
+            return _result([{"dbos_workflow_id": "t"}])
+
+    chain.execute = AsyncMock(side_effect=_execute)
+    return chain
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_update_task_status_terminal_sets_ended_at():
-    captured = {"payload": None}
-
-    chain = MagicMock()
-    chain.eq.return_value = chain
-    chain.execute = AsyncMock(return_value=_result([{"id": "t"}]))
-
-    def _update(payload):
-        captured["payload"] = payload
-        return chain
-
-    chain.update = _update
-    repo = _make_repo({"agent_tasks": chain})
-
+async def test_update_task_status_terminal_sets_completed_at():
+    """A4: ended_at column was renamed to completed_at; task_tracking carries
+    `status` (5-state mirror) and `phase` (8-state precision)."""
     for status in ("done", "failed", "cancelled"):
+        captured: dict[str, Any] = {"payload": None}
+        chain = _update_chain_with_metadata_select(captured)
+        repo = _make_repo({"task_tracking": chain})
         await repo.update_task_status(task_id=uuid4(), lifecycle_status=status)
-        assert captured["payload"]["lifecycle_status"] == status
-        assert "ended_at" in captured["payload"]
+        payload = captured["payload"]
+        assert payload is not None
+        assert payload["phase"] == status
+        # 5-state mirror: done→completed, failed→failed, cancelled→cancelled
+        expected_status = {
+            "done": "completed",
+            "failed": "failed",
+            "cancelled": "cancelled",
+        }[status]
+        assert payload["status"] == expected_status
+        assert "completed_at" in payload
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_update_task_status_in_progress_sets_started_at():
-    captured = {"payload": None}
-
-    chain = MagicMock()
-    chain.eq.return_value = chain
-    chain.execute = AsyncMock(return_value=_result([{"id": "t"}]))
-
-    def _update(payload):
-        captured["payload"] = payload
-        return chain
-
-    chain.update = _update
-    repo = _make_repo({"agent_tasks": chain})
+    captured: dict[str, Any] = {"payload": None}
+    chain = _update_chain_with_metadata_select(captured)
+    repo = _make_repo({"task_tracking": chain})
     await repo.update_task_status(task_id=uuid4(), lifecycle_status="in_progress")
-    assert "started_at" in captured["payload"]
-    assert "ended_at" not in captured["payload"]
+    payload = captured["payload"]
+    assert payload["phase"] == "in_progress"
+    assert payload["status"] == "processing"
+    assert "started_at" in payload
+    assert "completed_at" not in payload
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_requeue_task_only_acts_on_in_flight_states():
+    """A4: the in-flight CAS guard moved from lifecycle_status to phase."""
+    captured: dict[str, Any] = {"payload": None}
+    chain = _update_chain_with_metadata_select(captured)
     in_calls: list[tuple[str, list]] = []
-
-    chain = MagicMock()
-    chain.update.return_value = chain
-    chain.eq.return_value = chain
 
     def _in(field, values):
         in_calls.append((field, list(values)))
         return chain
 
     chain.in_ = _in
-    chain.execute = AsyncMock(return_value=_result([{"id": "t"}]))
 
-    repo = _make_repo({"agent_tasks": chain})
+    repo = _make_repo({"task_tracking": chain})
     await repo.requeue_task(uuid4())
     field, values = in_calls[0]
-    assert field == "lifecycle_status"
+    # After A4: filter on phase column (preserves 8-state precision).
+    assert field == "phase"
     assert set(values) == {"assigned", "in_progress"}
 
 

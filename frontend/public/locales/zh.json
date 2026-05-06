@@ -238,6 +238,7 @@
     "noItems": "暂无内容",
     "notifications": "通知",
     "noNotifications": "暂无通知",
+    "approvals": "待审批",
     "account": "账户",
     "helpDocs": "帮助与文档",
     "active": "进行中",
@@ -1324,6 +1325,38 @@
       "urlScheme": "URL 必须以 http:// 或 https:// 开头"
     },
     "helpText": "Outbound MCP servers 提供 agent 可调用的工具。Server name 会作为工具名的命名空间前缀（如 notion.create_page）。仅注册可信的 server — agent 可能会调用有副作用的工具。"
+  },
+  "versionHistory": {
+    "title": "版本历史",
+    "currentLabel": "当前",
+    "loading": "加载中...",
+    "loadFailed": "加载版本历史失败",
+    "empty": "暂无历史版本",
+    "refresh": "刷新",
+    "expand": "展开",
+    "collapse": "收起",
+    "rollback": "回滚",
+    "rollbackConfirm": "回滚到 v{{version}}？将创建新版本保留旧内容（审计可追溯）。",
+    "rollbackDone": "已回滚",
+    "rollbackFailed": "回滚失败：{{message}}",
+    "rollbackNotSupported": "目前仅 agent 支持回滚"
+  },
+  "billing": {
+    "title": "Token 消费",
+    "lastNDays": "最近 {{count}} 天",
+    "refresh": "刷新",
+    "loading": "加载中...",
+    "loadFailed": "加载消费数据失败",
+    "noUsage": "此区间无消费记录",
+    "statTokens": "Tokens",
+    "statPoints": "已消耗积分",
+    "statRuns": "运行次数",
+    "byModel": "按模型",
+    "byDay": "按日期",
+    "colModel": "模型",
+    "colRuns": "运行",
+    "colTokens": "Tokens",
+    "colCost": "成本"
   },
   "approvals": {
     "title": "待审批",

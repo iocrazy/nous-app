@@ -62,46 +62,55 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to load transcode config from database: {e}")
 
-    # P0-1: schema sanity probe — warn (don't block) if migrations the
-    # current code depends on haven't been applied. Quick + cheap query;
-    # failure here just means operator missed a `psql -f migrations/N.sql`
-    # step. We log loudly so the gap is visible, but startup proceeds —
-    # the affected feature paths will fail individually at first call.
-    try:
-        from app.db import get_async_supabase_admin
+    # ── Background bucket: spawned non-blocking, finished after yield ──
+    #
+    # These steps used to live inline in lifespan and were collectively the
+    # reason `--reload` cycles took 30-60s. None of them is required to be
+    # done before request handlers run; they're either pure logging
+    # (schema_probe), eventual-consistency feature setup (seed_loader), or
+    # one-shot side effects (deployment_log). Moving them to bg cuts cold
+    # start to <2s. Status surfaces at /api/v1/readyz.
+    from app.lifespan_helpers import BackgroundTaskRegistry
 
-        sb = await get_async_supabase_admin()
-        required_tables = [
-            "agent_commitments",   # mig 186
-            "ai_session_memory",   # mig 187
-            "user_mcp_servers",    # mig 194
-        ]  # extend on each migration that adds a hard-required table
-        for table in required_tables:
-            probe = await (
-                sb.table(table).select("*", count="exact").limit(0).execute()
-            )
-            if not hasattr(probe, "data"):
-                logger.warning(
-                    f"Schema probe: table '{table}' is unreachable — "
-                    f"check that the corresponding migration was applied"
+    app.state.bg_tasks = BackgroundTaskRegistry()
+
+    async def _bg_schema_probe() -> None:
+        """P0-1: warn-only sanity probe for migration drift."""
+        try:
+            from app.db import get_async_supabase_admin
+
+            sb = await get_async_supabase_admin()
+            required_tables = [
+                "agent_commitments",   # mig 186
+                "ai_session_memory",   # mig 187
+                "user_mcp_servers",    # mig 194
+            ]  # extend on each migration that adds a hard-required table
+            for table in required_tables:
+                probe = await (
+                    sb.table(table).select("*", count="exact").limit(0).execute()
                 )
-    except Exception as e:
-        # Most likely cause: PostgREST returns 42P01 when the table is missing.
-        # Surface the table name so operator can grep for the migration.
-        logger.warning(
-            f"Schema probe failed (likely missing migration): {e}"
-        )
+                if not hasattr(probe, "data"):
+                    logger.warning(
+                        f"Schema probe: table '{table}' is unreachable — "
+                        f"check that the corresponding migration was applied"
+                    )
+        except Exception as e:
+            # PostgREST returns 42P01 when the table is missing. Surface the
+            # table name so operator can grep for the migration.
+            logger.warning(f"Schema probe failed (likely missing migration): {e}")
 
-    # Load AI Library seeds (agents + skills) from backend/seeds/.
-    # Wrapped defensively: a seed failure must not block server startup.
-    # Breadcrumb logs below are load-bearing for post-incident diagnosis —
-    # keep the entry/exit pair even if the body is refactored.
-    seeds_root = Path(__file__).resolve().parent.parent / "seeds"
-    logger.info(
-        f"seed_loader: entering (seeds_root={seeds_root}, "
-        f"exists={seeds_root.exists()})"
-    )
-    try:
+    async def _bg_seed_loader() -> None:
+        """Load AI Library seeds (agents + skills) from backend/seeds/.
+
+        Idempotent via seed_hash columns (mig 200): on repeat starts the
+        loader skips entities whose source files haven't changed, so the
+        steady-state cost is one HEAD-style hash compare per entity.
+        """
+        seeds_root = Path(__file__).resolve().parent.parent / "seeds"
+        logger.info(
+            f"seed_loader: entering (seeds_root={seeds_root}, "
+            f"exists={seeds_root.exists()})"
+        )
         from app.repositories.agent_repository import AgentRepository
         from app.repositories.skill_repository import SkillRepository
         from app.services.seed_loader import SeedLoader
@@ -113,51 +122,62 @@ async def lifespan(app: FastAPI):
         )
         seed_results = await seed_loader.load_all()
         logger.info(f"seed_loader: exiting, results={seed_results}")
-    except Exception as e:
-        logger.exception(f"seed_loader: exiting with exception: {e}")
 
-    # Record deployment log — read build-info.json baked in by CI
-    try:
+    async def _bg_deployment_log() -> None:
+        """Record deployment log from CI-baked build-info.json (no-op in dev)."""
         import json
 
         build_info_path = Path("/app/build-info.json")
-        if build_info_path.exists():
-            info = json.loads(build_info_path.read_text(encoding="utf-8"))
-            sha = info.get("commit_sha")
-            if sha:
-                from app.db import get_async_supabase_admin
-
-                sb = await get_async_supabase_admin()
-                exists = await (
-                    sb.table("deployment_logs")
-                    .select("id")
-                    .eq("service", "backend")
-                    .eq("commit_sha", sha)
-                    .limit(1)
-                    .execute()
-                )
-                if exists.data:
-                    logger.info(f"Deployment {sha} already logged, skip")
-                else:
-                    row = {
-                        "service": info.get("service", "backend"),
-                        "version": info.get("version") or "latest",
-                        "commit_sha": sha,
-                        "commit_count": int(info.get("commit_count") or 0),
-                        "commits": info.get("commits") or [],
-                        "summary": info.get("summary") or "",
-                        "deployed_by": info.get("deployed_by") or "ci",
-                        "status": "success",
-                        "metadata": {"run_id": info.get("run_id")},
-                    }
-                    await sb.table("deployment_logs").insert(row).execute()
-                    logger.success(
-                        f"Deployment logged: {sha} ({row['commit_count']} commits)"
-                    )
-        else:
+        if not build_info_path.exists():
             logger.debug("build-info.json not found, skip deployment log")
-    except Exception as e:
-        logger.warning(f"Failed to record deployment log: {e}")
+            return
+        info = json.loads(build_info_path.read_text(encoding="utf-8"))
+        sha = info.get("commit_sha")
+        if not sha:
+            return
+        from app.db import get_async_supabase_admin
+
+        sb = await get_async_supabase_admin()
+        exists = await (
+            sb.table("deployment_logs")
+            .select("id")
+            .eq("service", "backend")
+            .eq("commit_sha", sha)
+            .limit(1)
+            .execute()
+        )
+        if exists.data:
+            logger.info(f"Deployment {sha} already logged, skip")
+            return
+        row = {
+            "service": info.get("service", "backend"),
+            "version": info.get("version") or "latest",
+            "commit_sha": sha,
+            "commit_count": int(info.get("commit_count") or 0),
+            "commits": info.get("commits") or [],
+            "summary": info.get("summary") or "",
+            "deployed_by": info.get("deployed_by") or "ci",
+            "status": "success",
+            "metadata": {"run_id": info.get("run_id")},
+        }
+        await sb.table("deployment_logs").insert(row).execute()
+        logger.success(f"Deployment logged: {sha} ({row['commit_count']} commits)")
+
+    app.state.bg_tasks.spawn("schema_probe", _bg_schema_probe())
+    app.state.bg_tasks.spawn("seed_loader", _bg_seed_loader())
+    app.state.bg_tasks.spawn("deployment_log", _bg_deployment_log())
+
+    # A8.5: paperclip-style stranded-run reconcile. Backend may have crashed
+    # while agent_runs were in flight; sweep them to status=failed +
+    # liveness=dead so the chat reflects reality and the user can retry.
+    async def _bg_liveness_reconcile() -> None:
+        try:
+            from app.workflows.liveness_scanner import reconcile_stranded_runs
+            await reconcile_stranded_runs()
+        except Exception as exc:
+            logger.warning(f"liveness reconcile on startup failed: {exc!r}")
+
+    app.state.bg_tasks.spawn("liveness_reconcile", _bg_liveness_reconcile())
 
     # DBOS Orchestrator (PR-D2.2): instantiate the singleton, import workflow
     # modules so their decorators register, then launch the worker pool.
@@ -468,27 +488,36 @@ async def lifespan(app: FastAPI):
         app.state.bounds_heartbeat_task = bounds_heartbeat_task
         logger.info("Bounds heartbeat task started (30s tick)")
 
-    # Event-loop-ready probe (D10-6): wait until the loop has settled
-    # after DBOS/seed/workforce init before we declare startup success.
-    # Avoids cold-start traffic hitting a still-loaded loop.
+    # Event-loop-ready probe (D10-6): short bounded wait so first request
+    # doesn't hit a still-loaded loop. Capped at 2s (was 10s) — anything
+    # longer suggests a sweeper is hogging the loop, which is its own bug
+    # to fix; making lifespan wait for it doesn't help.
     try:
         from app.agent_framework import wait_for_loop_ready
 
         ready = await wait_for_loop_ready(
             threshold_ms=200,
             consecutive_passes=2,
-            max_wait_seconds=10.0,
+            max_wait_seconds=2.0,
         )
         if ready:
             logger.info("Event loop ready (drift settled)")
         else:
-            logger.warning(
-                "Event loop did not settle within 10s — accepting traffic anyway"
+            logger.info(
+                "Event loop did not settle within 2s — accepting traffic anyway"
             )
     except Exception as e:
         logger.warning(f"Event-loop-ready probe failed: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
+
+    # Cancel still-running background bootstrap tasks first so they don't
+    # race the rest of the shutdown chain. swallow_timeout so a hung task
+    # can't block teardown — caller will see the warning and the process
+    # exits cleanly anyway.
+    bg_registry = getattr(app.state, "bg_tasks", None)
+    if bg_registry is not None:
+        await bg_registry.shutdown(timeout=3.0)
 
     # Sprint 5.5: stop heartbeat + unregister from bounds before draining.
     if bounds_heartbeat_task is not None:

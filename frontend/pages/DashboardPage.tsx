@@ -1,15 +1,41 @@
 import React from 'react';
-import { Activity } from 'lucide-react';
+import {
+  Activity, ScrollText, Cpu, Brain, FileText, Calendar, Layers,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StatsChart } from '../components/StatsChart';
-import { TasksPanel } from '../components/TasksPanel';
 import { LogsPanel } from '../components/LogsPanel';
 import { SystemMonitorPanel } from '../components/SystemMonitorPanel';
 import { AdminNousModelsPage } from './admin/AdminNousModelsPage';
 import { AdminDeploymentLogsPage } from './admin/AdminDeploymentLogsPage';
+import { AdminLanesPage } from './admin/AdminLanesPage';
+import { SchedulesPage } from './SchedulesPage';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../hooks/useNavigation';
 import { useTeamContext } from '../contexts/TeamContext';
+
+// A7: 'tasks' moved out of dashboard to its own page (TodolistPage at
+// /team/:teamId/todolist). Sidebar nav 待办事项 routes there.
+type SubView =
+  | 'overview' | 'logs' | 'monitor'
+  | 'schedules' | 'lanes' | 'nous-models' | 'deployment-logs';
+
+interface SubViewTab {
+  value: SubView;
+  label: string;
+  icon: React.ReactNode;
+  adminOnly?: boolean;
+}
+
+const SUBVIEW_TABS: SubViewTab[] = [
+  { value: 'overview',        label: 'Overview',        icon: <Activity size={14} /> },
+  { value: 'logs',            label: 'Logs',            icon: <ScrollText size={14} /> },
+  { value: 'schedules',       label: 'Schedules',       icon: <Calendar size={14} /> },
+  { value: 'monitor',         label: 'Monitor',         icon: <Cpu size={14} />,           adminOnly: true },
+  { value: 'lanes',           label: 'Lanes',           icon: <Layers size={14} />,        adminOnly: true },
+  { value: 'nous-models',     label: 'Nous Models',     icon: <Brain size={14} />,         adminOnly: true },
+  { value: 'deployment-logs', label: 'Deploy Logs',     icon: <FileText size={14} />,      adminOnly: true },
+];
 
 export function DashboardPage() {
   const { t } = useTranslation();
@@ -20,8 +46,29 @@ export function DashboardPage() {
     selectedTeamId,
   });
 
+  const isAdmin = userProfile.role === 'admin';
+  const visibleTabs = SUBVIEW_TABS.filter((tab) => !tab.adminOnly || isAdmin);
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* A6: dashboard sub-view nav strip — surfaces tasks/schedules/lanes/etc. */}
+      <div className="mb-6 flex flex-wrap items-center gap-1 p-1 bg-zinc-900 border border-zinc-800 rounded-lg overflow-x-auto">
+        {visibleTabs.map((tab) => (
+          <button
+            key={tab.value}
+            onClick={() => setDashboardSubView(tab.value)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition ${
+              dashboardSubView === tab.value
+                ? 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {dashboardSubView === 'overview' && (
         <div className="space-y-8">
           <header className="mb-8">
@@ -93,11 +140,12 @@ export function DashboardPage() {
         </div>
       )}
 
-      {dashboardSubView === 'tasks' && <TasksPanel />}
       {dashboardSubView === 'logs' && <LogsPanel />}
       {dashboardSubView === 'monitor' && userProfile.role === 'admin' && <SystemMonitorPanel />}
       {dashboardSubView === 'nous-models' && userProfile.role === 'admin' && <AdminNousModelsPage />}
       {dashboardSubView === 'deployment-logs' && userProfile.role === 'admin' && <AdminDeploymentLogsPage />}
+      {dashboardSubView === 'schedules' && <SchedulesPage />}
+      {dashboardSubView === 'lanes' && userProfile.role === 'admin' && <AdminLanesPage />}
     </div>
   );
 }

@@ -151,6 +151,16 @@ export async function getIssue(issueId: number): Promise<Issue> {
   return _json<Issue>(res);
 }
 
+/**
+ * Fetch sub-issues (children where parent_id=parentIssueId) using the
+ * existing list endpoint with a parent_id filter wired client-side.
+ * Backend doesn't have a dedicated endpoint yet; we filter client-side.
+ */
+export async function listSubIssues(parentIssueId: number, limit = 200): Promise<Issue[]> {
+  const all = await listIssues({ limit });
+  return all.items.filter((i) => i.parent_id === parentIssueId);
+}
+
 export async function getIssueByIdentifier(identifier: string): Promise<Issue> {
   const res = await fetch(
     `${_base}/by-identifier/${encodeURIComponent(identifier)}`,

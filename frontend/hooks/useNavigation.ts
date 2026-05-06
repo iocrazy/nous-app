@@ -22,7 +22,7 @@ export function useNavigation({ isAuthenticated, selectedTeamId, personalTeamId 
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
-  const [dashboardSubView, setDashboardSubView] = useState<'overview' | 'tasks' | 'logs' | 'monitor' | 'nous-models' | 'deployment-logs'>('overview');
+  const [dashboardSubView, setDashboardSubView] = useState<'overview' | 'logs' | 'monitor' | 'nous-models' | 'deployment-logs' | 'schedules' | 'lanes'>('overview');
   const [isDashboardMenuOpen, setIsDashboardMenuOpen] = useState(false);
 
   // Dashboard Stats
@@ -63,13 +63,24 @@ export function useNavigation({ isAuthenticated, selectedTeamId, personalTeamId 
     return () => { cancelled = true; };
   }, [isAuthenticated, view, dashboardSubView]);
 
+  // Channel name needs to be unique per hook instance — useNavigation is
+  // called from both AppLayout and DashboardPage; sharing one channel name
+  // causes the second `.on()` to fire after `.subscribe()` on the same
+  // RealtimeChannel singleton, which Supabase rejects with
+  // "cannot add postgres_changes callbacks ... after subscribe()".
+  const channelInstanceId = useRef<string>(
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10),
+  ).current;
+
   // Realtime for user_logs → dashboard recent activity
   useEffect(() => {
     const supabase = getSupabaseClient();
     if (!isAuthenticated || !isSupabaseConfigured() || !supabase) return;
 
     const logsChannel = supabase
-      .channel('dashboard_logs_realtime')
+      .channel(`dashboard_logs_realtime_${channelInstanceId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'user_logs' },

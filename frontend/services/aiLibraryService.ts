@@ -23,6 +23,8 @@ import type {
   AILibraryMCPServer,
   AILibraryMemory,
   AILibrarySkill,
+  AILibraryUsageSummary,
+  AILibraryVersionItem,
   AILibrarySkillFile,
   ChatResponse,
   ChatSession,
@@ -575,6 +577,55 @@ export const aiLibraryService = {
       method: 'POST',
       headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify({ note }),
+    });
+    return handle(resp);
+  },
+
+  /**
+   * Phase 3: Version history (lists snapshots of agents/skills/skill_files).
+   */
+  async listAgentVersions(slug: string, limit = 50): Promise<{
+    items: AILibraryVersionItem[];
+    current_version: number | null;
+  }> {
+    const resp = await fetch(`${base()}/agents/${encodeURIComponent(slug)}/versions?limit=${limit}`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle(resp);
+  },
+
+  async getAgentVersion(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/versions/${versionNumber}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  async rollbackAgent(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/rollback/${versionNumber}`,
+      { method: 'POST', headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  /**
+   * Phase 3: Per-user token-cost summary for the Billing dashboard.
+   */
+  async getUsageSummary(days = 30): Promise<AILibraryUsageSummary> {
+    const resp = await fetch(`${base()}/usage/summary?days=${days}`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle(resp);
+  },
+
+  async listSkillVersions(slug: string, limit = 50): Promise<{
+    items: AILibraryVersionItem[];
+    current_version: number | null;
+  }> {
+    const resp = await fetch(`${base()}/skills/${encodeURIComponent(slug)}/versions?limit=${limit}`, {
+      headers: await getAuthHeaders(),
     });
     return handle(resp);
   },

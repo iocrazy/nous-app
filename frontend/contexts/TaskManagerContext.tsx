@@ -467,10 +467,23 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     let unmounted = false;
 
     const connect = async () => {
+      // A 路线 PR #158: prefer short-lived ticket auth (?ticket=...) over
+      // long-lived JWT in URL (?token=...). Falls back to JWT on ticket
+      // failure during the deprecation window — backend still accepts
+      // both for now.
       const token = await getSupabaseAccessToken();
       if (!token || unmounted) return;
 
-      const wsUrl = `${getWsBaseUrl()}/ws/task-progress?token=${encodeURIComponent(token)}`;
+      let wsUrl: string;
+      try {
+        const { wsTicketService } = await import('../services/wsTicketService');
+        const { ticket } = await wsTicketService.acquire();
+        if (unmounted) return;
+        wsUrl = `${getWsBaseUrl()}/ws/task-progress?ticket=${encodeURIComponent(ticket)}`;
+      } catch (err) {
+        console.debug('[TaskManager/WS] ticket acquisition failed, falling back to JWT', err);
+        wsUrl = `${getWsBaseUrl()}/ws/task-progress?token=${encodeURIComponent(token)}`;
+      }
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

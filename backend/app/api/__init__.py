@@ -20,6 +20,7 @@ from app.api.error_report_router import router as error_report_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.invites_router import router as invites_router
 from app.api.libraries_router import router as libraries_router
+from app.api.lifespan_router import router as lifespan_router
 from app.api.logs_router import router as logs_router
 from app.api.media_auth import router as media_auth_router
 from app.api.media_router import legacy_router as legacy_douyin_router
@@ -59,6 +60,11 @@ from app.api.video_collections_router import router as video_collections_router
 from app.api.workforce_router import router as workforce_router
 
 api_router = APIRouter()
+
+# Liveness/readiness probes — mounted first so they are reachable even if
+# downstream routers fail to import. Match k8s probe semantics; see
+# `lifespan_router.py` for the rationale on splitting from /health.
+api_router.include_router(router=lifespan_router)
 
 api_router.include_router(router=auth_router, tags=["Authentication"])
 
@@ -169,3 +175,20 @@ api_router.include_router(router=workforce_router, tags=["Workforce"])
 from app.api.health_router import router as deep_health_router  # noqa: E402
 
 api_router.include_router(router=deep_health_router, tags=["Health"])
+
+# A 路线 (2026-05-04, session 2/3): 任务集 / 用户定时 / 4-Lane 优先级 / WS ticket
+# Imports from feat/a3 + feat/a5 + feat/a7 + feat/a9 (PR 队列 #158/159/160/161)
+from app.api.flows_router import router as flows_router  # noqa: E402
+from app.api.lanes_router import router as lanes_router  # noqa: E402
+from app.api.schedules_router import router as schedules_router  # noqa: E402
+from app.api.ws_ticket_router import router as ws_ticket_router  # noqa: E402
+
+api_router.include_router(router=flows_router, tags=["Flows"])
+api_router.include_router(router=schedules_router, tags=["Schedules"])
+api_router.include_router(router=lanes_router, tags=["Lanes"])
+api_router.include_router(router=ws_ticket_router, tags=["WS Ticket"])
+
+# A8: paperclip-style chat thread per issue (issue_messages table, mig 205).
+from app.api.issue_messages_router import router as issue_messages_router  # noqa: E402
+
+api_router.include_router(router=issue_messages_router, tags=["Issue Messages"])

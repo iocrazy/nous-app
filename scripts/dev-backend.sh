@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
 # scripts/dev-backend.sh
 #
-# Dev backend supervisor — starts uvicorn (reload mode) and watches the
-# /health endpoint. If health flatlines for ${UNHEALTHY_LIMIT} consecutive
-# probes the worker gets killed and respawned. Replaces the manual "find
-# my dead backend, kill -9, restart" loop that came up every few hours
-# during D7+D8 development.
+# Dev backend supervisor — runs uvicorn under watchexec for clean restarts
+# and polls /healthz to catch wedged-but-not-crashed states.
 #
-# Why this exists (vs. relying on uvicorn's own --reload):
-#   - DBOS runs in-process with FastAPI; an unhandled exception in a
-#     workflow thread can wedge uvicorn's event loop without crashing
-#     the process — uvicorn won't restart what didn't crash
-#   - reload teardown sometimes leaves DBOS queue listener threads
-#     holding sockets, which the new worker can't bind
-#   - net result: backend appears alive (process running, port open)
-#     but every HTTP request times out
+# Why we don't use uvicorn's own --reload:
+#   - DBOS / async sweepers / SsrfProxy hold sockets/threads on shutdown.
+#     uvicorn's reload sends SIGTERM to the worker but its hard-coded
+#     graceful timeout (and lack of cancel-safe coordination with our
+#     async background tasks) leaves listeners on :PORT in CLOSED state.
+#     Net result: process running, port open, every request times out.
+#   - watchexec spawns a fresh process group on every change. SIGTERM →
+#     5 s grace → SIGKILL → bind brand-new socket. Predictable.
 #
-# This script polls /health every PROBE_INTERVAL seconds, after
-# UNHEALTHY_LIMIT consecutive failures it kill -9's the worker and the
-# inner `while true` loop respawns it. Logs go to /tmp/dev-backend.log.
+# Two layers of safety:
+#   1. watchexec restarts on app/ file changes (code edits)
+#   2. supervisor probes /healthz every PROBE_INTERVAL; if 3 consecutive
+#      failures (wedged process, no file change to trigger restart),
+#      kills the watchexec tree and restarts it.
+#
+# Logs go to /tmp/dev-backend.log (override with BACKEND_LOG=...).
 #
 # Usage:
 #   ./scripts/dev-backend.sh             # foreground, Ctrl-C to stop
@@ -27,7 +28,7 @@
 set -u
 
 PORT="${BACKEND_PORT:-8082}"
-HEALTH_URL="http://localhost:${PORT}/health"
+HEALTH_URL="http://localhost:${PORT}/api/v1/healthz"
 LOG_FILE="${BACKEND_LOG:-/tmp/dev-backend.log}"
 PROBE_INTERVAL="${PROBE_INTERVAL:-30}"
 UNHEALTHY_LIMIT="${UNHEALTHY_LIMIT:-3}"
@@ -42,35 +43,57 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
+if ! command -v watchexec >/dev/null 2>&1; then
+  echo "[dev-backend] watchexec not installed. Run: brew install watchexec" >&2
+  exit 1
+fi
+
 cleanup() {
   echo "[dev-backend] shutting down (parent pid=$$)"
-  pkill -P $$ 2>/dev/null || true
+  if [[ -n "${WATCHEXEC_PID:-}" ]]; then
+    pkill -TERM -P "${WATCHEXEC_PID}" 2>/dev/null || true
+    kill -TERM "${WATCHEXEC_PID}" 2>/dev/null || true
+    sleep 2
+    pkill -KILL -P "${WATCHEXEC_PID}" 2>/dev/null || true
+    kill -KILL "${WATCHEXEC_PID}" 2>/dev/null || true
+  fi
+  lsof -ti tcp:"${PORT}" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
   exit 0
 }
 trap cleanup INT TERM
 
-start_uvicorn() {
-  echo "[dev-backend] starting uvicorn on :${PORT} (logs → ${LOG_FILE})"
+start_watchexec() {
+  echo "[dev-backend] starting watchexec → uvicorn on :${PORT} (logs → ${LOG_FILE})"
   set -a
   # shellcheck disable=SC1090
   . "${ENV_FILE}"
   set +a
   cd "${BACKEND_DIR}" || exit 1
-  uv run uvicorn app.main:app \
-    --host 0.0.0.0 --port "${PORT}" \
-    --reload --reload-dir app \
+
+  # watchexec flags:
+  #   --watch app                    only watch app/, not logs/ or .venv
+  #   --exts py                      only restart on .py changes
+  #   --restart                      kill old process (SIGTERM) before spawning new
+  #   --stop-timeout 5s              5s grace, then SIGKILL
+  #   --no-vcs-ignore                don't read .gitignore (we set our own scope)
+  #   --debounce 500ms               coalesce rapid saves
+  watchexec \
+    --watch app \
+    --exts py \
+    --restart \
+    --stop-timeout 5s \
+    --no-vcs-ignore \
+    --debounce 500ms \
+    -- uv run uvicorn app.main:app --host 0.0.0.0 --port "${PORT}" \
     >> "${LOG_FILE}" 2>&1 &
-  UVICORN_PID=$!
-  echo "[dev-backend] uvicorn pid=${UVICORN_PID}"
+  WATCHEXEC_PID=$!
+  echo "[dev-backend] watchexec pid=${WATCHEXEC_PID}"
 }
 
-kill_uvicorn() {
-  echo "[dev-backend] killing uvicorn pid=${UVICORN_PID}"
-  # SIGKILL the worker tree — graceful shutdown is what got us into
-  # this mess (DBOS.destroy() blocking) so don't bother with SIGTERM.
-  pkill -9 -P "${UVICORN_PID}" 2>/dev/null || true
-  kill -9 "${UVICORN_PID}" 2>/dev/null || true
-  # Anything still holding the port (orphans from previous runs)
+kill_watchexec() {
+  echo "[dev-backend] killing watchexec tree pid=${WATCHEXEC_PID}"
+  pkill -KILL -P "${WATCHEXEC_PID}" 2>/dev/null || true
+  kill -KILL "${WATCHEXEC_PID}" 2>/dev/null || true
   lsof -ti tcp:"${PORT}" 2>/dev/null | xargs -r kill -9 2>/dev/null || true
   sleep 2
 }
@@ -81,9 +104,9 @@ probe() {
 }
 
 while true; do
-  start_uvicorn
+  start_watchexec
 
-  # Warm-up: wait up to 90 s for /health to come up before policing it.
+  # Warm-up: wait up to 90s for /healthz to come up before policing it.
   warmup_deadline=$(( $(date +%s) + 90 ))
   while (( $(date +%s) < warmup_deadline )); do
     if [[ "$(probe)" == "200" ]]; then
@@ -104,12 +127,12 @@ while true; do
     failures=$(( failures + 1 ))
     echo "[dev-backend] unhealthy (probe ${failures}/${UNHEALTHY_LIMIT}, code=${code:-timeout})"
     if (( failures >= UNHEALTHY_LIMIT )); then
-      echo "[dev-backend] limit reached → restarting"
+      echo "[dev-backend] wedged → restarting watchexec tree"
       break
     fi
   done
 
-  kill_uvicorn
+  kill_watchexec
   echo "[dev-backend] respawning in 2s"
   sleep 2
 done

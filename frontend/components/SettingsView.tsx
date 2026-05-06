@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
-import { TasksPanel } from './TasksPanel';
+import { TaskCenter } from './TaskCenter/TaskCenter';
 import { TagsSettings } from './TagsSettings';
 import { ApiDocsPanel } from './ApiDocsPanel';
 import { CookiesSettings } from './CookiesSettings';
@@ -619,9 +619,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
         <SystemMonitorPanel />
       )}
 
-      {/* Tasks Tab */}
+      {/* Tasks Tab — A7 task LOG (read-only execution history). Lives here
+          because /todolist is reserved for paperclip-style task DISPATCH +
+          conversation (pending rewrite). Admin equivalent: admin/pages/tasks. */}
       {activeTab === 'tasks' && (
-        <TasksPanel />
+        <div className="h-[60vh]">
+          <TaskCenter embedded />
+        </div>
       )}
 
       {/* Tags Tab */}

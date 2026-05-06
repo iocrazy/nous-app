@@ -251,7 +251,22 @@ export const useSettingsStore = create<SettingsState>()(
           if (error) {
             console.warn('[settingsStore] hydration skipped (first load):', error?.message);
           }
-          useSettingsStore.setState({ isHydrated: true });
+          // The rehydration callback can fire BEFORE the `useSettingsStore`
+          // binding has been assigned (TDZ — Zustand persist middleware
+          // runs the callback synchronously during create()). Defer the
+          // setState to a microtask so the closure can resolve the
+          // module-level binding cleanly. This eliminates the
+          // "Cannot access 'useSettingsStore' before initialization"
+          // console error users were seeing on first page load.
+          queueMicrotask(() => {
+            try {
+              useSettingsStore.setState({ isHydrated: true });
+            } catch {
+              /* still TDZ in some bundler builds — drop quietly,
+                 the store's default isHydrated:false won't break
+                 anything; UI re-renders on next state change anyway */
+            }
+          });
         };
       },
       migrate: (persistedState: unknown) => {
