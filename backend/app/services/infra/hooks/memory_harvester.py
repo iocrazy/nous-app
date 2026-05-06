@@ -4,7 +4,7 @@ Returns a side_effect zero-arg callable that fires the memory-write
 background task. The hook itself doesn't know whether the dispatch
 goes via Celery or DBOS — it just calls ``signature_factory(...)`` and
 hands the resulting closure back as ``HookResult.side_effect``.
-Wiring lives in ``app.services.ai_library_chat_wiring``, which routes
+Wiring lives in ``app.services.ai.chat.ai_library_chat_wiring``, which routes
 through ``start_workflow_routed("memory_tasks", ...)`` so the routing
 table picks celery vs shadow vs dbos.
 
