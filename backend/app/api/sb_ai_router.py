@@ -3,7 +3,7 @@
 """
 Storyboard AI Router
 
-Endpoints that dispatch Celery tasks for AI-powered storyboard operations:
+Endpoints that dispatch DBOS workflows for AI-powered storyboard operations:
 image generation, video generation, script splitting, video analysis,
 scene detection, and conversational chat.
 
@@ -11,7 +11,6 @@ All generation endpoints return immediately with a task_id so the client
 can poll via the unified task manager.
 """
 
-import asyncio
 from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
@@ -24,8 +23,15 @@ from app.schemas.storyboard import (
     GenerateVideoRequest,
     SplitScriptRequest,
 )
+from app.services.dbos_orchestrator import start_workflow_routed
 from app.services.storyboard_service import StoryboardService
 from app.services.unified_task_manager import get_task_manager
+from app.workflows.storyboard import (
+    storyboard_image_workflow,
+    storyboard_script_split_workflow,
+    storyboard_video_analysis_workflow,
+    storyboard_video_workflow,
+)
 
 router = APIRouter(prefix="/storyboard")
 
@@ -64,13 +70,17 @@ async def generate_image(auth: AuthDep, body: GenerateImageRequest) -> Dict[str,
     task manager and delivered over the realtime channel.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_image_gen",
             title=f"Generate image for node {body.node_id[:8]}",
+            dbos_workflow_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "node_id": body.node_id,
@@ -79,19 +89,21 @@ async def generate_image(auth: AuthDep, body: GenerateImageRequest) -> Dict[str,
             },
         )
 
-        from app.tasks.storyboard_tasks import generate_storyboard_image
-
-        await asyncio.to_thread(
-            generate_storyboard_image.delay,
-            task_id,
-            body.project_id,
-            body.node_id,
-            body.prompt,
-            body.model,
-            body.provider,
-            body.character_ids,
-            body.reference_image_url,
-            body.aspect_ratio,
+        await start_workflow_routed(
+            "storyboard_image_gen",
+            dbos_workflow_callable=storyboard_image_workflow,
+            dbos_workflow_kwargs={
+                "project_id": body.project_id,
+                "node_id": body.node_id,
+                "prompt": body.prompt,
+                "task_id": task_id,
+                "model": body.model,
+                "provider": body.provider,
+                "character_ids": body.character_ids,
+                "reference_image_url": body.reference_image_url,
+                "aspect_ratio": body.aspect_ratio,
+            },
+            workflow_id=wf_id,
         )
 
         logger.info(
@@ -121,13 +133,17 @@ async def generate_video(auth: AuthDep, body: GenerateVideoRequest) -> Dict[str,
     Returns a task_id immediately.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_video_gen",
             title=f"Generate video for node {body.node_id[:8]}",
+            dbos_workflow_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "node_id": body.node_id,
@@ -135,22 +151,24 @@ async def generate_video(auth: AuthDep, body: GenerateVideoRequest) -> Dict[str,
             },
         )
 
-        from app.tasks.storyboard_tasks import generate_storyboard_video
-
-        await asyncio.to_thread(
-            generate_storyboard_video.delay,
-            task_id,
-            body.project_id,
-            body.node_id,
-            body.source_image_url,
-            body.prompt or "",
-            body.provider,
-            int(body.duration_seconds),
-            (
-                0.5
-                if body.motion_intensity == "medium"
-                else (0.25 if body.motion_intensity == "low" else 0.75)
-            ),
+        await start_workflow_routed(
+            "storyboard_video_gen",
+            dbos_workflow_callable=storyboard_video_workflow,
+            dbos_workflow_kwargs={
+                "project_id": body.project_id,
+                "node_id": body.node_id,
+                "source_image_url": body.source_image_url,
+                "task_id": task_id,
+                "prompt": body.prompt or "",
+                "provider": body.provider,
+                "duration": int(body.duration_seconds),
+                "motion_intensity": (
+                    0.5
+                    if body.motion_intensity == "medium"
+                    else (0.25 if body.motion_intensity == "low" else 0.75)
+                ),
+            },
+            workflow_id=wf_id,
         )
 
         logger.info(
@@ -180,24 +198,30 @@ async def split_script(auth: AuthDep, body: SplitScriptRequest) -> Dict[str, Any
     Returns a task_id immediately.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_script_split",
             title="Split script into storyboard scenes",
+            dbos_workflow_id=wf_id,
             metadata={"project_id": body.project_id},
         )
 
-        from app.tasks.storyboard_tasks import split_script_to_storyboard
-
-        await asyncio.to_thread(
-            split_script_to_storyboard.delay,
-            task_id,
-            body.project_id,
-            body.script_text,
-            body.style_guide or "",
+        await start_workflow_routed(
+            "storyboard_script_split",
+            dbos_workflow_callable=storyboard_script_split_workflow,
+            dbos_workflow_kwargs={
+                "project_id": body.project_id,
+                "script_text": body.script_text,
+                "task_id": task_id,
+                "style_guide": body.style_guide or "",
+            },
+            workflow_id=wf_id,
         )
 
         logger.info(
@@ -226,23 +250,29 @@ async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, A
     Returns a task_id immediately.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_video_analysis",
             title="Analyze video for storyboard scenes",
+            dbos_workflow_id=wf_id,
             metadata={"project_id": body.project_id, "video_url": body.video_url},
         )
 
-        from app.tasks.storyboard_tasks import analyze_video_scenes
-
-        await asyncio.to_thread(
-            analyze_video_scenes.delay,
-            task_id,
-            body.project_id,
-            body.video_url,
+        await start_workflow_routed(
+            "storyboard_video_analysis",
+            dbos_workflow_callable=storyboard_video_analysis_workflow,
+            dbos_workflow_kwargs={
+                "project_id": body.project_id,
+                "video_path": body.video_url,
+                "task_id": task_id,
+            },
+            workflow_id=wf_id,
         )
 
         logger.info(
@@ -272,13 +302,17 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
     worker. Returns a task_id immediately.
     """
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(body.project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_scene_detect",
             title="Detect scenes in video",
+            dbos_workflow_id=wf_id,
             metadata={
                 "project_id": body.project_id,
                 "video_url": body.video_url,
@@ -286,16 +320,18 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
             },
         )
 
-        # Reuse analyze_video_scenes task — it wraps detect_scenes internally.
-        # The threshold is stored in metadata for observability; the task uses
-        # StoryboardImageService defaults but can be extended later.
-        from app.tasks.storyboard_tasks import analyze_video_scenes
-
-        await asyncio.to_thread(
-            analyze_video_scenes.delay,
-            task_id,
-            body.project_id,
-            body.video_url,
+        # Reuse storyboard_video_analysis_workflow — wraps detect_scenes
+        # internally. Threshold is stored in metadata for observability;
+        # the workflow uses StoryboardImageService defaults.
+        await start_workflow_routed(
+            "storyboard_scene_detect",
+            dbos_workflow_callable=storyboard_video_analysis_workflow,
+            dbos_workflow_kwargs={
+                "project_id": body.project_id,
+                "video_path": body.video_url,
+                "task_id": task_id,
+            },
+            workflow_id=wf_id,
         )
 
         logger.info(

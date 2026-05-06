@@ -4,7 +4,7 @@
 Download Progress Tracking
 
 UnifiedProgressTracker: writes real-time progress to Redis pub/sub
-and Supabase unified_tasks lifecycle management.
+and Supabase task_tracking lifecycle management.
 """
 
 from loguru import logger
@@ -64,7 +64,7 @@ class UnifiedProgressTracker:
     async def update(self, downloaded: int, total: int):
         """Update download progress.
 
-        Writes to Redis (sync, always) and Supabase unified_tasks (async, throttled).
+        Writes to Redis (sync, always) and Supabase task_tracking (async, throttled).
         Must be awaited from an async context (e.g. inside download_file streaming loop).
         """
         import json
@@ -117,7 +117,7 @@ class UnifiedProgressTracker:
         self._publish(
             {
                 "unified_task_id": self.unified_task_id,
-                "celery_task_id": self.task_id,
+                "dbos_workflow_id": self.task_id,
                 "status": "downloading",
                 "percent": overall_percent,
                 "speed": speed_str,
@@ -152,7 +152,7 @@ class UnifiedProgressTracker:
         self._publish(
             {
                 "unified_task_id": self.unified_task_id,
-                "celery_task_id": self.task_id,
+                "dbos_workflow_id": self.task_id,
                 "status": "completed",
                 "percent": 100,
                 "speed": "0 B/s",
@@ -177,7 +177,7 @@ class UnifiedProgressTracker:
         self._publish(
             {
                 "unified_task_id": self.unified_task_id,
-                "celery_task_id": self.task_id,
+                "dbos_workflow_id": self.task_id,
                 "status": "failed",
                 "percent": 0,
                 "speed": "0 B/s",
@@ -202,7 +202,7 @@ def force_progress(
     tracker._publish(
         {
             "unified_task_id": tracker.unified_task_id,
-            "celery_task_id": tracker.task_id,
+            "dbos_workflow_id": tracker.task_id,
             "status": "downloading",
             "percent": clamped,
             "speed": speed_str,

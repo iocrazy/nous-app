@@ -117,6 +117,21 @@ api_router.include_router(router=task_manager_router, tags=["Task Manager"])
 
 api_router.include_router(router=teams_router, tags=["Teams"])
 
+# DBOS orchestrator health + introspection (PR-D2.2)
+from app.api.dbos_router import router as dbos_router  # noqa: E402
+
+api_router.include_router(router=dbos_router, tags=["DBOS"])
+
+# DBOS per-workflow status + SSE stream (PR-D4)
+from app.api.workflows_router import router as workflows_router  # noqa: E402
+
+api_router.include_router(router=workflows_router, tags=["DBOS Workflows"])
+
+# Issues — top-level user-visible entity (PR-D6)
+from app.api.issues_router import router as issues_router  # noqa: E402
+
+api_router.include_router(router=issues_router, tags=["Issues"])
+
 api_router.include_router(router=invites_router, tags=["Invites"])
 
 api_router.include_router(router=video_collections_router, tags=["Video Collections"])

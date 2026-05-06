@@ -18,9 +18,14 @@ from app.tasks.utils import run_async
 
 
 def maybe_chain_transcode(platform_id: str, user_id: str):
-    """Chain HLS transcoding after download if the resource is a video."""
+    """Chain HLS transcoding after download if the resource is a video.
+
+    PR-D7 phase 3: dispatch goes through start_workflow_routed so
+    it lands on the DBOS transcode workflow instead of Celery."""
     try:
         from app.repositories.resources_repository import ResourcesRepository
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.workflows.transcode import transcode_workflow
 
         repo = ResourcesRepository()
         resource = run_async(repo.get_resource_by_platform_id(platform_id))
@@ -43,7 +48,6 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
             )
             return
 
-        # Transcode the latest version
         latest = versions[0]
         version_id = str(latest["id"])
         logger.info(
@@ -51,17 +55,31 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
             f"version={version_id}, mime={mime}, platform_id={platform_id}"
         )
 
-        from app.tasks.transcode_tasks import maybe_trigger_transcode
-
-        maybe_trigger_transcode(resource_id, version_id, mime, user_id=user_id)
+        run_async(
+            start_workflow_routed(
+                "transcode",
+                dbos_workflow_callable=transcode_workflow,
+                dbos_workflow_kwargs={
+                    "resource_id": resource_id,
+                    "version_id": version_id,
+                    "user_id": user_id,
+                },
+            )
+        )
     except Exception as e:
         logger.error(f"[Transcode/Chain] Failed for {platform_id}: {e}", exc_info=True)
 
 
 def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
-    """Chain AI tasks after download if user has auto-transcribe/summarize enabled."""
+    """Chain AI tasks after download if user has auto-transcribe/summarize.
+
+    PR-D7 phase 3: was `chain_ai_pipeline` from app.tasks.ai_tasks.
+    Now directly dispatches the two leaf workflows (ai_transcription
+    + ai_summary) via start_workflow_routed when their respective
+    auto-* flags are enabled."""
     try:
         from app.repositories.user_settings_repository import UserSettingsRepository
+        from app.services.dbos_orchestrator import start_workflow_routed
 
         repo = UserSettingsRepository()
         settings = run_async(repo.get_by_user_id(user_id))
@@ -75,11 +93,11 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
 
         if not transcript_bool and not summary_bool:
             logger.info(
-                f"[AI] Auto-transcribe/summarize disabled for user {user_id}, skipping AI pipeline"
+                f"[AI] Auto-transcribe/summarize disabled for user {user_id}, "
+                "skipping AI pipeline"
             )
             return
 
-        # Look up resource_id from platform_id
         resource_id = None
         try:
             from app.repositories.resources_repository import ResourcesRepository
@@ -91,22 +109,60 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
         except Exception as e:
             logger.debug(f"[AI] Could not resolve resource_id for {platform_id}: {e}")
 
-        from app.tasks.ai_tasks import chain_ai_pipeline
+        # Dispatch each leaf via start_workflow_routed. Order doesn't
+        # matter — they share the parsed_media row (transcript →
+        # ai_rewrite_text) but DBOS workflow_id memoization handles
+        # accidental double-fires. Lookup parsed_media.id since
+        # workflows take int media_id.
+        from app.repositories.media_repository import MediaRepository
 
-        chain_ai_pipeline(
-            platform_id=platform_id,
-            user_id=user_id,
-            resource_id=resource_id,
-            transcript_bool=transcript_bool,
-            summary_bool=summary_bool,
-        )
+        media = run_async(MediaRepository().get_by_platform_id(platform_id))
+        parsed_media_id = (media or {}).get("id")
+        if not parsed_media_id:
+            logger.warning(
+                f"[AI] No parsed_media row for {platform_id}, skipping AI chain"
+            )
+            return
+
+        if transcript_bool:
+            from app.workflows.ai_transcription import ai_transcription_workflow
+
+            run_async(
+                start_workflow_routed(
+                    "ai_transcription",
+                    dbos_workflow_callable=ai_transcription_workflow,
+                    dbos_workflow_kwargs={
+                        "parsed_media_id": int(parsed_media_id),
+                        "user_id": user_id,
+                    },
+                )
+            )
+
+        if summary_bool:
+            from app.workflows.ai_summary import ai_summary_workflow
+
+            run_async(
+                start_workflow_routed(
+                    "ai_summary",
+                    dbos_workflow_callable=ai_summary_workflow,
+                    dbos_workflow_kwargs={
+                        "parsed_media_id": int(parsed_media_id),
+                        "user_id": user_id,
+                    },
+                )
+            )
+
         logger.info(
             f"[AI] Pipeline chained after download: {platform_id} "
-            f"(transcribe={transcript_bool}, summarize={summary_bool}, resource={resource_id})"
+            f"(transcribe={transcript_bool}, summarize={summary_bool}, "
+            f"resource={resource_id})"
         )
 
     except Exception as e:
-        logger.warning(f"[AI] Failed to chain AI pipeline for {platform_id}: {e}")
+        logger.warning(
+            f"[AI] Failed to chain AI pipeline for {platform_id}: "
+            f"{type(e).__name__}: {e!r}"
+        )
 
 
 # ─── URL availability helpers ─────────────────────────────────────────

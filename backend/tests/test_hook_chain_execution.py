@@ -335,18 +335,19 @@ async def test_post_hook_exception_is_swallowed_run_continues():
 
 
 # ─────────────────────────────────────────────────────────────────────
-# side_effect Celery dispatch — non-blocking
+# side_effect dispatch — zero-arg callable, non-blocking
+# (D4: contract changed from Celery .delay() to opaque callable so
+# hook owners can route via DBOS / Celery / both)
 # ─────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_side_effect_celery_signature_is_dispatched():
-    sig = MagicMock()
-    sig.delay = MagicMock()
+async def test_side_effect_callable_is_invoked():
+    fire = MagicMock()  # zero-arg dispatch closure
 
     async def hook(ctx: HookContext) -> HookResult:
-        return HookResult(decision="continue", side_effect=sig)
+        return HookResult(decision="continue", side_effect=fire)
 
     reg = HookRegistry()
     reg.register_pre(hook, name="harvester")
@@ -355,18 +356,17 @@ async def test_side_effect_celery_signature_is_dispatched():
     runner = AgentRunner(adapter=adapter, skill_tool=FakeSkillTool(), hooks=reg)
     await runner.run_turn(_composed(), [{"role": "user", "content": "hi"}])
 
-    sig.delay.assert_called_once()
+    fire.assert_called_once_with()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_side_effect_dispatch_failure_does_not_break_run():
-    """Celery broker down → side_effect.delay() raises → run continues."""
-    sig = MagicMock()
-    sig.delay.side_effect = RuntimeError("broker unreachable")
+    """side_effect callable raises (broker down, DBOS unhealthy) → run continues."""
+    fire = MagicMock(side_effect=RuntimeError("dispatch unreachable"))
 
     async def hook(ctx: HookContext) -> HookResult:
-        return HookResult(decision="continue", side_effect=sig)
+        return HookResult(decision="continue", side_effect=fire)
 
     reg = HookRegistry()
     reg.register_pre(hook, name="harvester")

@@ -739,11 +739,30 @@ class ResourcesService:
     def _trigger_transcode(
         self, resource_id: str, version_id: str, mime_type: str, user_id: str = None
     ):
-        """Queue HLS transcoding for a video version (sync — for Celery context)."""
-        try:
-            from app.tasks.transcode_tasks import maybe_trigger_transcode
+        """Queue HLS transcoding for a video version (sync — for legacy context).
 
-            maybe_trigger_transcode(resource_id, version_id, mime_type, user_id=user_id)
+        PR-D7 phase 3: dispatches via DBOS workflow instead of Celery.
+        Skips the legacy size/duration gating — DBOS workflow does its
+        own short-circuit if the version is too small."""
+        if not mime_type or not mime_type.startswith("video/"):
+            return
+        try:
+            import asyncio
+
+            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.workflows.transcode import transcode_workflow
+
+            asyncio.run(
+                start_workflow_routed(
+                    "transcode",
+                    dbos_workflow_callable=transcode_workflow,
+                    dbos_workflow_kwargs={
+                        "resource_id": resource_id,
+                        "version_id": version_id,
+                        "user_id": user_id,
+                    },
+                )
+            )
         except Exception as e:
             logger.warning(f"Failed to trigger transcode for {resource_id}: {e}")
 
@@ -809,38 +828,27 @@ class ResourcesService:
         except Exception as e:
             logger.warning(f"[Transcode] Gating check failed, proceeding: {e}")
 
-        # Dedup check via task manager
-        dedup_key = None
-        try:
-            from app.services.unified_task_manager import get_task_manager
-
-            mgr = get_task_manager()
-            result = await mgr.acquire_or_subscribe(
-                task_type="transcode",
-                dedup_identifier=version_id,
-                user_id=user_id or "",
-                resource_id=resource_id,
-            )
-            dedup_key = result.get("dedup_key")
-            if result["action"] in ("subscribed", "completed"):
-                logger.info(
-                    f"[Transcode] Dedup hit for version {version_id}: {result['action']}"
-                )
-                return
-        except Exception as e:
-            logger.warning(f"[Transcode] Dedup check failed, proceeding normally: {e}")
+        # PR-D7 phase 3: legacy unified_task_manager.acquire_or_subscribe
+        # dedup is no longer needed — DBOS workflow_id memoization
+        # provides equivalent dedup via the workflow_id derived from
+        # version_id. Two simultaneous dispatches for the same version
+        # collide on workflow_id and the second one short-circuits to
+        # the cached result.
 
         try:
             await self.repo.update_version(version_id, {"transcode_status": "pending"})
 
-            from app.tasks.transcode_tasks import transcode_to_hls
+            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.workflows.transcode import transcode_workflow
 
-            await asyncio.to_thread(
-                transcode_to_hls.delay,
-                resource_id,
-                version_id,
-                user_id,
-                _dedup_key=dedup_key,
+            await start_workflow_routed(
+                "transcode",
+                dbos_workflow_callable=transcode_workflow,
+                dbos_workflow_kwargs={
+                    "resource_id": resource_id,
+                    "version_id": version_id,
+                    "user_id": user_id,
+                },
             )
             logger.info(
                 f"[Transcode] Queued HLS transcode: resource={resource_id}, version={version_id}"

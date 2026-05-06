@@ -13,7 +13,7 @@
 **启动前必读**：检查当前 worktree 根目录的 `.worktree.env` 文件获取端口分配：
 - `FRONTEND_PORT` — 前端 dev server 端口
 - `BACKEND_PORT` — 后端 FastAPI 端口
-- `REDIS_DB` — Celery Redis 数据库编号
+- `REDIS_DB` — Redis 数据库编号（download progress KV）
 
 端口已自动写入 `frontend/.env.local` 和 `backend/.env`，无需手动配置。
 
@@ -142,7 +142,8 @@ mediahub/
 │   │   ├── schemas/          # Pydantic 模型
 │   │   ├── services/         # 业务逻辑层
 │   │   │   └── task_tracker.py       # unified_tasks 任务追踪
-│   │   └── tasks/            # Celery 异步任务
+│   │   ├── tasks/            # 残留 helper 模块（utils / download_progress / download_strategies / download_helpers）— Celery decorators 已删
+│   │   └── workflows/        # DBOS workflow 定义（@DBOS.workflow + @DBOS.scheduled）
 │   ├── config.yml            # 业务配置
 │   └── pyproject.toml        # 后端依赖（uv 管理）
 ├── frontend/                   # 前端应用（React 19 + Vite 7）
@@ -216,7 +217,7 @@ supabase db push
 | `teams` | 团队 | BIGINT Snowflake |
 | `team_members` | 团队成员 | BIGINT |
 | `projects` | 项目 | BIGINT Snowflake |
-| `unified_tasks` | 异步任务追踪（Celery/后台） | UUID |
+| `unified_tasks` | 异步任务追踪（DBOS workflow / FastAPI 后台） | UUID |
 | `folders` | 文件夹 | BIGINT Snowflake |
 | `application_logs` | 后端应用日志（全量） | — |
 | `frontend_error_logs` | 前端错误日志 | — |
@@ -242,7 +243,7 @@ supabase db push
 ### 任务系统（Task Center）
 
 - 前端 `TaskManagerContext` 通过 Supabase Realtime 监听 `unified_tasks` 表变化
-- Celery 任务和 FastAPI 后台任务均通过 `TaskTracker` 创建 `unified_tasks` 记录
+- DBOS workflows 和 FastAPI 后台任务均通过 `TaskTracker` 创建 `unified_tasks` 记录
 - 任务状态：`pending` → `running` → `completed` / `failed`
 
 ### 前端技术栈
@@ -486,7 +487,7 @@ Schema (schemas/)      — Pydantic 请求/响应模型
       cd ${{ secrets.NAS_PROJECT_PATH }}
       git pull origin master
       docker-compose build --no-cache backend
-      docker-compose up -d --force-recreate backend celery-worker
+      docker-compose up -d --force-recreate backend
 ```
 
 **GitHub Secrets 配置**:

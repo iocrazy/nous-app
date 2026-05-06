@@ -68,12 +68,17 @@ class WorkforceScheduler:
         self,
         *,
         runner: Any = run_one_task,
+        pool: Optional[Any] = None,
         fast_tick_seconds: float = DEFAULT_FAST_TICK_SECONDS,
         inbox_every_n_ticks: int = DEFAULT_INBOX_EVERY_N_TICKS,
     ) -> None:
         # Injected runner makes tests trivial: pass an AsyncMock and
         # observe call counts. Production binds run_one_task.
-        self.pool = AgentWorkerPool(runner=runner)
+        # `pool` is also injectable so the lifespan can swap in
+        # DbosAgentWorkforcePool (D5) without scheduler-internal changes.
+        # When None, defaults to in-process AgentWorkerPool — original
+        # M3 behaviour.
+        self.pool = pool if pool is not None else AgentWorkerPool(runner=runner)
         self.inbox = InboxProcessor(dispatcher=self.pool)
         self.outbox = OutboxDispatcher()
         self.fast_tick_seconds = fast_tick_seconds

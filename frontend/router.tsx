@@ -63,6 +63,7 @@ const AgentsPage = lazyWithRetry(() => import('./pages/AgentsPage').then(m => ({
 const SkillsPage = lazyWithRetry(() => import('./pages/SkillsPage').then(m => ({ default: m.SkillsPage })));
 const UsagePage = lazyWithRetry(() => import('./pages/UsagePage').then(m => ({ default: m.UsagePage })));
 const WorkforcePage = lazyWithRetry(() => import('./pages/WorkforcePage').then(m => ({ default: m.WorkforcePage })));
+const IssuesPage = lazyWithRetry(() => import('./pages/IssuesPage').then(m => ({ default: m.IssuesPage })));
 const AILibraryLayout = lazyWithRetry(() =>
   import('./components/AILibrary/AILibraryLayout').then(m => ({ default: m.AILibraryLayout })),
 );
@@ -118,6 +119,8 @@ export const router = createBrowserRouter([
       { path: 'members', element: <RedirectToTeam view="members" /> },
       { path: 'billing', element: <RedirectToTeam view="billing" /> },
       { path: 'todolist', element: <RedirectToTeam view="todolist" /> },
+      { path: 'issues', element: <RedirectToTeam view="issues" /> },
+      { path: 'issues/:identifier', element: <RedirectToTeam view="issues" /> },
       { path: 'cleanup', element: <RedirectToTeam view="cleanup" /> },
       { path: 'shared', element: <RedirectToTeam view="shared" /> },
       { path: 'agents', element: <RedirectToTeam view="agents" /> },
@@ -155,6 +158,8 @@ export const router = createBrowserRouter([
           { path: 'members', element: <SuspenseWrap><MembersPage /></SuspenseWrap> },
           { path: 'billing', element: <SuspenseWrap><BillingPage /></SuspenseWrap> },
           { path: 'todolist', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
+          { path: 'issues', element: <SuspenseWrap><IssuesPage /></SuspenseWrap> },
+          { path: 'issues/:identifier', element: <SuspenseWrap><IssuesPage /></SuspenseWrap> },
           { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },
           // Legacy AI Library routes (kept for bookmark compatibility —
           // render without the new secondary sidebar).

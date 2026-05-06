@@ -1041,9 +1041,8 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     # 14-day window inclusive of today: midnight of (today - 13 days)
     # through now. Bucketing keys are date-only ISO strings, so we want
     # day 0 = 13 days ago and day 13 = today.
-    window_start = (
-        now.replace(hour=0, minute=0, second=0, microsecond=0)
-        - timedelta(days=13)
+    window_start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+        days=13
     )
     iso_start = window_start.isoformat()
 
@@ -1085,8 +1084,7 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     # stays continuous when there are gaps. ``window_start`` is already
     # midnight of (today - 13d), so day 13 is today.
     days: List[str] = [
-        (window_start + timedelta(days=i)).date().isoformat()
-        for i in range(14)
+        (window_start + timedelta(days=i)).date().isoformat() for i in range(14)
     ]
 
     activity_buckets: Counter[str] = Counter()
@@ -1116,12 +1114,8 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
             except (TypeError, ValueError):
                 pass
 
-    run_activity_14d = [
-        {"date": d, "count": activity_buckets.get(d, 0)} for d in days
-    ]
-    success_rate_14d = [
-        {"date": d, **success_buckets[d]} for d in days
-    ]
+    run_activity_14d = [{"date": d, "count": activity_buckets.get(d, 0)} for d in days]
+    success_rate_14d = [{"date": d, **success_buckets[d]} for d in days]
 
     # Tasks: status counts over 14d. Tasks live in agent_tasks scoped
     # by user_id (Delegate from chat carries the caller's user_id, and

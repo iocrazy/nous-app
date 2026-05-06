@@ -8,7 +8,6 @@ Dispatches a Celery task and returns a task_id immediately so the client
 can poll for completion via the unified task manager.
 """
 
-import asyncio
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -62,13 +61,17 @@ async def export_project(
         )
 
     try:
+        import uuid as _uuid
+
         svc = StoryboardService()
         await svc.verify_project_access(project_id, auth.user_id)
         mgr = get_task_manager()
+        wf_id = str(_uuid.uuid4())
         task_id = await mgr.create(
             user_id=auth.user_id,
             task_type="storyboard_export",
             title=f"Export storyboard as {body.format.upper()}",
+            dbos_workflow_id=wf_id,
             metadata={
                 "project_id": project_id,
                 "format": body.format,
@@ -76,14 +79,19 @@ async def export_project(
             },
         )
 
-        from app.tasks.storyboard_tasks import export_storyboard
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.workflows.storyboard import storyboard_export_workflow
 
-        await asyncio.to_thread(
-            export_storyboard.delay,
-            task_id,
-            project_id,
-            body.format,
-            body.options or {},
+        await start_workflow_routed(
+            "storyboard_export",
+            dbos_workflow_callable=storyboard_export_workflow,
+            dbos_workflow_kwargs={
+                "project_id": project_id,
+                "task_id": task_id,
+                "format": body.format,
+                "options": body.options or {},
+            },
+            workflow_id=wf_id,
         )
 
         logger.info(

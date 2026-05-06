@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
 from app.middleware.request_logging import RequestLoggingMiddleware
+from app.services import dbos_orchestrator
 from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
 
 # 在应用启动前设置日志
@@ -127,22 +129,69 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to record deployment log: {e}")
 
-    # ── M3: workforce scheduler — in-process asyncio tick loop ──────
-    # Replaces the M2 Celery beat tasks (agent_workforce_tasks). Single
-    # uvicorn process owns the dispatch loop + AgentWorkerPool. See
-    # app/services/workforce/scheduler.py for design rationale.
+    # DBOS Orchestrator (PR-D2.2): instantiate the singleton, import workflow
+    # modules so their decorators register, then launch the worker pool.
+    # Failure here is non-fatal — backend keeps serving requests; only DBOS-
+    # routed task_types degrade. This is intentional for the Celery → DBOS
+    # migration window where 'celery' mode is the safe default.
+    #
+    # PR-D5: DBOS launch moved BEFORE workforce scheduler so the scheduler
+    # can pick DbosAgentWorkforcePool when WORKFORCE_USE_DBOS_QUEUE is on.
+    try:
+        dbos_orchestrator.init_dbos()
+        if dbos_orchestrator.is_enabled():
+            # `from app import workflows` (NOT `import app.workflows`) so that
+            # the `app` parameter on this function is not shadowed by a local
+            # module binding. `import app.X` introduces `app` as a local in
+            # the enclosing function, which would break the
+            # `app.state.workforce_scheduler = ...` assignment below.
+            from app import workflows  # noqa: F401 — registers @DBOS decorators
+
+            dbos_orchestrator.launch_dbos()
+            logger.info("DBOS orchestrator launched")
+    except Exception as e:
+        logger.error(
+            f"DBOS orchestrator startup failed: {e!r} — continuing without DBOS"
+        )
+
+    # ── M3 / D5: workforce scheduler — in-process asyncio tick loop ──
+    # Inbox/outbox dispatch loop. Pool selection:
+    #   WORKFORCE_USE_DBOS_QUEUE=true + DBOS enabled →
+    #     DbosAgentWorkforcePool (cluster-wide concurrency, partitioned
+    #     per-agent serialization, durable retry)
+    #   otherwise → AgentWorkerPool (in-process asyncio, M3 default)
     workforce_scheduler = None
     try:
         from app.services.workforce.scheduler import WorkforceScheduler
 
-        workforce_scheduler = WorkforceScheduler()
+        use_dbos_queue = (
+            os.environ.get("WORKFORCE_USE_DBOS_QUEUE", "").lower()
+            in ("1", "true", "yes")
+            and dbos_orchestrator.is_enabled()
+        )
+        pool = None
+        if use_dbos_queue:
+            from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
+
+            pool = DbosAgentWorkforcePool()
+            logger.info("Workforce: using DbosAgentWorkforcePool (DBOS queue)")
+        else:
+            logger.info("Workforce: using AgentWorkerPool (in-process)")
+
+        workforce_scheduler = WorkforceScheduler(pool=pool)
         workforce_scheduler.start()
         app.state.workforce_scheduler = workforce_scheduler
-        logger.info("Workforce scheduler started (in-process asyncio loop)")
+        logger.info("Workforce scheduler started")
     except Exception as e:
         logger.warning(f"Failed to start workforce scheduler: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
+
+    # Drain DBOS workers first so in-flight workflows checkpoint cleanly.
+    try:
+        dbos_orchestrator.shutdown_dbos()
+    except Exception as e:
+        logger.warning(f"DBOS shutdown raised {e!r}")
 
     # Stop workforce scheduler before other teardown — drains in-flight
     # agent runs gracefully.

@@ -6,7 +6,6 @@ Resources Versions Router
 Version management: upload, set-current, delete, HLS serve, transcode.
 """
 
-import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -228,10 +227,17 @@ async def retry_transcode(
         # Reset status before retrying
         await repo.update_version(version_id, {"transcode_status": "pending"})
 
-        from app.tasks.transcode_tasks import transcode_to_hls
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.workflows.transcode import transcode_workflow
 
-        await asyncio.to_thread(
-            transcode_to_hls.delay, resource_id, version_id, auth.user_id
+        await start_workflow_routed(
+            "transcode",
+            dbos_workflow_callable=transcode_workflow,
+            dbos_workflow_kwargs={
+                "resource_id": resource_id,
+                "version_id": version_id,
+                "user_id": auth.user_id,
+            },
         )
 
         return {"success": True, "message": "Transcoding queued"}

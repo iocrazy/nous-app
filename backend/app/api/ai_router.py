@@ -75,7 +75,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     # === Dedup: reject if already processing ===
     _admin = await _get_admin()
     _active = (
-        await _admin.table("unified_tasks")
+        await _admin.table("task_tracking")
         .select("id")
         .eq("resource_id", resource_id)
         .eq("task_type", "ai_transcription")
@@ -152,16 +152,12 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     # === End billing ===
 
     try:
-        from app.tasks.ai_tasks import chain_ai_pipeline
+        # PR-D7 phase 3: chain_ai_pipeline used to dispatch Celery
+        # transcribe + summary tasks. We call the DBOS-routed
+        # equivalent in app.tasks.download_helpers (kept as helper).
+        from app.tasks.download_helpers import maybe_chain_ai_pipeline
 
-        await asyncio.to_thread(
-            chain_ai_pipeline,
-            platform_id=platform_id,
-            user_id=auth.user_id,
-            resource_id=resource_id,
-            transcript_bool=True,
-            summary_bool=False,
-        )
+        await asyncio.to_thread(maybe_chain_ai_pipeline, platform_id, auth.user_id)
     except Exception as e:
         if _points_cost > 0 and _team_id:
             try:
@@ -198,7 +194,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     # === Dedup: reject if already processing ===
     _admin = await _get_admin()
     _active = (
-        await _admin.table("unified_tasks")
+        await _admin.table("task_tracking")
         .select("id")
         .eq("resource_id", resource_id)
         .eq("task_type", "ai_summary")
@@ -244,37 +240,34 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
 
     try:
         if transcript and transcript.get("full_text"):
-            # Transcript exists, just run summary
-            from app.services.unified_task_manager import get_task_manager
-            from app.tasks.ai_tasks import generate_summary_task
+            # Transcript exists, dispatch ai_summary_workflow.
+            import uuid as _uuid
 
-            # Create unified task for Task Center visibility
+            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.services.unified_task_manager import get_task_manager
+            from app.workflows.ai_summary import ai_summary_workflow
+
             tracker = get_task_manager()
+            wf_id = str(_uuid.uuid4())
             task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="ai_summary",
                 title=f"Summarize: {platform_id}",
                 media_id=platform_id,
                 resource_id=resource_id,
+                dbos_workflow_id=wf_id,
             )
-            await tracker.start(task_id)
             _orphan_task_id = task_id
 
-            celery_task = await asyncio.to_thread(
-                generate_summary_task.delay,
-                platform_id,
-                auth.user_id,
-                resource_id,
-                task_id,
+            await start_workflow_routed(
+                "ai_summary",
+                dbos_workflow_callable=ai_summary_workflow,
+                dbos_workflow_kwargs={
+                    "parsed_media_id": int(media["id"]),
+                    "user_id": auth.user_id,
+                },
+                workflow_id=wf_id,
             )
-            # Link celery task id so admin panel / retry flow can locate it.
-            try:
-                await tracker._atomic_update(
-                    task_id, {"celery_task_id": celery_task.id}
-                )
-            except Exception as _e:
-                logger.debug(f"[AI] Failed to link celery_task_id for {task_id}: {_e}")
-            # Dispatch succeeded — worker now owns the unified_task.
             _orphan_task_id = None
             return {
                 "message": "Summary generation queued",
@@ -282,19 +275,25 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
                 "platform_id": platform_id,
             }
         else:
-            # No transcript, run full pipeline
-            from app.tasks.ai_tasks import chain_ai_pipeline
+            # No transcript yet — dispatch transcription. PR-D7 phase
+            # 3b: chain_ai_pipeline used to celery-chain transcribe →
+            # summary. With DBOS, summary needs a parent workflow to
+            # depend on transcript completion. For now we dispatch
+            # transcription only; the user re-triggers summary once
+            # the transcript lands (frontend polls).
+            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.workflows.ai_transcription import ai_transcription_workflow
 
-            await asyncio.to_thread(
-                chain_ai_pipeline,
-                platform_id=platform_id,
-                user_id=auth.user_id,
-                resource_id=resource_id,
-                transcript_bool=True,
-                summary_bool=True,
+            await start_workflow_routed(
+                "ai_transcription",
+                dbos_workflow_callable=ai_transcription_workflow,
+                dbos_workflow_kwargs={
+                    "parsed_media_id": int(media["id"]),
+                    "user_id": auth.user_id,
+                },
             )
             return {
-                "message": "Full AI pipeline queued (transcribe + summarize)",
+                "message": "Transcription queued; trigger summary again once transcript is ready",
                 "resource_id": resource_id,
                 "platform_id": platform_id,
             }
@@ -373,15 +372,19 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
     # === End points check ===
 
     try:
-        from app.tasks.ai_tasks import chain_ai_pipeline
+        # PR-D7 phase 3b: dispatch ai_transcription_workflow directly.
+        # Workflow takes parsed_media_id (int), so look it up.
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.workflows.ai_transcription import ai_transcription_workflow
 
-        await asyncio.to_thread(
-            chain_ai_pipeline,
-            platform_id=platform_id,
-            user_id=auth.user_id,
-            resource_id=None,
-            transcript_bool=True,
-            summary_bool=False,
+        media_row = await _get_media_or_404(platform_id)
+        await start_workflow_routed(
+            "ai_transcription",
+            dbos_workflow_callable=ai_transcription_workflow,
+            dbos_workflow_kwargs={
+                "parsed_media_id": int(media_row["id"]),
+                "user_id": auth.user_id,
+            },
         )
     except Exception as e:
         if _points_cost > 0 and _team_id:
@@ -446,50 +449,52 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
 
     try:
         if transcript and transcript.get("full_text"):
-            # Transcript exists, just run summary
+            # Transcript exists — dispatch ai_summary_workflow.
+            import uuid as _uuid
+
+            from app.services.dbos_orchestrator import start_workflow_routed
             from app.services.unified_task_manager import get_task_manager
-            from app.tasks.ai_tasks import generate_summary_task
+            from app.workflows.ai_summary import ai_summary_workflow
 
             tracker = get_task_manager()
+            wf_id = str(_uuid.uuid4())
             task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="ai_summary",
                 title=f"Summarize: {platform_id}",
                 media_id=platform_id,
                 resource_id=_resource_id,
+                dbos_workflow_id=wf_id,
             )
-            await tracker.start(task_id)
             _orphan_task_id = task_id
 
-            celery_task = await asyncio.to_thread(
-                generate_summary_task.delay,
-                platform_id,
-                auth.user_id,
-                _resource_id,
-                task_id,
+            await start_workflow_routed(
+                "ai_summary",
+                dbos_workflow_callable=ai_summary_workflow,
+                dbos_workflow_kwargs={
+                    "parsed_media_id": int(media_id),
+                    "user_id": auth.user_id,
+                },
+                workflow_id=wf_id,
             )
-            try:
-                await tracker._atomic_update(
-                    task_id, {"celery_task_id": celery_task.id}
-                )
-            except Exception as _e:
-                logger.debug(f"[AI] Failed to link celery_task_id for {task_id}: {_e}")
             _orphan_task_id = None
             return {"message": "Summary generation queued", "platform_id": platform_id}
         else:
-            # No transcript, run full pipeline
-            from app.tasks.ai_tasks import chain_ai_pipeline
+            # No transcript yet — dispatch transcription only. PR-D7
+            # phase 3b: see trigger_summary_by_resource for rationale.
+            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.workflows.ai_transcription import ai_transcription_workflow
 
-            await asyncio.to_thread(
-                chain_ai_pipeline,
-                platform_id=platform_id,
-                user_id=auth.user_id,
-                resource_id=_resource_id,
-                transcript_bool=True,
-                summary_bool=True,
+            await start_workflow_routed(
+                "ai_transcription",
+                dbos_workflow_callable=ai_transcription_workflow,
+                dbos_workflow_kwargs={
+                    "parsed_media_id": int(media_id),
+                    "user_id": auth.user_id,
+                },
             )
             return {
-                "message": "Full AI pipeline queued (transcribe + summarize)",
+                "message": "Transcription queued; trigger summary again once transcript is ready",
                 "platform_id": platform_id,
             }
     except Exception as e:

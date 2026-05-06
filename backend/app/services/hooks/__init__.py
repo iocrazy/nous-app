@@ -9,7 +9,7 @@ Design (locked in plan-eng-review 2026-04-25):
   ``continue`` / ``modify`` / ``abort`` / ``await_approval``.
 - Hooks declare a ``priority`` integer; lower numbers run first.
   Same-priority hooks run in registration order.
-- ``HookResult.side_effect`` is a Celery task signature (NOT a coroutine).
+- ``HookResult.side_effect`` is a zero-arg callable (NOT a coroutine).
   AgentRunner calls ``task.delay(*args, **kwargs)`` and continues — the
   side effect runs out-of-process, OOM-isolated, retry-able. Originally
   considered ``asyncio.create_task()`` but rejected in review (memory leak
@@ -29,7 +29,7 @@ Rendering:
        │       │
        │       └── for hook in sorted(by priority):
        │              result = await hook(ctx)
-       │              if result.side_effect: task.delay(...)
+       │              if result.side_effect: result.side_effect()
        │              if result.decision == "abort": return aborted
        │              if result.decision == "modify": args = result.modified_args
        │              if result.decision == "await_approval": return paused
@@ -109,9 +109,13 @@ class HookResult:
     abort_reason: Optional[str] = None
     approval_request: Optional[ApprovalRequest] = None
 
-    # Celery task signature (e.g. ``write_memory.s(run_id=...)``).
-    # AgentRunner calls ``side_effect.delay()`` and continues without
-    # awaiting. Out-of-process, OOM-isolated, retry-able.
+    # Callable that fires background work and returns immediately.
+    # AgentRunner invokes ``side_effect()`` (no args) and continues
+    # without awaiting. The hook owner picks the dispatch mechanism
+    # — Celery .delay(), start_workflow_routed("...", ...), or both
+    # for shadow-mode comparison. Keeping the dispatch choice on the
+    # hook side lets us migrate task_types one at a time without
+    # touching AgentRunner.
     side_effect: Optional[Any] = None
 
 

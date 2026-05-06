@@ -129,7 +129,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
           const supabase = getSupabaseClient();
           if (supabase) {
             const { data: tasks } = await supabase
-              .from('unified_tasks')
+              .from('task_tracking')
               .select('status')
               .eq('resource_id', resourceId)
               .eq('task_type', 'ai_transcription')

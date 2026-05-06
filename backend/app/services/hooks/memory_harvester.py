@@ -1,18 +1,17 @@
-"""MemoryHarvester — PostToolUse hook skeleton.
+"""MemoryHarvester — PostToolUse hook.
 
-M1.A purpose: validate the side_effect Celery dispatch path. We do NOT
-write memories yet — that's M1.B (Memory v1 implementation). The skeleton
-returns a side_effect Celery signature that points at a no-op task.
-This proves the wiring works end-to-end before M1.B fills in real
-extraction logic (UUID->int mapping, dual-prompt extraction, when_to_use
-embedding, salience reinforcement).
+Returns a side_effect zero-arg callable that fires the memory-write
+background task. The hook itself doesn't know whether the dispatch
+goes via Celery or DBOS — it just calls ``signature_factory(...)`` and
+hands the resulting closure back as ``HookResult.side_effect``.
+Wiring lives in ``app.services.ai_library_chat_wiring``, which routes
+through ``start_workflow_routed("memory_tasks", ...)`` so the routing
+table picks celery vs shadow vs dbos.
 
-Promotion path: in M1.B, replace ``_noop_memory_signature`` with a real
-Celery task that:
-  1. Pulls the recent ai_messages for ctx.session_id
-  2. Runs both extractors (UserMemoryExtractor + AssistantMemoryExtractor)
-  3. Embeds the resulting facts on ``when_to_use``
-  4. Inserts into agent_memories with scope='agent_user'
+Real memory extraction (UUID->int mapping, dual-prompt extraction,
+when_to_use embedding, salience reinforcement) lives in
+``app.workflows.write_memory`` (PR-D3c port of the legacy
+``app.tasks.memory_tasks.write_memory_task``).
 """
 
 from __future__ import annotations
@@ -28,19 +27,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MemoryHarvesterHook:
-    """PostToolUse — fires a Celery side_effect to write memories.
+    """PostToolUse — fires a routed side_effect to write memories.
 
-    Skeleton in M1.A. Real implementation lands in M1.B.
+    Dispatch mechanism (Celery vs DBOS) is decided by the
+    ``signature_factory`` closure injected at wiring time, NOT by the
+    hook itself.
     """
 
     name: str = "memory_harvester"
     priority: int = 80  # Run after CostAuditor so audit row exists first.
 
-    # Optional injection: a Celery task signature factory. In production
-    # wiring, the chat service constructs the Hook with a closure over
-    # the real ``write_memory_task.s`` so it can curry the run_id /
-    # session_id. Tests pass a MagicMock so the dispatch path can be
-    # verified without Celery.
+    # Optional injection: a factory that returns a zero-arg callable.
+    # Production wiring (ai_library_chat_wiring.py) returns a closure
+    # that calls start_workflow_routed("memory_tasks", ...). Tests pass
+    # a MagicMock returning a callable so the dispatch path can be
+    # verified without Celery or DBOS.
     signature_factory: Optional[Any] = None
 
     async def __call__(

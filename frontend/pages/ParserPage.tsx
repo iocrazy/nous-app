@@ -255,33 +255,34 @@ export function ParserPage() {
               className={`p-3 md:p-5 rounded-xl bg-zinc-900/50 border transition-colors text-center flex flex-col items-center justify-center min-h-0 cursor-pointer ${
                 showActiveTasks
                   ? 'border-indigo-500/60 ring-1 ring-indigo-500/20' :
-                systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                systemStatus?.queue.status === 'offline'
                   ? 'border-red-800/60' : 'border-zinc-800/50 hover:border-zinc-700'
               }`}
            >
               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
-                systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                systemStatus?.queue.status === 'offline'
                   ? 'bg-red-900/30 text-red-400' :
                 activeTasks.length > 0 ? 'bg-indigo-900/30 text-indigo-400' : 'bg-zinc-800/50 text-zinc-500'
               }`}>
                 <ListVideo size={16} className="md:hidden" />
                 <ListVideo size={20} className="hidden md:block" />
               </div>
-              <h4 className="font-semibold text-zinc-200 text-xs md:text-base mb-0.5">Worker</h4>
+              <h4 className="font-semibold text-zinc-200 text-xs md:text-base mb-0.5">Engine</h4>
               <p className={`text-xs md:text-sm font-mono ${
-                systemStatus?.queue.status === 'offline' || systemStatus?.queue.status === 'outdated'
+                systemStatus?.queue.status === 'offline'
                   ? 'text-red-400' :
                 activeTasks.length > 0 ? 'text-indigo-400' : 'text-green-400'
               }`}>
                 {systemStatus?.queue.status === 'offline' ? 'Offline' :
-                 systemStatus?.queue.status === 'outdated' ? 'Outdated' :
-                 activeTasks.length > 0 ? `${activeTasks.length} Active` : 'Idle'}
+                 activeTasks.length > 0 ? `${activeTasks.length} Running` : 'Idle'}
               </p>
-              {systemStatus?.queue.status === 'outdated' && (
-                <p className="text-[10px] md:text-xs text-red-400/80 mt-0.5">Restart worker</p>
-              )}
               {systemStatus?.queue.status === 'offline' && (
-                <p className="text-[10px] md:text-xs text-red-400/80 mt-0.5">Start worker</p>
+                <p className="text-[10px] md:text-xs text-red-400/80 mt-0.5">DBOS unavailable</p>
+              )}
+              {systemStatus?.queue.status === 'online' && systemStatus.queue.pending > 0 && (
+                <p className="text-[10px] md:text-xs text-zinc-600 mt-0.5">
+                  {systemStatus.queue.pending} queued
+                </p>
               )}
               <div className="mt-1 text-zinc-500">
                 {showActiveTasks ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -310,7 +311,7 @@ export function ParserPage() {
            </div>
         </div>
 
-        {/* Active Tasks Panel — shown when Worker card is clicked */}
+        {/* Active Tasks Panel — shown when Engine card is clicked */}
         {showActiveTasks && (
           <div className="mt-3 bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden animate-in slide-in-from-top-2 duration-200">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800">

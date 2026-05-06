@@ -179,16 +179,20 @@ async def retry_transcode(
 
     resource_id = str(version["resource_id"])
 
-    # Mark as pending and dispatch Celery task directly.
-    # NOTE: cannot call maybe_trigger_transcode() here because it uses
-    # run_async(asyncio.run()) which crashes inside an already-running
-    # event loop (FastAPI's async handler).
+    # Mark as pending and dispatch DBOS workflow.
     await repo.mark_pending(version_id)
 
-    from app.tasks.transcode_tasks import transcode_to_hls
+    from app.services.dbos_orchestrator import start_workflow_routed
+    from app.workflows.transcode import transcode_workflow
 
-    await asyncio.to_thread(
-        transcode_to_hls.delay, resource_id, version_id, auth.user_id
+    await start_workflow_routed(
+        "transcode",
+        dbos_workflow_callable=transcode_workflow,
+        dbos_workflow_kwargs={
+            "resource_id": resource_id,
+            "version_id": version_id,
+            "user_id": auth.user_id,
+        },
     )
 
     # Audit log
@@ -218,15 +222,23 @@ async def batch_transcode(
     versions = await repo.list_versions_for_batch(action)
     queued = 0
 
-    # Dispatch Celery tasks directly (cannot use maybe_trigger_transcode in async context)
-    from app.tasks.transcode_tasks import transcode_to_hls
+    from app.services.dbos_orchestrator import start_workflow_routed
+    from app.workflows.transcode import transcode_workflow
 
     for v in versions:
         try:
             vid = str(v["id"])
             rid = str(v["resource_id"])
             await repo.mark_pending(vid)
-            await asyncio.to_thread(transcode_to_hls.delay, rid, vid, auth.user_id)
+            await start_workflow_routed(
+                "transcode",
+                dbos_workflow_callable=transcode_workflow,
+                dbos_workflow_kwargs={
+                    "resource_id": rid,
+                    "version_id": vid,
+                    "user_id": auth.user_id,
+                },
+            )
             queued += 1
         except Exception as e:
             logger.warning(f"[Admin] Batch transcode failed for version {v['id']}: {e}")

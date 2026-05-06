@@ -1,7 +1,7 @@
 # app/services/unified_task_manager.py
 
 """
-UnifiedTaskManager — Single source of truth for unified_tasks lifecycle.
+UnifiedTaskManager — Single source of truth for task_tracking lifecycle.
 
 Merges the former TaskTracker (status/progress) and TaskOrchestrator
 (phase/dedup/subscribers) into one class.  ``phase`` is the canonical
@@ -132,18 +132,19 @@ class UnifiedTaskManager:
         return await get_async_supabase_admin()
 
     def _get_redis(self):
-        """Get Redis connection from Celery backend."""
-        from app.celery_app import celery_app
+        """Get sync Redis connection. PR-D7: was via celery_app.backend;
+        now via the dedicated `app.core.redis.get_sync_redis` helper."""
+        from app.core.redis import get_sync_redis
 
-        return celery_app.backend.client
+        return get_sync_redis()
 
     async def _get_phase(self, task_id: str) -> TaskPhase:
         """Fetch the current phase of a task."""
         client = await self._get_client()
         result = await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .select("phase")
-            .eq("id", task_id)
+            .eq("dbos_workflow_id", task_id)
             .single()
             .execute()
         )
@@ -163,9 +164,11 @@ class UnifiedTaskManager:
             )
 
     async def _atomic_update(self, task_id: str, updates: Dict[str, Any]) -> None:
-        """Write updates to a unified_tasks row."""
+        """Write updates to a task_tracking row."""
         client = await self._get_client()
-        await client.table("unified_tasks").update(updates).eq("id", task_id).execute()
+        await client.table("task_tracking").update(updates).eq(
+            "dbos_workflow_id", task_id
+        ).execute()
 
     # ── Lifecycle: create ─────────────────────────────────────────────
 
@@ -178,13 +181,13 @@ class UnifiedTaskManager:
         resource_id: Optional[str] = None,
         media_id: Optional[str] = None,
         group_id: Optional[str] = None,
-        celery_task_id: Optional[str] = None,
+        dbos_workflow_id: Optional[str] = None,
         total_bytes: Optional[int] = None,
         subtitle: Optional[str] = None,
         metadata: Optional[dict] = None,
         dedup_key: Optional[str] = None,
     ) -> str:
-        """Create a unified_tasks row. Returns the task UUID.
+        """Create a task_tracking row. Returns the task UUID.
 
         Sets phase=QUEUED and status=pending at creation time.
         If dedup_key is provided it is written in the same INSERT,
@@ -205,8 +208,8 @@ class UnifiedTaskManager:
             row["media_id"] = media_id
         if group_id:
             row["group_id"] = group_id
-        if celery_task_id:
-            row["celery_task_id"] = celery_task_id
+        if dbos_workflow_id:
+            row["dbos_workflow_id"] = dbos_workflow_id
         if total_bytes is not None:
             row["total_bytes"] = total_bytes
         if subtitle:
@@ -216,8 +219,8 @@ class UnifiedTaskManager:
         if dedup_key:
             row["dedup_key"] = dedup_key
 
-        result = await client.table("unified_tasks").insert(row).execute()
-        task_id = result.data[0]["id"]
+        result = await client.table("task_tracking").insert(row).execute()
+        task_id = result.data[0]["dbos_workflow_id"]
         logger.debug(f"[TaskManager] Created {task_type} task {task_id}: {title[:40]}")
         return task_id
 
@@ -290,16 +293,18 @@ class UnifiedTaskManager:
             updates["title"] = title
         if metadata_patch:
             existing = (
-                await client.table("unified_tasks")
+                await client.table("task_tracking")
                 .select("metadata")
-                .eq("id", task_id)
+                .eq("dbos_workflow_id", task_id)
                 .single()
                 .execute()
             )
             merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
             updates["metadata"] = merged
 
-        await client.table("unified_tasks").update(updates).eq("id", task_id).execute()
+        await client.table("task_tracking").update(updates).eq(
+            "dbos_workflow_id", task_id
+        ).execute()
 
     # ── Lifecycle: complete ───────────────────────────────────────────
 
@@ -332,9 +337,9 @@ class UnifiedTaskManager:
         if metadata_patch:
             client = await self._get_client()
             existing = (
-                await client.table("unified_tasks")
+                await client.table("task_tracking")
                 .select("metadata")
-                .eq("id", task_id)
+                .eq("dbos_workflow_id", task_id)
                 .single()
                 .execute()
             )
@@ -381,9 +386,9 @@ class UnifiedTaskManager:
         if metadata_patch:
             client = await self._get_client()
             existing = (
-                await client.table("unified_tasks")
+                await client.table("task_tracking")
                 .select("metadata")
-                .eq("id", task_id)
+                .eq("dbos_workflow_id", task_id)
                 .single()
                 .execute()
             )
@@ -404,9 +409,9 @@ class UnifiedTaskManager:
         """
         client = await self._get_client()
         result = await (
-            client.table("unified_tasks")
-            .select("celery_task_id, phase")
-            .eq("id", task_id)
+            client.table("task_tracking")
+            .select("dbos_workflow_id, phase")
+            .eq("dbos_workflow_id", task_id)
             .eq("user_id", user_id)
             .single()
             .execute()
@@ -429,17 +434,17 @@ class UnifiedTaskManager:
             )
             return
 
-        celery_id = result.data.get("celery_task_id")
+        celery_id = result.data.get("dbos_workflow_id")
 
         await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .update(
                 {
                     "phase": TaskPhase.CANCELLED.value,
                     "status": _PHASE_TO_STATUS[TaskPhase.CANCELLED],
                 }
             )
-            .eq("id", task_id)
+            .eq("dbos_workflow_id", task_id)
             .eq("user_id", user_id)
             .execute()
         )
@@ -447,15 +452,15 @@ class UnifiedTaskManager:
         self._last_progress_value.pop(task_id, None)
 
         if celery_id:
-            try:
-                from app.celery_app import celery_app
-
-                celery_app.control.revoke(celery_id, terminate=True)
-                logger.info(f"[TaskManager] Revoked Celery task {celery_id}")
-            except Exception as e:
-                logger.warning(
-                    f"[TaskManager] Failed to revoke Celery task {celery_id}: {e}"
-                )
+            # PR-D7 phase 3: Celery is gone. The legacy `celery_id`
+            # column on task_tracking may still get populated by older
+            # task rows; ignore it (no Celery worker to revoke from).
+            # Future: try DBOS.cancel_workflow_async() if the row also
+            # carries a dbos_workflow_id.
+            logger.debug(
+                f"[TaskManager] Skipped revoke for legacy celery_id={celery_id} "
+                "(Celery removed in PR-D7)"
+            )
 
         logger.debug(f"[TaskManager] Cancelled {task_id}")
 
@@ -465,7 +470,7 @@ class UnifiedTaskManager:
         """Get active (pending/processing) tasks for a user."""
         client = await self._get_client()
         result = await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .select("*")
             .eq("user_id", user_id)
             .in_("status", ["pending", "processing"])
@@ -487,7 +492,7 @@ class UnifiedTaskManager:
         """Get paginated tasks for a user."""
         client = await self._get_client()
         query = (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .select("*")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
@@ -504,7 +509,7 @@ class UnifiedTaskManager:
         """Get task counts by type and status."""
         client = await self._get_client()
         result = await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .select("task_type, status")
             .eq("user_id", user_id)
             .execute()
@@ -545,9 +550,9 @@ class UnifiedTaskManager:
         """Delete a task record."""
         client = await self._get_client()
         result = await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .delete()
-            .eq("id", task_id)
+            .eq("dbos_workflow_id", task_id)
             .eq("user_id", user_id)
             .execute()
         )
@@ -557,25 +562,25 @@ class UnifiedTaskManager:
         """Delete old completed/failed tasks, keeping the most recent ones."""
         client = await self._get_client()
         keep = await (
-            client.table("unified_tasks")
-            .select("id")
+            client.table("task_tracking")
+            .select("dbos_workflow_id")
             .eq("user_id", user_id)
             .in_("status", ["completed", "failed", "cancelled"])
             .order("completed_at", desc=True)
             .limit(keep_recent)
             .execute()
         )
-        keep_ids = [r["id"] for r in (keep.data or [])]
+        keep_ids = [r["dbos_workflow_id"] for r in (keep.data or [])]
 
         query = (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .delete()
             .eq("user_id", user_id)
             .in_("status", ["completed", "failed", "cancelled"])
         )
         if keep_ids:
             for kid in keep_ids:
-                query = query.neq("id", kid)
+                query = query.neq("dbos_workflow_id", kid)
         result = await query.execute()
         return len(result.data or [])
 
@@ -583,9 +588,9 @@ class UnifiedTaskManager:
         """Reset a failed task for retry (phase -> QUEUED)."""
         client = await self._get_client()
         result = await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .select("*")
-            .eq("id", task_id)
+            .eq("dbos_workflow_id", task_id)
             .eq("user_id", user_id)
             .single()
             .execute()
@@ -595,7 +600,7 @@ class UnifiedTaskManager:
             return None
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        await client.table("unified_tasks").update(
+        await client.table("task_tracking").update(
             {
                 "phase": TaskPhase.QUEUED.value,
                 "status": "pending",
@@ -606,7 +611,7 @@ class UnifiedTaskManager:
                 "completed_at": None,
                 "updated_at": now_iso,
             }
-        ).eq("id", task_id).execute()
+        ).eq("dbos_workflow_id", task_id).execute()
 
         return task
 
@@ -645,7 +650,7 @@ class UnifiedTaskManager:
 
         client = await self._get_client()
         active_result = await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .select("id, phase, subscribers")
             .eq("dedup_key", dedup_key)
             .in_("phase", ["queued", "dedup_check", "processing"])
@@ -656,7 +661,7 @@ class UnifiedTaskManager:
 
         if active_result.data:
             task = active_result.data[0]
-            task_id = task["id"]
+            task_id = task["dbos_workflow_id"]
             subscribers = task.get("subscribers") or []
             subscribers.append(
                 {
@@ -666,9 +671,9 @@ class UnifiedTaskManager:
                 }
             )
             await (
-                client.table("unified_tasks")
+                client.table("task_tracking")
                 .update({"subscribers": subscribers})
-                .eq("id", task_id)
+                .eq("dbos_workflow_id", task_id)
                 .execute()
             )
             logger.info(
@@ -682,8 +687,8 @@ class UnifiedTaskManager:
             }
 
         completed_result = await (
-            client.table("unified_tasks")
-            .select("id")
+            client.table("task_tracking")
+            .select("dbos_workflow_id")
             .eq("dedup_key", dedup_key)
             .eq("phase", "completed")
             .order("completed_at", desc=True)
@@ -711,9 +716,9 @@ class UnifiedTaskManager:
         """Fan-out results to all subscribers of a dedup'd task."""
         client = await self._get_client()
         result = await (
-            client.table("unified_tasks")
+            client.table("task_tracking")
             .select("task_type, media_id, subscribers")
-            .eq("id", task_id)
+            .eq("dbos_workflow_id", task_id)
             .single()
             .execute()
         )

@@ -40,7 +40,7 @@ jobs:
             export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
             echo "Finding Supabase DB container..."
-            DB_CONTAINER="mediahub-db"
+            DB_CONTAINER="mediahub-sb-db"
             echo "Using DB container: $DB_CONTAINER"
 
             MIGRATION_FILE="${{ inputs.migration_file }}"
@@ -52,7 +52,7 @@ jobs:
             echo "Migration complete!"
 
             echo "Reloading PostgREST schema cache..."
-            sudo docker kill --signal=SIGUSR1 mediahub-rest 2>/dev/null || true
-            echo "Reloaded PostgREST: mediahub-rest"
+            sudo docker kill --signal=SIGUSR1 mediahub-sb-rest 2>/dev/null || true
+            echo "Reloaded PostgREST: mediahub-sb-rest"
 
             echo "Done!"

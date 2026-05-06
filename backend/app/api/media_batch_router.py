@@ -6,8 +6,6 @@ Media Batch Router
 Endpoints for batch fetching media and debug raw-parse.
 """
 
-import asyncio
-
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from loguru import logger
 
@@ -60,29 +58,45 @@ async def fetch_videos_batch(
         _batch_points_cost = points_result.get("points_cost", 0)
 
     if request.use_celery:
-        from app.tasks.parse_tasks import parse_batch_links_task
+        # PR-D7 phase 3: was Celery parse_batch_links_task. Now loops
+        # parse_workflow per URL via start_workflow_routed. Per-URL
+        # failures are absorbed (best-effort batch).
+        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.workflows.parse import parse_workflow
 
-        task = await asyncio.to_thread(
-            parse_batch_links_task.delay,
-            urls=request.urls,
-            user_id=auth.user_id,
-            video_bool=request.video_bool,
-            cover_bool=request.cover_bool,
-        )
+        wf_ids: list[str] = []
+        for u in request.urls:
+            try:
+                d = await start_workflow_routed(
+                    "parse",
+                    dbos_workflow_callable=parse_workflow,
+                    dbos_workflow_kwargs={
+                        "url": u,
+                        "user_id": auth.user_id,
+                        "video_bool": request.video_bool,
+                        "cover_bool": request.cover_bool,
+                    },
+                )
+                wid = d.get("dbos_workflow_id")
+                if wid:
+                    wf_ids.append(wid)
+            except Exception as exc:
+                logger.warning(f"[BatchFetch] dispatch failed for {u}: {exc}")
 
         background_tasks.add_task(
             log_user_action,
             user_id=auth.user_id,
             action="fetch_batch",
-            message=f"Submitted batch Celery task: {len(request.urls)} links",
+            message=f"Submitted DBOS batch: {len(wf_ids)}/{len(request.urls)} URLs",
             status="pending",
-            details={"url_count": len(request.urls)},
+            details={"url_count": len(request.urls), "started": len(wf_ids)},
         )
 
         return {
             "success": True,
-            "message": "Batch task submitted to Celery queue",
-            "task_id": task.id,
+            "message": "Batch dispatched to DBOS",
+            "task_id": wf_ids[0] if wf_ids else "",
+            "workflow_ids": wf_ids,
             "total": len(request.urls),
             "use_celery": True,
         }

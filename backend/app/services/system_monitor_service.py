@@ -31,35 +31,19 @@ _CRITICAL_TASKS = {
 def check_worker_ready(
     task_name: str = "app.tasks.download_tasks.download_unified_task",
 ) -> tuple[bool, str]:
-    """Check if a Celery worker is online and has the specified task registered.
+    """Worker readiness probe — used to be a Celery inspect ping.
 
-    Returns (is_ready, error_message).
+    PR-D7 phase 3: Celery is gone. DBOS workers are in-process with
+    the FastAPI server, so if this code is running the worker pool is
+    online by definition. Returns ready=True unconditionally; the
+    `task_name` arg is kept for caller signature compatibility but
+    no longer queried.
     """
-    try:
-        from app.celery_app import celery_app
+    from app.services import dbos_orchestrator
 
-        inspect = celery_app.control.inspect(timeout=1.0)
-        ping = inspect.ping()
-        if not ping:
-            return (
-                False,
-                "No Celery workers online. Start with: celery -A app.celery_app worker",
-            )
-
-        registered = inspect.registered() or {}
-        all_registered: set[str] = set()
-        for worker_tasks in registered.values():
-            all_registered.update(worker_tasks)
-
-        if task_name not in all_registered:
-            return False, (
-                f"Worker is online but task '{task_name}' is not registered. "
-                "Restart the Celery worker to load new code."
-            )
-
-        return True, ""
-    except Exception as e:
-        return False, f"Cannot reach Celery broker: {e}"
+    if not dbos_orchestrator.is_enabled():
+        return False, "DBOS not enabled — workflow dispatch unavailable"
+    return True, ""
 
 
 def _format_speed(bytes_per_sec: float) -> str:
@@ -94,13 +78,17 @@ def _parse_speed(speed_str: str) -> float:
 # ---------------------------------------------------------------------------
 
 
-def get_queue_status() -> dict:
-    """Return Celery queue metrics (with 5-second cache).
+async def get_queue_status() -> dict:
+    """Return DBOS workflow queue metrics (5-second cache).
 
-    Status values:
-    - "offline"  — no worker responds to ping
-    - "outdated" — worker online but missing critical tasks (needs restart)
-    - "online"   — worker online with all critical tasks registered
+    PR-D7: Celery introspection replaced with DBOS workflow_status
+    table aggregation. Status values:
+    - "offline" — DBOS not enabled (defensive; should never happen in
+      production since lifespan launches DBOS at startup)
+    - "online"  — DBOS launched + queue counts available
+
+    Async because DBOS.list_workflows() (sync) refuses to run inside an
+    asyncio event loop and FastAPI handlers always have one.
     """
     current_time = time.time()
 
@@ -110,54 +98,28 @@ def get_queue_status() -> dict:
     ):
         return _queue_cache["data"]
 
+    from app.services import dbos_orchestrator
+
+    if not dbos_orchestrator.is_enabled():
+        result = {"active": 0, "pending": 0, "scheduled": 0, "status": "offline"}
+        _queue_cache.update(data=result, timestamp=current_time)
+        return result
+
     try:
-        from app.celery_app import celery_app
+        from dbos import DBOS
 
-        inspect = celery_app.control.inspect(timeout=1.0)
-        ping = inspect.ping()
-
-        if not ping:
-            result = {"active": 0, "pending": 0, "scheduled": 0, "status": "offline"}
-            _queue_cache.update(data=result, timestamp=current_time)
-            return result
-
-        # Check if critical tasks are registered
-        registered = inspect.registered() or {}
-        all_registered: set[str] = set()
-        for worker_tasks in registered.values():
-            all_registered.update(worker_tasks)
-
-        missing = _CRITICAL_TASKS - all_registered
-        if missing:
-            logger.warning(
-                f"Worker online but missing critical tasks: {missing}. "
-                "Restart the Celery worker to pick up new code."
-            )
-            result = {
-                "active": 0,
-                "pending": 0,
-                "scheduled": 0,
-                "status": "outdated",
-                "missing_tasks": list(missing),
-            }
-            _queue_cache.update(data=result, timestamp=current_time)
-            return result
-
-        active = inspect.active() or {}
-        reserved = inspect.reserved() or {}
-
-        active_count = sum(len(tasks) for tasks in active.values())
-        pending_count = sum(len(tasks) for tasks in reserved.values())
+        running = await DBOS.list_workflows_async(status="RUNNING") or []
+        pending = await DBOS.list_workflows_async(status="PENDING") or []
+        enqueued = await DBOS.list_workflows_async(status="ENQUEUED") or []
 
         result = {
-            "active": active_count,
-            "pending": pending_count,
+            "active": len(running),
+            "pending": len(pending) + len(enqueued),
             "scheduled": 0,
             "status": "online",
         }
         _queue_cache.update(data=result, timestamp=current_time)
         return result
-
     except Exception as e:
         logger.warning(f"get_queue_status failed: {e}")
         result = {"active": 0, "pending": 0, "scheduled": 0, "status": "offline"}
@@ -214,9 +176,9 @@ def get_storage_status() -> dict:
 def get_network_status() -> dict:
     """Return download speed from Redis progress keys."""
     try:
-        from app.celery_app import celery_app
+        from app.core.redis import get_sync_redis
 
-        redis_client = celery_app.backend.client
+        redis_client = get_sync_redis()
         progress_keys = redis_client.keys("download_progress:*")
 
         total_speed = 0
@@ -243,59 +205,59 @@ def get_network_status() -> dict:
         return {"speed": "0 B/s", "status": "error"}
 
 
-def get_worker_stats() -> list[dict]:
-    """Return list of Celery worker info dicts."""
+async def get_worker_stats() -> list[dict]:
+    """Return DBOS worker pool info. PR-D7: replaces Celery worker
+    inspection. DBOS workers are in-process; we report a single
+    synthetic 'in-process' worker entry so the admin UI keeps a
+    consistent shape."""
+    from app.services import dbos_orchestrator
+
+    if not dbos_orchestrator.is_enabled():
+        return []
     try:
-        from app.celery_app import celery_app
+        from dbos import DBOS
 
-        inspect = celery_app.control.inspect(timeout=1.0)
-        ping = inspect.ping() or {}
-        stats = inspect.stats() or {}
-
-        workers = []
-        for worker_name in ping:
-            worker_stats = stats.get(worker_name, {})
-            pool = worker_stats.get("pool", {})
-            workers.append(
-                {
-                    "name": worker_name,
-                    "status": "online",
-                    "concurrency": pool.get("max-concurrency", 0),
-                    "processes": pool.get("processes", []),
-                    "total_tasks": worker_stats.get("total", {}),
-                }
-            )
-
-        return workers
-
+        return [
+            {
+                "name": "dbos@local",
+                "status": "online",
+                "concurrency": 8,  # matches WORKFORCE_QUEUE_CONCURRENCY default
+                "processes": [],
+                "total_tasks": {
+                    "running": len(
+                        await DBOS.list_workflows_async(status="RUNNING") or []
+                    )
+                },
+            }
+        ]
     except Exception as e:
         logger.warning(f"get_worker_stats failed: {e}")
         return []
 
 
-def get_active_tasks() -> list[dict]:
-    """Return list of currently active Celery tasks."""
+async def get_active_tasks() -> list[dict]:
+    """Return list of currently RUNNING DBOS workflows. Mirrors the
+    legacy Celery active_tasks shape so the admin TaskCenter UI keeps
+    rendering."""
+    from app.services import dbos_orchestrator
+
+    if not dbos_orchestrator.is_enabled():
+        return []
     try:
-        from app.celery_app import celery_app
+        from dbos import DBOS
 
-        inspect = celery_app.control.inspect(timeout=0.5)
-        active = inspect.active() or {}
-
-        tasks = []
-        for worker_name, worker_tasks in active.items():
-            for task in worker_tasks:
-                tasks.append(
-                    {
-                        "task_id": task.get("id", ""),
-                        "name": task.get("name", ""),
-                        "status": "active",
-                        "worker": worker_name,
-                        "args": task.get("args", []),
-                    }
-                )
-
-        return tasks
-
+        running = await DBOS.list_workflows_async(status="RUNNING") or []
+        return [
+            {
+                "task_id": getattr(w, "workflow_id", None)
+                or getattr(w, "workflow_uuid", None),
+                "name": getattr(w, "name", "") or "",
+                "status": "active",
+                "worker": "dbos@local",
+                "args": [],
+            }
+            for w in running
+        ]
     except Exception as e:
         logger.warning(f"get_active_tasks failed: {e}")
         return []

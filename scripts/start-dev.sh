@@ -50,10 +50,6 @@ check_frontend() {
     lsof -ti :"$FRONTEND_PORT" > /dev/null 2>&1
 }
 
-check_celery() {
-    pgrep -f "celery -A app.celery_app.*worker" > /dev/null 2>&1
-}
-
 check_nas() {
     [ -d "/Volumes/sources/MediaHub.library" ]
 }
@@ -84,15 +80,9 @@ status() {
     fi
 
     if check_backend; then
-        echo -e "  Backend:  ${GREEN}● ONLINE${NC} (port $BACKEND_PORT)"
+        echo -e "  Backend:  ${GREEN}● ONLINE${NC} (port $BACKEND_PORT)  (DBOS workers in-process)"
     else
         echo -e "  Backend:  ${RED}○ OFFLINE${NC}"
-    fi
-
-    if check_celery; then
-        echo -e "  Celery:   ${GREEN}● ONLINE${NC}"
-    else
-        echo -e "  Celery:   ${RED}○ OFFLINE${NC}"
     fi
 
     if check_frontend; then
@@ -126,7 +116,7 @@ start() {
     fi
     echo -e "  ${GREEN}✓${NC} NAS mounted"
 
-    # Check Redis
+    # Check Redis (still used by frontend WS progress + DBOS health probe)
     if ! check_redis; then
         echo -e "  ${YELLOW}Starting Redis...${NC}"
         brew services start redis 2>/dev/null || redis-server --daemonize yes
@@ -134,11 +124,8 @@ start() {
     fi
     echo -e "  ${GREEN}✓${NC} Redis running"
 
-    # Start Backend
+    # Start Backend (DBOS workers run in-process, no separate worker daemon)
     start_backend
-
-    # Start Celery
-    start_celery
 
     # Start Frontend
     start_frontend
@@ -165,22 +152,6 @@ start_backend() {
     fi
 }
 
-start_celery() {
-    # Kill existing celery workers for this worktree
-    pkill -f "celery -A app.celery_app.*worker" 2>/dev/null || true
-    sleep 1
-
-    echo -e "  ${YELLOW}Starting Celery worker...${NC}"
-    cd "$BACKEND_DIR"
-    nohup uv run celery -A app.celery_app worker --loglevel=info > "$LOG_DIR/celery.log" 2>&1 </dev/null &
-    sleep 3
-    if check_celery; then
-        echo -e "  ${GREEN}✓${NC} Celery worker running"
-    else
-        echo -e "  ${RED}✗${NC} Celery failed. Check $LOG_DIR/celery.log"
-    fi
-}
-
 start_frontend() {
     kill_port "$FRONTEND_PORT" 2>/dev/null || true
     sleep 1
@@ -202,7 +173,6 @@ stop() {
     echo -e "${BLUE}Stopping MediaHub [$WORKTREE_NAME]...${NC}"
 
     kill_port "$BACKEND_PORT" 2>/dev/null && echo -e "  ${GREEN}✓${NC} Backend stopped" || echo -e "  ${YELLOW}-${NC} Backend was not running"
-    pkill -f "celery -A app.celery_app.*worker" 2>/dev/null && echo -e "  ${GREEN}✓${NC} Celery stopped" || echo -e "  ${YELLOW}-${NC} Celery was not running"
     kill_port "$FRONTEND_PORT" 2>/dev/null && echo -e "  ${GREEN}✓${NC} Frontend stopped" || echo -e "  ${YELLOW}-${NC} Frontend was not running"
 
     echo ""
@@ -219,18 +189,16 @@ restart() {
 }
 
 restart_backend() {
-    echo -e "${BLUE}Restarting Backend + Celery [$WORKTREE_NAME]...${NC}"
+    echo -e "${BLUE}Restarting Backend [$WORKTREE_NAME]...${NC}"
     echo ""
 
     kill_port "$BACKEND_PORT" 2>/dev/null && echo -e "  ${GREEN}✓${NC} Backend stopped" || echo -e "  ${YELLOW}-${NC} Backend was not running"
-    pkill -f "celery -A app.celery_app.*worker" 2>/dev/null && echo -e "  ${GREEN}✓${NC} Celery stopped" || echo -e "  ${YELLOW}-${NC} Celery was not running"
     sleep 2
 
     start_backend
-    start_celery
 
     echo ""
-    echo -e "${GREEN}Backend + Celery restarted!${NC}"
+    echo -e "${GREEN}Backend restarted!${NC}"
     echo -e "  API: http://localhost:$BACKEND_PORT"
 }
 
@@ -240,7 +208,6 @@ logs() {
     SERVICE=${2:-all}
     case $SERVICE in
         backend)  tail -f "$LOG_DIR/backend.log" ;;
-        celery)   tail -f "$LOG_DIR/celery.log" ;;
         frontend) tail -f "$LOG_DIR/frontend.log" ;;
         all|*)    tail -f "$LOG_DIR"/*.log ;;
     esac
@@ -259,12 +226,12 @@ case "${1:-status}" in
         echo "Usage: $0 {start|stop|restart|restart-backend|status|logs [service]}"
         echo ""
         echo "Commands:"
-        echo "  start            Start all services"
+        echo "  start            Start all services (Backend + Frontend; DBOS workers run in-process)"
         echo "  stop             Stop all services"
         echo "  restart          Restart all services"
-        echo "  restart-backend  Restart Backend + Celery only (code reload)"
+        echo "  restart-backend  Restart Backend only (code reload)"
         echo "  status           Check service status"
-        echo "  logs             Tail logs (all, backend, celery, frontend)"
+        echo "  logs             Tail logs (all, backend, frontend)"
         exit 1
         ;;
 esac

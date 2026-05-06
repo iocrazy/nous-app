@@ -20,11 +20,9 @@ dependencies = [
     "anthropic>=0.40.0",
     "aiosqlite>=0.21.0",
     "alembic>=1.16.2",
-    "celery[redis]>=5.4.0",
     "drissionpage>=4.1.0.18",
     "faster-whisper>=1.1.0",
     "fastapi>=0.115.12",
-    "flower>=2.0.0",
     "greenlet>=3.2.3",
     "httpx>=0.28.1",
     "loguru>=0.7.3",
@@ -51,6 +49,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "gmssl>=3.2.2",
     "python-frontmatter>=1.1.0",
+    "dbos>=2.19.0",  # PoC #1-12 validated on 2.19.0; pin major version
 ]
 
 [project.optional-dependencies]
