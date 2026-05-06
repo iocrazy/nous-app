@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import pytest
 
-from app.services.review_service import ReviewService
+from app.services.library.review_service import ReviewService
 
 
 class _FakeRepo:

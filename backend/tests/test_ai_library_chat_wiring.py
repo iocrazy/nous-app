@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.ai_library_chat_wiring import (
+from app.services.ai.chat.ai_library_chat_wiring import (
     AgentRunnerStack,
     build_agent_runner_stack,
 )
@@ -38,7 +38,7 @@ async def test_stack_has_runner_and_recalled_memories():
     settings = MagicMock()
 
     with patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ):
         stack = await build_agent_runner_stack(
@@ -62,7 +62,7 @@ async def test_stack_has_runner_and_recalled_memories():
 async def test_fallback_chain_active_when_fallback_models_present():
     settings = MagicMock()
     with patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ):
         stack = await build_agent_runner_stack(
@@ -82,7 +82,7 @@ async def test_budget_guard_registered_when_budget_set():
     """BudgetGuard hook is in the registry only when budget_per_run_cents is non-None."""
     settings = MagicMock()
     with patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ):
         stack = await build_agent_runner_stack(
@@ -104,7 +104,7 @@ async def test_budget_guard_NOT_registered_when_budget_none():
     """No budget configured → no BudgetGuard. Run can spend unlimited."""
     settings = MagicMock()
     with patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ):
         stack = await build_agent_runner_stack(
@@ -125,7 +125,7 @@ async def test_budget_guard_NOT_registered_when_budget_none():
 async def test_post_hooks_include_cost_auditor_and_memory_harvester():
     settings = MagicMock()
     with patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ):
         stack = await build_agent_runner_stack(
@@ -149,7 +149,7 @@ async def test_per_turn_registry_isolated():
     concurrent users must not share hook state."""
     settings = MagicMock()
     with patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ):
         stack_a = await build_agent_runner_stack(
@@ -177,10 +177,10 @@ async def test_recall_failure_degrades_to_empty():
 
     # Patch the inner function's helper so the outer one's try-except catches.
     with patch(
-        "app.services.ai_library_chat_wiring.get_adapter",
+        "app.services.ai.chat.ai_library_chat_wiring.get_adapter",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         side_effect=broken_recall,
     ):
         with pytest.raises(RuntimeError):
@@ -205,7 +205,7 @@ async def test_delegate_tool_wired_with_caller_context():
     agent_record = _agent()
 
     with patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ):
         stack = await build_agent_runner_stack(
@@ -236,7 +236,7 @@ async def test_recall_returns_empty_when_supabase_unavailable():
     `get_async_supabase_admin` is imported inside the function (lazy
     deferred import) so the patch path is the actual module of origin.
     """
-    from app.services.ai_library_chat_wiring import _safe_recall_memories
+    from app.services.ai.chat.ai_library_chat_wiring import _safe_recall_memories
 
     with patch(
         "app.db.get_async_supabase_admin",
@@ -258,7 +258,7 @@ async def test_chat_wiring_constructs_mcp_registry_from_user_servers():
     """build_agent_runner_stack pulls user's MCP servers + builds an
     MCPOutboundRegistry that's passed to AgentRunner."""
     from app.repositories.user_mcp_servers_repository import UserMCPServer
-    from app.services.ai_library_chat_wiring import build_agent_runner_stack
+    from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 
     user_id = uuid4()
     fake_servers = [
@@ -291,13 +291,13 @@ async def test_chat_wiring_constructs_mcp_registry_from_user_servers():
         "app.repositories.user_mcp_servers_repository.UserMCPServersRepository",
         return_value=fake_repo,
     ), patch(
-        "app.services.ai_library_chat_wiring.LLMFallbackChain",
+        "app.services.ai.chat.ai_library_chat_wiring.LLMFallbackChain",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ), patch(
-        "app.services.ai_library_chat_wiring.AgentRunner",
+        "app.services.ai.chat.ai_library_chat_wiring.AgentRunner",
         side_effect=_capture_runner,
     ):
         await build_agent_runner_stack(
@@ -320,7 +320,7 @@ async def test_chat_wiring_constructs_mcp_registry_from_user_servers():
 @pytest.mark.asyncio
 async def test_chat_wiring_no_mcp_when_user_has_no_servers():
     """No rows → mcp_registry=None (zero overhead path)."""
-    from app.services.ai_library_chat_wiring import build_agent_runner_stack
+    from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 
     captured_kwargs = {}
 
@@ -335,13 +335,13 @@ async def test_chat_wiring_no_mcp_when_user_has_no_servers():
         "app.repositories.user_mcp_servers_repository.UserMCPServersRepository",
         return_value=fake_repo,
     ), patch(
-        "app.services.ai_library_chat_wiring.LLMFallbackChain",
+        "app.services.ai.chat.ai_library_chat_wiring.LLMFallbackChain",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ), patch(
-        "app.services.ai_library_chat_wiring.AgentRunner",
+        "app.services.ai.chat.ai_library_chat_wiring.AgentRunner",
         side_effect=_capture_runner,
     ):
         await build_agent_runner_stack(
@@ -360,7 +360,7 @@ async def test_chat_wiring_no_mcp_when_user_has_no_servers():
 @pytest.mark.asyncio
 async def test_chat_wiring_mcp_repo_failure_isolated():
     """Exception loading MCP rows → registry stays None, chat continues."""
-    from app.services.ai_library_chat_wiring import build_agent_runner_stack
+    from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 
     captured_kwargs = {}
 
@@ -375,13 +375,13 @@ async def test_chat_wiring_mcp_repo_failure_isolated():
         "app.repositories.user_mcp_servers_repository.UserMCPServersRepository",
         return_value=fake_repo,
     ), patch(
-        "app.services.ai_library_chat_wiring.LLMFallbackChain",
+        "app.services.ai.chat.ai_library_chat_wiring.LLMFallbackChain",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_wiring._safe_recall_memories",
+        "app.services.ai.chat.ai_library_chat_wiring._safe_recall_memories",
         AsyncMock(return_value=[]),
     ), patch(
-        "app.services.ai_library_chat_wiring.AgentRunner",
+        "app.services.ai.chat.ai_library_chat_wiring.AgentRunner",
         side_effect=_capture_runner,
     ):
         # Should not raise

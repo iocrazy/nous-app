@@ -13,6 +13,7 @@ import {
   triggerVisualAnalysis,
   pollForResult,
 } from '../services/aiService';
+import { useTaskManager } from '../contexts/TaskManagerContext';
 
 interface VideoDetailPanelProps {
   video: Video;
@@ -170,6 +171,26 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   }, [video.platform_id, resourceId]);
 
   const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
+  const { tasks } = useTaskManager();
+
+  // Short-circuit polling when the backend ai_transcription task hits a
+  // terminal failure. Without this the UI sat on "Processing…" for the
+  // full 3-minute pollForResult window even though task_tracking
+  // already had phase='failed'. Same for summary / visual analysis.
+  useEffect(() => {
+    if (!resourceId) return;
+    if (transcribeStatus !== 'processing') return;
+    const failed = tasks.find(
+      (t) => t.task_type === 'ai_transcription'
+        && t.resource_id === resourceId
+        && (t.status === 'failed' || t.status === 'cancelled')
+    );
+    if (failed) {
+      setTranscribeStatus('failed');
+      setTranscriptError(failed.error_msg || 'Transcription failed');
+      setTranscriptLoading(false);
+    }
+  }, [tasks, resourceId, transcribeStatus]);
 
   const handleTranscribe = async () => {
     try {

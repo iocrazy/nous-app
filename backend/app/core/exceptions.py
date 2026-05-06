@@ -186,6 +186,30 @@ def register_exception_handlers(app: FastAPI) -> None:
         merged_headers: Dict[str, str] = {**_cors_headers_for(request)}
         if exc.headers:
             merged_headers.update(exc.headers)
+
+        # 5XX bodies frequently carry str(exception) — which leaks DB
+        # column names, file paths, traceback fragments, schema hints,
+        # and provider-key names to anyone who can hit the endpoint.
+        # Replace the user-facing message with a generic string and put
+        # the original detail in server logs (with request id) for
+        # operators to correlate.
+        if exc.status_code >= 500:
+            logger.warning(
+                f"[5xx] {request.method} {request.url.path} "
+                f"({exc.status_code}) detail={detail!r} "
+                f"request_id={_request_id(request)}"
+            )
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    code=f"http_{exc.status_code}",
+                    request_id=_request_id(request),
+                    details=None,
+                ).model_dump(),
+                headers=merged_headers or None,
+            )
+
         return JSONResponse(
             status_code=exc.status_code,
             content=ErrorResponse(

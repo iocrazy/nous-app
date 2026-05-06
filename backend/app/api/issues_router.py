@@ -171,8 +171,7 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
     """Kick off the execute_issue DBOS workflow. Persists the workflow_id
     onto issues.dbos_workflow_id so the frontend can subscribe to
     /api/v1/workflows/{workflow_id}/events for live status."""
-    from app.services import dbos_orchestrator
-
+    from app.services.infra import dbos_orchestrator
     existing = await issue_repository.get_by_id(issue_id)
     if not existing:
         raise HTTPException(

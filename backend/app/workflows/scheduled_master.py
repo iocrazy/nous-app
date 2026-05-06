@@ -139,7 +139,7 @@ async def _dispatch_one(sb: Any, row: Dict[str, Any]) -> None:
     # through start_workflow_routed so the existing routing table
     # decides which workflow callable to fire. Unknown task_type just
     # logs + bumps fail_count (next call up the stack).
-    from app.services.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
 
     # The mapping task_type → workflow callable lives in
     # app/workflows/__init__.py + dispatch routing. For each task_type

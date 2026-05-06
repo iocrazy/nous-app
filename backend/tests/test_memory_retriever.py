@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.services.memory.retriever import (
+from app.services.ai.memory.retriever import (
     DEFAULT_TOP_K_CANDIDATES,
     DEFAULT_TOP_N_FINAL,
     MemoryRetriever,
@@ -215,7 +215,7 @@ async def test_p0_cache_hit_fetch_filters_by_user_id():
 @pytest.mark.unit
 def test_salience_reranks_by_reinforcement():
     """High reinforcement boosts a record above a slightly higher cosine peer."""
-    from app.services.memory import MemoryRecord, MemoryScope
+    from app.services.ai.memory import MemoryRecord, MemoryScope
 
     a = MemoryRecord(
         id=uuid4(), agent_id=uuid4(), user_id=uuid4(),

@@ -24,8 +24,8 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.resources_repository import ResourcesRepository
-from app.services.resources_service import ResourcesService
-from app.services.thumbnail_service import ThumbnailService
+from app.services.library.resources_service import ResourcesService
+from app.services.media.render.thumbnail_service import ThumbnailService
 
 router = APIRouter(prefix="/resources")
 
@@ -227,7 +227,7 @@ async def retry_transcode(
         # Reset status before retrying
         await repo.update_version(version_id, {"transcode_status": "pending"})
 
-        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.workflows.transcode import transcode_workflow
 
         await start_workflow_routed(

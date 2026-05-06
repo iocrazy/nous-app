@@ -111,7 +111,7 @@ def run_summarize_agent(
     """Invoke the `summarize` agent via SummarizeService → AgentRunner.
     Returns {summary, key_points, topics}. Each retry is a fresh agent
     call (token cost + agent_runs row each time)."""
-    from app.services.summarize_service import SummarizeService
+    from app.services.ai.summarize.summarize_service import SummarizeService
 
     svc = SummarizeService(provider_key=provider_key, provider_config=provider_config)
     result = asyncio.run(

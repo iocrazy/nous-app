@@ -15,7 +15,7 @@ from app.schemas.search import (
     SemanticSearchRequest,
     TextSearchRequest,
 )
-from app.services.search_service import SearchService
+from app.services.library.search_service import SearchService
 
 router = APIRouter(prefix="/search", tags=["Search"])
 

@@ -35,7 +35,7 @@ def test_set_proxy_called_when_ssrf_url_set(monkeypatch):
             return self
 
     # Patch the ChromiumOptions name in the parser module
-    import app.services.douyin_parse.drissionpage_parser as parser_mod
+    import app.services.media.parsers.douyin_parse.drissionpage_parser as parser_mod
     monkeypatch.setattr(parser_mod, "ChromiumOptions", _MockOptions)
     monkeypatch.setattr(parser_mod, "ChromiumPage", MagicMock())
 
@@ -79,7 +79,7 @@ def test_no_proxy_call_when_ssrf_url_empty(monkeypatch):
         def set_argument(self, arg):
             return self
 
-    import app.services.douyin_parse.drissionpage_parser as parser_mod
+    import app.services.media.parsers.douyin_parse.drissionpage_parser as parser_mod
     monkeypatch.setattr(parser_mod, "ChromiumOptions", _MockOptions)
     monkeypatch.setattr(parser_mod, "ChromiumPage", MagicMock())
 

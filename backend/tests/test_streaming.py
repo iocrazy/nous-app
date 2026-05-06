@@ -6,8 +6,8 @@ from typing import Any
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.agent_runner import AgentRunner
-from app.services.ai_adapters.base import StreamChunk
+from app.services.ai.runner.agent_runner import AgentRunner
+from app.services.ai.adapters.base import StreamChunk
 from uuid import UUID
 
 
@@ -172,7 +172,7 @@ def test_stream_chunk_immutable():
 # ─── Phase P (P1): tool_calls in stream ──────────────────────────────
 
 
-from app.services.agent_runner import _merge_tool_call_deltas
+from app.services.ai.runner.agent_runner import _merge_tool_call_deltas
 
 
 @pytest.mark.unit

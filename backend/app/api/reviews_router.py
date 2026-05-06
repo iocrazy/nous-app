@@ -13,7 +13,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
-from app.services.review_service import ReviewService
+from app.services.library.review_service import ReviewService
 
 router = APIRouter(prefix="/reviews")
 

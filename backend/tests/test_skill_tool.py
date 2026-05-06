@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.skill_tool_service import SkillToolService
+from app.services.ai.skills.skill_tool_service import SkillToolService
 
 
 class FakeSkillRepo:

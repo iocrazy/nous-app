@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from app.services.memory import ExtractedFrom
-from app.services.memory.extractor import (
+from app.services.ai.memory import ExtractedFrom
+from app.services.ai.memory.extractor import (
     AssistantMemoryExtractor,
     UserMemoryExtractor,
     _parse_facts,

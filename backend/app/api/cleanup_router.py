@@ -14,7 +14,7 @@ from app.schemas.cleanup import CleanupSuggestion as CleanupSuggestionSchema
 from app.schemas.cleanup import (
     CleanupSuggestionsResponse,
 )
-from app.services.cleanup_service import CleanupService
+from app.services.infra.cleanup_service import CleanupService
 
 router = APIRouter(prefix="/cleanup", tags=["Cleanup"])
 

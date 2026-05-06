@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.services.points_service import PointsService
+from app.services.billing.points_service import PointsService
 
 
 class _FakeRepo:

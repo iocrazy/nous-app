@@ -31,7 +31,7 @@ from app.schemas.projects import (
     TaskUpdateRequest,
     UpdateMemberRoleRequest,
 )
-from app.services.projects_service import ProjectsService
+from app.services.library.projects_service import ProjectsService
 
 router = APIRouter(prefix="/projects")
 

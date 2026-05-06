@@ -11,8 +11,8 @@ from uuid import UUID
 
 import pytest
 
-from app.services.hooks import HookContext
-from app.services.hooks.memory_harvester import MemoryHarvesterHook
+from app.services.infra.hooks import HookContext
+from app.services.infra.hooks.memory_harvester import MemoryHarvesterHook
 
 
 def _ctx() -> HookContext:

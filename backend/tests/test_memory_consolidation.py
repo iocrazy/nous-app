@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.memory.consolidation import (
+from app.services.ai.memory.consolidation import (
     DEFAULT_CLUSTER_THRESHOLD,
     Cluster,
     MemoryCandidate,

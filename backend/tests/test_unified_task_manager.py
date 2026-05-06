@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.unified_task_manager import (
+from app.services.infra.unified_task_manager import (
     TaskPhase,
     UnifiedTaskManager,
     VALID_TRANSITIONS,

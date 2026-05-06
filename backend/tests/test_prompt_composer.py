@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.prompt_composer import (
+from app.services.ai.prompts.prompt_composer import (
     CACHE_BOUNDARY_MARKER,
     PromptComposer,
 )

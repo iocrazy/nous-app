@@ -91,7 +91,7 @@ def test_b4_analyze_video_rejects_decimal_ipv4(sb_app: FastAPI):
 async def test_b5_image_url_blocked_returns_none(monkeypatch):
     """When URL fails boundary, _encode_image_from_url returns None
     without making any httpx call (no SSRF leak)."""
-    from app.services.visual_analysis_service import VisualAnalysisService
+    from app.services.ai.visual.visual_analysis_service import VisualAnalysisService
 
     # Construct minimal instance (skip __init__ that needs DB)
     svc = VisualAnalysisService.__new__(VisualAnalysisService)
@@ -119,7 +119,7 @@ async def test_b5_image_url_blocked_returns_none(monkeypatch):
 
 @pytest.mark.unit
 async def test_b5_image_url_decimal_ipv4_blocked(monkeypatch):
-    from app.services.visual_analysis_service import VisualAnalysisService
+    from app.services.ai.visual.visual_analysis_service import VisualAnalysisService
 
     svc = VisualAnalysisService.__new__(VisualAnalysisService)
     result = await svc._encode_image_from_url("http://2130706433/img.jpg")
@@ -134,7 +134,7 @@ async def test_b5_image_url_decimal_ipv4_blocked(monkeypatch):
 async def test_b7_download_url_blocked_returns_false(tmp_path):
     """Blocked URL must return False AND mark tracker failed,
     without any httpx call."""
-    from app.services.download_progress import (
+    from app.services.media.downloader.download_progress import (
         DownloadProgressTracker,
         download_file_with_progress,
     )
@@ -174,7 +174,7 @@ async def test_b7_download_url_blocked_returns_false(tmp_path):
 
 @pytest.mark.unit
 async def test_b7_download_localhost_suffix_blocked(tmp_path):
-    from app.services.download_progress import download_file_with_progress
+    from app.services.media.downloader.download_progress import download_file_with_progress
 
     class _StubTracker:
         def __init__(self):

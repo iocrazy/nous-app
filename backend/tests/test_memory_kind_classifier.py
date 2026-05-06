@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.memory.kind_classifier import (
+from app.services.ai.memory.kind_classifier import (
     KIND_WEIGHT_MODIFIERS,
     MemoryKind,
     classify_heuristic,

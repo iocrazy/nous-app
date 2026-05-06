@@ -7,8 +7,8 @@ import pytest
 
 from app.agent_framework.context_engine import ContextEngine, ContextPayload
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.chat_context_engine import ChatContextEngine
-from app.services.prompt_composer import ComposerInput, RecalledMemory
+from app.services.ai.chat.chat_context_engine import ChatContextEngine
+from app.services.ai.prompts.prompt_composer import ComposerInput, RecalledMemory
 
 
 _AGENT_ID = uuid4()

@@ -26,7 +26,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.core.config import settings
-from app.services.supabase_auth_service import SupabaseAuthService
+from app.services.infra.supabase_auth_service import SupabaseAuthService
 
 router = APIRouter(prefix="/auth", tags=["Media Auth"])
 

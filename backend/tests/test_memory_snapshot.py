@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.services.memory.snapshot import (
+from app.services.ai.memory.snapshot import (
     MemorySnapshotEntry,
     RollbackPlan,
     SnapshotManifest,

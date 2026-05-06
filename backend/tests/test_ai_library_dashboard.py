@@ -134,10 +134,14 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
         },
     ]
     latest_run = runs_14d[0]
+    # A4 (mig 200): agent_tasks merged into task_tracking with task_kind='agent_task'.
+    # Mock data uses the new column shape (`phase` instead of `lifecycle_status`,
+    # `dbos_workflow_id` as PK) so it travels through tt_row_to_task_shape() the
+    # same way real rows do.
     tasks_14d = [
-        {"id": str(uuid4()), "lifecycle_status": "queued", "created_at": today_iso, "title": "Hire eng"},
-        {"id": str(uuid4()), "lifecycle_status": "done", "created_at": today_iso, "title": "Pick stack"},
-        {"id": str(uuid4()), "lifecycle_status": "done", "created_at": today_iso, "title": "Approve"},
+        {"dbos_workflow_id": str(uuid4()), "phase": "queued", "created_at": today_iso, "title": "Hire eng"},
+        {"dbos_workflow_id": str(uuid4()), "phase": "done",   "created_at": today_iso, "title": "Pick stack"},
+        {"dbos_workflow_id": str(uuid4()), "phase": "done",   "created_at": today_iso, "title": "Approve"},
     ]
     recent_tasks = tasks_14d[:5]
     recent_runs = runs_14d[:10]
@@ -149,7 +153,7 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
                 [latest_run],  # latest 1
                 recent_runs,  # recent 10
             ],
-            "agent_tasks": [
+            "task_tracking": [
                 tasks_14d,     # 14d list for status counts
                 recent_tasks,  # recent 5
             ],
@@ -216,7 +220,7 @@ async def test_dashboard_empty_agent_returns_zero_buckets(
     fake_client = _client_for(
         {
             "agent_runs": [[], [], []],  # 14d, latest, recent
-            "agent_tasks": [[], []],
+            "task_tracking": [[], []],   # A4: was `agent_tasks` before mig 200
         }
     )
 

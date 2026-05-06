@@ -8,11 +8,11 @@ from uuid import UUID
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.llm_fallback_chain import (
+from app.services.ai.llm.llm_fallback_chain import (
     AllModelsFailed,
     LLMFallbackChain,
 )
-from app.services.llm_retry_middleware import LLMCallError
+from app.services.ai.llm.llm_retry_middleware import LLMCallError
 
 
 def _composed() -> ComposedSystemPrompt:

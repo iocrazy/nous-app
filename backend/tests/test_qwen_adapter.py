@@ -9,7 +9,7 @@ from uuid import UUID
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.ai_provider import QwenAdapter
+from app.services.ai.providers.ai_provider import QwenAdapter
 
 
 def _sample_composed(tools=None) -> ComposedSystemPrompt:

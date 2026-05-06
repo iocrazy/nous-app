@@ -17,10 +17,10 @@ from app.core.deps import AuthDep
 from app.repositories.tags_repository import TagsRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
-from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
-from app.services.douyin_parse.formatter import DouyinFormatter
-from app.services.douyin_parse.ies_parser import IesDouyinParser
-from app.services.ytdlp_service import YtdlpService
+from app.services.media.parsers.douyin_parse.drissionpage_parser import DrissionPageParser
+from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
+from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
+from app.services.media.parsers.ytdlp_service import YtdlpService
 
 # ============================================
 # Models
@@ -150,8 +150,8 @@ async def dedup_and_dispatch(
 ) -> dict:
     """Per-type Orchestrator dedup check + DBOS workflow dispatch.
     PR-D7 phase 3: was Celery .delay()."""
-    from app.services.dbos_orchestrator import start_workflow_routed
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows.download import download_workflow
 
     is_image_type = int(media_type) in (2, 68)
@@ -247,7 +247,7 @@ async def dedup_and_dispatch(
         except Exception as celery_err:
             logger.warning(f"[Download/Init] DBOS dispatch failed: {celery_err}")
             if background_tasks:
-                from app.services.downloader import DownloaderService
+                from app.services.media.downloader.downloader import DownloaderService
 
                 if dl_video:
                     if is_image_type:
@@ -303,7 +303,7 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
         logger.warning(f"Failed to read user parse mode, using default: {e}")
 
     # Pick a Douyin UA once per request so LightHTTP + BrowserAuto share it.
-    from app.services.douyin_parse.ua_pool import pick_ua
+    from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
 
     douyin_ua = pick_ua()
 
@@ -412,8 +412,8 @@ async def handle_media_fetch_dispatch(
 
     PR-D7 phase 3: was Celery `parse_media_task.delay`. Now dispatches
     `parse_workflow` via DBOS."""
-    from app.services.dbos_orchestrator import start_workflow_routed
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows.parse import parse_workflow
 
     mgr = get_task_manager()

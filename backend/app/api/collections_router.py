@@ -12,7 +12,7 @@ from app.schemas.collections import (
     CollectionRules,
     CollectionUpdate,
 )
-from app.services.collections_service import CollectionsService
+from app.services.library.collections_service import CollectionsService
 
 router = APIRouter(prefix="/collections", tags=["Collections"])
 

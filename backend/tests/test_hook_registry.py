@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.hooks import (
+from app.services.infra.hooks import (
     HookContext,
     HookRegistry,
     HookResult,
@@ -74,7 +74,7 @@ def test_clear_resets_both_chains():
 def test_default_registry_is_isolated_per_test():
     """Reads `default_registry` for assertion that it is a singleton — but
     test cases must clear it themselves to avoid pollution."""
-    from app.services.hooks import default_registry
+    from app.services.infra.hooks import default_registry
 
     default_registry.clear()
     assert default_registry.get_pre_hooks() == []

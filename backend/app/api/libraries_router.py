@@ -11,7 +11,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.schemas.libraries import LibraryCreate, LibraryUpdate
-from app.services.libraries_service import LibrariesService
+from app.services.library.libraries_service import LibrariesService
 
 router = APIRouter(prefix="/libraries")
 

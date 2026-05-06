@@ -18,7 +18,7 @@ import pytest
 from app.agent_framework.mcp_client import MCPClientError
 from app.agent_framework.mcp_outbound_registry import QualifiedTool
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.agent_runner import (
+from app.services.ai.runner.agent_runner import (
     AgentRunner,
     _is_mcp_tool_name,
     _mcp_tools_to_openai_format,

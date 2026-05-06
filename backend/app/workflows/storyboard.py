@@ -71,7 +71,7 @@ def generate_image_step(
     reference_image_url: Optional[str],
     aspect_ratio: str,
 ) -> dict[str, Any]:
-    from app.services.storyboard_ai_service import StoryboardAIService
+    from app.services.storyboard.storyboard_ai_service import StoryboardAIService
 
     async def _do() -> dict[str, Any]:
         svc = StoryboardAIService()
@@ -124,7 +124,7 @@ def storyboard_image_workflow(
 
 @DBOS.step(retries_allowed=True, max_attempts=3)
 def generate_image_batch_step(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    from app.services.storyboard_ai_service import StoryboardAIService
+    from app.services.storyboard.storyboard_ai_service import StoryboardAIService
 
     async def _do() -> list[dict[str, Any]]:
         svc = StoryboardAIService()
@@ -173,7 +173,7 @@ def generate_video_step(
     duration: int,
     motion_intensity: float,
 ) -> dict[str, Any]:
-    from app.services.storyboard_ai_service import StoryboardAIService
+    from app.services.storyboard.storyboard_ai_service import StoryboardAIService
 
     async def _do() -> dict[str, Any]:
         svc = StoryboardAIService()
@@ -221,7 +221,7 @@ def storyboard_video_workflow(
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
 def split_script_step(script_text: str, style_guide: str) -> list[dict[str, Any]]:
-    from app.services.storyboard_ai_service import StoryboardAIService
+    from app.services.storyboard.storyboard_ai_service import StoryboardAIService
 
     async def _do() -> list[dict[str, Any]]:
         svc = StoryboardAIService()
@@ -301,7 +301,7 @@ def storyboard_script_split_workflow(
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
 def analyze_video_step(video_path: str) -> list[dict[str, Any]]:
-    from app.services.storyboard_ai_service import StoryboardAIService
+    from app.services.storyboard.storyboard_ai_service import StoryboardAIService
 
     async def _do() -> list[dict[str, Any]]:
         svc = StoryboardAIService()
@@ -380,7 +380,7 @@ def storyboard_video_analysis_workflow(
 def export_storyboard_step(
     *, project_id: str, format: str, options: dict[str, Any]
 ) -> dict[str, Any]:
-    from app.services.storyboard_export_service import StoryboardExportService
+    from app.services.storyboard.storyboard_export_service import StoryboardExportService
 
     async def _do() -> dict[str, Any]:
         svc = StoryboardExportService()
@@ -428,7 +428,7 @@ def storyboard_export_workflow(
 @DBOS.step(retries_allowed=True, max_attempts=2)
 def split_image_grid_step(*, image_path: str, rows: int, cols: int) -> list[str]:
     """CPU-bound — sync service call wrapped in a step for retry."""
-    from app.services.storyboard_image_service import StoryboardImageService
+    from app.services.storyboard.storyboard_image_service import StoryboardImageService
 
     svc = StoryboardImageService()
     return svc.split_image(image_path=image_path, rows=rows, cols=cols)

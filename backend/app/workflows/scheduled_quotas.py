@@ -62,7 +62,7 @@ def grant_daily_free_points_step() -> dict[str, Any]:
     for the supabase-py quirk that crashed this task 6x/week."""
     from app.core.config import settings
     from app.db.supabase_client import get_async_supabase_admin
-    from app.services.points_service import PointsService
+    from app.services.billing.points_service import PointsService
 
     amount = settings.DAILY_FREE_POINTS
     if amount <= 0:
@@ -131,7 +131,7 @@ def reclaim_daily_free_points_step() -> dict[str, Any]:
     """For each of yesterday's granted gifts, sum point_transactions of
     type='consume' since granted_at, reclaim the unused portion."""
     from app.db.supabase_client import get_async_supabase_admin
-    from app.services.points_service import PointsService
+    from app.services.billing.points_service import PointsService
 
     async def _do() -> dict[str, int]:
         supabase = await get_async_supabase_admin()

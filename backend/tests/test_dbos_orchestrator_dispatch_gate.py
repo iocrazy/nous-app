@@ -4,9 +4,7 @@ from __future__ import annotations
 import pytest
 
 from app.agent_framework.bounds import BoundsAdvertisement, BoundsRegistry
-from app.services import dbos_orchestrator
-
-
+from app.services.infra import dbos_orchestrator
 @pytest.fixture
 def registered_workflow_callable():
     """Stand-in for a @DBOS.workflow function — only its __name__ matters

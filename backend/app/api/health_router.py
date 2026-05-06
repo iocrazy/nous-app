@@ -69,7 +69,7 @@ async def _probe_redis() -> str:
 
 
 async def _probe_dbos() -> str:
-    from app.services import dbos_orchestrator as dbos_orch
+    from app.services.infra import dbos_orchestrator as dbos_orch
     return f"enabled={dbos_orch.is_enabled()}"
 
 

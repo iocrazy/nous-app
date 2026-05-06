@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.ai_adapters.openai_compat import OpenAICompatibleAdapter
+from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
 
 
 def _make_composed(**overrides: Any) -> ComposedSystemPrompt:
@@ -94,7 +94,7 @@ async def test_call_posts_to_api_url_with_bearer_auth() -> None:
     }
 
     with patch(
-        "app.services.ai_adapters.openai_compat.httpx.AsyncClient"
+        "app.services.ai.adapters.openai_compat.httpx.AsyncClient"
     ) as mock_client_cls:
         mock_instance = AsyncMock()
         fake_resp = type(
@@ -126,7 +126,7 @@ async def test_call_omits_authorization_when_api_key_empty() -> None:
     composed = _make_composed()
 
     with patch(
-        "app.services.ai_adapters.openai_compat.httpx.AsyncClient"
+        "app.services.ai.adapters.openai_compat.httpx.AsyncClient"
     ) as mock_client_cls:
         mock_instance = AsyncMock()
         fake_resp = type(
@@ -147,7 +147,7 @@ async def test_call_omits_authorization_when_api_key_empty() -> None:
 
 
 def test_qwen_adapter_has_dashscope_default_url() -> None:
-    from app.services.ai_adapters import QwenAdapter
+    from app.services.ai.adapters import QwenAdapter
 
     a = QwenAdapter(api_key="test")
     assert "dashscope" in a.api_url
@@ -155,7 +155,7 @@ def test_qwen_adapter_has_dashscope_default_url() -> None:
 
 
 def test_deepseek_adapter_has_deepseek_default_url() -> None:
-    from app.services.ai_adapters import DeepSeekAdapter
+    from app.services.ai.adapters import DeepSeekAdapter
 
     a = DeepSeekAdapter(api_key="test")
     assert "api.deepseek.com" in a.api_url
@@ -163,7 +163,7 @@ def test_deepseek_adapter_has_deepseek_default_url() -> None:
 
 
 def test_doubao_adapter_has_volces_default_url() -> None:
-    from app.services.ai_adapters import DoubaoAdapter
+    from app.services.ai.adapters import DoubaoAdapter
 
     a = DoubaoAdapter(api_key="test")
     assert "volces.com" in a.api_url

@@ -31,7 +31,7 @@ async def collect_system_status_step() -> dict[str, Any]:
     Async because get_queue_status now awaits DBOS.list_workflows_async
     (the sync DBOS API refuses to run in an event-loop context)."""
     from app.db.supabase_client import get_async_supabase_admin
-    from app.services.system_monitor_service import (
+    from app.services.infra.system_monitor_service import (
         get_active_tasks,
         get_network_status,
         get_queue_status,

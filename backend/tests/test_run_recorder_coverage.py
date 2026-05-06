@@ -28,29 +28,33 @@ BACKEND_APP = Path(__file__).resolve().parent.parent / "app"
 # with a documented reason for each. The regression test treats any
 # other occurrence as a failure.
 ALLOWED_BYPASS_PATHS: dict[str, str] = {
+    # Updated 2026-05-06: paths reorganised under sub-packages
+    # (services/ai/runner, services/ai/llm, services/ai/chat, etc).
+    # See `services/__init__.py` re-exports for the historical shape.
+
     # RunRecorder is the telemetry anchor itself — no recorder to wrap.
-    "services/run_recorder.py": "telemetry implementation",
+    "services/ai/runner/run_recorder.py": "telemetry implementation",
     # AgentRunner drives the adapter — callers wrap the whole runner in
     # a RunRecorder context, not each adapter.call inside.
-    "services/agent_runner.py": "adapter.call inside recorder-aware runner",
+    "services/ai/runner/agent_runner.py": "adapter.call inside recorder-aware runner",
     # Adapter implementations themselves call OpenAI / Anthropic SDKs.
-    "services/ai_adapters/": "adapter SDK internals",
-    "services/ai_provider.py": "adapter re-exports + legacy factory",
+    "services/ai/adapters/": "adapter SDK internals",
+    "services/ai/providers/ai_provider.py": "adapter re-exports + legacy factory",
     # VisualAnalysisService calls OpenAI directly for image multimodal;
     # both analyze_l1 and analyze_l2 wrap the call in RunRecorder context.
-    "services/visual_analysis_service.py": "image multimodal, wrapped in RunRecorder",
+    "services/ai/visual/visual_analysis_service.py": "image multimodal, wrapped in RunRecorder",
     # Embedding service calls OpenAI embeddings API, not chat completions
     # — separate concern from agent telemetry.
-    "services/embedding_service.py": "embeddings API, not chat completions",
+    "services/ai/providers/embedding_service.py": "embeddings API, not chat completions",
     # ASR: speech-to-text via Volcengine, not an LLM chat completion.
-    "services/volcengine_asr_service.py": "ASR API, not an agent invocation",
+    "services/ai/transcribe/volcengine_asr_service.py": "ASR API, not an agent invocation",
     # M1.A retry middleware: wraps adapter.call() for callers that DO
     # supply a RunRecorder via AgentRunner. The middleware itself is
     # recorder-agnostic; coverage is enforced one level up.
-    "services/llm_retry_middleware.py": "retry wrapper, recorder lives in caller",
+    "services/ai/llm/llm_retry_middleware.py": "retry wrapper, recorder lives in caller",
     # M1.A FALLBACK chain: walks fallback_models list, each attempt goes
     # through LLMRetryMiddleware. Same coverage shape as the retry MW.
-    "services/llm_fallback_chain.py": "fallback chain, recorder lives in caller",
+    "services/ai/llm/llm_fallback_chain.py": "fallback chain, recorder lives in caller",
     # Sprint 2 #5: RotatingAdapter wraps N single-key adapters and
     # rotates on 429/auth fail. Same coverage shape as fallback chain
     # — each wrapped adapter still goes through LLMRetryMiddleware
@@ -71,15 +75,15 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     "workflows/ai_summary.py": "summary DBOS workflow, off-chat-path",
     # M1.5 wiring: cheap-model auxiliary LLM call for memory ranker.
     # Side-channel from the main agent run; cost tracked separately.
-    "services/ai_library_chat_wiring.py": "memory ranker auxiliary LLM, side-channel",
+    "services/ai/chat/ai_library_chat_wiring.py": "memory ranker auxiliary LLM, side-channel",
     # M1.5 chat compactor: cheap-model summarizer for history compaction.
     # Side-channel from the main agent run; cost tracked separately.
-    "services/ai_library_chat_service.py": "compaction summariser auxiliary LLM, side-channel",
+    "services/ai/chat/ai_library_chat_service.py": "compaction summariser auxiliary LLM, side-channel",
     # Wave 5b (B4) session-memory updater: cheap-model maintenance call
     # for the running session-memory.md document. Off-chat-path,
     # fire-and-forget — telemetry tracked via session_memory.version
     # bumps + last_updated_at, not RunRecorder.
-    "services/session_memory_runner.py": "session-memory maintenance auxiliary LLM, fire-and-forget",
+    "services/ai/runner/session_memory_runner.py": "session-memory maintenance auxiliary LLM, fire-and-forget",
     # Wave F (F6) memory consolidation sweeper: weekly DBOS workflow.
     # cheap-model merges similar memories into super-memories. Off-chat-
     # path, scheduled job — telemetry via DBOS workflow status.
@@ -87,7 +91,7 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # Wave J (J6) active_remember contradiction check: cheap-LLM
     # classifier inside the built-in 'remember' skill path. Side-effect
     # of a tool call, not a primary chat completion.
-    "services/skill_tool_service.py": "active_remember contradiction classifier, side-effect of remember()",
+    "services/ai/skills/skill_tool_service.py": "active_remember contradiction classifier, side-effect of remember()",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a

@@ -367,7 +367,7 @@ async def confirm_order(
     )
 
     # Add points to team
-    from app.services.points_service import PointsService
+    from app.services.billing.points_service import PointsService
 
     points_svc = PointsService()
     await points_svc.add_points(
@@ -422,7 +422,7 @@ async def refund_order(
     await repo.update_order(order_id, {"payment_status": "refunded", "updated_at": now})
 
     # Deduct points from team (negative amount)
-    from app.services.points_service import PointsService
+    from app.services.billing.points_service import PointsService
 
     points_svc = PointsService()
     points_amount = order.get("points_amount") or 0
@@ -609,7 +609,7 @@ async def batch_gift(
     request: Request,
 ):
     """Gift points to multiple teams."""
-    from app.services.points_service import PointsService
+    from app.services.billing.points_service import PointsService
 
     points_svc = PointsService()
 
@@ -652,7 +652,7 @@ async def adjust_points(
     request: Request,
 ):
     """Manually adjust points for a single team."""
-    from app.services.points_service import PointsService
+    from app.services.billing.points_service import PointsService
 
     points_svc = PointsService()
 

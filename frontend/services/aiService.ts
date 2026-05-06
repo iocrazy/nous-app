@@ -73,6 +73,14 @@ export const triggerTranscriptionByResource = async (
   return response.json();
 };
 
+/** Sentinel thrown when backend says "no transcript yet" (200 + null
+ * fields). pollForResult catches it and keeps polling; UI callers
+ * catch it and render the "No Transcript Available" empty state. */
+class TranscriptNotReadyError extends Error {
+  readonly notReady = true;
+  constructor() { super('Transcript not ready'); }
+}
+
 /** @deprecated Use getTranscriptByResource instead */
 export const getTranscript = async (
   platformId: string
@@ -90,6 +98,7 @@ export const getTranscript = async (
   }
 
   const raw = await response.json();
+  if (!raw.full_text && !raw.text) throw new TranscriptNotReadyError();
   // Map backend field names to frontend interface
   return {
     text: raw.full_text || raw.text || '',
@@ -116,6 +125,7 @@ export const getTranscriptByResource = async (
   }
 
   const raw = await response.json();
+  if (!raw.full_text && !raw.text) throw new TranscriptNotReadyError();
   return {
     text: raw.full_text || raw.text || '',
     segments: raw.segments || [],
@@ -164,6 +174,14 @@ export const triggerSummaryByResource = async (
   return response.json();
 };
 
+/** Sentinel for "summary not ready yet" — same pattern as
+ * TranscriptNotReadyError. Lets pollForResult continue and lets UI
+ * callers render an empty state without console-error noise. */
+class SummaryNotReadyError extends Error {
+  readonly notReady = true;
+  constructor() { super('Summary not ready'); }
+}
+
 /** @deprecated Use getSummaryByResource instead */
 export const getSummary = async (
   platformId: string
@@ -181,6 +199,7 @@ export const getSummary = async (
   }
 
   const raw = await response.json();
+  if (!raw.summary_text && !raw.summary) throw new SummaryNotReadyError();
   // Map backend field names to frontend interface
   return {
     summary: raw.summary_text || raw.summary || '',
@@ -206,6 +225,7 @@ export const getSummaryByResource = async (
   }
 
   const raw = await response.json();
+  if (!raw.summary_text && !raw.summary) throw new SummaryNotReadyError();
   return {
     summary: raw.summary_text || raw.summary || '',
     key_points: raw.key_points || [],

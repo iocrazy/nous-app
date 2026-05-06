@@ -19,7 +19,7 @@ from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.points_repository import PointsRepository
 from app.schemas.points import PointsAdjustRequest
-from app.services.points_service import PointsService
+from app.services.billing.points_service import PointsService
 
 router = APIRouter(prefix="/points")
 

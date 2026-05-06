@@ -14,7 +14,7 @@ from loguru import logger
 
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
-from app.services.downloader import DownloaderService
+from app.services.media.downloader.downloader import DownloaderService
 from app.tasks.download_helpers import (
     ensure_download_urls,
     extract_audio_from_video,
@@ -120,7 +120,7 @@ def _do_douyin_download(
                     )
                     try:
                         from app.boundary import validate_url
-                        from app.services.ytdlp_service import YtdlpService
+                        from app.services.media.parsers.ytdlp_service import YtdlpService
 
                         # Boundary: SSRF guard. Original_url stored at parse
                         # time was validated, but defensive re-check protects
@@ -193,10 +193,10 @@ def _do_douyin_download(
                         from app.repositories.media_repository import (
                             MediaRepository as _MR_browser,
                         )
-                        from app.services.douyin_parse.drissionpage_parser import (
+                        from app.services.media.parsers.douyin_parse.drissionpage_parser import (
                             DrissionPageParser,
                         )
-                        from app.services.douyin_parse.formatter import DouyinFormatter
+                        from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
 
                         browser_detail = run_async(
                             DrissionPageParser.fetch_one_video(
@@ -330,8 +330,8 @@ def _do_douyin_download(
                 # Fallback: re-parse to get fresh image URLs and retry
                 try:
                     from app.repositories.media_repository import MediaRepository
-                    from app.services.douyin_parse.formatter import DouyinFormatter
-                    from app.services.douyin_parse.ies_parser import IesDouyinParser
+                    from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
+                    from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
 
                     logger.info(
                         f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
@@ -340,7 +340,7 @@ def _do_douyin_download(
                     # consistent with the original parse+download chain.
                     _re_ua = user_agent
                     if not _re_ua:
-                        from app.services.douyin_parse.ua_pool import pick_ua
+                        from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
 
                         _re_ua = pick_ua()
                     aweme_detail = run_async(
@@ -445,8 +445,8 @@ def _do_ytdlp_download(
     """
     from app.boundary import URLBlockedError, validate_url
     from app.repositories.media_repository import MediaRepository
-    from app.services.url_router import URLRouter
-    from app.services.ytdlp_service import YtdlpService
+    from app.services.media.parsers.url_router import URLRouter
+    from app.services.media.parsers.ytdlp_service import YtdlpService
 
     results = {"video": None, "music": None, "cover": None}
 

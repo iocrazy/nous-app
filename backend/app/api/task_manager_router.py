@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.services.unified_task_manager import get_task_manager
+from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/task-manager")
 
@@ -96,7 +96,7 @@ async def retry_task(task_id: str, auth: AuthDep):
                 if versions:
                     version_id = str(versions[0]["id"])
             if version_id:
-                from app.services.dbos_orchestrator import start_workflow_routed
+                from app.services.infra.dbos_orchestrator import start_workflow_routed
                 from app.workflows.transcode import transcode_workflow
 
                 await start_workflow_routed(
@@ -121,7 +121,7 @@ async def retry_task(task_id: str, auth: AuthDep):
             # tasks as failed (status=failed, error_code=WORKER_LOST),
             # and this path rehydrates the DBOS workflow from the media row.
             from app.repositories.media_repository import MediaRepository
-            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.download import download_workflow
 
             media_id = task.get("media_id")
@@ -166,7 +166,7 @@ async def retry_task(task_id: str, auth: AuthDep):
             )
 
         elif task_type == "ai_summary" and resource_id:
-            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.ai_summary import ai_summary_workflow
 
             media_id = task.get("media_id")

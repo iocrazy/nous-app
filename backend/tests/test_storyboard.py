@@ -72,7 +72,7 @@ _FAKE_PROJECT = {
 
 def _svc_patch(method: str, return_value=None):
     """Shortcut to patch a StoryboardService async method."""
-    target = f"app.services.storyboard_service.StoryboardService.{method}"
+    target = f"app.services.storyboard.storyboard_service.StoryboardService.{method}"
     return patch(target, new_callable=AsyncMock, return_value=return_value)
 
 
@@ -317,7 +317,7 @@ class TestExport:
                 "app.api.sb_export_router.get_task_manager"
             ) as mock_mgr_fn,
             patch(
-                "app.services.dbos_orchestrator.start_workflow_routed",
+                "app.services.infra.dbos_orchestrator.start_workflow_routed",
                 new_callable=AsyncMock,
             ),
         ):

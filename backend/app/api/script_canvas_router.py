@@ -11,7 +11,7 @@ from app.schemas.script import (
     ScriptChapterCreate,
     ScriptChapterUpdate,
 )
-from app.services.script_service import ScriptService
+from app.services.storyboard.script.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts/projects")
 

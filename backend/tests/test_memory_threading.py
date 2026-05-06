@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.services.memory.threading import (
+from app.services.ai.memory.threading import (
     DEFAULT_THREAD_WINDOW_MINUTES,
     assign_thread_for,
     load_thread_for_memory,

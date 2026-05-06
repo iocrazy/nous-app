@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.services.memory.decay import (
+from app.services.ai.memory.decay import (
     DEFAULT_ARCHIVE_THRESHOLD,
     DEFAULT_HALF_LIFE_DAYS,
     MemoryDecayInput,

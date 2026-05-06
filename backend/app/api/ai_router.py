@@ -19,7 +19,7 @@ from app.repositories.ai_repository import AIRepository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.ai import SummaryResponse, TranscriptResponse
-from app.services.points_service import PointsService
+from app.services.billing.points_service import PointsService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
@@ -75,7 +75,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     _admin = await _get_admin()
     _active = (
         await _admin.table("task_tracking")
-        .select("id")
+        .select("dbos_workflow_id")
         .eq("resource_id", resource_id)
         .eq("task_type", "ai_transcription")
         .in_("status", ["pending", "processing", "running"])
@@ -175,8 +175,8 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
         # for the post-download auto-chain).
         import uuid as _uuid
 
-        from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.ai_transcription import ai_transcription_workflow
 
         tracker = get_task_manager()
@@ -205,7 +205,7 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -252,7 +252,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     _admin = await _get_admin()
     _active = (
         await _admin.table("task_tracking")
-        .select("id")
+        .select("dbos_workflow_id")
         .eq("resource_id", resource_id)
         .eq("task_type", "ai_summary")
         .in_("status", ["pending", "processing", "running"])
@@ -300,8 +300,8 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
             # Transcript exists, dispatch ai_summary_workflow.
             import uuid as _uuid
 
-            from app.services.dbos_orchestrator import start_workflow_routed
-            from app.services.unified_task_manager import get_task_manager
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.unified_task_manager import get_task_manager
             from app.workflows.ai_summary import ai_summary_workflow
 
             tracker = get_task_manager()
@@ -338,7 +338,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
             # depend on transcript completion. For now we dispatch
             # transcription only; the user re-triggers summary once
             # the transcript lands (frontend polls).
-            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.ai_transcription import ai_transcription_workflow
 
             await start_workflow_routed(
@@ -357,7 +357,7 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -427,8 +427,8 @@ async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
     try:
         import uuid as _uuid
 
-        from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.analyze_l1 import analyze_l1_workflow
 
         tracker = get_task_manager()
@@ -464,7 +464,7 @@ async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -532,8 +532,8 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
         # Workflow takes parsed_media_id (int), so look it up.
         import uuid as _uuid
 
-        from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.ai_transcription import ai_transcription_workflow
 
         media_row = await _get_media_or_404(platform_id)
@@ -573,7 +573,7 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -649,8 +649,8 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
             # Transcript exists — dispatch ai_summary_workflow.
             import uuid as _uuid
 
-            from app.services.dbos_orchestrator import start_workflow_routed
-            from app.services.unified_task_manager import get_task_manager
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.unified_task_manager import get_task_manager
             from app.workflows.ai_summary import ai_summary_workflow
 
             tracker = get_task_manager()
@@ -679,7 +679,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
         else:
             # No transcript yet — dispatch transcription only. PR-D7
             # phase 3b: see trigger_summary_by_resource for rationale.
-            from app.services.dbos_orchestrator import start_workflow_routed
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.ai_transcription import ai_transcription_workflow
 
             await start_workflow_routed(
@@ -697,7 +697,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep):
     except Exception as e:
         if _orphan_task_id:
             try:
-                from app.services.unified_task_manager import get_task_manager
+                from app.services.infra.unified_task_manager import get_task_manager
 
                 await get_task_manager().fail(
                     _orphan_task_id,
@@ -780,7 +780,15 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
 
 @router.get("/transcript/resource/{resource_id}", response_model=TranscriptResponse)
 async def get_transcript_by_resource(resource_id: str, auth: AuthDep):
-    """Get transcript for a resource."""
+    """Get transcript for a resource.
+
+    "Resource not transcribed yet" returns 200 with full_text=None — NOT
+    404. Returning 404 makes Chrome paint the entire request red in
+    DevTools every time the user opens the Transcript tab on an
+    un-transcribed video, even though the UI handles it correctly. The
+    poll helper looks for full_text presence, so it keeps polling on
+    null and stops on a real transcript.
+    """
     # Ownership check
     res_repo = ResourcesRepository()
     resource = await res_repo.get_resource_by_id(resource_id)
@@ -790,10 +798,7 @@ async def get_transcript_by_resource(resource_id: str, auth: AuthDep):
         raise HTTPException(status_code=403, detail="Access denied")
 
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(resource_id)
-
-    if not transcript:
-        raise HTTPException(status_code=404, detail="Transcript not found")
+    transcript = await ai_repo.get_transcript(resource_id) or {}
 
     return TranscriptResponse(
         media_id=resource_id,
@@ -821,11 +826,11 @@ async def get_transcript(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=404, detail="No resource linked to this media")
 
     ai_repo = AIRepository()
-    transcript = await ai_repo.get_transcript(str(resource["id"]))
+    transcript = await ai_repo.get_transcript(str(resource["id"])) or {}
 
-    if not transcript:
-        raise HTTPException(status_code=404, detail="Transcript not found")
-
+    # 200 + nulls (not 404) when no transcript exists yet — same reason
+    # as the by-resource endpoint above. Stops Chrome from painting the
+    # request red on every Transcript tab open.
     return TranscriptResponse(
         media_id=media_id,
         language=transcript.get("language"),
@@ -849,10 +854,7 @@ async def get_summary_by_resource(resource_id: str, auth: AuthDep):
         raise HTTPException(status_code=403, detail="Access denied")
 
     ai_repo = AIRepository()
-    summary = await ai_repo.get_summary(resource_id)
-
-    if not summary:
-        raise HTTPException(status_code=404, detail="Summary not found")
+    summary = await ai_repo.get_summary(resource_id) or {}
 
     return SummaryResponse(
         media_id=resource_id,
@@ -881,10 +883,7 @@ async def get_summary(platform_id: str, auth: AuthDep):
         raise HTTPException(status_code=404, detail="No resource linked to this media")
 
     ai_repo = AIRepository()
-    summary = await ai_repo.get_summary(str(resource["id"]))
-
-    if not summary:
-        raise HTTPException(status_code=404, detail="Summary not found")
+    summary = await ai_repo.get_summary(str(resource["id"])) or {}
 
     return SummaryResponse(
         media_id=media_id,

@@ -66,12 +66,20 @@ class UnifiedProgressTracker:
 
         Writes to Redis (sync, always) and Supabase task_tracking (async, throttled).
         Must be awaited from an async context (e.g. inside download_file streaming loop).
+
+        Throttle is 100ms instead of 500ms so even small files (~1MB on a
+        gigabit LAN) get at least one in-flight publish before the file
+        finishes. The first call (last_update == 0) always publishes so
+        the user immediately sees the bar appear at 0%, instead of
+        nothing happening until 500ms have elapsed.
         """
         import json
         import time
 
         now = time.time()
-        if now - self.last_update < 0.5:
+        # First call: always publish (forces a 0% frame on screen).
+        # Subsequent: 100ms throttle.
+        if self.last_update > 0 and now - self.last_update < 0.1:
             return
         self.last_update = now
 

@@ -15,8 +15,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
-from app.services.storyboard_service import StoryboardService
-from app.services.unified_task_manager import get_task_manager
+from app.services.storyboard.storyboard_service import StoryboardService
+from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/storyboard")
 
@@ -79,7 +79,7 @@ async def export_project(
             },
         )
 
-        from app.services.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.workflows.storyboard import storyboard_export_workflow
 
         await start_workflow_routed(

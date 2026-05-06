@@ -33,7 +33,7 @@ def _fake_maybe_single(row: dict | None):
 @pytest.mark.asyncio
 async def test_get_session_returns_owned_row() -> None:
     """Owner fetches session → row returned unchanged."""
-    from app.services.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
     user_id = uuid4()
     session_id = uuid4()
@@ -43,7 +43,7 @@ async def test_get_session_returns_owned_row() -> None:
     client.table.return_value = _fake_maybe_single(row)
 
     with patch(
-        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
     ):
         svc = AILibraryChatService()
@@ -54,7 +54,7 @@ async def test_get_session_returns_owned_row() -> None:
 @pytest.mark.asyncio
 async def test_get_session_404_when_not_owner() -> None:
     """Foreign user → 404 (NOT 403, to avoid session-existence leakage)."""
-    from app.services.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
     user_id = uuid4()
     other = uuid4()
@@ -65,7 +65,7 @@ async def test_get_session_404_when_not_owner() -> None:
     client.table.return_value = _fake_maybe_single(row)
 
     with patch(
-        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
     ):
         svc = AILibraryChatService()
@@ -76,13 +76,13 @@ async def test_get_session_404_when_not_owner() -> None:
 
 @pytest.mark.asyncio
 async def test_get_session_404_when_missing() -> None:
-    from app.services.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
     client = MagicMock()
     client.table.return_value = _fake_maybe_single(None)
 
     with patch(
-        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
     ):
         svc = AILibraryChatService()
@@ -95,7 +95,7 @@ async def test_get_session_404_when_missing() -> None:
 async def test_chat_persists_both_messages_and_bumps_counters() -> None:
     """Happy path: chat() inserts user msg, runs agent, inserts assistant
     msg, and updates session total_tokens + message_count."""
-    from app.services.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
     user_id = uuid4()
     session_id = uuid4()
@@ -211,26 +211,26 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
     fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
 
     with patch(
-        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
     ), patch(
-        "app.services.ai_library_chat_service.AgentRepository",
+        "app.services.ai.chat.ai_library_chat_service.AgentRepository",
         return_value=fake_agent_repo_instance,
     ), patch(
-        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
         AsyncMock(return_value=fake_stack),
     ), patch(
-        "app.services.ai_library_chat_service.PromptComposer",
+        "app.services.ai.chat.ai_library_chat_service.PromptComposer",
         return_value=composer,
     ), patch(
-        "app.services.ai_library_chat_service.AgentRunner", return_value=runner
+        "app.services.ai.chat.ai_library_chat_service.AgentRunner", return_value=runner
     ), patch(
-        "app.services.ai_library_chat_service.get_adapter", return_value=MagicMock()
+        "app.services.ai.chat.ai_library_chat_service.get_adapter", return_value=MagicMock()
     ), patch(
-        "app.services.ai_library_chat_service.SkillToolService",
+        "app.services.ai.chat.ai_library_chat_service.SkillToolService",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.RunRecorder", return_value=_CM()
+        "app.services.ai.chat.ai_library_chat_service.RunRecorder", return_value=_CM()
     ):
         svc = AILibraryChatService()
         out = await svc.chat(session_id, user_id=user_id, content="Hello")
@@ -265,7 +265,7 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
     """When the runner reports tool dispatches this turn, the assistant
     message row's metadata_json carries them so a fresh session reload
     still renders the sub-task cards (no separate tool_calls table)."""
-    from app.services.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
     user_id = uuid4()
     session_id = uuid4()
@@ -371,27 +371,27 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
     fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
 
     with patch(
-        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
     ), patch(
-        "app.services.ai_library_chat_service.AgentRepository",
+        "app.services.ai.chat.ai_library_chat_service.AgentRepository",
         return_value=fake_agent_repo_instance,
     ), patch(
-        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
         AsyncMock(return_value=fake_stack),
     ), patch(
-        "app.services.ai_library_chat_service.PromptComposer",
+        "app.services.ai.chat.ai_library_chat_service.PromptComposer",
         return_value=composer,
     ), patch(
-        "app.services.ai_library_chat_service.AgentRunner", return_value=runner
+        "app.services.ai.chat.ai_library_chat_service.AgentRunner", return_value=runner
     ), patch(
-        "app.services.ai_library_chat_service.get_adapter",
+        "app.services.ai.chat.ai_library_chat_service.get_adapter",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.SkillToolService",
+        "app.services.ai.chat.ai_library_chat_service.SkillToolService",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.RunRecorder",
+        "app.services.ai.chat.ai_library_chat_service.RunRecorder",
         return_value=_CM(),
     ):
         svc = AILibraryChatService()
@@ -412,8 +412,8 @@ async def test_chat_streams_chunks_via_callback() -> None:
     """P2: when chunk_callback is provided, chat() drives stream_turn
     and forwards each delta_text to the callback. Final assistant
     content equals the concatenation of streamed chunks."""
-    from app.services.ai_library_chat_service import AILibraryChatService
-    from app.services.ai_adapters.base import StreamChunk
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.adapters.base import StreamChunk
 
     user_id = uuid4()
     session_id = uuid4()
@@ -521,27 +521,27 @@ async def test_chat_streams_chunks_via_callback() -> None:
         chunks_received.append(text)
 
     with patch(
-        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
     ), patch(
-        "app.services.ai_library_chat_service.AgentRepository",
+        "app.services.ai.chat.ai_library_chat_service.AgentRepository",
         return_value=fake_agent_repo_instance,
     ), patch(
-        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
         AsyncMock(return_value=fake_stack),
     ), patch(
-        "app.services.ai_library_chat_service.PromptComposer",
+        "app.services.ai.chat.ai_library_chat_service.PromptComposer",
         return_value=composer,
     ), patch(
-        "app.services.ai_library_chat_service.AgentRunner", return_value=runner
+        "app.services.ai.chat.ai_library_chat_service.AgentRunner", return_value=runner
     ), patch(
-        "app.services.ai_library_chat_service.get_adapter",
+        "app.services.ai.chat.ai_library_chat_service.get_adapter",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.SkillToolService",
+        "app.services.ai.chat.ai_library_chat_service.SkillToolService",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.RunRecorder",
+        "app.services.ai.chat.ai_library_chat_service.RunRecorder",
         return_value=_CM(),
     ):
         svc = AILibraryChatService()
@@ -573,8 +573,8 @@ async def test_chat_streams_chunks_via_callback() -> None:
 async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
     """P2: a callback that raises must not crash the stream — the turn
     completes and the persisted message still has the full content."""
-    from app.services.ai_library_chat_service import AILibraryChatService
-    from app.services.ai_adapters.base import StreamChunk
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.adapters.base import StreamChunk
 
     user_id = uuid4()
     session_id = uuid4()
@@ -671,27 +671,27 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
         raise RuntimeError("downstream queue full")
 
     with patch(
-        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
         AsyncMock(return_value=client),
     ), patch(
-        "app.services.ai_library_chat_service.AgentRepository",
+        "app.services.ai.chat.ai_library_chat_service.AgentRepository",
         return_value=fake_agent_repo_instance,
     ), patch(
-        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
         AsyncMock(return_value=fake_stack),
     ), patch(
-        "app.services.ai_library_chat_service.PromptComposer",
+        "app.services.ai.chat.ai_library_chat_service.PromptComposer",
         return_value=composer,
     ), patch(
-        "app.services.ai_library_chat_service.AgentRunner", return_value=runner,
+        "app.services.ai.chat.ai_library_chat_service.AgentRunner", return_value=runner,
     ), patch(
-        "app.services.ai_library_chat_service.get_adapter",
+        "app.services.ai.chat.ai_library_chat_service.get_adapter",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.SkillToolService",
+        "app.services.ai.chat.ai_library_chat_service.SkillToolService",
         return_value=MagicMock(),
     ), patch(
-        "app.services.ai_library_chat_service.RunRecorder",
+        "app.services.ai.chat.ai_library_chat_service.RunRecorder",
         return_value=_CM(),
     ):
         svc = AILibraryChatService()

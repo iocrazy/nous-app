@@ -25,8 +25,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.services import dbos_orchestrator
-
+from app.services.infra import dbos_orchestrator
 router = APIRouter(prefix="/workflows", tags=["DBOS Workflows"])
 
 # How often the SSE stream polls DBOS for status changes. 1.5s balances
@@ -380,50 +379,66 @@ async def stream_workflow_events(
         description="Also stream the step list on every status change. "
         "Heavier but lets the UI render per-step timelines.",
     ),
+    ticket: Optional[str] = Query(
+        None,
+        description="One-shot 30s ticket from POST /api/v1/ws/ticket. "
+        "Preferred over ?token= since the JWT never enters the URL.",
+    ),
     token: Optional[str] = Query(
         None,
-        description="Supabase JWT for browsers (EventSource can't set "
-        "Authorization headers). Server validates the same way as "
-        "Bearer header. Falls back to header auth when omitted.",
+        description="DEPRECATED. Supabase JWT in URL leaks via access "
+        "logs / Referer / browser history. Use ?ticket= instead. Kept "
+        "reachable for legacy tabs only; logs a WARNING on every hit.",
     ),
     authorization: Optional[str] = Header(None),
 ) -> StreamingResponse:
     """SSE stream of DBOS workflow status changes. Closes on terminal
     state, 30-min ceiling, or client disconnect.
 
-    Auth: prefers Authorization header; falls back to ?token= query
-    parameter for browser EventSource compatibility.
-
-    Frontend usage:
-        const es = new EventSource(
-          `/api/v1/workflows/${id}/events?token=${jwt}`
-        );
-        es.addEventListener("status", (e) => render(JSON.parse(e.data)));
-        es.addEventListener("done",   () => es.close());
-        es.addEventListener("not_found", () => showError("workflow gone"));
+    Auth chain (preferred → deprecated):
+      1. ?ticket=<random>  — one-shot, 30s, no JWT in URL
+      2. Authorization: Bearer <JWT>  — for non-browser clients
+      3. ?token=<JWT>  — DEPRECATED, JWT in URL → access-log leak
     """
-    # Auth: header first (preferred), then query token fallback. We
-    # don't reuse `Depends(get_optional_auth)` here because we want
-    # to fall through to the query-param path WITHOUT raising 401
-    # when the header is absent — a behaviour that's awkward to
-    # express through Depends on a single endpoint.
-    from app.core.deps import _validate_bearer_token
+    # Ticket (preferred) — consume the one-shot Redis token first.
+    if ticket:
+        from app.api.ws_ticket_router import consume_ticket
 
-    bearer = authorization or (f"Bearer {token}" if token else None)
-    if not bearer:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No auth: provide Authorization header or ?token=",
-        )
-    try:
-        await _validate_bearer_token(bearer)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {e}",
-        )
+        if await consume_ticket(ticket):
+            # Authenticated via ticket; skip JWT validation chain.
+            pass
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired ticket",
+            )
+    else:
+        # Header first (preferred for non-browser clients), then ?token=.
+        # ?token= remains reachable for legacy tabs but logs WARNING.
+        from app.core.deps import _validate_bearer_token
+
+        if not authorization and token:
+            logger.warning(
+                "[workflows/events] DEPRECATED ?token= auth — JWT was just "
+                "leaked to access logs. Client should migrate to ?ticket= "
+                "(POST /api/v1/ws/ticket)."
+            )
+
+        bearer = authorization or (f"Bearer {token}" if token else None)
+        if not bearer:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No auth: provide Authorization header or ?ticket=",
+            )
+        try:
+            await _validate_bearer_token(bearer)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid token: {e}",
+            )
 
     # Validate workflow exists before opening the stream so the client
     # gets a synchronous 404 instead of the SSE not_found event.

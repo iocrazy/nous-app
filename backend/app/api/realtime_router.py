@@ -178,38 +178,44 @@ async def event_generator(user_id: str, request: Request) -> AsyncGenerator[str,
 
 @router.get("/subscribe")
 async def subscribe_to_realtime(
-    request: Request, token: str = None, auth: OptionalAuthDep = None
+    request: Request,
+    ticket: str = None,
+    token: str = None,
+    auth: OptionalAuthDep = None,
 ):
     """
     Subscribe to realtime updates via Server-Sent Events.
 
-    Authentication: Pass token as query parameter (EventSource doesn't support headers)
-    Example: /api/v1/realtime/subscribe?token=your_jwt_token
+    Authentication (preferred): one-shot 30s ticket from POST
+    `/api/v1/ws/ticket`, passed as `?ticket=<random>`. The JWT itself
+    never enters the URL (which would otherwise leak into nginx /
+    uvicorn / Sentry access logs and the Referer header).
+
+    Authentication (deprecated): `?token=<JWT>`. Still accepted while
+    legacy clients migrate; logs a WARNING on every use because the JWT
+    is now in the URL and therefore in access logs.
 
     Events:
-    - video: Changes to parsed_media table (insert/update/delete)
-    - collection_video: Changes to video_collections table
-    - video_tag: Changes to video_tags table
-    - heartbeat: Keep-alive ping every 30 seconds
-    - connected: Initial connection confirmation
-    - error: Subscription errors
-
-    Event format:
-    ```json
-    {
-        "type": "video",
-        "event": "insert",
-        "data": { ... record data ... }
-    }
-    ```
+    - video, collection_video, video_tag — DB changes
+    - heartbeat — keep-alive every 30 s
+    - connected — initial ack
+    - error — subscription errors
     """
-    # Auth can come from header (AuthDep) or query param (token)
+    # Auth chain: ticket (preferred) → header (Authorization) → token (warn).
     user_id = None
-    if auth and auth.user_id:
+    if ticket:
+        from app.api.ws_ticket_router import consume_ticket
+
+        user_id = await consume_ticket(ticket)
+    elif auth and auth.user_id:
         user_id = auth.user_id
     elif token:
-        # Verify token manually if passed as query param
-        from app.services.supabase_auth_service import SupabaseAuthService
+        logger.warning(
+            "[realtime/sse] DEPRECATED ?token= auth — JWT was just leaked to "
+            "access logs. Client should migrate to ?ticket= "
+            "(POST /api/v1/ws/ticket)."
+        )
+        from app.services.infra.supabase_auth_service import SupabaseAuthService
 
         auth_service = SupabaseAuthService()
         try:

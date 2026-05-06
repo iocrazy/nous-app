@@ -271,7 +271,7 @@ async def _build_default_registry_async() -> MCPToolRegistry:
     even when the DB is unreachable (useful for protocol smoke tests).
     """
     try:
-        from app.services.mcp_tool_registration import build_mcp_registry
+        from app.services.ai.skills.mcp_tool_registration import build_mcp_registry
         return await build_mcp_registry()
     except Exception:
         return MCPToolRegistry()

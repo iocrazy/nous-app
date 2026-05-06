@@ -14,7 +14,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep, require_team_id
 from app.schemas.storyboard import StoryboardProjectCreate, StoryboardProjectUpdate
-from app.services.storyboard_service import StoryboardService
+from app.services.storyboard.storyboard_service import StoryboardService
 
 router = APIRouter(prefix="/storyboard/projects")
 

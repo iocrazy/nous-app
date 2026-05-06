@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.storyboard_ai_service import AGENT_SLUG, StoryboardAIService
+from app.services.storyboard.storyboard_ai_service import AGENT_SLUG, StoryboardAIService
 
 
 def test_agent_slug_constant() -> None:
@@ -87,7 +87,7 @@ async def test_analyze_video_composes_mode_b_once_for_all_keyframes() -> None:
     ]
 
     with patch(
-        "app.services.storyboard_image_service.StoryboardImageService"
+        "app.services.storyboard.storyboard_image_service.StoryboardImageService"
     ) as mock_img_svc_cls:
         mock_img_svc_cls.return_value.detect_scenes = lambda _: fake_keyframes
 

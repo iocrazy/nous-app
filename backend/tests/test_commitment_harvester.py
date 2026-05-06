@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.services.commitment_harvester import (
+from app.services.ai.runner.commitment_harvester import (
     HarvestContext,
     HarvestedCommitment,
     HarvestResult,

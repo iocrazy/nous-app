@@ -26,7 +26,7 @@ from app.schemas.storyboard import (
     StoryboardNodeCreate,
     StoryboardNodeUpdate,
 )
-from app.services.storyboard_service import StoryboardService
+from app.services.storyboard.storyboard_service import StoryboardService
 
 router = APIRouter(prefix="/storyboard")
 

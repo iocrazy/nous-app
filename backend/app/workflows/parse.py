@@ -37,7 +37,7 @@ from loguru import logger
 def extract_url_step(url: str) -> str:
     """Validate + canonicalise URL. Raises ValueError on bad input —
     workflow catches that and returns a failed-status dict."""
-    from app.services.parse_helpers import extract_url
+    from app.services.media.parsers.parse_helpers import extract_url
 
     return extract_url(url)
 
@@ -53,7 +53,7 @@ def fetch_and_parse_step(
 ) -> dict[str, Any]:
     """3-tier fallback parse (LightHTTP → ABogus → DrissionPage) +
     formatter. Heavy I/O — 3 retries matches legacy Celery budget."""
-    from app.services.parse_helpers import fetch_and_parse
+    from app.services.media.parsers.parse_helpers import fetch_and_parse
 
     aweme_detail, parsed_data = fetch_and_parse(
         valid_url,
@@ -71,7 +71,7 @@ def save_media_step(
     parsed_data: dict[str, Any], platform_id: str, video_bool: bool
 ) -> Optional[dict[str, Any]]:
     """Insert/update parsed_media row. Returns the saved record or None."""
-    from app.services.parse_helpers import save_media_to_db
+    from app.services.media.parsers.parse_helpers import save_media_to_db
 
     return save_media_to_db(parsed_data, platform_id, video_bool)
 
@@ -85,7 +85,7 @@ def auto_tag_step(
     description: str,
 ) -> None:
     """Best-effort hashtag → tag classification. Never raises."""
-    from app.services.parse_helpers import auto_tag_media
+    from app.services.media.parsers.parse_helpers import auto_tag_media
 
     auto_tag_media(video_db_id, platform_id, aweme_detail, title, description)
 
@@ -114,8 +114,8 @@ def dispatch_download_step(
     context."""
     import uuid as _uuid
 
-    from app.services.dbos_orchestrator import start_workflow_routed
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows.download import download_workflow
 
     wf_id = str(_uuid.uuid4())
@@ -173,8 +173,8 @@ def dispatch_l1_analysis_step(
     import uuid as _uuid
 
     try:
-        from app.services.dbos_orchestrator import start_workflow_routed
-        from app.services.unified_task_manager import get_task_manager
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.analyze_l1 import analyze_l1_workflow
 
         wf_id = str(_uuid.uuid4())
@@ -226,7 +226,7 @@ def update_parse_tracking_step(
     this update the parse task stays without a media_id and the result
     card never appears (legacy parse_tasks.py used to do the same write
     via `manager._atomic_update`)."""
-    from app.services.unified_task_manager import get_task_manager
+    from app.services.infra.unified_task_manager import get_task_manager
 
     async def _do() -> None:
         try:
@@ -316,13 +316,24 @@ def parse_workflow(
     to the cached result.
     """
     # 1. URL validation (sync, fast)
+    #
+    # Short-circuit failures MUST raise so DBOS marks the workflow ERROR
+    # and the mirror_dbos_lifecycle_to_tracking trigger flips
+    # task_tracking.phase to 'failed'. Returning a {"status":"failed"}
+    # dict makes DBOS think the workflow SUCCEEDED — the row then ends
+    # up phase='completed' but subtitle still 'Initializing...' because
+    # update_parse_tracking_step never runs, which is exactly the
+    # "Parse Initializing... but the file is already in 资源库" footgun
+    # we just dug out of the logs (run 17:44:12 -> 17:46:18 NO_ROUTER_DATA
+    # then media_repository.create failed; the row still got mirrored to
+    # completed by the SUCCESS-only trigger).
     try:
         valid_url = extract_url_step(url)
     except ValueError as e:
-        return {"status": "failed", "url": url, "error": f"Invalid URL: {e}"}
+        raise RuntimeError(f"Invalid URL: {e}") from e
 
     # 2. Fetch + parse (heavy)
-    from app.services.douyin_parse.ua_pool import pick_ua
+    from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
 
     legacy_ua = pick_ua()
     fetched = fetch_and_parse_step(
@@ -336,14 +347,12 @@ def parse_workflow(
     video_title = parsed_data.get("title", "undefined")
     parsed_data["user_id"] = user_id
 
-    # 3. Save metadata
+    # 3. Save metadata — same short-circuit-by-raise rule.
     saved_video = save_media_step(parsed_data, platform_id, video_bool)
     if not saved_video:
-        return {
-            "status": "failed",
-            "url": valid_url,
-            "error": "Data validation failed",
-        }
+        raise RuntimeError(
+            f"save_metadata_only failed for {platform_id}: see media_repository.create logs"
+        )
     video_db_id = saved_video.get("id")
     resource_id = saved_video.get("resource_id")
 

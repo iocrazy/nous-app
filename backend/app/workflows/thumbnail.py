@@ -18,7 +18,7 @@ from loguru import logger
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
 def generate_thumbnail_step(resource_id: str, file_path: str, mime_type: str) -> bool:
-    from app.services.thumbnail_service import ThumbnailService
+    from app.services.media.render.thumbnail_service import ThumbnailService
 
     try:
         asyncio.run(

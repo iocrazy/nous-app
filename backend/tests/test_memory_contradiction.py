@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.memory.contradiction import (
+from app.services.ai.memory.contradiction import (
     ELITE_SIMILARITY,
     HIGH_SIMILARITY,
     SUPERSEDING_VERDICTS,

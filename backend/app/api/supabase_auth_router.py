@@ -16,8 +16,8 @@ from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.user_logs_repository import log_user_action
-from app.services.points_service import PointsService
-from app.services.supabase_auth_service import (
+from app.services.billing.points_service import PointsService
+from app.services.infra.supabase_auth_service import (
     SupabaseAdminAuthService,
     SupabaseAuthService,
 )

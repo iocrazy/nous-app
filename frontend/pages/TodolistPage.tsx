@@ -224,6 +224,8 @@ export function TodolistPage() {
         onViewModeChange={setViewMode}
         onNewIssue={() => setNewIssueOpen(true)}
         onRefresh={() => { void refreshIssues(agentsById); }}
+        agents={agents}
+        currentUserId={currentUserId ?? undefined}
       />
       {newIssueOpen && (
         <NewIssueDialog

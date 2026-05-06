@@ -15,7 +15,7 @@ from uuid import UUID
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.script_ai_service import ScriptAIService
+from app.services.storyboard.script.script_ai_service import ScriptAIService
 
 
 def _fake_composed() -> ComposedSystemPrompt:
@@ -37,9 +37,8 @@ def _fake_composed() -> ComposedSystemPrompt:
 async def test_outline_uses_composed_system_message(monkeypatch):
     """generate_outline must compose via PromptComposer with agent_slug=script_ai
     and run the result through AgentRunner."""
-    from app.services import agent_runner as ar_module
-    from app.services import prompt_composer as pc_module
-
+    from app.services.ai.runner import agent_runner as ar_module
+    from app.services.ai.prompts import prompt_composer as pc_module
     mock_compose = AsyncMock(return_value=_fake_composed())
     monkeypatch.setattr(pc_module.PromptComposer, "compose", mock_compose)
 
@@ -85,8 +84,7 @@ async def test_outline_uses_composed_system_message(monkeypatch):
 @pytest.mark.unit
 def test_no_hardcoded_system_prompt_left():
     """Grep the service source for common hardcoded-prompt sentinels."""
-    from app.services import script_ai_service
-
+    from app.services.storyboard.script import script_ai_service
     src = inspect.getsource(script_ai_service)
 
     # No leftover `system_prompt = "..."` assignments

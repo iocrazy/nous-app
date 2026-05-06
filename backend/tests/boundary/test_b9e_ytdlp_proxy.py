@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.ytdlp_service import YtdlpService
+from app.services.media.parsers.ytdlp_service import YtdlpService
 
 
 @pytest.fixture(autouse=True)

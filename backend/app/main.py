@@ -20,8 +20,8 @@ from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_async_redis
 from app.core.utils import Utils
 from app.middleware.request_logging import RequestLoggingMiddleware
-from app.services import dbos_orchestrator
-from app.services.douyin_parse.drissionpage_parser import DrissionPageParser
+from app.services.infra import dbos_orchestrator
+from app.services.media.parsers.douyin_parse.drissionpage_parser import DrissionPageParser
 
 # 在应用启动前设置日志
 Utils.setup_logging()
@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
         )
         from app.repositories.agent_repository import AgentRepository
         from app.repositories.skill_repository import SkillRepository
-        from app.services.seed_loader import SeedLoader
+        from app.services.ai.runner.seed_loader import SeedLoader
 
         seed_loader = SeedLoader(
             agent_repo=AgentRepository(),
@@ -178,6 +178,46 @@ async def lifespan(app: FastAPI):
             logger.warning(f"liveness reconcile on startup failed: {exc!r}")
 
     app.state.bg_tasks.spawn("liveness_reconcile", _bg_liveness_reconcile())
+
+    # 2026-05-05 path C: DBOS internal-queue PENDING reaper.
+    # Background: every backend restart abandons whatever scheduled
+    # housekeeping workflows (update_system_status / commitment_sweeper
+    # / agent_runs_sweeper / scheduled_master / reap_stuck_pending_tasks)
+    # were enqueued at the time. They sit forever in dbos.workflow_status
+    # with status='PENDING' on _dbos_internal_queue, eventually polluting
+    # any code that introspects the queue. This sweep marks anything older
+    # than 5 minutes on that queue as CANCELLED so the table stops growing
+    # across restarts. User-queued workflows are left alone.
+    async def _bg_reap_internal_queue() -> None:
+        try:
+            import os
+            import psycopg
+
+            dsn = os.environ.get("DBOS_DATABASE_URL")
+            if not dsn:
+                return
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE dbos.workflow_status
+                           SET status='CANCELLED'
+                         WHERE queue_name='_dbos_internal_queue'
+                           AND status IN ('PENDING','ENQUEUED')
+                           AND created_at <
+                               (EXTRACT(EPOCH FROM NOW() - INTERVAL '5 minutes') * 1000)::bigint
+                        """
+                    )
+                    affected = cur.rowcount or 0
+            if affected:
+                logger.info(
+                    f"reap_internal_queue: cancelled {affected} stranded "
+                    f"_dbos_internal_queue PENDING/ENQUEUED rows"
+                )
+        except Exception as exc:
+            logger.warning(f"reap_internal_queue startup sweep failed: {exc!r}")
+
+    app.state.bg_tasks.spawn("reap_internal_queue", _bg_reap_internal_queue())
 
     # DBOS Orchestrator (PR-D2.2): instantiate the singleton, import workflow
     # modules so their decorators register, then launch the worker pool.
@@ -335,8 +375,8 @@ async def lifespan(app: FastAPI):
                 wrap_legacy_post,
                 wrap_legacy_pre,
             )
-            from app.services.hooks.cost_auditor import CostAuditorHook
-            from app.services.hooks.memory_harvester import MemoryHarvesterHook
+            from app.services.infra.hooks.cost_auditor import CostAuditorHook
+            from app.services.infra.hooks.memory_harvester import MemoryHarvesterHook
 
             hook_registry = HookRegistry()
             try:
@@ -364,7 +404,7 @@ async def lifespan(app: FastAPI):
         # PromptComposer; callers fetch via require('chat'). Search /
         # Storyboard register their own engines from feature modules.
         try:
-            from app.services.chat_context_engine import ChatContextEngine
+            from app.services.ai.chat.chat_context_engine import ChatContextEngine
 
             app.state.context_engines.register(ChatContextEngine())
             logger.info("ContextEngine registered: chat")

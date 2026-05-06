@@ -10,7 +10,7 @@ from app.boundary import ValidatedURL
 
 @pytest.mark.unit
 async def test_fetch_metadata_rejects_raw_str():
-    from app.services.ytdlp_service import YtdlpService
+    from app.services.media.parsers.ytdlp_service import YtdlpService
 
     with pytest.raises(AssertionError, match="ValidatedURL"):
         await YtdlpService.fetch_metadata("https://example.com/v")
@@ -18,7 +18,7 @@ async def test_fetch_metadata_rejects_raw_str():
 
 @pytest.mark.unit
 async def test_download_video_rejects_raw_str(tmp_path):
-    from app.services.ytdlp_service import YtdlpService
+    from app.services.media.parsers.ytdlp_service import YtdlpService
 
     with pytest.raises(AssertionError, match="ValidatedURL"):
         await YtdlpService.download_video(
@@ -28,7 +28,7 @@ async def test_download_video_rejects_raw_str(tmp_path):
 
 @pytest.mark.unit
 async def test_download_audio_rejects_raw_str(tmp_path):
-    from app.services.ytdlp_service import YtdlpService
+    from app.services.media.parsers.ytdlp_service import YtdlpService
 
     with pytest.raises(AssertionError, match="ValidatedURL"):
         await YtdlpService.download_audio(
@@ -43,7 +43,7 @@ async def test_fetch_metadata_accepts_validated_url(monkeypatch):
     assert allows ValidatedURL."""
     import asyncio
 
-    from app.services.ytdlp_service import YtdlpService
+    from app.services.media.parsers.ytdlp_service import YtdlpService
 
     async def fake_subprocess(*args, **kwargs):
         # Return an object whose communicate() returns valid JSON

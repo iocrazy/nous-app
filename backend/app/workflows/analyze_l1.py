@@ -27,7 +27,7 @@ def _dsn() -> str:
 def resolve_analyze_provider(user_id: Optional[str]) -> dict[str, Any]:
     """Resolve provider key + config + model name. Mirrors
     analysis_tasks._resolve_analyze_provider_config."""
-    from app.services.ai_provider_helpers import resolve_analyze_provider_config
+    from app.services.ai.providers.ai_provider_helpers import resolve_analyze_provider_config
 
     provider_key, provider_config, agent_model = resolve_analyze_provider_config(
         user_id
@@ -53,8 +53,8 @@ def call_analyze_l1(
     """Run the multimodal analysis + persist results. Returns a digest dict."""
     from app.repositories.analysis_repository import AnalysisRepository
     from app.repositories.tags_repository import TagsRepository
-    from app.services.embedding_service import EmbeddingService
-    from app.services.visual_analysis_service import VisualAnalysisService
+    from app.services.ai.providers.embedding_service import EmbeddingService
+    from app.services.ai.visual.visual_analysis_service import VisualAnalysisService
 
     async def _analyze() -> dict[str, Any]:
         analysis_service = VisualAnalysisService(

@@ -111,6 +111,48 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
     }
   }, [currentParseTask?.status]);
 
+  // Mount-time hydration: if the user reloads or navigates back to
+  // ParserPage while a parse/download is still in flight (or just
+  // finished), we need to rebuild `currentResult` from whatever the
+  // TaskManager already has cached, otherwise the page renders with no
+  // MediaCard / DownloadProgress at all and the user sees their work
+  // disappear. Picks the most-recent in-progress (or recently completed)
+  // download task with a media_id and refetches its parsed_media.
+  // Runs once after the first successful tasks-load to avoid racing the
+  // initial fetch.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (currentResult) { hydratedRef.current = true; return; }
+    if (!isAuthenticated || tasks.length === 0) return;
+
+    const cutoff = Date.now() - 5 * 60 * 1000; // last 5 minutes
+    const candidate = tasks
+      .filter((t) => t.task_type === 'download' && t.media_id)
+      .filter((t) => {
+        if (t.status === 'pending' || t.status === 'processing') return true;
+        if (t.status === 'completed') {
+          const ts = t.completed_at || t.updated_at || t.created_at;
+          return ts && new Date(ts).getTime() > cutoff;
+        }
+        return false;
+      })
+      .sort((a, b) => {
+        const ta = new Date(a.updated_at || a.created_at).getTime();
+        const tb = new Date(b.updated_at || b.created_at).getTime();
+        return tb - ta;
+      })[0];
+
+    if (!candidate?.media_id) return;
+    hydratedRef.current = true;
+    if (candidate.celery_task_id) {
+      setDownloadCeleryId(candidate.celery_task_id);
+    }
+    fetchVideoByPlatformId(candidate.media_id)
+      .then((v) => { if (v) setCurrentResult(v); })
+      .catch(() => {});
+  }, [tasks, isAuthenticated, currentResult]);
+
   // Watch for download task to appear in tasks array (race condition fix)
   // After parse completes, download task may not be in Realtime yet
   useEffect(() => {

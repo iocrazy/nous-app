@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.services.memory.uuid_int_mapper import UuidIntMapper
+from app.services.ai.memory.uuid_int_mapper import UuidIntMapper
 
 
 @dataclass

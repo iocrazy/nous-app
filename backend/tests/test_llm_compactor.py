@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.llm_compactor import (
+from app.services.ai.llm.llm_compactor import (
     DEFAULT_AUTO_COMPACTION_INPUT_TOKENS,
     DEFAULT_KEEP_FLOOR_TURNS,
     CompactionResult,
@@ -365,7 +365,7 @@ def _assert_no_orphan_tool_replies(messages: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
-from app.services.llm_compactor import _candidate_split_by_token_budget
+from app.services.ai.llm.llm_compactor import _candidate_split_by_token_budget
 
 
 @pytest.mark.unit

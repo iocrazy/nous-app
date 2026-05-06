@@ -6,8 +6,8 @@ from typing import Any, Optional
 
 import pytest
 
-from app.services import script_service as svc_module
-from app.services.script_service import ScriptService
+from app.services.storyboard.script import script_service as svc_module
+from app.services.storyboard.script.script_service import ScriptService
 
 
 class _FakeProjectRepo:

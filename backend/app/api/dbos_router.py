@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.services import dbos_orchestrator
-
+from app.services.infra import dbos_orchestrator
 router = APIRouter(prefix="/dbos", tags=["DBOS"])
 
 

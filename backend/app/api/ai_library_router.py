@@ -64,8 +64,8 @@ from app.schemas.ai_library_chat import (
     SessionUpdate,
     SessionWithMessages,
 )
-from app.services.ai_library_chat_service import AILibraryChatService
-from app.services.seed_loader import SeedLoader
+from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+from app.services.ai.runner.seed_loader import SeedLoader
 
 router = APIRouter(prefix="/ai-library", tags=["AI Library"])
 
@@ -2613,7 +2613,7 @@ async def get_usage_summary(
     if days < 1 or days > 90:
         raise HTTPException(status_code=400, detail="days must be 1..90")
 
-    from app.services.token_billing import summarize_user_usage
+    from app.services.ai.billing.token_billing import summarize_user_usage
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     summary = await summarize_user_usage(user_uuid, days=days)

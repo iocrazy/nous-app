@@ -182,7 +182,7 @@ async def retry_transcode(
     # Mark as pending and dispatch DBOS workflow.
     await repo.mark_pending(version_id)
 
-    from app.services.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
     from app.workflows.transcode import transcode_workflow
 
     await start_workflow_routed(
@@ -222,7 +222,7 @@ async def batch_transcode(
     versions = await repo.list_versions_for_batch(action)
     queued = 0
 
-    from app.services.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
     from app.workflows.transcode import transcode_workflow
 
     for v in versions:

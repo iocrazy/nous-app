@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.services.script_import_service import ScriptImportService
+from app.services.storyboard.script.script_import_service import ScriptImportService
 
 router = APIRouter(prefix="/scripts", tags=["Script Import"])
 

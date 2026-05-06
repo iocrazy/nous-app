@@ -7,8 +7,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.services.script_export_service import ScriptExportService
-from app.services.script_service import ScriptService
+from app.services.storyboard.script.script_export_service import ScriptExportService
+from app.services.storyboard.script.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts", tags=["Script Export"])
 

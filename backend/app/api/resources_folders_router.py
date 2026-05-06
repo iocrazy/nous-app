@@ -19,7 +19,7 @@ from app.schemas.resources import (
     SmartFolderCreate,
     SmartFolderUpdate,
 )
-from app.services.resources_service import ResourcesService
+from app.services.library.resources_service import ResourcesService
 
 router = APIRouter(prefix="/resources")
 
