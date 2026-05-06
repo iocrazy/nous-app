@@ -40,6 +40,11 @@ jobs:
       - name: Build (includes TypeScript check)
         run: npm run build
 
+      # Phase S (S1) + P1 fix: vitest is now BLOCKING. 52/52 tests pass
+      # locally as of this commit; failures must be addressed not ignored.
+      - name: Vitest unit tests
+        run: npx vitest run --reporter=default
+
   backend:
     name: Backend Lint & Deps
     runs-on: ubuntu-latest

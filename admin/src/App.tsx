@@ -21,6 +21,7 @@ import { TranscodeList } from './pages/transcode'
 import { TranscodeConfig } from './pages/transcode-config'
 import { TaskCenter } from './pages/tasks'
 import { AIModelsPage } from './pages/ai'
+import { AgentTelemetryDashboard } from './pages/agent-telemetry'
 import { DeploymentLogsPage } from './pages/deployment-logs'
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/tags" element={<TagsPage />} />
               <Route path="/credits" element={<CreditsPage />} />
               <Route path="/ai" element={<AIModelsPage />} />
+              <Route path="/agent-telemetry" element={<AgentTelemetryDashboard />} />
               <Route path="/monitoring" element={<MonitoringDashboard />} />
               <Route path="/search" element={<GlobalSearch />} />
               <Route path="/audit-logs" element={<AuditLogList />} />

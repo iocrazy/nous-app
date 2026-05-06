@@ -49,7 +49,57 @@ MAX_TOOL_ITERATIONS = 5
 
 # Tool names recognised by the runner. Anything else is silently ignored
 # (forward-compat with future caller-provided tools).
+# Q5: MCP-routed tools are matched by ``"." in name`` separately — they
+# don't need to be listed here.
 SUPPORTED_TOOLS: frozenset[str] = frozenset({"Skill", "Delegate"})
+
+
+def _is_mcp_tool_name(name: str, mcp_registry) -> bool:
+    """Q5: check if a tool name maps to a registered MCP server.
+
+    Returns True iff (a) name contains exactly one '.' separator,
+    (b) the prefix matches one of the registry's registered server
+    names. Returns False when registry is None or name shape mismatches.
+    """
+    if mcp_registry is None or not name or "." not in name:
+        return False
+    server_name, _, raw = name.partition(".")
+    if not raw:
+        return False
+    return server_name in mcp_registry.server_names()
+
+
+def _mcp_tools_to_openai_format(qualified_tools) -> list[dict]:
+    """Q5: convert MCPOutboundRegistry.QualifiedTool[] → OpenAI tools[].
+
+    The OpenAI function-calling spec is what every chat-completions
+    adapter expects in ``composed.tools``:
+
+        {
+          "type": "function",
+          "function": {
+            "name": "notion.create_page",
+            "description": "...",
+            "parameters": { "type": "object", ... }   # JSONSchema
+          }
+        }
+
+    MCP's ``inputSchema`` already matches the JSONSchema shape, so the
+    adapter is a thin wrapper.
+    """
+    out = []
+    for qt in qualified_tools:
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": qt.qualified_name,
+                    "description": qt.description or "",
+                    "parameters": qt.input_schema or {"type": "object"},
+                },
+            }
+        )
+    return out
 
 
 class AgentRunner:
@@ -60,6 +110,7 @@ class AgentRunner:
         *,
         hooks: Optional[HookRegistry] = None,
         delegate_tool: Optional[Any] = None,
+        mcp_registry: Optional[Any] = None,
     ) -> None:
         self.adapter = adapter
         self.skill_tool = skill_tool
@@ -68,6 +119,13 @@ class AgentRunner:
         # are answered with an explicit "tool not configured" so the LLM
         # gets useful feedback instead of silent skip behaviour.
         self.delegate_tool = delegate_tool
+        # Q5: optional outbound MCP registry. When set, tools advertised
+        # by registered MCP servers are injected into composed.tools at
+        # turn-start, and tool_calls whose name matches a server prefix
+        # are routed via mcp_registry.call(qualified_name, args). Server
+        # names are sanitized — no '.' allowed — so the prefix split is
+        # unambiguous (e.g. 'notion.create_page' → server 'notion').
+        self.mcp_registry = mcp_registry
 
     async def stream_turn(
         self,
@@ -76,35 +134,79 @@ class AgentRunner:
         *,
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
+        auto_recorder: bool = True,
+        user_id: Optional["UUID"] = None,
+        session_id: Optional["UUID"] = None,
+        trigger: str = "chat_stream",
     ):
-        """Wave H (B): incremental streaming variant of run_turn.
+        """Wave H (B) + Phase P (P1) + R4: incremental streaming with tool_calls.
 
-        Yields StreamChunk instances as the model emits them. Falls back
-        to a single buffered chunk when the adapter doesn't implement
-        stream(). The caller MUST consume the generator fully — pending
-        on it mid-iteration leaks the underlying httpx connection.
+        Yields StreamChunk instances as the model emits them. When the
+        model emits tool_call deltas, we collect them, execute the tools
+        on completion (between LLM iterations), and re-enter the stream
+        loop with the tool results in messages.
 
-        Limitations of this initial implementation:
-          - Text-only path. If the model emits tool_calls during stream,
-            we collect the deltas but DO NOT execute them mid-stream;
-            the caller can fall back to run_turn() for tool-using turns.
-          - Per-turn output budget (Wave 5c C2 / G4) still applies via
-            composed.max_tokens.
-          - AbortController interrupts AT chunk boundaries (not mid-byte
-            from upstream — httpx + asyncio cancel will get there next
-            yield point).
+        R4: when ``recorder`` is None and ``auto_recorder=True`` (default),
+        an internal RunRecorder is constructed + context-managed for the
+        duration of the stream. Caller need only pass ``user_id``
+        (and optionally session_id). This guarantees telemetry
+        (agent_runs row + status + duration + cost) is never silently
+        dropped because the caller forgot the wrapper.
 
-        Usage:
-            async for chunk in runner.stream_turn(composed, msgs):
-                if chunk.delta_text: send_to_user(chunk.delta_text)
-                if chunk.finish_reason: break
+        Yields:
+          - delta_text chunks during text generation
+          - StreamChunk with tool_call_delta during tool emission
+          - synthetic StreamChunk with delta_text describing each tool
+            execution (so caller's UI can show "→ ran skill X")
+          - final chunk with finish_reason on completion
+
+        Falls back to a single buffered chunk when the adapter doesn't
+        implement stream().
+
+        Per-turn output budget + AbortController + loop_guard all apply
+        same as run_turn().
         """
-        from app.agent_framework import RunAborted
+        from contextlib import AsyncExitStack
+        from app.agent_framework import RunAborted, ToolCallLoopGuard
         from app.services.ai_adapters.base import StreamChunk, StreamingNotSupported
+        from app.agent_framework._metrics_helper import inc_metric
+
+        # R4: optionally wrap in RunRecorder when caller didn't supply one
+        async with AsyncExitStack() as _stack:
+            if recorder is None and auto_recorder and user_id is not None:
+                recorder = await _stack.enter_async_context(
+                    RunRecorder(
+                        agent_id=composed.agent_id,
+                        user_id=user_id,
+                        trigger=trigger,
+                        session_id=session_id,
+                        model=composed.model,
+                    )
+                )
+                inc_metric("stream_turn_auto_recorder")
+
+            async for _chunk in self._stream_turn_inner(
+                composed, user_messages,
+                recorder=recorder, abort=abort,
+            ):
+                yield _chunk
+
+    async def _stream_turn_inner(
+        self,
+        composed: ComposedSystemPrompt,
+        user_messages: list[dict],
+        *,
+        recorder: Optional[RunRecorder],
+        abort: Optional["AbortController"],
+    ):
+        """R4: extracted inner generator so stream_turn can wrap us in
+        an optional RunRecorder context without nesting concerns."""
+        from app.agent_framework import RunAborted, ToolCallLoopGuard
+        from app.services.ai_adapters.base import StreamChunk, StreamingNotSupported
+        from app.agent_framework._metrics_helper import inc_metric
 
         stream_method = getattr(self.adapter, "stream", None)
         if stream_method is None:
-            # Adapter doesn't support streaming → emit one buffered chunk
             resp = await self.adapter.call(composed, user_messages)
             msg = resp["choices"][0]["message"]
             yield StreamChunk(
@@ -114,32 +216,182 @@ class AgentRunner:
             )
             return
 
-        from app.agent_framework._metrics_helper import inc_metric
         inc_metric("streaming_started")
-        try:
-            async for chunk in stream_method(composed, user_messages):
-                if abort is not None and abort.is_aborted():
-                    inc_metric("streaming_aborted_mid")
-                    raise RunAborted("user cancel mid-stream")
-                yield chunk
-                if chunk.finish_reason:
-                    if recorder is not None and chunk.usage:
-                        recorder.record_usage(
-                            prompt_tokens=int(chunk.usage.get("prompt_tokens") or 0),
-                            completion_tokens=int(
-                                chunk.usage.get("completion_tokens") or 0
-                            ),
+
+        # P1: per-run loop guard same as run_turn
+        loop_guard = ToolCallLoopGuard(repeat_threshold=3, window=5)
+
+        # G3: discover MCP tools once + augment composed.tools (mirrors
+        # run_turn's logic). Failures isolated — discovery error skips
+        # MCP for this turn but the stream proceeds.
+        mcp_tool_names: set[str] = set()
+        if self.mcp_registry is not None:
+            try:
+                qualified = await self.mcp_registry.all_tools()
+                if qualified:
+                    extra_tools = _mcp_tools_to_openai_format(qualified)
+                    composed = composed.model_copy(update={
+                        "tools": list(composed.tools or []) + extra_tools,
+                    })
+                    mcp_tool_names = {qt.qualified_name for qt in qualified}
+                    inc_metric("mcp_tools_injected", by=len(extra_tools))
+            except Exception as exc:
+                logger.warning(
+                    f"[stream_turn] MCP tool discovery failed (non-fatal): {exc}"
+                )
+
+        messages = list(user_messages)
+        iteration = 0
+        MAX_STREAM_ITERATIONS = 10
+
+        while iteration < MAX_STREAM_ITERATIONS:
+            iteration += 1
+            if abort is not None and abort.is_aborted():
+                inc_metric("streaming_aborted_mid")
+                raise RunAborted("user cancel between stream iterations")
+
+            # Per-iteration tool_call accumulation. Provider sends each
+            # tool_call as deltas across multiple chunks; we stitch them.
+            tool_call_buf: dict[int, dict] = {}
+            final_finish: Optional[str] = None
+            final_usage: Optional[dict] = None
+
+            try:
+                async for chunk in stream_method(composed, messages):
+                    if abort is not None and abort.is_aborted():
+                        inc_metric("streaming_aborted_mid")
+                        raise RunAborted("user cancel mid-stream")
+
+                    # Forward text delta as-is to caller
+                    if chunk.delta_text or chunk.tool_call_delta:
+                        yield chunk
+
+                    # Stitch tool_call deltas
+                    if chunk.tool_call_delta:
+                        _merge_tool_call_deltas(
+                            tool_call_buf,
+                            chunk.tool_call_delta.get("tool_calls") or [],
                         )
-                    break
-        except StreamingNotSupported:
-            # Provider exposed stream() but raised at runtime → fall back
-            resp = await self.adapter.call(composed, user_messages)
-            msg = resp["choices"][0]["message"]
-            yield StreamChunk(
-                delta_text=msg.get("content") or "",
-                finish_reason=resp["choices"][0].get("finish_reason") or "stop",
-                usage=resp.get("usage"),
-            )
+
+                    if chunk.finish_reason:
+                        final_finish = chunk.finish_reason
+                        final_usage = chunk.usage
+                        if recorder is not None and chunk.usage:
+                            recorder.record_usage(
+                                prompt_tokens=int(chunk.usage.get("prompt_tokens") or 0),
+                                completion_tokens=int(chunk.usage.get("completion_tokens") or 0),
+                            )
+                        break
+            except StreamingNotSupported:
+                resp = await self.adapter.call(composed, messages)
+                msg = resp["choices"][0]["message"]
+                yield StreamChunk(
+                    delta_text=msg.get("content") or "",
+                    finish_reason=resp["choices"][0].get("finish_reason") or "stop",
+                    usage=resp.get("usage"),
+                )
+                return
+
+            # If finish_reason is 'tool_calls' (or we collected calls
+            # despite a 'stop'), execute them + re-enter loop.
+            tool_calls_to_run = list(tool_call_buf.values()) if tool_call_buf else []
+            if not tool_calls_to_run:
+                # No tool calls — turn complete. Always yield terminal
+                # finish chunk (inner loop's finish chunk wasn't yielded
+                # when it lacked delta_text/tool_call_delta).
+                yield StreamChunk(
+                    finish_reason=final_finish or "stop",
+                    usage=final_usage,
+                )
+                return
+
+            # Append assistant tool-use message
+            assistant_msg = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls_to_run,
+            }
+            messages.append(assistant_msg)
+
+            # Execute each tool, append tool reply, yield synthetic
+            # delta describing each.
+            import json as _json
+            for call in tool_calls_to_run:
+                fn = call.get("function") or {}
+                tool_name = fn.get("name", "")
+                # G3: accept MCP tools alongside built-in Skill / Delegate
+                is_mcp = tool_name in mcp_tool_names or _is_mcp_tool_name(
+                    tool_name, self.mcp_registry,
+                )
+                if not is_mcp and tool_name not in SUPPORTED_TOOLS:
+                    continue
+                try:
+                    args = _json.loads(fn.get("arguments") or "{}")
+                except _json.JSONDecodeError:
+                    args = {}
+
+                # Yield synthetic UI hint
+                hint_label = (
+                    args.get("skill") or "" if tool_name == "Skill" else ""
+                )
+                yield StreamChunk(
+                    delta_text=f"\n\n→ Running {tool_name}({hint_label})...\n",
+                )
+
+                try:
+                    args_repr = _json.dumps(args, sort_keys=True, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    args_repr = repr(args)
+                loop_guard.observe(tool_name, args_repr)
+                inc_metric("loop_guard_observed")
+
+                if tool_name == "Skill":
+                    if recorder is not None and args.get("skill"):
+                        recorder.record_skill(str(args["skill"]))
+                    result = await self.skill_tool.execute(args)
+                elif is_mcp:
+                    # G3: route to outbound MCP server. Mirrors run_turn
+                    # error handling — transport errors → tool result
+                    # dict, not raise.
+                    try:
+                        result = await self.mcp_registry.call(tool_name, args)
+                        inc_metric("mcp_tool_call")
+                        if isinstance(result, dict) and result.get("isError"):
+                            inc_metric("mcp_tool_call_error")
+                    except Exception as exc:
+                        inc_metric("mcp_tool_call_transport_error")
+                        result = {
+                            "error": f"MCP transport failure: {exc}",
+                            "tool": tool_name,
+                        }
+                else:  # Delegate
+                    if self.delegate_tool is None:
+                        result = {"error": "Delegate tool not configured"}
+                    else:
+                        result = await self.delegate_tool.execute(args)
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id"),
+                    "name": tool_name,
+                    "content": _json.dumps(result, ensure_ascii=False),
+                })
+
+                if loop_guard.is_looping():
+                    warning = loop_guard.render_warning()
+                    if warning:
+                        messages.append({"role": "system", "content": warning})
+                        inc_metric("loop_guard_tripped")
+                        break  # Out of inner for; back to LLM with warning
+
+            # Loop continues — next iteration calls stream_method again
+            # with the updated messages
+
+        # Hit MAX_STREAM_ITERATIONS — yield terminal chunk
+        yield StreamChunk(
+            finish_reason="length",
+            usage={"warning": "max_stream_iterations_exceeded"},
+        )
 
     async def run_turn(
         self,
@@ -213,6 +465,26 @@ class AgentRunner:
         # (we strip non-JSON values so dataclasses / UUIDs don't poison
         # the response payload).
         tool_call_trace: list[dict[str, Any]] = []
+
+        # Q5: discover MCP tools once per turn + augment composed.tools.
+        # Failures isolated — if discovery breaks, the turn proceeds
+        # without MCP tools (back-compat).
+        mcp_tool_names: set[str] = set()
+        if self.mcp_registry is not None:
+            try:
+                qualified = await self.mcp_registry.all_tools()
+                if qualified:
+                    extra_tools = _mcp_tools_to_openai_format(qualified)
+                    composed = composed.model_copy(update={
+                        "tools": list(composed.tools or []) + extra_tools,
+                    })
+                    mcp_tool_names = {qt.qualified_name for qt in qualified}
+                    from app.agent_framework._metrics_helper import inc_metric
+                    inc_metric("mcp_tools_injected", by=len(extra_tools))
+            except Exception as exc:
+                logger.warning(
+                    f"[AgentRunner] MCP tool discovery failed (non-fatal): {exc}"
+                )
 
         for _ in range(MAX_TOOL_ITERATIONS):
             iteration += 1
@@ -305,7 +577,13 @@ class AgentRunner:
             for call in tool_calls:
                 fn = call.get("function") or {}
                 tool_name = fn.get("name")
-                if tool_name not in SUPPORTED_TOOLS:
+                # Q5: MCP tools have a server-prefixed name (e.g.
+                # 'notion.create_page'). Allow them in addition to the
+                # built-in Skill / Delegate.
+                is_mcp = tool_name in mcp_tool_names or _is_mcp_tool_name(
+                    tool_name or "", self.mcp_registry
+                )
+                if not is_mcp and tool_name not in SUPPORTED_TOOLS:
                     # Unknown tool — skip (caller-provided tools handled elsewhere in future)
                     continue
                 try:
@@ -356,6 +634,25 @@ class AgentRunner:
                     # Cache result if this skill is idempotent
                     if cache_key is not None and isinstance(result, dict) and not result.get("error"):
                         tool_cache.put(cache_key, result)
+                elif is_mcp:
+                    # Q5: route to outbound MCP server. Tool errors
+                    # (server returned isError=true) come back as a
+                    # normal result dict with error info. Transport
+                    # failures (network down, 4xx) → MCPClientError
+                    # which we catch and convert to a result dict so
+                    # the LLM gets feedback instead of crashing the run.
+                    from app.agent_framework._metrics_helper import inc_metric
+                    try:
+                        result = await self.mcp_registry.call(tool_name, args)
+                        inc_metric("mcp_tool_call")
+                        if result.get("isError"):
+                            inc_metric("mcp_tool_call_error")
+                    except Exception as exc:
+                        inc_metric("mcp_tool_call_transport_error")
+                        result = {
+                            "error": f"MCP transport failure: {exc}",
+                            "tool": tool_name,
+                        }
                 else:  # tool_name == "Delegate"
                     if self.delegate_tool is None:
                         result = {
@@ -638,3 +935,31 @@ class AgentRunner:
             "approval_reason": approval.reason if approval else "",
             "approval_payload": approval.payload if approval else {},
         }
+
+
+# ─── Phase P (P1) helpers ─────────────────────────────────────────────
+
+
+def _merge_tool_call_deltas(
+    buf: dict, deltas: list[dict]
+) -> None:
+    """Merge OpenAI-style tool_call deltas into ``buf`` keyed by index.
+
+    Each delta carries ``index`` (which tool slot) + partial ``id`` /
+    ``function.name`` / ``function.arguments`` (a string fragment).
+    Stitch arguments by appending; latch id + name on first delta.
+    """
+    for d in deltas or []:
+        idx = d.get("index", 0)
+        slot = buf.setdefault(idx, {
+            "id": "",
+            "type": "function",
+            "function": {"name": "", "arguments": ""},
+        })
+        if d.get("id"):
+            slot["id"] = d["id"]
+        fn_delta = d.get("function") or {}
+        if fn_delta.get("name"):
+            slot["function"]["name"] = fn_delta["name"]
+        if fn_delta.get("arguments"):
+            slot["function"]["arguments"] += fn_delta["arguments"]

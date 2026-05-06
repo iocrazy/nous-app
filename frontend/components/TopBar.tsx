@@ -12,9 +12,12 @@ import {
   XCircle,
   X,
   RotateCcw,
+  ShieldAlert,
   Upload as UploadIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { ApprovalsPanel } from './ApprovalsPanel';
+import { aiLibraryService } from '../services/aiLibraryService';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useUpload, formatSpeed as uploadFormatSpeed, formatFileSize as uploadFormatFileSize } from '../contexts/UploadContext';
 import {
@@ -39,7 +42,7 @@ interface TopBarProps {
   sidebarCollapsed?: boolean;
 }
 
-type PanelType = 'taskCenter' | 'notifications' | 'avatar' | null;
+type PanelType = 'taskCenter' | 'notifications' | 'approvals' | 'avatar' | null;
 
 // ---------------------------------------------------------------------------
 // Hook: click-outside + Escape to close
@@ -468,7 +471,24 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
 
   const taskCenterRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
+  const approvalsRef = useRef<HTMLDivElement>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
+
+  // G1-UI: pending approvals badge. Polled every 60s, refreshed on
+  // every panel open (the panel itself polls more aggressively).
+  const [approvalsCount, setApprovalsCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCount = async () => {
+      try {
+        const resp = await aiLibraryService.listApprovalRequests(50);
+        if (!cancelled) setApprovalsCount(resp.count);
+      } catch { /* badge is best-effort */ }
+    };
+    void fetchCount();
+    const id = window.setInterval(fetchCount, 60_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
 
   // Only one panel open at a time — toggle or switch
   const togglePanel = (panel: PanelType) => {
@@ -480,6 +500,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   // Close handlers for each panel
   useCloseOnOutsideOrEscape(taskCenterRef, openPanel === 'taskCenter', closeAll);
   useCloseOnOutsideOrEscape(notificationsRef, openPanel === 'notifications', closeAll);
+  useCloseOnOutsideOrEscape(approvalsRef, openPanel === 'approvals', closeAll);
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
   return (
@@ -523,6 +544,26 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           <Bell size={18} />
         </IconButton>
         {openPanel === 'notifications' && <NotificationsPanel />}
+      </div>
+
+      {/* G1-UI: Approvals (agent hook gates pending user decision) */}
+      <div ref={approvalsRef} className="relative hidden sm:block">
+        <IconButton
+          title={t('topbar.approvals', 'Approvals')}
+          onClick={() => togglePanel('approvals')}
+          active={openPanel === 'approvals'}
+          badge={approvalsCount > 0 ? approvalsCount : undefined}
+        >
+          <ShieldAlert size={18} />
+        </IconButton>
+        {openPanel === 'approvals' && (
+          <PanelShell className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
+            <ApprovalsPanel
+              compact
+              onCountChange={setApprovalsCount}
+            />
+          </PanelShell>
+        )}
       </div>
 
       {/* Avatar Menu — desktop only, stays on far right */}

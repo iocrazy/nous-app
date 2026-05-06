@@ -405,3 +405,303 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
     # Live response also carries the trace so streaming clients don't
     # need to refetch just to render cards.
     assert out["tool_calls"] == trace
+
+
+@pytest.mark.asyncio
+async def test_chat_streams_chunks_via_callback() -> None:
+    """P2: when chunk_callback is provided, chat() drives stream_turn
+    and forwards each delta_text to the callback. Final assistant
+    content equals the concatenation of streamed chunks."""
+    from app.services.ai_library_chat_service import AILibraryChatService
+    from app.services.ai_adapters.base import StreamChunk
+
+    user_id = uuid4()
+    session_id = uuid4()
+    agent_id = uuid4()
+    session_row = {
+        "id": str(session_id),
+        "user_id": str(user_id),
+        "agent_slug": "script_ai",
+        "agent_id": str(agent_id),
+        "total_tokens": 0,
+        "message_count": 0,
+        "team_id": None,
+        "project_id": None,
+    }
+
+    inserted: list[tuple[str, dict]] = []
+
+    def _make_table(name: str):
+        table = MagicMock()
+        if name == "ai_sessions":
+            q = MagicMock()
+            q.select.return_value = q
+            q.eq.return_value = q
+            q.maybe_single.return_value = q
+            q.execute = AsyncMock(return_value=MagicMock(data=session_row))
+            upd_chain = MagicMock()
+            q.update = MagicMock(return_value=upd_chain)
+            upd_chain.eq.return_value = upd_chain
+            upd_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+            return q
+        if name == "ai_messages":
+            q = MagicMock()
+            q.select.return_value = q
+            q.eq.return_value = q
+            q.order.return_value = q
+            q.limit.return_value = q
+            q.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+            def _ins(payload):
+                inserted.append((name, payload))
+                ins_chain = MagicMock()
+                ins_chain.execute = AsyncMock(
+                    return_value=MagicMock(data=[{**payload, "id": str(uuid4())}])
+                )
+                return ins_chain
+
+            q.insert = _ins
+            return q
+        return MagicMock()
+
+    client = MagicMock()
+    client.table.side_effect = _make_table
+
+    composed = MagicMock()
+    composed.agent_id = agent_id
+    composed.agent_slug = "script_ai"
+    composed.model = "qwen-max"
+
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    # Async generator yielding 3 text deltas + finish chunk
+    async def _fake_stream(*_a, **_kw):
+        yield StreamChunk(delta_text="Hello ")
+        yield StreamChunk(delta_text="streaming ")
+        yield StreamChunk(delta_text="world", finish_reason="stop",
+                          usage={"prompt_tokens": 5, "completion_tokens": 3})
+
+    runner = MagicMock()
+    runner.stream_turn = MagicMock(side_effect=_fake_stream)
+    runner.run_turn = AsyncMock(return_value={"content": "should-not-be-used"})
+
+    recorder = MagicMock()
+    recorder.run_id = uuid4()
+    recorder.prompt_tokens = 5
+    recorder.completion_tokens = 3
+    recorder.set_summaries = MagicMock()
+    recorder.record_usage = MagicMock()
+
+    class _CM:
+        async def __aenter__(self_inner):
+            return recorder
+
+        async def __aexit__(self_inner, exc_type, exc, tb):
+            return False
+
+    fake_agent_record = {
+        "id": str(agent_id),
+        "slug": "script_ai",
+        "model": "qwen-max",
+        "budget_per_run_cents": None,
+        "fallback_models": [],
+    }
+    fake_stack = MagicMock()
+    fake_stack.runner = runner
+    fake_stack.recalled_memories = []
+    fake_stack.primary_model = "qwen-max"
+    fake_stack.fallback_chain_active = False
+    fake_agent_repo_instance = MagicMock()
+    fake_agent_repo_instance.get_by_slug = AsyncMock(return_value=fake_agent_record)
+
+    chunks_received: list[str] = []
+
+    async def _capture(text):
+        chunks_received.append(text)
+
+    with patch(
+        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        AsyncMock(return_value=client),
+    ), patch(
+        "app.services.ai_library_chat_service.AgentRepository",
+        return_value=fake_agent_repo_instance,
+    ), patch(
+        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        AsyncMock(return_value=fake_stack),
+    ), patch(
+        "app.services.ai_library_chat_service.PromptComposer",
+        return_value=composer,
+    ), patch(
+        "app.services.ai_library_chat_service.AgentRunner", return_value=runner
+    ), patch(
+        "app.services.ai_library_chat_service.get_adapter",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_service.SkillToolService",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_service.RunRecorder",
+        return_value=_CM(),
+    ):
+        svc = AILibraryChatService()
+        out = await svc.chat(
+            session_id,
+            user_id=user_id,
+            content="hi",
+            chunk_callback=_capture,
+        )
+
+    # Streaming branch was used (run_turn untouched, stream_turn called)
+    runner.stream_turn.assert_called_once()
+    runner.run_turn.assert_not_called()
+
+    # All deltas were captured by callback in order
+    assert chunks_received == ["Hello ", "streaming ", "world"]
+
+    # Persisted assistant message = concatenated streamed text
+    asst_inserts = [p for t, p in inserted if p.get("role") == "assistant"]
+    assert len(asst_inserts) == 1
+    assert asst_inserts[0]["content"] == "Hello streaming world"
+
+    # Response shape stays the same as buffered chat()
+    assert out["assistant_message"]["content"] == "Hello streaming world"
+    assert out["run_id"] == str(recorder.run_id)
+
+
+@pytest.mark.asyncio
+async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
+    """P2: a callback that raises must not crash the stream — the turn
+    completes and the persisted message still has the full content."""
+    from app.services.ai_library_chat_service import AILibraryChatService
+    from app.services.ai_adapters.base import StreamChunk
+
+    user_id = uuid4()
+    session_id = uuid4()
+    agent_id = uuid4()
+    session_row = {
+        "id": str(session_id),
+        "user_id": str(user_id),
+        "agent_slug": "script_ai",
+        "agent_id": str(agent_id),
+        "total_tokens": 0,
+        "message_count": 0,
+        "team_id": None,
+        "project_id": None,
+    }
+
+    inserted: list[tuple[str, dict]] = []
+
+    def _make_table(name: str):
+        if name == "ai_sessions":
+            q = MagicMock()
+            q.select.return_value = q
+            q.eq.return_value = q
+            q.maybe_single.return_value = q
+            q.execute = AsyncMock(return_value=MagicMock(data=session_row))
+            upd_chain = MagicMock()
+            q.update = MagicMock(return_value=upd_chain)
+            upd_chain.eq.return_value = upd_chain
+            upd_chain.execute = AsyncMock(return_value=MagicMock(data=[]))
+            return q
+        if name == "ai_messages":
+            q = MagicMock()
+            q.select.return_value = q
+            q.eq.return_value = q
+            q.order.return_value = q
+            q.limit.return_value = q
+            q.execute = AsyncMock(return_value=MagicMock(data=[]))
+
+            def _ins(payload):
+                inserted.append((name, payload))
+                ins_chain = MagicMock()
+                ins_chain.execute = AsyncMock(
+                    return_value=MagicMock(data=[{**payload, "id": str(uuid4())}])
+                )
+                return ins_chain
+
+            q.insert = _ins
+            return q
+        return MagicMock()
+
+    client = MagicMock()
+    client.table.side_effect = _make_table
+
+    composed = MagicMock()
+    composed.agent_id = agent_id
+    composed.agent_slug = "script_ai"
+    composed.model = "qwen-max"
+
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    async def _fake_stream(*_a, **_kw):
+        yield StreamChunk(delta_text="part1")
+        yield StreamChunk(delta_text="part2", finish_reason="stop",
+                          usage={"prompt_tokens": 1, "completion_tokens": 1})
+
+    runner = MagicMock()
+    runner.stream_turn = MagicMock(side_effect=_fake_stream)
+
+    recorder = MagicMock()
+    recorder.run_id = uuid4()
+    recorder.prompt_tokens = 1
+    recorder.completion_tokens = 1
+    recorder.set_summaries = MagicMock()
+    recorder.record_usage = MagicMock()
+
+    class _CM:
+        async def __aenter__(self_inner):
+            return recorder
+        async def __aexit__(self_inner, *a):
+            return False
+
+    fake_stack = MagicMock()
+    fake_stack.runner = runner
+    fake_stack.recalled_memories = []
+    fake_stack.primary_model = "qwen-max"
+    fake_stack.fallback_chain_active = False
+    fake_agent_repo_instance = MagicMock()
+    fake_agent_repo_instance.get_by_slug = AsyncMock(return_value={
+        "id": str(agent_id), "slug": "script_ai", "model": "qwen-max",
+        "budget_per_run_cents": None, "fallback_models": [],
+    })
+
+    async def _broken_callback(_text):
+        raise RuntimeError("downstream queue full")
+
+    with patch(
+        "app.services.ai_library_chat_service.get_async_supabase_admin",
+        AsyncMock(return_value=client),
+    ), patch(
+        "app.services.ai_library_chat_service.AgentRepository",
+        return_value=fake_agent_repo_instance,
+    ), patch(
+        "app.services.ai_library_chat_service.build_agent_runner_stack",
+        AsyncMock(return_value=fake_stack),
+    ), patch(
+        "app.services.ai_library_chat_service.PromptComposer",
+        return_value=composer,
+    ), patch(
+        "app.services.ai_library_chat_service.AgentRunner", return_value=runner,
+    ), patch(
+        "app.services.ai_library_chat_service.get_adapter",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_service.SkillToolService",
+        return_value=MagicMock(),
+    ), patch(
+        "app.services.ai_library_chat_service.RunRecorder",
+        return_value=_CM(),
+    ):
+        svc = AILibraryChatService()
+        # Must NOT raise — callback failures are swallowed
+        out = await svc.chat(
+            session_id, user_id=user_id, content="hi",
+            chunk_callback=_broken_callback,
+        )
+
+    # Turn completed cleanly; full content persisted
+    asst_inserts = [p for t, p in inserted if p.get("role") == "assistant"]
+    assert asst_inserts[0]["content"] == "part1part2"
+    assert out["assistant_message"]["content"] == "part1part2"

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   BarChart3,
+  Brain,
   ChevronLeft,
   ChevronRight,
   Cpu,
@@ -85,6 +86,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
   const skillsActive = /\/ai-library\/skills(\/|$)/.test(location.pathname);
   const usageActive = /\/ai-library\/usage(\/|$)/.test(location.pathname);
   const workforceActive = /\/ai-library\/workforce(\/|$)/.test(location.pathname);
+  const memoryActive = /\/ai-library\/memory(\/|$)/.test(location.pathname);
 
   const loadAgents = useCallback(async () => {
     try {
@@ -269,7 +271,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
         {/* Divider */}
         <div className="mx-3 my-2 border-t border-zinc-800/80" />
 
-        {/* Usage */}
+        {/* Usage + Memory */}
         <div className="px-2 pb-3">
           <SectionLabel>{t('aiLibrary.usageSection', 'Usage')}</SectionLabel>
           <div className="mt-1 flex flex-col gap-0.5">
@@ -278,6 +280,12 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
               label={t('sidebar.aiUsage', 'AI Usage')}
               active={usageActive}
               onClick={() => navigate(`${urlPrefix}/ai-library/usage`)}
+            />
+            <NavItem
+              icon={Brain}
+              label={t('sidebar.memory', 'My Memory')}
+              active={memoryActive}
+              onClick={() => navigate(`${urlPrefix}/ai-library/memory`)}
             />
           </div>
         </div>

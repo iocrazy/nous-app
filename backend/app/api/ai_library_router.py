@@ -29,6 +29,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
+from pydantic import BaseModel, Field
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
@@ -897,7 +898,27 @@ async def upsert_skill_file(
     # to keep routing + persistence in lockstep.
     skill_id = int(skill["id"])
     user_uuid = _coerce_user_uuid(auth.user_id)
-    return await skill_repo.upsert_file_versioned(
+
+    # Skill scanner: non-blocking warning for now. Findings are logged
+    # + surfaced in the response so the UI can show a security badge.
+    # A future deployment can enable strict-block by checking
+    # has_blocking_findings() and raising 422 here.
+    scan_findings: List[Dict[str, Any]] = []
+    if payload.content:
+        try:
+            from app.boundary import skill_scanner
+            findings = skill_scanner.scan(payload.content)
+            scan_findings = skill_scanner.to_dict_list(findings)
+            if findings:
+                logger.warning(
+                    f"[skill_scanner] {slug}/{path}: {len(findings)} finding(s) "
+                    f"(highest={findings[0].severity.value}); upload allowed"
+                )
+        except Exception as exc:
+            # Scanner failure must not block legitimate uploads
+            logger.warning(f"[skill_scanner] failed (non-fatal): {exc}")
+
+    result = await skill_repo.upsert_file_versioned(
         skill_id=skill_id,
         path=path,
         content=payload.content,
@@ -905,6 +926,11 @@ async def upsert_skill_file(
         binary_url=payload.binary_url,
         created_by=user_uuid,
     )
+    # Tack scanner findings onto the response (extra field — caller
+    # can ignore safely if not present)
+    if isinstance(result, dict):
+        result = {**result, "security_findings": scan_findings}
+    return result
 
 
 @router.delete(
@@ -1471,12 +1497,14 @@ async def send_chat_message(
         user_id=user_uuid,
         content=payload.content,
         plan_mode=payload.plan_mode,
+        attachments=payload.attachments or None,  # G2
     )
     return {
         "message": result["assistant_message"],
         "usage": result["usage"],
         "run_id": result["run_id"],
         "tool_calls": result.get("tool_calls", []),
+        "attachment_failures": result.get("attachment_failures", []),  # G2
     }
 
 
@@ -1511,7 +1539,11 @@ async def send_chat_message_stream(
     async def _generator():
         try:
             async for evt in svc.chat_stream(
-                session_id, user_id=user_uuid, content=payload.content
+                session_id,
+                user_id=user_uuid,
+                content=payload.content,
+                plan_mode=payload.plan_mode,
+                attachments=payload.attachments or None,  # G2
             ):
                 # evt: dict with type + payload
                 event_name = evt.get("type", "delta")
@@ -1529,3 +1561,807 @@ async def send_chat_message_stream(
             "X-Accel-Buffering": "no",  # disable nginx buffering
         },
     )
+
+
+# ─── O2: Admin telemetry — system-wide rollup ─────────────────────────
+
+
+@router.get(
+    "/admin/telemetry",
+    summary="Admin-only system-wide agent telemetry snapshot",
+)
+async def admin_telemetry(
+    auth: AdminAuthDep,
+    days: int = 7,
+) -> Dict[str, Any]:
+    """Return a snapshot of agent_runs telemetry across ALL users for the
+    last N days (default 7, max 30).
+
+    Sections:
+      - overview: total runs, total tokens, total cost (cents),
+        success/fail/cancel rates
+      - top_agents: top 10 by run_count + cost
+      - top_users:  top 10 by run_count + cost (id only — admin enriches)
+      - daily_trend: per-day buckets {date, runs, cost_cents,
+        prompt_tokens, completion_tokens}
+      - status_breakdown: counts by status
+      - failure_modes: top error_codes for status='failed' rows
+
+    Admin-gated via AdminAuthDep — non-admin gets 403.
+    """
+    if days < 1 or days > 30:
+        raise HTTPException(status_code=400, detail="days must be 1..30")
+
+    from datetime import datetime as _dt, timedelta as _td
+
+    end = _dt.now(timezone.utc)
+    start = end - _td(days=days)
+
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("agent_runs")
+        .select(
+            "agent_id,user_id,status,prompt_tokens,completion_tokens,"
+            "total_tokens,cost_cents,started_at,error_code"
+        )
+        .gte("started_at", start.isoformat())
+        .lte("started_at", end.isoformat())
+        .order("started_at", desc=True)
+        .limit(20000)
+        .execute()
+    )
+    rows = result.data or []
+
+    # ---- overview rollup ----
+    n = len(rows)
+    total_prompt = sum(int(r.get("prompt_tokens") or 0) for r in rows)
+    total_completion = sum(int(r.get("completion_tokens") or 0) for r in rows)
+    total_cost = sum(float(r.get("cost_cents") or 0.0) for r in rows)
+    status_counts: Dict[str, int] = {}
+    for r in rows:
+        s = r.get("status") or "unknown"
+        status_counts[s] = status_counts.get(s, 0) + 1
+
+    # ---- per-agent + per-user buckets ----
+    per_agent: Dict[str, Dict[str, Any]] = {}
+    per_user: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        aid = r.get("agent_id") or "?"
+        uid = r.get("user_id") or "?"
+        a = per_agent.setdefault(
+            aid,
+            {"agent_id": aid, "run_count": 0, "cost_cents": 0.0, "total_tokens": 0},
+        )
+        a["run_count"] += 1
+        a["cost_cents"] += float(r.get("cost_cents") or 0.0)
+        a["total_tokens"] += int(r.get("total_tokens") or 0)
+
+        u = per_user.setdefault(
+            uid,
+            {"user_id": uid, "run_count": 0, "cost_cents": 0.0, "total_tokens": 0},
+        )
+        u["run_count"] += 1
+        u["cost_cents"] += float(r.get("cost_cents") or 0.0)
+        u["total_tokens"] += int(r.get("total_tokens") or 0)
+
+    top_agents = sorted(
+        per_agent.values(), key=lambda x: x["cost_cents"], reverse=True
+    )[:10]
+    top_users = sorted(
+        per_user.values(), key=lambda x: x["cost_cents"], reverse=True
+    )[:10]
+
+    # ---- daily trend ----
+    daily: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        ts = r.get("started_at") or ""
+        day = ts[:10] if ts else "unknown"
+        d = daily.setdefault(
+            day,
+            {
+                "date": day,
+                "runs": 0,
+                "cost_cents": 0.0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+            },
+        )
+        d["runs"] += 1
+        d["cost_cents"] += float(r.get("cost_cents") or 0.0)
+        d["prompt_tokens"] += int(r.get("prompt_tokens") or 0)
+        d["completion_tokens"] += int(r.get("completion_tokens") or 0)
+
+    daily_trend = sorted(daily.values(), key=lambda x: x["date"])
+
+    # ---- failure modes ----
+    failure_codes: Dict[str, int] = {}
+    for r in rows:
+        if r.get("status") == "failed":
+            code = r.get("error_code") or "unknown"
+            failure_codes[code] = failure_codes.get(code, 0) + 1
+    failure_modes = sorted(
+        ({"error_code": k, "count": v} for k, v in failure_codes.items()),
+        key=lambda x: x["count"],
+        reverse=True,
+    )[:10]
+
+    return {
+        "window_days": days,
+        "window_start": start.isoformat(),
+        "window_end": end.isoformat(),
+        "overview": {
+            "total_runs": n,
+            "total_prompt_tokens": total_prompt,
+            "total_completion_tokens": total_completion,
+            "total_cost_cents": round(total_cost, 4),
+            "unique_agents": len(per_agent),
+            "unique_users": len(per_user),
+        },
+        "status_breakdown": status_counts,
+        "top_agents": top_agents,
+        "top_users": top_users,
+        "daily_trend": daily_trend,
+        "failure_modes": failure_modes,
+    }
+
+
+# ─── O4: User commitments listing ─────────────────────────────────────
+
+
+@router.get(
+    "/commitments",
+    summary="List the caller's agent commitments (followups)",
+)
+async def list_my_commitments(
+    auth: AuthDep,
+    status: Optional[str] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """Return commitments where ``user_id`` = authenticated caller.
+
+    Query params:
+      - status: optional 'pending' | 'fulfilled' | 'cancelled' | 'failed'
+                | 'expired'. Omit for all.
+      - limit:  1..200, default 100.
+    """
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+
+    from app.agent_framework.commitments import CommitmentStatus
+    from app.repositories.commitment_repository import CommitmentRepository
+
+    status_filter: Optional[CommitmentStatus] = None
+    if status:
+        try:
+            status_filter = CommitmentStatus(status)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid status; expected one of {[s.value for s in CommitmentStatus]}",
+            )
+
+    repo = CommitmentRepository()
+    items = await repo.list_for_user(
+        str(auth.user_id), status=status_filter, limit=limit
+    )
+    return {
+        "items": [
+            {
+                "id": c.id,
+                "agent_id": c.agent_id,
+                "session_id": c.session_id,
+                "description": c.description,
+                "trigger_type": c.trigger_type.value if c.trigger_type else None,
+                "trigger_at": c.trigger_at.isoformat() if c.trigger_at else None,
+                "trigger_event": c.trigger_event,
+                "status": c.status.value,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "fulfilled_at": (
+                    c.fulfilled_at.isoformat() if c.fulfilled_at else None
+                ),
+                "expires_at": c.expires_at.isoformat() if c.expires_at else None,
+            }
+            for c in items
+        ],
+        "count": len(items),
+    }
+
+
+@router.post(
+    "/commitments/{commitment_id}/fulfill",
+    summary="Mark a commitment fulfilled (user-initiated)",
+)
+async def fulfill_commitment(
+    commitment_id: int,
+    auth: AuthDep,
+) -> Dict[str, Any]:
+    """User says 'I took care of this' — marks the commitment fulfilled.
+
+    Ownership-checked: only the user who is named on the commitment row
+    can fulfill it; any other caller gets 404.
+    """
+    from app.repositories.commitment_repository import CommitmentRepository
+
+    repo = CommitmentRepository()
+    existing = await repo.get_by_id(commitment_id)
+    if not existing or existing.user_id != str(auth.user_id):
+        raise HTTPException(status_code=404, detail="commitment not found")
+
+    updated = await repo.mark_fulfilled(commitment_id, notes="user-initiated")
+    if not updated:
+        raise HTTPException(
+            status_code=409, detail="commitment already in terminal state"
+        )
+    return {"id": updated.id, "status": updated.status.value}
+
+
+@router.post(
+    "/commitments/{commitment_id}/cancel",
+    summary="Cancel a commitment (user-initiated)",
+)
+async def cancel_commitment(
+    commitment_id: int,
+    auth: AuthDep,
+) -> Dict[str, Any]:
+    """User dismisses a pending followup."""
+    from app.repositories.commitment_repository import CommitmentRepository
+
+    repo = CommitmentRepository()
+    existing = await repo.get_by_id(commitment_id)
+    if not existing or existing.user_id != str(auth.user_id):
+        raise HTTPException(status_code=404, detail="commitment not found")
+
+    updated = await repo.mark_cancelled(commitment_id, notes="user dismissed")
+    if not updated:
+        raise HTTPException(
+            status_code=409, detail="commitment already in terminal state"
+        )
+    return {"id": updated.id, "status": updated.status.value}
+
+
+# ─── O5: User memory listing (visualization page) ─────────────────────
+
+
+@router.get(
+    "/memories",
+    summary="List the caller's agent memories (for visualization page)",
+)
+async def list_my_memories(
+    auth: AuthDep,
+    agent_slug: Optional[str] = None,
+    status: Optional[str] = None,
+    kind: Optional[str] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """Return memories visible to the calling user.
+
+    Filters:
+      - agent_slug: limit to one agent (else all agents user has touched)
+      - status: 'active' / 'archived' / 'superseded'
+      - kind:   'declarative' / 'procedural' / 'episodic'
+      - limit:  1..500, default 100
+    """
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be 1..500")
+
+    client = await get_async_supabase_admin()
+    q = (
+        client.table("agent_memories")
+        .select(
+            "id,agent_id,user_id,scope,summary,when_to_use,status,kind,"
+            "thread_id,session_id,extracted_from,reinforce_count,"
+            "last_reinforced_at,decay_score,created_at,updated_at"
+        )
+        .eq("user_id", str(auth.user_id))
+        .order("updated_at", desc=True)
+        .limit(limit)
+    )
+    if status:
+        q = q.eq("status", status)
+    if kind:
+        q = q.eq("kind", kind)
+    if agent_slug:
+        # Resolve agent_id from slug
+        agent_repo = AgentRepository()
+        agent = await agent_repo.get_by_slug(agent_slug)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"agent slug not found: {agent_slug}")
+        q = q.eq("agent_id", str(agent["id"]))
+
+    result = await q.execute()
+    rows = result.data or []
+
+    # Aggregate stats
+    by_kind: Dict[str, int] = {}
+    by_status: Dict[str, int] = {}
+    by_agent: Dict[str, int] = {}
+    for r in rows:
+        k = r.get("kind") or "unknown"
+        s = r.get("status") or "unknown"
+        a = r.get("agent_id") or "unknown"
+        by_kind[k] = by_kind.get(k, 0) + 1
+        by_status[s] = by_status.get(s, 0) + 1
+        by_agent[a] = by_agent.get(a, 0) + 1
+
+    return {
+        "items": rows,
+        "count": len(rows),
+        "stats": {
+            "by_kind": by_kind,
+            "by_status": by_status,
+            "by_agent": by_agent,
+        },
+    }
+
+
+@router.delete(
+    "/memories/{memory_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Archive a memory (user-initiated soft delete)",
+)
+async def archive_memory(memory_id: UUID, auth: AuthDep) -> None:
+    """Mark a memory archived. Only the user who owns it (user_id match)
+    can archive; archived memories are excluded from recall but kept
+    for audit/replay (R3 snapshot lineage)."""
+    client = await get_async_supabase_admin()
+    existing = (
+        await client.table("agent_memories")
+        .select("user_id")
+        .eq("id", str(memory_id))
+        .maybe_single()
+        .execute()
+    )
+    if not existing or not existing.data:
+        raise HTTPException(status_code=404, detail="memory not found")
+    if existing.data.get("user_id") != str(auth.user_id):
+        raise HTTPException(status_code=404, detail="memory not found")
+
+    await (
+        client.table("agent_memories")
+        .update({"status": "archived"})
+        .eq("id", str(memory_id))
+        .execute()
+    )
+
+
+# ─── G1+G5: User MCP server CRUD ──────────────────────────────────────
+
+
+class _MCPServerCreate(BaseModel):
+    name: str = Field(..., pattern=r"^[A-Za-z0-9_]+$")
+    url: str = Field(..., pattern=r"^https?://")
+    bearer_token: Optional[str] = None
+    description: Optional[str] = None
+    enabled: bool = True
+
+
+class _MCPServerUpdate(BaseModel):
+    url: Optional[str] = Field(default=None, pattern=r"^https?://")
+    bearer_token: Optional[str] = None
+    description: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+def _mcp_row_to_dict(row, *, include_token: bool = False):
+    out = {
+        "id": str(row.id),
+        "name": row.name,
+        "url": row.url,
+        "description": row.description,
+        "enabled": row.enabled,
+    }
+    if include_token:
+        out["bearer_token"] = row.bearer_token
+    else:
+        # Mask presence without leaking value
+        out["has_bearer_token"] = bool(row.bearer_token)
+    return out
+
+
+@router.get("/mcp-servers", summary="List the caller's MCP server registrations")
+async def list_mcp_servers(auth: AuthDep) -> Dict[str, Any]:
+    from app.repositories.user_mcp_servers_repository import (
+        UserMCPServersRepository,
+    )
+    repo = UserMCPServersRepository()
+    rows = await repo.list_for_user(_coerce_user_uuid(auth.user_id), only_enabled=False)
+    return {"items": [_mcp_row_to_dict(r) for r in rows], "count": len(rows)}
+
+
+@router.post("/mcp-servers", status_code=status.HTTP_201_CREATED,
+             summary="Register an MCP server for the caller")
+async def create_mcp_server(payload: _MCPServerCreate, auth: AuthDep) -> Dict[str, Any]:
+    from app.repositories.user_mcp_servers_repository import (
+        UserMCPServersRepository,
+    )
+    repo = UserMCPServersRepository()
+    try:
+        row = await repo.create(
+            user_id=_coerce_user_uuid(auth.user_id),
+            name=payload.name,
+            url=payload.url,
+            bearer_token=payload.bearer_token,
+            description=payload.description,
+            enabled=payload.enabled,
+        )
+    except Exception as exc:
+        # Most likely UNIQUE (user_id, name) conflict
+        raise HTTPException(status_code=409, detail=f"create failed: {exc}")
+    if not row:
+        raise HTTPException(status_code=500, detail="create returned no row")
+    return _mcp_row_to_dict(row)
+
+
+@router.patch("/mcp-servers/{server_id}",
+              summary="Update an MCP server registration")
+async def update_mcp_server(
+    server_id: UUID, payload: _MCPServerUpdate, auth: AuthDep,
+) -> Dict[str, Any]:
+    from app.repositories.user_mcp_servers_repository import (
+        UserMCPServersRepository,
+    )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    repo = UserMCPServersRepository()
+    existing = await repo.get_by_id(server_id)
+    if not existing or existing.user_id != user_uuid:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    ok = await repo.update(
+        server_id,
+        owner_user_id=user_uuid,
+        url=payload.url,
+        bearer_token=payload.bearer_token,
+        description=payload.description,
+        enabled=payload.enabled,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="no fields to update")
+    fresh = await repo.get_by_id(server_id)
+    return _mcp_row_to_dict(fresh) if fresh else {}
+
+
+@router.delete("/mcp-servers/{server_id}",
+               status_code=status.HTTP_204_NO_CONTENT,
+               summary="Delete an MCP server registration")
+async def delete_mcp_server(server_id: UUID, auth: AuthDep) -> None:
+    from app.repositories.user_mcp_servers_repository import (
+        UserMCPServersRepository,
+    )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    repo = UserMCPServersRepository()
+    existing = await repo.get_by_id(server_id)
+    if not existing or existing.user_id != user_uuid:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    await repo.delete(server_id, owner_user_id=user_uuid)
+
+
+# ─── B: Chat attachment upload (temp storage for one-off chat use) ────
+
+
+from pathlib import Path as _Path
+import shutil as _shutil
+import time as _time
+import uuid as _uuid
+
+
+# Per-user temp storage. Files older than 24h are reaped on each upload
+# (cheap O(N) sweep — fine for small N, replace with a cron later if it
+# grows). Each file becomes server-readable via the path returned, which
+# the chat attachment resolver consumes directly.
+_CHAT_ATTACHMENTS_BASE = _Path("/tmp/mediahub_chat_attachments")
+_CHAT_ATTACHMENT_TTL_SECONDS = 24 * 3600
+
+# Per-attachment hard cap (keeps a single upload from filling /tmp)
+_CHAT_ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+_ALLOWED_EXTS = {
+    # image
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+    # video
+    ".mp4", ".mov", ".webm", ".mkv", ".avi",
+    # pdf
+    ".pdf",
+}
+
+
+# C2: magic-byte signatures keyed by extension. Defends against
+# extension-spoofing (uploading malicious binary as .jpg). Schema:
+#   ext → list[Signature]   where Signature = list[(offset, bytes)]
+# Outer list is OR (any signature matches → accept). Inner list is
+# AND (every (offset, bytes) pair within a signature must match).
+# This lets us express e.g. WEBP = "RIFF at 0 AND WEBP at 8" without
+# accidentally accepting AVI files (which also have RIFF at 0).
+_MAGIC_BYTES: dict[str, list[list[tuple[int, bytes]]]] = {
+    ".jpg":  [[(0, b"\xff\xd8\xff")]],
+    ".jpeg": [[(0, b"\xff\xd8\xff")]],
+    ".png":  [[(0, b"\x89PNG\r\n\x1a\n")]],
+    ".gif":  [[(0, b"GIF87a")], [(0, b"GIF89a")]],
+    ".webp": [[(0, b"RIFF"), (8, b"WEBP")]],
+    ".bmp":  [[(0, b"BM")]],
+    ".mp4":  [[(4, b"ftyp")]],
+    ".mov":  [[(4, b"ftyp")]],
+    ".webm": [[(0, b"\x1a\x45\xdf\xa3")]],  # EBML / Matroska
+    ".mkv":  [[(0, b"\x1a\x45\xdf\xa3")]],
+    ".avi":  [[(0, b"RIFF"), (8, b"AVI ")]],
+    ".pdf":  [[(0, b"%PDF-")]],
+}
+
+
+def _check_magic_bytes(ext: str, head: bytes) -> bool:
+    """Return True iff the first bytes match one of the signatures
+    registered for this extension. Unknown extensions accept (caller
+    has already filtered via _ALLOWED_EXTS)."""
+    signatures = _MAGIC_BYTES.get(ext)
+    if not signatures:
+        return True
+    for sig in signatures:
+        # Inner AND: every (offset, expected) within this signature
+        # must match for the signature to count.
+        if all(
+            len(head) >= offset + len(expected)
+            and head[offset:offset + len(expected)] == expected
+            for offset, expected in sig
+        ):
+            return True
+    return False
+
+
+def _user_attachment_dir(user_id: UUID) -> _Path:
+    d = _CHAT_ATTACHMENTS_BASE / str(user_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _reap_old_attachments(user_dir: _Path) -> None:
+    """Best-effort sweep — drop files older than TTL."""
+    cutoff = _time.time() - _CHAT_ATTACHMENT_TTL_SECONDS
+    try:
+        for p in user_dir.iterdir():
+            try:
+                if p.is_file() and p.stat().st_mtime < cutoff:
+                    p.unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.debug(f"[chat_attachments] reap failed: {exc}")
+
+
+@router.post(
+    "/chat-attachments/upload",
+    summary="Upload a one-off chat attachment (image/video/pdf, 24h TTL)",
+)
+async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, Any]:
+    """Multipart upload for chat attachments.
+
+    Returns: { kind, url, size_bytes, mime, filename }
+      - kind: image | video | pdf (inferred from content-type / extension)
+      - url:  server-local filesystem path. The chat attachment resolver
+              reads this path directly when building multimodal content.
+      - 24h TTL — files older than that are reaped lazily on next upload.
+
+    Single-container assumption (H1): the returned ``url`` is a path
+    on THIS container's filesystem. The resolver later reads it from
+    the same container during the chat turn. If the deployment scales
+    to multiple backend replicas WITHOUT a shared volume, uploads on
+    replica A become unreadable from replica B. Today's docker-compose
+    is single-replica so this is fine; multi-replica deploys must
+    either (a) share a volume mounted at CHAT_ATTACHMENT_BASE_DIR or
+    (b) move to Supabase Storage with a signed URL.
+    """
+    user_id = _coerce_user_uuid(auth.user_id)
+
+    # FastAPI doesn't auto-bind UploadFile when the route param is just
+    # `request: Request`. Use the lower-level form() API.
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "filename"):
+        raise HTTPException(status_code=400, detail="missing 'file' field")
+
+    filename = upload.filename or "upload"
+    ext = _Path(filename).suffix.lower()
+    if ext not in _ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"unsupported file type {ext!r}; allowed: "
+            f"{sorted(_ALLOWED_EXTS)}",
+        )
+
+    # Reject oversize before reading the body fully (defensive — also
+    # check after read in case content-length was lying).
+    cl = request.headers.get("content-length")
+    if cl and int(cl) > _CHAT_ATTACHMENT_MAX_BYTES * 1.1:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file too large; max {_CHAT_ATTACHMENT_MAX_BYTES} bytes",
+        )
+
+    user_dir = _user_attachment_dir(user_id)
+    _reap_old_attachments(user_dir)
+
+    # Save with random filename (ext preserved for downstream tools)
+    new_id = _uuid.uuid4().hex
+    out_path = user_dir / f"{new_id}{ext}"
+    try:
+        # Stream copy so we don't load the whole file into memory at once.
+        # First chunk is also checked against magic bytes (C2) — extension
+        # alone is not a trust boundary.
+        with out_path.open("wb") as f:
+            chunk_total = 0
+            magic_checked = False
+            while True:
+                chunk = await upload.read(64 * 1024)
+                if not chunk:
+                    break
+                if not magic_checked:
+                    if not _check_magic_bytes(ext, chunk[:32]):
+                        out_path.unlink(missing_ok=True)
+                        raise HTTPException(
+                            status_code=415,
+                            detail=f"file content does not match {ext} format",
+                        )
+                    magic_checked = True
+                chunk_total += len(chunk)
+                if chunk_total > _CHAT_ATTACHMENT_MAX_BYTES:
+                    out_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"file exceeds {_CHAT_ATTACHMENT_MAX_BYTES} bytes",
+                    )
+                f.write(chunk)
+        size_bytes = out_path.stat().st_size
+    finally:
+        try:
+            await upload.close()
+        except Exception:
+            pass
+
+    # Map extension → kind
+    if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
+        kind = "image"
+    elif ext in {".mp4", ".mov", ".webm", ".mkv", ".avi"}:
+        kind = "video"
+    else:
+        kind = "pdf"
+
+    mime_guess = (upload.content_type if hasattr(upload, "content_type") else None)
+
+    return {
+        "kind": kind,
+        "url": str(out_path),
+        "size_bytes": size_bytes,
+        "mime": mime_guess,
+        "filename": filename,
+    }
+
+
+# ─── G1: Approval requests (human-in-loop gates) ──────────────────────
+
+
+@router.get("/approval-requests", summary="List the caller's pending approval requests")
+async def list_approval_requests(auth: AuthDep, limit: int = 50) -> Dict[str, Any]:
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    from app.repositories.approval_requests_repository import (
+        ApprovalRequestsRepository,
+    )
+    repo = ApprovalRequestsRepository()
+    rows = await repo.list_pending_for_user(_coerce_user_uuid(auth.user_id), limit=limit)
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+                "agent_id": str(r.agent_id),
+                "session_id": str(r.session_id) if r.session_id else None,
+                "run_id": str(r.run_id) if r.run_id else None,
+                "hook_name": r.hook_name,
+                "reason": r.reason,
+                "payload": r.payload,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            }
+            for r in rows
+        ],
+        "count": len(rows),
+    }
+
+
+class _ApprovalDecision(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/approval-requests/{request_id}/approve",
+             summary="Approve a pending request")
+async def approve_approval_request(
+    request_id: UUID, payload: _ApprovalDecision, auth: AuthDep,
+) -> Dict[str, Any]:
+    from app.repositories.approval_requests_repository import (
+        ApprovalRequestsRepository,
+    )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    repo = ApprovalRequestsRepository()
+    existing = await repo.get_by_id(request_id)
+    if not existing or existing.user_id != user_uuid:
+        raise HTTPException(status_code=404, detail="approval request not found")
+    if existing.status != "pending":
+        raise HTTPException(status_code=409, detail=f"already {existing.status}")
+    ok = await repo.decide(
+        request_id, owner_user_id=user_uuid, approve=True, note=payload.note,
+    )
+    if not ok:
+        raise HTTPException(status_code=409, detail="decide failed")
+    _signal_dbos_workflow_if_any(existing, approved=True, note=payload.note)
+    return {"id": str(request_id), "status": "approved"}
+
+
+@router.post("/approval-requests/{request_id}/reject",
+             summary="Reject a pending request")
+async def reject_approval_request(
+    request_id: UUID, payload: _ApprovalDecision, auth: AuthDep,
+) -> Dict[str, Any]:
+    from app.repositories.approval_requests_repository import (
+        ApprovalRequestsRepository,
+    )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    repo = ApprovalRequestsRepository()
+    existing = await repo.get_by_id(request_id)
+    if not existing or existing.user_id != user_uuid:
+        raise HTTPException(status_code=404, detail="approval request not found")
+    if existing.status != "pending":
+        raise HTTPException(status_code=409, detail=f"already {existing.status}")
+    ok = await repo.decide(
+        request_id, owner_user_id=user_uuid, approve=False, note=payload.note,
+    )
+    if not ok:
+        raise HTTPException(status_code=409, detail="decide failed")
+    _signal_dbos_workflow_if_any(existing, approved=False, note=payload.note)
+    return {"id": str(request_id), "status": "rejected"}
+
+
+def _signal_dbos_workflow_if_any(
+    existing, *, approved: bool, note: Optional[str],
+) -> None:
+    """G2: when an approval row was created from inside a DBOS
+    workflow (payload includes ``workflow_id``), wake the paused
+    workflow via DBOS.send. No-op for chat-style approvals where
+    no workflow is waiting — those rely on G1's next-turn-replay."""
+    workflow_id = (existing.payload or {}).get("workflow_id")
+    if not workflow_id:
+        return
+    try:
+        from app.agent_framework.approval_gate import signal_approval_decision
+        signal_approval_decision(
+            workflow_id=str(workflow_id),
+            approval_id=str(existing.id),
+            approved=approved,
+            note=note,
+        )
+    except Exception as exc:
+        logger.warning(
+            f"[approval] DBOS signal failed for workflow={workflow_id} "
+            f"(non-fatal — chat path unaffected): {exc}"
+        )
+
+
+# ─── G3: Lane queue snapshot for ops ──────────────────────────────────
+
+
+@router.get("/admin/lanes/snapshot", summary="Per-lane queue depth snapshot")
+async def admin_lane_snapshot(auth: AdminAuthDep) -> Dict[str, Any]:
+    """Returns current depth of each LaneQueue partition. Lets ops see
+    which lane is backed up (User vs Background vs Scheduled vs Subagent).
+    """
+    from app.main import app as _app
+    lq = getattr(_app.state, "lane_queue", None)
+    if lq is None:
+        return {"available": False, "reason": "lane_queue not wired on this process"}
+
+    queues = getattr(lq, "_queues", {})
+    snapshot: Dict[str, Any] = {}
+    for lane, q in queues.items():
+        try:
+            lane_name = lane.value if hasattr(lane, "value") else str(lane)
+            snapshot[lane_name] = {
+                "depth": q.qsize() if hasattr(q, "qsize") else 0,
+            }
+        except Exception:
+            continue
+    return {"available": True, "lanes": snapshot}

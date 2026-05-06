@@ -18,6 +18,10 @@ import type {
   AgentRunDetail,
   AgentRunListResponse,
   AILibraryAgent,
+  AILibraryApprovalRequest,
+  AILibraryCommitment,
+  AILibraryMCPServer,
+  AILibraryMemory,
   AILibrarySkill,
   AILibrarySkillFile,
   ChatResponse,
@@ -397,10 +401,214 @@ export const aiLibraryService = {
    * row that backed this turn — usable to deep-link from the chat bubble
    * to the Runs tab). Returns a 409 if the agent is paused.
    */
+  /**
+   * O4: List the caller's commitments. Optional status filter
+   * ('pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired').
+   */
+  async listCommitments(options: {
+    status?: 'pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired';
+    limit?: number;
+  } = {}): Promise<{ items: AILibraryCommitment[]; count: number }> {
+    const params = new URLSearchParams();
+    if (options.status) params.set('status', options.status);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const qs = params.toString();
+    const resp = await fetch(
+      `${base()}/commitments${qs ? '?' + qs : ''}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  async fulfillCommitment(commitmentId: number): Promise<{ id: number; status: string }> {
+    const resp = await fetch(
+      `${base()}/commitments/${commitmentId}/fulfill`,
+      { method: 'POST', headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  async cancelCommitment(commitmentId: number): Promise<{ id: number; status: string }> {
+    const resp = await fetch(
+      `${base()}/commitments/${commitmentId}/cancel`,
+      { method: 'POST', headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  /**
+   * O5: List the caller's memories for the visualization page.
+   */
+  async listMemories(options: {
+    agent_slug?: string;
+    status?: 'active' | 'archived' | 'superseded';
+    kind?: 'declarative' | 'procedural' | 'episodic';
+    limit?: number;
+  } = {}): Promise<{
+    items: AILibraryMemory[];
+    count: number;
+    stats: {
+      by_kind: Record<string, number>;
+      by_status: Record<string, number>;
+      by_agent: Record<string, number>;
+    };
+  }> {
+    const params = new URLSearchParams();
+    if (options.agent_slug) params.set('agent_slug', options.agent_slug);
+    if (options.status) params.set('status', options.status);
+    if (options.kind) params.set('kind', options.kind);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const qs = params.toString();
+    const resp = await fetch(
+      `${base()}/memories${qs ? '?' + qs : ''}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  /**
+   * G1+G5 / A: per-user MCP server registrations.
+   */
+  async listMCPServers(): Promise<{ items: AILibraryMCPServer[]; count: number }> {
+    const resp = await fetch(`${base()}/mcp-servers`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle(resp);
+  },
+
+  async createMCPServer(input: {
+    name: string;
+    url: string;
+    bearer_token?: string;
+    description?: string;
+    enabled?: boolean;
+  }): Promise<AILibraryMCPServer> {
+    const resp = await fetch(`${base()}/mcp-servers`, {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    return handle(resp);
+  },
+
+  async updateMCPServer(
+    id: string,
+    patch: {
+      url?: string;
+      bearer_token?: string;
+      description?: string;
+      enabled?: boolean;
+    },
+  ): Promise<AILibraryMCPServer> {
+    const resp = await fetch(`${base()}/mcp-servers/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    return handle(resp);
+  },
+
+  /**
+   * B: upload a one-off chat attachment. 24h TTL on the server.
+   * Returns { kind, url, size_bytes, mime, filename } — pass the kind+url
+   * straight into ChatRequest.attachments.
+   */
+  async uploadChatAttachment(file: File): Promise<{
+    kind: 'image' | 'video' | 'pdf';
+    url: string;
+    size_bytes: number;
+    mime: string | null;
+    filename: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers: Record<string, string> = {};
+    const auth = await getAuthHeaders();
+    Object.entries(auth).forEach(([k, v]) => {
+      // multipart needs browser-set boundary — drop Content-Type
+      if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
+    });
+    const resp = await fetch(`${base()}/chat-attachments/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    return handle(resp);
+  },
+
+  async deleteMCPServer(id: string): Promise<void> {
+    const resp = await fetch(`${base()}/mcp-servers/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: await getAuthHeaders(),
+    });
+    if (!resp.ok && resp.status !== 204) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
+  },
+
+  /**
+   * G1: Approval requests (human-in-loop hook gates).
+   */
+  async listApprovalRequests(limit = 50): Promise<{
+    items: AILibraryApprovalRequest[];
+    count: number;
+  }> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    const resp = await fetch(`${base()}/approval-requests?${params}`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle(resp);
+  },
+
+  async approveRequest(id: string, note?: string): Promise<{ id: string; status: string }> {
+    const resp = await fetch(`${base()}/approval-requests/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+    return handle(resp);
+  },
+
+  async rejectRequest(id: string, note?: string): Promise<{ id: string; status: string }> {
+    const resp = await fetch(`${base()}/approval-requests/${encodeURIComponent(id)}/reject`, {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+    return handle(resp);
+  },
+
+  async archiveMemory(memoryId: string): Promise<void> {
+    const resp = await fetch(
+      `${base()}/memories/${encodeURIComponent(memoryId)}`,
+      { method: 'DELETE', headers: await getAuthHeaders() },
+    );
+    if (!resp.ok && resp.status !== 204) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${resp.status}: ${text}`);
+    }
+  },
+
   async sendChatMessage(
     sessionId: string,
     content: string,
+    options: {
+      plan_mode?: 'auto' | 'prompt_user' | 'dry_run';
+      attachments?: Array<{
+        kind: 'image' | 'video' | 'pdf';
+        url?: string;
+        data_url?: string;
+        mime?: string;
+        alt_text?: string;
+      }>;
+    } = {},
   ): Promise<ChatResponse> {
+    const body: Record<string, unknown> = { content };
+    if (options.plan_mode) body.plan_mode = options.plan_mode;
+    if (options.attachments && options.attachments.length > 0) {
+      body.attachments = options.attachments;
+    }
     const resp = await fetch(
       `${base()}/sessions/${encodeURIComponent(sessionId)}/chat`,
       {
@@ -409,9 +617,85 @@ export const aiLibraryService = {
           ...(await getAuthHeaders()),
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
       },
     );
     return handle<ChatResponse>(resp);
+  },
+
+  /**
+   * Phase O (O1): SSE streaming variant of sendChatMessage.
+   *
+   * Returns a per-event async iterator. Backend currently does
+   * "buffered call + chunked emit" (Phase L L3) — frontend sees
+   * delta events with (text, offset) and a final done event with
+   * (message_id, usage, run_id, tool_calls, total_chars).
+   *
+   * Caller pattern:
+   *   for await (const evt of streamChatMessage(sid, "hi")) {
+   *     if (evt.type === 'delta') append(evt.data.text);
+   *     if (evt.type === 'done') finalize(evt.data);
+   *     if (evt.type === 'error') showError(evt.data.error);
+   *   }
+   *
+   * Uses fetch + ReadableStream rather than EventSource because we
+   * need POST + auth headers; EventSource only supports GET.
+   */
+  async *streamChatMessage(
+    sessionId: string,
+    content: string,
+    options: { plan_mode?: 'auto' | 'prompt_user' | 'dry_run'; signal?: AbortSignal } = {},
+  ): AsyncGenerator<{ type: string; data: any }> {
+    const body: Record<string, unknown> = { content };
+    if (options.plan_mode) body.plan_mode = options.plan_mode;
+    const resp = await fetch(
+      `${base()}/sessions/${encodeURIComponent(sessionId)}/chat-stream`,
+      {
+        method: 'POST',
+        headers: {
+          ...(await getAuthHeaders()),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: options.signal,
+      },
+    );
+    if (!resp.ok || !resp.body) {
+      const errText = await resp.text().catch(() => '');
+      throw new Error(`stream HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+    }
+    // Parse SSE: events separated by \n\n; each event has "event: NAME\n" + "data: JSON\n"
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Drain complete events
+        let nl;
+        while ((nl = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 2);
+          let evtName = 'message';
+          let dataPayload = '';
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) evtName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataPayload += line.slice(5).trim();
+          }
+          let data: any = {};
+          try {
+            data = dataPayload ? JSON.parse(dataPayload) : {};
+          } catch {
+            data = { _raw: dataPayload };
+          }
+          yield { type: evtName, data };
+          if (evtName === 'done' || evtName === 'error') return;
+        }
+      }
+    } finally {
+      try { await reader.cancel(); } catch { /* ignore */ }
+    }
   },
 };

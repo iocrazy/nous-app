@@ -198,12 +198,53 @@ async def build_agent_runner_stack(
         agent_depth=agent_depth,
     )
 
+    # ── 4.5. MCP outbound registry (G1+G5) ───────────────────────────
+    # Per-user MCP server registrations (table user_mcp_servers, mig 194).
+    # Each enabled row → MCPServerConfig → registered. AgentRunner.run_turn
+    # discovers tools via mcp_registry.all_tools() and routes namespaced
+    # tool_calls to mcp_registry.call(...). When user has no servers,
+    # registry stays empty (zero overhead — discovery returns []).
+    mcp_registry = None
+    try:
+        from app.agent_framework.mcp_client import MCPServerConfig
+        from app.agent_framework.mcp_outbound_registry import MCPOutboundRegistry
+        from app.repositories.user_mcp_servers_repository import (
+            UserMCPServersRepository,
+        )
+
+        mcp_repo = UserMCPServersRepository()
+        mcp_rows = await mcp_repo.list_for_user(user_id, only_enabled=True)
+        if mcp_rows:
+            mcp_registry = MCPOutboundRegistry()
+            for row in mcp_rows:
+                try:
+                    mcp_registry.add_server(MCPServerConfig(
+                        name=row.name,
+                        url=row.url,
+                        bearer_token=row.bearer_token,
+                    ))
+                except ValueError as exc:
+                    # name conflict / invalid name — log + skip the row
+                    from loguru import logger as _logger
+                    _logger.warning(
+                        f"[chat_wiring] skipping MCP server '{row.name}' for user "
+                        f"{user_id}: {exc}"
+                    )
+            from app.agent_framework._metrics_helper import inc_metric
+            inc_metric("chat_mcp_registry_built", by=len(mcp_rows))
+    except Exception as exc:
+        # MCP wiring failures are non-fatal — chat continues without MCP
+        from loguru import logger as _logger
+        _logger.warning(f"[chat_wiring] MCP registry build skipped: {exc}")
+        mcp_registry = None
+
     # ── 5. AgentRunner ──────────────────────────────────────────────
     runner = AgentRunner(
         adapter=fallback_chain,
         skill_tool=SkillToolService(skill_repo),
         hooks=registry,
         delegate_tool=delegate_tool,
+        mcp_registry=mcp_registry,
     )
 
     return AgentRunnerStack(

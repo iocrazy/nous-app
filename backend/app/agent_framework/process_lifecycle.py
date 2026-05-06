@@ -1,4 +1,4 @@
-"""D10-7: process exit cleanup — kill all spawned children before
+"""D10-7 + R2: process exit cleanup — kill all spawned children before
 the parent dies.
 
 Problem: pytest / uvicorn / dev scripts spawn multiprocessing workers
@@ -9,17 +9,34 @@ requests. Eventually max_connections / FD limit hits and operator
 gets cryptic "remaining connection slots reserved" errors with no
 clue why.
 
-This module installs:
+Coverage matrix (which exit modes leave NO orphans):
+
+  exit mode                    | atexit | signal | PR_SET_PDEATHSIG
+  -----------------------------|--------|--------|------------------
+  sys.exit() / normal          |   ✓    |   —    |   ✓ (already dead)
+  SIGINT (Ctrl-C)              |   ✓    |   ✓    |   ✓
+  SIGTERM (kill, docker stop)  |   ✓    |   ✓    |   ✓
+  SIGKILL (kill -9, OOM kill)  |   ✗    |   ✗    |   ✓  ← R2 only
+  power loss                   |   ✗    |   ✗    |   ✗
+
+This module installs three layers:
 
   1. atexit handler — fires on normal interpreter exit. Walks the
      subprocess_registry + multiprocessing._children + kills everything
-     SIGTERM → 1s grace → SIGKILL.
+     SIGTERM → 0.5s grace → SIGKILL.
 
   2. Signal handlers (SIGINT, SIGTERM) — same cleanup before the
      process dies. Re-raises the signal so default behavior (exit code)
      stays correct.
 
-Both are best-effort and idempotent — calling install_cleanup_handlers()
+  3. R2: ``bind_to_parent_death()`` — Linux-only PR_SET_PDEATHSIG
+     helper for spawned children. Calling it as the first line in a
+     multiprocessing target (or via os.fork() child branch) makes the
+     kernel send SIGKILL to the child the instant the parent dies —
+     even if the parent died via SIGKILL / OOM / panic. This is the
+     only way to defend against SIGKILL of the parent.
+
+All best-effort and idempotent — calling install_cleanup_handlers()
 twice is safe.
 
 For multiprocessing.Process children: we use multiprocessing._children
@@ -163,4 +180,94 @@ def _cleanup_multiprocessing_children() -> None:
             pass
 
 
-__all__ = ["install_cleanup_handlers"]
+def bind_to_parent_death() -> bool:
+    """R2: Bind this process to the parent + create a new process group.
+
+    Two effects, both pre-exec safe:
+
+      1. ``os.setsid()`` — new session/process group. Required for
+         ``kill_tree.kill_process_tree(pid)`` to actually hit all
+         descendants (ffmpeg → av_demux thread, yt-dlp → curl child,
+         whisper → CUDA workers). Without setsid, killpg target the
+         PARENT's group → kills mediahub itself.
+
+      2. PR_SET_PDEATHSIG — kernel will SIGKILL this child when the
+         parent dies, even via SIGKILL/OOM/panic. Without this,
+         atexit/signal handlers don't fire → orphans accumulate.
+
+    POSIX (Linux + macOS) supports setsid; PR_SET_PDEATHSIG is Linux-only.
+    Returns True on full success, False on Windows/error (callers
+    must treat as best-effort).
+
+    Call from a preexec_fn (subprocess.Popen / asyncio.create_subprocess_exec):
+
+        proc = subprocess.Popen([...], **safe_popen_kwargs())
+
+    Implementation note: PR_SET_PDEATHSIG must be set in the child
+    after fork; setting it in the parent would bind the parent.
+    preexec_fn satisfies this — it runs in the child between fork
+    and exec.
+    """
+    if sys.platform == "win32":
+        return False
+
+    # 1) New process group / session — POSIX (Linux + macOS)
+    try:
+        os.setsid()
+    except (OSError, AttributeError) as exc:
+        logger.warning(f"[process_lifecycle] os.setsid failed: {exc}")
+        return False
+
+    # 2) PR_SET_PDEATHSIG — Linux only
+    if sys.platform != "linux":
+        return True  # macOS gets process group only; that's the best we can do
+
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        PR_SET_PDEATHSIG = 1  # from <sys/prctl.h>
+        rc = libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+        if rc != 0:
+            err = ctypes.get_errno()
+            logger.warning(
+                f"[process_lifecycle] prctl(PR_SET_PDEATHSIG) failed: errno={err}"
+            )
+            return False
+        return True
+    except Exception as exc:
+        logger.warning(f"[process_lifecycle] PR_SET_PDEATHSIG failed: {exc}")
+        return False
+
+
+def safe_popen_kwargs() -> dict:
+    """R2: returns kwargs to splat into subprocess.Popen / subprocess.run /
+    asyncio.create_subprocess_exec so the spawned child:
+
+      - lives in its own process group → kill_tree.kill_process_tree
+        works correctly
+      - auto-dies on parent SIGKILL/OOM (Linux only via PR_SET_PDEATHSIG)
+
+    Usage:
+
+        import subprocess
+        from app.agent_framework.process_lifecycle import safe_popen_kwargs
+        proc = subprocess.Popen(["yt-dlp", url], **safe_popen_kwargs())
+
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-i", src, dst, **safe_popen_kwargs()
+        )
+
+    On Windows: returns empty dict (passthrough).
+    On Linux/macOS: passes ``preexec_fn`` (sets up new process group +
+    binds-to-parent-death where supported).
+    """
+    if sys.platform == "win32":
+        return {}
+    return {"preexec_fn": bind_to_parent_death}
+
+
+__all__ = [
+    "install_cleanup_handlers",
+    "bind_to_parent_death",
+    "safe_popen_kwargs",
+]

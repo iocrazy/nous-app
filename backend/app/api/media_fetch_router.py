@@ -11,6 +11,7 @@ Helper functions are in media_fetch_helpers.py.
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.api.media_batch_router import router as batch_router
 from app.api.media_fetch_helpers import (
     MediaFetchRequest,
@@ -382,6 +383,7 @@ async def extract_audio(
                         ],
                         capture_output=True,
                         timeout=300,
+                        **safe_popen_kwargs(),
                     )
                     return proc.returncode == 0
 

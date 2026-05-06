@@ -150,12 +150,27 @@ def parse_harvest_output(raw: str) -> list[HarvestedCommitment]:
             try:
                 parsed_ts = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
             except (ValueError, TypeError):
-                # If trigger_type=time but trigger_at malformed → skip the row
+                # R3: malformed timestamp on a 'time' commit shouldn't
+                # drop the user's intent. Demote to next_session (in-app
+                # delivery via G8 surface-on-first-turn) instead of
+                # losing it entirely.
                 if ttype == "time":
-                    continue
-        # trigger-data invariant (matches DB CHECK on agent_commitments)
+                    ttype = "next_session"
+                    parsed_ts = None
+                    try:
+                        from app.agent_framework._metrics_helper import inc_metric
+                        inc_metric("commitment_demoted_fuzzy_time")
+                    except Exception:
+                        pass
+        # R3: 'time' trigger with no trigger_at at all → also demote
+        # to next_session (LLM said "later" but didn't give a clock).
         if ttype == "time" and parsed_ts is None:
-            continue
+            ttype = "next_session"
+            try:
+                from app.agent_framework._metrics_helper import inc_metric
+                inc_metric("commitment_demoted_fuzzy_time")
+            except Exception:
+                pass
         if ttype == "event" and not evt:
             continue
         out.append(

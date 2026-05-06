@@ -17,7 +17,8 @@ import httpx
 from loguru import logger
 
 # from app.db.session import get_async_transaction_session
-from app.boundary import safe_async_client
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
+from app.boundary import URLBlockedError, safe_async_client
 from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
@@ -64,6 +65,7 @@ class DownloaderService:
                 temp_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             try:
                 _, stderr_bytes = await asyncio.wait_for(
@@ -134,6 +136,7 @@ class DownloaderService:
                 "-",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             try:
                 _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=60)

@@ -1257,6 +1257,67 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
+/** G1: Approval request row from agent_approval_requests (mig 198).
+ *  Surfaced to the user when an agent hook returns await_approval.
+ *  All times ISO strings. payload is hook-defined JSON. */
+export interface AILibraryApprovalRequest {
+  id: string;
+  agent_id: string;
+  session_id: string | null;
+  run_id: string | null;
+  hook_name: string;
+  reason: string;
+  payload: Record<string, unknown>;
+  created_at: string | null;
+  expires_at: string | null;
+}
+
+/** A: AI Library MCP server registration row.
+ *  bearer_token is never returned — only has_bearer_token boolean. */
+export interface AILibraryMCPServer {
+  id: string;
+  name: string;
+  url: string;
+  description: string | null;
+  enabled: boolean;
+  has_bearer_token?: boolean;
+}
+
+/** O5: AI Library memory row, as returned by GET /memories. */
+export interface AILibraryMemory {
+  id: string;
+  agent_id: string;
+  user_id: string | null;
+  scope: string;
+  summary: string;
+  when_to_use: string | null;
+  status: 'active' | 'archived' | 'superseded';
+  kind: 'declarative' | 'procedural' | 'episodic' | null;
+  thread_id: string | null;
+  session_id: string | null;
+  extracted_from: string | null;
+  reinforce_count: number;
+  last_reinforced_at: string | null;
+  decay_score: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** O4: AI Library commitment (followup) row, as returned by GET /commitments. */
+export interface AILibraryCommitment {
+  id: number;
+  agent_id: string;
+  session_id: string | null;
+  description: string;
+  trigger_type: 'time' | 'event' | 'next_session' | null;
+  trigger_at: string | null;
+  trigger_event: string | null;
+  status: 'pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired';
+  created_at: string | null;
+  fulfilled_at: string | null;
+  expires_at: string | null;
+}
+
 /**
  * One Skill / Delegate dispatch the LLM made during a chat turn.
  * Mirrors backend ``ChatToolCall``. Returned at the top level of

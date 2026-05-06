@@ -20,6 +20,7 @@ from typing import Optional
 import aiofiles
 from loguru import logger
 
+from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
 from app.repositories.resources_repository import ResourcesRepository
 
@@ -807,6 +808,7 @@ class ResourcesService:
                     str(file_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    **safe_popen_kwargs(),
                 )
                 stdout, _ = await proc.communicate()
                 if proc.returncode == 0 and stdout.strip():
@@ -871,6 +873,7 @@ class ResourcesService:
                 filepath,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                **safe_popen_kwargs(),
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:

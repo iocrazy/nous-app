@@ -82,6 +82,31 @@ class SessionWithMessages(SessionOut):
 # ─── Chat request/response ──────────────────────────────────────────────────
 
 
+class AttachmentRequest(BaseModel):
+    """G2: One attachment in a chat turn. The chat service converts these
+    to multimodal Attachment[] (image / video frames / PDF pages) before
+    composing the user message."""
+
+    kind: str = Field(..., description="image | video | pdf")
+    """Source format. video → frames extracted via Q2; pdf → pages
+    rendered via Q3; image → passed through as-is."""
+
+    url: Optional[str] = Field(
+        default=None,
+        description="Public/signed URL the model can fetch. For video/pdf, "
+        "must be a server-local path the chat service can read.",
+    )
+
+    data_url: Optional[str] = Field(
+        default=None,
+        description="Inline data URL (base64). For images only — video/pdf "
+        "data URLs are too large to ship in JSON.",
+    )
+
+    alt_text: Optional[str] = Field(default=None)
+    mime: Optional[str] = Field(default=None)
+
+
 class ChatRequest(BaseModel):
     """POST /sessions/:id/chat body. Only the user's new message; history
     comes from the server-side ai_messages rows."""
@@ -95,6 +120,11 @@ class ChatRequest(BaseModel):
     plan_mode: Optional[str] = Field(
         default=None, description="auto / prompt_user / dry_run"
     )
+
+    # G2: optional multi-modal attachments. Vision-capable models see
+    # them as image parts; text-only models gracefully degrade to
+    # placeholder text.
+    attachments: list[AttachmentRequest] = Field(default_factory=list)
 
 
 class ChatToolCall(BaseModel):

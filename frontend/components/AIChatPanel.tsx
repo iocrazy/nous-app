@@ -30,6 +30,8 @@ import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/MessageBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
 import { ChatInput } from './chat/ChatInput';
+import { CommitmentsPanel } from './CommitmentsPanel';
+import { ChatAttachmentPicker, type StagedAttachment } from './ChatAttachmentPicker';
 import { EmptyState } from './chat/EmptyState';
 import { useToast } from './Toast';
 
@@ -92,6 +94,28 @@ export function AIChatPanel({
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  // O3: plan-mode toggle. 'auto' = normal execute; 'prompt_user' = LLM
+  // emits a plan first; 'dry_run' = plan without ever executing.
+  // Persisted in localStorage so the user's choice survives reloads.
+  const [planMode, setPlanMode] = useState<'auto' | 'prompt_user' | 'dry_run'>(
+    () => {
+      try {
+        const v = localStorage.getItem('ai_chat_plan_mode');
+        if (v === 'auto' || v === 'prompt_user' || v === 'dry_run') return v;
+      } catch { /* ignore */ }
+      return 'auto';
+    },
+  );
+  const handlePlanModeChange = useCallback(
+    (next: 'auto' | 'prompt_user' | 'dry_run') => {
+      setPlanMode(next);
+      try { localStorage.setItem('ai_chat_plan_mode', next); } catch { /* ignore */ }
+    },
+    [],
+  );
+
+  // B: staged attachments (uploaded but not yet sent). Cleared on send.
+  const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -249,7 +273,22 @@ export function AIChatPanel({
       setMessages((prev) => [...prev, tempUser]);
 
       try {
-        await aiLibraryService.sendChatMessage(activeSessionId, text);
+        // O3: pass plan_mode only when non-default. Backend swaps in
+        // plan-prompt instructions for prompt_user / dry_run.
+        // B: send staged attachments alongside (kind+url). Clear on
+        // success — failed sends keep them so the user can retry.
+        const opts: Parameters<typeof aiLibraryService.sendChatMessage>[2] = {};
+        if (planMode !== 'auto') opts.plan_mode = planMode;
+        if (stagedAttachments.length > 0) {
+          opts.attachments = stagedAttachments.map((a) => ({
+            kind: a.kind,
+            url: a.url,
+            mime: a.mime ?? undefined,
+            alt_text: a.filename,
+          }));
+        }
+        await aiLibraryService.sendChatMessage(activeSessionId, text, opts);
+        setStagedAttachments([]);
         // Refetch full history so IDs + timestamps are server-authoritative.
         await loadSessionMessages(activeSessionId);
       } catch (err) {
@@ -270,7 +309,11 @@ export function AIChatPanel({
           .catch((err) => console.error('[AIChatPanel] refresh sessions failed:', err));
       }
     },
-    [activeSessionId, sending, selectedAgentSlug, numericProjectId, addToast],
+    // C3 fix: include planMode + stagedAttachments so the closure
+    // doesn't capture stale values when the user changes mode or
+    // adds/removes attachments between renders.
+    [activeSessionId, sending, selectedAgentSlug, numericProjectId,
+     addToast, planMode, stagedAttachments],
   );
 
   const handleSuggest = useCallback(
@@ -338,6 +381,15 @@ export function AIChatPanel({
         )}
       </div>
 
+      {/* O4: Pending followups — hidden when empty so it doesn't take
+          space on the common case */}
+      <CommitmentsPanel
+        status="pending"
+        limit={20}
+        className="max-h-48 overflow-hidden flex-shrink-0"
+        hideWhenEmpty
+      />
+
       {/* Session list */}
       <SessionList
         sessions={sessionItems}
@@ -391,18 +443,76 @@ export function AIChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Chat input */}
-      <ChatInput
-        onSend={handleSend}
-        disabled={sending || !activeSessionId || !selectedAgentSlug}
-        placeholder={
-          !selectedAgentSlug
-            ? t('chat.placeholderNoAgent', 'Select an agent to start')
-            : !activeSessionId
-              ? t('chat.placeholderNoSession', 'Create a session first')
-              : t('chat.placeholder', 'Type a message...')
-        }
-      />
+      {/* B: Attachment chip strip — only render when staged or actively
+          uploading. The picker button itself lives next to ChatInput. */}
+      {activeSessionId && selectedAgentSlug && stagedAttachments.length > 0 && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 bg-zinc-900/30">
+          <ChatAttachmentPicker
+            attachments={stagedAttachments}
+            onChange={setStagedAttachments}
+            disabled={sending}
+          />
+        </div>
+      )}
+
+      {/* O3: PlanMode toggle bar */}
+      {activeSessionId && selectedAgentSlug && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 text-xs text-zinc-400 bg-zinc-900/50">
+          <span className="font-medium text-zinc-500">{t('chat.planMode.label')}</span>
+          {(['auto', 'prompt_user', 'dry_run'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => handlePlanModeChange(m)}
+              className={`px-2 py-0.5 rounded transition-colors ${
+                planMode === m
+                  ? 'bg-blue-600 text-white'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+              }`}
+              title={
+                m === 'auto'
+                  ? t('chat.planMode.auto_tooltip')
+                  : m === 'prompt_user'
+                    ? t('chat.planMode.promptUser_tooltip')
+                    : t('chat.planMode.dryRun_tooltip')
+              }
+            >
+              {m === 'auto' ? t('chat.planMode.execute') : m === 'prompt_user' ? t('chat.planMode.planFirst') : t('chat.planMode.dryRun')}
+            </button>
+          ))}
+          {planMode !== 'auto' && (
+            <span className="ml-auto text-amber-400 text-[10px] uppercase tracking-wide">
+              ⚠ {planMode === 'dry_run' ? t('chat.planMode.warning_dryRun') : t('chat.planMode.warning_planning')}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Chat input + B: attachment picker (when no staged chips above) */}
+      <div className="flex items-end gap-1 bg-zinc-900 border-t border-zinc-700/50">
+        {activeSessionId && selectedAgentSlug && stagedAttachments.length === 0 && (
+          <div className="pl-2 pb-2">
+            <ChatAttachmentPicker
+              attachments={[]}
+              onChange={setStagedAttachments}
+              disabled={sending}
+            />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <ChatInput
+            onSend={handleSend}
+            disabled={sending || !activeSessionId || !selectedAgentSlug}
+            placeholder={
+              !selectedAgentSlug
+                ? t('chat.placeholderNoAgent', 'Select an agent to start')
+                : !activeSessionId
+                  ? t('chat.placeholderNoSession', 'Create a session first')
+                  : t('chat.placeholder', 'Type a message...')
+            }
+          />
+        </div>
+      </div>
     </div>
   );
 }

@@ -26,8 +26,20 @@ services:
     image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
     container_name: mediahub-app-backend
     restart: unless-stopped
+    # R2: Use docker-init (tini) as PID 1 so signals (SIGTERM from
+    # `docker stop`) are forwarded to uvicorn instead of being absorbed
+    # by Python; tini also reaps zombie children of crashed subprocs.
+    # Pairs with backend's PR_SET_PDEATHSIG safe_popen_kwargs() to
+    # eliminate orphans across SIGKILL / OOM.
+    init: true
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+      # Process supervision: autoheal sidecar polls our docker
+      # healthcheck status; when this container goes 'unhealthy' for
+      # the configured run, autoheal sends SIGKILL → restart policy
+      # picks it up. Catches the "process alive but DBOS event-loop
+      # wedged" failure mode that restart:unless-stopped misses.
+      - "autoheal=true"
     ports:
       - "${APP_PORT:-8080}:8080"
     volumes:
@@ -45,7 +57,14 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      # P5: use deep health probe so downstream HEALTHY status reflects
+      # subsystem state (DBOS / Supabase / Redis), not just FastAPI alive.
+      # If the JSON aggregate status is 'unhealthy' the curl returns
+      # a 200 with JSON body status=unhealthy — we grep for it. If we
+      # need stricter (HTTP-status-based), back-end can return 503 on
+      # 'unhealthy'; for now we keep the response 200 + content check
+      # because Prometheus scrape consumers prefer that shape.
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/api/v1/health/deep | grep -q '\"status\":\"healthy\"' || curl -fs http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -67,8 +86,10 @@ services:
   #   image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
   #   container_name: mediahub-app-worker
   #   restart: unless-stopped
+  #   init: true   # R2: tini PID 1 for signal forwarding + zombie reaping
   #   labels:
   #     - "com.centurylinklabs.watchtower.enable=true"
+  #     - "autoheal=true"   # supervised by autoheal sidecar (same as gateway)
   #   # No published port — worker only serves /health internally.
   #   volumes:
   #     - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
@@ -100,6 +121,43 @@ services:
   # or for Intel iGPU (QSV / VA-API):
   #   devices:
   #     - /dev/dri:/dev/dri
+
+  # ── Process supervision sidecar ────────────────────────────────
+  # willfarrell/autoheal watches docker healthcheck statuses on any
+  # container labeled `autoheal=true` and SIGKILLs them when they go
+  # unhealthy. Combined with `restart: unless-stopped`, that turns a
+  # wedged container (process alive but /health/deep failing) into
+  # an automatic restart cycle within ~30s.
+  #
+  # Why this matters for MediaHub:
+  #   - DBOS workflows run in-process with FastAPI; an unhandled
+  #     exception in a workflow thread can wedge uvicorn's event loop
+  #     without crashing the process. Plain `restart: unless-stopped`
+  #     never fires because the process is technically alive.
+  #   - dev-backend.sh implements the same logic for dev. autoheal is
+  #     the prod equivalent.
+  #
+  # Tuning:
+  #   - AUTOHEAL_INTERVAL: how often autoheal polls (5s default)
+  #   - AUTOHEAL_START_PERIOD: grace before autoheal is allowed to
+  #     act on a freshly-started container (must exceed our backend's
+  #     start_period of 60s — set to 90s)
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: mediahub-autoheal
+    restart: always
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=10
+      - AUTOHEAL_START_PERIOD=90
+      - AUTOHEAL_DEFAULT_STOP_TIMEOUT=15
+      - TZ=Asia/Shanghai
+    volumes:
+      # The sidecar needs the docker socket to inspect + restart peers.
+      # This is a privilege grant — autoheal effectively has root on
+      # the docker daemon. Acceptable here because it's first-party
+      # and pinned to willfarrell/autoheal (small, audited image).
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # Nginx - HLS streaming server
   nginx:

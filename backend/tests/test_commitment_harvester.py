@@ -123,9 +123,25 @@ def test_parse_skips_invalid_trigger_type():
 
 
 @pytest.mark.unit
-def test_parse_skips_time_without_trigger_at():
+def test_parse_demotes_time_without_trigger_at_to_next_session():
+    """R3: a 'time' commitment without a concrete trigger_at is demoted
+    to next_session rather than dropped — preserves user intent and
+    routes it through G8 in-app delivery."""
     raw = '[{"description": "x", "trigger_type": "time"}]'
-    assert parse_harvest_output(raw) == []
+    out = parse_harvest_output(raw)
+    assert len(out) == 1
+    assert out[0].trigger_type == "next_session"
+    assert out[0].trigger_at is None
+
+
+@pytest.mark.unit
+def test_parse_demotes_time_with_malformed_trigger_at_to_next_session():
+    """R3: malformed trigger_at on a 'time' commit also demoted, not dropped."""
+    raw = '[{"description": "x", "trigger_type": "time", "trigger_at": "tomorrow morning"}]'
+    out = parse_harvest_output(raw)
+    assert len(out) == 1
+    assert out[0].trigger_type == "next_session"
+    assert out[0].trigger_at is None
 
 
 @pytest.mark.unit
