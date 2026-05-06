@@ -15,9 +15,9 @@ import tempfile
 from datetime import datetime
 from typing import Callable, Optional
 
-import httpx
 from loguru import logger
 
+from app.boundary import ValidatedURL, safe_async_client
 from app.core.utils import Utils
 from app.services.url_router import URLRouter
 
@@ -89,7 +89,7 @@ class YtdlpService:
 
     @staticmethod
     async def fetch_metadata(
-        url: str,
+        url: ValidatedURL,
         user_id: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> dict:
@@ -97,7 +97,7 @@ class YtdlpService:
         Fetch video metadata using yt-dlp --dump-json.
 
         Args:
-            url: Video URL
+            url: Video URL (must have passed app.boundary.url_guard.validate_url)
             user_id: Optional user ID for per-user cookie lookup
             user_agent: Optional explicit UA (used for Douyin so the same UA
                 threads through LightHTTP/ABogus/yt-dlp/download_video).
@@ -107,7 +107,13 @@ class YtdlpService:
 
         Raises:
             RuntimeError: If yt-dlp fails or returns no data
+            AssertionError: If url is not a ValidatedURL (caller bug)
         """
+        # Boundary: runtime guard. Caller must validate first (mypy not in CI).
+        assert isinstance(url, ValidatedURL), (
+            "YtdlpService.fetch_metadata requires ValidatedURL — "
+            "call app.boundary.validate_url[_async] first"
+        )
         logger.info(f"[yt-dlp] Fetching metadata: {url}")
 
         ua_args = ["--user-agent", user_agent] if user_agent else []
@@ -170,7 +176,7 @@ class YtdlpService:
 
     @staticmethod
     async def download_video(
-        url: str,
+        url: ValidatedURL,
         output_dir: str,
         platform_id: str,
         progress_callback: Optional[Callable] = None,
@@ -181,7 +187,7 @@ class YtdlpService:
         Download video file via yt-dlp with real-time progress tracking.
 
         Args:
-            url: Video URL
+            url: Video URL (must have passed validate_url[_async])
             output_dir: Directory to save the file
             platform_id: Used for filename
             progress_callback: Optional callback(downloaded, total, speed) for progress updates
@@ -192,7 +198,15 @@ class YtdlpService:
 
         Returns:
             dict: {file_path, file_size}
+
+        Raises:
+            AssertionError: If url is not a ValidatedURL (caller bug)
         """
+        # Boundary: runtime guard. Caller must validate first (mypy not in CI).
+        assert isinstance(url, ValidatedURL), (
+            "YtdlpService.download_video requires ValidatedURL — "
+            "call app.boundary.validate_url[_async] first"
+        )
         os.makedirs(output_dir, exist_ok=True)
 
         output_template = os.path.join(output_dir, "video.%(ext)s")
@@ -297,7 +311,7 @@ class YtdlpService:
 
     @staticmethod
     async def download_audio(
-        url: str,
+        url: ValidatedURL,
         output_dir: str,
         platform_id: str,
         user_id: Optional[str] = None,
@@ -306,14 +320,22 @@ class YtdlpService:
         Extract audio only via yt-dlp.
 
         Args:
-            url: Video URL
+            url: Video URL (must have passed validate_url[_async])
             output_dir: Directory to save the file
             platform_id: Used for filename
             user_id: Optional user ID for per-user cookie lookup
 
+        Raises:
+            AssertionError: If url is not a ValidatedURL (caller bug)
+
         Returns:
             dict: {file_path, file_size}
         """
+        # Boundary: runtime guard. Caller must validate first.
+        assert isinstance(url, ValidatedURL), (
+            "YtdlpService.download_audio requires ValidatedURL — "
+            "call app.boundary.validate_url[_async] first"
+        )
         os.makedirs(output_dir, exist_ok=True)
 
         output_template = os.path.join(output_dir, "audio.%(ext)s")
@@ -481,7 +503,7 @@ class YtdlpService:
             None on failure.
         """
         try:
-            async with httpx.AsyncClient() as client:
+            async with safe_async_client() as client:
                 resp = await client.get(
                     f"https://api.bilibili.com/x/web-interface/archive/stat?bvid={bvid}",
                     timeout=10.0,
@@ -495,31 +517,46 @@ class YtdlpService:
 
     @staticmethod
     def _get_proxy_args(url: str) -> list[str]:
-        """Return ['--proxy', 'http://...'] for platforms that need it.
+        """Return ['--proxy', 'http://...'] for the platform.
 
-        Reads from env vars in priority order:
-          1. YT_DLP_PROXY_YOUTUBE / YT_DLP_PROXY (platform-specific / generic)
-          2. HTTPS_PROXY, HTTP_PROXY, ALL_PROXY (standard env vars)
-
-        Only applied for YouTube / Twitter by default (domestic platforms
-        like Douyin, Bilibili don't need proxy and would break).
+        Priority order:
+          1. EXTERNAL proxy for international platforms (YouTube/Twitter)
+             via YT_DLP_PROXY_YOUTUBE / YT_DLP_PROXY / HTTPS_PROXY env.
+             yt-dlp can only use ONE --proxy at a time, so when the user
+             needs an external VPN proxy for international content the
+             boundary SsrfProxy is bypassed for that single hop. The
+             external proxy provides its own egress controls; the L4
+             firewall (B9-H) gives kernel-level fallback.
+          2. BOUNDARY SsrfProxy (settings.SSRF_PROXY_URL) for everything
+             else (Douyin / Bilibili / unknown). yt-dlp routes through
+             our local proxy which validates URL + redirect destinations
+             via the unified boundary policy.
+          3. No proxy if neither is set (degraded — happens during dev
+             before lifespan starts the proxy).
         """
         import os
         from urllib.parse import urlparse
 
+        from app.core.config import settings
+
         host = (urlparse(url).hostname or "").lower()
-        needs_proxy_hosts = ("youtube.com", "youtu.be", "twitter.com", "x.com")
-        if not any(h in host for h in needs_proxy_hosts):
-            return []
-        proxy = (
-            os.environ.get("YT_DLP_PROXY_YOUTUBE")
-            or os.environ.get("YT_DLP_PROXY")
-            or os.environ.get("HTTPS_PROXY")
-            or os.environ.get("HTTP_PROXY")
-            or os.environ.get("ALL_PROXY")
-        )
-        if proxy:
-            return ["--proxy", proxy]
+        needs_external_hosts = ("youtube.com", "youtu.be", "twitter.com", "x.com")
+        if any(h in host for h in needs_external_hosts):
+            external = (
+                os.environ.get("YT_DLP_PROXY_YOUTUBE")
+                or os.environ.get("YT_DLP_PROXY")
+                or os.environ.get("HTTPS_PROXY")
+                or os.environ.get("HTTP_PROXY")
+                or os.environ.get("ALL_PROXY")
+            )
+            if external:
+                return ["--proxy", external]
+            # Fall through to boundary proxy if no external configured.
+
+        # Default: route through the boundary SsrfProxy if it's running.
+        boundary_proxy = settings.SSRF_PROXY_URL
+        if boundary_proxy:
+            return ["--proxy", boundary_proxy]
         return []
 
     @staticmethod

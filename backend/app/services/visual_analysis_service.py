@@ -23,9 +23,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-import httpx
 from loguru import logger
 
+from app.boundary import URLBlockedError, safe_async_client
 from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
@@ -100,14 +100,23 @@ class VisualAnalysisService:
     # ── Image encoding helpers ────────────────────────────────────────
 
     async def _encode_image_from_url(self, url: str) -> Optional[str]:
-        """Download and encode image to base64."""
+        """Download and encode image to base64.
+
+        Boundary: safe_async_client validates the URL + every redirect hop
+        and strips Authorization on cross-origin redirect. URLBlockedError
+        bubbles up; we catch and return None to keep prior None-on-failure
+        contract for this internal helper.
+        """
         try:
-            async with httpx.AsyncClient() as client:
+            async with safe_async_client() as client:
                 response = await client.get(url, timeout=30.0)
                 if response.status_code == 200:
                     return base64.b64encode(response.content).decode("utf-8")
+        except URLBlockedError as e:
+            logger.warning(f"Image URL blocked by boundary: {e}")
         except Exception as e:
-            logger.error(f"Failed to download image from {url}: {e}")
+            # Log redacted by loguru patcher (Phase D); do not echo full URL
+            logger.error(f"Failed to download image: {type(e).__name__}: {e}")
         return None
 
     async def _encode_image_from_file(self, file_path: str) -> Optional[str]:

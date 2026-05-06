@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.boundary import validate_url_async
 from app.core.deps import AuthDep
 from app.schemas.storyboard import (
     GenerateImageRequest,
@@ -249,6 +250,10 @@ async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, A
 
     Returns a task_id immediately.
     """
+    # Boundary: SSRF guard. URLBlockedError -> global handler -> 400.
+    # Outside try so the broad `except Exception` doesn't convert to 500.
+    validated_url = await validate_url_async(body.video_url)
+
     try:
         import uuid as _uuid
 
@@ -261,7 +266,7 @@ async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, A
             task_type="storyboard_video_analysis",
             title="Analyze video for storyboard scenes",
             dbos_workflow_id=wf_id,
-            metadata={"project_id": body.project_id, "video_url": body.video_url},
+            metadata={"project_id": body.project_id, "video_url": validated_url},
         )
 
         await start_workflow_routed(
@@ -269,7 +274,7 @@ async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, A
             dbos_workflow_callable=storyboard_video_analysis_workflow,
             dbos_workflow_kwargs={
                 "project_id": body.project_id,
-                "video_path": body.video_url,
+                "video_path": validated_url,
                 "task_id": task_id,
             },
             workflow_id=wf_id,
@@ -298,9 +303,12 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
     """
     Dispatch a scene-detection task (no LLM annotation).
 
-    Uses the image service's detect_scenes() method directly via a Celery
-    worker. Returns a task_id immediately.
+    Uses the image service's detect_scenes() method directly via a DBOS
+    workflow. Returns a task_id immediately.
     """
+    # Boundary: SSRF guard. URLBlockedError -> global handler -> 400.
+    validated_url = await validate_url_async(body.video_url)
+
     try:
         import uuid as _uuid
 
@@ -315,7 +323,7 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
             dbos_workflow_id=wf_id,
             metadata={
                 "project_id": body.project_id,
-                "video_url": body.video_url,
+                "video_url": validated_url,
                 "threshold": body.threshold,
             },
         )
@@ -328,7 +336,7 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
             dbos_workflow_callable=storyboard_video_analysis_workflow,
             dbos_workflow_kwargs={
                 "project_id": body.project_id,
-                "video_path": body.video_url,
+                "video_path": validated_url,
                 "task_id": task_id,
             },
             workflow_id=wf_id,

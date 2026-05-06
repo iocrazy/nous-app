@@ -26,8 +26,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from app.agent_framework import AbortController
 
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.hooks import (
@@ -72,7 +75,43 @@ class AgentRunner:
         user_messages: list[dict],
         *,
         recorder: Optional[RunRecorder] = None,
+        abort: Optional["AbortController"] = None,
     ) -> dict[str, Any]:
+        """Run one turn of the agent loop.
+
+        ``recorder`` polls cancel BETWEEN iterations (cooperative).
+        ``abort`` (Sprint 2 #3) interrupts the in-flight adapter.call —
+        pressing the frontend cancel button takes effect within seconds,
+        not after the LLM call finishes. Caller is responsible for
+        creating the AbortController and the watcher coroutine that
+        fires it.
+        """
+        # Pre-flight: context budget guard. A small-context model
+        # (e.g. user filled qwen-max with a heavy AGENT spec) would
+        # otherwise return truncated nonsense or fail with cryptic
+        # provider errors. Reject early with a structured error.
+        try:
+            from app.agent_framework import (
+                ContextWindowError,
+                check_context_budget,
+            )
+
+            check_context_budget(
+                system_prompt=composed.system_message,
+                user_messages=user_messages,
+                model=composed.model,
+            )
+        except ContextWindowError as exc:
+            logger.warning(f"[AgentRunner] context budget rejected: {exc}")
+            return {
+                "content": "",
+                "raw": None,
+                "error": str(exc),
+                "error_code": "context_budget_exceeded",
+            }
+        # ContextWindowWarning is emitted via warnings module — picked
+        # up by loguru's stdlib bridge if configured. Don't block on it.
+
         messages = list(user_messages)
         iteration = 0
         # Step A milestone: trace each Skill / Delegate dispatch made
@@ -92,7 +131,27 @@ class AgentRunner:
                 if await recorder.check_cancelled():
                     return {"content": "", "raw": None, "cancelled": True}
 
-            resp = await self.adapter.call(composed, messages)
+            # Sprint 2 #3: race adapter.call against AbortController so
+            # pressing cancel mid-LLM-call interrupts within seconds
+            # instead of waiting for the full request to complete.
+            if abort is not None:
+                from app.agent_framework import RunAborted, race_until_abort
+
+                try:
+                    resp = await race_until_abort(
+                        self.adapter.call(composed, messages),
+                        abort,
+                    )
+                except RunAborted as exc:
+                    logger.info(f"[AgentRunner] aborted mid-call: {exc}")
+                    return {
+                        "content": "",
+                        "raw": None,
+                        "cancelled": True,
+                        "abort_reason": str(exc),
+                    }
+            else:
+                resp = await self.adapter.call(composed, messages)
 
             if recorder is not None:
                 usage = resp.get("usage") or {}
@@ -379,10 +438,10 @@ class AgentRunner:
         """Fire HookResult.side_effect — non-blocking.
 
         side_effect is a zero-arg callable. Hook owners build a closure
-        that does whatever dispatch they want — Celery `.delay()`,
-        `start_workflow_routed("...", ...)`, or both for shadow mode.
-        AgentRunner just invokes it and continues. Dispatch failures
-        (broker down, DBOS not enabled, signature malformed) are logged
+        that does whatever dispatch they want — typically
+        ``start_workflow_routed("...", ...)`` (Celery was removed in
+        PR-D7). AgentRunner just invokes it and continues. Dispatch
+        failures (DBOS not enabled, signature malformed) are logged
         and swallowed — the run continues.
         """
         if result.side_effect is None:

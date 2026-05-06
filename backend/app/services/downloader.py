@@ -17,6 +17,7 @@ import httpx
 from loguru import logger
 
 # from app.db.session import get_async_transaction_session
+from app.boundary import safe_async_client
 from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils
@@ -198,6 +199,10 @@ class DownloaderService:
         Returns:
             bool: Whether download was successful
         """
+        # Boundary: safe_async_client (used below) validates URL + every
+        # redirect hop. Defense-in-depth: catch URLBlockedError here to
+        # apply the consistent "download failed" semantics (mark tracker
+        # failed, return False) rather than letting it propagate.
         if not headers:
             headers = Utils.get_headers()
         else:
@@ -230,7 +235,7 @@ class DownloaderService:
         try:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-            async with httpx.AsyncClient(http2=True) as client:
+            async with safe_async_client(http2=True) as client:
                 # Check if file exists and is complete
                 if os.path.exists(file_path):
                     existing_size = os.path.getsize(file_path)
@@ -534,7 +539,7 @@ class DownloaderService:
             download_errors = []
             for i, url in enumerate(video_urls):
                 try:
-                    async with httpx.AsyncClient(http2=True) as _diag:
+                    async with safe_async_client(http2=True) as _diag:
                         _r = await _diag.head(
                             url, headers=headers, follow_redirects=True, timeout=10.0
                         )

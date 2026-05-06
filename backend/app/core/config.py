@@ -132,6 +132,37 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # Boundary layer (SSRF guard) — Sprint 1 v2
+    # See docs/architecture/boundary-layer.md
+    # ============================================
+    SSRF_EXTRA_BLOCKED_NETWORKS: list[str] = Field(
+        default_factory=lambda: ["192.168.50.0/24"],
+        description="CIDR list of additional networks blocked by url_guard "
+        "(beyond Python ipaddress.is_private). Default blocks NAS subnet.",
+    )
+    SSRF_DEV_ALLOWLIST: list[str] = Field(
+        default_factory=list,
+        description="CIDR list of explicitly allowed networks for dev. "
+        "MUST be empty in production. Example: 192.168.50.10/32,127.0.0.1/32",
+    )
+    SSRF_DNS_TIMEOUT_SECONDS: float = Field(
+        default=2.0,
+        description="DNS resolution timeout for url_guard async path",
+    )
+    SSRF_DNS_CACHE_TTL_SECONDS: int = Field(
+        default=60,
+        description="LRU cache TTL for DNS results (defends DNS rebinding)",
+    )
+    SSRF_PROXY_URL: str = Field(
+        default="",
+        description="Local SsrfProxy URL (auto-populated at startup, "
+        "e.g. http://127.0.0.1:55001). Subprocess + browser clients "
+        "(yt-dlp, DrissionPage) are configured to route through this. "
+        "Empty value means proxy not started — clients run unproxied "
+        "(degraded boundary).",
+    )
+
+    # ============================================
     # OpenAI Configuration (for visual analysis)
     # ============================================
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API Key")

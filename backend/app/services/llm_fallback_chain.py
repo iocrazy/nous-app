@@ -63,7 +63,15 @@ class _SwitchEvent:
 
 @dataclass
 class LLMFallbackChain:
-    """Wraps primary + fallback chain. Returns first model to succeed."""
+    """Wraps primary + fallback chain. Returns first model to succeed.
+
+    Sprint 3: optional ``health_registry`` consults a per-process
+    ``ModelHealthRegistry`` to skip recently-failed models. A model
+    that just hit 429 won't be retried for 60s — fallback fires
+    immediately on the next call instead of burning the retry budget
+    on the known-bad primary again. Result: 5-30s per call shaved off
+    when primary is in a temporary outage.
+    """
 
     primary_model: str
     fallback_models: list[str]
@@ -74,6 +82,10 @@ class LLMFallbackChain:
     max_retries_per_model: int = 3
     base_delay_s: float = 1.0
     max_delay_s: float = 30.0
+
+    # Sprint 3: optional health registry. None = legacy behavior (try
+    # every model in order, no skip-known-bad).
+    health_registry: Optional[Any] = None
 
     _switch_log: list[_SwitchEvent] = field(default_factory=list, init=False)
 
@@ -95,6 +107,27 @@ class LLMFallbackChain:
         last_exc: Optional[BaseException] = None
 
         for idx, model in enumerate(models):
+            # Sprint 3: skip recently-failed models. The registry has
+            # already discovered their cooldown via report_status from
+            # a prior call's failure — no point burning retries on them.
+            if (
+                self.health_registry is not None
+                and not self.health_registry.is_available(model)
+            ):
+                logger.info(
+                    "[Fallback] %s skipped (cooled down by health registry)",
+                    model,
+                )
+                if idx > 0:
+                    self._switch_log.append(
+                        _SwitchEvent(
+                            from_model=models[idx - 1],
+                            to_model=model,
+                            reason="model_cooled_down",
+                        )
+                    )
+                continue
+
             try:
                 adapter = self._build_adapter(model)
             except Exception as exc:  # noqa: BLE001
@@ -135,6 +168,12 @@ class LLMFallbackChain:
                     "[Fallback] %s exhausted retries; trying next model", model
                 )
                 last_exc = exc
+                # Sprint 3: report to health registry so subsequent
+                # calls skip this model until cooldown expires. Use 429
+                # as the proxy status for "exhausted retries" — same
+                # cooldown duration as a single 429.
+                if self.health_registry is not None:
+                    self.health_registry.report_status(model, 429)
                 if idx < len(models) - 1:
                     self._switch_log.append(
                         _SwitchEvent(
@@ -144,6 +183,12 @@ class LLMFallbackChain:
                         )
                     )
                 continue
+
+            # Sprint 3: success — clear any stale cooldown for this
+            # model in the registry (in case its TTL expired between
+            # is_available check and now).
+            if self.health_registry is not None:
+                self.health_registry.mark_recovered(model)
 
             # Success — annotate and return.
             response["_fallback_meta"] = {

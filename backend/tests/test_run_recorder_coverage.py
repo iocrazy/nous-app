@@ -51,6 +51,11 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # M1.A FALLBACK chain: walks fallback_models list, each attempt goes
     # through LLMRetryMiddleware. Same coverage shape as the retry MW.
     "services/llm_fallback_chain.py": "fallback chain, recorder lives in caller",
+    # Sprint 2 #5: RotatingAdapter wraps N single-key adapters and
+    # rotates on 429/auth fail. Same coverage shape as fallback chain
+    # — each wrapped adapter still goes through LLMRetryMiddleware
+    # when the caller wraps the RotatingAdapter in AgentRunner.
+    "agent_framework/rotating_adapter.py": "key rotation wrapper, recorder lives in caller",
     # M1.B memory writer Celery task: runs OFF the chat path, no chat
     # session to record against. Memory extraction LLM calls are tracked
     # via Celery task metrics, not RunRecorder.

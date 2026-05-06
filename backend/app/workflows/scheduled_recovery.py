@@ -108,12 +108,15 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        # Sprint 2: status='lost' (was 'failed') — orphan tasks are a
+        # system issue (DBOS crash / never claimed), not a business
+        # failure. Lets operators distinguish in dashboards.
         result = (
             await supabase.table("task_tracking")
             .update(
                 {
-                    "status": "failed",
-                    "phase": "failed",
+                    "status": "lost",
+                    "phase": "lost",
                     "error_msg": (
                         "Worker never claimed this task within 1h — "
                         "DBOS workflow may have crashed or never "
@@ -167,36 +170,91 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
 
 @DBOS.step()
 def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
-    """Release dedup locks held by task_tracking stuck in 'processing'
-    >1h. Becomes obsolete in D3d (DBOS workflow_id replaces this)."""
+    """Release dedup locks held by task_tracking stuck in 'processing'.
+
+    Per-type ceiling (D11 / agent_framework.workflow_timeout_policy):
+    parse>5min, download>30min, ai_visual_analysis>60min etc. Avoids
+    the previous one-size-fits-all 1h cutoff that was both too eager
+    for parse (real failure at 5min) and too lax for analyze (legit at
+    30min, was reaped wrongly).
+
+    Becomes obsolete in D3d (DBOS workflow_id replaces this)."""
+    from app.agent_framework import is_stuck
     from app.services.unified_task_manager import get_task_manager
 
     async def _do() -> int:
         mgr = get_task_manager()
         client = await mgr._get_client()
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        # Pull a generous window — 2h covers the longest configured
+        # ceiling (ai_visual_analysis = 60min) plus headroom; per-row
+        # filtering by task_type ceiling happens below.
+        broad_cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
 
         stale = await (
             client.table("task_tracking")
-            .select("id, dedup_key")
+            .select("dbos_workflow_id, dedup_key, task_type, started_at")
             .eq("phase", "processing")
-            .lt("started_at", cutoff)
+            .lt("started_at", broad_cutoff)
             .execute()
         )
 
+        # Also catch tasks past their per-type ceiling but inside the
+        # broad cutoff. Two-window query: broad + narrow per type.
+        narrow_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        narrow = await (
+            client.table("task_tracking")
+            .select("dbos_workflow_id, dedup_key, task_type, started_at")
+            .eq("phase", "processing")
+            .lt("started_at", narrow_cutoff)
+            .execute()
+        )
+
+        # Dedup the union by dbos_workflow_id
+        seen: set[str] = set()
+        candidates: list[dict[str, Any]] = []
+        for row in (stale.data or []) + (narrow.data or []):
+            wid = row.get("dbos_workflow_id")
+            if wid and wid not in seen:
+                seen.add(wid)
+                candidates.append(row)
+
+        now_utc = datetime.now(timezone.utc)
         recovered = 0
-        for task in stale.data or []:
+        for task in candidates:
+            tid = task.get("dbos_workflow_id")
+            task_type = task.get("task_type") or ""
+            started_at_str = task.get("started_at")
+            elapsed = 0.0
+            if started_at_str:
+                try:
+                    started_dt = datetime.fromisoformat(
+                        started_at_str.replace("Z", "+00:00")
+                    )
+                    elapsed = (now_utc - started_dt).total_seconds()
+                except (ValueError, TypeError):
+                    elapsed = 0.0
+
+            if not is_stuck(task_type, elapsed_seconds=elapsed):
+                # Within ceiling — leave alone
+                continue
+
             try:
-                await mgr.fail(
-                    task["id"], "Stale task timeout", error_code="NETWORK_TIMEOUT"
-                )
+                if tid:
+                    # Use mark_lost (Sprint 2): system-level orphan / worker
+                    # died, NOT business-level failure. Operators can query
+                    # status='lost' GROUP BY task_type to spot infra issues
+                    # vs application bugs.
+                    await mgr.mark_lost(
+                        tid,
+                        f"Stuck {task_type} timeout (elapsed {int(elapsed)}s, "
+                        f"ceiling per workflow_timeout_policy)",
+                        error_code="WORKER_LOST",
+                    )
                 if task.get("dedup_key"):
                     mgr.release_lock(task["dedup_key"])
                 recovered += 1
             except Exception as e:
-                logger.warning(
-                    f"[recover_stale_orchestrator_locks] task {task['id']}: {e}"
-                )
+                logger.warning(f"[recover_stale_orchestrator_locks] task {tid}: {e}")
         return recovered
 
     count = asyncio.run(_do())

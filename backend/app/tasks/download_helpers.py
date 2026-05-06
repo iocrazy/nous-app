@@ -71,50 +71,29 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
 
 
 def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
-    """Chain AI tasks after download if user has auto-transcribe/summarize.
+    """Chain AI workflows after download iff the user attached the
+    matching intent tag to the resource.
 
-    PR-D7 phase 3: was `chain_ai_pipeline` from app.tasks.ai_tasks.
-    Now directly dispatches the two leaf workflows (ai_transcription
-    + ai_summary) via start_workflow_routed when their respective
-    auto-* flags are enabled."""
+    Old model (removed): read user_settings.ai_settings.auto_transcribe
+    / auto_summarize and fire on every download — wasteful, surprising,
+    "我没标 tag 不该跑 AI" was the feedback.
+
+    New model: look up the user's resource for this platform_id, read
+    its tag set, and dispatch one workflow per attached AI intent tag:
+
+      tag "Transcript" → ai_transcription_workflow
+      tag "Summary"    → ai_summary_workflow (also implies Transcript:
+                         the summary step needs transcript text)
+      tag "Analyze"    → analyze_l1_workflow (cover analysis)
+
+    Tags must be attached BEFORE this fires (i.e. selected on the
+    parse page tag picker, or added to a previously-saved resource via
+    the MediaCard picker — that latter path needs a separate
+    re-dispatch endpoint, not in scope here)."""
     try:
-        from app.repositories.user_settings_repository import UserSettingsRepository
-        from app.services.dbos_orchestrator import start_workflow_routed
-
-        repo = UserSettingsRepository()
-        settings = run_async(repo.get_by_user_id(user_id))
-
-        ai_settings = {}
-        if settings and settings.get("settings_json"):
-            ai_settings = settings["settings_json"].get("ai_settings", {})
-
-        transcript_bool = ai_settings.get("auto_transcribe", False)
-        summary_bool = ai_settings.get("auto_summarize", False)
-
-        if not transcript_bool and not summary_bool:
-            logger.info(
-                f"[AI] Auto-transcribe/summarize disabled for user {user_id}, "
-                "skipping AI pipeline"
-            )
-            return
-
-        resource_id = None
-        try:
-            from app.repositories.resources_repository import ResourcesRepository
-
-            res_repo = ResourcesRepository()
-            resource = run_async(res_repo.get_resource_by_platform_id(platform_id))
-            if resource:
-                resource_id = str(resource["id"])
-        except Exception as e:
-            logger.debug(f"[AI] Could not resolve resource_id for {platform_id}: {e}")
-
-        # Dispatch each leaf via start_workflow_routed. Order doesn't
-        # matter — they share the parsed_media row (transcript →
-        # ai_rewrite_text) but DBOS workflow_id memoization handles
-        # accidental double-fires. Lookup parsed_media.id since
-        # workflows take int media_id.
         from app.repositories.media_repository import MediaRepository
+        from app.repositories.resources_repository import ResourcesRepository
+        from app.services.dbos_orchestrator import start_workflow_routed
 
         media = run_async(MediaRepository().get_by_platform_id(platform_id))
         parsed_media_id = (media or {}).get("id")
@@ -124,7 +103,74 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
             )
             return
 
-        if transcript_bool:
+        res_repo = ResourcesRepository()
+        resource = run_async(
+            res_repo.get_resource_by_media_id_and_creator(str(parsed_media_id), user_id)
+        )
+        if not resource:
+            logger.debug(
+                f"[AI] No resource for media={parsed_media_id} user={user_id}, "
+                "skipping AI chain"
+            )
+            return
+        resource_id = str(resource["id"])
+
+        # Pull tag names attached to this resource. Use the supabase admin
+        # client so RLS doesn't get in the way of the chain helper.
+        from app.db.supabase_client import get_async_supabase_admin
+
+        async def _read_tag_names() -> set[str]:
+            client = await get_async_supabase_admin()
+            r = await (
+                client.table("resource_tags")
+                .select("tags(name)")
+                .eq("resource_id", resource_id)
+                .execute()
+            )
+            names: set[str] = set()
+            for row in r.data or []:
+                t = row.get("tags") or {}
+                n = t.get("name")
+                if n:
+                    names.add(n)
+            return names
+
+        tag_names = run_async(_read_tag_names())
+
+        want_transcript = "Transcript" in tag_names or "Summary" in tag_names
+        want_summary = "Summary" in tag_names
+        want_analyze = "Analyze" in tag_names
+
+        if not (want_transcript or want_summary or want_analyze):
+            logger.debug(
+                f"[AI] No AI intent tags on resource={resource_id}, "
+                f"tags={tag_names}, skipping AI chain"
+            )
+            return
+
+        # Event-driven gating for transcript/summary: don't dispatch
+        # transcription until the audio asset is actually ready on disk.
+        # We rely on parsed_media.music_download_status (set by
+        # extract_audio_from_video → "completed" only after the post-write
+        # exists+getsize check passes). When the audio isn't ready we
+        # simply skip — a follow-up trigger (manual button click on the
+        # MediaCard, or a future audio-extraction-completed callback)
+        # will redispatch. Replaces the polling wait_for_audio_step
+        # which sleep-waited inside the workflow body.
+        audio_ready = (media or {}).get("music_download_status") == "completed"
+
+        if want_transcript and not audio_ready:
+            logger.info(
+                f"[AI] Transcript skipped for {platform_id}: audio not "
+                f"yet extracted (music_download_status="
+                f"{(media or {}).get('music_download_status')!r}). "
+                "Will fire when user manually triggers or after audio "
+                "extraction completes."
+            )
+            want_transcript = False
+            want_summary = False  # summary depends on transcript
+
+        if want_transcript:
             from app.workflows.ai_transcription import ai_transcription_workflow
 
             run_async(
@@ -138,7 +184,7 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
                 )
             )
 
-        if summary_bool:
+        if want_summary:
             from app.workflows.ai_summary import ai_summary_workflow
 
             run_async(
@@ -152,10 +198,30 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
                 )
             )
 
+        if want_analyze:
+            cover_url = (media or {}).get("cover_urls") or []
+            cover_url = cover_url[0] if cover_url else None
+            if cover_url:
+                from app.workflows.analyze_l1 import analyze_l1_workflow
+
+                run_async(
+                    start_workflow_routed(
+                        "ai_extract",
+                        dbos_workflow_callable=analyze_l1_workflow,
+                        dbos_workflow_kwargs={
+                            "media_id": parsed_media_id,
+                            "cover_url": cover_url,
+                            "title": (media or {}).get("title") or "",
+                            "description": (media or {}).get("description") or "",
+                            "user_id": user_id,
+                        },
+                    )
+                )
+
         logger.info(
             f"[AI] Pipeline chained after download: {platform_id} "
-            f"(transcribe={transcript_bool}, summarize={summary_bool}, "
-            f"resource={resource_id})"
+            f"(transcript={want_transcript}, summary={want_summary}, "
+            f"analyze={want_analyze}, resource={resource_id})"
         )
 
     except Exception as e:
@@ -361,14 +427,12 @@ async def check_url_accessible(url: str, timeout: float = 10.0) -> tuple[bool, s
 
     Returns (accessible, reason) tuple.
     """
-    import httpx
+    from app.boundary import safe_async_client
 
     headers = Utils.get_headers()
     try:
-        async with httpx.AsyncClient(http2=True) as client:
-            resp = await client.head(
-                url, headers=headers, follow_redirects=True, timeout=timeout
-            )
+        async with safe_async_client(http2=True) as client:
+            resp = await client.head(url, headers=headers, timeout=timeout)
             if resp.status_code == 200:
                 return True, "ok"
             reason = f"HTTP {resp.status_code}"

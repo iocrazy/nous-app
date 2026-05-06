@@ -119,7 +119,6 @@ describe('getAISettings', () => {
   it('maps ai_providers to providers with defaults', async () => {
     stubJson({
       ai_enabled: false,
-      auto_transcribe: true,
       ai_providers: { openai: { enabled: true } },
       task_assignment: {
         transcription: 'whisper',
@@ -129,7 +128,6 @@ describe('getAISettings', () => {
 
     const settings = await getAISettings();
     expect(settings.ai_enabled).toBe(false);
-    expect(settings.auto_transcribe).toBe(true);
     expect(settings.providers).toEqual({ openai: { enabled: true } });
     expect(settings.task_assignment.transcription).toBe('whisper');
   });
@@ -195,8 +193,6 @@ describe('saveAISettings', () => {
     const spy = stubJson({ success: true });
     await saveAISettings({
       ai_enabled: true,
-      auto_transcribe: false,
-      auto_summarize: false,
       preferred_language: 'auto',
       providers: {},
       task_assignment: {
@@ -217,8 +213,6 @@ describe('saveAISettings', () => {
     const spy = stubJson({ success: true });
     await saveAISettings({
       ai_enabled: true,
-      auto_transcribe: false,
-      auto_summarize: false,
       preferred_language: 'auto',
       providers: {},
       task_assignment: {
@@ -239,8 +233,6 @@ describe('saveAISettings', () => {
     const spy = stubJson({ success: true });
     await saveAISettings({
       ai_enabled: true,
-      auto_transcribe: false,
-      auto_summarize: false,
       preferred_language: 'auto',
       providers: {},
       task_assignment: {

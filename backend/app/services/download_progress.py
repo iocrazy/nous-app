@@ -9,8 +9,9 @@ import json
 import os
 
 import aiofiles
-import httpx
 from loguru import logger
+
+from app.boundary import safe_async_client
 
 
 class DownloadProgressTracker:
@@ -137,12 +138,12 @@ async def download_file_with_progress(
             tracker.complete()
             return True
 
-        async with httpx.AsyncClient() as client:
+        # Boundary: safe_async_client validates URL + every redirect hop.
+        async with safe_async_client() as client:
             async with client.stream(
                 "GET",
                 url,
                 headers=headers,
-                follow_redirects=True,
                 timeout=timeout,
             ) as response:
                 if response.status_code != 200:

@@ -43,6 +43,23 @@ class DrissionPageParser(metaclass=SingletonMeta):
                 options.set_argument("--no-sandbox")  # 禁用沙盒（Docker必需）
                 options.set_argument("--disable-dev-shm-usage")  # 禁用共享内存
                 options.set_argument("--disable-gpu")  # 禁用GPU
+
+                # Boundary (B9-F): route Chromium through SsrfProxy if running.
+                # set_proxy() configures the upstream forward proxy; the proxy
+                # validates every URL the browser fetches via the unified
+                # boundary policy (validate + redirect-safe + cross-origin).
+                # Empty string = proxy not started (dev pre-lifespan); skip
+                # to keep the parser usable in tests / cold-start scenarios.
+                from app.core.config import settings as _bsettings
+
+                if _bsettings.SSRF_PROXY_URL:
+                    options.set_proxy(_bsettings.SSRF_PROXY_URL)
+                    # localhost MUST NOT bypass the proxy — that's the whole
+                    # point of the boundary. Chromium's default proxy bypass
+                    # list includes <local>; override to empty so even
+                    # 127.0.0.1 / 192.168.* destinations go through proxy
+                    # (where they are blocked by SSRF guard).
+                    options.set_argument("--proxy-bypass-list=<-loopback>")
                 # options.set_argument(
                 #     '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
                 #     'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'

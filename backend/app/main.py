@@ -135,6 +135,16 @@ async def lifespan(app: FastAPI):
     # routed task_types degrade. This is intentional for the Celery → DBOS
     # migration window where 'celery' mode is the safe default.
     #
+    # Sprint 5 (D10-A): MEDIAHUB_ROLE controls whether this process pulls
+    # workflows from the DBOS queue. Gateway-only containers init DBOS
+    # (so dispatch/enqueue still works) but skip launch (no consumption).
+    # Default = combined → preserves current single-process behavior.
+    from app.agent_framework import role_from_env
+
+    process_role = role_from_env()
+    app.state.process_role = process_role
+    logger.info(f"Process role: {process_role.value}")
+
     # PR-D5: DBOS launch moved BEFORE workforce scheduler so the scheduler
     # can pick DbosAgentWorkforcePool when WORKFORCE_USE_DBOS_QUEUE is on.
     try:
@@ -147,8 +157,14 @@ async def lifespan(app: FastAPI):
             # `app.state.workforce_scheduler = ...` assignment below.
             from app import workflows  # noqa: F401 — registers @DBOS decorators
 
-            dbos_orchestrator.launch_dbos()
-            logger.info("DBOS orchestrator launched")
+            if process_role.runs_dbos_workers:
+                dbos_orchestrator.launch_dbos()
+                logger.info("DBOS orchestrator launched")
+            else:
+                logger.info(
+                    f"DBOS orchestrator initialised but launch skipped "
+                    f"(role={process_role.value} — gateway dispatches only)"
+                )
     except Exception as e:
         logger.error(
             f"DBOS orchestrator startup failed: {e!r} — continuing without DBOS"
@@ -161,29 +177,121 @@ async def lifespan(app: FastAPI):
     #     per-agent serialization, durable retry)
     #   otherwise → AgentWorkerPool (in-process asyncio, M3 default)
     workforce_scheduler = None
-    try:
-        from app.services.workforce.scheduler import WorkforceScheduler
-
-        use_dbos_queue = (
-            os.environ.get("WORKFORCE_USE_DBOS_QUEUE", "").lower()
-            in ("1", "true", "yes")
-            and dbos_orchestrator.is_enabled()
+    if not process_role.runs_inprocess_schedulers:
+        logger.info(
+            f"Workforce scheduler skipped (role={process_role.value} — "
+            f"schedulers run on worker side only)"
         )
-        pool = None
-        if use_dbos_queue:
-            from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
+    else:
+        try:
+            from app.services.workforce.scheduler import WorkforceScheduler
 
-            pool = DbosAgentWorkforcePool()
-            logger.info("Workforce: using DbosAgentWorkforcePool (DBOS queue)")
-        else:
-            logger.info("Workforce: using AgentWorkerPool (in-process)")
+            use_dbos_queue = (
+                os.environ.get("WORKFORCE_USE_DBOS_QUEUE", "").lower()
+                in ("1", "true", "yes")
+                and dbos_orchestrator.is_enabled()
+            )
+            pool = None
+            if use_dbos_queue:
+                from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
 
-        workforce_scheduler = WorkforceScheduler(pool=pool)
-        workforce_scheduler.start()
-        app.state.workforce_scheduler = workforce_scheduler
-        logger.info("Workforce scheduler started")
+                pool = DbosAgentWorkforcePool()
+                logger.info("Workforce: using DbosAgentWorkforcePool (DBOS queue)")
+            else:
+                logger.info("Workforce: using AgentWorkerPool (in-process)")
+
+            workforce_scheduler = WorkforceScheduler(pool=pool)
+            workforce_scheduler.start()
+            app.state.workforce_scheduler = workforce_scheduler
+            logger.info("Workforce scheduler started")
+        except Exception as e:
+            logger.warning(f"Failed to start workforce scheduler: {e}")
+
+    # Boundary layer (B9-D/E): SsrfProxy for subprocess + browser clients
+    # (yt-dlp, DrissionPage, ffmpeg). Populates settings.SSRF_PROXY_URL so
+    # downstream code (ytdlp_service cmd builders) reads the actual port.
+    ssrf_proxy = None
+    try:
+        from app.boundary import SsrfProxy
+
+        ssrf_proxy = SsrfProxy()
+        await ssrf_proxy.start()
+        settings.SSRF_PROXY_URL = ssrf_proxy.url
+        app.state.ssrf_proxy = ssrf_proxy
+        logger.info(f"Boundary SsrfProxy started at {ssrf_proxy.url}")
     except Exception as e:
-        logger.warning(f"Failed to start workforce scheduler: {e}")
+        logger.warning(f"Failed to start SsrfProxy: {e}")
+
+    # Agent framework D10 primitives: per-process LifecycleBus + LaneQueue
+    # held on app.state for any code that wants to publish events / route
+    # work into a lane. Wiring callsites is per-feature follow-up.
+    try:
+        from app.agent_framework import (
+            BoundsAdvertisement,
+            BoundsRegistry,
+            ContextEngineRegistry,
+            LaneQueue,
+            LifecycleBus,
+        )
+
+        app.state.lifecycle_bus = LifecycleBus()
+        app.state.lane_queue = LaneQueue()
+        # Sprint 6: per-process context-engine registry. Surfaces (chat,
+        # search, storyboard) self-register their engines at startup so
+        # callers can fetch by surface name. Empty by default — engines
+        # opt in. The chat composer wiring follows in Sprint 6.5.
+        app.state.context_engines = ContextEngineRegistry()
+
+        # Sprint 5 (D10-1): every process holds a BoundsRegistry. On worker
+        # / combined processes we self-register the bounds we know about
+        # locally — the gateway-side registry will receive these via the
+        # transport layer in Sprint 5.5 (HTTP push or DB row). For now this
+        # makes the registry queryable in-process for tests / admin views.
+        app.state.bounds_registry = BoundsRegistry()
+        if process_role.runs_dbos_workers:
+            try:
+                import socket
+
+                worker_id = f"{socket.gethostname()}-pid{os.getpid()}"
+                # Bounds are filled minimally here — concrete inventory
+                # (registered workflow names, agent slugs, providers)
+                # comes from a discovery pass in Sprint 5.5. This entry
+                # is enough for "is there *any* worker alive" checks.
+                self_bound = BoundsAdvertisement(
+                    worker_id=worker_id,
+                    role=process_role.value,
+                )
+                app.state.bounds_registry.register(self_bound)
+                logger.info(f"Bounds registry: self-registered worker_id={worker_id}")
+            except Exception as e:
+                logger.warning(f"Bounds self-registration failed: {e}")
+
+        logger.info(
+            "Agent framework primitives ready "
+            "(LifecycleBus + LaneQueue + BoundsRegistry + ContextEngineRegistry)"
+        )
+    except Exception as e:
+        logger.warning(f"Agent framework primitive setup failed: {e}")
+
+    # Event-loop-ready probe (D10-6): wait until the loop has settled
+    # after DBOS/seed/workforce init before we declare startup success.
+    # Avoids cold-start traffic hitting a still-loaded loop.
+    try:
+        from app.agent_framework import wait_for_loop_ready
+
+        ready = await wait_for_loop_ready(
+            threshold_ms=200,
+            consecutive_passes=2,
+            max_wait_seconds=10.0,
+        )
+        if ready:
+            logger.info("Event loop ready (drift settled)")
+        else:
+            logger.warning(
+                "Event loop did not settle within 10s — accepting traffic anyway"
+            )
+    except Exception as e:
+        logger.warning(f"Event-loop-ready probe failed: {e}")
 
     yield logger.success(f"{settings.APP_NAME}启动成功")
 
@@ -201,6 +309,15 @@ async def lifespan(app: FastAPI):
             logger.info("Workforce scheduler stopped")
         except Exception as e:
             logger.warning(f"Workforce scheduler shutdown error: {e}")
+
+    # Stop SsrfProxy after workforce so any in-flight subprocess clients
+    # (yt-dlp etc) can finish current requests through the proxy.
+    if ssrf_proxy is not None:
+        try:
+            await ssrf_proxy.stop()
+            logger.info("Boundary SsrfProxy stopped")
+        except Exception as e:
+            logger.warning(f"SsrfProxy shutdown error: {e}")
 
     try:
         # 关闭 DrissionPageParser 浏览器资源
