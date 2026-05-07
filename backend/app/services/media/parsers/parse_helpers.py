@@ -173,22 +173,27 @@ def fetch_and_parse(
     user_agent: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> tuple[dict, dict]:
-    """3-tier Douyin fallback chain (mirrors master/parse_tasks): LightHTTP →
-    ABogus → DrissionPage, respecting admin toggles in system_settings.
+    """3-tier Douyin fallback chain: ABogus → LightHTTP → DrissionPage,
+    respecting admin toggles in system_settings.
 
-    LightHTTP handles image-text notes (douyin /note/...) that
-    DrissionPage's video-page-only flow misses. Browser is the slow
-    last resort.
+    Order rationale (2026-05-08): ABogus authenticates with the user's
+    saved douyin cookie via user_cookies table, so when a logged-in
+    user has uploaded their cookie it sails past Douyin's anti-bot
+    consistently. LightHTTP doesn't carry cookie auth and started
+    failing with NO_ROUTER_DATA after Douyin tightened share-page
+    detection — kept as middle tier because it's the only path that
+    handles image-text notes (douyin /note/...) that DrissionPage's
+    video-page-only flow misses. Browser is the slow last resort.
 
     Returns (aweme_detail, parsed_data). Raises RuntimeError on failure."""
     flags = _get_douyin_method_flags()
     logger.info(f"[Douyin Fallback] flags={flags} ua={(user_agent or '')[:40]}…")
 
     methods: list[tuple[str, Any]] = []
-    if flags.get("lighthttp"):
-        methods.append(("LightHTTP", _try_lighthttp))
     if flags.get("abogus"):
         methods.append(("ABogus", _try_abogus))
+    if flags.get("lighthttp"):
+        methods.append(("LightHTTP", _try_lighthttp))
     if flags.get("drissionpage"):
         methods.append(("DrissionPage", _try_drissionpage))
 
