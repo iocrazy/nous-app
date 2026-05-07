@@ -23,8 +23,8 @@ export const createInvite = async (
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) throw new Error('Not authenticated');
 
   let expires_at: string | null = null;
   if (options.expiresIn && options.expiresIn !== 'never') {
@@ -44,7 +44,7 @@ export const createInvite = async (
     .from('team_invites')
     .insert({
       team_id: teamId,
-      created_by: user.id,
+      created_by: claims.sub,
       expires_at,
       max_uses: options.maxUses || null,
     })
@@ -85,8 +85,8 @@ export const acceptInvite = async (code: string): Promise<{ teamId: string; team
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) throw new Error('Not authenticated');
 
   // Find the invite
   const { data: invite, error: inviteError } = await supabase
@@ -110,7 +110,7 @@ export const acceptInvite = async (code: string): Promise<{ teamId: string; team
   // Add user to team
   const { error: memberError } = await supabase
     .from('team_members')
-    .insert({ team_id: invite.team_id, user_id: user.id, role: 'member' });
+    .insert({ team_id: invite.team_id, user_id: claims.sub, role: 'member' });
 
   if (memberError) {
     if (memberError.code === '23505') throw new Error('Already a member');

@@ -853,11 +853,11 @@ export const fetchDashboardStats = async (): Promise<DashboardStats> => {
   }
 
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return emptyStats;
+    const { data: { claims } } = await supabase.auth.getClaims();
+    if (!claims) return emptyStats;
 
     const { data, error } = await supabase.rpc('get_dashboard_stats', {
-      p_user_id: user.id,
+      p_user_id: claims.sub,
     });
 
     if (error) {

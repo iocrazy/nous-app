@@ -147,32 +147,30 @@ class SupabaseAuthService:
 
     async def get_user(self, access_token: str) -> Optional[Dict[str, Any]]:
         """
-        根据 access_token 获取用户信息
+        根据 access_token 获取用户信息（本地 JWKS 验签，零网络）。
 
-        Args:
-            access_token: JWT 访问令牌
-
-        Returns:
-            用户信息或 None
+        返回结构与历史版本对齐（id / email / user_metadata / app_metadata /
+        created_at），让现有 caller（/auth/me、realtime、media_auth）不变。
+        created_at 不在 JWT claims 里，所以始终为 None — 需要 admin 字段
+        请改用 SupabaseAdminAuthService.get_user_by_id。
         """
+        # Local import to avoid circular dependency with app.core.deps
+        from app.core.deps import verify_jwt
+
         try:
-            client = await self._get_client()
-            response = await client.auth.get_user(access_token)
-            if response.user:
-                return {
-                    "id": response.user.id,
-                    "email": response.user.email,
-                    "user_metadata": response.user.user_metadata,
-                    "app_metadata": response.user.app_metadata,
-                    "created_at": (
-                        str(response.user.created_at)
-                        if response.user.created_at
-                        else None
-                    ),
-                }
-            return None
+            claims = await verify_jwt(access_token)
+            sub = claims.get("sub")
+            if not sub:
+                return None
+            return {
+                "id": str(sub),
+                "email": claims.get("email"),
+                "user_metadata": claims.get("user_metadata") or {},
+                "app_metadata": claims.get("app_metadata") or {},
+                "created_at": None,
+            }
         except Exception as e:
-            logger.error(f"获取用户信息失败: {e}")
+            logger.warning(f"获取用户信息失败 (token verify): {e}")
             return None
 
     async def refresh_session(self, refresh_token: str) -> Dict[str, Any]:

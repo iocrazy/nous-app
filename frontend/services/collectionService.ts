@@ -8,13 +8,13 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) return [];
 
   const { data: memberships } = await supabase
     .from('team_members')
     .select('team_id')
-    .eq('user_id', user.id);
+    .eq('user_id', claims.sub);
 
   const teamIds = memberships?.map(m => m.team_id) || [];
 
@@ -24,9 +24,9 @@ export const fetchMyCollections = async (): Promise<Collection[]> => {
     .order('created_at', { ascending: false });
 
   if (teamIds.length > 0) {
-    query = query.or(`owner_id.eq.${user.id},team_id.in.(${teamIds.join(',')})`);
+    query = query.or(`owner_id.eq.${claims.sub},team_id.in.(${teamIds.join(',')})`);
   } else {
-    query = query.eq('owner_id', user.id);
+    query = query.eq('owner_id', claims.sub);
   }
 
   const { data, error } = await query;
@@ -46,14 +46,14 @@ export const createCollection = async (name: string, teamId?: string): Promise<C
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
     .from('collections')
     .insert({
       name,
-      owner_id: user.id,
+      owner_id: claims.sub,
       team_id: teamId || null,
     })
     .select()

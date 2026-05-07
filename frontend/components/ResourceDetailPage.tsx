@@ -614,8 +614,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       const client = getSupabaseClient();
       if (!client) return;
       try {
-        const { data: { user } } = await client.auth.getUser();
-        if (user) setCurrentUserId(user.id);
+        const { data: { claims } } = await client.auth.getClaims();
+        if (claims) setCurrentUserId(claims.sub);
       } catch { /* ignore */ }
     };
     loadUser();

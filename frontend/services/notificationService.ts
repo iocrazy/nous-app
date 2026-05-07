@@ -9,13 +9,13 @@ export const fetchNotifications = async (): Promise<NotificationWithRead[]> => {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) return [];
 
   const { data: memberships } = await supabase
     .from('team_members')
     .select('team_id')
-    .eq('user_id', user.id);
+    .eq('user_id', claims.sub);
 
   const teamIds = memberships?.map(m => m.team_id) || [];
 
@@ -39,7 +39,7 @@ export const fetchNotifications = async (): Promise<NotificationWithRead[]> => {
   const { data: readStatus } = await supabase
     .from('user_notifications')
     .select('notification_id, read_at')
-    .eq('user_id', user.id)
+    .eq('user_id', claims.sub)
     .in('notification_id', notificationIds);
 
   const readMap = new Map(readStatus?.map(r => [r.notification_id, !!r.read_at]) || []);
@@ -54,13 +54,13 @@ export const markAsRead = async (notificationId: string): Promise<void> => {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) throw new Error('Not authenticated');
 
   await supabase
     .from('user_notifications')
     .upsert({
-      user_id: user.id,
+      user_id: claims.sub,
       notification_id: notificationId,
       read_at: new Date().toISOString(),
     });
@@ -70,8 +70,8 @@ export const markAllAsRead = async (): Promise<void> => {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) throw new Error('Not authenticated');
 
   const notifications = await fetchNotifications();
   const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
@@ -79,7 +79,7 @@ export const markAllAsRead = async (): Promise<void> => {
   if (unreadIds.length === 0) return;
 
   const upserts = unreadIds.map(id => ({
-    user_id: user.id,
+    user_id: claims.sub,
     notification_id: id,
     read_at: new Date().toISOString(),
   }));
