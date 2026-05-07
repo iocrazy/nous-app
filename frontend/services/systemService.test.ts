@@ -109,7 +109,11 @@ describe('getQueueDisplay', () => {
     ).toBe('Offline');
   });
 
-  it('returns Outdated on outdated', () => {
+  it('returns Idle for legacy outdated status with empty queue', () => {
+    // `outdated` / `degraded` are legacy Celery-era status values kept
+    // for backward-compat. DBOS migration removed special-casing — when
+    // the queue is empty, we just show "Idle" regardless of the legacy
+    // status value, matching the new source behavior in getQueueDisplay.
     expect(
       getQueueDisplay({
         active: 0,
@@ -117,7 +121,7 @@ describe('getQueueDisplay', () => {
         scheduled: 0,
         status: 'outdated',
       }),
-    ).toBe('Outdated');
+    ).toBe('Idle');
   });
 
   it('returns Idle when active+pending=0', () => {
@@ -131,7 +135,7 @@ describe('getQueueDisplay', () => {
     ).toBe('Idle');
   });
 
-  it('returns N Active otherwise', () => {
+  it('returns N Running otherwise', () => {
     expect(
       getQueueDisplay({
         active: 3,
@@ -139,6 +143,6 @@ describe('getQueueDisplay', () => {
         scheduled: 0,
         status: 'online',
       }),
-    ).toBe('3 Active');
+    ).toBe('3 Running');
   });
 });
