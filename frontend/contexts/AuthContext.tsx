@@ -173,11 +173,15 @@ export function AuthProvider({
         }
 
         // Load profile and settings in background — don't block data loading
+        // ``.maybeSingle()`` returns null instead of 406 when the row is
+        // missing. user_profiles can lag auth.users for legacy users whose
+        // profile-creation trigger didn't fire (e.g. accounts created
+        // before the trigger was added, or migration backfill misses).
         supabase
           .from('user_profiles')
           .select('role')
           .eq('id', session.user.id)
-          .single()
+          .maybeSingle()
           .then(({ data: profile }) => {
             if (profile?.role) {
               setUserProfile(prev => ({ ...prev, role: profile.role }));
