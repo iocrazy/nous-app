@@ -12,19 +12,18 @@ import json
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from app.core.deps import verify_jwt
 from app.core.redis import get_async_redis
-from app.db.supabase_client import get_async_supabase
 
 router = APIRouter()
 
 
 async def _authenticate_ws(token: str) -> str | None:
-    """Validate JWT token and return user_id, or None on failure."""
+    """Validate JWT token via local JWKS and return user_id, or None on failure."""
     try:
-        client = await get_async_supabase()
-        user_response = await client.auth.get_user(token)
-        if user_response and user_response.user:
-            return str(user_response.user.id)
+        claims = await verify_jwt(token)
+        sub = claims.get("sub")
+        return str(sub) if sub else None
     except Exception as e:
         logger.debug(f"[WS] Auth failed: {e}")
     return None

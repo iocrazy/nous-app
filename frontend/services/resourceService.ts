@@ -38,12 +38,12 @@ export async function createFolder(folder: {
   scope_type: 'personal' | 'team';
   scope_id: string;
 }): Promise<Folder> {
-  const user = (await supabase.auth.getUser()).data.user;
-  if (!user) throw new Error('Not authenticated');
+  const claims = (await supabase.auth.getClaims()).data.claims;
+  if (!claims) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
     .from('folders')
-    .insert({ ...folder, created_by: user.id })
+    .insert({ ...folder, created_by: claims.sub })
     .select()
     .single();
 
@@ -1194,8 +1194,8 @@ export async function copyResourceItem(
   targetFolderId: string | null,
   targetLibraryId?: string | null
 ): Promise<ResourceItem> {
-  const user = (await supabase.auth.getUser()).data.user;
-  if (!user) throw new Error('Not authenticated');
+  const claims = (await supabase.auth.getClaims()).data.claims;
+  if (!claims) throw new Error('Not authenticated');
   const { data, error } = await supabase
     .from('resource_items')
     .insert({
@@ -1204,7 +1204,7 @@ export async function copyResourceItem(
       scope_id: targetScopeId,
       folder_id: targetFolderId,
       library_id: targetLibraryId || null,
-      added_by: user.id,
+      added_by: claims.sub,
     })
     .select('*, resource:resources(*)')
     .single();

@@ -8,18 +8,64 @@
 支持两种认证方式：
 1. Bearer Token (JWT) - 通过 Authorization header
 2. API Key - 通过 X-API-Key header
+
+JWT 验签策略：本地 JWKS 验签（PyJWT + PyJWKClient），不再每次请求打 GoTrue 网络。
+JWKS 端点 = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"，PyJWKClient 自带 lru cache。
+仅支持 ES256（asymmetric）。老 HS256 session 切到 ES256 后会被拒，
+用户需重新登录拿到新签名 token —— 这是 2026-05-07 ES256 切换决定接受的代价。
 """
 
+import asyncio
 from dataclasses import dataclass
 from typing import Annotated, List, Optional
 
+import jwt
 from fastapi import Depends, Header, HTTPException, Request, status
 from loguru import logger
 from supabase._async.client import AsyncClient
 
 from app.core.api_key_scopes import check_scope_permission, get_required_scopes
+from app.core.config import settings
 from app.db.supabase_client import get_async_supabase as _get_async_supabase
 from app.db.supabase_client import get_async_supabase_admin as _get_async_supabase_admin
+
+# Module-level JWKS client singleton (lazy-initialized).
+# PyJWKClient 自带 lru_cache (default lifespan ~5min)，足够覆盖 hot path；
+# 测试可通过把 _jwks_client 重置为 None 强制重新初始化。
+_jwks_client: Optional[jwt.PyJWKClient] = None
+
+
+def _get_jwks_client() -> jwt.PyJWKClient:
+    """Lazily build the module-level PyJWKClient against current SUPABASE_URL."""
+    global _jwks_client
+    if _jwks_client is None:
+        url = (
+            f"{settings.SUPABASE_URL.rstrip('/')}"
+            f"/auth/v1/.well-known/jwks.json"
+        )
+        _jwks_client = jwt.PyJWKClient(url, cache_keys=True, lifespan=300)
+    return _jwks_client
+
+
+async def verify_jwt(token: str) -> dict:
+    """Verify a JWT against the JWKS, return its claims.
+
+    Runs the (sync) PyJWKClient lookup + jwt.decode in a worker thread so the
+    async handler isn't blocked while the very first request fetches JWKS.
+    Raises jwt.InvalidTokenError (or subclasses) on any verification failure.
+    """
+    client = _get_jwks_client()
+
+    def _decode_sync() -> dict:
+        signing_key = client.get_signing_key_from_jwt(token)
+        return jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["ES256"],
+            audience="authenticated",
+        )
+
+    return await asyncio.to_thread(_decode_sync)
 
 
 async def get_async_supabase() -> AsyncClient:
@@ -51,22 +97,27 @@ async def get_current_user(authorization: str = Header(...)):
     """
     从 Authorization header 获取当前用户
 
-    用于需要认证的端点
+    用于需要认证的端点。返回 dict 形态：{id, email, role, aud}。
+    callers 已经容错访问（getattr or .get），切换不破坏现有路由。
     """
     try:
         token = authorization.replace("Bearer ", "")
-        client = await _get_async_supabase()
+        claims = await verify_jwt(token)
 
-        # 验证 token 并获取用户
-        user_response = await client.auth.get_user(token)
-
-        if not user_response or not user_response.user:
+        if not claims.get("sub"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌"
             )
 
-        return user_response.user
+        return {
+            "id": str(claims["sub"]),
+            "email": claims.get("email"),
+            "role": claims.get("role"),
+            "aud": claims.get("aud"),
+        }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=f"认证失败: {str(e)}"
@@ -224,18 +275,17 @@ async def _validate_bearer_token(authorization: str) -> AuthContext:
         )
 
     token = authorization[7:]  # 移除 "Bearer " 前缀
-    client = await _get_async_supabase()
 
     try:
-        user_response = await client.auth.get_user(token)
+        claims = await verify_jwt(token)
 
-        if not user_response or not user_response.user:
+        if not claims.get("sub"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证令牌"
             )
 
         return AuthContext(
-            user_id=str(user_response.user.id),
+            user_id=str(claims["sub"]),
             auth_type="jwt",
             scopes=None,  # JWT 用户拥有完整权限
         )

@@ -55,16 +55,16 @@ export const createTeam = async (name: string): Promise<Team> => {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const { data: { claims }, error: authError } = await supabase.auth.getClaims();
   if (authError) {
     console.error('Auth error:', authError);
     throw new Error('Authentication failed: ' + authError.message);
   }
-  if (!user) throw new Error('Not authenticated - please log in again');
+  if (!claims) throw new Error('Not authenticated - please log in again');
 
   const { data, error } = await supabase
     .from('teams')
-    .insert({ name, owner_id: user.id })
+    .insert({ name, owner_id: claims.sub })
     .select()
     .single();
 
@@ -80,8 +80,8 @@ export const joinTeamByCode = async (inviteCode: string): Promise<Team> => {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) throw new Error('Not authenticated');
 
   const { data: team, error: teamError } = await supabase
     .from('teams')
@@ -93,7 +93,7 @@ export const joinTeamByCode = async (inviteCode: string): Promise<Team> => {
 
   const { error: memberError } = await supabase
     .from('team_members')
-    .insert({ team_id: team.id, user_id: user.id, role: 'member' });
+    .insert({ team_id: team.id, user_id: claims.sub, role: 'member' });
 
   if (memberError) {
     if (memberError.code === '23505') throw new Error('Already a member');
@@ -107,14 +107,14 @@ export const leaveTeam = async (teamId: string): Promise<void> => {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase not configured');
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { claims } } = await supabase.auth.getClaims();
+  if (!claims) throw new Error('Not authenticated');
 
   const { error } = await supabase
     .from('team_members')
     .delete()
     .eq('team_id', teamId)
-    .eq('user_id', user.id);
+    .eq('user_id', claims.sub);
 
   if (error) throw error;
 };
