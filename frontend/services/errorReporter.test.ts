@@ -66,9 +66,14 @@ describe('reportError', () => {
 
   it('dedupes identical errors within the window', async () => {
     const fetchSpy = spyFetch();
-    await reportError(new Error('same'));
-    await reportError(new Error('same'));
-    await reportError(new Error('same'));
+    // Reuse the same Error instance — fingerprint is `message::stack[:100]`
+    // and a fresh `new Error()` produces a distinct stack on each line, so
+    // separate instances would never dedup. We're testing the dedup path,
+    // not stack uniqueness.
+    const err = new Error('same');
+    await reportError(err);
+    await reportError(err);
+    await reportError(err);
     await new Promise(r => setTimeout(r, 0));
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
