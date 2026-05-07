@@ -26,6 +26,16 @@ services:
     image: crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com/heygo/mediahub-backend:latest
     container_name: mediahub-app-backend
     restart: unless-stopped
+    # DNS: NAS host typically points at upstream Google DNS (8.8.8.8),
+    # which is unreliable for CN platform domains — bilibili / douyin /
+    # xiaohongshu intermittently exceed the SSRF boundary's DNS timeout
+    # and trigger spurious URLBlockedError → HTTP 400 on /media/fetch.
+    # Container-scoped DNS overrides the host config; CN resolvers go
+    # first, Google as last-resort fallback.
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
+      - 8.8.8.8
     # R2: Use docker-init (tini) as PID 1 so signals (SIGTERM from
     # `docker stop`) are forwarded to uvicorn instead of being absorbed
     # by Python; tini also reaps zombie children of crashed subprocs.
@@ -53,6 +63,11 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
       - WHISPER_PROVIDER=${WHISPER_PROVIDER:-openai_api}
+      # DBOS orchestrator — direct Postgres URL (NOT supavisor / pgbouncer:
+      # DBOS uses LISTEN/NOTIFY which doesn't survive any pooler). Empty
+      # value falls back to "DBOS disabled" startup warning + HTTP 500 on
+      # /media/fetch. See docker/.env.example for the URL format.
+      - DBOS_DATABASE_URL=${DBOS_DATABASE_URL:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -68,7 +83,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      # DBOS first-launch creates 11 tables in the dbos schema (DBOS
+      # v2.19.0 migrations). On a cold prod DB this takes ~90s; a 60s
+      # start_period let autoheal kill the container before init
+      # finished. 300s gives comfortable headroom; subsequent restarts
+      # find the schema already present and complete in <30s.
+      start_period: 300s
 
   # PR-D7 phase 3b: celery-worker + celery-beat removed. All workflows
   # now run inside the `mediahub` container via DBOS (durable PG-backed
