@@ -54,10 +54,17 @@ async def collect_system_status_step() -> dict[str, Any]:
 
 
 @DBOS.step()
-def health_check_step() -> dict[str, Any]:
+async def health_check_step() -> dict[str, Any]:
     """Multi-component liveness check. Mirrors the legacy implementation —
-    Celery ping + Supabase query + storage writability. Result is logged;
-    no DB write."""
+    Redis ping + Supabase query + storage writability. Result is logged;
+    no DB write.
+
+    Async so the supabase liveness query awaits naturally instead of
+    spinning up its own event loop with `asyncio.run()` (which under
+    DBOS's `_configure_asyncio_thread_pool` hook cascades into shared
+    executor shutdown — see scheduled_commitment_sweeper for the gory
+    details). The redis ping and storage check are sync, but Python's
+    happy to mix sync calls inside an async function."""
     checks: dict[str, str] = {
         "redis": "unknown",
         "supabase": "unknown",
@@ -75,12 +82,15 @@ def health_check_step() -> dict[str, Any]:
         checks["redis"] = f"error: {str(e)[:50]}"
 
     try:
-        from app.repositories.media_repository import MediaRepository
+        # Lightweight DB liveness probe. Avoid MediaRepository.get_statistics()
+        # — its signature requires user_id, so the bare call always raised
+        # TypeError "missing 1 required positional argument". A one-row
+        # SELECT against system_settings via the admin client gives us the
+        # same RTT signal without user-scoping.
+        from app.db.supabase_client import get_async_supabase_admin
 
-        async def _ping_db() -> None:
-            await MediaRepository().get_statistics()
-
-        asyncio.run(_ping_db())
+        client = await get_async_supabase_admin()
+        await client.table("system_settings").select("key").limit(1).execute()
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = f"error: {str(e)[:50]}"
@@ -116,7 +126,7 @@ async def update_system_status_workflow(
 
 @DBOS.scheduled("0 * * * *")  # hourly at :00
 @DBOS.workflow()
-def health_check_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
-    result = health_check_step()
+async def health_check_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
+    result = await health_check_step()
     if result["status"] != "healthy":
         logger.warning(f"[health_check] degraded: {result['checks']}")
