@@ -96,11 +96,6 @@ def health_check_step() -> dict[str, Any]:
         try:
             loop.run_until_complete(_ping_db())
         finally:
-            # DBOS injects its shared ThreadPoolExecutor as the running
-            # loop's _default_executor; if we don't detach it here,
-            # loop.close() shuts down the DBOS pool the rest of the
-            # process depends on. See scheduled_commitment_sweeper.
-            loop.set_default_executor(None)
             loop.close()
         checks["supabase"] = "ok"
     except Exception as e:

@@ -103,25 +103,19 @@ def commitment_sweeper_workflow(
     """Per-minute commitment sweep."""
     import asyncio
 
-    # Why this dance:
-    #   1. DBOS executor threads have no current event loop, so
-    #      asyncio.get_event_loop() raises.
-    #   2. asyncio.run() and loop.close() both shutdown the loop's
-    #      _default_executor — and DBOS hooks _configure_asyncio_thread_pool
-    #      onto every step's running loop, mutating that loop's
-    #      _default_executor to point at DBOS's process-wide
-    #      ThreadPoolExecutor. So shutting down the loop's default
-    #      executor shuts down the DBOS pool everyone shares — and then
-    #      every verify_jwt / DBOS queue dispatch dies with
-    #      "cannot schedule new futures after shutdown" forever.
-    #
-    # Fix: detach the default executor reference before close() so close
-    # doesn't shutdown what DBOS plugged in mid-run.
+    # Don't use asyncio.run(): in our Python 3.13 prod environment its
+    # cleanup phase (shutdown_default_executor) was observed to poison
+    # subsequent main-loop asyncio.to_thread() calls with
+    # "cannot schedule new futures after shutdown" within seconds of the
+    # first scheduled run completing. Likely interaction between DBOS's
+    # executor-thread loop policy and asyncio.run's executor-shutdown.
+    # The new-loop + close pattern is functionally equivalent for our
+    # workflow (it doesn't use asyncio.to_thread internally) without the
+    # default-executor side effect.
     loop = asyncio.new_event_loop()
     try:
         result = loop.run_until_complete(sweep_due_commitments_step())
     finally:
-        loop.set_default_executor(None)  # detach DBOS's shared pool
         loop.close()
     if result.get("fired") or result.get("expired"):
         logger.info(f"[commitment.sweeper] {result}")
