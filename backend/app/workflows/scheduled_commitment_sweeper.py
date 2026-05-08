@@ -97,13 +97,21 @@ async def sweep_due_commitments_step(
 
 @DBOS.scheduled("* * * * *")  # every minute
 @DBOS.workflow()
-def commitment_sweeper_workflow(
+async def commitment_sweeper_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    """Per-minute commitment sweep."""
-    import asyncio
+    """Per-minute commitment sweep.
 
-    result = asyncio.get_event_loop().run_until_complete(sweep_due_commitments_step())
+    Async because the step is async — letting DBOS dispatch the workflow
+    coroutine onto its BackgroundEventLoop (which forwards to the main
+    uvicorn loop) keeps us off the per-fire `asyncio.run()` /
+    `loop.close()` path that cascades into DBOS shared-executor shutdown.
+    See `update_system_status_workflow` in scheduled_health.py for the
+    same pattern. Pre-this-fix `def + asyncio.get_event_loop()` raised
+    RuntimeError every fire (executor thread has no loop); the three
+    intermediate fixes (#185 #186 #187) all triggered cascade. Reverted
+    in #188; this is the durable fix."""
+    result = await sweep_due_commitments_step()
     if result.get("fired") or result.get("expired"):
         logger.info(f"[commitment.sweeper] {result}")
 

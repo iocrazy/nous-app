@@ -276,15 +276,15 @@ async def _write_super_and_supersede(
 
 @DBOS.scheduled("0 4 * * 0")  # Sunday 04:00 UTC (after archival at 03:00)
 @DBOS.workflow()
-def memory_consolidation_workflow(
+async def memory_consolidation_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    """Weekly memory consolidation pass."""
-    import asyncio
+    """Weekly memory consolidation pass.
 
-    result = asyncio.get_event_loop().run_until_complete(
-        consolidate_namespaces_step()
-    )
+    Async so DBOS dispatches via its BackgroundEventLoop → main loop;
+    matches `update_system_status_workflow` and `commitment_sweeper_workflow`.
+    See those for context."""
+    result = await consolidate_namespaces_step()
     logger.info(f"[memory.consolidation] sweep complete: {result}")
 
 
