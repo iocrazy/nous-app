@@ -76,27 +76,20 @@ def health_check_step() -> dict[str, Any]:
 
     try:
         # Lightweight liveness probe — just confirm we can round-trip
-        # SQL through the supabase pooler. (Earlier this called
-        # MediaRepository().get_statistics() bare, which raised
-        # TypeError because get_statistics requires a user_id; the
-        # supabase health line was permanently "error: missing 1
-        # required positional argument".)
-        #
-        # Don't use asyncio.run() — its shutdown_default_executor()
-        # was observed to poison the main-loop asyncio.to_thread()
-        # used by verify_jwt, so every JWT verify started returning
-        # 401 within seconds of this scheduled workflow firing.
+        # SQL through the supabase pooler. Previously this called
+        # MediaRepository().get_statistics() which requires a user_id
+        # arg (caller's signature is `get_statistics(self, user_id)`),
+        # so the ping always raised TypeError "missing 1 required
+        # positional argument: 'user_id'" and supabase health was
+        # falsely reported as degraded. A bare COUNT(*) on a tiny
+        # admin table sidesteps user-scoping entirely.
         from app.db.supabase_client import get_async_supabase_admin
 
         async def _ping_db() -> None:
             client = await get_async_supabase_admin()
             await client.table("system_settings").select("key").limit(1).execute()
 
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_ping_db())
-        finally:
-            loop.close()
+        asyncio.run(_ping_db())
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = f"error: {str(e)[:50]}"
