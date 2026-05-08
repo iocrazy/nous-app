@@ -103,7 +103,10 @@ def commitment_sweeper_workflow(
     """Per-minute commitment sweep."""
     import asyncio
 
-    result = asyncio.get_event_loop().run_until_complete(sweep_due_commitments_step())
+    # asyncio.run() builds its own loop and tears it down — works inside
+    # DBOS executor threads which have no current event loop. Previously
+    # `asyncio.get_event_loop()` raised RuntimeError on every scheduled run.
+    result = asyncio.run(sweep_due_commitments_step())
     if result.get("fired") or result.get("expired"):
         logger.info(f"[commitment.sweeper] {result}")
 
