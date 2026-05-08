@@ -222,6 +222,44 @@ def fetch_and_parse(
     return aweme_detail, parsed_data
 
 
+def fetch_and_parse_ytdlp(
+    valid_url: str,
+    video_bool: bool,
+    cover_bool: bool,
+    user_agent: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> tuple[dict, dict]:
+    """yt-dlp parse path for non-douyin platforms (bilibili / youtube / etc).
+
+    Returns the same `(aweme_detail, parsed_data)` tuple shape as
+    `fetch_and_parse` so the workflow keeps a single contract. There is no
+    real aweme_detail outside the douyin chain — instead we synthesise a
+    minimal stub that surfaces yt-dlp's `tags` list under the `text_extra`
+    key auto_tag_media reads, so hashtag → tag classification keeps working
+    unchanged across platforms."""
+    from app.boundary import validate_url
+    from app.services.media.parsers.ytdlp_service import YtdlpService
+
+    validated = validate_url(valid_url)
+    ytdlp_info = _run_async(
+        YtdlpService.fetch_metadata(
+            validated, user_id=user_id, user_agent=user_agent
+        )
+    )
+    parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, valid_url)
+
+    parsed_data["need_download_video"] = video_bool
+    parsed_data["need_download_cover"] = cover_bool
+    parsed_data["need_download_music"] = False
+
+    tags = ytdlp_info.get("tags") or []
+    aweme_detail_stub: dict = {
+        "text_extra": [{"hashtag_name": str(t)} for t in tags if t],
+    }
+
+    return aweme_detail_stub, parsed_data
+
+
 def save_media_to_db(
     parsed_data: dict, platform_id: str, video_bool: bool
 ) -> Optional[dict]:

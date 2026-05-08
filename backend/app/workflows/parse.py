@@ -50,19 +50,36 @@ def fetch_and_parse_step(
     categories: Optional[str],
     user_agent: str,
     user_id: Optional[str] = None,
+    platform: str = "douyin",
 ) -> dict[str, Any]:
-    """3-tier fallback parse (LightHTTP → ABogus → DrissionPage) +
-    formatter. Heavy I/O — 3 retries matches legacy Celery budget."""
-    from app.services.media.parsers.parse_helpers import fetch_and_parse
+    """Platform-aware parse step. douyin → 3-tier fallback chain
+    (LightHTTP → ABogus → DrissionPage) + DouyinFormatter; other platforms
+    (bilibili / youtube / …) → yt-dlp metadata + YtdlpService schema map.
 
-    aweme_detail, parsed_data = fetch_and_parse(
-        valid_url,
-        video_bool,
-        cover_bool,
-        categories,
-        user_agent=user_agent,
-        user_id=user_id,
-    )
+    `platform` defaults to "douyin" so any in-flight workflows queued
+    before this change keep the legacy behaviour. Heavy I/O — 3 retries
+    matches the legacy Celery budget."""
+    if platform == "douyin":
+        from app.services.media.parsers.parse_helpers import fetch_and_parse
+
+        aweme_detail, parsed_data = fetch_and_parse(
+            valid_url,
+            video_bool,
+            cover_bool,
+            categories,
+            user_agent=user_agent,
+            user_id=user_id,
+        )
+    else:
+        from app.services.media.parsers.parse_helpers import fetch_and_parse_ytdlp
+
+        aweme_detail, parsed_data = fetch_and_parse_ytdlp(
+            valid_url,
+            video_bool,
+            cover_bool,
+            user_agent=user_agent,
+            user_id=user_id,
+        )
     return {"aweme_detail": aweme_detail, "parsed_data": parsed_data}
 
 
@@ -308,6 +325,7 @@ def parse_workflow(
     cover_bool: bool = True,
     categories: Optional[str] = None,
     tag_ids: Optional[list[str]] = None,
+    platform: str = "douyin",
 ) -> dict[str, Any]:
     """DBOS port of parse_single_link_task.
 
@@ -337,7 +355,13 @@ def parse_workflow(
 
     legacy_ua = pick_ua()
     fetched = fetch_and_parse_step(
-        valid_url, video_bool, cover_bool, categories, legacy_ua, user_id=user_id
+        valid_url,
+        video_bool,
+        cover_bool,
+        categories,
+        legacy_ua,
+        user_id=user_id,
+        platform=platform,
     )
     aweme_detail = fetched["aweme_detail"]
     parsed_data = fetched["parsed_data"]
