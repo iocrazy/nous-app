@@ -184,7 +184,24 @@ class MediaRepository:
             logger.info(f"Updated parsed_media: {platform_id}")
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error(f"Failed to update parsed_media: {e}")
+            # Supabase / PostgREST APIError often has __str__ == "" while
+            # the actual reason lives on .message / .code / .details /
+            # .hint (or .args). Default `f"{e}"` would log nothing
+            # useful — pull the real fields out explicitly so the next
+            # repro tells us *why* the update failed instead of just
+            # "Failed: ".
+            logger.error(
+                "Failed to update parsed_media platform_id=%s: "
+                "type=%s repr=%r message=%s code=%s details=%s hint=%s args=%s",
+                platform_id,
+                type(e).__name__,
+                e,
+                getattr(e, "message", None),
+                getattr(e, "code", None),
+                getattr(e, "details", None),
+                getattr(e, "hint", None),
+                getattr(e, "args", None),
+            )
             raise
 
     async def mark_stale_downloads_failed(self, timeout_minutes: int = 30) -> int:
