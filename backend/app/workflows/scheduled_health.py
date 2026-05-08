@@ -75,19 +75,10 @@ def health_check_step() -> dict[str, Any]:
         checks["redis"] = f"error: {str(e)[:50]}"
 
     try:
-        # Lightweight liveness probe — just confirm we can round-trip
-        # SQL through the supabase pooler. Previously this called
-        # MediaRepository().get_statistics() which requires a user_id
-        # arg (caller's signature is `get_statistics(self, user_id)`),
-        # so the ping always raised TypeError "missing 1 required
-        # positional argument: 'user_id'" and supabase health was
-        # falsely reported as degraded. A bare COUNT(*) on a tiny
-        # admin table sidesteps user-scoping entirely.
-        from app.db.supabase_client import get_async_supabase_admin
+        from app.repositories.media_repository import MediaRepository
 
         async def _ping_db() -> None:
-            client = await get_async_supabase_admin()
-            await client.table("system_settings").select("key").limit(1).execute()
+            await MediaRepository().get_statistics()
 
         asyncio.run(_ping_db())
         checks["supabase"] = "ok"

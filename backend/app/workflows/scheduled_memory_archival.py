@@ -116,10 +116,9 @@ def memory_archival_workflow(scheduled_time: datetime, actual_time: datetime) ->
     """Weekly memory archival pass."""
     import asyncio
 
-    # asyncio.run() builds its own loop and tears it down — works inside
-    # DBOS executor threads which have no current event loop. Previously
-    # `asyncio.get_event_loop()` raised RuntimeError on every scheduled run.
-    result = asyncio.run(archive_decayed_memories_step())
+    result = asyncio.get_event_loop().run_until_complete(
+        archive_decayed_memories_step()
+    )
     logger.info(f"[memory.archival] sweep complete: {result}")
 
 
