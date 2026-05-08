@@ -75,33 +75,12 @@ def health_check_step() -> dict[str, Any]:
         checks["redis"] = f"error: {str(e)[:50]}"
 
     try:
-        # Lightweight liveness probe — just confirm we can round-trip
-        # SQL through the supabase pooler. (Earlier this called
-        # MediaRepository().get_statistics() bare, which raised
-        # TypeError because get_statistics requires a user_id; the
-        # supabase health line was permanently "error: missing 1
-        # required positional argument".)
-        #
-        # Don't use asyncio.run() — its shutdown_default_executor()
-        # was observed to poison the main-loop asyncio.to_thread()
-        # used by verify_jwt, so every JWT verify started returning
-        # 401 within seconds of this scheduled workflow firing.
-        from app.db.supabase_client import get_async_supabase_admin
+        from app.repositories.media_repository import MediaRepository
 
         async def _ping_db() -> None:
-            client = await get_async_supabase_admin()
-            await client.table("system_settings").select("key").limit(1).execute()
+            await MediaRepository().get_statistics()
 
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_ping_db())
-        finally:
-            # DBOS injects its shared ThreadPoolExecutor as the running
-            # loop's _default_executor; if we don't detach it here,
-            # loop.close() shuts down the DBOS pool the rest of the
-            # process depends on. See scheduled_commitment_sweeper.
-            loop.set_default_executor(None)
-            loop.close()
+        asyncio.run(_ping_db())
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = f"error: {str(e)[:50]}"

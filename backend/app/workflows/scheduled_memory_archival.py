@@ -116,16 +116,9 @@ def memory_archival_workflow(scheduled_time: datetime, actual_time: datetime) ->
     """Weekly memory archival pass."""
     import asyncio
 
-    # See scheduled_commitment_sweeper for the why; tldr DBOS injects its
-    # shared ThreadPoolExecutor as our loop's _default_executor mid-run,
-    # so we must detach it before close() or close shuts down the pool
-    # the rest of the process depends on.
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(archive_decayed_memories_step())
-    finally:
-        loop.set_default_executor(None)
-        loop.close()
+    result = asyncio.get_event_loop().run_until_complete(
+        archive_decayed_memories_step()
+    )
     logger.info(f"[memory.archival] sweep complete: {result}")
 
 

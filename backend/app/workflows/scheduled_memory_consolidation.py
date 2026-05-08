@@ -282,16 +282,9 @@ def memory_consolidation_workflow(
     """Weekly memory consolidation pass."""
     import asyncio
 
-    # See scheduled_commitment_sweeper for the why; tldr DBOS injects its
-    # shared ThreadPoolExecutor as our loop's _default_executor mid-run,
-    # so we must detach it before close() or close shuts down the pool
-    # the rest of the process depends on.
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(consolidate_namespaces_step())
-    finally:
-        loop.set_default_executor(None)
-        loop.close()
+    result = asyncio.get_event_loop().run_until_complete(
+        consolidate_namespaces_step()
+    )
     logger.info(f"[memory.consolidation] sweep complete: {result}")
 
 
