@@ -103,10 +103,20 @@ def commitment_sweeper_workflow(
     """Per-minute commitment sweep."""
     import asyncio
 
-    # asyncio.run() builds its own loop and tears it down — works inside
-    # DBOS executor threads which have no current event loop. Previously
-    # `asyncio.get_event_loop()` raised RuntimeError on every scheduled run.
-    result = asyncio.run(sweep_due_commitments_step())
+    # Don't use asyncio.run(): in our Python 3.13 prod environment its
+    # cleanup phase (shutdown_default_executor) was observed to poison
+    # subsequent main-loop asyncio.to_thread() calls with
+    # "cannot schedule new futures after shutdown" within seconds of the
+    # first scheduled run completing. Likely interaction between DBOS's
+    # executor-thread loop policy and asyncio.run's executor-shutdown.
+    # The new-loop + close pattern is functionally equivalent for our
+    # workflow (it doesn't use asyncio.to_thread internally) without the
+    # default-executor side effect.
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(sweep_due_commitments_step())
+    finally:
+        loop.close()
     if result.get("fired") or result.get("expired"):
         logger.info(f"[commitment.sweeper] {result}")
 
