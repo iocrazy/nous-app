@@ -101,9 +101,16 @@ def commitment_sweeper_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
     """Per-minute commitment sweep."""
-    import asyncio
+    # Run the async step on the process-wide persistent loop. See
+    # app.core.scheduled_async_runner for why a fresh-loop-per-fire
+    # pattern (asyncio.run / new_event_loop+close / etc.) cascades
+    # into DBOS-shared-executor shutdown under our setup — short
+    # version: DBOS hooks the running loop's _default_executor to
+    # point at its process-wide pool, and any cleanup path that
+    # shuts down the loop's default executor takes the pool with it.
+    from app.core.scheduled_async_runner import run_in_scheduled_loop
 
-    result = asyncio.get_event_loop().run_until_complete(sweep_due_commitments_step())
+    result = run_in_scheduled_loop(sweep_due_commitments_step())
     if result.get("fired") or result.get("expired"):
         logger.info(f"[commitment.sweeper] {result}")
 

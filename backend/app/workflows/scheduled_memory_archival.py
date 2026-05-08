@@ -114,11 +114,11 @@ async def archive_decayed_memories_step(
 @DBOS.workflow()
 def memory_archival_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
     """Weekly memory archival pass."""
-    import asyncio
+    # See scheduled_commitment_sweeper for why we use the persistent
+    # loop helper instead of managing our own loop here.
+    from app.core.scheduled_async_runner import run_in_scheduled_loop
 
-    result = asyncio.get_event_loop().run_until_complete(
-        archive_decayed_memories_step()
-    )
+    result = run_in_scheduled_loop(archive_decayed_memories_step())
     logger.info(f"[memory.archival] sweep complete: {result}")
 
 

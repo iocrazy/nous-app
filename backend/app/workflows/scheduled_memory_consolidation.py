@@ -280,11 +280,11 @@ def memory_consolidation_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
     """Weekly memory consolidation pass."""
-    import asyncio
+    # See scheduled_commitment_sweeper for why we use the persistent
+    # loop helper instead of managing our own loop here.
+    from app.core.scheduled_async_runner import run_in_scheduled_loop
 
-    result = asyncio.get_event_loop().run_until_complete(
-        consolidate_namespaces_step()
-    )
+    result = run_in_scheduled_loop(consolidate_namespaces_step())
     logger.info(f"[memory.consolidation] sweep complete: {result}")
 
 

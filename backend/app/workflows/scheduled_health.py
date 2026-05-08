@@ -75,12 +75,25 @@ def health_check_step() -> dict[str, Any]:
         checks["redis"] = f"error: {str(e)[:50]}"
 
     try:
-        from app.repositories.media_repository import MediaRepository
+        # Liveness probe: confirm we can round-trip SQL through the
+        # supabase pooler. Earlier this called
+        # MediaRepository().get_statistics() bare, which raises TypeError
+        # because get_statistics(self, user_id) requires user_id; the
+        # ping always errored. Use a one-row SELECT against
+        # system_settings via the admin client instead — same RTT, no
+        # user-scoping required.
+        #
+        # Don't manage our own asyncio loop here (asyncio.run / loop.close
+        # both cascade into DBOS shared-executor shutdown — see
+        # scheduled_commitment_sweeper). Use the persistent-loop helper.
+        from app.core.scheduled_async_runner import run_in_scheduled_loop
+        from app.db.supabase_client import get_async_supabase_admin
 
         async def _ping_db() -> None:
-            await MediaRepository().get_statistics()
+            client = await get_async_supabase_admin()
+            await client.table("system_settings").select("key").limit(1).execute()
 
-        asyncio.run(_ping_db())
+        run_in_scheduled_loop(_ping_db())
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = f"error: {str(e)[:50]}"
