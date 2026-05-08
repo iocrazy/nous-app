@@ -316,6 +316,36 @@ def attach_tags_step(*, resource_id: str, tag_ids: list[str]) -> int:
     return asyncio.run(_do())
 
 
+@DBOS.step()
+def mark_workflow_processing_step(workflow_id: str) -> None:
+    """Push task_tracking.phase from 'queued' to 'processing'.
+
+    Best-effort. Background:
+    `mirror_dbos_lifecycle_to_tracking` only writes `status` (not
+    `phase`); nothing else explicitly transitions the row to
+    PROCESSING when DBOS picks the workflow up. As a result tasks
+    were observed sitting on phase='queued' the entire time they ran,
+    which the TaskMonitor stat panel rendered as "WORKER Idle" while
+    a parse / download was clearly in flight.
+
+    A bare `manager.start()` does the trick — it sets
+    phase='processing', status='processing', started_at=NOW.
+    Wrapped so a transient supabase hiccup never demotes a real
+    workflow run to failed: the badge correctness is nice-to-have,
+    completing the user's task is not."""
+    from app.services.infra.unified_task_manager import get_task_manager
+
+    async def _do() -> None:
+        try:
+            await get_task_manager().start(workflow_id)
+        except Exception as e:
+            logger.warning(
+                f"[parse.mark_processing] {workflow_id}: {e}"
+            )
+
+    asyncio.run(_do())
+
+
 @DBOS.workflow()
 def parse_workflow(
     url: str,
@@ -333,6 +363,13 @@ def parse_workflow(
     duplicate user-click within the same retry budget short-circuits
     to the cached result.
     """
+    # 0. Mark task_tracking.phase='processing' so admin counters /
+    # TaskMonitor "WORKER" stat reflect that this workflow is actually
+    # running (the `mirror_dbos_lifecycle_to_tracking` trigger only
+    # touches `status`, not `phase`, so without this call the row
+    # would stay phase='queued' for the full lifetime of the run).
+    mark_workflow_processing_step(DBOS.workflow_id)
+
     # 1. URL validation (sync, fast)
     #
     # Short-circuit failures MUST raise so DBOS marks the workflow ERROR

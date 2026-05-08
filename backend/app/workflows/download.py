@@ -471,6 +471,29 @@ def mark_task_user_visible_complete_step(
     asyncio.run(_do())
 
 
+@DBOS.step()
+def mark_workflow_processing_step(workflow_id: str) -> None:
+    """Push task_tracking.phase 'queued' → 'processing'. Same rationale
+    as parse.mark_workflow_processing_step — `mirror_dbos_lifecycle_to_tracking`
+    only writes `status`, leaving `phase` stuck at 'queued' for the
+    workflow lifetime, which the TaskMonitor stat panel renders as
+    "WORKER Idle" while a download is actually in flight.
+
+    Best-effort wrap — a transient supabase hiccup here is purely
+    cosmetic; the file will still download regardless."""
+    from app.services.infra.unified_task_manager import get_task_manager
+
+    async def _do() -> None:
+        try:
+            await get_task_manager().start(workflow_id)
+        except Exception as e:
+            logger.warning(
+                f"[download.mark_processing] {workflow_id}: {e}"
+            )
+
+    asyncio.run(_do())
+
+
 @DBOS.workflow()
 def download_workflow(
     platform_id: str,
@@ -491,6 +514,13 @@ def download_workflow(
     so retries within the same minute share results, but a fresh user
     request bumps the suffix to bypass cache.
     """
+    # 0. Mark task_tracking.phase='processing' immediately so admin
+    # counters reflect that this workflow is actually running. Without
+    # it, mirror_dbos_lifecycle_to_tracking would only update `status`
+    # and `phase` stays 'queued' until terminal — which is what made
+    # TaskMonitor display "WORKER Idle" mid-download.
+    mark_workflow_processing_step(DBOS.workflow_id)
+
     strategy = "yt-dlp" if url else "douyin"
 
     # 1. Cache short-circuit

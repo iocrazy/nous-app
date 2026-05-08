@@ -92,7 +92,11 @@ async def get_queue_status() -> dict:
       "offline" — DB unreachable (defensive; should not happen)
       "online"  — counts available
 
-    Active = phase 'in_progress'; Pending = phase 'queued'.
+    Active = phase 'processing'; Pending = phase 'queued'. The string
+    'processing' must match `TaskPhase.PROCESSING.value` in
+    unified_task_manager — there used to be a typo here ('in_progress')
+    that made the active count always zero, which manifested as
+    "WORKER Idle" in TaskMonitor while a task was actively parsing.
     """
     current_time = time.time()
 
@@ -109,7 +113,7 @@ async def get_queue_status() -> dict:
         active_resp = (
             await client.table("task_tracking")
             .select("dbos_workflow_id", head=True, count="exact")
-            .eq("phase", "in_progress")
+            .eq("phase", "processing")
             .execute()
         )
         pending_resp = (
