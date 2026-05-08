@@ -533,6 +533,13 @@ async def handle_media_fetch_dispatch(
             # can attach them to the new resource (was being silently
             # dropped, breaking the tag-driven AI chain).
             "tag_ids": tag_ids or [],
+            # Without this, parse_workflow defaults to platform="douyin"
+            # and feeds bilibili / youtube URLs into the douyin fallback
+            # chain — which can never succeed (DrissionPage waits on a
+            # douyin API response that never comes). The router already
+            # detected the right platform up at the API edge; just thread
+            # it through.
+            "platform": platform,
         },
         workflow_id=dbos_wf_id,
     )
