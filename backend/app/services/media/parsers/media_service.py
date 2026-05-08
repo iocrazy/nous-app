@@ -502,7 +502,23 @@ class MediaService:
             }
 
         except Exception as e:
-            logger.error(f"Failed to save metadata: {str(e)}")
+            # Same problem as MediaRepository.update — supabase APIError
+            # often has empty __str__; pull the structured fields out so
+            # the log line is actionable. The user-facing `message`
+            # below stays str(e) for backwards-compat with callers that
+            # surface it as a UI string.
+            logger.error(
+                "Failed to save metadata platform_id=%s: "
+                "type=%s repr=%r message=%s code=%s details=%s hint=%s args=%s",
+                platform_id,
+                type(e).__name__,
+                e,
+                getattr(e, "message", None),
+                getattr(e, "code", None),
+                getattr(e, "details", None),
+                getattr(e, "hint", None),
+                getattr(e, "args", None),
+            )
             return {"success": False, "message": f"Save failed: {str(e)}"}
 
     @staticmethod
