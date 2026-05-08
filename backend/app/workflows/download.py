@@ -216,9 +216,24 @@ def finalize_post_download_step(
                     or 0
                 )
                 if actual_size > 0:
-                    await res_repo.update_resource(
-                        resource_id, {"file_size_bytes": actual_size}
-                    )
+                    # File is already on disk + parsed_media row carries the
+                    # canonical size; the resources.file_size_bytes mirror is
+                    # a UI nicety. Don't let a transient PostgREST hiccup
+                    # here promote a successful download to a failed task —
+                    # downstream `mark_task_user_visible_complete_step`
+                    # would never get a chance to run, and 资源库 already
+                    # shows the file the user wanted.
+                    try:
+                        await res_repo.update_resource(
+                            resource_id, {"file_size_bytes": actual_size}
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "[download.finalize] file_size mirror failed "
+                            "(non-fatal, file is already on disk) "
+                            "resource_id=%s actual_size=%d err=%s: %r",
+                            resource_id, actual_size, type(e).__name__, e,
+                        )
 
             try:
                 existing_versions = await res_repo.get_versions(resource_id)
@@ -277,7 +292,28 @@ def finalize_post_download_step(
                         if current_pm.get(k) != "completed"
                     }
                     if needs_update:
-                        await media_repo.update(platform_id, needs_update)
+                        # Same rationale as the file_size_bytes mirror above —
+                        # this update flips parsed_media.*_download_status
+                        # flags from 'pending' to 'completed' for UI badges.
+                        # The file is already on disk; if PostgREST is
+                        # momentarily unavailable here we'd otherwise mark
+                        # the whole download workflow failed and stomp the
+                        # subtitle the user sees, even though the user can
+                        # already open the file in 资源库. (Reproducer:
+                        # download_workflow 2d9d667d 2026-05-08, file
+                        # landed but task_tracking ended up phase=failed
+                        # subtitle stuck on "video + cover".)
+                        try:
+                            await media_repo.update(platform_id, needs_update)
+                        except Exception as e:
+                            logger.warning(
+                                "[download.finalize] parsed_media status "
+                                "flag update failed (non-fatal, file is "
+                                "already on disk) platform_id=%s "
+                                "needs_update=%s err=%s: %r",
+                                platform_id, needs_update,
+                                type(e).__name__, e,
+                            )
 
         return {
             "fresh_download_path": fresh_download_path,
