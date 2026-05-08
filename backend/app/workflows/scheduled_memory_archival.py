@@ -116,10 +116,15 @@ def memory_archival_workflow(scheduled_time: datetime, actual_time: datetime) ->
     """Weekly memory archival pass."""
     import asyncio
 
-    # asyncio.run() builds its own loop and tears it down — works inside
-    # DBOS executor threads which have no current event loop. Previously
-    # `asyncio.get_event_loop()` raised RuntimeError on every scheduled run.
-    result = asyncio.run(archive_decayed_memories_step())
+    # See scheduled_commitment_sweeper for why we don't use asyncio.run()
+    # here: its shutdown_default_executor() leaked across our prod loop
+    # boundaries and broke verify_jwt with "cannot schedule new futures
+    # after shutdown" within seconds of the first successful run.
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(archive_decayed_memories_step())
+    finally:
+        loop.close()
     logger.info(f"[memory.archival] sweep complete: {result}")
 
 
