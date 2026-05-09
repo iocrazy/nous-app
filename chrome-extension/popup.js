@@ -107,10 +107,16 @@ function renderTags(tags) {
     groups.get(tag.group_name).push(tag);
   }
 
-  // Append ungrouped to last group
+  // Render ungrouped under "其他" so a backend missing group_name (e.g.
+  // tag_groups orphan FKs) doesn't silently drop tags. Before this guard
+  // ungrouped tags were dropped entirely whenever entries was empty.
   const entries = Array.from(groups.entries());
-  if (ungrouped.length > 0 && entries.length > 0) {
-    entries[entries.length - 1][1].push(...ungrouped);
+  if (ungrouped.length > 0) {
+    if (entries.length > 0) {
+      entries[entries.length - 1][1].push(...ungrouped);
+    } else {
+      entries.push(['其他', ungrouped]);
+    }
   }
 
   // Frequently used (top 6)
