@@ -132,15 +132,42 @@ class SubAgentTaskService:
                 f"at caller depth {self.agent_depth}"
             )
 
+        # Lazy import: pulls the full agent_runner stack which we don't
+        # want at module-import time for any code path that doesn't
+        # actually spawn sub-agents. Single try block + single
+        # AgentRepository instance shared between the slug lookup and
+        # the later compose step.
+        try:
+            from app.core.config import settings
+            from app.repositories.agent_repository import AgentRepository
+            from app.repositories.skill_repository import SkillRepository
+            from app.services.ai.adapters.factory import provider_key_for_model
+            from app.services.ai.chat.ai_library_chat_wiring import (
+                build_agent_runner_stack,
+            )
+            from app.services.ai.prompts.prompt_composer import (
+                ComposerInput,
+                PromptComposer,
+            )
+            from app.services.ai.runner.run_recorder import RunRecorder
+            # _attach_to_parent_run is private to agent_worker; keep an
+            # eye on it during workforce refactors. The function writes
+            # agent_runs.parent_run_id + root_run_id; if it ever moves
+            # the import will fail loudly at the first task spawn.
+            from app.services.workforce.agent_worker import _attach_to_parent_run
+        except Exception as exc:
+            logger.exception("[subagent_task] import wiring failed")
+            return self._failed(f"import failed: {exc!s:.120}")
+
+        agent_repo = AgentRepository()
+
         # Reject self-spawn — same agent should branch via plan/loop,
         # not by recursing on itself. Delegate also rejects this; we
         # match for symmetry.
         try:
-            from app.repositories.agent_repository import AgentRepository
-
-            target = await AgentRepository().get_by_slug(slug)
+            target = await agent_repo.get_by_slug(slug)
         except Exception as exc:
-            logger.warning("[subagent_task] agent lookup failed: {}", exc)
+            logger.exception("[subagent_task] agent lookup failed slug={}", slug)
             return self._failed(f"agent lookup failed: {exc!s:.120}")
 
         if not target:
@@ -152,31 +179,12 @@ class SubAgentTaskService:
                 "cannot spawn self as sub-agent; refactor as a plan step"
             )
 
-        # Run the sub-agent. Imports kept local — these pull the full
-        # agent_runner stack which we don't want at module-import time
-        # for any code path that doesn't actually spawn sub-agents.
-        try:
-            from app.core.config import settings
-            from app.services.ai.adapters.factory import provider_key_for_model
-            from app.services.ai.chat.ai_library_chat_wiring import (
-                build_agent_runner_stack,
-            )
-            from app.services.ai.prompts.prompt_composer import (
-                ComposerInput,
-                PromptComposer,
-            )
-            from app.services.ai.runner.run_recorder import RunRecorder
-            from app.repositories.skill_repository import SkillRepository
-            from app.repositories.agent_repository import AgentRepository
-            from app.services.workforce.agent_worker import _attach_to_parent_run
-        except Exception as exc:
-            logger.error("[subagent_task] import wiring failed: {}", exc)
-            return self._failed(f"import failed: {exc!s:.120}")
+        skill_repo = SkillRepository()
 
         try:
             stack = await build_agent_runner_stack(
                 agent=target,
-                skill_repo=SkillRepository(),
+                skill_repo=skill_repo,
                 user_id=self.caller_user_id,
                 session_id=self.session_id,
                 user_query=prompt,
@@ -185,11 +193,11 @@ class SubAgentTaskService:
                 agent_depth=self.agent_depth + 1,
             )
         except Exception as exc:
-            logger.warning("[subagent_task] stack build failed: {}", exc)
+            logger.exception("[subagent_task] stack build failed slug={}", slug)
             return self._failed(f"stack build failed: {exc!s:.120}")
 
         try:
-            composer = PromptComposer(AgentRepository(), SkillRepository())
+            composer = PromptComposer(agent_repo, skill_repo)
             composed = await composer.compose(
                 ComposerInput(
                     agent_slug=slug,
@@ -204,7 +212,7 @@ class SubAgentTaskService:
                 )
             )
         except Exception as exc:
-            logger.warning("[subagent_task] prompt compose failed: {}", exc)
+            logger.exception("[subagent_task] prompt compose failed slug={}", slug)
             return self._failed(f"prompt compose failed: {exc!s:.120}")
 
         model = composed.model or ""
@@ -238,13 +246,16 @@ class SubAgentTaskService:
                             parent_run_id=self.parent_run_id,
                             agent_depth=self.agent_depth + 1,
                         )
-                    except Exception as exc:
+                    except Exception:
                         # Non-fatal: parent_run_id is for the Runs tab
                         # tree; losing it doesn't break the sub-run
-                        # itself. Log and continue.
-                        logger.warning(
-                            "[subagent_task] _attach_to_parent_run failed: {}",
-                            exc,
+                        # itself. Log full stack so post-mortem can see
+                        # which write failed.
+                        logger.exception(
+                            "[subagent_task] _attach_to_parent_run failed "
+                            "run_id={} parent_run_id={}",
+                            getattr(recorder, "run_id", "?"),
+                            self.parent_run_id,
                         )
 
                 result = await stack.runner.run_turn(
@@ -258,7 +269,7 @@ class SubAgentTaskService:
                     sub_run_id=recorder.run_id,
                 )
         except Exception as exc:
-            logger.warning("[subagent_task] run_turn failed: {}", exc)
+            logger.exception("[subagent_task] run_turn failed slug={}", slug)
             return self._failed(f"sub-agent crashed: {exc!s:.120}")
 
     @staticmethod
