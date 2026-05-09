@@ -91,6 +91,10 @@ async def _read_provider_setting() -> str:
         )
         rows = result.data or []
         if rows:
+            # We only honor string values; admin who stores a JSON object /
+            # bool here will silently fall through to the default. Keeps
+            # the failure mode "use the safe default" rather than "crash
+            # the agent loop" if a future migration changes value type.
             value = rows[0].get("value")
             if isinstance(value, str) and value.strip():
                 return value.strip()
