@@ -521,6 +521,17 @@
     "newSpreadsheet": "Spreadsheet",
     "newPresentation": "Presentation",
     "newWebUrl": "Web URL",
+    "fetchUrl": {
+      "title": "Fetch from URL",
+      "label": "Media link",
+      "placeholder": "Paste a YouTube / Bilibili / Douyin / X link",
+      "hint": "The download will appear in Task Center, then in your library.",
+      "submit": "Parse",
+      "submitting": "Submitting...",
+      "successFallback": "Parse task submitted",
+      "failed": "Failed to submit",
+      "invalidScheme": "URL must start with http(s)://"
+    },
     "transferList": "Transfer List",
     "taskList": "Task List",
     "uploadingCount": "Uploading {{current}}/{{total}}",

@@ -38,6 +38,7 @@ import { FilterBar } from './resources/filter/FilterBar';
 import type { ChipId } from './resources/filter/types';
 import type { UseFilterBarConfigReturn } from '../hooks/useFilterBarConfig';
 import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
+import { ResourceFetchUrlModal } from './ResourceFetchUrlModal';
 
 // ─── Skeleton components ────────────────────────────────
 
@@ -283,6 +284,10 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
   // New dropdown
   const [showNewDropdown, setShowNewDropdown] = useState(false);
+  // Bug F (issue #194) — replaces the placeholder "即将推出" toast
+  // on the 网页地址 menu item with a real URL submission modal that
+  // hits POST /api/v1/media/fetch.
+  const [showFetchUrlModal, setShowFetchUrlModal] = useState(false);
   const newDropdownRef = useRef<HTMLDivElement>(null);
 
   // Sort panel
@@ -605,7 +610,10 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                       <div className="border-t border-zinc-800 my-1" />
                       {/* Group 3 -- Other */}
                       <button
-                        onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
+                        onClick={() => {
+                          setShowFetchUrlModal(true);
+                          setShowNewDropdown(false);
+                        }}
                         className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
                       >
                         <Globe size={14} className="text-indigo-400" />
@@ -1034,6 +1042,13 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
           )
         )}
       </div>
+
+      {/* Bug F (issue #194) — Web URL fetch modal, mounted as a sibling
+          so the dropdown closing doesn't unmount it mid-submit. */}
+      <ResourceFetchUrlModal
+        isOpen={showFetchUrlModal}
+        onClose={() => setShowFetchUrlModal(false)}
+      />
     </div>
   );
 };

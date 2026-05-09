@@ -521,6 +521,17 @@
     "newSpreadsheet": "表格",
     "newPresentation": "演示文稿",
     "newWebUrl": "网页地址",
+    "fetchUrl": {
+      "title": "从链接抓取",
+      "label": "媒体链接",
+      "placeholder": "粘贴 YouTube / B 站 / 抖音 / X 链接",
+      "hint": "下载会显示在任务中心，完成后进入资源库。",
+      "submit": "解析",
+      "submitting": "提交中...",
+      "successFallback": "已提交解析任务",
+      "failed": "提交失败",
+      "invalidScheme": "链接需要以 http(s):// 开头"
+    },
     "transferList": "传输列表",
     "taskList": "任务列表",
     "uploadingCount": "正在上传 {{current}}/{{total}}",
