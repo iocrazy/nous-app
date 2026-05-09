@@ -190,17 +190,18 @@ class MediaRepository:
             # useful — pull the real fields out explicitly so the next
             # repro tells us *why* the update failed instead of just
             # "Failed: ".
+            # Loguru ignores stdlib-style %s positional args — the
+            # original PR #191 logging silently rendered literal '%s'
+            # in production (issue #194 Bug D). Use f-string so the
+            # APIError fields actually reach the log line.
             logger.error(
-                "Failed to update parsed_media platform_id=%s: "
-                "type=%s repr=%r message=%s code=%s details=%s hint=%s args=%s",
-                platform_id,
-                type(e).__name__,
-                e,
-                getattr(e, "message", None),
-                getattr(e, "code", None),
-                getattr(e, "details", None),
-                getattr(e, "hint", None),
-                getattr(e, "args", None),
+                f"Failed to update parsed_media platform_id={platform_id}: "
+                f"type={type(e).__name__} repr={e!r} "
+                f"message={getattr(e, 'message', None)!r} "
+                f"code={getattr(e, 'code', None)!r} "
+                f"details={getattr(e, 'details', None)!r} "
+                f"hint={getattr(e, 'hint', None)!r} "
+                f"args={getattr(e, 'args', None)!r}"
             )
             raise
 

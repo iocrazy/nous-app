@@ -507,17 +507,17 @@ class MediaService:
             # the log line is actionable. The user-facing `message`
             # below stays str(e) for backwards-compat with callers that
             # surface it as a UI string.
+            # Loguru doesn't interpolate %s positional args (issue
+            # #194 Bug D — PR #191 was rendering literal '%s' in prod).
+            # Use f-string to actually surface APIError fields.
             logger.error(
-                "Failed to save metadata platform_id=%s: "
-                "type=%s repr=%r message=%s code=%s details=%s hint=%s args=%s",
-                platform_id,
-                type(e).__name__,
-                e,
-                getattr(e, "message", None),
-                getattr(e, "code", None),
-                getattr(e, "details", None),
-                getattr(e, "hint", None),
-                getattr(e, "args", None),
+                f"Failed to save metadata platform_id={platform_id}: "
+                f"type={type(e).__name__} repr={e!r} "
+                f"message={getattr(e, 'message', None)!r} "
+                f"code={getattr(e, 'code', None)!r} "
+                f"details={getattr(e, 'details', None)!r} "
+                f"hint={getattr(e, 'hint', None)!r} "
+                f"args={getattr(e, 'args', None)!r}"
             )
             return {"success": False, "message": f"Save failed: {str(e)}"}
 
