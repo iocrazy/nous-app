@@ -114,7 +114,7 @@ class ContextCompactor:
         regression on a single tenant)."""
         return os.environ.get("AGENT_AUTO_COMPACT", "true").lower() != "false"
 
-    def maybe_compact(
+    async def maybe_compact(
         self,
         *,
         system_message: str,
@@ -122,6 +122,10 @@ class ContextCompactor:
         model: str,
     ) -> tuple[list[dict], CompactionStats]:
         """Return possibly-compacted messages + stats.
+
+        Async because Phase 2 may make an LLM call to summarize the
+        head when the budget is tight. The yellow path is still
+        synchronous internally; the await on green is a no-op.
 
         ``system_message`` is read for token counting only — never edited
         or returned. Caller keeps the original.
@@ -188,27 +192,41 @@ class ContextCompactor:
                 yellow_prune=prune_stats,
             )
 
-        # Orange / Red: emergency cap (Phase 1 stub for what Phase 2
-        # will replace with an LLM head summary). cap_messages_tokens
-        # truncates message bodies in place; lossier than summarising
-        # but lets the turn continue.
+        # Orange / Red: head summarization. Replace older turns with a
+        # single [Earlier conversation summary] system message produced
+        # by a cheap model (default Haiku 4.5). Falls back to lossy
+        # character truncation if the summarizer fails / times out so
+        # context_compactor stays in control of the policy.
         keep = (
             self.RED_KEEP_RECENT_TURNS
             if tier == CompactionTier.RED
             else self.EMERGENCY_KEEP_RECENT_TURNS
         )
-        capped, dropped_chars = self._emergency_cap(
-            messages=pruned,
-            model=model,
-            window=window,
-            sys_tokens=sys_tokens,
-            keep_recent_turns=keep,
-        )
-        final_total = sys_tokens + count_messages_tokens(capped, model)
+        notes: list[str] = []
+        capped: list[dict]
+        dropped_chars = 0
 
-        notes: list[str] = [
-            "emergency-cap (Phase 1 stub); Phase 2 will replace with LLM summary"
-        ]
+        try:
+            capped = await self._compact_with_summary(
+                messages=pruned, keep_recent_turns=keep
+            )
+            notes.append("compacted via LLM head summary")
+        except Exception as exc:
+            logger.warning(
+                "[compactor] summarizer failed, falling back to "
+                "emergency-cap truncation: {}",
+                exc,
+            )
+            capped, dropped_chars = self._emergency_cap(
+                messages=pruned,
+                model=model,
+                window=window,
+                sys_tokens=sys_tokens,
+                keep_recent_turns=keep,
+            )
+            notes.append(f"emergency-cap fallback (summarizer failed: {exc!s:.120})")
+
+        final_total = sys_tokens + count_messages_tokens(capped, model)
         if final_total / window > self.EMERGENCY_FLOOR_PCT:
             notes.append(
                 f"still over emergency floor {self.EMERGENCY_FLOOR_PCT:.0%} "
@@ -229,6 +247,35 @@ class ContextCompactor:
             emergency_dropped_chars=dropped_chars,
             notes=tuple(notes),
         )
+
+    async def _compact_with_summary(
+        self,
+        *,
+        messages: list[dict],
+        keep_recent_turns: int,
+    ) -> list[dict]:
+        """Replace messages[:-keep_recent_turns] with a single
+        [Earlier conversation summary] system message produced by the
+        configured cheap model.
+
+        Raises ``RuntimeError`` (from summarizer) on any provider
+        failure so the caller can fall back to the lossy
+        ``_emergency_cap`` path.
+        """
+        if len(messages) <= keep_recent_turns:
+            return list(messages)  # nothing to summarize
+
+        from app.agent_framework.summarizer import summarize
+
+        head = messages[:-keep_recent_turns]
+        tail = messages[-keep_recent_turns:]
+        summary_text = await summarize(head)
+
+        summary_message = {
+            "role": "system",
+            "content": "[Earlier conversation summary]\n" + summary_text,
+        }
+        return [summary_message] + list(tail)
 
     def _tier_for(self, used_pct: float) -> CompactionTier:
         if used_pct >= self.thresholds.red_pct:
