@@ -32,6 +32,7 @@ from uuid import UUID
 if TYPE_CHECKING:
     from app.agent_framework import AbortController
 
+from app.agent_framework import ContextCompactor
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.infra.hooks import (
     HookContext,
@@ -46,6 +47,11 @@ from app.services.ai.skills.skill_tool_service import SkillToolService
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_ITERATIONS = 5
+
+# Module-level singleton — ContextCompactor is stateless. Reusing the
+# same instance per turn avoids the GC churn of allocating a fresh
+# object on the agent's hot path.
+_DEFAULT_COMPACTOR = ContextCompactor()
 
 # Tool names recognised by the runner. Anything else is silently ignored
 # (forward-compat with future caller-provided tools).
@@ -417,22 +423,22 @@ class AgentRunner:
         # no token re-count. On any other tier we feed the COMPACTED list
         # into the budget check below so we don't reject a turn that
         # would have fit after pruning.
-        from app.agent_framework import ContextCompactor
-
-        compactor = ContextCompactor()
-        user_messages, compaction_stats = compactor.maybe_compact(
+        user_messages, compaction_stats = _DEFAULT_COMPACTOR.maybe_compact(
             system_message=composed.system_message,
             user_messages=user_messages,
             model=composed.model,
         )
-        if recorder is not None and compaction_stats.tokens_saved > 0:
-            try:
-                recorder.note_compaction(compaction_stats)
-            except AttributeError:
-                # Recorder doesn't yet expose the helper — Phase 5 wires
-                # it in. Stay quiet, the stats are still in the log line
-                # the compactor itself emits.
-                pass
+        # hasattr instead of try/except AttributeError so a real bug
+        # inside note_compaction (e.g., supabase write failing with
+        # AttributeError on a None response) doesn't get swallowed —
+        # Phase 5 wires the helper in; until then this branch is just
+        # quiet.
+        if (
+            recorder is not None
+            and compaction_stats.tokens_saved > 0
+            and hasattr(recorder, "note_compaction")
+        ):
+            recorder.note_compaction(compaction_stats)
 
         # Pre-flight 2: context budget guard. A small-context model
         # (e.g. user filled qwen-max with a heavy AGENT spec) would

@@ -57,6 +57,39 @@ def test_kill_switch_returns_messages_unchanged(monkeypatch, compactor):
     assert "AGENT_AUTO_COMPACT=false" in stats.notes
 
 
+def test_kill_switch_skips_tokenization(monkeypatch, compactor):
+    """The disabled path's whole point is "no work". Tokens stay at 0
+    sentinel — caller's note_compaction guard already short-circuits on
+    tokens_saved == 0, and re-counting just to fill stats nobody reads
+    defeats the kill switch."""
+    monkeypatch.setenv("AGENT_AUTO_COMPACT", "false")
+    msgs = _tail_messages(count=3)
+
+    with patch(
+        "app.agent_framework.context_compactor.count_messages_tokens"
+    ) as mock_count:
+        out, stats = compactor.maybe_compact(
+            system_message="sys", user_messages=msgs, model="claude-sonnet-4-6"
+        )
+
+    mock_count.assert_not_called()
+    assert stats.tokens_before == 0
+    assert stats.tokens_after == 0
+
+
+def test_notes_is_immutable_tuple(compactor):
+    """``notes`` lives on a frozen dataclass; making it a ``list`` would
+    let callers mutate `stats.notes.append(...)` and silently change a
+    "frozen" record. Pin the type so an accidental refactor back to
+    list trips the test."""
+    msgs = _tail_messages(count=2)
+    _, stats = compactor.maybe_compact(
+        system_message="", user_messages=msgs, model="claude-sonnet-4-6"
+    )
+
+    assert isinstance(stats.notes, tuple)
+
+
 def test_unknown_model_falls_back_to_green(compactor):
     """Bail out cleanly on unknown models — the downstream context-budget
     check still runs and rejects oversize requests."""

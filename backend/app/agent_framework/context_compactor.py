@@ -32,7 +32,7 @@ observability + cost analysis.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
@@ -68,7 +68,11 @@ class CompactionThresholds:
 
 @dataclass(frozen=True)
 class CompactionStats:
-    """Per-turn telemetry. Persist via agent_runs.metadata."""
+    """Per-turn telemetry. Persist via agent_runs.metadata.
+
+    ``notes`` is a tuple — a list with ``frozen=True`` would lie about
+    immutability since the list itself stays mutable.
+    """
 
     tier: CompactionTier
     tokens_before: int
@@ -76,7 +80,7 @@ class CompactionStats:
     tokens_saved: int
     yellow_prune: Optional[PruneStats] = None
     emergency_dropped_chars: int = 0
-    notes: list[str] = field(default_factory=list)
+    notes: tuple[str, ...] = ()
 
 
 class ContextCompactor:
@@ -88,6 +92,12 @@ class ContextCompactor:
     # here means the integration point in agent_runner doesn't change.
     EMERGENCY_KEEP_RECENT_TURNS = 4
     RED_KEEP_RECENT_TURNS = 2
+
+    # Emergency cap targets this fraction of the window for messages
+    # (rest reserved for system prompt). 0.80 lands a compacted run at
+    # the orange/red boundary — enough headroom for the next turn's
+    # tool output without immediately re-triggering compaction.
+    EMERGENCY_TARGET_PCT = 0.80
 
     # Hard-stop floor when even the "keep recent" budget can't fit the
     # window. Below this we give up and let the existing
@@ -120,26 +130,29 @@ class ContextCompactor:
         returns a new list (or the input unchanged if tier == green).
         """
         if not self.is_enabled():
-            tokens = count_messages_tokens(user_messages, model)
+            # Kill switch: skip even tokenization. Caller asked for the
+            # cheapest possible no-op; tokens=0 is a sentinel meaning
+            # "not measured" — caller's recorder.note_compaction guard
+            # already short-circuits on tokens_saved == 0.
             return user_messages, CompactionStats(
                 tier=CompactionTier.GREEN,
-                tokens_before=tokens,
-                tokens_after=tokens,
+                tokens_before=0,
+                tokens_after=0,
                 tokens_saved=0,
-                notes=["AGENT_AUTO_COMPACT=false"],
+                notes=("AGENT_AUTO_COMPACT=false",),
             )
 
         window = model_window_size(model)
         if window <= 0:
-            # Unknown model → bail out with noop. The downstream budget
-            # check will still run and reject if the request is way over.
-            tokens = count_messages_tokens(user_messages, model)
+            # Unknown model → bail out with noop. Same sentinel semantics
+            # as the kill-switch path: don't pay for tokenization just to
+            # populate stats nobody will read.
             return user_messages, CompactionStats(
                 tier=CompactionTier.GREEN,
-                tokens_before=tokens,
-                tokens_after=tokens,
+                tokens_before=0,
+                tokens_after=0,
                 tokens_saved=0,
-                notes=[f"unknown model={model}, compaction skipped"],
+                notes=(f"unknown model={model}, compaction skipped",),
             )
 
         sys_tokens = count_tokens(system_message, model) if system_message else 0
@@ -194,7 +207,7 @@ class ContextCompactor:
         final_total = sys_tokens + count_messages_tokens(capped, model)
 
         notes: list[str] = [
-            f"emergency-cap (Phase 1 stub); Phase 2 will replace with LLM summary"
+            "emergency-cap (Phase 1 stub); Phase 2 will replace with LLM summary"
         ]
         if final_total / window > self.EMERGENCY_FLOOR_PCT:
             notes.append(
@@ -214,7 +227,7 @@ class ContextCompactor:
             tokens_saved=total - final_total,
             yellow_prune=prune_stats,
             emergency_dropped_chars=dropped_chars,
-            notes=notes,
+            notes=tuple(notes),
         )
 
     def _tier_for(self, used_pct: float) -> CompactionTier:
@@ -247,11 +260,11 @@ class ContextCompactor:
         if len(messages) <= keep_recent_turns:
             return messages, 0
 
-        # Reserve 80 % of the window for the conversation; system prompt
-        # gets the remaining 20 %. cap_messages_tokens enforces a per-
-        # message cap, not a total — we hand it a per-message budget that
-        # the math says will fit.
-        target_msg_tokens = int(window * 0.8) - sys_tokens
+        # Reserve EMERGENCY_TARGET_PCT of the window for the
+        # conversation; system prompt gets the remainder.
+        # cap_messages_tokens enforces a per-message cap, not a total —
+        # we hand it a per-message budget that the math says will fit.
+        target_msg_tokens = int(window * self.EMERGENCY_TARGET_PCT) - sys_tokens
         if target_msg_tokens <= 0:
             # System prompt alone overflows — nothing this module can do.
             return messages, 0
