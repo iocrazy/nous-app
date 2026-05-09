@@ -50,7 +50,7 @@ class SkillRepository(BaseRepository):
     async def archive(self, skill_id: str) -> None:
         """Soft-delete by setting status to 'archived'."""
         await self.update(skill_id, {"status": "archived"})
-        logger.info("Archived skill %s", skill_id)
+        logger.info(f"Archived skill {skill_id}")
 
     async def list_skills(
         self,
@@ -91,7 +91,7 @@ class SkillRepository(BaseRepository):
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error("Failed to list skills: %s", e)
+            logger.error(f"Failed to list skills: {e}")
             return []
 
     # ------------------------------------------------------------------
@@ -300,7 +300,7 @@ class SkillRepository(BaseRepository):
                 .eq("path", path)
                 .execute()
             )
-            logger.info("Deleted skill_files row skill_id=%s path=%s", skill_id, path)
+            logger.info(f"Deleted skill_files row skill_id={skill_id} path={path}")
         except Exception as e:
             logger.error(f"Failed to delete file {path!r} for skill {skill_id}: {e}")
             raise
@@ -336,7 +336,7 @@ class SkillRepository(BaseRepository):
         try:
             client = await self._get_client()
             await client.table(self.TABLE).delete().eq("id", skill_id).execute()
-            logger.info("Deleted skill id=%s", skill_id)
+            logger.info(f"Deleted skill id={skill_id}")
         except Exception as e:
             logger.error(f"Failed to delete skill {skill_id}: {e}")
             raise

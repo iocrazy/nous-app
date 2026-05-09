@@ -39,7 +39,7 @@ async def create_chapter(
         )
         return {"success": True, "data": chapter}
     except Exception as exc:
-        logger.error("[Scripts] create_chapter failed: %s", exc)
+        logger.error(f"[Scripts] create_chapter failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create chapter")
 
 
@@ -54,7 +54,7 @@ async def update_chapter(
         )
         return {"success": True, "data": chapter}
     except Exception as exc:
-        logger.error("[Scripts] update_chapter %s failed: %s", chapter_id, exc)
+        logger.error(f"[Scripts] update_chapter {chapter_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update chapter")
 
 
@@ -65,7 +65,7 @@ async def delete_chapter(auth: AuthDep, chapter_id: str) -> Dict[str, Any]:
         await svc.delete_chapter(chapter_id)
         return {"success": True}
     except Exception as exc:
-        logger.error("[Scripts] delete_chapter %s failed: %s", chapter_id, exc)
+        logger.error(f"[Scripts] delete_chapter {chapter_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to delete chapter")
 
 
@@ -85,5 +85,5 @@ async def sync_canvas(
         )
         return {"success": True, "data": result}
     except Exception as exc:
-        logger.error("[Scripts] sync_canvas %s failed: %s", script_id, exc)
+        logger.error(f"[Scripts] sync_canvas {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to sync canvas")

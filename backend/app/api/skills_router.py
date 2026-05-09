@@ -31,7 +31,7 @@ async def create_skill(auth: AuthDep, body: SkillCreate) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[Skills] create failed: %s", exc)
+        logger.error(f"[Skills] create failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create skill")
 
 
@@ -52,7 +52,7 @@ async def list_skills(
         )
         return {"success": True, "data": skills}
     except Exception as exc:
-        logger.error("[Skills] list failed: %s", exc)
+        logger.error(f"[Skills] list failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to list skills")
 
 
@@ -74,7 +74,7 @@ async def get_skill(auth: AuthDep, skill_id: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[Skills] get %s failed: %s", skill_id, exc)
+        logger.error(f"[Skills] get {skill_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to get skill")
 
 
@@ -99,7 +99,7 @@ async def update_skill(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[Skills] update %s failed: %s", skill_id, exc)
+        logger.error(f"[Skills] update {skill_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update skill")
 
 
@@ -122,5 +122,5 @@ async def delete_skill(auth: AuthDep, skill_id: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[Skills] delete %s failed: %s", skill_id, exc)
+        logger.error(f"[Skills] delete {skill_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to delete skill")

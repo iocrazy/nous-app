@@ -92,6 +92,13 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # classifier inside the built-in 'remember' skill path. Side-effect
     # of a tool call, not a primary chat completion.
     "services/ai/skills/skill_tool_service.py": "active_remember contradiction classifier, side-effect of remember()",
+    # Phase 2 of #199: head summarizer for context compaction. Cheap
+    # model (default Haiku 4.5) called from inside ContextCompactor's
+    # orange/red tier when a long conversation needs to fit the
+    # window. The parent agent's run_turn already runs under a
+    # RunRecorder; this internal LLM call is a side-channel for which
+    # cost is rolled up via metadata.compaction.total_tokens_saved.
+    "agent_framework/summarizer.py": "compaction head summarizer auxiliary LLM, side-channel",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a

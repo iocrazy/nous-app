@@ -63,7 +63,7 @@ class SessionMemoryRepository:
                 return None
             return self._row_to_obj(result.data)
         except Exception as exc:
-            logger.error("session_memory load %s failed: %s", session_id, exc)
+            logger.error(f"session_memory load {session_id} failed: {exc}")
             return None
 
     async def upsert(

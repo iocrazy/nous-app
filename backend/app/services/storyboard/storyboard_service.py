@@ -136,7 +136,7 @@ class StoryboardService:
             )
             return project
         except Exception as exc:
-            logger.error("Failed to create storyboard project: %s", exc)
+            logger.error(f"Failed to create storyboard project: {exc}")
             raise
 
     def _ensure_nas_directories(self, team_id: str, project_id: str) -> None:
@@ -155,7 +155,7 @@ class StoryboardService:
             os.makedirs(project_root, exist_ok=True)
             for subdir in _PROJECT_SUBDIRS:
                 os.makedirs(os.path.join(project_root, subdir), exist_ok=True)
-            logger.info("Provisioned NAS directories at %s", project_root)
+            logger.info(f"Provisioned NAS directories at {project_root}")
         except OSError as exc:
             logger.error(
                 "Failed to create NAS directories for project %s: %s",
@@ -232,7 +232,7 @@ class StoryboardService:
                 project_id=project_id,
             )
         except Exception as exc:
-            logger.error("Failed to list projects for team %s: %s", team_id, exc)
+            logger.error(f"Failed to list projects for team {team_id}: {exc}")
             raise
 
     async def update_project(
@@ -251,7 +251,7 @@ class StoryboardService:
         try:
             return await self.project_repo.update(project_id, data)
         except Exception as exc:
-            logger.error("Failed to update storyboard project %s: %s", project_id, exc)
+            logger.error(f"Failed to update storyboard project {project_id}: {exc}")
             raise
 
     async def soft_delete_project(self, project_id: str) -> None:
@@ -382,7 +382,7 @@ class StoryboardService:
                 "deleted_edges_count": deleted_edges_count,
             }
         except Exception as exc:
-            logger.error("Canvas sync failed for project %s: %s", project_id, exc)
+            logger.error(f"Canvas sync failed for project {project_id}: {exc}")
             raise
 
     # ------------------------------------------------------------------ #
@@ -419,7 +419,7 @@ class StoryboardService:
                 character_data["visual_traits"] = visual_traits
 
             character = await self.character_repo.create(character_data)
-            logger.info("Created character '%s' for project %s", name, project_id)
+            logger.info(f"Created character '{name}' for project {project_id}")
             return character
         except Exception as exc:
             logger.error(
@@ -445,7 +445,7 @@ class StoryboardService:
         try:
             return await self.character_repo.update(character_id, data)
         except Exception as exc:
-            logger.error("Failed to update character %s: %s", character_id, exc)
+            logger.error(f"Failed to update character {character_id}: {exc}")
             raise
 
     async def delete_character(self, character_id: str) -> None:
@@ -458,7 +458,7 @@ class StoryboardService:
         try:
             await self.character_repo.delete(character_id)
         except Exception as exc:
-            logger.error("Failed to delete character %s: %s", character_id, exc)
+            logger.error(f"Failed to delete character {character_id}: {exc}")
             raise
 
     async def get_character_prompt_fragment(self, character_id: str) -> str:
@@ -855,7 +855,7 @@ class StoryboardService:
             )
             return result.data[0] if result.data else None
         except Exception as exc:
-            logger.error("Failed to get asset %s: %s", asset_id, exc)
+            logger.error(f"Failed to get asset {asset_id}: {exc}")
             return None
 
 

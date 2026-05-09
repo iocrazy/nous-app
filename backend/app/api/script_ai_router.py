@@ -65,7 +65,7 @@ async def generate_outline(
 
         return {"success": True, "task_id": task_id}
     except Exception as exc:
-        logger.error("[ScriptAI] generate_outline failed: %s", exc)
+        logger.error(f"[ScriptAI] generate_outline failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to generate outline")
 
 
@@ -87,7 +87,7 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
 
         return {"success": True, "data": {"content": content, "chapter": updated}}
     except Exception as exc:
-        logger.error("[ScriptAI] expand_chapter failed: %s", exc)
+        logger.error(f"[ScriptAI] expand_chapter failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to expand chapter")
 
 
@@ -132,7 +132,7 @@ async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[st
 
         return {"success": True, "data": {"branches": created}}
     except Exception as exc:
-        logger.error("[ScriptAI] create_branches failed: %s", exc)
+        logger.error(f"[ScriptAI] create_branches failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create branches")
 
 
@@ -208,7 +208,7 @@ async def convert_to_storyboard(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[ScriptAI] convert_to_storyboard failed: %s", exc)
+        logger.error(f"[ScriptAI] convert_to_storyboard failed: {exc}")
         raise HTTPException(
             status_code=500,
             detail="Failed to convert chapter to storyboard",

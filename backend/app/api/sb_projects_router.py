@@ -41,7 +41,7 @@ async def create_project(
         )
         return {"success": True, "data": project}
     except Exception as exc:
-        logger.error("[SBProjects] create_project failed: %s", exc)
+        logger.error(f"[SBProjects] create_project failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to create project: {exc}")
 
 
@@ -75,7 +75,7 @@ async def list_projects(
         )
         return {"success": True, "data": result}
     except Exception as exc:
-        logger.error("[SBProjects] list_projects failed: %s", exc)
+        logger.error(f"[SBProjects] list_projects failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to list projects: {exc}")
 
 
@@ -97,7 +97,7 @@ async def get_project(auth: AuthDep, project_id: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[SBProjects] get_project %s failed: %s", project_id, exc)
+        logger.error(f"[SBProjects] get_project {project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to get project: {exc}")
 
 
@@ -120,7 +120,7 @@ async def update_project(
         )
         return {"success": True, "data": updated}
     except Exception as exc:
-        logger.error("[SBProjects] update_project %s failed: %s", project_id, exc)
+        logger.error(f"[SBProjects] update_project {project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to update project: {exc}")
 
 
@@ -138,7 +138,7 @@ async def delete_project(auth: AuthDep, project_id: str) -> Dict[str, Any]:
         await svc.soft_delete_project(project_id)
         return {"success": True}
     except Exception as exc:
-        logger.error("[SBProjects] delete_project %s failed: %s", project_id, exc)
+        logger.error(f"[SBProjects] delete_project {project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to delete project: {exc}")
 
 
@@ -159,5 +159,5 @@ async def update_viewport(
         updated = await svc.update_viewport(project_id, body)
         return {"success": True, "data": updated}
     except Exception as exc:
-        logger.error("[SBProjects] update_viewport %s failed: %s", project_id, exc)
+        logger.error(f"[SBProjects] update_viewport {project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to update viewport: {exc}")

@@ -186,7 +186,7 @@ class LLMAnalysisService:
                     )
                     recorder.set_summaries(output_summary=result.get("content") or "")
             except AgentPausedError as err:
-                logger.warning("[Summarize] agent paused: %s", err)
+                logger.warning(f"[Summarize] agent paused: {err}")
                 raise
 
         if result.get("error"):

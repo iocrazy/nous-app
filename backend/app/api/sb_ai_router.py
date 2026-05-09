@@ -115,7 +115,7 @@ async def generate_image(auth: AuthDep, body: GenerateImageRequest) -> Dict[str,
         )
         return {"success": True, "task_id": task_id}
     except Exception as exc:
-        logger.error("[SBAi] generate_image failed: %s", exc)
+        logger.error(f"[SBAi] generate_image failed: {exc}")
         raise HTTPException(
             status_code=500, detail=f"Failed to queue image generation: {exc}"
         )
@@ -180,7 +180,7 @@ async def generate_video(auth: AuthDep, body: GenerateVideoRequest) -> Dict[str,
         )
         return {"success": True, "task_id": task_id}
     except Exception as exc:
-        logger.error("[SBAi] generate_video failed: %s", exc)
+        logger.error(f"[SBAi] generate_video failed: {exc}")
         raise HTTPException(
             status_code=500, detail=f"Failed to queue video generation: {exc}"
         )
@@ -232,7 +232,7 @@ async def split_script(auth: AuthDep, body: SplitScriptRequest) -> Dict[str, Any
         )
         return {"success": True, "task_id": task_id}
     except Exception as exc:
-        logger.error("[SBAi] split_script failed: %s", exc)
+        logger.error(f"[SBAi] split_script failed: {exc}")
         raise HTTPException(
             status_code=500, detail=f"Failed to queue script split: {exc}"
         )
@@ -287,7 +287,7 @@ async def analyze_video(auth: AuthDep, body: AnalyzeVideoRequest) -> Dict[str, A
         )
         return {"success": True, "task_id": task_id}
     except Exception as exc:
-        logger.error("[SBAi] analyze_video failed: %s", exc)
+        logger.error(f"[SBAi] analyze_video failed: {exc}")
         raise HTTPException(
             status_code=500, detail=f"Failed to queue video analysis: {exc}"
         )
@@ -349,7 +349,7 @@ async def detect_scenes(auth: AuthDep, body: DetectScenesRequest) -> Dict[str, A
         )
         return {"success": True, "task_id": task_id}
     except Exception as exc:
-        logger.error("[SBAi] detect_scenes failed: %s", exc)
+        logger.error(f"[SBAi] detect_scenes failed: {exc}")
         raise HTTPException(
             status_code=500, detail=f"Failed to queue scene detection: {exc}"
         )

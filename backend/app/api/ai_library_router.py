@@ -86,7 +86,7 @@ def _coerce_user_uuid(user_id: str) -> UUID:
     try:
         return UUID(user_id)
     except (TypeError, ValueError) as exc:
-        logger.error("[ai-library] malformed user_id from auth: %r (%s)", user_id, exc)
+        logger.error(f"[ai-library] malformed user_id from auth: {user_id} ({exc})")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid user identifier in auth context",
@@ -314,7 +314,7 @@ async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
         try:
             agent_uuid = UUID(str(row["id"]))
         except (KeyError, TypeError, ValueError) as exc:
-            logger.warning("[ai-library] skipping agent with bad id: %s", exc)
+            logger.warning(f"[ai-library] skipping agent with bad id: {exc}")
             continue
         skill_ids = await agent_repo.get_skill_ids(agent_uuid)
         enriched_with_skills.append({**row, "skill_ids": skill_ids})
@@ -590,7 +590,7 @@ async def list_skills(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
         try:
             skill_id = int(s["id"])
         except (KeyError, TypeError, ValueError) as exc:
-            logger.warning("[ai-library] skipping skill with bad id: %s", exc)
+            logger.warning(f"[ai-library] skipping skill with bad id: {exc}")
             continue
         files = await skill_repo.list_files(skill_id)
         enriched.append({**s, "files": files})

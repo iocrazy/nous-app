@@ -201,14 +201,14 @@ class StoryboardAIService:
                 f"LLM API error {exc.response.status_code}: {exc.response.text[:200]}"
             ) from exc
         except httpx.RequestError as exc:
-            logger.error("LLM API request failed: %s", exc)
+            logger.error(f"LLM API request failed: {exc}")
             raise RuntimeError(f"LLM API request failed: {exc}") from exc
 
         data = response.json()
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError) as exc:
-            logger.error("Unexpected LLM response shape: %s", data)
+            logger.error(f"Unexpected LLM response shape: {data}")
             raise RuntimeError("Unexpected LLM response structure") from exc
 
     @staticmethod
@@ -577,7 +577,7 @@ class StoryboardAIService:
         try:
             scenes = self._extract_json_from_text(raw)
         except ValueError as exc:
-            logger.error("Failed to parse split_script LLM response: %s", exc)
+            logger.error(f"Failed to parse split_script LLM response: {exc}")
             raise
 
         if not isinstance(scenes, list):
@@ -585,7 +585,7 @@ class StoryboardAIService:
                 f"Expected JSON array from LLM, got {type(scenes).__name__}"
             )
 
-        logger.info("split_script: parsed %d scene(s) from script", len(scenes))
+        logger.info(f"split_script: parsed {len(scenes)} scene(s) from script")
         return scenes
 
     # ------------------------------------------------------------------ #
@@ -617,11 +617,11 @@ class StoryboardAIService:
                 video_path
             )
         except Exception as exc:
-            logger.error("detect_scenes failed for video %s: %s", video_path, exc)
+            logger.error(f"detect_scenes failed for video {video_path}: {exc}")
             raise
 
         if not raw_keyframes:
-            logger.info("analyze_video: no keyframes detected in %s", video_path)
+            logger.info(f"analyze_video: no keyframes detected in {video_path}")
             return {"keyframes": []}
 
         # Compose Mode B system prompt ONCE — every keyframe uses the same
