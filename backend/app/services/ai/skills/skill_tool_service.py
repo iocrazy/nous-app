@@ -32,6 +32,12 @@ class SkillToolService:
         # a fresh SkillToolService per run — its todo_list lives only for
         # that run and is reset at run start. Set lazily on first use.
         self.todo_list: Optional[Any] = None
+        # Phase 3b of #199: per-turn SubAgentTaskService. Wired by the
+        # chat layer with caller_agent_id / parent_run_id / agent_depth
+        # baked in. None when sub-agent dispatch isn't configured for
+        # this run — the ``task`` built-in returns a structured error
+        # in that case so the LLM gets useful feedback.
+        self.subagent_task: Optional[Any] = None
 
     async def execute(self, args: dict[str, Any]) -> dict[str, Any]:
         slug = (args.get("skill") or "").strip()
@@ -49,6 +55,24 @@ class SkillToolService:
         # AgentRunner attaches before each turn.
         if slug == "todo":
             return await self._execute_todo(args)
+
+        # Phase 3b of #199: built-in 'task' skill — synchronous spawn-
+        # and-return of a sub-agent. Requires ``self.subagent_task`` to
+        # be wired by the chat layer (see ai_library_chat_wiring.py).
+        # Returns a structured error envelope when not configured so
+        # the parent LLM sees ``status=failed`` instead of a silent
+        # "unknown skill: task" that would leak into normal skill lookup.
+        if slug == "task":
+            if self.subagent_task is None:
+                return {
+                    "summary": "",
+                    "status": "failed",
+                    "error": (
+                        "task tool not configured for this run — chat "
+                        "wiring did not install a SubAgentTaskService"
+                    ),
+                }
+            return await self.subagent_task.spawn(args)
 
         skill = await self.skill_repo.get_by_slug(slug)
         if not skill:

@@ -239,9 +239,27 @@ async def build_agent_runner_stack(
         mcp_registry = None
 
     # ── 5. AgentRunner ──────────────────────────────────────────────
+    # SubAgentTaskService wires the spawn-and-return Task tool that
+    # Phase 3b of #199 added. Same caller context as DelegateTool —
+    # both share the rate-limit + depth + cycle helpers in
+    # workforce/delegate_tool, so the two ways of spawning sub-agents
+    # cannot bypass each other's safety net.
+    from app.services.ai.runner.subagent_task_service import (
+        SubAgentTaskService,
+    )
+
+    skill_tool = SkillToolService(skill_repo)
+    skill_tool.subagent_task = SubAgentTaskService(
+        caller_agent_id=UUID(agent["id"]),
+        caller_user_id=user_id,
+        parent_run_id=parent_run_id,
+        agent_depth=agent_depth,
+        session_id=session_id,
+    )
+
     runner = AgentRunner(
         adapter=fallback_chain,
-        skill_tool=SkillToolService(skill_repo),
+        skill_tool=skill_tool,
         hooks=registry,
         delegate_tool=delegate_tool,
         mcp_registry=mcp_registry,
