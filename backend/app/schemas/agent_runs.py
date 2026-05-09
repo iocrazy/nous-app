@@ -33,6 +33,11 @@ class RunListItem(BaseModel):
     ended_at: Optional[datetime] = None
     error_code: Optional[str] = None
     skill_slugs_used: list[str] = Field(default_factory=list)
+    # Phase 3a/3b of #199. Top-level runs leave this NULL; runs spawned
+    # via the SubAgentTask tool point to the parent. Frontend uses this
+    # to show "this is a sub-run" badges and to render Runs lists as a
+    # tree.
+    parent_run_id: Optional[UUID] = None
 
 
 class RunDetail(RunListItem):
