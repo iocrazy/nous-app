@@ -22,6 +22,7 @@ from app.api.ai_library_router import (
     get_run,
     get_usage,
     list_agent_runs,
+    list_run_children,
 )
 
 
@@ -275,3 +276,77 @@ async def test_get_usage_sums_per_agent_for_user_scope() -> None:
     per_agent = {b["agent_id"]: b for b in result["per_agent"]}
     assert per_agent[agent_a]["run_count"] == 2
     assert per_agent[agent_b]["failed_count"] == 1
+
+
+# ─── Phase 4 of #199: list_run_children ────────────────────────────────
+
+
+def test_row_to_run_list_item_includes_parent_run_id() -> None:
+    """Sub-runs spawned via the Task tool carry parent_run_id; the
+    list projection must surface it so the Runs UI can render the
+    tree without a second round-trip."""
+    parent = str(uuid4())
+    row = _sample_row(parent_run_id=parent)
+    item = _row_to_run_list_item(row)
+    assert item["parent_run_id"] == parent
+
+
+def test_row_to_run_list_item_parent_null_for_top_level() -> None:
+    """Top-level runs have NULL parent_run_id. The projection must
+    pass NULL through cleanly — UI treats NULL as 'this is a root'."""
+    row = _sample_row()  # no parent_run_id key set
+    item = _row_to_run_list_item(row)
+    assert item["parent_run_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_run_children_404_when_parent_missing() -> None:
+    """Stray parent_run_id from another user must read as 404 — the
+    same authz pattern as get_run, so existence isn't leaked via
+    'children empty list' vs 'parent doesn't exist'."""
+    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+        runs_cls.return_value.get_by_id = AsyncMock(return_value=None)
+        with pytest.raises(HTTPException) as exc:
+            await list_run_children(uuid4(), _fake_auth())
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_run_children_returns_empty_when_no_subruns() -> None:
+    """A parent that exists but never spawned a sub-agent has no
+    children — return empty list, not 404."""
+    parent_id = uuid4()
+    parent_row = _sample_row(id=str(parent_id))
+    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+        instance = runs_cls.return_value
+        instance.get_by_id = AsyncMock(return_value=parent_row)
+        instance.list_children = AsyncMock(return_value=[])
+        out = await list_run_children(parent_id, _fake_auth())
+    assert out == []
+
+
+@pytest.mark.asyncio
+async def test_list_run_children_returns_slim_envelope() -> None:
+    """Children come back through the slim _row_to_run_list_item
+    projection — same shape as the agents/{slug}/runs list endpoint
+    so the Runs UI can use one render path for both."""
+    parent_id = uuid4()
+    parent_row = _sample_row(id=str(parent_id))
+    child_row = _sample_row(
+        id=str(uuid4()),
+        parent_run_id=str(parent_id),
+        trigger="subagent_task",
+    )
+
+    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+        instance = runs_cls.return_value
+        instance.get_by_id = AsyncMock(return_value=parent_row)
+        instance.list_children = AsyncMock(return_value=[child_row])
+        out = await list_run_children(parent_id, _fake_auth())
+
+    assert len(out) == 1
+    assert out[0]["parent_run_id"] == str(parent_id)
+    assert out[0]["trigger"] == "subagent_task"
+    # Slim projection — heavy fields like metadata_json must NOT be
+    # in the list response (token cost in the UI render).
+    assert "metadata_json" not in out[0]

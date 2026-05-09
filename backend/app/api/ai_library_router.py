@@ -43,6 +43,7 @@ from app.repositories.agent_workforce_repository import (
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.agent_runs import (
     RunDetail,
+    RunListItem,
     RunListResponse,
     UsageAggregate,
 )
@@ -1015,6 +1016,9 @@ def _row_to_run_list_item(row: Dict[str, Any]) -> Dict[str, Any]:
         "ended_at": row.get("ended_at"),
         "error_code": row.get("error_code"),
         "skill_slugs_used": row.get("skill_slugs_used") or [],
+        # Phase 3a/3b/4 of #199: surface parent_run_id so the Runs UI
+        # can render sub-spawn hierarchy without an extra round-trip.
+        "parent_run_id": row.get("parent_run_id"),
     }
 
 
@@ -1285,6 +1289,27 @@ async def get_run(run_id: UUID, auth: AuthDep) -> Dict[str, Any]:
         if row.get(field) is not None:
             row[field] = float(row[field])
     return row
+
+
+@router.get(
+    "/runs/{run_id}/children",
+    response_model=List[RunListItem],
+    summary="List direct sub-runs spawned by this run via the Task tool",
+)
+async def list_run_children(run_id: UUID, auth: AuthDep) -> List[Dict[str, Any]]:
+    """Phase 4 of issue #199. Direct children only — UI calls
+    recursively when it wants a full tree. Returns [] when the parent
+    run is unknown / not owned (avoids leaking existence)."""
+    runs_repo = AgentRunsRepository()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    # Verify the parent is visible to the caller before exposing
+    # children. Without this, a stray run_id from another user would
+    # leak the fact that sub-runs exist (count != 0 vs count == 0).
+    parent = await runs_repo.get_by_id(run_id, user_id=user_uuid)
+    if not parent:
+        raise HTTPException(status_code=404, detail="run not found")
+    rows = await runs_repo.list_children(run_id, user_id=user_uuid)
+    return [_row_to_run_list_item(r) for r in rows]
 
 
 @router.post(

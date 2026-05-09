@@ -93,6 +93,42 @@ class AgentRunsRepository:
             logger.error(f"Failed to get run {run_id}: {e}")
             return None
 
+    async def list_children(
+        self,
+        parent_run_id: UUID,
+        *,
+        user_id: UUID,
+        limit: int = 100,
+    ) -> list[Dict[str, Any]]:
+        """Phase 4 of #199: direct children of one parent run.
+
+        Direct only — caller asks recursively if they want a full tree
+        (this avoids surprise N+1 explosions and keeps the per-call
+        cost predictable). The user_id filter doubles as authz: a
+        stray parent_run_id from another user reads as empty rather
+        than leaking existence.
+
+        Ordered by started_at DESC so the newest sub-spawn is at top —
+        matches Runs UI's "newest first" convention.
+        """
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table(self.TABLE)
+                .select("*")
+                .eq("parent_run_id", str(parent_run_id))
+                .eq("user_id", str(user_id))
+                .order("started_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(
+                f"Failed to list children for parent={parent_run_id}: {e}"
+            )
+            return []
+
     # ------------------------------------------------------------------
     # Cancel (flip flag; runner observes via RunRecorder.check_cancelled)
     # ------------------------------------------------------------------
