@@ -28,7 +28,7 @@ async def create_script_project(
         )
         return {"success": True, "data": project}
     except Exception as exc:
-        logger.error("[Scripts] create_project failed: %s", exc)
+        logger.error(f"[Scripts] create_project failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create script")
 
 
@@ -50,7 +50,7 @@ async def list_script_projects(
         )
         return {"success": True, "data": result}
     except Exception as exc:
-        logger.error("[Scripts] list_projects failed: %s", exc)
+        logger.error(f"[Scripts] list_projects failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to list scripts")
 
 
@@ -65,7 +65,7 @@ async def get_script_project(auth: AuthDep, script_id: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[Scripts] get_project %s failed: %s", script_id, exc)
+        logger.error(f"[Scripts] get_project {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to get script")
 
 
@@ -80,7 +80,7 @@ async def update_script_project(
         )
         return {"success": True, "data": updated}
     except Exception as exc:
-        logger.error("[Scripts] update_project %s failed: %s", script_id, exc)
+        logger.error(f"[Scripts] update_project {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update script")
 
 
@@ -91,7 +91,7 @@ async def delete_script_project(auth: AuthDep, script_id: str) -> Dict[str, Any]
         await svc.soft_delete_project(script_id)
         return {"success": True}
     except Exception as exc:
-        logger.error("[Scripts] delete_project %s failed: %s", script_id, exc)
+        logger.error(f"[Scripts] delete_project {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to delete script")
 
 
@@ -104,5 +104,5 @@ async def update_viewport(
         await svc.update_viewport(script_id, body.model_dump())
         return {"success": True}
     except Exception as exc:
-        logger.error("[Scripts] update_viewport %s failed: %s", script_id, exc)
+        logger.error(f"[Scripts] update_viewport {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update viewport")

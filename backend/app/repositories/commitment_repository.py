@@ -95,7 +95,7 @@ class CommitmentRepository:
                 raise RuntimeError("commitment insert returned no row")
             return self._row_to_commitment(result.data[0])
         except Exception as exc:
-            logger.error("Failed to create commitment: %s", exc)
+            logger.error(f"Failed to create commitment: {exc}")
             raise
 
     async def mark_fulfilled(
@@ -190,7 +190,7 @@ class CommitmentRepository:
                 return None
             return self._row_to_commitment(result.data)
         except Exception as exc:
-            logger.error("Failed to get commitment %s: %s", commitment_id, exc)
+            logger.error(f"Failed to get commitment {commitment_id}: {exc}")
             return None
 
     async def list_due_time(
@@ -212,7 +212,7 @@ class CommitmentRepository:
             )
             return [self._row_to_commitment(r) for r in (result.data or [])]
         except Exception as exc:
-            logger.error("Failed to list due time commitments: %s", exc)
+            logger.error(f"Failed to list due time commitments: {exc}")
             raise
 
     async def list_pending_event(
@@ -232,7 +232,7 @@ class CommitmentRepository:
             )
             return [self._row_to_commitment(r) for r in (result.data or [])]
         except Exception as exc:
-            logger.error("Failed to list event commitments for %s: %s", event, exc)
+            logger.error(f"Failed to list event commitments for {event}: {exc}")
             raise
 
     async def list_next_session(
@@ -284,7 +284,7 @@ class CommitmentRepository:
             result = await q.execute()
             return [self._row_to_commitment(r) for r in (result.data or [])]
         except Exception as exc:
-            logger.error("Failed to list commitments for user %s: %s", user_id, exc)
+            logger.error(f"Failed to list commitments for user {user_id}: {exc}")
             raise
 
     async def list_expired_pending(
@@ -306,7 +306,7 @@ class CommitmentRepository:
             )
             return [self._row_to_commitment(r) for r in (result.data or [])]
         except Exception as exc:
-            logger.error("Failed to list expired commitments: %s", exc)
+            logger.error(f"Failed to list expired commitments: {exc}")
             raise
 
 
@@ -324,7 +324,7 @@ def _parse_ts(value: Any) -> Optional[datetime]:
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            logger.warning("Could not parse timestamp: %r", value)
+            logger.warning(f"Could not parse timestamp: {value}")
             return None
     return None
 

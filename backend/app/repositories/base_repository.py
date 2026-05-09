@@ -21,10 +21,10 @@ class BaseRepository:
             result = await client.table(self.TABLE_NAME).insert(data).execute()
             if not result.data:
                 raise RuntimeError(f"Insert into {self.TABLE_NAME} returned no data")
-            logger.info("Created %s record", self.TABLE_NAME)
+            logger.info(f"Created {self.TABLE_NAME} record")
             return result.data[0]
         except Exception as e:
-            logger.error("Failed to create %s: %s", self.TABLE_NAME, e)
+            logger.error(f"Failed to create {self.TABLE_NAME}: {e}")
             raise
 
     async def update(self, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -38,7 +38,7 @@ class BaseRepository:
             )
             return result.data[0] if result.data else {}
         except Exception as e:
-            logger.error("Failed to update %s %s: %s", self.TABLE_NAME, record_id, e)
+            logger.error(f"Failed to update {self.TABLE_NAME} {record_id}: {e}")
             raise
 
     async def get_by_id(self, record_id: str) -> Optional[Dict[str, Any]]:
@@ -52,7 +52,7 @@ class BaseRepository:
             )
             return result.data[0] if result.data else None
         except Exception as e:
-            logger.error("Failed to get %s %s: %s", self.TABLE_NAME, record_id, e)
+            logger.error(f"Failed to get {self.TABLE_NAME} {record_id}: {e}")
             return None
 
     async def soft_delete(self, record_id: str) -> None:
@@ -64,10 +64,10 @@ class BaseRepository:
                 .eq("id", record_id)
                 .execute()
             )
-            logger.info("Soft-deleted %s %s", self.TABLE_NAME, record_id)
+            logger.info(f"Soft-deleted {self.TABLE_NAME} {record_id}")
         except Exception as e:
             logger.error(
-                "Failed to soft-delete %s %s: %s", self.TABLE_NAME, record_id, e
+                f"Failed to soft-delete {self.TABLE_NAME} {record_id}: {e}"
             )
             raise
 
@@ -75,7 +75,7 @@ class BaseRepository:
         try:
             client = await self._get_client()
             await client.table(self.TABLE_NAME).delete().eq("id", record_id).execute()
-            logger.info("Deleted %s %s", self.TABLE_NAME, record_id)
+            logger.info(f"Deleted {self.TABLE_NAME} {record_id}")
         except Exception as e:
-            logger.error("Failed to delete %s %s: %s", self.TABLE_NAME, record_id, e)
+            logger.error(f"Failed to delete {self.TABLE_NAME} {record_id}: {e}")
             raise

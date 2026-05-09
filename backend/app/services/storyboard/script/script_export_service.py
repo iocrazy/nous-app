@@ -51,7 +51,7 @@ class ScriptExportService:
                 lines.append("")
 
         result = "\n".join(lines)
-        logger.debug("TXT export: %d chars", len(result))
+        logger.debug(f"TXT export: {len(result)} chars")
         return result
 
     def export_markdown(self, project: Dict[str, Any], chapters: List[Dict]) -> str:
@@ -81,7 +81,7 @@ class ScriptExportService:
                 lines.append("")
 
         result = "\n".join(lines)
-        logger.debug("Markdown export: %d chars", len(result))
+        logger.debug(f"Markdown export: {len(result)} chars")
         return result
 
     def export_json(
@@ -142,7 +142,7 @@ class ScriptExportService:
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
-        logger.debug("DOCX export: %d chapters", len(chapters))
+        logger.debug(f"DOCX export: {len(chapters)} chapters")
         return buffer
 
     # ─── Helpers ─────────────────────────────────────────────────────────

@@ -55,7 +55,7 @@ async def create_nodes(
         )
         return {"success": True, "data": nodes}
     except Exception as exc:
-        logger.error("[SBCanvas] create_nodes project=%s failed: %s", project_id, exc)
+        logger.error(f"[SBCanvas] create_nodes project={project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to create nodes: {exc}")
 
 
@@ -76,7 +76,7 @@ async def update_node(
         updated = await node_repo.update(node_id, body.model_dump(exclude_none=True))
         return {"success": True, "data": updated}
     except Exception as exc:
-        logger.error("[SBCanvas] update_node %s failed: %s", node_id, exc)
+        logger.error(f"[SBCanvas] update_node {node_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to update node: {exc}")
 
 
@@ -93,7 +93,7 @@ async def delete_node(auth: AuthDep, node_id: str) -> Dict[str, Any]:
         await node_repo.delete(node_id)
         return {"success": True}
     except Exception as exc:
-        logger.error("[SBCanvas] delete_node %s failed: %s", node_id, exc)
+        logger.error(f"[SBCanvas] delete_node {node_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to delete node: {exc}")
 
 
@@ -121,7 +121,7 @@ async def sync_canvas(
         result = await svc.sync_canvas(project_id, body)
         return {"success": True, "data": result}
     except Exception as exc:
-        logger.error("[SBCanvas] sync_canvas project=%s failed: %s", project_id, exc)
+        logger.error(f"[SBCanvas] sync_canvas project={project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Canvas sync failed: {exc}")
 
 
@@ -146,7 +146,7 @@ async def create_edges(
         edges = await edge_repo.bulk_upsert(project_id, body)
         return {"success": True, "data": edges}
     except Exception as exc:
-        logger.error("[SBCanvas] create_edges project=%s failed: %s", project_id, exc)
+        logger.error(f"[SBCanvas] create_edges project={project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to create edges: {exc}")
 
 
@@ -163,7 +163,7 @@ async def delete_edge(auth: AuthDep, edge_id: str) -> Dict[str, Any]:
         await edge_repo.delete(edge_id)
         return {"success": True}
     except Exception as exc:
-        logger.error("[SBCanvas] delete_edge %s failed: %s", edge_id, exc)
+        logger.error(f"[SBCanvas] delete_edge {edge_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to delete edge: {exc}")
 
 
@@ -196,7 +196,7 @@ async def get_frames(
             },
         }
     except Exception as exc:
-        logger.error("[SBCanvas] get_frames node=%s failed: %s", node_id, exc)
+        logger.error(f"[SBCanvas] get_frames node={node_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to get frames: {exc}")
 
 
@@ -217,7 +217,7 @@ async def update_frame(
         updated = await frame_repo.update(frame_id, body.model_dump(exclude_none=True))
         return {"success": True, "data": updated}
     except Exception as exc:
-        logger.error("[SBCanvas] update_frame %s failed: %s", frame_id, exc)
+        logger.error(f"[SBCanvas] update_frame {frame_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to update frame: {exc}")
 
 
@@ -244,7 +244,7 @@ async def reorder_frames(
         await frame_repo.reorder(body)
         return {"success": True}
     except Exception as exc:
-        logger.error("[SBCanvas] reorder_frames failed: %s", exc)
+        logger.error(f"[SBCanvas] reorder_frames failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to reorder frames: {exc}")
 
 
@@ -374,7 +374,7 @@ async def upload_image(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[SBCanvas] upload_image project=%s failed: %s", project_id, exc)
+        logger.error(f"[SBCanvas] upload_image project={project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {exc}")
 
 
@@ -431,7 +431,7 @@ async def serve_asset_file(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[SBCanvas] serve_asset_file %s failed: %s", asset_id, exc)
+        logger.error(f"[SBCanvas] serve_asset_file {asset_id} failed: {exc}")
         raise HTTPException(
             status_code=500, detail=f"Failed to serve asset file: {exc}"
         )

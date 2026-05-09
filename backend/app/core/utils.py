@@ -115,7 +115,7 @@ class Utils:
                 continue
             hostname = urlparse(url).hostname
             if not cls._is_allowed_domain(hostname):
-                logger.warning("Blocked URL with disallowed domain: %s", hostname)
+                logger.warning(f"Blocked URL with disallowed domain: {hostname}")
                 continue
             valid_urls.append(url)
 

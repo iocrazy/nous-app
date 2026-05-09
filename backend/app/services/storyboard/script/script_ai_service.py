@@ -153,7 +153,7 @@ class ScriptAIService:
                     )
                     recorder.set_summaries(output_summary=result.get("content") or "")
             except AgentPausedError as err:
-                logger.warning("[ScriptAI] agent paused: %s", err)
+                logger.warning(f"[ScriptAI] agent paused: {err}")
                 raise
 
         if result.get("error"):

@@ -104,5 +104,5 @@ async def export_project(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("[SBExport] export_project project=%s failed: %s", project_id, exc)
+        logger.error(f"[SBExport] export_project project={project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to queue export: {exc}")

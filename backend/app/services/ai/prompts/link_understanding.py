@@ -159,7 +159,7 @@ async def understand_link(
         async with safe_async_client(timeout=timeout_s) as client:
             response = await client.get(str(validated))
     except Exception as exc:  # noqa: BLE001 — httpx + boundary errors collapse here
-        logger.warning("[link_understanding] fetch failed: %r", exc)
+        logger.warning(f"[link_understanding] fetch failed: {exc}")
         raise LinkUnderstandingError(f"fetch failed: {type(exc).__name__}") from exc
 
     if response.status_code >= 400:

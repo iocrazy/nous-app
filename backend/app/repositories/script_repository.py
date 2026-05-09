@@ -79,7 +79,7 @@ class ScriptChapterRepository(BaseRepository):
                 .upsert(rows, on_conflict="id")
                 .execute()
             )
-            logger.info("Bulk-upserted %d chapters for script %s", len(rows), script_id)
+            logger.info(f"Bulk-upserted {len(rows)} chapters for script {script_id}")
             return result.data or []
         except Exception as e:
             logger.error(
@@ -103,7 +103,7 @@ class ScriptChapterRepository(BaseRepository):
             )
             return result.data or []
         except Exception as e:
-            logger.error("Failed to get chapters for script %s: %s", script_id, e)
+            logger.error(f"Failed to get chapters for script {script_id}: {e}")
             return []
 
 
@@ -132,7 +132,7 @@ class ScriptAssetRepository(BaseRepository):
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error("Failed to list assets for script %s: %s", script_id, e)
+            logger.error(f"Failed to list assets for script {script_id}: {e}")
             return []
 
 
@@ -157,7 +157,7 @@ class ScriptStoryboardLinkRepository(BaseRepository):
             )
             return result.data or []
         except Exception as e:
-            logger.error("Failed to list links for chapter %s: %s", chapter_id, e)
+            logger.error(f"Failed to list links for chapter {chapter_id}: {e}")
             return []
 
     async def list_by_storyboard(

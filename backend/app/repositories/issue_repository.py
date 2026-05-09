@@ -66,7 +66,7 @@ class IssueRepository:
         )
         if not row:
             raise RuntimeError("issue_create_atomic returned malformed result")
-        logger.info("Created issue %s (id=%s)", row.get("identifier"), row.get("id"))
+        logger.info(f"Created issue {row.get('identifier')} (id={row.get('id')})")
         return row
 
     async def get_by_id(self, issue_id: int) -> Optional[dict[str, Any]]:

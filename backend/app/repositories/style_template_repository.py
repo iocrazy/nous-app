@@ -49,5 +49,5 @@ class StyleTemplateRepository(BaseRepository):
             result = await query.execute()
             return result.data or []
         except Exception as e:
-            logger.error("Failed to list style templates: %s", e)
+            logger.error(f"Failed to list style templates: {e}")
             return []

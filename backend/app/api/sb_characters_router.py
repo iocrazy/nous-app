@@ -70,7 +70,7 @@ async def update_character(
         )
         return {"success": True, "data": updated}
     except Exception as exc:
-        logger.error("[SBCharacters] update_character %s failed: %s", char_id, exc)
+        logger.error(f"[SBCharacters] update_character {char_id} failed: {exc}")
         raise HTTPException(
             status_code=500, detail=f"Failed to update character: {exc}"
         )
@@ -89,7 +89,7 @@ async def delete_character(auth: AuthDep, char_id: str) -> Dict[str, Any]:
         await svc.delete_character(char_id)
         return {"success": True}
     except Exception as exc:
-        logger.error("[SBCharacters] delete_character %s failed: %s", char_id, exc)
+        logger.error(f"[SBCharacters] delete_character {char_id} failed: {exc}")
         raise HTTPException(
             status_code=500, detail=f"Failed to delete character: {exc}"
         )
