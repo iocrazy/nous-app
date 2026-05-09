@@ -169,3 +169,36 @@ async def test_envelope_keys_are_stable():
         "sub_run_id",
         "status",
     }
+
+
+# ─── Phase 5: parent_recorder rollup ──────────────────────────────────
+
+
+async def test_spawn_calls_note_subagent_on_parent_recorder(caller_ctx):
+    """Phase 5 of #199: when a parent recorder is wired in, every
+    spawn() must roll the envelope into recorder.metadata.subagents
+    so the parent run row exposes the sub-agent fan-out without a
+    separate join."""
+    parent_rec = MagicMock()
+    parent_rec.note_subagent = MagicMock()
+
+    service = SubAgentTaskService(
+        **caller_ctx,
+        parent_recorder=parent_rec,
+    )
+    # Trigger the failure path (no slug) — counter still bumps so we
+    # can assert the wiring without mocking the entire AgentRunner.
+    out = await service.spawn({"prompt": "x"})
+
+    parent_rec.note_subagent.assert_called_once()
+    (envelope,), _ = parent_rec.note_subagent.call_args
+    assert envelope is out
+    assert envelope["status"] == "failed"
+
+
+async def test_spawn_without_parent_recorder_is_silent(caller_ctx):
+    """A SubAgentTaskService with no parent_recorder (CLI / batch
+    callers, tests) must not crash — the rollup is opt-in."""
+    service = SubAgentTaskService(**caller_ctx)
+    out = await service.spawn({"prompt": "x"})
+    assert out["status"] == "failed"  # no slug → fail, no exception

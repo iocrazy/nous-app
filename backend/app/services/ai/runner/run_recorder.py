@@ -159,6 +159,50 @@ class RunRecorder:
         if slug and slug not in self._skill_slugs_used:
             self._skill_slugs_used.append(slug)
 
+    def note_compaction(self, stats: Any) -> None:
+        """Phase 5 of #199: accumulate context-compactor counters into
+        metadata so the Runs UI can show how often a long run hit the
+        compactor and how many tokens that bought back.
+
+        Tolerant of any object exposing ``tier`` + ``tokens_saved``
+        attributes (typically ``app.agent_framework.CompactionStats``)
+        — duck-typing keeps this layer free of an import cycle into
+        agent_framework.
+        """
+        try:
+            tier = getattr(stats, "tier", None)
+            saved = int(getattr(stats, "tokens_saved", 0) or 0)
+            tier_str = getattr(tier, "value", None) or str(tier or "")
+        except Exception:  # noqa: BLE001 — never break a run over telemetry
+            return
+        if not tier_str or saved <= 0:
+            return
+        # metadata.compaction.{tier_str}_count + total_tokens_saved
+        comp = self.metadata.setdefault("compaction", {})
+        comp[f"{tier_str}_count"] = int(comp.get(f"{tier_str}_count", 0)) + 1
+        comp["total_tokens_saved"] = int(
+            comp.get("total_tokens_saved", 0)
+        ) + saved
+
+    def note_subagent(self, envelope: dict[str, Any]) -> None:
+        """Phase 5 of #199: count sub-agent spawns + their cost so the
+        parent run's metadata exposes the tree at a glance.
+
+        Reads ``envelope.tokens_used`` and ``envelope.status`` defensively
+        — a malformed envelope (any future schema drift) increments the
+        count without polluting totals.
+        """
+        sub = self.metadata.setdefault("subagents", {})
+        sub["count"] = int(sub.get("count", 0)) + 1
+        try:
+            tokens = int((envelope or {}).get("tokens_used") or 0)
+            sub["tokens_used"] = int(sub.get("tokens_used", 0)) + tokens
+        except (TypeError, ValueError):
+            pass
+        status = (envelope or {}).get("status")
+        if status == "failed":
+            sub["failed_count"] = int(sub.get("failed_count", 0)) + 1
+
     def set_summaries(
         self,
         *,

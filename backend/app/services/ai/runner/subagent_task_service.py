@@ -80,15 +80,53 @@ class SubAgentTaskService:
         parent_run_id: Optional[UUID],
         agent_depth: int = 0,
         session_id: Optional[UUID] = None,
+        parent_recorder: Optional[Any] = None,
     ) -> None:
         self.caller_agent_id = caller_agent_id
         self.caller_user_id = caller_user_id
         self.parent_run_id = parent_run_id
         self.agent_depth = agent_depth
         self.session_id = session_id
+        # Phase 5 of #199: parent's RunRecorder so we can roll spawn
+        # counts up to its metadata as note_subagent() calls. Optional
+        # because not every caller hands us a recorder (CLI / batch
+        # spawns may not have one); we only roll up when present.
+        self.parent_recorder = parent_recorder
 
     async def spawn(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Entry point invoked by the ``task`` built-in skill.
+        """Public entry: dispatch + roll observability up to the
+        parent recorder. Wrapping ``_spawn`` keeps the metadata
+        side-effect on a single return path so any future early-exit
+        added to ``_spawn`` automatically gets counted."""
+        envelope = await self._spawn(args)
+        if self.parent_recorder is not None and hasattr(
+            self.parent_recorder, "note_subagent"
+        ):
+            try:
+                self.parent_recorder.note_subagent(envelope)
+            except Exception:
+                # Telemetry is best-effort — never break the parent's
+                # tool dispatch loop over a metadata write.
+                logger.exception(
+                    "[subagent_task] note_subagent failed envelope_keys={}",
+                    list(envelope.keys()),
+                )
+        # Structured log for observability dashboards (Phase 5 of #199).
+        # loguru ``{}`` placeholder — issue #194 Bug D applies here too.
+        logger.info(
+            "[subagent.spawn] caller_agent_id={} caller_depth={} slug={} "
+            "status={} sub_run_id={} tokens={}",
+            self.caller_agent_id,
+            self.agent_depth,
+            args.get("subagent_type") or args.get("agent_slug"),
+            envelope.get("status"),
+            envelope.get("sub_run_id"),
+            envelope.get("tokens_used"),
+        )
+        return envelope
+
+    async def _spawn(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Inner dispatch (the body of what was originally ``spawn``).
 
         ``args`` schema:
             subagent_type (str, required) — agent slug to spawn
