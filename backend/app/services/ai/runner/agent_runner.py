@@ -440,6 +440,20 @@ class AgentRunner:
         ):
             recorder.note_compaction(compaction_stats)
 
+        # Phase 5 of #199: hand the per-turn recorder to the
+        # SubAgentTaskService so any spawn() inside this turn can roll
+        # its envelope counters up to metadata.subagents. Set lazily —
+        # SkillToolService.subagent_task may be None if the chat layer
+        # didn't install one for this run.
+        if (
+            recorder is not None
+            and getattr(self.skill_tool, "subagent_task", None) is not None
+        ):
+            try:
+                self.skill_tool.subagent_task.parent_recorder = recorder
+            except Exception:  # noqa: BLE001 — telemetry side-effect
+                pass
+
         # Pre-flight 2: context budget guard. A small-context model
         # (e.g. user filled qwen-max with a heavy AGENT spec) would
         # otherwise return truncated nonsense or fail with cryptic
