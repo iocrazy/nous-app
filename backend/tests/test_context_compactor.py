@@ -9,11 +9,14 @@ invariants the runner relies on:
     loop counts on
   - AGENT_AUTO_COMPACT=false is a hard kill switch that bypasses
     everything
+
+Phase 2 added an LLM-driven head summarizer. Tests for the
+summarizer call (mock the network) and the emergency-cap fallback
+when the summarizer fails are pinned here too.
 """
 from __future__ import annotations
 
-import os
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -41,23 +44,23 @@ def _bulk_messages(approx_tokens: int) -> list[dict]:
     return [{"role": "assistant", "content": body}]
 
 
-def test_kill_switch_returns_messages_unchanged(monkeypatch, compactor):
+async def test_kill_switch_returns_messages_unchanged(monkeypatch, compactor):
     """AGENT_AUTO_COMPACT=false must short-circuit before any work — the
     compactor goes from a critical-path component to a no-op so a single
     tenant can be debugged without disabling the runner."""
     monkeypatch.setenv("AGENT_AUTO_COMPACT", "false")
     msgs = _tail_messages(count=3)
 
-    out, stats = compactor.maybe_compact(
+    out, stats = await compactor.maybe_compact(
         system_message="sys", user_messages=msgs, model="claude-sonnet-4-6"
     )
 
-    assert out is msgs  # identity check — no copy
+    assert out is msgs
     assert stats.tier == CompactionTier.GREEN
     assert "AGENT_AUTO_COMPACT=false" in stats.notes
 
 
-def test_kill_switch_skips_tokenization(monkeypatch, compactor):
+async def test_kill_switch_skips_tokenization(monkeypatch, compactor):
     """The disabled path's whole point is "no work". Tokens stay at 0
     sentinel — caller's note_compaction guard already short-circuits on
     tokens_saved == 0, and re-counting just to fill stats nobody reads
@@ -68,7 +71,7 @@ def test_kill_switch_skips_tokenization(monkeypatch, compactor):
     with patch(
         "app.agent_framework.context_compactor.count_messages_tokens"
     ) as mock_count:
-        out, stats = compactor.maybe_compact(
+        out, stats = await compactor.maybe_compact(
             system_message="sys", user_messages=msgs, model="claude-sonnet-4-6"
         )
 
@@ -77,20 +80,20 @@ def test_kill_switch_skips_tokenization(monkeypatch, compactor):
     assert stats.tokens_after == 0
 
 
-def test_notes_is_immutable_tuple(compactor):
+async def test_notes_is_immutable_tuple(compactor):
     """``notes`` lives on a frozen dataclass; making it a ``list`` would
     let callers mutate `stats.notes.append(...)` and silently change a
     "frozen" record. Pin the type so an accidental refactor back to
     list trips the test."""
     msgs = _tail_messages(count=2)
-    _, stats = compactor.maybe_compact(
+    _, stats = await compactor.maybe_compact(
         system_message="", user_messages=msgs, model="claude-sonnet-4-6"
     )
 
     assert isinstance(stats.notes, tuple)
 
 
-def test_unknown_model_falls_back_to_green(compactor):
+async def test_unknown_model_falls_back_to_green(compactor):
     """Bail out cleanly on unknown models — the downstream context-budget
     check still runs and rejects oversize requests."""
     msgs = _tail_messages(count=2)
@@ -98,7 +101,7 @@ def test_unknown_model_falls_back_to_green(compactor):
     with patch(
         "app.agent_framework.context_compactor.model_window_size", return_value=0
     ):
-        out, stats = compactor.maybe_compact(
+        out, stats = await compactor.maybe_compact(
             system_message="", user_messages=msgs, model="some-future-model"
         )
 
@@ -107,14 +110,12 @@ def test_unknown_model_falls_back_to_green(compactor):
     assert any("unknown model" in n for n in stats.notes)
 
 
-def test_green_tier_returns_input_identity(compactor):
+async def test_green_tier_returns_input_identity(compactor):
     """Hot path: a small turn under 60 % of the window must not even
-    allocate a new list. Identity check guards against accidental
-    `list(messages)` copies in the green branch."""
-    # Tiny turn → easily under green threshold for a 200K window
+    allocate a new list."""
     msgs = _tail_messages(count=2)
 
-    out, stats = compactor.maybe_compact(
+    out, stats = await compactor.maybe_compact(
         system_message="short sys", user_messages=msgs, model="claude-sonnet-4-6"
     )
 
@@ -123,9 +124,9 @@ def test_green_tier_returns_input_identity(compactor):
     assert stats.tokens_saved == 0
 
 
-def test_yellow_tier_invokes_prune(compactor):
+async def test_yellow_tier_invokes_prune(compactor):
     """At 60-80 %, the compactor must call ``prune`` (dedupe + age) but
-    NOT touch the emergency cap path. Cheap, no LLM call yet."""
+    NOT make an LLM call. Cheap, no network."""
     msgs = _tail_messages(count=4)
 
     with patch(
@@ -134,24 +135,71 @@ def test_yellow_tier_invokes_prune(compactor):
         "app.agent_framework.context_compactor.count_tokens", return_value=0
     ), patch(
         "app.agent_framework.context_compactor.count_messages_tokens",
-        side_effect=[700, 500],  # before, after-prune
+        side_effect=[700, 500],
     ), patch(
         "app.agent_framework.context_compactor.prune",
         return_value=(msgs, _make_prune_stats(duplicates=2)),
-    ) as mock_prune:
-        out, stats = compactor.maybe_compact(
+    ) as mock_prune, patch(
+        "app.agent_framework.summarizer.summarize",
+        new=AsyncMock(),
+    ) as mock_summarize:
+        out, stats = await compactor.maybe_compact(
             system_message="", user_messages=msgs, model="claude-sonnet-4-6"
         )
 
     mock_prune.assert_called_once()
+    mock_summarize.assert_not_called()  # yellow never reaches the summary path
     assert stats.tier == CompactionTier.YELLOW
     assert stats.tokens_saved == 200
     assert stats.yellow_prune is not None
 
 
-def test_orange_tier_runs_emergency_cap_when_yellow_insufficient(compactor):
-    """If yellow alone can't pull us under the orange threshold, the
-    emergency cap must run and keep the recent turns intact."""
+async def test_orange_tier_invokes_summarizer(compactor):
+    """Orange tier must call summarize() (Phase 2 path). The head turns
+    are replaced with a single [Earlier conversation summary] system
+    message; recent turns survive verbatim."""
+    head = _bulk_messages(approx_tokens=200)
+    tail = _tail_messages(count=4)
+    msgs = head + tail
+
+    fake_summary = "User asked about X. Agent ran tool foo. Result: bar."
+
+    with patch(
+        "app.agent_framework.context_compactor.model_window_size", return_value=1000
+    ), patch(
+        "app.agent_framework.context_compactor.count_tokens", return_value=0
+    ), patch(
+        "app.agent_framework.context_compactor.count_messages_tokens",
+        side_effect=[850, 830, 400],  # before / after-prune / final-after-summary
+    ), patch(
+        "app.agent_framework.context_compactor.prune",
+        return_value=(msgs, _make_prune_stats()),
+    ), patch(
+        "app.agent_framework.summarizer.summarize",
+        new=AsyncMock(return_value=fake_summary),
+    ) as mock_summarize:
+        out, stats = await compactor.maybe_compact(
+            system_message="",
+            user_messages=msgs,
+            model="claude-sonnet-4-6",
+        )
+
+    mock_summarize.assert_awaited_once()
+    assert stats.tier == CompactionTier.ORANGE
+    # Tail unchanged
+    assert out[-4:] == tail
+    # First message is the summary system message
+    assert out[0]["role"] == "system"
+    assert "[Earlier conversation summary]" in out[0]["content"]
+    assert fake_summary in out[0]["content"]
+    assert "compacted via LLM head summary" in stats.notes
+
+
+async def test_summarizer_failure_falls_back_to_emergency_cap(compactor):
+    """If the summarizer raises (timeout / provider error / empty
+    response), the compactor must NOT bubble the exception. Fall back
+    to the lossy ``_emergency_cap`` truncation so the agent's turn
+    keeps moving."""
     head = _bulk_messages(approx_tokens=200)
     tail = _tail_messages(count=4)
     msgs = head + tail
@@ -162,29 +210,31 @@ def test_orange_tier_runs_emergency_cap_when_yellow_insufficient(compactor):
         "app.agent_framework.context_compactor.count_tokens", return_value=0
     ), patch(
         "app.agent_framework.context_compactor.count_messages_tokens",
-        # before=850 (orange); after-prune=830 (still orange);
-        # tail=200; final=400
         side_effect=[850, 830, 200, 400],
     ), patch(
         "app.agent_framework.context_compactor.prune",
         return_value=(msgs, _make_prune_stats()),
+    ), patch(
+        "app.agent_framework.summarizer.summarize",
+        new=AsyncMock(side_effect=RuntimeError("haiku 503")),
     ):
-        out, stats = compactor.maybe_compact(
+        out, stats = await compactor.maybe_compact(
             system_message="",
             user_messages=msgs,
             model="claude-sonnet-4-6",
         )
 
     assert stats.tier == CompactionTier.ORANGE
-    # Recent turns must survive verbatim — the compactor edits older head
-    # only.
+    # Recent turns survive verbatim under emergency cap too
     assert out[-4:] == tail
+    # The fallback note was added so an operator can see the summarizer broke
+    assert any("emergency-cap fallback" in n for n in stats.notes)
 
 
-def test_red_tier_keeps_fewer_recent_turns(compactor):
-    """At >90 %, even the recent-turn budget shrinks (RED_KEEP_RECENT_TURNS
-    < EMERGENCY_KEEP_RECENT_TURNS). Verifies a different code path from
-    orange — same emergency-cap helper, smaller keep window."""
+async def test_red_tier_keeps_fewer_recent_turns(compactor):
+    """RED tier shrinks keep_recent_turns from 4 to 2 — verifies a
+    different code path from orange. Summarizer is mocked to bypass
+    the network."""
     head = _bulk_messages(approx_tokens=400)
     tail = _tail_messages(count=4)
     msgs = head + tail
@@ -195,19 +245,22 @@ def test_red_tier_keeps_fewer_recent_turns(compactor):
         "app.agent_framework.context_compactor.count_tokens", return_value=0
     ), patch(
         "app.agent_framework.context_compactor.count_messages_tokens",
-        side_effect=[950, 940, 100, 300],  # tail=100 to fit below red
+        side_effect=[950, 940, 300],
     ), patch(
         "app.agent_framework.context_compactor.prune",
         return_value=(msgs, _make_prune_stats()),
+    ), patch(
+        "app.agent_framework.summarizer.summarize",
+        new=AsyncMock(return_value="summary"),
     ):
-        out, stats = compactor.maybe_compact(
+        out, stats = await compactor.maybe_compact(
             system_message="",
             user_messages=msgs,
             model="claude-sonnet-4-6",
         )
 
     assert stats.tier == CompactionTier.RED
-    # Red tier preserves only the LAST 2 turns (vs 4 in orange).
+    # Red tier preserves only the LAST 2 turns
     assert out[-2:] == tail[-2:]
 
 
@@ -220,7 +273,7 @@ def test_thresholds_are_configurable():
 
 def test_custom_thresholds_take_effect():
     """Caller can override thresholds for tenants on tighter / looser
-    budgets — verify the overrides actually drive tier selection."""
+    budgets."""
     aggressive = CompactionThresholds(
         yellow_pct=0.30, orange_pct=0.50, red_pct=0.70
     )

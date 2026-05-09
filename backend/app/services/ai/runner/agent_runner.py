@@ -423,7 +423,7 @@ class AgentRunner:
         # no token re-count. On any other tier we feed the COMPACTED list
         # into the budget check below so we don't reject a turn that
         # would have fit after pruning.
-        user_messages, compaction_stats = _DEFAULT_COMPACTOR.maybe_compact(
+        user_messages, compaction_stats = await _DEFAULT_COMPACTOR.maybe_compact(
             system_message=composed.system_message,
             user_messages=user_messages,
             model=composed.model,
