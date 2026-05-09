@@ -410,7 +410,31 @@ class AgentRunner:
         creating the AbortController and the watcher coroutine that
         fires it.
         """
-        # Pre-flight: context budget guard. A small-context model
+        # Pre-flight 1: tiered compaction (Phase 1 of issue #199).
+        # Yellow tier prunes tool results in place; orange/red emergency-
+        # caps message bodies (Phase 2 will swap that for an LLM head
+        # summary). On green this is essentially free — identity return,
+        # no token re-count. On any other tier we feed the COMPACTED list
+        # into the budget check below so we don't reject a turn that
+        # would have fit after pruning.
+        from app.agent_framework import ContextCompactor
+
+        compactor = ContextCompactor()
+        user_messages, compaction_stats = compactor.maybe_compact(
+            system_message=composed.system_message,
+            user_messages=user_messages,
+            model=composed.model,
+        )
+        if recorder is not None and compaction_stats.tokens_saved > 0:
+            try:
+                recorder.note_compaction(compaction_stats)
+            except AttributeError:
+                # Recorder doesn't yet expose the helper — Phase 5 wires
+                # it in. Stay quiet, the stats are still in the log line
+                # the compactor itself emits.
+                pass
+
+        # Pre-flight 2: context budget guard. A small-context model
         # (e.g. user filled qwen-max with a heavy AGENT spec) would
         # otherwise return truncated nonsense or fail with cryptic
         # provider errors. Reject early with a structured error.

@@ -45,6 +45,12 @@ from app.agent_framework.context_engine import (
     ContextPayload,
     DuplicateContextEngineError,
 )
+from app.agent_framework.context_compactor import (
+    CompactionStats,
+    CompactionThresholds,
+    CompactionTier,
+    ContextCompactor,
+)
 from app.agent_framework.context_window import (
     ContextWindowError,
     ContextWindowWarning,
@@ -220,6 +226,10 @@ __all__ = [
     "COUNTER_NAMES",
     "Commitment",
     "CommitmentStatus",
+    "CompactionStats",
+    "CompactionThresholds",
+    "CompactionTier",
+    "ContextCompactor",
     "ContextEngine",
     "ContextEngineRegistry",
     "ContextPayload",
