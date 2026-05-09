@@ -107,16 +107,13 @@ function renderTags(tags) {
     groups.get(tag.group_name).push(tag);
   }
 
-  // Render ungrouped under "其他" so a backend missing group_name (e.g.
-  // tag_groups orphan FKs) doesn't silently drop tags. Before this guard
-  // ungrouped tags were dropped entirely whenever entries was empty.
+  // Ungrouped tags always render as their own "未分类" section — never
+  // tail-appended to another group (would visually bleed into it) and
+  // never silently dropped (the old `entries.length > 0` guard did this
+  // when tag_groups was empty in prod, costing 65 of 71 tags).
   const entries = Array.from(groups.entries());
   if (ungrouped.length > 0) {
-    if (entries.length > 0) {
-      entries[entries.length - 1][1].push(...ungrouped);
-    } else {
-      entries.push(['其他', ungrouped]);
-    }
+    entries.push(['未分类', ungrouped]);
   }
 
   // Frequently used (top 6)
