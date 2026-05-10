@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     SUPAVISOR_POOL_MAX_SIZE: int = Field(
         default=10, description="asyncpg pool max connections"
     )
+    # Per-repository feature flags. Default false = legacy supabase-py
+    # path. Set true on a single repo to A/B-test the asyncpg version
+    # without affecting the rest. After a repo is proven stable for a
+    # week in prod the default flips and the legacy code is removed.
+    USE_ASYNCPG_AGENT_RUNS: bool = Field(
+        default=False,
+        description="Route AgentRunsRepository through asyncpg + Supavisor",
+    )
 
     # ============================================
     # 下载设置

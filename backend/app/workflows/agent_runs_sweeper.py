@@ -30,10 +30,10 @@ HEARTBEAT_STALENESS_SECONDS = 120
 @DBOS.step()
 def mark_heartbeat_lost_step() -> int:
     """Flip running rows whose heartbeat is older than 2 minutes."""
-    from app.repositories.agent_runs_repository import AgentRunsRepository
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
 
     async def _do() -> int:
-        runs_repo = AgentRunsRepository()
+        runs_repo = get_agent_runs_repository()
         stale_before = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(
             seconds=HEARTBEAT_STALENESS_SECONDS
         )
@@ -47,14 +47,14 @@ def recompute_monthly_budgets_step() -> int:
     """Sum this month's spend per agent, flip paused_reason='budget' on
     overrun. Returns count of agents whose paused_reason transitioned."""
     from app.db.supabase_client import get_async_supabase_admin
-    from app.repositories.agent_runs_repository import AgentRunsRepository
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
 
     async def _do() -> int:
         client = await get_async_supabase_admin()
         now = datetime.now(timezone.utc)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        runs_repo = AgentRunsRepository()
+        runs_repo = get_agent_runs_repository()
         rows = await runs_repo.monthly_usage_by_agent(
             month_start=month_start,
             month_end=now.replace(microsecond=0),

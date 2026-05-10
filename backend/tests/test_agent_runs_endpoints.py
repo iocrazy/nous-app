@@ -133,7 +133,7 @@ async def test_list_agent_runs_returns_paginated_envelope() -> None:
         "app.api.ai_library_router._repos",
         return_value=(mock_agent_repo, MagicMock()),
     ), patch(
-        "app.api.ai_library_router.AgentRunsRepository"
+        "app.repositories.agent_runs_repository.AgentRunsRepository"
     ) as runs_cls:
         runs_cls.return_value.list_by_agent = AsyncMock(return_value=page)
         result = await list_agent_runs("x", _fake_auth(), limit=10, offset=0)
@@ -148,7 +148,7 @@ async def test_list_agent_runs_returns_paginated_envelope() -> None:
 
 @pytest.mark.asyncio
 async def test_get_run_404_when_not_found() -> None:
-    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+    with patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls:
         runs_cls.return_value.get_by_id = AsyncMock(return_value=None)
         with pytest.raises(HTTPException) as exc:
             await get_run(uuid4(), _fake_auth())
@@ -162,7 +162,7 @@ async def test_get_run_normalizes_decimal_strings_to_float() -> None:
         prompt_cents_per_1k_snapshot="0.4",
         completion_cents_per_1k_snapshot="1.2",
     )
-    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+    with patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls:
         runs_cls.return_value.get_by_id = AsyncMock(return_value=row)
         result = await get_run(uuid4(), _fake_auth())
     assert result["cost_cents"] == 0.5
@@ -174,7 +174,7 @@ async def test_get_run_normalizes_decimal_strings_to_float() -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_run_404_when_not_cancellable() -> None:
-    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+    with patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls:
         runs_cls.return_value.request_cancel = AsyncMock(return_value=False)
         with pytest.raises(HTTPException) as exc:
             await cancel_run(uuid4(), _fake_auth())
@@ -183,7 +183,7 @@ async def test_cancel_run_404_when_not_cancellable() -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_run_returns_accepted_on_success() -> None:
-    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+    with patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls:
         runs_cls.return_value.request_cancel = AsyncMock(return_value=True)
         result = await cancel_run(uuid4(), _fake_auth())
     assert result["status"] == "cancel_requested"
@@ -263,7 +263,7 @@ async def test_get_usage_sums_per_agent_for_user_scope() -> None:
     agent_repo = MagicMock()
     agent_repo.get_by_id = AsyncMock(return_value={"slug": "x", "name": "X"})
 
-    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls, patch(
+    with patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls, patch(
         "app.api.ai_library_router._repos",
         return_value=(agent_repo, MagicMock()),
     ):
@@ -304,7 +304,7 @@ async def test_list_run_children_404_when_parent_missing() -> None:
     """Stray parent_run_id from another user must read as 404 — the
     same authz pattern as get_run, so existence isn't leaked via
     'children empty list' vs 'parent doesn't exist'."""
-    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+    with patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls:
         runs_cls.return_value.get_by_id = AsyncMock(return_value=None)
         with pytest.raises(HTTPException) as exc:
             await list_run_children(uuid4(), _fake_auth())
@@ -317,7 +317,7 @@ async def test_list_run_children_returns_empty_when_no_subruns() -> None:
     children — return empty list, not 404."""
     parent_id = uuid4()
     parent_row = _sample_row(id=str(parent_id))
-    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+    with patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls:
         instance = runs_cls.return_value
         instance.get_by_id = AsyncMock(return_value=parent_row)
         instance.list_children = AsyncMock(return_value=[])
@@ -338,7 +338,7 @@ async def test_list_run_children_returns_slim_envelope() -> None:
         trigger="subagent_task",
     )
 
-    with patch("app.api.ai_library_router.AgentRunsRepository") as runs_cls:
+    with patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls:
         instance = runs_cls.return_value
         instance.get_by_id = AsyncMock(return_value=parent_row)
         instance.list_children = AsyncMock(return_value=[child_row])

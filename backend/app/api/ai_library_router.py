@@ -35,7 +35,10 @@ from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
-from app.repositories.agent_runs_repository import AgentRunsRepository
+from app.repositories.agent_runs_repository import (
+    AgentRunsRepository,
+    get_agent_runs_repository,
+)
 from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
     tt_row_to_task_shape,
@@ -1255,7 +1258,7 @@ async def list_agent_runs(
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
 
-    runs_repo = AgentRunsRepository()
+    runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
     agent_uuid = UUID(str(agent["id"]))
     page = await runs_repo.list_by_agent(
@@ -1276,7 +1279,7 @@ async def list_agent_runs(
 )
 async def get_run(run_id: UUID, auth: AuthDep) -> Dict[str, Any]:
     """Full run row with metadata_json. 404 if not owned by caller."""
-    runs_repo = AgentRunsRepository()
+    runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
     row = await runs_repo.get_by_id(run_id, user_id=user_uuid)
     if not row:
@@ -1300,7 +1303,7 @@ async def list_run_children(run_id: UUID, auth: AuthDep) -> List[Dict[str, Any]]
     """Phase 4 of issue #199. Direct children only — UI calls
     recursively when it wants a full tree. Returns [] when the parent
     run is unknown / not owned (avoids leaking existence)."""
-    runs_repo = AgentRunsRepository()
+    runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
     # Verify the parent is visible to the caller before exposing
     # children. Without this, a stray run_id from another user would
@@ -1325,7 +1328,7 @@ async def cancel_run(run_id: UUID, auth: AuthDep) -> Dict[str, Any]:
     process dies before observing, the heartbeat sweeper marks it
     heartbeat_lost within 2 minutes.
     """
-    runs_repo = AgentRunsRepository()
+    runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
     ok = await runs_repo.request_cancel(run_id, user_id=user_uuid)
     if not ok:
@@ -1364,7 +1367,7 @@ async def get_usage(
     start_iso, end_iso = _month_bounds(month)
     from datetime import datetime as _dt
 
-    runs_repo = AgentRunsRepository()
+    runs_repo = get_agent_runs_repository()
     rows = await runs_repo.monthly_usage_by_agent(
         month_start=_dt.fromisoformat(start_iso),
         month_end=_dt.fromisoformat(end_iso),
