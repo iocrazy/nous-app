@@ -52,6 +52,27 @@ agent_workforce_queue = Queue(
 )
 
 
+# PR-D8 Phase 2 — per-run subprocess isolation
+#
+# Two execution modes:
+#   AGENT_RUN_ISOLATION=inprocess   (default; legacy behavior)
+#       Runs the task inline in the worker process. Fastest, but a leak
+#       or crash inside `run_one_task` accumulates / wedges the worker.
+#
+#   AGENT_RUN_ISOLATION=subprocess  (new; per-run isolation)
+#       Spawns a fresh `python -m app.run_isolated` for each task,
+#       applies RLIMIT_AS + wall-clock timeout, exits when done. OS
+#       reclaims all memory / FDs / threads. ~1-2s cold-start tax per
+#       task — fine for AI runs that take 10s+ end-to-end.
+#
+# Tunables (only consulted in subprocess mode):
+#   AGENT_RUN_MEM_LIMIT_MB  — RLIMIT_AS cap (POSIX). Default 1024 (1 GiB).
+#   AGENT_RUN_TIMEOUT_S     — wall-clock cap. Default 600 (10 min).
+_ISOLATION_MODE = os.environ.get("AGENT_RUN_ISOLATION", "inprocess").lower()
+_RUN_MEM_LIMIT_MB = int(os.environ.get("AGENT_RUN_MEM_LIMIT_MB", "1024"))
+_RUN_TIMEOUT_S = float(os.environ.get("AGENT_RUN_TIMEOUT_S", "600"))
+
+
 @DBOS.step()
 def run_one_task_step(task: dict[str, Any]) -> dict[str, Any]:
     """Sync wrapper that runs the existing async ``run_one_task``.
@@ -64,7 +85,22 @@ def run_one_task_step(task: dict[str, Any]) -> dict[str, Any]:
 
     Idempotent on replay: ``run_one_task`` early-returns when the task
     isn't in 'queued'/'assigned' state any more, so re-execution after
-    a worker crash short-circuits cleanly."""
+    a worker crash short-circuits cleanly.
+
+    See module-level docstring for ``AGENT_RUN_ISOLATION`` modes."""
+    if _ISOLATION_MODE == "subprocess":
+        # Phase 2 path: fresh process per run, full crash isolation.
+        from app.services.workforce.isolated_runner import run_isolated
+
+        result = run_isolated(
+            task,
+            timeout_s=_RUN_TIMEOUT_S,
+            mem_limit_mb=_RUN_MEM_LIMIT_MB,
+        )
+        return result.as_worker_dict()
+
+    # Legacy in-process path — kept as default until subprocess mode
+    # graduates from staging.
     from app.services.workforce.agent_worker import run_one_task
 
     return asyncio.run(run_one_task(task))
