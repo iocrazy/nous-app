@@ -25,6 +25,7 @@ Intentionally NOT included (use raw SQL directly):
   - Soft delete / pagination helpers (vary too much by table)
   - ORM-style relationship loading (yagni for our flat schemas)
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -87,10 +88,10 @@ class AsyncpgRepository:
     async def transaction(self) -> AsyncIterator[asyncpg.Connection]:
         """Wrap multiple statements in a single PG transaction.
 
-            async with repo.transaction() as conn:
-                await conn.execute("INSERT INTO ...")
-                await conn.execute("UPDATE ...")
-                # auto-commit on clean exit; auto-rollback on raise
+        async with repo.transaction() as conn:
+            await conn.execute("INSERT INTO ...")
+            await conn.execute("UPDATE ...")
+            # auto-commit on clean exit; auto-rollback on raise
         """
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -164,9 +165,7 @@ class AsyncpgRepository:
             )
         if not fields:
             raise ValueError("update_by_id() requires at least one field")
-        set_pairs = ", ".join(
-            f'"{c}" = ${i + 1}' for i, c in enumerate(fields.keys())
-        )
+        set_pairs = ", ".join(f'"{c}" = ${i + 1}' for i, c in enumerate(fields.keys()))
         id_placeholder = f"${len(fields) + 1}"
         sql = (
             f'UPDATE "{self.TABLE}" SET {set_pairs} '
@@ -174,9 +173,7 @@ class AsyncpgRepository:
         )
         return await self.fetch_one(sql, *fields.values(), row_id)
 
-    async def get_by_id(
-        self, row_id: Any, *, id_column: str = "id"
-    ) -> Optional[dict]:
+    async def get_by_id(self, row_id: Any, *, id_column: str = "id") -> Optional[dict]:
         """SELECT one row by primary key. Returns None when not found."""
         if not self.TABLE:
             raise RuntimeError(
@@ -185,9 +182,7 @@ class AsyncpgRepository:
         sql = f'SELECT * FROM "{self.TABLE}" WHERE "{id_column}" = $1'
         return await self.fetch_one(sql, row_id)
 
-    async def delete_by_id(
-        self, row_id: Any, *, id_column: str = "id"
-    ) -> bool:
+    async def delete_by_id(self, row_id: Any, *, id_column: str = "id") -> bool:
         """DELETE one row by primary key. Returns True iff a row was
         deleted (matches PostgREST ``.delete().eq()`` truthiness)."""
         if not self.TABLE:

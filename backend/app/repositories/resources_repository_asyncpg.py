@@ -26,6 +26,7 @@ Behavioural parity vs legacy:
   - INFO log on every successful create/update/delete (matches legacy)
   - L2 dedup status detection mirrors legacy (image vs video status)
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
@@ -57,9 +58,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             logger.error(f"Failed to create resource: {e}")
             raise
 
-    async def get_resource_by_id(
-        self, resource_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_resource_by_id(self, resource_id: str) -> Optional[Dict[str, Any]]:
         try:
             return await self.fetch_one(
                 "SELECT * FROM resources WHERE id = $1",
@@ -69,18 +68,14 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             logger.error(f"Failed to get resource {resource_id}: {e}")
             return None
 
-    async def get_resource_by_media_id(
-        self, media_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_resource_by_media_id(self, media_id: str) -> Optional[Dict[str, Any]]:
         try:
             return await self.fetch_one(
                 "SELECT * FROM resources WHERE media_id = $1 LIMIT 1",
                 self._bigint(media_id),
             )
         except Exception as e:
-            logger.error(
-                f"Failed to get resource by media_id {media_id}: {e}"
-            )
+            logger.error(f"Failed to get resource by media_id {media_id}: {e}")
             return None
 
     async def get_resource_by_platform_id(
@@ -105,9 +100,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             # always been a Snowflake int since the migration.
             return await self.get_resource_by_media_id(media_id)
         except Exception as e:
-            logger.error(
-                f"Failed to get resource by platform_id {platform_id}: {e}"
-            )
+            logger.error(f"Failed to get resource by platform_id {platform_id}: {e}")
             return None
 
     async def get_resource_by_media_id_and_creator(
@@ -117,7 +110,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             return await self.fetch_one(
                 "SELECT * FROM resources "
                 "WHERE media_id = $1 AND creator_id = $2 LIMIT 1",
-                self._bigint(media_id), creator_id,
+                self._bigint(media_id),
+                creator_id,
             )
         except Exception as e:
             logger.error(
@@ -146,7 +140,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 "INNER JOIN parsed_media p ON r.media_id = p.id "
                 "WHERE r.creator_id = $1 AND p.original_url = $2 "
                 "LIMIT 1",
-                creator_id, url,
+                creator_id,
+                url,
             )
             if not row:
                 return None
@@ -212,16 +207,12 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             )
             return int(count or 0)
         except Exception as e:
-            logger.error(
-                f"Failed to count resources for media {media_id}: {e}"
-            )
+            logger.error(f"Failed to count resources for media {media_id}: {e}")
             return 0
 
     # ── Hash-based duplicate lookup ─────────────────────────────────
 
-    async def find_by_hash(
-        self, file_hash: str, creator_id: str
-    ) -> list[dict]:
+    async def find_by_hash(self, file_hash: str, creator_id: str) -> list[dict]:
         """Find non-trashed resources with the same file hash for a
         given creator. Column projection matches legacy exactly so
         callers don't accidentally start depending on extra fields."""
@@ -234,7 +225,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 "WHERE file_hash = $1 "
                 "  AND creator_id = $2 "
                 "  AND is_trashed = false",
-                file_hash, creator_id,
+                file_hash,
+                creator_id,
             )
         except Exception as e:
             logger.error(f"Failed to find resources by hash: {e}")

@@ -1469,6 +1469,7 @@ def get_resources_repository():
             from app.repositories.resources_repository_asyncpg import (
                 ResourcesRepositoryAsyncpg,
             )
+
             return ResourcesRepositoryAsyncpg()
         logger.warning(
             "USE_ASYNCPG_RESOURCES=true but SUPAVISOR_DATABASE_URL is empty "
