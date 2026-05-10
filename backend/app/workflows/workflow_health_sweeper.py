@@ -32,7 +32,6 @@ full control.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Any, Dict
 
@@ -41,7 +40,7 @@ from loguru import logger
 
 
 @DBOS.step()
-def classify_and_act_step() -> Dict[str, int]:
+async def classify_and_act_step() -> Dict[str, int]:
     """Classify every active workflow + take only safe auto-actions.
 
     Returns counters by classification for `/health/deep` and operator
@@ -49,57 +48,56 @@ def classify_and_act_step() -> Dict[str, int]:
         {"healthy": N, "slow": N, "stalled": N, "lost": N,
          "orphan_pending": N, "user_timeout": N, "auto_cancelled": N,
          "lost_marked": N}
+
+    Async because `asyncio.run()` from a sync step body cascades into
+    DBOS shared-executor shutdown — same pattern documented in
+    scheduled_commitment_sweeper.py header (durable fix #188 era).
+    Without this, every 2-min sweep tick crashed the executor and
+    contributed to the parse-failure / slow-workflow symptoms reported
+    after #176 deployed.
     """
+    from app.db import get_async_supabase_admin
 
-    async def _do() -> Dict[str, int]:
-        from app.db import get_async_supabase_admin
+    sb = await get_async_supabase_admin()
 
-        sb = await get_async_supabase_admin()
-
-        # Fetch active rows with the columns the classifier needs.
-        active = await (
-            sb.table("task_tracking")
-            .select(
-                "dbos_workflow_id, task_type, phase, started_at, "
-                "heartbeat_at, progress, updated_at, max_duration_minutes, "
-                "do_not_auto_cancel, health_status, user_id, title"
-            )
-            .in_("phase", ["queued", "in_progress"])
-            .execute()
+    # Fetch active rows with the columns the classifier needs.
+    active = await (
+        sb.table("task_tracking")
+        .select(
+            "dbos_workflow_id, task_type, phase, started_at, "
+            "heartbeat_at, progress, updated_at, max_duration_minutes, "
+            "do_not_auto_cancel, health_status, user_id, title"
         )
-        rows = active.data or []
-        if not rows:
-            return _zero_counters()
+        .in_("phase", ["queued", "in_progress"])
+        .execute()
+    )
+    rows = active.data or []
+    if not rows:
+        return _zero_counters()
 
-        # Classify in PG via the shared SQL function so the logic stays
-        # in one place (admin can `SELECT classify_workflow_health(...)`
-        # too). One round-trip per row keeps the code simple — N is
-        # bounded by active workflows (typically <100).
-        counters = _zero_counters()
-        for row in rows:
-            classification = await _classify_one(sb, row)
-            counters[classification.lower()] = (
-                counters.get(classification.lower(), 0) + 1
-            )
+    # Classify in PG via the shared SQL function so the logic stays
+    # in one place (admin can `SELECT classify_workflow_health(...)`
+    # too). One round-trip per row keeps the code simple — N is
+    # bounded by active workflows (typically <100).
+    counters = _zero_counters()
+    for row in rows:
+        classification = await _classify_one(sb, row)
+        counters[classification.lower()] = counters.get(classification.lower(), 0) + 1
 
-            # Persist the classification so the UI can surface it.
-            await _persist_classification(sb, row, classification)
+        # Persist the classification so the UI can surface it.
+        await _persist_classification(sb, row, classification)
 
-            # Take action only on the auto-action states.
-            if classification == "LOST":
-                await _mark_lost(sb, row)
-                counters["lost_marked"] += 1
-            elif classification == "ORPHAN_PENDING" and not row.get(
-                "do_not_auto_cancel"
-            ):
-                await _cancel_orphan(sb, row)
-                counters["auto_cancelled"] += 1
-            elif classification == "USER_TIMEOUT" and not row.get("do_not_auto_cancel"):
-                await _mark_timed_out(sb, row)
-                counters["auto_cancelled"] += 1
-        return counters
-
-    return asyncio.run(_do())
+        # Take action only on the auto-action states.
+        if classification == "LOST":
+            await _mark_lost(sb, row)
+            counters["lost_marked"] += 1
+        elif classification == "ORPHAN_PENDING" and not row.get("do_not_auto_cancel"):
+            await _cancel_orphan(sb, row)
+            counters["auto_cancelled"] += 1
+        elif classification == "USER_TIMEOUT" and not row.get("do_not_auto_cancel"):
+            await _mark_timed_out(sb, row)
+            counters["auto_cancelled"] += 1
+    return counters
 
 
 def _zero_counters() -> Dict[str, int]:
@@ -338,7 +336,7 @@ async def _mark_timed_out(sb: Any, row: Dict[str, Any]) -> None:
 
 @DBOS.scheduled("*/2 * * * *")  # every 2 minutes
 @DBOS.workflow()
-def workflow_health_sweeper_workflow(
+async def workflow_health_sweeper_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
     """One sweeper tick. DBOS dedups via the standard `sched-<name>-<iso>`
@@ -347,17 +345,18 @@ def workflow_health_sweeper_workflow(
     Refresh the policy cache before classifying so a hot edit to
     workflow_timeout_policy takes effect within 2 minutes without
     restart.
+
+    Async because the previous `def + asyncio.run()` pattern cascades
+    into DBOS shared-executor shutdown — see
+    scheduled_commitment_sweeper.py header for the gory details and
+    the durable fix landed in #188. Hot-fix follow-up to #176.
     """
+    from app.db import get_async_supabase_admin
 
-    async def _refresh() -> None:
-        from app.db import get_async_supabase_admin
+    sb = await get_async_supabase_admin()
+    await _refresh_policy(sb)
 
-        sb = await get_async_supabase_admin()
-        await _refresh_policy(sb)
-
-    asyncio.run(_refresh())
-
-    counters = classify_and_act_step()
+    counters = await classify_and_act_step()
     if (
         counters["lost_marked"]
         or counters["auto_cancelled"]
