@@ -93,7 +93,10 @@ async def list_tasks(
 
     items = [
         AdminTaskResponse(
-            id=str(row["id"]),
+            # task_tracking.id was dropped in migration 180 — PK is now
+            # dbos_workflow_id (UUID string). Map it to the response
+            # `id` field for backward compatibility with the admin UI.
+            id=str(row["dbos_workflow_id"]),
             user_id=str(row["user_id"]),
             user_email=email_map.get(str(row["user_id"])),
             task_type=row["task_type"],

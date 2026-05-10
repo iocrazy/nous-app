@@ -151,6 +151,13 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
       - WHISPER_PROVIDER=${WHISPER_PROVIDER:-openai_api}
+      # CRITICAL: worker NEEDS DBOS_DATABASE_URL — the WHOLE point of
+      # this container is to consume the DBOS workflow queue. Without
+      # this env, init_dbos() logs "DBOS disabled" and the process
+      # exits cleanly via lifespan teardown (~8s after start). Result:
+      # zero workflow execution cluster-wide. Caught in prod 2026-05-10
+      # — parse + download stuck because no worker was actually running.
+      - DBOS_DATABASE_URL=${DBOS_DATABASE_URL:-}
     depends_on:
       redis:
         condition: service_healthy
