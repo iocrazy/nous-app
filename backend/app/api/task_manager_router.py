@@ -11,6 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
+from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
 from app.services.infra.unified_task_manager import get_task_manager
@@ -69,6 +70,123 @@ async def cancel_task(task_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to cancel task {task_id}: {e}")
         raise HTTPException(500, f"Failed to cancel task: {e}")
+
+
+# ── Workflow health classifier user controls (D8-B) ────────────────
+# Match the columns added in migration 201. The sweeper respects all
+# three: do_not_auto_cancel makes the row immune to ORPHAN_PENDING /
+# USER_TIMEOUT auto-actions; max_duration_minutes is the user-set hard
+# cap (overrides the type-policy ceiling); expected_duration_minutes
+# silences the "running long" notification but doesn't change kill
+# semantics.
+
+
+class HealthOverridePayload(BaseModel):
+    """Subset of task_tracking columns the user can override."""
+
+    max_duration_minutes: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=43200,  # 30 days max — anything beyond is a UI bug
+        description="User-set hard cap on workflow runtime. Exceeding it "
+        "auto-cancels (status=timed_out). NULL = use type-policy ceiling.",
+    )
+    expected_duration_minutes: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=43200,
+        description="User declares this task is expected to be slow. "
+        "Suppresses the 'running long' notification but does not change "
+        "auto-cancel behavior.",
+    )
+    do_not_auto_cancel: Optional[bool] = Field(
+        default=None,
+        description="When true, the sweeper never auto-cancels this row "
+        "regardless of classification. Even ORPHAN_PENDING / USER_TIMEOUT "
+        "only emit a notification.",
+    )
+
+
+@router.patch("/tasks/{task_id}/health-override")
+async def patch_health_override(
+    task_id: str, payload: HealthOverridePayload, auth: AuthDep
+):
+    """Update the user-control fields used by the workflow health sweeper.
+
+    Returns the patched row so the frontend can refresh its local state
+    without a follow-up GET.
+    """
+    from app.db import get_async_supabase_admin
+
+    sb = await get_async_supabase_admin()
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(400, "no fields to update")
+
+    try:
+        result = await (
+            sb.table("task_tracking")
+            .update(fields)
+            .eq("id", task_id)
+            .eq("user_id", str(auth.user_id))
+            .execute()
+        )
+    except Exception as e:
+        logger.exception(f"health override patch failed for task {task_id}: {e}")
+        raise HTTPException(500, f"update failed: {e}")
+    if not result.data:
+        raise HTTPException(404, "task not found or not owned by user")
+    return {"success": True, "task": result.data[0]}
+
+
+@router.post("/tasks/{task_id}/extend")
+async def extend_task_timeout(task_id: str, auth: AuthDep, minutes: int = 30):
+    """Convenience endpoint for the 'extend timeout' button.
+
+    Equivalent to PATCH /health-override with max_duration_minutes set
+    to (current elapsed + ``minutes``). If the row has no started_at the
+    request just sets max to ``minutes``.
+    """
+    if minutes < 1 or minutes > 43200:
+        raise HTTPException(400, "minutes must be between 1 and 43200")
+
+    from datetime import datetime, timezone
+
+    from app.db import get_async_supabase_admin
+
+    sb = await get_async_supabase_admin()
+    row_resp = await (
+        sb.table("task_tracking")
+        .select("started_at, max_duration_minutes")
+        .eq("id", task_id)
+        .eq("user_id", str(auth.user_id))
+        .single()
+        .execute()
+    )
+    row = row_resp.data
+    if not row:
+        raise HTTPException(404, "task not found")
+
+    started = row.get("started_at")
+    new_max = minutes
+    if started:
+        try:
+            started_dt = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+            elapsed_min = int(
+                (datetime.now(timezone.utc) - started_dt).total_seconds() / 60
+            )
+            new_max = elapsed_min + minutes
+        except (ValueError, TypeError):
+            pass
+
+    await (
+        sb.table("task_tracking")
+        .update({"max_duration_minutes": new_max})
+        .eq("id", task_id)
+        .eq("user_id", str(auth.user_id))
+        .execute()
+    )
+    return {"success": True, "max_duration_minutes": new_max}
 
 
 @router.post("/tasks/{task_id}/retry")
