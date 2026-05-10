@@ -6,7 +6,14 @@ asyncpg + Supavisor. Lands in phases so each PR stays reviewable:
   - Phase 3a: ``resources`` table core (10 methods) — shipped #213
   - Phase 3b: ``resource_items`` table (12 methods) — shipped #219
   - Phase 3c: ``resource_versions`` table (8 methods) — shipped #220
-  - Phase 3d: ``folders`` table (10 methods) — this file
+  - Phase 3d: ``folders`` table (10 methods) — shipped #221
+  - Phase 3e: ``get_resource_items`` (1 method, deferred from 3b) — this file
+
+After 3e the only remaining legacy-path methods on this file are
+``add_resource_tag`` / ``remove_resource_tag`` / ``get_resource_tags``
+(resource_tags surface) and the smart-folder trio
+(``get_smart_folders`` / ``create_smart_folder`` /
+``execute_smart_rules``). Those land in Phase 3f if/when needed.
 
 Strategy: multiple inheritance from ``AsyncpgRepository`` and the
 legacy ``ResourcesRepository``. Methods we override go through asyncpg;
@@ -24,13 +31,17 @@ Behavioural parity vs legacy:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from app.db.repository_base import AsyncpgRepository
-from app.repositories.resources_repository import ResourcesRepository
+from app.repositories.resources_repository import (
+    _AI_STATUS_COMPLETED,
+    _AI_STATUS_FIELDS,
+    ResourcesRepository,
+)
 
 
 class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
@@ -458,6 +469,221 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         except Exception as e:
             logger.error(f"Failed to count items for resource {resource_id}: {e}")
             return 0
+
+    # ── Listing with filters (the 22-arg behemoth) ──────────────────
+    #
+    # Translation of the legacy ``get_resource_items`` from PostgREST
+    # chaining to dynamic SQL. The legacy version accepts 22 params,
+    # but at the repository layer only ~10 actually filter — the rest
+    # (``aspect_ratios`` + the 6 social-metric chips) are no-ops kept
+    # for API-surface parity and applied client-side. The asyncpg
+    # version preserves the exact same no-op behaviour.
+
+    @staticmethod
+    def _build_mime_sql(types: Optional[List[str]]) -> Optional[str]:
+        """Translate type categories into a SQL ``OR`` expression.
+        Returns None when no filter is needed. Values are inlined as
+        SQL string literals (not $N params) because they're a fixed
+        set of well-known LIKE patterns — no injection surface."""
+        if not types:
+            return None
+        categories = {t.strip() for t in types if t and t.strip()}
+        if not categories:
+            return None
+
+        # The known prefixes used by both 'document' and 'other'.
+        document_clause = (
+            "(r.mime_type = 'application/pdf' "
+            "OR r.mime_type LIKE 'application/msword%' "
+            "OR r.mime_type LIKE 'application/vnd.%' "
+            "OR r.mime_type LIKE 'text/%')"
+        )
+        known_clause = (
+            "(r.mime_type LIKE 'video/%' "
+            "OR r.mime_type LIKE 'image/%' "
+            "OR r.mime_type LIKE 'audio/%' "
+            "OR r.mime_type = 'application/pdf' "
+            "OR r.mime_type LIKE 'application/msword%' "
+            "OR r.mime_type LIKE 'application/vnd.%' "
+            "OR r.mime_type LIKE 'text/%')"
+        )
+
+        clauses: List[str] = []
+        for category in categories:
+            if category == "video":
+                clauses.append("r.mime_type LIKE 'video/%'")
+            elif category == "image":
+                clauses.append("r.mime_type LIKE 'image/%'")
+            elif category == "audio":
+                clauses.append("r.mime_type LIKE 'audio/%'")
+            elif category == "document":
+                clauses.append(document_clause)
+            elif category == "other":
+                clauses.append(f"NOT {known_clause}")
+            # Silently ignore unknown categories — schema validation
+            # is the router's job (matches legacy behaviour).
+
+        if not clauses:
+            return None
+        return "(" + " OR ".join(clauses) + ")"
+
+    async def get_resource_items(
+        self,
+        scope_type: str,
+        scope_id: str,
+        folder_id: Optional[str] = None,
+        include_trashed: bool = False,
+        tag_ids: Optional[List[str]] = None,
+        min_rating: Optional[int] = None,
+        types: Optional[List[str]] = None,
+        platforms: Optional[List[str]] = None,
+        ai_transcribed: Optional[bool] = None,
+        ai_summarized: Optional[bool] = None,
+        ai_analyzed: Optional[bool] = None,
+        created_after: Optional[date] = None,
+        created_before: Optional[date] = None,
+        duration_min: Optional[int] = None,
+        duration_max: Optional[int] = None,
+        aspect_ratios: Optional[List[str]] = None,
+        min_likes: Optional[int] = None,
+        min_comments: Optional[int] = None,
+        min_favorites: Optional[int] = None,
+        min_shares: Optional[int] = None,
+        social_combine: str = "and",
+        has_comments: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]:
+        """List resource_items joined to their resources.
+
+        See the legacy docstring on
+        ``ResourcesRepository.get_resource_items`` for full
+        per-parameter semantics — this implementation preserves all
+        of them, including the no-ops (``aspect_ratios`` and social
+        metrics) which the frontend chip applies client-side."""
+        try:
+            # AND-semantic tag filter — pre-resolve via helper.
+            matched_resource_ids: Optional[List[str]] = None
+            if tag_ids:
+                matched_resource_ids = await self._resource_ids_with_all_tags(tag_ids)
+                if not matched_resource_ids:
+                    return []
+
+            # Platform pre-resolution + intersection.
+            if platforms:
+                platform_resource_ids = await self._resource_ids_for_platforms(
+                    platforms
+                )
+                if not platform_resource_ids:
+                    return []
+                if matched_resource_ids is None:
+                    matched_resource_ids = platform_resource_ids
+                else:
+                    platform_set = set(platform_resource_ids)
+                    matched_resource_ids = [
+                        rid for rid in matched_resource_ids if rid in platform_set
+                    ]
+                    if not matched_resource_ids:
+                        return []
+
+            # Build dynamic WHERE. Each conditional appends a clause
+            # and a $N param. Order matters: same-numbered placeholders
+            # must match args[] index 1:1.
+            where: List[str] = ["i.scope_type = $1", "i.scope_id = $2"]
+            args: List[Any] = [scope_type, scope_id]
+
+            def _ph() -> str:
+                return f"${len(args) + 1}"
+
+            if folder_id:
+                where.append(f"i.folder_id = {_ph()}")
+                args.append(self._bigint(folder_id))
+            else:
+                where.append("i.folder_id IS NULL")
+
+            if not include_trashed:
+                where.append("r.is_trashed = false")
+
+            if matched_resource_ids is not None:
+                where.append(f"i.resource_id = ANY({_ph()}::bigint[])")
+                args.append(self._bigint_list(matched_resource_ids))
+
+            if min_rating is not None:
+                where.append(f"r.rating >= {_ph()}")
+                args.append(int(min_rating))
+
+            mime_sql = self._build_mime_sql(types)
+            if mime_sql:
+                where.append(mime_sql)
+
+            # AI status filters: each requires == "completed".
+            for flag, column in (
+                (ai_transcribed, _AI_STATUS_FIELDS["transcribed"]),
+                (ai_summarized, _AI_STATUS_FIELDS["summarized"]),
+                (ai_analyzed, _AI_STATUS_FIELDS["analyzed"]),
+            ):
+                if flag is True:
+                    where.append(f'r."{column}" = {_ph()}')
+                    args.append(_AI_STATUS_COMPLETED)
+
+            if created_after is not None:
+                where.append(f"r.created_at >= {_ph()}")
+                args.append(
+                    datetime.combine(
+                        created_after, datetime.min.time(), tzinfo=timezone.utc
+                    ).isoformat()
+                )
+            if created_before is not None:
+                where.append(f"r.created_at <= {_ph()}")
+                args.append(
+                    datetime.combine(
+                        created_before, datetime.max.time(), tzinfo=timezone.utc
+                    ).isoformat()
+                )
+
+            if duration_min is not None:
+                where.append(f"r.duration_seconds >= {_ph()}")
+                args.append(int(duration_min))
+            if duration_max is not None:
+                where.append(f"r.duration_seconds <= {_ph()}")
+                args.append(int(duration_max))
+
+            # Tail no-ops kept for parity (router accepts them, the
+            # filter happens client-side in useResourcesDisplay).
+            _ = (
+                aspect_ratios,
+                min_likes,
+                min_comments,
+                min_favorites,
+                min_shares,
+                social_combine,
+                has_comments,
+            )
+
+            sql = (
+                "SELECT i.id, i.resource_id, i.scope_type, i.scope_id, "
+                "       i.folder_id, "
+                "       i.created_at AS i_created_at, "
+                "       i.updated_at AS i_updated_at, "
+                "       row_to_json(r.*) AS resource "
+                "FROM resource_items i "
+                "INNER JOIN resources r ON i.resource_id = r.id "
+                f"WHERE {' AND '.join(where)} "
+                "ORDER BY i.created_at DESC"
+            )
+
+            import json
+
+            rows = await self.fetch_all(sql, *args)
+            for row in rows:
+                resource = row.get("resource")
+                if isinstance(resource, str):
+                    row["resource"] = json.loads(resource)
+                # Restore the unprefixed column names callers expect.
+                row["created_at"] = row.pop("i_created_at")
+                row["updated_at"] = row.pop("i_updated_at")
+            return rows
+        except Exception as e:
+            logger.error(f"Failed to get resource items: {e}")
+            return []
 
     # ── Trash listing ───────────────────────────────────────────────
 

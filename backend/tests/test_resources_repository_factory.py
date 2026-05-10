@@ -137,7 +137,7 @@ _PHASE_3A_METHODS = [
     "find_by_hash",
 ]
 _PHASE_3B_METHODS = [
-    # resource_items table + trash listings
+    # resource_items table + trash listings (+ get_resource_items added in Phase 3e)
     "find_resource_item",
     "create_resource_item",
     "_resource_ids_for_platforms",
@@ -148,6 +148,7 @@ _PHASE_3B_METHODS = [
     "update_resource_item",
     "delete_resource_item",
     "count_resource_items",
+    "get_resource_items",  # Phase 3e — 22-arg dynamic-filter listing
     "get_expired_trashed_resources",
     "get_trashed_resources",
 ]
@@ -230,7 +231,7 @@ def test_bigint_helper_coerces_str_input():
 
 def test_unmigrated_methods_inherit_from_legacy():
     """Strangler fig sanity check: a method we did NOT migrate (e.g.
-    ``get_resource_items``) should resolve to the LEGACY implementation
+    ``get_resource_tags``) should resolve to the LEGACY implementation
     via MRO, not raise NotImplementedError. Catches the failure mode
     where multiple inheritance breaks unexpectedly."""
     from app.repositories.resources_repository import ResourcesRepository
@@ -238,11 +239,11 @@ def test_unmigrated_methods_inherit_from_legacy():
         ResourcesRepositoryAsyncpg,
     )
 
-    # Pick one representative unmigrated method. ``get_resource_items``
-    # is intentionally on the legacy path (22-parameter dynamic-filter
-    # query, deferred to a follow-up PR) — perfect canary.
-    legacy_method = ResourcesRepository.get_resource_items
-    asyncpg_method = ResourcesRepositoryAsyncpg.get_resource_items
-    # MRO: since the asyncpg subclass doesn't override get_resource_items,
+    # Pick one representative unmigrated method. ``get_resource_tags``
+    # is part of the resource_tags surface (add/remove/get) which
+    # isn't on the asyncpg hot path yet — Phase 3f material.
+    legacy_method = ResourcesRepository.get_resource_tags
+    asyncpg_method = ResourcesRepositoryAsyncpg.get_resource_tags
+    # MRO: since the asyncpg subclass doesn't override get_resource_tags,
     # the resolved attr should be the legacy implementation itself.
     assert asyncpg_method is legacy_method
