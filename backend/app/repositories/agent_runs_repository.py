@@ -1,13 +1,22 @@
-"""Repository for agent_runs table — read paths only (writes go through RunRecorder)."""
+"""Repository for agent_runs table — read paths only (writes go through RunRecorder).
+
+Phase 2 of the supabase-py → asyncpg migration installs a
+``get_agent_runs_repository()`` factory that returns either the
+legacy supabase-py implementation (this file) or the new asyncpg
+one (``agent_runs_repository_asyncpg.py``) depending on the
+``USE_ASYNCPG_AGENT_RUNS`` flag. Call sites import the factory
+instead of the class so the swap is invisible to them.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from loguru import logger
 
+from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
 
 
@@ -218,3 +227,38 @@ class AgentRunsRepository:
         except Exception as e:
             logger.error(f"Failed to load monthly usage: {e}")
             return []
+
+
+# ─── Factory ──────────────────────────────────────────────────────────
+
+
+def get_agent_runs_repository() -> Union[
+    AgentRunsRepository, "AgentRunsRepositoryAsyncpg"
+]:
+    """Return the active AgentRunsRepository implementation.
+
+    Routing:
+      - ``settings.USE_ASYNCPG_AGENT_RUNS=True`` AND pg_pool configured
+        → asyncpg + Supavisor implementation
+      - else → legacy supabase-py implementation (this file)
+
+    Both classes expose the same public method signatures, so call sites
+    just do ``repo = get_agent_runs_repository()`` and use it the same
+    way regardless of backend.
+    """
+    if settings.USE_ASYNCPG_AGENT_RUNS:
+        from app.db.pg_pool import is_configured
+
+        if is_configured():
+            from app.repositories.agent_runs_repository_asyncpg import (
+                AgentRunsRepositoryAsyncpg,
+            )
+
+            return AgentRunsRepositoryAsyncpg()
+        # Flag on but URL missing — log once + fall back so a
+        # half-configured deploy doesn't crash.
+        logger.warning(
+            "USE_ASYNCPG_AGENT_RUNS=true but SUPAVISOR_DATABASE_URL "
+            "is empty — falling back to supabase-py path"
+        )
+    return AgentRunsRepository()
