@@ -1,0 +1,61 @@
+# gitleaks config — detects committed secrets via the pre-commit hook
+# in `.pre-commit-config.yaml`. Run manually with:
+#
+#   gitleaks detect --staged --redact     # scan staged diff
+#   gitleaks detect                       # scan whole working tree
+#   gitleaks git --redact                 # scan full history (slow)
+#
+# Why we have this: 2026-05-10 incident. A screenshot revealed a real
+# prod PG password (`MediaHub_Prod_v2_Jwkp...`) had been hardcoded as a
+# fallback default in a spike script. Pattern was the textbook
+# `os.environ.get("X") or "<literal-secret>"` — exactly what the
+# default gitleaks rules catch. Same day I also found 5 backend/scripts
+# files with a hardcoded NAS dev PG password (PR #229). Pre-commit
+# hook on by default would have refused both at commit time.
+#
+# Inheritance: `useDefault = true` pulls in the upstream gitleaks
+# rule set (~150 rules covering AWS / GCP / Azure / GitHub /
+# Stripe / Slack / generic high-entropy strings). We only override
+# allowlist below.
+
+title = "MediaHub gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives that aren't real secrets"
+
+# Test UUIDs that appear in fixtures + integration tests.
+regexes = [
+    '''8e1584e3-9c29-4a5b-90fe-125b74259f7f''',  # USER_A test uuid
+    '''61f15833-2b2b-4a53-b126-16897f9184a8''',  # USER_B test uuid
+    '''81e49ea8-c3d5-4bc7-a904-7bdf109e0cd9''',  # USER_C test uuid
+    '''00000000-0000-0000-0000-000000000099''',  # smoke test uuid
+]
+
+paths = [
+    # Migration files often contain example values that look like
+    # secrets (e.g., RLS test fixtures with fake tokens).
+    '''supabase/migrations/.*\.sql''',
+    # Auto-generated lock files — gitleaks would flag truncated SHAs as
+    # high-entropy strings.
+    '''.*/(?:uv|package|composer|cargo)\.lock''',
+    # Test snapshots / vendored chrome extension build output.
+    '''chrome-extension/.*\.zip''',
+    '''release/.*\.zip''',
+    # Existing repo secrets that are actually shared (tenant-id-as-username
+    # is documented public info in Supavisor URLs — we can't redact it).
+    '''docs/runbook/asyncpg-canary\.md''',
+]
+
+# Allow the literal "REDACTED" / "<PASSWORD>" placeholders we use in
+# documentation + commit messages.
+stopwords = [
+    "REDACTED",
+    "<PASSWORD>",
+    "<PWD>",
+    "your-password-here",
+    "MediaHub_Dev_REDACTED",
+    "MediaHub_Prod_REDACTED",
+]
