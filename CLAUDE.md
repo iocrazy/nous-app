@@ -484,36 +484,33 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_API_URL` → `https://mediahub.heygo.cn`
 
-### 后端部署 (GitHub Actions + SSH)
+### 后端部署 (GitHub Actions + ACR + Watchtower)
 
-**触发条件**: 推送到 `master` 且修改了 `backend/**` 文件
+**触发条件**: 推送到 `master` 且修改了 `backend/**` 或 `docker/**` 文件
 
 **工作流文件**: `.github/workflows/deploy-backend.yml`
 
-```yaml
-- name: Deploy to NAS via SSH
-  uses: appleboy/ssh-action@v1.0.3
-  with:
-    host: ${{ secrets.NAS_HOST }}
-    port: ${{ secrets.NAS_PORT }}
-    username: ${{ secrets.NAS_USER }}
-    key: ${{ secrets.NAS_SSH_KEY }}
-    script: |
-      cd ${{ secrets.NAS_PROJECT_PATH }}
-      git pull origin master
-      docker-compose build --no-cache backend
-      docker-compose up -d --force-recreate backend
-```
+⚠️ **WATCHTOWER 不会应用 docker-compose 配置变更** — 详见 [`docs/runbook/compose-config-changes.md`](docs/runbook/compose-config-changes.md)
+
+任何对 `docker/docker-compose.yml` 的修改（新增 service、改 env var、改 volume、改 ports、改 depends_on）**都需要在 NAS 上手动跑 `docker compose up -d`** 才会生效。Watchtower 只会拉新 image + 用容器**已有**的 env 重启，不会读 compose 文件。
+
+血泪教训：2026-05-10 #172 加 `MEDIAHUB_ROLE=gateway` env + 新 `mediahub-worker` service，但没人去 NAS 跑 `docker compose up -d`，结果：
+- backend 还在 combined 模式（env 没生效）
+- mediahub-worker 容器从未创建
+- mediahub-admin 后续因为 compose state 漂移而打不开
+
+**实际部署链**:
+1. CI build + push image to Aliyun ACR (`mediahub-backend:latest`)
+2. CI 调用 `WATCHTOWER_URL` webhook 触发 NAS 上 watchtower
+3. Watchtower pull 新 image + 重启 `mediahub-app-backend` container（用 container 已有 env，不读 compose 文件）
 
 **GitHub Secrets 配置**:
 
 | Secret | 说明 |
 |--------|------|
-| `NAS_HOST` | 公网 IP 或 DDNS 域名 |
-| `NAS_PORT` | SSH 端口 (如 2222) |
-| `NAS_USER` | SSH 用户名 |
-| `NAS_SSH_KEY` | 完整私钥 (含 BEGIN/END 行) |
-| `NAS_PROJECT_PATH` | 项目路径 |
+| `ACR_REGISTRY` / `ACR_USERNAME` / `ACR_PASSWORD` | Aliyun ACR 推 image |
+| `ACR_NAMESPACE` | image 命名空间（heygo） |
+| `WATCHTOWER_URL` / `WATCHTOWER_TOKEN` | NAS 上 watchtower 的 webhook 触发器 |
 
 ### 手动部署
 

@@ -99,6 +99,24 @@ services:
   # /api/v1/healthz + /api/v1/readyz are mounted (worker mode skips
   # the public API router entirely — see app/main.py role gate).
   #
+  # ⚠️ DEPLOYMENT GOTCHA — Watchtower DOES NOT activate compose changes
+  # ----------------------------------------------------------------
+  # Watchtower polls image digests for containers it ALREADY KNOWS.
+  # It does NOT read docker-compose.yml and create newly-added services
+  # (this `mediahub-worker` was new when #172 landed), and it DOES NOT
+  # apply env-var changes on existing services (e.g., `MEDIAHUB_ROLE=
+  # gateway` was added on the `mediahub` service in the same PR — the
+  # value only reaches the running container after a manual recreate).
+  #
+  # First-time activation after a compose-config change requires a
+  # one-shot manual `docker compose up -d` on the NAS:
+  #
+  #   ssh user@nas-ip -p 2222
+  #   cd /volume1/docker/mediahub/docker
+  #   sudo docker compose up -d
+  #
+  # See docs/runbook/compose-config-changes.md for the full procedure.
+  #
   # Failure isolation: a workflow OOM / segfault here cannot affect
   # the mediahub gateway service. autoheal restarts unhealthy worker
   # containers; DBOS replays in-flight workflows from the durable
