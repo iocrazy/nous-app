@@ -93,18 +93,30 @@ def test_asyncpg_repo_has_same_public_methods_as_legacy():
 
 
 # Migrated methods — keep this list in sync with
-# MediaRepositoryAsyncpg overrides.
-_PHASE_4A_METHODS = [
+# MediaRepositoryAsyncpg overrides. Phase 4a is CRUD, Phase 4b is
+# bulk + lists, Phase 4c is search + statistics. After Phase 4c
+# lands, the only methods inherited from legacy are the wrappers
+# (check_*, mark_*, get_music_data) which test below pins via MRO.
+_MIGRATED_METHODS = [
+    # Phase 4a
     "create",
     "get_by_platform_id",
     "get_by_id",
     "update",
     "delete",
     "get_downloaded_by_platform_id",
+    # Phase 4b
+    "mark_stale_downloads_failed",
+    "get_pending_downloads",
+    "get_all",
+    "get_user_media_list",
+    # Phase 4c
+    "search",
+    "get_statistics",
 ]
 
 
-@pytest.mark.parametrize("method_name", _PHASE_4A_METHODS)
+@pytest.mark.parametrize("method_name", _MIGRATED_METHODS)
 def test_asyncpg_signature_matches_legacy(method_name):
     """Per-method signature parity — catches accidental kwarg
     renames that would silently no-op."""
@@ -121,17 +133,6 @@ def test_asyncpg_signature_matches_legacy(method_name):
         f"{method_name} signature drift: legacy={sorted(legacy_params)}, "
         f"asyncpg={sorted(asyncpg_params)}"
     )
-
-
-def test_unmigrated_methods_inherit_from_legacy():
-    """Strangler fig sanity check: ``search`` (Phase 4c material)
-    should resolve to the legacy implementation via MRO."""
-    from app.repositories.media_repository import MediaRepository
-    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
-
-    legacy_method = MediaRepository.search
-    asyncpg_method = MediaRepositoryAsyncpg.search
-    assert asyncpg_method is legacy_method
 
 
 def test_wrapper_methods_get_asyncpg_routing_via_mro():
