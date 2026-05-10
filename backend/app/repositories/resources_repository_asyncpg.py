@@ -934,4 +934,149 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             return 1
 
 
+    # ── Resource Versions ───────────────────────────────────────────
+    #
+    # ``resource_versions`` is append-only history per resource. The
+    # version_number column is monotonic per resource_id; reads almost
+    # always sort DESC to get the latest first.
+
+    async def create_version(
+        self, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        try:
+            cols = list(data.keys())
+            placeholders = ", ".join(f"${i + 1}" for i in range(len(cols)))
+            col_list = ", ".join(f'"{c}"' for c in cols)
+            sql = (
+                f'INSERT INTO "resource_versions" ({col_list}) '
+                f"VALUES ({placeholders}) RETURNING *"
+            )
+            row = await self.fetch_one(sql, *data.values())
+            logger.info(
+                f"Created version {data.get('version_number')} "
+                f"for resource {data.get('resource_id')}"
+            )
+            return row or {}
+        except Exception as e:
+            logger.error(f"Failed to create version: {e}")
+            raise
+
+    async def get_versions(
+        self, resource_id: str
+    ) -> List[Dict[str, Any]]:
+        try:
+            return await self.fetch_all(
+                "SELECT * FROM resource_versions "
+                "WHERE resource_id = $1 "
+                "ORDER BY version_number DESC",
+                self._bigint(resource_id),
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to get versions for resource {resource_id}: {e}"
+            )
+            return []
+
+    async def get_version_by_id(
+        self, version_id: str
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.fetch_one(
+                "SELECT * FROM resource_versions WHERE id = $1",
+                self._bigint(version_id),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get version {version_id}: {e}")
+            return None
+
+    async def get_version_by_number(
+        self, resource_id: str, version_number: int
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.fetch_one(
+                "SELECT * FROM resource_versions "
+                "WHERE resource_id = $1 AND version_number = $2 "
+                "LIMIT 1",
+                self._bigint(resource_id), int(version_number),
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to get version {version_number} for "
+                f"{resource_id}: {e}"
+            )
+            return None
+
+    async def delete_version(self, version_id: str) -> bool:
+        try:
+            await self.execute(
+                "DELETE FROM resource_versions WHERE id = $1",
+                self._bigint(version_id),
+            )
+            logger.info(f"Deleted version {version_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete version {version_id}: {e}")
+            raise
+
+    async def update_version(
+        self, version_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        try:
+            cols = list(data.keys())
+            set_pairs = ", ".join(
+                f'"{c}" = ${i + 1}' for i, c in enumerate(cols)
+            )
+            sql = (
+                f'UPDATE "resource_versions" SET {set_pairs} '
+                f"WHERE id = ${len(cols) + 1} RETURNING *"
+            )
+            row = await self.fetch_one(
+                sql, *data.values(), self._bigint(version_id)
+            )
+            return row or {}
+        except Exception as e:
+            logger.error(f"Failed to update version {version_id}: {e}")
+            raise
+
+    async def get_untranscoded_video_versions(
+        self,
+    ) -> List[Dict[str, Any]]:
+        """Video versions that have never been transcoded — NULL
+        ``transcode_status`` AND non-NULL ``file_path``. The legacy
+        version pulled this via PostgREST's ``.like`` + ``.is_`` +
+        ``.not_.is_`` chain; SQL says it directly."""
+        try:
+            return await self.fetch_all(
+                "SELECT id, resource_id, mime_type, file_path "
+                "FROM resource_versions "
+                "WHERE mime_type LIKE 'video/%' "
+                "  AND transcode_status IS NULL "
+                "  AND file_path IS NOT NULL"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to get untranscoded video versions: {e}"
+            )
+            return []
+
+    async def get_next_version_number(self, resource_id: str) -> int:
+        """Next monotonic version_number for a resource. Returns 1
+        when the resource has no versions yet. Single COALESCE-MAX
+        query — cheaper than the legacy SELECT...ORDER...LIMIT 1
+        round-trip."""
+        try:
+            current = await self.fetch_value(
+                "SELECT COALESCE(MAX(version_number), 0) "
+                "FROM resource_versions WHERE resource_id = $1",
+                self._bigint(resource_id),
+            )
+            return int(current or 0) + 1
+        except Exception as e:
+            logger.error(
+                f"Failed to get next version for resource "
+                f"{resource_id}: {e}"
+            )
+            return 1
+
+
 __all__ = ["ResourcesRepositoryAsyncpg"]
