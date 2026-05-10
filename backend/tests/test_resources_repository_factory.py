@@ -162,7 +162,22 @@ _PHASE_3C_METHODS = [
     "get_untranscoded_video_versions",
     "get_next_version_number",
 ]
-_MIGRATED_METHODS = _PHASE_3A_METHODS + _PHASE_3B_METHODS + _PHASE_3C_METHODS
+_PHASE_3D_METHODS = [
+    # folders table
+    "create_folder",
+    "get_trashed_folders",
+    "get_folders",
+    "get_folder_by_id",
+    "update_folder",
+    "delete_folder",
+    "get_descendant_folder_ids",
+    "count_folder_contents",
+    "restore_folder_cascade",
+    "trash_folder_cascade",
+]
+_MIGRATED_METHODS = (
+    _PHASE_3A_METHODS + _PHASE_3B_METHODS + _PHASE_3C_METHODS + _PHASE_3D_METHODS
+)
 
 
 @pytest.mark.parametrize("method_name", _MIGRATED_METHODS)
@@ -215,17 +230,19 @@ def test_bigint_helper_coerces_str_input():
 
 def test_unmigrated_methods_inherit_from_legacy():
     """Strangler fig sanity check: a method we did NOT migrate (e.g.
-    ``get_folders``) should resolve to the LEGACY implementation via
-    MRO, not raise NotImplementedError. Catches the failure mode
+    ``get_resource_items``) should resolve to the LEGACY implementation
+    via MRO, not raise NotImplementedError. Catches the failure mode
     where multiple inheritance breaks unexpectedly."""
     from app.repositories.resources_repository import ResourcesRepository
     from app.repositories.resources_repository_asyncpg import (
         ResourcesRepositoryAsyncpg,
     )
 
-    # Pick one representative unmigrated method.
-    legacy_method = ResourcesRepository.get_folders
-    asyncpg_method = ResourcesRepositoryAsyncpg.get_folders
-    # MRO says ResourcesRepository.get_folders is the resolved attr
-    # since the asyncpg subclass doesn't override it.
+    # Pick one representative unmigrated method. ``get_resource_items``
+    # is intentionally on the legacy path (22-parameter dynamic-filter
+    # query, deferred to a follow-up PR) — perfect canary.
+    legacy_method = ResourcesRepository.get_resource_items
+    asyncpg_method = ResourcesRepositoryAsyncpg.get_resource_items
+    # MRO: since the asyncpg subclass doesn't override get_resource_items,
+    # the resolved attr should be the legacy implementation itself.
     assert asyncpg_method is legacy_method

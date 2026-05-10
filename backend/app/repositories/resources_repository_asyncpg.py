@@ -5,8 +5,8 @@ asyncpg + Supavisor. Lands in phases so each PR stays reviewable:
 
   - Phase 3a: ``resources`` table core (10 methods) — shipped #213
   - Phase 3b: ``resource_items`` table (12 methods) — shipped #219
-  - Phase 3c: ``resource_versions`` table (8 methods) — this file
-  - Phase 3d: ``folders`` table — pending
+  - Phase 3c: ``resource_versions`` table (8 methods) — shipped #220
+  - Phase 3d: ``folders`` table (10 methods) — this file
 
 Strategy: multiple inheritance from ``AsyncpgRepository`` and the
 legacy ``ResourcesRepository``. Methods we override go through asyncpg;
@@ -642,6 +642,287 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         except Exception as e:
             logger.error(f"Failed to get next version for resource {resource_id}: {e}")
             return 1
+
+    # ── Folders ─────────────────────────────────────────────────────
+    #
+    # Folders form a scope-rooted tree (parent_id NULL = top level
+    # of a scope). Cascade operations recurse via WITH RECURSIVE
+    # CTEs in PG — single round-trip vs. the legacy BFS-in-Python
+    # which fired one query per level. The cascade methods preserve
+    # the legacy return shape (``{trashed_folders, trashed_resources}``
+    # / ``{restored_folders, restored_resources}``) so callers don't
+    # need to change.
+
+    async def create_folder(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            cols = list(data.keys())
+            placeholders = ", ".join(f"${i + 1}" for i in range(len(cols)))
+            col_list = ", ".join(f'"{c}"' for c in cols)
+            sql = (
+                f'INSERT INTO "folders" ({col_list}) '
+                f"VALUES ({placeholders}) RETURNING *"
+            )
+            row = await self.fetch_one(sql, *data.values())
+            logger.info(f"Created folder: {data.get('name')}")
+            return row or {}
+        except Exception as e:
+            logger.error(f"Failed to create folder: {e}")
+            raise
+
+    async def get_trashed_folders(
+        self, scope_type: str, scope_id: str
+    ) -> List[Dict[str, Any]]:
+        try:
+            return await self.fetch_all(
+                "SELECT * FROM folders "
+                "WHERE scope_type = $1 "
+                "  AND scope_id = $2 "
+                "  AND is_trashed = true "
+                "ORDER BY trashed_at DESC",
+                scope_type,
+                scope_id,
+            )
+        except Exception as e:
+            logger.error(f"Failed to get trashed folders: {e}")
+            return []
+
+    async def get_folders(
+        self,
+        scope_type: str,
+        scope_id: str,
+        include_trashed: bool = False,
+    ) -> List[Dict[str, Any]]:
+        try:
+            if include_trashed:
+                return await self.fetch_all(
+                    "SELECT * FROM folders "
+                    "WHERE scope_type = $1 AND scope_id = $2 "
+                    "ORDER BY sort_order ASC",
+                    scope_type,
+                    scope_id,
+                )
+            return await self.fetch_all(
+                "SELECT * FROM folders "
+                "WHERE scope_type = $1 "
+                "  AND scope_id = $2 "
+                "  AND is_trashed = false "
+                "ORDER BY sort_order ASC",
+                scope_type,
+                scope_id,
+            )
+        except Exception as e:
+            logger.error(f"Failed to get folders: {e}")
+            return []
+
+    async def get_folder_by_id(self, folder_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.fetch_one(
+                "SELECT * FROM folders WHERE id = $1",
+                self._bigint(folder_id),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get folder {folder_id}: {e}")
+            return None
+
+    async def update_folder(
+        self, folder_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        try:
+            cols = list(data.keys())
+            set_pairs = ", ".join(f'"{c}" = ${i + 1}' for i, c in enumerate(cols))
+            sql = (
+                f'UPDATE "folders" SET {set_pairs} '
+                f"WHERE id = ${len(cols) + 1} RETURNING *"
+            )
+            row = await self.fetch_one(sql, *data.values(), self._bigint(folder_id))
+            logger.info(f"Updated folder {folder_id}")
+            return row or {}
+        except Exception as e:
+            logger.error(f"Failed to update folder {folder_id}: {e}")
+            raise
+
+    async def delete_folder(self, folder_id: str) -> bool:
+        try:
+            await self.execute(
+                "DELETE FROM folders WHERE id = $1",
+                self._bigint(folder_id),
+            )
+            logger.info(f"Deleted folder {folder_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete folder {folder_id}: {e}")
+            raise
+
+    async def get_descendant_folder_ids(self, folder_id: str) -> List[str]:
+        """Recursive descent into non-trashed children. Single CTE
+        replaces the legacy BFS that fired one query per tree level
+        (10-level tree = 10 round-trips before; 1 now).
+
+        Returns list[str] for legacy contract (caller passes back to
+        PostgREST in some unmigrated paths); internal callers like
+        ``count_folder_contents`` re-coerce via ``_bigint_list``."""
+        try:
+            rows = await self.fetch_all(
+                "WITH RECURSIVE descendants AS ("
+                "  SELECT id FROM folders "
+                "    WHERE parent_id = $1 AND is_trashed = false "
+                "  UNION ALL "
+                "  SELECT f.id FROM folders f "
+                "    INNER JOIN descendants d ON f.parent_id = d.id "
+                "    WHERE f.is_trashed = false"
+                ") SELECT id FROM descendants",
+                self._bigint(folder_id),
+            )
+            return [str(r["id"]) for r in rows]
+        except Exception as e:
+            logger.error(f"Failed to get descendant folders for {folder_id}: {e}")
+            return []
+
+    async def count_folder_contents(self, folder_ids: List[str]) -> Dict[str, int]:
+        """Resource + sub-folder count for a list of folder ids.
+
+        Sub-folder count mirrors legacy quirk: ``len(ids) - 1`` (the
+        list is expected to be ``[root] + descendants`` from
+        get_descendant_folder_ids; the -1 strips the root itself).
+
+        ``folder_id`` column is bigint; the ``::bigint[]`` cast +
+        per-element coercion is required because asyncpg won't bind
+        a list of str to a bigint array."""
+        try:
+            resource_count = await self.fetch_value(
+                "SELECT count(*) FROM resource_items "
+                "WHERE folder_id = ANY($1::bigint[])",
+                self._bigint_list(folder_ids),
+            )
+            subfolder_count = len(folder_ids) - 1 if len(folder_ids) > 1 else 0
+            return {
+                "resource_count": int(resource_count or 0),
+                "subfolder_count": subfolder_count,
+            }
+        except Exception as e:
+            logger.error(f"Failed to count folder contents: {e}")
+            return {"resource_count": 0, "subfolder_count": 0}
+
+    async def restore_folder_cascade(self, folder_id: str) -> Dict[str, int]:
+        """Restore a folder + all trashed descendants + their
+        resources, in one transaction. Single CTE per phase replaces
+        the legacy per-folder loop.
+
+        ``all_ids`` is kept as int (not stringified) for the bulk
+        UPDATEs — folder_id and resources.id are both bigint, and
+        ``::bigint[]`` is the only safe binding."""
+        try:
+            async with self.transaction() as conn:
+                folder_ids_rows = await conn.fetch(
+                    "WITH RECURSIVE subtree AS ("
+                    "  SELECT id FROM folders "
+                    "    WHERE id = $1 AND is_trashed = true "
+                    "  UNION ALL "
+                    "  SELECT f.id FROM folders f "
+                    "    INNER JOIN subtree s ON f.parent_id = s.id "
+                    "    WHERE f.is_trashed = true"
+                    ") SELECT id FROM subtree",
+                    self._bigint(folder_id),
+                )
+                all_ids = [r["id"] for r in folder_ids_rows]
+                if not all_ids:
+                    return {"restored_folders": 0, "restored_resources": 0}
+
+                restored_resources_rows = await conn.fetch(
+                    "UPDATE resources SET is_trashed = false, "
+                    "       trashed_at = NULL "
+                    "WHERE is_trashed = true "
+                    "  AND id IN ("
+                    "    SELECT resource_id FROM resource_items "
+                    "    WHERE folder_id = ANY($1::bigint[])"
+                    "  ) RETURNING id",
+                    all_ids,
+                )
+                restored_folders_rows = await conn.fetch(
+                    "UPDATE folders SET is_trashed = false, "
+                    "       trashed_at = NULL "
+                    "WHERE id = ANY($1::bigint[]) RETURNING id",
+                    all_ids,
+                )
+
+            restored_folders = len(restored_folders_rows)
+            restored_resources = len(restored_resources_rows)
+            logger.info(
+                f"Cascade-restored folder {folder_id}: "
+                f"{restored_folders} folders, "
+                f"{restored_resources} resources"
+            )
+            return {
+                "restored_folders": restored_folders,
+                "restored_resources": restored_resources,
+            }
+        except Exception as e:
+            logger.error(f"Failed to cascade-restore folder {folder_id}: {e}")
+            raise
+
+    async def trash_folder_cascade(self, folder_id: str) -> Dict[str, int]:
+        """Trash a folder + all non-trashed descendants + their
+        resources, in one transaction. The resource UPDATE preserves
+        the original location (last_folder_id / last_library_id /
+        last_scope_*) per legacy contract — needed for restore."""
+        try:
+            async with self.transaction() as conn:
+                # Subtree of non-trashed folders rooted at folder_id.
+                # Includes the root regardless of its trashed state
+                # (legacy behaviour: trash_folder_cascade always
+                # processes the root).
+                folder_ids_rows = await conn.fetch(
+                    "WITH RECURSIVE subtree AS ("
+                    "  SELECT id FROM folders WHERE id = $1 "
+                    "  UNION ALL "
+                    "  SELECT f.id FROM folders f "
+                    "    INNER JOIN subtree s ON f.parent_id = s.id "
+                    "    WHERE f.is_trashed = false"
+                    ") SELECT id FROM subtree",
+                    self._bigint(folder_id),
+                )
+                all_ids = [r["id"] for r in folder_ids_rows]
+                if not all_ids:
+                    return {"trashed_folders": 0, "trashed_resources": 0}
+
+                # Trash resources currently in any of these folders.
+                # Snapshot last_* fields from resource_items so a
+                # later restore can put them back where they were.
+                trashed_resources_rows = await conn.fetch(
+                    "UPDATE resources r SET "
+                    "  is_trashed = true, "
+                    "  trashed_at = now(), "
+                    "  last_folder_id = i.folder_id, "
+                    "  last_library_id = i.library_id, "
+                    "  last_scope_type = i.scope_type, "
+                    "  last_scope_id = i.scope_id "
+                    "FROM resource_items i "
+                    "WHERE r.id = i.resource_id "
+                    "  AND i.folder_id = ANY($1::bigint[]) "
+                    "  AND r.is_trashed = false RETURNING r.id",
+                    all_ids,
+                )
+                trashed_folders_rows = await conn.fetch(
+                    "UPDATE folders SET "
+                    "  is_trashed = true, trashed_at = now() "
+                    "WHERE id = ANY($1::bigint[]) RETURNING id",
+                    all_ids,
+                )
+
+            trashed_folders = len(trashed_folders_rows)
+            trashed_resources = len(trashed_resources_rows)
+            logger.info(
+                f"Cascade-trashed folder {folder_id}: "
+                f"{trashed_folders} folders, "
+                f"{trashed_resources} resources"
+            )
+            return {
+                "trashed_folders": trashed_folders,
+                "trashed_resources": trashed_resources,
+            }
+        except Exception as e:
+            logger.error(f"Failed to cascade-trash folder {folder_id}: {e}")
+            raise
 
 
 __all__ = ["ResourcesRepositoryAsyncpg"]
