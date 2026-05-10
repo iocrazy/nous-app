@@ -1,9 +1,16 @@
 # asyncpg + Supavisor canary runbook (Bug C)
 
 Operational guide for rolling out the asyncpg + Supavisor data path
-behind the `USE_ASYNCPG_RESOURCES` feature flag. The flag is currently
-**off** in every environment — this doc walks through how to flip it
-in dev, watch for regressions, and promote to prod once stable.
+behind three per-repo feature flags:
+
+- `USE_ASYNCPG_AGENT_RUNS` — Phase 2 (`AgentRunsRepository`)
+- `USE_ASYNCPG_RESOURCES` — Phase 3a-3e (`ResourcesRepository`)
+- `USE_ASYNCPG_MEDIA` — Phase 4a/4b/4c (`MediaRepository`)
+
+All three flags are currently **off** in every environment — this doc
+walks through how to flip them in dev, watch for regressions, and
+promote to prod once stable. Flags are independent: flip one at a time
+to keep the blast radius small.
 
 ## What this validates
 
@@ -24,19 +31,36 @@ PG via [Supavisor](https://supabase.com/docs/guides/database/connecting-to-postg
 
 ## What was migrated
 
-`ResourcesRepository` is the first hot path. After Phase 3a-3e
-(PRs #213/219/220/221/222), 41 of 47 public methods route through
-`ResourcesRepositoryAsyncpg` when `USE_ASYNCPG_RESOURCES=true`.
+### `ResourcesRepository` (Phase 3a-3e — PRs #213 / #219 / #220 / #221 / #222)
 
-The remaining 6 methods (`add_resource_tag`, `remove_resource_tag`,
-`get_resource_tags`, `get_smart_folders`, `create_smart_folder`,
-`execute_smart_rules`) inherit from the legacy supabase-py
-implementation via MRO — they're lower-traffic and intentionally
+41 of 47 public methods route through `ResourcesRepositoryAsyncpg`
+when `USE_ASYNCPG_RESOURCES=true`. The remaining 6 (`add_resource_tag`,
+`remove_resource_tag`, `get_resource_tags`, `get_smart_folders`,
+`create_smart_folder`, `execute_smart_rules`) inherit from the legacy
+supabase-py implementation via MRO — lower-traffic, intentionally
 deferred. If the canary surfaces them as Bug C contributors, see
 Phase 3f (TBD).
 
-`AgentRunsRepository` is also migrated (#212, behind
-`USE_ASYNCPG_AGENT_RUNS`).
+### `MediaRepository` (Phase 4a/4b/4c — PRs #225 / #234)
+
+12 public methods overridden in `MediaRepositoryAsyncpg` covering
+the full `parsed_media` table surface:
+
+- **Phase 4a CRUD**: `create`, `get_by_platform_id`, `get_by_id`,
+  `update`, `delete`, `get_downloaded_by_platform_id`
+- **Phase 4b lists**: `mark_stale_downloads_failed`,
+  `get_pending_downloads`, `get_all`, `get_user_media_list`
+- **Phase 4c search/stats**: `search`, `get_statistics`
+
+The 9 wrapper methods (`check_*`, `mark_*`, `get_music_data`,
+`mark_download_failed`) are NOT overridden — they call into
+`self.get_by_platform_id` / `self.update` and Python MRO routes them
+through the asyncpg overrides automatically. Flag: `USE_ASYNCPG_MEDIA`.
+
+### `AgentRunsRepository` (Phase 2 — PR #212)
+
+Already canary'd, behind `USE_ASYNCPG_AGENT_RUNS`. Telemetry path,
+lower volume than the other two.
 
 ## Pre-flight: env config
 
@@ -80,9 +104,15 @@ Pull the actual password from each Supabase admin console (`Settings → Databas
 SUPAVISOR_DATABASE_URL=postgresql://postgres.heygo-dev:<PASSWORD>@192.168.50.9:6543/postgres
 SUPAVISOR_POOL_MIN_SIZE=2     # default; tune if needed
 SUPAVISOR_POOL_MAX_SIZE=10    # default; raise for high-concurrency env
-USE_ASYNCPG_RESOURCES=true    # the actual feature flag
 USE_ASYNCPG_AGENT_RUNS=true   # already canary'd in Phase 2 — leave on
+USE_ASYNCPG_RESOURCES=true    # Phase 3a-3e
+USE_ASYNCPG_MEDIA=true        # Phase 4a/4b/4c
 ```
+
+**Flip one at a time** if you're not sure the env is healthy. Each
+flag is independent — start with `USE_ASYNCPG_RESOURCES`, soak 24h,
+then add `USE_ASYNCPG_MEDIA`. If something breaks under one flag, the
+narrow blast radius makes diagnosis trivial.
 
 ## Flip procedure (dev → staging → prod)
 
@@ -105,32 +135,65 @@ curl -s http://localhost:$BACKEND_PORT/api/v1/health  # adjust path
 
 ### 2. Smoke test the hot paths
 
-These exercise the migrated methods that matter most for Bug C:
+These exercise the migrated methods that matter most for Bug C.
+**Group A** runs under `USE_ASYNCPG_RESOURCES=true`; **Group B** runs
+under `USE_ASYNCPG_MEDIA=true`. Run group A first, then add group B.
+
+#### Group A — `ResourcesRepository`
 
 ```
-1. Resource library list:
-     GET /api/v1/resources?scope_type=user&scope_id=<your_user_uuid>
-     Expect: 200 with embedded {resource: {...}} shape per row
-     This hits get_resource_items (Phase 3e — most complex)
+A1. Resource library list:
+      GET /api/v1/resources?scope_type=user&scope_id=<your_user_uuid>
+      Expect: 200 with embedded {resource: {...}} shape per row
+      Hits get_resource_items (Phase 3e — most complex JOIN + filter)
 
-2. Resource lookup:
-     GET /api/v1/resources/<id>
-     This hits get_resource_by_id (Phase 3a — most-called)
+A2. Resource lookup:
+      GET /api/v1/resources/<id>
+      Hits get_resource_by_id (Phase 3a — most-called read)
 
-3. Media fetch:
-     POST /api/v1/media/fetch with a Douyin URL
-     This hits get_completed_resource_by_url_and_creator (the
-     L2 dedup probe — most-called supabase-py path under Bug C)
+A3. Media fetch (cross-user dedup):
+      POST /api/v1/media/fetch with a Douyin URL someone else has
+      already downloaded
+      Hits get_completed_resource_by_url_and_creator (the L2 dedup
+      probe — most-called supabase-py path under Bug C)
 
-4. Folder ops:
-     Create folder, nest subfolder, trash root, restore root
-     This hits restore_folder_cascade / trash_folder_cascade
-     (Phase 3d — recursive CTE replaces legacy BFS)
+A4. Folder ops:
+      Create folder, nest subfolder, trash root, restore root
+      Hits restore_folder_cascade / trash_folder_cascade
+      (Phase 3d — recursive CTE replaces legacy BFS)
 ```
 
-For each: response should be identical to pre-flip (shapes and
-contents match). If anything diverges, that's a parity bug — file an
-issue and rollback.
+#### Group B — `MediaRepository`
+
+```
+B1. Media library list (per-user JOIN):
+      GET /api/v1/media?limit=50
+      Hits get_user_media_list (Phase 4b — JOIN through resources +
+      resource_id overlay shape preservation)
+
+B2. Media detail:
+      GET /api/v1/media/<id>
+      Hits get_by_id (Phase 4a — the BIGINT-coercion path; broken
+      under naive str input, see PR #225's empirical fix)
+
+B3. Media search:
+      Use the search UI with a keyword that returns results
+      Hits search (Phase 4c — dynamic parameterized WHERE assembly)
+
+B4. Library statistics:
+      GET /api/v1/media/statistics  (or whatever the dashboard uses)
+      Hits get_statistics (Phase 4c — single SQL aggregation;
+      compare numbers against pre-flip dashboard)
+
+B5. Parse + download a fresh URL:
+      Triggers create + update + mark_*_as_downloaded wrappers
+      The wrappers call self.update — verifies MRO routing works
+      end-to-end (no leak back to legacy supabase-py)
+```
+
+For each: response should be identical to pre-flip (shapes + contents
+match). If anything diverges, that's a parity bug — file an issue and
+rollback the offending flag (the others can stay on).
 
 ### 3. Soak
 
@@ -154,6 +217,40 @@ Watch for:
          OR message ILIKE '%pg_pool%'
          OR message ILIKE '%pool exhausted%'
          OR message ILIKE '%Supavisor%')
+  ORDER BY logged_at DESC LIMIT 50;
+  ```
+
+- Type-binding bugs specific to Phase 4 (BIGINT coercion + datetime).
+  These would surface as `asyncpg.exceptions.DataError` with a
+  signature like `'str' object cannot be interpreted as an integer`
+  or `expected datetime.datetime instance, got 'str'`:
+
+  ```sql
+  SELECT logged_at, module, message
+  FROM application_logs
+  WHERE level = 'ERROR'
+    AND logged_at >= NOW() - INTERVAL '24 hours'
+    AND (message ILIKE '%DataError%'
+         OR message ILIKE '%cannot be interpreted as an integer%'
+         OR message ILIKE '%expected%datetime%')
+  ORDER BY logged_at DESC LIMIT 50;
+  ```
+
+- Repository-method-level errors. The asyncpg classes log
+  `Failed to <verb> parsed_media:` / `Failed to get user media list:`
+  / `搜索视频失败:` / `获取统计信息失败:` etc. on every caught
+  exception:
+
+  ```sql
+  SELECT logged_at, message
+  FROM application_logs
+  WHERE level = 'ERROR'
+    AND logged_at >= NOW() - INTERVAL '24 hours'
+    AND (message ILIKE '%Failed to%parsed_media%'
+         OR message ILIKE '%Failed to get user media list%'
+         OR message ILIKE '%获取待下载列表失败%'
+         OR message ILIKE '%搜索视频失败%'
+         OR message ILIKE '%获取统计信息失败%')
   ORDER BY logged_at DESC LIMIT 50;
   ```
 
@@ -188,11 +285,14 @@ account, in a dedicated browser session that you can throw away).
 
 ## Rollback
 
-Single-line revert. Either:
+Single-line revert per flag. Each repo can be rolled back independently
+without touching the others — that's the whole point of separating
+them. Either:
 
 ```bash
 # Edit .env, set back to false:
-USE_ASYNCPG_RESOURCES=false
+USE_ASYNCPG_RESOURCES=false   # rollback Resources path only
+USE_ASYNCPG_MEDIA=false       # rollback Media path only
 
 # Restart backend.
 ```
@@ -237,5 +337,6 @@ legacy classpath).
 - Phase 1 foundation: PR #211 (`pg_pool.py` + `repository_base.py`)
 - Phase 2 pilot: PR #212 (AgentRunsRepository)
 - Phase 3a-3e: PRs #213 / #219 / #220 / #221 / #222 (ResourcesRepository)
+- Phase 4a/4b/4c: PRs #225 / #234 (MediaRepository)
 - CI lint scope fix: PR #217
 - Master format sweep + pre-commit: PR #218

@@ -86,8 +86,9 @@ class Settings(BaseSettings):
     USE_ASYNCPG_MEDIA: bool = Field(
         default=False,
         description="Route MediaRepository through asyncpg + Supavisor "
-        "(Phase 4a — covers parsed_media CRUD; lists / search / "
-        "statistics still use legacy supabase-py)",
+        "(Phase 4a/4b/4c — covers parsed_media CRUD + lists + search + "
+        "statistics; the 9 wrapper methods route through the asyncpg "
+        "overrides automatically via Python MRO)",
     )
 
     # ============================================
