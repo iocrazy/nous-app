@@ -28,6 +28,7 @@ Pure layer:
 DB-touching pieces (load full + ablated agent runs) deferred — this
 module is the algorithm + diff layer.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -46,9 +47,7 @@ class ReplayDiff:
     differing_tokens: tuple[str, ...] = field(default_factory=tuple)
 
 
-def filter_excluding(
-    memory_ids: Iterable[str], excluded: Iterable[str]
-) -> list[str]:
+def filter_excluding(memory_ids: Iterable[str], excluded: Iterable[str]) -> list[str]:
     """Return memory_ids with any id in ``excluded`` removed."""
     excl = set(excluded)
     return [mid for mid in memory_ids if mid not in excl]

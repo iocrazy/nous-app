@@ -12,7 +12,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.storyboard.storyboard_ai_service import AGENT_SLUG, StoryboardAIService
+from app.services.storyboard.storyboard_ai_service import (
+    AGENT_SLUG,
+    StoryboardAIService,
+)
 
 
 def test_agent_slug_constant() -> None:

@@ -201,7 +201,9 @@ async def test_agent_update_fields_versioned_noop_when_no_tracked_change() -> No
 
 
 @pytest.mark.asyncio
-async def test_agent_update_fields_versioned_writes_untracked_field_without_snapshot() -> None:
+async def test_agent_update_fields_versioned_writes_untracked_field_without_snapshot() -> (
+    None
+):
     """Budget / paused_reason etc. are not in _VERSIONED_AGENT_FIELDS — they
     still need to land in the DB, they just shouldn't bump version history."""
     agent_id = uuid4()

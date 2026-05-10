@@ -1,4 +1,5 @@
 """L2 — built-in 'todo' skill."""
+
 from __future__ import annotations
 
 import pytest
@@ -30,9 +31,7 @@ async def test_todo_replace_creates_list():
 @pytest.mark.asyncio
 async def test_todo_complete_flips_status():
     svc = _svc()
-    await svc.execute(
-        {"skill": "todo", "op": "replace", "items": [{"content": "a"}]}
-    )
+    await svc.execute({"skill": "todo", "op": "replace", "items": [{"content": "a"}]})
     out = await svc.execute({"skill": "todo", "op": "complete", "id": 1})
     assert out["updated_id"] == 1
     assert out["all_done"] is True
@@ -42,9 +41,11 @@ async def test_todo_complete_flips_status():
 async def test_todo_in_progress_then_complete():
     svc = _svc()
     await svc.execute(
-        {"skill": "todo", "op": "replace", "items": [
-            {"content": "a"}, {"content": "b"}
-        ]}
+        {
+            "skill": "todo",
+            "op": "replace",
+            "items": [{"content": "a"}, {"content": "b"}],
+        }
     )
     await svc.execute({"skill": "todo", "op": "in_progress", "id": 1})
     await svc.execute({"skill": "todo", "op": "complete", "id": 1})
@@ -57,9 +58,11 @@ async def test_todo_in_progress_then_complete():
 async def test_todo_only_one_in_progress_at_a_time():
     svc = _svc()
     await svc.execute(
-        {"skill": "todo", "op": "replace", "items": [
-            {"content": "a"}, {"content": "b"}
-        ]}
+        {
+            "skill": "todo",
+            "op": "replace",
+            "items": [{"content": "a"}, {"content": "b"}],
+        }
     )
     await svc.execute({"skill": "todo", "op": "in_progress", "id": 1})
     out = await svc.execute({"skill": "todo", "op": "in_progress", "id": 2})
@@ -77,9 +80,7 @@ async def test_todo_replace_requires_items():
 @pytest.mark.asyncio
 async def test_todo_complete_requires_int_id():
     svc = _svc()
-    await svc.execute(
-        {"skill": "todo", "op": "replace", "items": [{"content": "a"}]}
-    )
+    await svc.execute({"skill": "todo", "op": "replace", "items": [{"content": "a"}]})
     out = await svc.execute({"skill": "todo", "op": "complete", "id": "1"})
     assert "error" in out
 
@@ -104,9 +105,11 @@ async def test_todo_show_empty():
 async def test_todo_show_lists_items():
     svc = _svc()
     await svc.execute(
-        {"skill": "todo", "op": "replace", "items": [
-            {"content": "first"}, {"content": "second"}
-        ]}
+        {
+            "skill": "todo",
+            "op": "replace",
+            "items": [{"content": "first"}, {"content": "second"}],
+        }
     )
     out = await svc.execute({"skill": "todo", "op": "show"})
     assert "first" in out["prompt"]
@@ -128,9 +131,11 @@ async def test_todo_state_persists_across_calls():
     """Per-instance state — same svc keeps the list across calls."""
     svc = _svc()
     await svc.execute(
-        {"skill": "todo", "op": "replace", "items": [
-            {"content": "a"}, {"content": "b"}, {"content": "c"}
-        ]}
+        {
+            "skill": "todo",
+            "op": "replace",
+            "items": [{"content": "a"}, {"content": "b"}, {"content": "c"}],
+        }
     )
     await svc.execute({"skill": "todo", "op": "complete", "id": 1})
     show = await svc.execute({"skill": "todo", "op": "show"})

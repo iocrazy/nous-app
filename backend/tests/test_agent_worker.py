@@ -22,7 +22,6 @@ from app.services.workforce.agent_worker import (
     run_one_task,
 )
 
-
 # ─── helpers ──────────────────────────────────────────────────────────
 
 
@@ -125,19 +124,36 @@ async def test_happy_path_queued_to_done_with_outbox():
     cm, recorder = _run_recorder_cm(run_id=uuid4())
 
     with (
-        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
-        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
-        patch("app.services.workforce.agent_worker.SkillRepository", return_value=MagicMock()),
-        patch("app.services.workforce.agent_worker.build_agent_runner_stack", AsyncMock(return_value=stack)),
+        patch(
+            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.AgentRepository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.SkillRepository",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.workforce.agent_worker.build_agent_runner_stack",
+            AsyncMock(return_value=stack),
+        ),
         patch("app.services.workforce.agent_worker.PromptComposer") as PC,
         patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
-        patch("app.services.workforce.agent_worker._lookup_inbox_message", AsyncMock(return_value=None)),
+        patch(
+            "app.services.workforce.agent_worker._lookup_inbox_message",
+            AsyncMock(return_value=None),
+        ),
         patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
     ):
         composer = MagicMock()
         composer.compose = AsyncMock(
             return_value=MagicMock(
-                agent_id=agent_id, agent_slug="summarize", model="doubao-seed-2-0-pro-260215"
+                agent_id=agent_id,
+                agent_slug="summarize",
+                model="doubao-seed-2-0-pro-260215",
             )
         )
         PC.return_value = composer
@@ -148,14 +164,19 @@ async def test_happy_path_queued_to_done_with_outbox():
     assert result["run_id"] == str(recorder.run_id)
 
     # Lifecycle: in_progress then done
-    statuses = [c.kwargs["lifecycle_status"] for c in workforce.update_task_status.await_args_list]
+    statuses = [
+        c.kwargs["lifecycle_status"]
+        for c in workforce.update_task_status.await_args_list
+    ]
     assert statuses == ["in_progress", "done"]
 
     # Outbox row written with task_result content
     workforce.enqueue_outbox.assert_awaited_once()
     outbox_kwargs = workforce.enqueue_outbox.await_args.kwargs
     assert outbox_kwargs["sender_agent_id"] == agent_id
-    assert outbox_kwargs["recipient_kind"] == "user"  # default fallback when no inbox_msg
+    assert (
+        outbox_kwargs["recipient_kind"] == "user"
+    )  # default fallback when no inbox_msg
     assert outbox_kwargs["payload"]["content"] == "Done summary."
     assert outbox_kwargs["message_type"] == "task_result"
 
@@ -182,8 +203,14 @@ async def test_refuses_non_persistent_agent():
     )
 
     with (
-        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
-        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
+        patch(
+            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.AgentRepository",
+            return_value=agent_repo,
+        ),
     ):
         result = await run_one_task(task)
 
@@ -261,8 +288,14 @@ async def test_empty_prompt_fails_fast():
     agent_repo.get_by_id = AsyncMock(return_value=_persistent_agent(agent_id=agent_id))
 
     with (
-        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
-        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
+        patch(
+            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.AgentRepository",
+            return_value=agent_repo,
+        ),
     ):
         result = await run_one_task(task)
 
@@ -295,10 +328,22 @@ async def test_run_turn_exception_marks_failed():
     cm, _ = _run_recorder_cm(run_id=uuid4())
 
     with (
-        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
-        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
-        patch("app.services.workforce.agent_worker.SkillRepository", return_value=MagicMock()),
-        patch("app.services.workforce.agent_worker.build_agent_runner_stack", AsyncMock(return_value=stack)),
+        patch(
+            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.AgentRepository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.SkillRepository",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.workforce.agent_worker.build_agent_runner_stack",
+            AsyncMock(return_value=stack),
+        ),
         patch("app.services.workforce.agent_worker.PromptComposer") as PC,
         patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
         patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
@@ -306,7 +351,9 @@ async def test_run_turn_exception_marks_failed():
         composer = MagicMock()
         composer.compose = AsyncMock(
             return_value=MagicMock(
-                agent_id=agent_id, agent_slug="summarize", model="doubao-seed-2-0-pro-260215"
+                agent_id=agent_id,
+                agent_slug="summarize",
+                model="doubao-seed-2-0-pro-260215",
             )
         )
         PC.return_value = composer
@@ -315,9 +362,15 @@ async def test_run_turn_exception_marks_failed():
 
     assert result["status"] == "failed"
     # Final update should be 'failed' with runtime_error
-    statuses = [c.kwargs["lifecycle_status"] for c in workforce.update_task_status.await_args_list]
+    statuses = [
+        c.kwargs["lifecycle_status"]
+        for c in workforce.update_task_status.await_args_list
+    ]
     assert statuses[-1] == "failed"
-    assert workforce.update_task_status.await_args_list[-1].kwargs["error_code"] == "runtime_error"
+    assert (
+        workforce.update_task_status.await_args_list[-1].kwargs["error_code"]
+        == "runtime_error"
+    )
 
 
 # ─── outbox routing ─────────────────────────────────────────────────
@@ -357,18 +410,36 @@ async def test_outbox_routes_to_agent_when_sender_kind_agent():
     )
 
     with (
-        patch("app.services.workforce.agent_worker.AgentWorkforceRepository", return_value=workforce),
-        patch("app.services.workforce.agent_worker.AgentRepository", return_value=agent_repo),
-        patch("app.services.workforce.agent_worker.SkillRepository", return_value=MagicMock()),
-        patch("app.services.workforce.agent_worker.build_agent_runner_stack", AsyncMock(return_value=stack)),
+        patch(
+            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.AgentRepository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.SkillRepository",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.workforce.agent_worker.build_agent_runner_stack",
+            AsyncMock(return_value=stack),
+        ),
         patch("app.services.workforce.agent_worker.PromptComposer") as PC,
         patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
-        patch("app.services.workforce.agent_worker._lookup_inbox_message", inbox_lookup),
+        patch(
+            "app.services.workforce.agent_worker._lookup_inbox_message", inbox_lookup
+        ),
         patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
     ):
         composer = MagicMock()
         composer.compose = AsyncMock(
-            return_value=MagicMock(agent_id=agent_id, agent_slug="summarize", model="doubao-seed-2-0-pro-260215")
+            return_value=MagicMock(
+                agent_id=agent_id,
+                agent_slug="summarize",
+                model="doubao-seed-2-0-pro-260215",
+            )
         )
         PC.return_value = composer
 

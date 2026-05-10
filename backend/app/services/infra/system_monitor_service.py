@@ -40,6 +40,7 @@ def check_worker_ready(
     no longer queried.
     """
     from app.services.infra import dbos_orchestrator
+
     if not dbos_orchestrator.is_enabled():
         return False, "DBOS not enabled — workflow dispatch unavailable"
     return True, ""
@@ -221,6 +222,7 @@ async def get_worker_stats() -> list[dict]:
     synthetic 'in-process' worker entry so the admin UI keeps a
     consistent shape."""
     from app.services.infra import dbos_orchestrator
+
     if not dbos_orchestrator.is_enabled():
         return []
     try:
@@ -249,6 +251,7 @@ async def get_active_tasks() -> list[dict]:
     legacy Celery active_tasks shape so the admin TaskCenter UI keeps
     rendering."""
     from app.services.infra import dbos_orchestrator
+
     if not dbos_orchestrator.is_enabled():
         return []
     try:

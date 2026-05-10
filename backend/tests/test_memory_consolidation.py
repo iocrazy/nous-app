@@ -1,4 +1,5 @@
 """D2 — memory consolidation: cluster + summarize."""
+
 from __future__ import annotations
 
 import pytest
@@ -176,9 +177,7 @@ async def test_consolidate_singleton_returns_none():
 
 @pytest.mark.asyncio
 async def test_consolidate_summarizer_failure_returns_none():
-    cluster = Cluster(
-        members=[_cand("a", "x", (1.0,)), _cand("b", "y", (1.0,))]
-    )
+    cluster = Cluster(members=[_cand("a", "x", (1.0,)), _cand("b", "y", (1.0,))])
 
     async def _broken(memories):
         raise RuntimeError("LLM down")
@@ -189,9 +188,7 @@ async def test_consolidate_summarizer_failure_returns_none():
 @pytest.mark.asyncio
 async def test_consolidate_empty_summary_returns_none():
     """Summarizer returning empty string is treated as failure."""
-    cluster = Cluster(
-        members=[_cand("a", "x", (1.0,)), _cand("b", "y", (1.0,))]
-    )
+    cluster = Cluster(members=[_cand("a", "x", (1.0,)), _cand("b", "y", (1.0,))])
 
     async def _empty(memories):
         return "  "

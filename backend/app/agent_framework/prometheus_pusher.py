@@ -14,6 +14,7 @@ Config via env:
   PROMETHEUS_PUSH_JOB — pushgateway "job" label, default "mediahub-harness"
   PROMETHEUS_PUSH_INSTANCE — instance label, default hostname-pid
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -52,9 +53,7 @@ class PrometheusPusher:
 
     def push_url(self) -> str:
         """The /metrics/job/<job>/instance/<instance> push endpoint."""
-        return (
-            f"{self.gateway_url}/metrics/job/{self.job}/instance/{self.instance}"
-        )
+        return f"{self.gateway_url}/metrics/job/{self.job}/instance/{self.instance}"
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -97,8 +96,9 @@ class PrometheusPusher:
         """One push attempt. Returns True on success, False on transport
         failure (caller backs off)."""
         try:
-            from app.agent_framework.prometheus_exporter import render_prometheus
             import httpx
+
+            from app.agent_framework.prometheus_exporter import render_prometheus
         except Exception:
             return False
 
@@ -108,14 +108,14 @@ class PrometheusPusher:
                 resp = await client.post(
                     self.push_url(),
                     content=body,
-                    headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
+                    headers={
+                        "Content-Type": "text/plain; version=0.0.4; charset=utf-8"
+                    },
                 )
                 # Pushgateway returns 200/202 on success
                 if 200 <= resp.status_code < 300:
                     return True
-                logger.debug(
-                    f"[prometheus_pusher] push HTTP {resp.status_code}"
-                )
+                logger.debug(f"[prometheus_pusher] push HTTP {resp.status_code}")
                 return False
         except Exception as exc:
             logger.debug(f"[prometheus_pusher] push transport failed: {exc}")

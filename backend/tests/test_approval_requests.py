@@ -1,4 +1,5 @@
 """G1 — approval requests router smoke tests."""
+
 from __future__ import annotations
 
 import sys
@@ -10,6 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 import app.api.ai_library_router  # noqa: F401
+
 router_module = sys.modules["app.api.ai_library_router"]
 
 from app.repositories.approval_requests_repository import ApprovalRequest
@@ -43,7 +45,8 @@ async def test_list_returns_only_pending():
     fake_repo = MagicMock()
     fake_repo.list_pending_for_user = AsyncMock(return_value=rows)
 
-    auth = MagicMock(); auth.user_id = str(user_id)
+    auth = MagicMock()
+    auth.user_id = str(user_id)
     with patch(
         "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
         return_value=fake_repo,
@@ -61,7 +64,8 @@ async def test_approve_404s_when_not_owner():
     fake_repo = MagicMock()
     fake_repo.get_by_id = AsyncMock(return_value=_row(owner))
 
-    auth = MagicMock(); auth.user_id = str(intruder)
+    auth = MagicMock()
+    auth.user_id = str(intruder)
     payload = router_module._ApprovalDecision(note="x")
     with patch(
         "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
@@ -78,7 +82,8 @@ async def test_approve_409s_when_already_decided():
     user_id = uuid4()
     fake_repo = MagicMock()
     fake_repo.get_by_id = AsyncMock(return_value=_row(user_id, status="approved"))
-    auth = MagicMock(); auth.user_id = str(user_id)
+    auth = MagicMock()
+    auth.user_id = str(user_id)
     payload = router_module._ApprovalDecision()
     with patch(
         "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
@@ -97,7 +102,8 @@ async def test_approve_happy_path_calls_decide_with_owner():
     fake_repo = MagicMock()
     fake_repo.get_by_id = AsyncMock(return_value=_row(user_id))
     fake_repo.decide = AsyncMock(return_value=True)
-    auth = MagicMock(); auth.user_id = str(user_id)
+    auth = MagicMock()
+    auth.user_id = str(user_id)
     payload = router_module._ApprovalDecision(note="lgtm")
     with patch(
         "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
@@ -120,7 +126,8 @@ async def test_reject_happy_path():
     fake_repo = MagicMock()
     fake_repo.get_by_id = AsyncMock(return_value=_row(user_id))
     fake_repo.decide = AsyncMock(return_value=True)
-    auth = MagicMock(); auth.user_id = str(user_id)
+    auth = MagicMock()
+    auth.user_id = str(user_id)
     payload = router_module._ApprovalDecision(note="too risky")
     with patch(
         "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
@@ -137,7 +144,8 @@ async def test_reject_happy_path():
 @pytest.mark.asyncio
 async def test_lane_snapshot_returns_unavailable_when_not_wired():
     """Without lane_queue on app.state, snapshot says so cleanly."""
-    auth = MagicMock(); auth.user_id = str(uuid4())
+    auth = MagicMock()
+    auth.user_id = str(uuid4())
     # Simulate fresh app.state with no lane_queue
     fake_app = MagicMock()
     fake_app.state.lane_queue = None
@@ -156,15 +164,18 @@ async def test_lane_snapshot_reads_qsize_per_lane():
         USER = "user"
         BACKGROUND = "background"
 
-    fake_q_user = MagicMock(); fake_q_user.qsize = MagicMock(return_value=3)
-    fake_q_bg = MagicMock(); fake_q_bg.qsize = MagicMock(return_value=12)
+    fake_q_user = MagicMock()
+    fake_q_user.qsize = MagicMock(return_value=3)
+    fake_q_bg = MagicMock()
+    fake_q_bg.qsize = MagicMock(return_value=12)
     fake_lq = MagicMock()
     fake_lq._queues = {_Lane.USER: fake_q_user, _Lane.BACKGROUND: fake_q_bg}
 
     fake_app = MagicMock()
     fake_app.state.lane_queue = fake_lq
 
-    auth = MagicMock(); auth.user_id = str(uuid4())
+    auth = MagicMock()
+    auth.user_id = str(uuid4())
     with patch("app.main.app", fake_app):
         out = await router_module.admin_lane_snapshot(auth)
     assert out["available"] is True

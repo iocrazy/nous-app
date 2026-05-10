@@ -38,8 +38,8 @@ from loguru import logger
 
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.agent_workforce_repository import (
-    AgentWorkforceRepository,
     TASK_KIND_AGENT,
+    AgentWorkforceRepository,
     tt_row_to_task_shape,
 )
 
@@ -240,8 +240,9 @@ class DelegateToolService:
         # so cancelling the root run fans out to this subagent. Best-effort:
         # registry only present in FastAPI process; CLI / tests skip.
         try:
+            pass
+
             from app.main import app as _app
-            from uuid import UUID as _UUID
 
             registry = getattr(_app.state, "root_abort_registry", None)
             if (
@@ -404,9 +405,7 @@ class DelegateToolService:
             client = await get_async_supabase_admin()
             result = (
                 await client.table("task_tracking")
-                .select(
-                    "dbos_workflow_id,phase,error_code,error_msg,metadata"
-                )
+                .select("dbos_workflow_id,phase,error_code,error_msg,metadata")
                 .eq("task_kind", TASK_KIND_AGENT)
                 .eq("inbox_message_id", str(caller_inbox_id))
                 .maybe_single()

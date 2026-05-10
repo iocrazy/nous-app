@@ -17,6 +17,7 @@ Why six fixed sections (matches OpenClaw / Claude Code pattern):
   - workflow_steps: 1-N ordered list with status emoji prefix
   - errors_fixes: bullet list of {symptom: fix} pairs
 """
+
 from __future__ import annotations
 
 import re
@@ -24,7 +25,6 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from app.agent_framework.tokenizer import count_messages_tokens
-
 
 # ─── Trigger ──────────────────────────────────────────────────────────
 
@@ -41,15 +41,14 @@ class SessionMemoryTrigger:
     delta_tokens: int = 4_000
     delta_tool_calls: int = 5
 
-    def should_update(self, current: "SessionMetrics", baseline: "SessionMetrics") -> bool:
+    def should_update(
+        self, current: "SessionMetrics", baseline: "SessionMetrics"
+    ) -> bool:
         if current.total_tokens < self.min_total_tokens:
             return False
         token_delta = current.total_tokens - baseline.total_tokens
         tool_delta = current.tool_calls - baseline.tool_calls
-        return (
-            token_delta >= self.delta_tokens
-            or tool_delta >= self.delta_tool_calls
-        )
+        return token_delta >= self.delta_tokens or tool_delta >= self.delta_tool_calls
 
 
 @dataclass(frozen=True)
@@ -66,9 +65,7 @@ def compute_metrics(messages: list[dict], model: str = "") -> SessionMetrics:
     if not messages:
         return SessionMetrics()
     tool_calls = sum(
-        len(m.get("tool_calls") or [])
-        for m in messages
-        if m.get("role") == "assistant"
+        len(m.get("tool_calls") or []) for m in messages if m.get("role") == "assistant"
     )
     return SessionMetrics(
         total_tokens=count_messages_tokens(messages, model),
@@ -187,9 +184,9 @@ UPDATED DOCUMENT (output only the markdown):
 def build_update_prompt(*, previous_md: str, new_activity: str) -> str:
     """Render the LLM prompt to maintain the document."""
     prev = previous_md.strip() or "(initial — no previous document)"
-    return UPDATE_PROMPT_TEMPLATE.replace(
-        "{previous}", prev
-    ).replace("{new_activity}", new_activity.strip() or "(none)")
+    return UPDATE_PROMPT_TEMPLATE.replace("{previous}", prev).replace(
+        "{new_activity}", new_activity.strip() or "(none)"
+    )
 
 
 # ─── Updater ──────────────────────────────────────────────────────────
@@ -227,6 +224,7 @@ class SessionMemoryService:
         current = compute_metrics(messages, model)
 
         from app.agent_framework._metrics_helper import inc_metric
+
         inc_metric("session_memory_update_attempted")
 
         if not force and not self.trigger.should_update(current, baseline):
@@ -234,12 +232,8 @@ class SessionMemoryService:
             return None
 
         previous_md = (existing.body_md if existing else "") or ""
-        new_activity = _render_messages_for_summarizer(
-            messages, baseline.turn_count
-        )
-        prompt = build_update_prompt(
-            previous_md=previous_md, new_activity=new_activity
-        )
+        new_activity = _render_messages_for_summarizer(messages, baseline.turn_count)
+        prompt = build_update_prompt(previous_md=previous_md, new_activity=new_activity)
 
         try:
             updated_md = await self.summarizer(prompt)

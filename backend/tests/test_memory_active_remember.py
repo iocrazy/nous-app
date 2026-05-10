@@ -1,4 +1,5 @@
 """D4 — active remember() tool: validation + handler."""
+
 from __future__ import annotations
 
 import pytest
@@ -17,7 +18,6 @@ from app.services.ai.memory.active_remember import (
     handle_remember,
     validate_remember_args,
 )
-
 
 # ─── validate_remember_args ──────────────────────────────────────────
 
@@ -133,6 +133,7 @@ async def test_handler_success():
 @pytest.mark.asyncio
 async def test_handler_validation_failure_returns_error():
     """Validation error → success=False, error populated. NEVER raises."""
+
     async def _persistor(request, context):
         raise AssertionError("persistor should not be called on validation failure")
 

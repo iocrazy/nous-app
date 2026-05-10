@@ -11,12 +11,11 @@ Pins the contract:
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.services.workforce.scheduler import WorkforceScheduler
-
 
 # ─── lifecycle ────────────────────────────────────────────────────────
 
@@ -152,6 +151,7 @@ async def test_stop_drains_worker_pool():
 
     # Manually dispatch a task on the pool to simulate inflight work.
     from uuid import uuid4
+
     task = {"id": str(uuid4()), "agent_id": str(uuid4()), "payload": {}}
     await sched.pool.dispatch(task)
     await asyncio.sleep(0.05)
@@ -187,6 +187,7 @@ async def test_stop_cancels_workers_past_drain_timeout():
     sched.start()
 
     from uuid import uuid4
+
     await sched.pool.dispatch(
         {"id": str(uuid4()), "agent_id": str(uuid4()), "payload": {}}
     )

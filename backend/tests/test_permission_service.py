@@ -12,8 +12,8 @@ import pytest
 
 from app.services.library.permission_service import (
     CAPABILITIES,
-    PermissionService,
     TEAM_ROLE_MAP,
+    PermissionService,
 )
 
 
@@ -43,9 +43,7 @@ class _FakePermissionRepository:
     ) -> Optional[dict[str, Any]]:
         return self.resource_scopes.get(resource_id)
 
-    async def get_team_member_role(
-        self, user_id: str, team_id: str
-    ) -> Optional[str]:
+    async def get_team_member_role(self, user_id: str, team_id: str) -> Optional[str]:
         return self.team_roles.get((user_id, team_id))
 
 

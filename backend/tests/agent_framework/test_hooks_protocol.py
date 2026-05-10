@@ -1,7 +1,6 @@
 """C3 — Hook protocol + registry."""
-from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
 
 import pytest
 
@@ -14,7 +13,6 @@ from app.agent_framework.hooks_protocol import (
     HookRegistry,
     HookResult,
 )
-
 
 # ─── Test fixtures ────────────────────────────────────────────────────
 
@@ -129,7 +127,9 @@ async def test_abort_short_circuits():
     reg.register(aborter)
     reg.register(pre)
     # Fire PRE_LLM_CALL — aborter triggers abort, pre is not called (different event anyway)
-    res = await reg.fire(HookEvent.PRE_LLM_CALL, HookContext(event=HookEvent.PRE_LLM_CALL))
+    res = await reg.fire(
+        HookEvent.PRE_LLM_CALL, HookContext(event=HookEvent.PRE_LLM_CALL)
+    )
     assert res.decision == HookDecision.ABORT_RUN
     assert "budget" in (res.note or "")
 
@@ -156,9 +156,7 @@ async def test_broken_hook_does_not_crash_run():
     other = _MutatingHook()  # subscribes to same event
     reg.register(other)
     # Should not raise
-    res = await reg.fire(
-        HookEvent.TURN_START, HookContext(event=HookEvent.TURN_START)
-    )
+    res = await reg.fire(HookEvent.TURN_START, HookContext(event=HookEvent.TURN_START))
     # The non-broken hook still ran
     assert res.payload_patch is not None
     assert res.payload_patch.get("injected_key") == "v1"

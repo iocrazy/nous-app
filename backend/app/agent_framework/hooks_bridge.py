@@ -24,17 +24,16 @@ Decision mapping:
   legacy 'await_approval'  → HookResult.abort(note='await_approval')
                              (new protocol has no await state yet)
 """
+
 from __future__ import annotations
 
 from typing import Any
 
-from app.agent_framework.hooks_protocol import (
-    HookContext as NewHookContext,
-)
+from app.agent_framework.hooks_protocol import HookContext as NewHookContext
 from app.agent_framework.hooks_protocol import (
     HookEvent,
-    HookResult as NewHookResult,
 )
+from app.agent_framework.hooks_protocol import HookResult as NewHookResult
 
 
 class LegacyPreToolUseHook:
@@ -82,9 +81,7 @@ async def _invoke_legacy(legacy_hook: Any, ctx: NewHookContext) -> NewHookResult
         session_id=ctx.session_id,
         tool_name=ctx.payload.get("tool_name", ""),
         tool_args=ctx.payload.get("tool_args", {}),
-        accumulated_prompt_tokens=ctx.payload.get(
-            "accumulated_prompt_tokens", 0
-        ),
+        accumulated_prompt_tokens=ctx.payload.get("accumulated_prompt_tokens", 0),
         accumulated_completion_tokens=ctx.payload.get(
             "accumulated_completion_tokens", 0
         ),

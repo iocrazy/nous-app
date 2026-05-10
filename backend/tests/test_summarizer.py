@@ -9,6 +9,7 @@ Pin the data-shape contract between summarizer and compactor:
   - admin override via system_settings + env override take precedence
     over the default
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -52,11 +53,12 @@ async def test_env_override_wins_over_system_settings(monkeypatch):
     monkeypatch.setenv("COMPACTION_PROVIDER", "qwen-plus")
     fake_adapter = _adapter_returning("summary text")
 
-    with patch(
-        "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
-    ) as mock_factory, patch(
-        "app.db.supabase_client.get_async_supabase_admin"
-    ) as mock_db:
+    with (
+        patch(
+            "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+        ) as mock_factory,
+        patch("app.db.supabase_client.get_async_supabase_admin") as mock_db,
+    ):
         result = await summarize(_make_msgs())
 
     mock_db.assert_not_called()  # env override skipped DB
@@ -77,11 +79,12 @@ async def test_system_settings_override_used_when_no_env(monkeypatch):
         return_value=type("R", (), {"data": [{"value": "claude-haiku-4-5"}]})()
     )
 
-    with patch(
-        "app.db.supabase_client.get_async_supabase_admin", return_value=fake_db
-    ), patch(
-        "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
-    ) as mock_factory:
+    with (
+        patch("app.db.supabase_client.get_async_supabase_admin", return_value=fake_db),
+        patch(
+            "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+        ) as mock_factory,
+    ):
         await summarize(_make_msgs())
 
     args, _ = mock_factory.call_args
@@ -95,12 +98,15 @@ async def test_db_failure_falls_back_to_default(monkeypatch):
     monkeypatch.delenv("COMPACTION_PROVIDER", raising=False)
     fake_adapter = _adapter_returning("summary text")
 
-    with patch(
-        "app.db.supabase_client.get_async_supabase_admin",
-        side_effect=RuntimeError("supabase down"),
-    ), patch(
-        "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
-    ) as mock_factory:
+    with (
+        patch(
+            "app.db.supabase_client.get_async_supabase_admin",
+            side_effect=RuntimeError("supabase down"),
+        ),
+        patch(
+            "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+        ) as mock_factory,
+    ):
         result = await summarize(_make_msgs())
 
     args, _ = mock_factory.call_args
@@ -125,15 +131,17 @@ async def test_provider_timeout_raises_runtime_error(monkeypatch):
 
     async def hang(*_a, **_kw):
         import asyncio
+
         await asyncio.sleep(SUMMARIZE_TIMEOUT_S * 2)
 
     fake_adapter = AsyncMock()
     fake_adapter.call = hang
 
-    with patch(
-        "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
-    ), patch(
-        "app.agent_framework.summarizer.SUMMARIZE_TIMEOUT_S", 0.05
+    with (
+        patch(
+            "app.services.ai.adapters.factory.get_adapter", return_value=fake_adapter
+        ),
+        patch("app.agent_framework.summarizer.SUMMARIZE_TIMEOUT_S", 0.05),
     ):
         with pytest.raises(RuntimeError, match="timed out"):
             await summarize(_make_msgs())

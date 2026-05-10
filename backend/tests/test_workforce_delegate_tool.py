@@ -145,9 +145,7 @@ async def test_depth_at_or_above_max_rejected():
 async def test_happy_path_writes_inbox_and_outbox():
     target_aid = uuid4()
     target = {"id": str(target_aid), "slug": "summary", "persistent": True}
-    svc, _, workforce, caller_aid, caller_uid, parent_run = _service(
-        target=target
-    )
+    svc, _, workforce, caller_aid, caller_uid, parent_run = _service(target=target)
     out = await svc.execute(
         {
             "agent_slug": "summary",
@@ -200,9 +198,7 @@ async def test_dedup_key_forwarded():
     await svc.execute(
         {"agent_slug": "summary", "prompt": "hi", "dedup_key": "delegate-001"}
     )
-    assert (
-        workforce.enqueue_inbox.await_args.kwargs["dedup_key"] == "delegate-001"
-    )
+    assert workforce.enqueue_inbox.await_args.kwargs["dedup_key"] == "delegate-001"
 
 
 @pytest.mark.unit
@@ -341,9 +337,7 @@ async def test_await_true_failed_task_returns_error_fields():
         }
     )
 
-    out = await svc.execute(
-        {"agent_slug": "summary", "prompt": "x", "await": True}
-    )
+    out = await svc.execute({"agent_slug": "summary", "prompt": "x", "await": True})
     assert out["status"] == "failed"
     assert out["error_code"] == "runtime_error"
     assert out["error_message"] == "model exploded"

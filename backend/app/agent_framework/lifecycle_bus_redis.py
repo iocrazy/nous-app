@@ -14,6 +14,7 @@ contract as a single-process LifecycleBus.
 
 Optional: redis_client=None falls back to pure in-process behavior.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,6 @@ import json
 from typing import Any, Awaitable, Callable, Optional
 
 from app.agent_framework.lifecycle_bus import LifecycleBus, LifecycleEvent
-
 
 CHANNEL = "lifecycle_bus:events"
 

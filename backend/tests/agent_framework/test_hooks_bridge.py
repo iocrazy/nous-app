@@ -1,4 +1,5 @@
 """F9 — bridge legacy hooks into new HookRegistry."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,9 +46,7 @@ class _LegacyAbortHook:
 
 class _LegacyModifyHook:
     async def __call__(self, ctx: LegacyCtx):
-        return _LegacyResult(
-            decision="modify", modified_args={"new_arg": "value"}
-        )
+        return _LegacyResult(decision="modify", modified_args={"new_arg": "value"})
 
 
 class _LegacyAwaitApprovalHook:
@@ -161,9 +160,7 @@ async def test_side_effect_invoked():
     reg = HookRegistry()
     legacy = _LegacySideEffectHook()
     reg.register(wrap_legacy_pre(legacy))
-    await reg.fire(
-        HookEvent.PRE_TOOL_USE, HookContext(event=HookEvent.PRE_TOOL_USE)
-    )
+    await reg.fire(HookEvent.PRE_TOOL_USE, HookContext(event=HookEvent.PRE_TOOL_USE))
     assert legacy.side_called == 1
 
 
@@ -179,9 +176,7 @@ async def test_pre_hook_not_called_for_post_event():
             return _LegacyResult(decision="continue")
 
     reg.register(wrap_legacy_pre(_Counter()))
-    await reg.fire(
-        HookEvent.POST_TOOL_USE, HookContext(event=HookEvent.POST_TOOL_USE)
-    )
+    await reg.fire(HookEvent.POST_TOOL_USE, HookContext(event=HookEvent.POST_TOOL_USE))
     assert captured["n"] == 0
 
 

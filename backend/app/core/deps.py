@@ -39,10 +39,7 @@ def _get_jwks_client() -> jwt.PyJWKClient:
     """Lazily build the module-level PyJWKClient against current SUPABASE_URL."""
     global _jwks_client
     if _jwks_client is None:
-        url = (
-            f"{settings.SUPABASE_URL.rstrip('/')}"
-            f"/auth/v1/.well-known/jwks.json"
-        )
+        url = f"{settings.SUPABASE_URL.rstrip('/')}" f"/auth/v1/.well-known/jwks.json"
         _jwks_client = jwt.PyJWKClient(url, cache_keys=True, lifespan=300)
     return _jwks_client
 

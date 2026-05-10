@@ -21,11 +21,11 @@ Notes:
   - Subprocess uses ``safe_popen_kwargs()`` so children die with parent
     on SIGKILL/OOM.
 """
+
 from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -37,12 +37,11 @@ from loguru import logger
 from app.agent_framework.multimodal import Attachment, AttachmentKind
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 
-
 # Default config — small enough that 8 frames stay under typical 10 MB
 # vision-model attachment cap.
 DEFAULT_NUM_FRAMES = 6
 DEFAULT_FRAME_WIDTH = 640  # px (preserves aspect, letterbox-free)
-DEFAULT_JPEG_QUALITY = 4   # ffmpeg -q:v 1 best, 31 worst; 4 ≈ 80% JPEG
+DEFAULT_JPEG_QUALITY = 4  # ffmpeg -q:v 1 best, 31 worst; 4 ≈ 80% JPEG
 
 
 @dataclass(frozen=True)
@@ -63,9 +62,12 @@ async def _probe_duration(video_path: str) -> Optional[float]:
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             video_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -162,12 +164,18 @@ async def extract_frames(
             for idx, ts in enumerate(timestamps):
                 out = tmp_path / f"frame_{idx:03d}.jpg"
                 cmd = [
-                    "ffmpeg", "-y",
-                    "-ss", f"{ts:.3f}",
-                    "-i", str(src),
-                    "-frames:v", "1",
-                    "-vf", f"scale={frame_width}:-1",
-                    "-q:v", str(jpeg_quality),
+                    "ffmpeg",
+                    "-y",
+                    "-ss",
+                    f"{ts:.3f}",
+                    "-i",
+                    str(src),
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    f"scale={frame_width}:-1",
+                    "-q:v",
+                    str(jpeg_quality),
                     str(out),
                 ]
                 try:
@@ -208,11 +216,16 @@ async def extract_frames(
             # gives ~num_frames over the unknown total. Use fps filter
             # with very low rate; cap total via -frames:v.
             cmd = [
-                "ffmpeg", "-y",
-                "-i", str(src),
-                "-vf", f"fps=1/2,scale={frame_width}:-1",
-                "-frames:v", str(num_frames),
-                "-q:v", str(jpeg_quality),
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(src),
+                "-vf",
+                f"fps=1/2,scale={frame_width}:-1",
+                "-frames:v",
+                str(num_frames),
+                "-q:v",
+                str(jpeg_quality),
                 str(tmp_path / "frame_%03d.jpg"),
             ]
             try:
@@ -231,7 +244,7 @@ async def extract_frames(
                         duration_seconds=None,
                         sampled_at_seconds=[],
                         error=f"ffmpeg fallback failed: "
-                              f"{stderr.decode(errors='replace')[:200]}",
+                        f"{stderr.decode(errors='replace')[:200]}",
                     )
                 for frame_path in sorted(tmp_path.glob("frame_*.jpg")):
                     data_url = _frame_to_data_url(frame_path)

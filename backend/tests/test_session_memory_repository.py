@@ -1,4 +1,5 @@
 """B2 — SessionMemoryRepository unit tests (mock Supabase)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -92,6 +93,7 @@ async def test_load_parses_existing_row(repo, fake_query):
 @pytest.mark.asyncio
 async def test_load_swallows_errors(repo):
     """DB error in load → None (best-effort, never crashes caller)."""
+
     async def _broken_client():
         raise RuntimeError("supabase down")
 
@@ -122,8 +124,10 @@ async def test_upsert_inserts_when_no_existing(repo, fake_query):
 
     async def _execute_seq(self):
         call_count["n"] += 1
+
         class _R:
             data = inserted_data if call_count["n"] >= 2 else None
+
         return _R()
 
     # Patch fake_query to alternate
@@ -152,16 +156,16 @@ async def test_upsert_bumps_version(repo, fake_query):
         "tool_calls_at_last_update": 0,
         "turns_at_last_update": 0,
     }
-    upserted = [
-        {**existing, "body_md": "updated", "version": 4}
-    ]
+    upserted = [{**existing, "body_md": "updated", "version": 4}]
 
     call_count = {"n": 0}
 
     async def _execute_seq(self):
         call_count["n"] += 1
+
         class _R:
             data = upserted if call_count["n"] >= 2 else existing
+
         return _R()
 
     fake_query.execute = _execute_seq.__get__(fake_query)
@@ -181,6 +185,7 @@ async def test_upsert_bumps_version(repo, fake_query):
 @pytest.mark.asyncio
 async def test_upsert_swallows_errors(repo):
     """DB error in upsert → None, never raises."""
+
     async def _broken():
         raise RuntimeError("nope")
 

@@ -19,6 +19,7 @@ time (callers do this via the existing ``UnifiedTaskManager.create``
 path with the new ``flow_id`` kwarg — wired in a follow-up). This PR
 ships the flow surface + cascade cancel only.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -29,7 +30,6 @@ from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
-
 
 router = APIRouter(prefix="/flows", tags=["Task Flows"])
 

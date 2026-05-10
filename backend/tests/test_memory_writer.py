@@ -7,11 +7,9 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.ai.memory import ExtractedFrom, MemoryScope
+from app.services.ai.memory import ExtractedFrom
 from app.services.ai.memory.extractor import (
-    AssistantMemoryExtractor,
     ExtractedFact,
-    UserMemoryExtractor,
 )
 from app.services.ai.memory.writer import MemoryWriter
 
@@ -65,8 +63,11 @@ async def test_writer_skips_when_no_facts_extracted():
         supabase_client=_make_supabase(),
     )
     rows = await writer.write(
-        agent_id=uuid4(), user_id=uuid4(), run_id=None,
-        user_messages=[], assistant_messages=[],
+        agent_id=uuid4(),
+        user_id=uuid4(),
+        run_id=None,
+        user_messages=[],
+        assistant_messages=[],
     )
     assert rows == 0
 
@@ -75,10 +76,18 @@ async def test_writer_skips_when_no_facts_extracted():
 @pytest.mark.asyncio
 async def test_writer_inserts_one_row_per_fact():
     user_facts = [
-        ExtractedFact(summary="user fact 1", when_to_use="why 1", extracted_from=ExtractedFrom.USER_MSG),
+        ExtractedFact(
+            summary="user fact 1",
+            when_to_use="why 1",
+            extracted_from=ExtractedFrom.USER_MSG,
+        ),
     ]
     asst_facts = [
-        ExtractedFact(summary="asst fact 1", when_to_use="why a", extracted_from=ExtractedFrom.ASSISTANT_MSG),
+        ExtractedFact(
+            summary="asst fact 1",
+            when_to_use="why a",
+            extracted_from=ExtractedFrom.ASSISTANT_MSG,
+        ),
     ]
     client = _make_supabase()
 
@@ -91,8 +100,11 @@ async def test_writer_inserts_one_row_per_fact():
     user_id = uuid4()
     agent_id = uuid4()
     rows = await writer.write(
-        agent_id=agent_id, user_id=user_id, run_id=None,
-        user_messages=["x"], assistant_messages=["y"],
+        agent_id=agent_id,
+        user_id=user_id,
+        run_id=None,
+        user_messages=["x"],
+        assistant_messages=["y"],
     )
 
     assert rows == 2
@@ -124,8 +136,11 @@ async def test_writer_drops_facts_with_no_embedding():
         supabase_client=client,
     )
     rows = await writer.write(
-        agent_id=uuid4(), user_id=uuid4(), run_id=None,
-        user_messages=["x"], assistant_messages=[],
+        agent_id=uuid4(),
+        user_id=uuid4(),
+        run_id=None,
+        user_messages=["x"],
+        assistant_messages=[],
     )
     assert rows == 0
 
@@ -146,8 +161,11 @@ async def test_writer_db_failure_returns_zero():
         supabase_client=client,
     )
     rows = await writer.write(
-        agent_id=uuid4(), user_id=uuid4(), run_id=None,
-        user_messages=["x"], assistant_messages=[],
+        agent_id=uuid4(),
+        user_id=uuid4(),
+        run_id=None,
+        user_messages=["x"],
+        assistant_messages=[],
     )
     assert rows == 0
 
@@ -166,8 +184,11 @@ async def test_writer_preserves_extracted_from_per_fact():
         supabase_client=client,
     )
     await writer.write(
-        agent_id=uuid4(), user_id=uuid4(), run_id=None,
-        user_messages=["x"], assistant_messages=["y"],
+        agent_id=uuid4(),
+        user_id=uuid4(),
+        run_id=None,
+        user_messages=["x"],
+        assistant_messages=["y"],
     )
     payload = client.table.return_value.insert.call_args.args[0]
     sources = {row["extracted_from"] for row in payload}
@@ -270,7 +291,9 @@ async def test_no_classifier_skips_post_pass():
     fact = ExtractedFact(
         summary="x", when_to_use="y", extracted_from=ExtractedFrom.USER_MSG
     )
-    client = _make_supabase_with_returning([{"id": "1", "summary": "x", "embedding": [0.1]}])
+    client = _make_supabase_with_returning(
+        [{"id": "1", "summary": "x", "embedding": [0.1]}]
+    )
     writer = MemoryWriter(
         user_extractor=_make_extractor([fact]),
         assistant_extractor=_make_assistant_extractor([]),
@@ -279,8 +302,11 @@ async def test_no_classifier_skips_post_pass():
         # contradiction_classifier=None (default)
     )
     await writer.write(
-        agent_id=uuid4(), user_id=uuid4(), run_id=None,
-        user_messages=["x"], assistant_messages=[],
+        agent_id=uuid4(),
+        user_id=uuid4(),
+        run_id=None,
+        user_messages=["x"],
+        assistant_messages=[],
     )
     # No update calls (post-pass not invoked)
     client.table.return_value.update.assert_not_called()
@@ -314,8 +340,11 @@ async def test_classifier_unrelated_does_not_supersede():
         contradiction_classifier=_classifier,
     )
     await writer.write(
-        agent_id=uuid4(), user_id=uuid4(), run_id=None,
-        user_messages=["x"], assistant_messages=[],
+        agent_id=uuid4(),
+        user_id=uuid4(),
+        run_id=None,
+        user_messages=["x"],
+        assistant_messages=[],
     )
     # No UPDATE — neighbors examined but verdict = keep
     client.table.return_value.update.assert_not_called()
@@ -328,7 +357,9 @@ async def test_contradiction_post_pass_failure_doesnt_break_insert():
     fact = ExtractedFact(
         summary="x", when_to_use="y", extracted_from=ExtractedFrom.USER_MSG
     )
-    client = _make_supabase_with_returning([{"id": "1", "summary": "x", "embedding": [0.1]}])
+    client = _make_supabase_with_returning(
+        [{"id": "1", "summary": "x", "embedding": [0.1]}]
+    )
 
     # Make the SELECT for neighbors blow up
     client.table.return_value.select.return_value.execute = AsyncMock(
@@ -346,8 +377,11 @@ async def test_contradiction_post_pass_failure_doesnt_break_insert():
         contradiction_classifier=_classifier,
     )
     n = await writer.write(
-        agent_id=uuid4(), user_id=uuid4(), run_id=None,
-        user_messages=["x"], assistant_messages=[],
+        agent_id=uuid4(),
+        user_id=uuid4(),
+        run_id=None,
+        user_messages=["x"],
+        assistant_messages=[],
     )
     # Insert still counted as success
     assert n == 1

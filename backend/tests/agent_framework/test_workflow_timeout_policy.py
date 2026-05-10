@@ -18,6 +18,7 @@ Per-type ceilings let the sweeper apply the right threshold per task:
 
 Mirrors OpenClaw cron/service/timeout-policy.ts.
 """
+
 from __future__ import annotations
 
 from datetime import timedelta

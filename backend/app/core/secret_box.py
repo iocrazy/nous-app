@@ -28,13 +28,13 @@ either (a) set MEDIAHUB_TOKEN_ENCRYPTION_KEY in .env, or (b) use the
 DEV_TOKEN_ENCRYPTION_KEY constant below for local-only convenience
 (NEVER ship to prod).
 """
+
 from __future__ import annotations
 
 import os
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
-
 
 # Local-dev convenience key — intentionally NOT a real secret. Generated
 # once via Fernet.generate_key(); committed so dev environments have a
@@ -112,8 +112,7 @@ def decrypt(ciphertext: Optional[str]) -> Optional[str]:
         return f.decrypt(ciphertext.encode()).decode()
     except InvalidToken as exc:
         raise ValueError(
-            "decrypt failed — wrong key, tampered ciphertext, or "
-            "expired token"
+            "decrypt failed — wrong key, tampered ciphertext, or " "expired token"
         ) from exc
 
 

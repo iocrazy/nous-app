@@ -18,6 +18,7 @@ Pure layer:
 DB-touching pieces (persist manifest as JSONB blob; restore-by-rebuild)
 deferred — module is the algorithm + math layer.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -68,15 +69,17 @@ def build_manifest(
     """Take current agent_memories rows + freeze a manifest."""
     entries = []
     for row in rows or []:
-        entries.append(MemorySnapshotEntry(
-            id=str(row.get("id") or ""),
-            summary=str(row.get("summary") or ""),
-            status=str(row.get("status") or "active"),
-            content_hash=_entry_hash(
-                str(row.get("summary") or ""),
-                str(row.get("when_to_use") or ""),
-            ),
-        ))
+        entries.append(
+            MemorySnapshotEntry(
+                id=str(row.get("id") or ""),
+                summary=str(row.get("summary") or ""),
+                status=str(row.get("status") or "active"),
+                content_hash=_entry_hash(
+                    str(row.get("summary") or ""),
+                    str(row.get("when_to_use") or ""),
+                ),
+            )
+        )
     # Sort by id for deterministic comparison
     entries.sort(key=lambda e: e.id)
     return SnapshotManifest(
@@ -97,7 +100,8 @@ class ManifestDiff:
 
 
 def diff_manifests(
-    before: SnapshotManifest, after: SnapshotManifest,
+    before: SnapshotManifest,
+    after: SnapshotManifest,
 ) -> ManifestDiff:
     """Compare two snapshots — returns ids that changed in each axis."""
     before_by_id = {e.id: e for e in before.entries}
@@ -141,7 +145,8 @@ class RollbackPlan:
 
 
 def plan_rollback_to(
-    snapshot: SnapshotManifest, current: SnapshotManifest,
+    snapshot: SnapshotManifest,
+    current: SnapshotManifest,
 ) -> RollbackPlan:
     """Build a rollback plan: which rows to flip back to active.
 
@@ -172,15 +177,21 @@ def plan_rollback_to(
 def serialize_manifest(manifest: SnapshotManifest) -> str:
     """JSON-encode for storage in agent_memory_snapshots.payload (TBD
     table). Round-trips via deserialize_manifest."""
-    return json.dumps({
-        "namespace_key": manifest.namespace_key,
-        "captured_at": manifest.captured_at.isoformat(),
-        "entries": [
-            {"id": e.id, "summary": e.summary, "status": e.status,
-             "content_hash": e.content_hash}
-            for e in manifest.entries
-        ],
-    })
+    return json.dumps(
+        {
+            "namespace_key": manifest.namespace_key,
+            "captured_at": manifest.captured_at.isoformat(),
+            "entries": [
+                {
+                    "id": e.id,
+                    "summary": e.summary,
+                    "status": e.status,
+                    "content_hash": e.content_hash,
+                }
+                for e in manifest.entries
+            ],
+        }
+    )
 
 
 def deserialize_manifest(blob: str) -> SnapshotManifest:

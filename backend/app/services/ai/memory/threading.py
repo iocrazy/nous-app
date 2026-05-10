@@ -15,12 +15,12 @@ This module gives:
 Pure functions; DB calls injected via repo callable so module is
 testable.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional
 from uuid import UUID, uuid4
-
 
 # Two memories share a thread if same session AND created within
 # this window of each other. 30 min covers a typical sustained
@@ -69,9 +69,7 @@ async def assign_thread_for(
         # Coerce timestamp
         if isinstance(row_created, str):
             try:
-                row_created = datetime.fromisoformat(
-                    row_created.replace("Z", "+00:00")
-                )
+                row_created = datetime.fromisoformat(row_created.replace("Z", "+00:00"))
             except ValueError:
                 continue
         # Compare in same tz space — strip tz from both for safety

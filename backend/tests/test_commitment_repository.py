@@ -1,4 +1,5 @@
 """Sprint 4 — CommitmentRepository unit tests (mock Supabase)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -13,7 +14,6 @@ from app.agent_framework.commitments import (
     TriggerType,
 )
 from app.repositories.commitment_repository import CommitmentRepository
-
 
 # ─── Fake Supabase plumbing (mirrors test_agent_repository.py style) ──
 

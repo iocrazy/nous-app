@@ -380,7 +380,9 @@ def storyboard_video_analysis_workflow(
 def export_storyboard_step(
     *, project_id: str, format: str, options: dict[str, Any]
 ) -> dict[str, Any]:
-    from app.services.storyboard.storyboard_export_service import StoryboardExportService
+    from app.services.storyboard.storyboard_export_service import (
+        StoryboardExportService,
+    )
 
     async def _do() -> dict[str, Any]:
         svc = StoryboardExportService()

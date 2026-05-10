@@ -1,6 +1,7 @@
 """B8 — handle_media_fetch_dispatch runtime assert: passing raw str
 (without going through validate_url_async) must fail at function entry,
 not silently bypass the boundary."""
+
 from __future__ import annotations
 
 import pytest

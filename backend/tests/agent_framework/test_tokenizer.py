@@ -1,4 +1,5 @@
 """A1 — model-aware tokenizer with heuristic fallback."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,7 +8,6 @@ from app.agent_framework.tokenizer import (
     count_messages_tokens,
     count_tokens,
 )
-
 
 # ─── Empty / edge cases ───────────────────────────────────────────────
 

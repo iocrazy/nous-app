@@ -683,7 +683,9 @@ class StoryboardService:
             Dict with keys: frames (list of frame records), source_asset_id,
             rows, cols.
         """
-        from app.services.storyboard.storyboard_image_service import StoryboardImageService
+        from app.services.storyboard.storyboard_image_service import (
+            StoryboardImageService,
+        )
 
         # Validate grid dimensions
         if rows < 1 or rows > 10:

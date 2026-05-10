@@ -36,7 +36,6 @@ from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.agent_runs_repository import (
-    AgentRunsRepository,
     get_agent_runs_repository,
 )
 from app.repositories.agent_workforce_repository import (
@@ -915,6 +914,7 @@ async def upsert_skill_file(
     if payload.content:
         try:
             from app.boundary import skill_scanner
+
             findings = skill_scanner.scan(payload.content)
             scan_findings = skill_scanner.to_dict_list(findings)
             if findings:
@@ -1170,9 +1170,7 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
         .execute()
     )
     tasks_14d_raw = tasks_q.data or []
-    tasks_14d: List[Dict[str, Any]] = [
-        tt_row_to_task_shape(r) for r in tasks_14d_raw
-    ]
+    tasks_14d: List[Dict[str, Any]] = [tt_row_to_task_shape(r) for r in tasks_14d_raw]
     status_counts: Counter[str] = Counter(
         (t.get("lifecycle_status") or "unknown") for t in tasks_14d
     )
@@ -1229,9 +1227,7 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
             "total_cost_cents": round(sum_cost_cents, 4),
             "run_count": len(runs_14d),
         },
-        "recent_tasks": [
-            tt_row_to_task_shape(r) for r in (recent_tasks_q.data or [])
-        ],
+        "recent_tasks": [tt_row_to_task_shape(r) for r in (recent_tasks_q.data or [])],
         "recent_runs": recent_runs_q.data or [],
     }
 
@@ -1632,7 +1628,8 @@ async def admin_telemetry(
     if days < 1 or days > 30:
         raise HTTPException(status_code=400, detail="days must be 1..30")
 
-    from datetime import datetime as _dt, timedelta as _td
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
 
     end = _dt.now(timezone.utc)
     start = end - _td(days=days)
@@ -1687,9 +1684,9 @@ async def admin_telemetry(
     top_agents = sorted(
         per_agent.values(), key=lambda x: x["cost_cents"], reverse=True
     )[:10]
-    top_users = sorted(
-        per_user.values(), key=lambda x: x["cost_cents"], reverse=True
-    )[:10]
+    top_users = sorted(per_user.values(), key=lambda x: x["cost_cents"], reverse=True)[
+        :10
+    ]
 
     # ---- daily trend ----
     daily: Dict[str, Dict[str, Any]] = {}
@@ -1905,7 +1902,9 @@ async def list_my_memories(
         agent_repo = AgentRepository()
         agent = await agent_repo.get_by_slug(agent_slug)
         if not agent:
-            raise HTTPException(status_code=404, detail=f"agent slug not found: {agent_slug}")
+            raise HTTPException(
+                status_code=404, detail=f"agent slug not found: {agent_slug}"
+            )
         q = q.eq("agent_id", str(agent["id"]))
 
     result = await q.execute()
@@ -2003,17 +2002,22 @@ async def list_mcp_servers(auth: AuthDep) -> Dict[str, Any]:
     from app.repositories.user_mcp_servers_repository import (
         UserMCPServersRepository,
     )
+
     repo = UserMCPServersRepository()
     rows = await repo.list_for_user(_coerce_user_uuid(auth.user_id), only_enabled=False)
     return {"items": [_mcp_row_to_dict(r) for r in rows], "count": len(rows)}
 
 
-@router.post("/mcp-servers", status_code=status.HTTP_201_CREATED,
-             summary="Register an MCP server for the caller")
+@router.post(
+    "/mcp-servers",
+    status_code=status.HTTP_201_CREATED,
+    summary="Register an MCP server for the caller",
+)
 async def create_mcp_server(payload: _MCPServerCreate, auth: AuthDep) -> Dict[str, Any]:
     from app.repositories.user_mcp_servers_repository import (
         UserMCPServersRepository,
     )
+
     repo = UserMCPServersRepository()
     try:
         row = await repo.create(
@@ -2032,14 +2036,16 @@ async def create_mcp_server(payload: _MCPServerCreate, auth: AuthDep) -> Dict[st
     return _mcp_row_to_dict(row)
 
 
-@router.patch("/mcp-servers/{server_id}",
-              summary="Update an MCP server registration")
+@router.patch("/mcp-servers/{server_id}", summary="Update an MCP server registration")
 async def update_mcp_server(
-    server_id: UUID, payload: _MCPServerUpdate, auth: AuthDep,
+    server_id: UUID,
+    payload: _MCPServerUpdate,
+    auth: AuthDep,
 ) -> Dict[str, Any]:
     from app.repositories.user_mcp_servers_repository import (
         UserMCPServersRepository,
     )
+
     user_uuid = _coerce_user_uuid(auth.user_id)
     repo = UserMCPServersRepository()
     existing = await repo.get_by_id(server_id)
@@ -2059,13 +2065,16 @@ async def update_mcp_server(
     return _mcp_row_to_dict(fresh) if fresh else {}
 
 
-@router.delete("/mcp-servers/{server_id}",
-               status_code=status.HTTP_204_NO_CONTENT,
-               summary="Delete an MCP server registration")
+@router.delete(
+    "/mcp-servers/{server_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an MCP server registration",
+)
 async def delete_mcp_server(server_id: UUID, auth: AuthDep) -> None:
     from app.repositories.user_mcp_servers_repository import (
         UserMCPServersRepository,
     )
+
     user_uuid = _coerce_user_uuid(auth.user_id)
     repo = UserMCPServersRepository()
     existing = await repo.get_by_id(server_id)
@@ -2077,11 +2086,9 @@ async def delete_mcp_server(server_id: UUID, auth: AuthDep) -> None:
 # ─── B: Chat attachment upload (temp storage for one-off chat use) ────
 
 
-from pathlib import Path as _Path
-import shutil as _shutil
 import time as _time
 import uuid as _uuid
-
+from pathlib import Path as _Path
 
 # Per-user temp storage. Files older than 24h are reaped on each upload
 # (cheap O(N) sweep — fine for small N, replace with a cron later if it
@@ -2095,9 +2102,18 @@ _CHAT_ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 
 _ALLOWED_EXTS = {
     # image
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".bmp",
     # video
-    ".mp4", ".mov", ".webm", ".mkv", ".avi",
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".mkv",
+    ".avi",
     # pdf
     ".pdf",
 }
@@ -2111,18 +2127,18 @@ _ALLOWED_EXTS = {
 # This lets us express e.g. WEBP = "RIFF at 0 AND WEBP at 8" without
 # accidentally accepting AVI files (which also have RIFF at 0).
 _MAGIC_BYTES: dict[str, list[list[tuple[int, bytes]]]] = {
-    ".jpg":  [[(0, b"\xff\xd8\xff")]],
+    ".jpg": [[(0, b"\xff\xd8\xff")]],
     ".jpeg": [[(0, b"\xff\xd8\xff")]],
-    ".png":  [[(0, b"\x89PNG\r\n\x1a\n")]],
-    ".gif":  [[(0, b"GIF87a")], [(0, b"GIF89a")]],
+    ".png": [[(0, b"\x89PNG\r\n\x1a\n")]],
+    ".gif": [[(0, b"GIF87a")], [(0, b"GIF89a")]],
     ".webp": [[(0, b"RIFF"), (8, b"WEBP")]],
-    ".bmp":  [[(0, b"BM")]],
-    ".mp4":  [[(4, b"ftyp")]],
-    ".mov":  [[(4, b"ftyp")]],
+    ".bmp": [[(0, b"BM")]],
+    ".mp4": [[(4, b"ftyp")]],
+    ".mov": [[(4, b"ftyp")]],
     ".webm": [[(0, b"\x1a\x45\xdf\xa3")]],  # EBML / Matroska
-    ".mkv":  [[(0, b"\x1a\x45\xdf\xa3")]],
-    ".avi":  [[(0, b"RIFF"), (8, b"AVI ")]],
-    ".pdf":  [[(0, b"%PDF-")]],
+    ".mkv": [[(0, b"\x1a\x45\xdf\xa3")]],
+    ".avi": [[(0, b"RIFF"), (8, b"AVI ")]],
+    ".pdf": [[(0, b"%PDF-")]],
 }
 
 
@@ -2138,7 +2154,7 @@ def _check_magic_bytes(ext: str, head: bytes) -> bool:
         # must match for the signature to count.
         if all(
             len(head) >= offset + len(expected)
-            and head[offset:offset + len(expected)] == expected
+            and head[offset : offset + len(expected)] == expected
             for offset, expected in sig
         ):
             return True
@@ -2262,7 +2278,7 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
     else:
         kind = "pdf"
 
-    mime_guess = (upload.content_type if hasattr(upload, "content_type") else None)
+    mime_guess = upload.content_type if hasattr(upload, "content_type") else None
 
     return {
         "kind": kind,
@@ -2283,8 +2299,11 @@ async def list_approval_requests(auth: AuthDep, limit: int = 50) -> Dict[str, An
     from app.repositories.approval_requests_repository import (
         ApprovalRequestsRepository,
     )
+
     repo = ApprovalRequestsRepository()
-    rows = await repo.list_pending_for_user(_coerce_user_uuid(auth.user_id), limit=limit)
+    rows = await repo.list_pending_for_user(
+        _coerce_user_uuid(auth.user_id), limit=limit
+    )
     return {
         "items": [
             {
@@ -2308,14 +2327,18 @@ class _ApprovalDecision(BaseModel):
     note: Optional[str] = None
 
 
-@router.post("/approval-requests/{request_id}/approve",
-             summary="Approve a pending request")
+@router.post(
+    "/approval-requests/{request_id}/approve", summary="Approve a pending request"
+)
 async def approve_approval_request(
-    request_id: UUID, payload: _ApprovalDecision, auth: AuthDep,
+    request_id: UUID,
+    payload: _ApprovalDecision,
+    auth: AuthDep,
 ) -> Dict[str, Any]:
     from app.repositories.approval_requests_repository import (
         ApprovalRequestsRepository,
     )
+
     user_uuid = _coerce_user_uuid(auth.user_id)
     repo = ApprovalRequestsRepository()
     existing = await repo.get_by_id(request_id)
@@ -2324,7 +2347,10 @@ async def approve_approval_request(
     if existing.status != "pending":
         raise HTTPException(status_code=409, detail=f"already {existing.status}")
     ok = await repo.decide(
-        request_id, owner_user_id=user_uuid, approve=True, note=payload.note,
+        request_id,
+        owner_user_id=user_uuid,
+        approve=True,
+        note=payload.note,
     )
     if not ok:
         raise HTTPException(status_code=409, detail="decide failed")
@@ -2332,14 +2358,18 @@ async def approve_approval_request(
     return {"id": str(request_id), "status": "approved"}
 
 
-@router.post("/approval-requests/{request_id}/reject",
-             summary="Reject a pending request")
+@router.post(
+    "/approval-requests/{request_id}/reject", summary="Reject a pending request"
+)
 async def reject_approval_request(
-    request_id: UUID, payload: _ApprovalDecision, auth: AuthDep,
+    request_id: UUID,
+    payload: _ApprovalDecision,
+    auth: AuthDep,
 ) -> Dict[str, Any]:
     from app.repositories.approval_requests_repository import (
         ApprovalRequestsRepository,
     )
+
     user_uuid = _coerce_user_uuid(auth.user_id)
     repo = ApprovalRequestsRepository()
     existing = await repo.get_by_id(request_id)
@@ -2348,7 +2378,10 @@ async def reject_approval_request(
     if existing.status != "pending":
         raise HTTPException(status_code=409, detail=f"already {existing.status}")
     ok = await repo.decide(
-        request_id, owner_user_id=user_uuid, approve=False, note=payload.note,
+        request_id,
+        owner_user_id=user_uuid,
+        approve=False,
+        note=payload.note,
     )
     if not ok:
         raise HTTPException(status_code=409, detail="decide failed")
@@ -2357,7 +2390,10 @@ async def reject_approval_request(
 
 
 def _signal_dbos_workflow_if_any(
-    existing, *, approved: bool, note: Optional[str],
+    existing,
+    *,
+    approved: bool,
+    note: Optional[str],
 ) -> None:
     """G2: when an approval row was created from inside a DBOS
     workflow (payload includes ``workflow_id``), wake the paused
@@ -2368,6 +2404,7 @@ def _signal_dbos_workflow_if_any(
         return
     try:
         from app.agent_framework.approval_gate import signal_approval_decision
+
         signal_approval_decision(
             workflow_id=str(workflow_id),
             approval_id=str(existing.id),
@@ -2390,6 +2427,7 @@ async def admin_lane_snapshot(auth: AdminAuthDep) -> Dict[str, Any]:
     which lane is backed up (User vs Background vs Scheduled vs Subagent).
     """
     from app.main import app as _app
+
     lq = getattr(_app.state, "lane_queue", None)
     if lq is None:
         return {"available": False, "reason": "lane_queue not wired on this process"}
@@ -2436,7 +2474,9 @@ def _serialize_versions(rows, *, kind: str) -> List[Dict[str, Any]]:
     "/agents/{slug}/versions",
     summary="List version history of an agent",
 )
-async def list_agent_versions(slug: str, auth: AuthDep, limit: int = 50) -> Dict[str, Any]:
+async def list_agent_versions(
+    slug: str, auth: AuthDep, limit: int = 50
+) -> Dict[str, Any]:
     """Versions ordered newest first. Includes model/temp/max_tokens in
     list view so the user can spot config changes; full markdown bodies
     only via the detail endpoint."""
@@ -2450,7 +2490,9 @@ async def list_agent_versions(slug: str, auth: AuthDep, limit: int = 50) -> Dict
     client = await get_async_supabase_admin()
     result = (
         await client.table("ai_agent_versions")
-        .select("id,version_number,model,temperature,max_tokens,notes,created_by,created_at")
+        .select(
+            "id,version_number,model,temperature,max_tokens,notes,created_by,created_at"
+        )
         .eq("agent_id", str(agent["id"]))
         .order("version_number", desc=True)
         .limit(limit)
@@ -2467,7 +2509,9 @@ async def list_agent_versions(slug: str, auth: AuthDep, limit: int = 50) -> Dict
     summary="Get a specific agent version (full body)",
 )
 async def get_agent_version(
-    slug: str, version_number: int, auth: AuthDep,
+    slug: str,
+    version_number: int,
+    auth: AuthDep,
 ) -> Dict[str, Any]:
     agent_repo, _ = _repos()
     agent = await agent_repo.get_by_slug(slug)
@@ -2496,7 +2540,9 @@ async def get_agent_version(
     summary="Rollback agent to a previous version (creates a new version with the old content)",
 )
 async def rollback_agent(
-    slug: str, version_number: int, auth: AuthDep,
+    slug: str,
+    version_number: int,
+    auth: AuthDep,
 ) -> Dict[str, Any]:
     """Rollback writes a NEW version with the old body content rather than
     moving the current_version pointer back. This preserves the audit
@@ -2508,7 +2554,8 @@ async def rollback_agent(
         raise HTTPException(status_code=404, detail="agent not found")
     if _is_system_skill(agent):
         raise HTTPException(
-            status_code=403, detail="cannot rollback a system preset agent",
+            status_code=403,
+            detail="cannot rollback a system preset agent",
         )
 
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -2528,20 +2575,24 @@ async def rollback_agent(
 
     # Use the existing versioned update — it snapshots current then writes new
     notes = f"rollback of v{version_number}"
-    updated = await agent_repo.update_fields_versioned(
-        agent_id=int(agent["id"]) if isinstance(agent["id"], int) else None,
-        agent_uuid=agent["id"],
-        updates={
-            "identity_md": snap.get("identity_md"),
-            "soul_md": snap.get("soul_md"),
-            "agent_md": snap.get("agent_md"),
-            "model": snap.get("model"),
-            "temperature": snap.get("temperature"),
-            "max_tokens": snap.get("max_tokens"),
-        },
-        editor_user_id=user_uuid,
-        notes=notes,
-    ) if hasattr(agent_repo, "update_fields_versioned") else None
+    updated = (
+        await agent_repo.update_fields_versioned(
+            agent_id=int(agent["id"]) if isinstance(agent["id"], int) else None,
+            agent_uuid=agent["id"],
+            updates={
+                "identity_md": snap.get("identity_md"),
+                "soul_md": snap.get("soul_md"),
+                "agent_md": snap.get("agent_md"),
+                "model": snap.get("model"),
+                "temperature": snap.get("temperature"),
+                "max_tokens": snap.get("max_tokens"),
+            },
+            editor_user_id=user_uuid,
+            notes=notes,
+        )
+        if hasattr(agent_repo, "update_fields_versioned")
+        else None
+    )
 
     # Fall back to direct table update if signature mismatch (defensive)
     if updated is None:
@@ -2552,7 +2603,9 @@ async def rollback_agent(
 
     return {
         "rolled_back_to": version_number,
-        "new_version": (updated.get("current_version") if isinstance(updated, dict) else None),
+        "new_version": (
+            updated.get("current_version") if isinstance(updated, dict) else None
+        ),
         "notes": notes,
     }
 
@@ -2561,7 +2614,9 @@ async def rollback_agent(
     "/skills/{slug}/versions",
     summary="List version history of a skill",
 )
-async def list_skill_versions(slug: str, auth: AuthDep, limit: int = 50) -> Dict[str, Any]:
+async def list_skill_versions(
+    slug: str, auth: AuthDep, limit: int = 50
+) -> Dict[str, Any]:
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be 1..200")
     _, skill_repo = _repos()
@@ -2588,7 +2643,10 @@ async def list_skill_versions(slug: str, auth: AuthDep, limit: int = 50) -> Dict
     summary="List version history of a skill file",
 )
 async def list_skill_file_versions(
-    slug: str, path: str, auth: AuthDep, limit: int = 50,
+    slug: str,
+    path: str,
+    auth: AuthDep,
+    limit: int = 50,
 ) -> Dict[str, Any]:
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be 1..200")

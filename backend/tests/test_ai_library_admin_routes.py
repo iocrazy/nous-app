@@ -51,9 +51,7 @@ def test_reload_seeds_rejects_non_admin(client: TestClient):
         app.dependency_overrides.clear()
 
 
-def test_reload_seeds_runs_loader_for_admin(
-    client: TestClient, fake_auth
-):
+def test_reload_seeds_runs_loader_for_admin(client: TestClient, fake_auth):
     """When AdminAuthDep grants access, SeedLoader.load_all() runs and its
     result is returned as the response body."""
     app = client.app

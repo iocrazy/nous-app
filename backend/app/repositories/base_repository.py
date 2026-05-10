@@ -66,9 +66,7 @@ class BaseRepository:
             )
             logger.info(f"Soft-deleted {self.TABLE_NAME} {record_id}")
         except Exception as e:
-            logger.error(
-                f"Failed to soft-delete {self.TABLE_NAME} {record_id}: {e}"
-            )
+            logger.error(f"Failed to soft-delete {self.TABLE_NAME} {record_id}: {e}")
             raise
 
     async def hard_delete(self, record_id: str) -> None:

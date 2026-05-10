@@ -26,6 +26,7 @@ Request shape this engine accepts:
 Anything else in the dict is ignored — keeps the engine forward-compat
 with future call-sites that want to attach extra hints.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -112,7 +113,9 @@ class ChatContextEngine:
                 "model": composed.model,
                 "tools": composed.tools,
                 "skill_manifest": composed.skill_manifest,
-                "recalled_memory_ids": [str(uid) for uid in composed.recalled_memory_ids],
+                "recalled_memory_ids": [
+                    str(uid) for uid in composed.recalled_memory_ids
+                ],
                 "dynamic_fingerprint": composed.dynamic_fingerprint,
             },
         )

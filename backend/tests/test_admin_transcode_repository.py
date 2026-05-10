@@ -26,12 +26,14 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
 
@@ -105,9 +107,7 @@ async def test_list_null_status_uses_is_null(
 ) -> None:
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_video_versions(
-        page=1, page_size=20, status_filter="null"
-    )
+    await repo.list_video_versions(page=1, page_size=20, status_filter="null")
 
     is_calls = [c for c in fake_query.calls if c[0] == "is_"]
     assert ("transcode_status", "null") in [c[1] for c in is_calls]
@@ -119,9 +119,7 @@ async def test_list_named_status_uses_eq(
 ) -> None:
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_video_versions(
-        page=1, page_size=20, status_filter="completed"
-    )
+    await repo.list_video_versions(page=1, page_size=20, status_filter="completed")
 
     eq_calls = [c for c in fake_query.calls if c[0] == "eq"]
     assert ("transcode_status", "completed") in [c[1] for c in eq_calls]
@@ -145,9 +143,7 @@ async def test_list_invalid_sort_field_falls_back_to_created_at(
 ) -> None:
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_video_versions(
-        page=1, page_size=20, sort_by="DROP TABLE"
-    )
+    await repo.list_video_versions(page=1, page_size=20, sort_by="DROP TABLE")
 
     order = next(c for c in fake_query.calls if c[0] == "order")
     assert order[1] == ("created_at",)

@@ -259,6 +259,7 @@ async def start_workflow_routed(
                 workflow_name
             ):
                 from app.agent_framework._metrics_helper import inc_metric
+
                 inc_metric("dispatch_gate_blocked")
                 raise RuntimeError(
                     f"no live worker advertises workflow '{workflow_name}' — "
@@ -267,6 +268,7 @@ async def start_workflow_routed(
                 )
             elif workflow_name:
                 from app.agent_framework._metrics_helper import inc_metric
+
                 inc_metric("dispatch_gate_passed")
 
     from contextlib import nullcontext

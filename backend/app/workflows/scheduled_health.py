@@ -12,7 +12,6 @@ are honored.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from datetime import datetime
 from pathlib import Path
@@ -126,7 +125,9 @@ async def update_system_status_workflow(
 
 @DBOS.scheduled("0 * * * *")  # hourly at :00
 @DBOS.workflow()
-async def health_check_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
+async def health_check_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
     result = await health_check_step()
     if result["status"] != "healthy":
         logger.warning(f"[health_check] degraded: {result['checks']}")

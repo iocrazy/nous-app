@@ -13,6 +13,7 @@ For each due commitment:
 Best-effort: bad rows log + skip. Cap per-run batch so a stuck
 delivery channel can't pile up.
 """
+
 from __future__ import annotations
 
 import logging
@@ -84,6 +85,7 @@ async def sweep_due_commitments_step(
 
     if fired_count or expired_count:
         from app.agent_framework._metrics_helper import inc_metric
+
         if fired_count:
             inc_metric("commitment_sweeper_fired", by=fired_count)
         if expired_count:
@@ -132,6 +134,7 @@ async def _deliver_commitment(commitment) -> str:
     # Try app.state notifier first
     try:
         from app.main import app as _app
+
         notifier = getattr(_app.state, "commitment_notifier", None)
         if notifier is not None:
             await notifier(commitment)
@@ -146,6 +149,7 @@ async def _deliver_commitment(commitment) -> str:
     if webhook:
         try:
             import httpx
+
             text = (
                 f"⏰ **Commitment due**\n"
                 f"📝 {commitment.description}\n"
@@ -155,9 +159,7 @@ async def _deliver_commitment(commitment) -> str:
                 await client.post(webhook, json={"content": text})
             return f"delivered to discord webhook (channel={channel_id})"
         except Exception as exc:
-            logger.warning(
-                "[commitment.sweeper] discord webhook failed: %r", exc
-            )
+            logger.warning("[commitment.sweeper] discord webhook failed: %r", exc)
 
     return "fired by sweeper (no delivery channel configured)"
 

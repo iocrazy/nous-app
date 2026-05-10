@@ -5,6 +5,7 @@ KNOWN prefix (sk-, Bearer, JWT eyJ…, KEY=…) and a minimum length so
 random IDs (UUIDs, Snowflake BIGINTs, commit hashes) don't get wrongly
 masked.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -14,55 +15,63 @@ from app.boundary.log_redact import (
     redact,
 )
 
-
 # ============================================================================
 # Positive — known secret shapes ARE redacted
 # ============================================================================
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "raw,must_contain,must_not_contain",
     [
         # sk- API key (Anthropic / OpenAI / Doubao convention)
-        ("api key sk-1234567890abcdefghij used", "sk-***",
-         "sk-1234567890abcdefghij"),
+        ("api key sk-1234567890abcdefghij used", "sk-***", "sk-1234567890abcdefghij"),
         # Bearer token
-        ("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload12345.sig123abc",
-         "Bearer ***",
-         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload12345.sig123abc"),
+        (
+            "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload12345.sig123abc",
+            "Bearer ***",
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload12345.sig123abc",
+        ),
         # Authorization header
-        ("Authorization: Bearer abc123def456ghi789jklmnop",
-         "Authorization: Bearer ***",
-         "abc123def456ghi789jklmnop"),
+        (
+            "Authorization: Bearer abc123def456ghi789jklmnop",
+            "Authorization: Bearer ***",
+            "abc123def456ghi789jklmnop",
+        ),
         # query string token
-        ("token=ya29.a0AfH6SMBxxxxxxxxxxxxxxxx&other=value",
-         "token=***",
-         "ya29.a0AfH6SMBxxxxxxxxxxxxxxxx"),
+        (
+            "token=ya29.a0AfH6SMBxxxxxxxxxxxxxxxx&other=value",
+            "token=***",
+            "ya29.a0AfH6SMBxxxxxxxxxxxxxxxx",
+        ),
         # KEY=value env style (uppercase prefix that ends with KEY/TOKEN/SECRET)
-        ("DOUBAO_API_KEY=sk-doubao-very-secret-key-xxxxxxxxxxxx",
-         "DOUBAO_API_KEY=***",
-         "sk-doubao-very-secret-key-xxxxxxxxxxxx"),
+        (
+            "DOUBAO_API_KEY=sk-doubao-very-secret-key-xxxxxxxxxxxx",
+            "DOUBAO_API_KEY=***",
+            "sk-doubao-very-secret-key-xxxxxxxxxxxx",
+        ),
         # JWT bare in body (3-segment dot-separated)
-        ("Token leaked in log: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-         ".eyJzdWIiOiIxMjM0NTY3ODkwIn0"
-         ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c — investigate",
-         "***JWT***",
-         "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"),
+        (
+            "Token leaked in log: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+            ".eyJzdWIiOiIxMjM0NTY3ODkwIn0"
+            ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c — investigate",
+            "***JWT***",
+            "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+        ),
     ],
 )
 def test_redacts_known_secret_shapes(raw, must_contain, must_not_contain):
     result = redact(raw)
-    assert must_contain in result, (
-        f"expected {must_contain!r} in {result!r}"
-    )
-    assert must_not_contain not in result, (
-        f"original secret leaked: {must_not_contain!r} found in {result!r}"
-    )
+    assert must_contain in result, f"expected {must_contain!r} in {result!r}"
+    assert (
+        must_not_contain not in result
+    ), f"original secret leaked: {must_not_contain!r} found in {result!r}"
 
 
 # ============================================================================
 # Negative — false-positive guards (E13)
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_uuid_not_redacted():
@@ -112,6 +121,7 @@ def test_version_number_not_redacted():
 # Edge cases
 # ============================================================================
 
+
 @pytest.mark.unit
 def test_empty_string_untouched():
     assert redact("") == ""
@@ -127,6 +137,7 @@ def test_non_string_passthrough():
 # ============================================================================
 # Loguru patcher — message + extra walk (E6)
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_patcher_redacts_record_message():

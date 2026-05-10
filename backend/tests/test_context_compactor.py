@@ -14,6 +14,7 @@ Phase 2 added an LLM-driven head summarizer. Tests for the
 summarizer call (mock the network) and the emergency-cap fallback
 when the summarizer fails are pinned here too.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -21,7 +22,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.agent_framework.context_compactor import (
-    CompactionStats,
     CompactionThresholds,
     CompactionTier,
     ContextCompactor,
@@ -129,20 +129,24 @@ async def test_yellow_tier_invokes_prune(compactor):
     NOT make an LLM call. Cheap, no network."""
     msgs = _tail_messages(count=4)
 
-    with patch(
-        "app.agent_framework.context_compactor.model_window_size", return_value=1000
-    ), patch(
-        "app.agent_framework.context_compactor.count_tokens", return_value=0
-    ), patch(
-        "app.agent_framework.context_compactor.count_messages_tokens",
-        side_effect=[700, 500],
-    ), patch(
-        "app.agent_framework.context_compactor.prune",
-        return_value=(msgs, _make_prune_stats(duplicates=2)),
-    ) as mock_prune, patch(
-        "app.agent_framework.summarizer.summarize",
-        new=AsyncMock(),
-    ) as mock_summarize:
+    with (
+        patch(
+            "app.agent_framework.context_compactor.model_window_size", return_value=1000
+        ),
+        patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
+        patch(
+            "app.agent_framework.context_compactor.count_messages_tokens",
+            side_effect=[700, 500],
+        ),
+        patch(
+            "app.agent_framework.context_compactor.prune",
+            return_value=(msgs, _make_prune_stats(duplicates=2)),
+        ) as mock_prune,
+        patch(
+            "app.agent_framework.summarizer.summarize",
+            new=AsyncMock(),
+        ) as mock_summarize,
+    ):
         out, stats = await compactor.maybe_compact(
             system_message="", user_messages=msgs, model="claude-sonnet-4-6"
         )
@@ -164,20 +168,24 @@ async def test_orange_tier_invokes_summarizer(compactor):
 
     fake_summary = "User asked about X. Agent ran tool foo. Result: bar."
 
-    with patch(
-        "app.agent_framework.context_compactor.model_window_size", return_value=1000
-    ), patch(
-        "app.agent_framework.context_compactor.count_tokens", return_value=0
-    ), patch(
-        "app.agent_framework.context_compactor.count_messages_tokens",
-        side_effect=[850, 830, 400],  # before / after-prune / final-after-summary
-    ), patch(
-        "app.agent_framework.context_compactor.prune",
-        return_value=(msgs, _make_prune_stats()),
-    ), patch(
-        "app.agent_framework.summarizer.summarize",
-        new=AsyncMock(return_value=fake_summary),
-    ) as mock_summarize:
+    with (
+        patch(
+            "app.agent_framework.context_compactor.model_window_size", return_value=1000
+        ),
+        patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
+        patch(
+            "app.agent_framework.context_compactor.count_messages_tokens",
+            side_effect=[850, 830, 400],  # before / after-prune / final-after-summary
+        ),
+        patch(
+            "app.agent_framework.context_compactor.prune",
+            return_value=(msgs, _make_prune_stats()),
+        ),
+        patch(
+            "app.agent_framework.summarizer.summarize",
+            new=AsyncMock(return_value=fake_summary),
+        ) as mock_summarize,
+    ):
         out, stats = await compactor.maybe_compact(
             system_message="",
             user_messages=msgs,
@@ -204,19 +212,23 @@ async def test_summarizer_failure_falls_back_to_emergency_cap(compactor):
     tail = _tail_messages(count=4)
     msgs = head + tail
 
-    with patch(
-        "app.agent_framework.context_compactor.model_window_size", return_value=1000
-    ), patch(
-        "app.agent_framework.context_compactor.count_tokens", return_value=0
-    ), patch(
-        "app.agent_framework.context_compactor.count_messages_tokens",
-        side_effect=[850, 830, 200, 400],
-    ), patch(
-        "app.agent_framework.context_compactor.prune",
-        return_value=(msgs, _make_prune_stats()),
-    ), patch(
-        "app.agent_framework.summarizer.summarize",
-        new=AsyncMock(side_effect=RuntimeError("haiku 503")),
+    with (
+        patch(
+            "app.agent_framework.context_compactor.model_window_size", return_value=1000
+        ),
+        patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
+        patch(
+            "app.agent_framework.context_compactor.count_messages_tokens",
+            side_effect=[850, 830, 200, 400],
+        ),
+        patch(
+            "app.agent_framework.context_compactor.prune",
+            return_value=(msgs, _make_prune_stats()),
+        ),
+        patch(
+            "app.agent_framework.summarizer.summarize",
+            new=AsyncMock(side_effect=RuntimeError("haiku 503")),
+        ),
     ):
         out, stats = await compactor.maybe_compact(
             system_message="",
@@ -239,19 +251,23 @@ async def test_red_tier_keeps_fewer_recent_turns(compactor):
     tail = _tail_messages(count=4)
     msgs = head + tail
 
-    with patch(
-        "app.agent_framework.context_compactor.model_window_size", return_value=1000
-    ), patch(
-        "app.agent_framework.context_compactor.count_tokens", return_value=0
-    ), patch(
-        "app.agent_framework.context_compactor.count_messages_tokens",
-        side_effect=[950, 940, 300],
-    ), patch(
-        "app.agent_framework.context_compactor.prune",
-        return_value=(msgs, _make_prune_stats()),
-    ), patch(
-        "app.agent_framework.summarizer.summarize",
-        new=AsyncMock(return_value="summary"),
+    with (
+        patch(
+            "app.agent_framework.context_compactor.model_window_size", return_value=1000
+        ),
+        patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
+        patch(
+            "app.agent_framework.context_compactor.count_messages_tokens",
+            side_effect=[950, 940, 300],
+        ),
+        patch(
+            "app.agent_framework.context_compactor.prune",
+            return_value=(msgs, _make_prune_stats()),
+        ),
+        patch(
+            "app.agent_framework.summarizer.summarize",
+            new=AsyncMock(return_value="summary"),
+        ),
     ):
         out, stats = await compactor.maybe_compact(
             system_message="",
@@ -274,9 +290,7 @@ def test_thresholds_are_configurable():
 def test_custom_thresholds_take_effect():
     """Caller can override thresholds for tenants on tighter / looser
     budgets."""
-    aggressive = CompactionThresholds(
-        yellow_pct=0.30, orange_pct=0.50, red_pct=0.70
-    )
+    aggressive = CompactionThresholds(yellow_pct=0.30, orange_pct=0.50, red_pct=0.70)
     compactor = ContextCompactor(thresholds=aggressive)
     assert compactor._tier_for(0.10) == CompactionTier.GREEN
     assert compactor._tier_for(0.40) == CompactionTier.YELLOW
@@ -289,6 +303,7 @@ def test_custom_thresholds_take_effect():
 
 def _make_prune_stats(duplicates: int = 0, aged: int = 0, chars: int = 0):
     from app.agent_framework.tool_result_pruner import PruneStats
+
     return PruneStats(
         duplicates_replaced=duplicates,
         aged_results=aged,

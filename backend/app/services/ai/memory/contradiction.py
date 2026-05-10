@@ -22,12 +22,12 @@ The cheap LLM is the bottleneck: every write triggers ~3 cheap calls
 (one per high-similarity neighbor). Acceptable cost: writes are 10x
 less frequent than reads in mediahub's pattern.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
 from typing import Awaitable, Callable, Optional
-
 
 # Two-tier threshold:
 #   HIGH (≥0.90): worth asking the LLM at all
@@ -39,10 +39,10 @@ ELITE_SIMILARITY = 0.95
 class ContradictionVerdict(str, Enum):
     """LLM-returned classification."""
 
-    REPLACES = "replaces"          # NEW makes OLD wrong/stale
-    CONTRADICTS = "contradicts"    # NEW directly conflicts with OLD
-    SUPPLEMENTS = "supplements"    # Both true, complementary
-    UNRELATED = "unrelated"        # LLM thinks they're not really about same fact
+    REPLACES = "replaces"  # NEW makes OLD wrong/stale
+    CONTRADICTS = "contradicts"  # NEW directly conflicts with OLD
+    SUPPLEMENTS = "supplements"  # Both true, complementary
+    UNRELATED = "unrelated"  # LLM thinks they're not really about same fact
 
 
 # Verdicts that should mark OLD as superseded.
@@ -133,11 +133,7 @@ def select_supersede_targets(
     decisions: list[ContradictionDecision],
 ) -> list[str]:
     """Filter to ids that should be marked superseded by the new memory."""
-    return [
-        d.old_memory_id
-        for d in decisions
-        if d.verdict in SUPERSEDING_VERDICTS
-    ]
+    return [d.old_memory_id for d in decisions if d.verdict in SUPERSEDING_VERDICTS]
 
 
 __all__ = [

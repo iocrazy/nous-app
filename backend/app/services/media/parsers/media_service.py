@@ -391,7 +391,7 @@ class MediaService:
             need_download_music = parsed_data.pop("need_download_music", False)
             need_download_cover = parsed_data.pop("need_download_cover", False)
 
-            title = parsed_data.get("title", "")
+            parsed_data.get("title", "")
             media_type = parsed_data.get("media_type", "")
             is_image_type = str(media_type) in ("images", "image", "2", "68")
 

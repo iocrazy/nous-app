@@ -1,4 +1,5 @@
 """Sprint 8 — link_understanding fetcher tests."""
+
 from __future__ import annotations
 
 import httpx
@@ -162,6 +163,7 @@ async def test_invalid_url_rejected_at_boundary(monkeypatch):
     test sees the actual boundary rejection rather than the passthrough.
     """
     from app.boundary import url_guard
+
     monkeypatch.setattr(lu, "validate_url_async", url_guard.validate_url_async)
     with pytest.raises(LinkUnderstandingError, match="boundary"):
         await understand_link("file:///etc/passwd")
@@ -188,15 +190,15 @@ async def test_oversized_body_rejected():
 async def test_long_body_truncated_to_excerpt():
     """The neutralized excerpt obeys body_excerpt_chars; full body_text
     is also retained for the caller."""
-    long_html = "<html><head><title>T</title></head><body>" + ("x " * 5000) + "</body></html>"
+    long_html = (
+        "<html><head><title>T</title></head><body>" + ("x " * 5000) + "</body></html>"
+    )
     respx.get("https://example.com/long").mock(
         return_value=httpx.Response(
             200, headers={"content-type": "text/html"}, text=long_html
         )
     )
-    summary = await understand_link(
-        "https://example.com/long", body_excerpt_chars=200
-    )
+    summary = await understand_link("https://example.com/long", body_excerpt_chars=200)
     # Caller gets the FULL cleaned body (their choice what to do with it)
     assert len(summary.body_text) > 200
     # Neutralized excerpt is bounded

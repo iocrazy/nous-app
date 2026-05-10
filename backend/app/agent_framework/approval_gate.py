@@ -48,11 +48,11 @@ already call ``signal_approval_decision`` — they're a no-op for the
 chat path (no waiter exists) but light up automatically for any
 workflow that opts in.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Optional
-
 
 # Sentinel topic prefix — keeps approval messages from colliding with
 # other DBOS.send usages in the future.
@@ -150,8 +150,8 @@ def signal_approval_decision(
     already finished — DBOS drops messages destined for terminal
     workflows.
     """
-    from loguru import logger
     from dbos import DBOS
+    from loguru import logger
 
     topic = _topic_for(approval_id)
     payload: dict[str, Any] = {"approved": approved, "note": note}

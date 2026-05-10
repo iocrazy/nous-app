@@ -12,7 +12,9 @@ Douyin 解析模块
 """
 
 from app.services.media.parsers.douyin_parse.abogus_parser import ABogusDouyinParser
-from app.services.media.parsers.douyin_parse.drissionpage_parser import DrissionPageParser
+from app.services.media.parsers.douyin_parse.drissionpage_parser import (
+    DrissionPageParser,
+)
 from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
 from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
 

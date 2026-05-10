@@ -7,10 +7,11 @@ agent_runner stack (PromptComposer, AgentRunner, RunRecorder,
 build_agent_runner_stack); we test the wiring is right, not the
 inner runner — that's covered by Phase 5 E2E.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -65,9 +66,7 @@ async def test_depth_cap_rejects_at_limit(caller_ctx):
     DB roundtrip (the cheapest fail-fast)."""
     ctx = {**caller_ctx, "agent_depth": MAX_DELEGATION_DEPTH}
     service = SubAgentTaskService(**ctx)
-    out = await service.spawn(
-        {"subagent_type": "research", "prompt": "x"}
-    )
+    out = await service.spawn({"subagent_type": "research", "prompt": "x"})
     assert out["status"] == "failed"
     assert "max sub-agent depth" in out["error"]
 
@@ -76,14 +75,10 @@ async def test_unknown_slug_returns_failed(service):
     """Misconfigured parent prompt that names a non-existent agent
     must not crash the parent's run — return a clean envelope so the
     LLM can choose a different slug or fall back."""
-    with patch(
-        "app.repositories.agent_repository.AgentRepository"
-    ) as mock_repo_cls:
+    with patch("app.repositories.agent_repository.AgentRepository") as mock_repo_cls:
         mock_repo = mock_repo_cls.return_value
         mock_repo.get_by_slug = AsyncMock(return_value=None)
-        out = await service.spawn(
-            {"subagent_type": "nonexistent", "prompt": "x"}
-        )
+        out = await service.spawn({"subagent_type": "nonexistent", "prompt": "x"})
     assert out["status"] == "failed"
     assert "unknown agent slug" in out["error"]
 
@@ -93,16 +88,12 @@ async def test_self_spawn_rejected(service, caller_ctx):
     SAME context — Delegate also rejects this. Refactor to a plan
     step is the right answer."""
     self_uuid = caller_ctx["caller_agent_id"]
-    with patch(
-        "app.repositories.agent_repository.AgentRepository"
-    ) as mock_repo_cls:
+    with patch("app.repositories.agent_repository.AgentRepository") as mock_repo_cls:
         mock_repo = mock_repo_cls.return_value
         mock_repo.get_by_slug = AsyncMock(
             return_value={"id": str(self_uuid), "slug": "myself"}
         )
-        out = await service.spawn(
-            {"subagent_type": "myself", "prompt": "x"}
-        )
+        out = await service.spawn({"subagent_type": "myself", "prompt": "x"})
     assert out["status"] == "failed"
     assert "cannot spawn self" in out["error"]
 
@@ -127,9 +118,7 @@ async def test_build_envelope_success_shape():
         "content": "Found 3 relevant docs in /docs/",
         "usage": {"total_tokens": 1234, "input_tokens": 800, "output_tokens": 434},
     }
-    env = SubAgentTaskService._build_envelope(
-        result=fake_result, sub_run_id=sub_run_id
-    )
+    env = SubAgentTaskService._build_envelope(result=fake_result, sub_run_id=sub_run_id)
     assert env["status"] == "success"
     assert env["summary"] == "Found 3 relevant docs in /docs/"
     assert env["sub_run_id"] == str(sub_run_id)
@@ -148,9 +137,7 @@ async def test_build_envelope_failed_shape():
         "error": "context_budget_exceeded",
         "usage": None,
     }
-    env = SubAgentTaskService._build_envelope(
-        result=fake_result, sub_run_id=uuid4()
-    )
+    env = SubAgentTaskService._build_envelope(result=fake_result, sub_run_id=uuid4())
     assert env["status"] == "failed"
     assert env["error"] == "context_budget_exceeded"
     assert env["summary"] == "tried but couldn't"

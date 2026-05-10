@@ -68,12 +68,12 @@ def extract_and_persist_memories_step(
     """Run extractor LLM calls + persist memory rows. workflow_id
     memoization keeps replay safe (same run_id+inputs = same rows)."""
     from app.db import get_async_supabase_admin
-    from app.services.ai.providers.embedding_service import EmbeddingService
     from app.services.ai.memory.extractor import (
         AssistantMemoryExtractor,
         UserMemoryExtractor,
     )
     from app.services.ai.memory.writer import MemoryWriter
+    from app.services.ai.providers.embedding_service import EmbeddingService
 
     async def _do() -> dict[str, Any]:
         client = await get_async_supabase_admin()

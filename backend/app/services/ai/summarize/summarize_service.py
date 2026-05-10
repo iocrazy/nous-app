@@ -26,7 +26,6 @@ from loguru import logger
 from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
-from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.adapters.factory import (
     get_adapter_for_user,
@@ -34,6 +33,7 @@ from app.services.ai.adapters.factory import (
 )
 from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
+from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService
 

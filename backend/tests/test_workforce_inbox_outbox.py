@@ -9,9 +9,8 @@ These cover the contract corners that the M2 dispatch loop depends on:
 
 from __future__ import annotations
 
-from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -20,7 +19,6 @@ from app.services.workforce.outbox_dispatcher import OutboxDispatcher
 from app.services.workforce.state_machine import (
     InvalidTransitionError,
 )
-
 
 # ─── shared fakes ────────────────────────────────────────────────────
 
@@ -77,7 +75,8 @@ async def test_inbox_tick_spawns_task_and_transitions_worker():
     processor = InboxProcessor(repo=repo, state_machine=sm)
 
     with patch.object(
-        processor, "_agents_with_unread_messages",
+        processor,
+        "_agents_with_unread_messages",
         AsyncMock(return_value=[agent_id]),
     ):
         stats = await processor.tick()
@@ -107,7 +106,8 @@ async def test_inbox_cancel_message_updates_task_no_state_transition():
     )
     processor = InboxProcessor(repo=repo, state_machine=sm)
     with patch.object(
-        processor, "_agents_with_unread_messages",
+        processor,
+        "_agents_with_unread_messages",
         AsyncMock(return_value=[uuid4()]),
     ):
         stats = await processor.tick()
@@ -135,7 +135,8 @@ async def test_inbox_status_query_writes_outbox_response():
     )
     processor = InboxProcessor(repo=repo, state_machine=sm)
     with patch.object(
-        processor, "_agents_with_unread_messages",
+        processor,
+        "_agents_with_unread_messages",
         AsyncMock(return_value=[uuid4()]),
     ):
         await processor.tick()
@@ -171,7 +172,8 @@ async def test_inbox_invalid_transition_marks_blocked():
 
     processor = InboxProcessor(repo=repo, state_machine=sm)
     with patch.object(
-        processor, "_agents_with_unread_messages",
+        processor,
+        "_agents_with_unread_messages",
         AsyncMock(return_value=[uuid4()]),
     ):
         await processor.tick()

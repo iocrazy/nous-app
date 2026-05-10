@@ -25,10 +25,11 @@ Pure layer:
   - flatten_to_text(message) → str (degrade for text-only adapters)
   - sniff_supports_vision(model) → bool (cheap heuristic)
 """
+
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -36,15 +37,21 @@ from typing import Any
 class AttachmentKind(str, Enum):
     IMAGE = "image"
     VIDEO_THUMBNAIL = "video_thumbnail"  # treated as image to model
-    PDF_PAGE = "pdf_page"               # rendered to image first by caller
-    AUDIO = "audio"                     # OpenAI/Qwen audio input (rare)
+    PDF_PAGE = "pdf_page"  # rendered to image first by caller
+    AUDIO = "audio"  # OpenAI/Qwen audio input (rare)
 
 
 # Common content-type sniff for image vs other
-_IMAGE_MIMES = frozenset({
-    "image/png", "image/jpeg", "image/jpg", "image/webp",
-    "image/gif", "image/bmp",
-})
+_IMAGE_MIMES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/webp",
+        "image/gif",
+        "image/bmp",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -52,10 +59,10 @@ class Attachment:
     """One user-supplied non-text input."""
 
     kind: AttachmentKind
-    url: str = ""           # public/signed URL
-    data_url: str = ""      # base64 data: URL (use when no public URL)
-    mime: str = ""          # explicit mime type
-    alt_text: str = ""      # caption / fallback for text-only adapters
+    url: str = ""  # public/signed URL
+    data_url: str = ""  # base64 data: URL (use when no public URL)
+    mime: str = ""  # explicit mime type
+    alt_text: str = ""  # caption / fallback for text-only adapters
 
     def is_inline(self) -> bool:
         return bool(self.data_url)
@@ -69,9 +76,15 @@ class Attachment:
 # Models known to support image input. Conservative heuristic — when
 # in doubt, flatten_to_text degrades the input (UX still works).
 _VISION_MODEL_PREFIXES = (
-    "gpt-4o", "gpt-4-vision", "gpt-4-turbo",
-    "claude-3", "claude-sonnet-4", "claude-opus-4",
-    "qwen-vl", "qwen2-vl", "qwen2.5-vl",
+    "gpt-4o",
+    "gpt-4-vision",
+    "gpt-4-turbo",
+    "claude-3",
+    "claude-sonnet-4",
+    "claude-opus-4",
+    "qwen-vl",
+    "qwen2-vl",
+    "qwen2.5-vl",
     "gemini-",
     "doubao-vision",
 )
@@ -117,24 +130,29 @@ def build_user_message(
         url = att.display_url()
         if not url:
             continue
-        if att.kind in {AttachmentKind.IMAGE, AttachmentKind.VIDEO_THUMBNAIL,
-                        AttachmentKind.PDF_PAGE}:
-            parts.append({
-                "type": "image_url",
-                "image_url": {"url": url},
-            })
+        if att.kind in {
+            AttachmentKind.IMAGE,
+            AttachmentKind.VIDEO_THUMBNAIL,
+            AttachmentKind.PDF_PAGE,
+        }:
+            parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": url},
+                }
+            )
         elif att.kind == AttachmentKind.AUDIO:
             # Per OpenAI 2024-10 audio support — rarer + provider specific
-            parts.append({
-                "type": "input_audio",
-                "input_audio": {"data": url, "format": att.mime or "wav"},
-            })
+            parts.append(
+                {
+                    "type": "input_audio",
+                    "input_audio": {"data": url, "format": att.mime or "wav"},
+                }
+            )
     return {"role": "user", "content": parts}
 
 
-def flatten_attachments_to_text(
-    text: str, attachments: list[Attachment]
-) -> str:
+def flatten_attachments_to_text(text: str, attachments: list[Attachment]) -> str:
     """Convert attachments → text placeholders for text-only adapters.
 
     Each attachment becomes "[image: <alt or url>]" line. Original

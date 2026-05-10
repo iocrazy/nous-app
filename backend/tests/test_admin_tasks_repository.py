@@ -7,7 +7,6 @@ so we exercise each knob and verify the builder call chain the repo emits.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -27,12 +26,14 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
 
@@ -62,9 +63,7 @@ def repo(fake_query: _FakeQuery) -> AdminTasksRepository:
 
 
 @pytest.mark.asyncio
-async def test_count_total(
-    repo: AdminTasksRepository, fake_query: _FakeQuery
-) -> None:
+async def test_count_total(repo: AdminTasksRepository, fake_query: _FakeQuery) -> None:
     fake_query._count = 42
     assert await repo.count_total() == 42
 

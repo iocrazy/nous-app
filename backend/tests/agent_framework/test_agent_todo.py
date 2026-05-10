@@ -1,4 +1,5 @@
 """K2 — AgentTodoList: per-turn internal task list."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,17 +11,18 @@ from app.agent_framework.agent_todo import (
     TodoValidationError,
 )
 
-
 # ─── replace ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
 def test_replace_basic():
     todos = AgentTodoList()
-    items = todos.replace([
-        {"content": "fix bug"},
-        {"content": "write test", "active_form": "writing test"},
-    ])
+    items = todos.replace(
+        [
+            {"content": "fix bug"},
+            {"content": "write test", "active_form": "writing test"},
+        ]
+    )
     assert len(items) == 2
     assert items[0].id == 1
     assert items[0].content == "fix bug"
@@ -159,11 +161,13 @@ def test_render_empty_list_is_empty_string():
 @pytest.mark.unit
 def test_render_includes_status_emojis():
     todos = AgentTodoList()
-    todos.replace([
-        {"content": "first"},
-        {"content": "second", "active_form": "doing second"},
-        {"content": "third"},
-    ])
+    todos.replace(
+        [
+            {"content": "first"},
+            {"content": "second", "active_form": "doing second"},
+            {"content": "third"},
+        ]
+    )
     todos.update_status(1, TodoStatus.COMPLETED)
     todos.update_status(2, TodoStatus.IN_PROGRESS)
     md = todos.render_for_prompt()

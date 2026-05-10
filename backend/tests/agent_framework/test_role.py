@@ -1,4 +1,5 @@
 """Sprint 5 — ProcessRole + role_from_env."""
+
 from __future__ import annotations
 
 import pytest

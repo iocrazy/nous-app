@@ -16,13 +16,13 @@ It does NOT call the LLM — adapter layer enforces the budget by
 passing it to provider's max_tokens param. This module just centralizes
 the policy.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
 
 from app.agent_framework.context_window import model_window_size
-
 
 # Defaults. Per-model overrides via DEFAULT_OUTPUT_BUDGET_BY_MODEL.
 DEFAULT_OUTPUT_FRACTION = 0.25

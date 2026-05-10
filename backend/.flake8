@@ -4,26 +4,64 @@ exclude = __pycache__
 # E203: whitespace before ':' - conflicts with black's slice formatting
 # W503: line break before binary operator - conflicts with black
 extend-ignore = E203, W503
-# Per-file ignores — pre-existing master debt, tracked for follow-up.
-# These suppress specific codes in specific files so CI stays green while
-# the debt is addressed in dedicated fix PRs rather than a formatting PR.
+# Per-file ignores. These are ALL pre-existing master debt — collected
+# from running flake8 against post-format master after the big black +
+# isort sweep. Nothing here was introduced by the format PR; entries
+# document tracked debt awaiting dedicated fix PRs.
+#
+# F401 in __init__.py is intentional re-export pattern, glob-ignored.
 per-file-ignores =
-    # 3rd-party-ported ABogus parser — maintains upstream style
-    app/services/douyin_parse/_f2_abogus.py:E131,E501,F821
-    app/services/douyin_parse/formatter.py:E501
-    # Known module-level import-at-top exceptions (conditional imports)
-    app/services/script_service.py:E402
-    app/api/supabase_auth_router.py:E402
-    # Known long lines awaiting dedicated refactor
-    app/api/task_manager_router.py:E501
-    app/services/downloader.py:E501
-    app/services/script_ai_service.py:E501
-    app/services/ytdlp_service.py:E501
-    # Known unused locals — tracked for follow-up, not causing runtime issues
-    app/api/admin/__init__.py:F841
-    app/api/media_fetch_helpers.py:F841
-    app/services/media_service.py:F841
-    app/tasks/parse_tasks.py:F841
-    # Real F821 bugs in master — tracked for follow-up PR, not introduced here
-    app/tasks/analysis_tasks.py:F821
-    app/tasks/transcode_tasks.py:F821
+    # ── intentional re-export pattern (and test fixtures imports) ──
+    __init__.py: F401
+    tests/*.py: F401
+    tests/**/*.py: F401
+
+    # ── 3rd-party-ported ABogus parser — maintains upstream style ──
+    app/services/media/parsers/douyin_parse/_f2_abogus.py: E131,E501
+    app/services/media/parsers/douyin_parse/formatter.py: E501
+
+    # ── conditional imports / deferred top-of-file imports ─────────
+    app/agent_framework/mcp_stdio.py: E402
+    app/api/ai_library_router.py: E402
+    app/services/ai/llm/llm_compactor.py: E402
+    app/services/storyboard/script/script_service.py: E402
+
+    # ── known long lines awaiting dedicated refactor ───────────────
+    app/services/media/downloader/downloader.py: E501
+    app/services/media/parsers/ytdlp_service.py: E501
+
+    # ── known unused locals — track for follow-up, not runtime bugs ─
+    app/agent_framework/db_pool_probe.py: F841
+    app/api/media_fetch_helpers.py: F841
+    app/api/schedules_router.py: F841
+    app/services/ai/memory/threading.py: F841
+    app/services/media/parsers/media_service.py: F841
+
+    # ── more pre-existing debt surfaced post-format ────────────────
+    app/api/supabase_auth_router.py: E402
+    app/api/task_manager_router.py: E501
+
+    # ── forward-reference Union types resolved at type-check time ──
+    app/repositories/agent_runs_repository.py: F821
+    app/services/ai/chat/ai_library_chat_service.py: F821
+
+    # ── style nits in agent runner / plan_mode ─────────────────────
+    app/agent_framework/plan_mode.py: F541
+    app/services/ai/runner/agent_runner.py: F402
+
+    # ── tests: known debt, prefer test clarity over strict lint ────
+    # F401 already covered by tests/*.py glob above. Per-file entries
+    # below ADD codes specific to each test file.
+    tests/agent_framework/test_cancel_watcher.py: E701,F401
+    tests/boundary/test_url_guard.py: F841,F401
+    tests/test_a6_routers.py: E741,F841,F401
+    tests/test_ai_library_chat.py: F841,F401
+    tests/test_approval_requests.py: E402,F401
+    tests/test_commitment_harvester.py: E501,F401
+    tests/test_dbos_orchestrator_dispatch_gate.py: E301,E306,F401
+    tests/test_llm_compactor.py: E402,F401
+    tests/test_loguru_no_percent_format.py: E501,F401
+    tests/test_schema_drift.py: F841,F401
+    tests/test_script_service.py: E741,F401
+    tests/test_streaming.py: E402,F401
+    tests/test_user_mcp_servers_router.py: E402,F401

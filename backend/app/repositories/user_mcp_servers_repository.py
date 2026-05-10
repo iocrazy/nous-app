@@ -16,6 +16,7 @@ control boundary:
     ownership check cannot cross-mutate
 The router endpoints layer additional ownership checks on top.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ class UserMCPServer:
     user_id: UUID
     name: str
     url: str
-    bearer_token: Optional[str]    # plain text in memory; encrypted at rest
+    bearer_token: Optional[str]  # plain text in memory; encrypted at rest
     description: Optional[str]
     enabled: bool
 
@@ -127,14 +128,16 @@ class UserMCPServersRepository:
             stored_token = _encrypt_secret(bearer_token) if bearer_token else None
             result = (
                 await client.table(self.TABLE)
-                .insert({
-                    "user_id": str(user_id),
-                    "name": name,
-                    "url": url,
-                    "bearer_token": stored_token,
-                    "description": description,
-                    "enabled": enabled,
-                })
+                .insert(
+                    {
+                        "user_id": str(user_id),
+                        "name": name,
+                        "url": url,
+                        "bearer_token": stored_token,
+                        "description": description,
+                        "enabled": enabled,
+                    }
+                )
                 .execute()
             )
             if not result.data:
@@ -178,7 +181,7 @@ class UserMCPServersRepository:
                 client.table(self.TABLE)
                 .update(patch)
                 .eq("id", str(server_id))
-                .eq("user_id", str(owner_user_id))   # M3: defensive filter
+                .eq("user_id", str(owner_user_id))  # M3: defensive filter
                 .execute()
             )
             return True
@@ -196,7 +199,7 @@ class UserMCPServersRepository:
                 client.table(self.TABLE)
                 .delete()
                 .eq("id", str(server_id))
-                .eq("user_id", str(owner_user_id))   # M3: defensive filter
+                .eq("user_id", str(owner_user_id))  # M3: defensive filter
                 .execute()
             )
             return True

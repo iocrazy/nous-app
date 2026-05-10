@@ -129,15 +129,13 @@ class OpenAICompatibleAdapter:
                 async for raw in resp.aiter_lines():
                     if not raw or not raw.startswith("data:"):
                         continue
-                    payload = raw[len("data:"):].strip()
+                    payload = raw[len("data:") :].strip()
                     if payload == "[DONE]":
                         # Emit terminal chunk if not already (some
                         # providers send finish_reason on a separate
                         # line; others bundle it with the [DONE] line).
                         if final_finish is None:
-                            yield StreamChunk(
-                                finish_reason="stop", usage=final_usage
-                            )
+                            yield StreamChunk(finish_reason="stop", usage=final_usage)
                         return
                     try:
                         evt = json.loads(payload)

@@ -123,9 +123,7 @@ async def test_delegate_call_returns_explicit_error_when_unconfigured():
         skill_tool=_FakeSkillTool(),
         delegate_tool=None,
     )
-    await runner.run_turn(
-        _composed(), [{"role": "user", "content": "try delegate"}]
-    )
+    await runner.run_turn(_composed(), [{"role": "user", "content": "try delegate"}])
 
     second_messages = adapter.call.await_args_list[1].args[1]
     tool_msg = next(m for m in second_messages if m.get("role") == "tool")
@@ -218,9 +216,7 @@ async def test_run_turn_returns_tool_calls_trace():
 async def test_run_turn_trace_empty_when_no_tools_called():
     """Direct LLM answers (no tool calls) → empty trace, not missing key."""
     adapter = AsyncMock()
-    adapter.call.return_value = {
-        "choices": [{"message": {"content": "answer"}}]
-    }
+    adapter.call.return_value = {"choices": [{"message": {"content": "answer"}}]}
     runner = AgentRunner(
         adapter=adapter,
         skill_tool=_FakeSkillTool(),

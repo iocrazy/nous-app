@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -10,8 +9,6 @@ import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.llm.llm_retry_middleware import (
-    DEFAULT_BASE_DELAY_S,
-    DEFAULT_JITTER_RATIO,
     LLMCallError,
     LLMRetryExhausted,
     LLMRetryMiddleware,
@@ -135,18 +132,14 @@ def test_backoff_capped_at_max_delay():
 @pytest.mark.unit
 def test_backoff_jitter_low_end():
     """rng=0 → minimum jitter → delay = raw * (1 - jitter_ratio)."""
-    result = compute_backoff(
-        1, base_delay_s=10.0, jitter_ratio=0.25, rng=lambda: 0.0
-    )
+    result = compute_backoff(1, base_delay_s=10.0, jitter_ratio=0.25, rng=lambda: 0.0)
     assert result == pytest.approx(10.0 * (1 - 0.25))
 
 
 @pytest.mark.unit
 def test_backoff_jitter_high_end():
     """rng=1 → maximum jitter → delay = raw * (1 + jitter_ratio)."""
-    result = compute_backoff(
-        1, base_delay_s=10.0, jitter_ratio=0.25, rng=lambda: 1.0
-    )
+    result = compute_backoff(1, base_delay_s=10.0, jitter_ratio=0.25, rng=lambda: 1.0)
     assert result == pytest.approx(10.0 * (1 + 0.25))
 
 
@@ -249,9 +242,7 @@ async def test_cancel_check_false_lets_retry_proceed():
     ]
     cancel_check = AsyncMock(return_value=False)
 
-    mw = LLMRetryMiddleware(
-        adapter, cancel_check=cancel_check, base_delay_s=0
-    )
+    mw = LLMRetryMiddleware(adapter, cancel_check=cancel_check, base_delay_s=0)
     result = await mw.call(_composed(), [])
 
     assert result["choices"][0]["message"]["content"] == "ok"
@@ -268,9 +259,7 @@ async def test_cancel_check_exception_does_not_break_sleep():
     ]
     cancel_check = AsyncMock(side_effect=RuntimeError("DB down"))
 
-    mw = LLMRetryMiddleware(
-        adapter, cancel_check=cancel_check, base_delay_s=0
-    )
+    mw = LLMRetryMiddleware(adapter, cancel_check=cancel_check, base_delay_s=0)
     result = await mw.call(_composed(), [])
 
     assert result["choices"][0]["message"]["content"] == "ok"

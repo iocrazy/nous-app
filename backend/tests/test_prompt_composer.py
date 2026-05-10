@@ -91,7 +91,9 @@ def test_empty_skills_skips_xml_section(fake_agent):
 
 
 @pytest.mark.unit
-def test_available_workers_section_rendered_when_workers_present(fake_agent, fake_skills):
+def test_available_workers_section_rendered_when_workers_present(
+    fake_agent, fake_skills
+):
     """M3: persistent agents listed as Delegate targets in `<available_workers>`."""
     workers = [
         {
@@ -152,7 +154,7 @@ def test_workers_html_escaped_in_description(fake_agent, fake_skills):
     # Make sure raw <tag> didn't leak (sandwich check around the worker's
     # description so we don't catch the legitimate <slug> / <description>
     # XML markers).
-    desc_block = msg[msg.index("<slug>evil</slug>"):]
+    desc_block = msg[msg.index("<slug>evil</slug>") :]
     assert "<tag>" not in desc_block
 
 

@@ -27,6 +27,7 @@ This module is deliberately a primitive (pure functions + dataclass
 return). Whether to call it on every turn / only when URL-detected /
 behind a feature flag is left to the route caller (chat service).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,7 +42,6 @@ from app.services.ai.prompts.link_understanding import (
     LinkUnderstandingError,
     understand_link,
 )
-
 
 # ─── URL extraction ───────────────────────────────────────────────────
 
@@ -61,9 +61,7 @@ _URL_REGEX = re.compile(
 _TRAILING_PUNCT = ".,;:!?)]}>'\""
 
 
-def extract_urls(
-    text: str, *, max_urls: int = 3, dedupe: bool = True
-) -> list[str]:
+def extract_urls(text: str, *, max_urls: int = 3, dedupe: bool = True) -> list[str]:
     """Extract up to ``max_urls`` URLs from ``text`` in source order.
 
     De-duplicates by exact URL string when ``dedupe`` is True.
@@ -255,6 +253,7 @@ async def fetch_and_render(
             failures.append((url, reason))
     # J1 telemetry
     from app.agent_framework._metrics_helper import inc_metric
+
     inc_metric("link_injection_fetched", by=len(blocks) - len(failures))
     if failures:
         inc_metric("link_injection_failed", by=len(failures))

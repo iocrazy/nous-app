@@ -20,12 +20,14 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
 
@@ -227,9 +229,7 @@ async def test_app_log_count_by_levels_uses_in_filter(
     repo: AlertRulesRepository, fake_query: _FakeQuery
 ) -> None:
     fake_query._count = 7
-    count = await repo.app_log_count_by_levels(
-        ["ERROR", "CRITICAL"], "2026-04-17"
-    )
+    count = await repo.app_log_count_by_levels(["ERROR", "CRITICAL"], "2026-04-17")
     assert count == 7
 
     in_call = next(c for c in fake_query.calls if c[0] == "in_")

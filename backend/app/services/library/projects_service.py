@@ -74,7 +74,9 @@ class ProjectsService:
         team_id = project.get("team_id")
         if team_id:
             try:
-                from app.services.library.display_code_service import generate_display_code
+                from app.services.library.display_code_service import (
+                    generate_display_code,
+                )
 
                 display_code = await generate_display_code(int(team_id), "P")
                 project = await self.repo.update_project(

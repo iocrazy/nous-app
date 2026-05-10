@@ -40,7 +40,10 @@ async def test_first_iteration_writes_full_amount_as_delta():
     hook = CostAuditorHook()
     write_mock = AsyncMock()
     with patch.object(CostAuditorHook, "_write_event", write_mock):
-        result = await hook(_ctx(prompt_tokens=100, completion_tokens=50, cost_cents=3.0), {"prompt": "ok"})
+        result = await hook(
+            _ctx(prompt_tokens=100, completion_tokens=50, cost_cents=3.0),
+            {"prompt": "ok"},
+        )
 
     assert result.decision == "continue"
     write_mock.assert_awaited_once()
@@ -56,12 +59,18 @@ async def test_second_iteration_emits_delta_only():
     hook = CostAuditorHook()
     write_mock = AsyncMock()
     with patch.object(CostAuditorHook, "_write_event", write_mock):
-        await hook(_ctx(iteration=1, prompt_tokens=100, completion_tokens=50, cost_cents=3.0), {})
-        await hook(_ctx(iteration=2, prompt_tokens=180, completion_tokens=90, cost_cents=5.0), {})
+        await hook(
+            _ctx(iteration=1, prompt_tokens=100, completion_tokens=50, cost_cents=3.0),
+            {},
+        )
+        await hook(
+            _ctx(iteration=2, prompt_tokens=180, completion_tokens=90, cost_cents=5.0),
+            {},
+        )
 
     assert write_mock.await_count == 2
     second_kwargs = write_mock.await_args_list[1].kwargs
-    assert second_kwargs["prompt_tokens_delta"] == 80   # 180 - 100
+    assert second_kwargs["prompt_tokens_delta"] == 80  # 180 - 100
     assert second_kwargs["completion_tokens_delta"] == 40  # 90 - 50
     assert abs(second_kwargs["cost_cents_delta"] - 2.0) < 1e-6  # 5.0 - 3.0
 

@@ -1,4 +1,5 @@
 """D1 — memory decay + composite scoring."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -13,7 +14,6 @@ from app.services.ai.memory.decay import (
     score_with_decay,
     should_archive,
 )
-
 
 _NOW = datetime(2026, 5, 3, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -132,7 +132,9 @@ def test_score_old_high_reinforce_demoted():
 def test_score_zero_decay_zeros_recency_and_salience_terms():
     """decay=0 → only cosine_weight·cosine remains."""
     s = score_with_decay(
-        cosine=1.0, reinforcement_count=100, decay=0.0,
+        cosine=1.0,
+        reinforcement_count=100,
+        decay=0.0,
         cosine_weight=0.6,
     )
     assert s == pytest.approx(0.6, abs=1e-6)

@@ -22,6 +22,7 @@ Behavioural parity vs legacy:
   - Same error handling (log + return None / [] / 0 / False)
   - Same date handling (UTC ISO strings)
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -58,20 +59,22 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
             total = await self.fetch_value(
                 "SELECT count(*) FROM agent_runs "
                 "WHERE agent_id = $1 AND user_id = $2",
-                agent_id, user_id,
+                agent_id,
+                user_id,
             )
             items = await self.fetch_all(
                 "SELECT * FROM agent_runs "
                 "WHERE agent_id = $1 AND user_id = $2 "
                 "ORDER BY started_at DESC "
                 "LIMIT $3 OFFSET $4",
-                agent_id, user_id, limit, offset,
+                agent_id,
+                user_id,
+                limit,
+                offset,
             )
             return {"items": items, "total": int(total or 0)}
         except Exception as e:
-            logger.error(
-                f"Failed to list runs (agent={agent_id}, user={user_id}): {e}"
-            )
+            logger.error(f"Failed to list runs (agent={agent_id}, user={user_id}): {e}")
             return {"items": [], "total": 0}
 
     async def get_by_id(
@@ -82,7 +85,8 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
         try:
             return await self.fetch_one(
                 "SELECT * FROM agent_runs WHERE id = $1 AND user_id = $2",
-                run_id, user_id,
+                run_id,
+                user_id,
             )
         except Exception as e:
             logger.error(f"Failed to get run {run_id}: {e}")
@@ -102,12 +106,12 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
                 "WHERE parent_run_id = $1 AND user_id = $2 "
                 "ORDER BY started_at DESC "
                 "LIMIT $3",
-                parent_run_id, user_id, limit,
+                parent_run_id,
+                user_id,
+                limit,
             )
         except Exception as e:
-            logger.error(
-                f"Failed to list children for parent={parent_run_id}: {e}"
-            )
+            logger.error(f"Failed to list children for parent={parent_run_id}: {e}")
             return []
 
     # ── Writes ──────────────────────────────────────────────────────
@@ -121,7 +125,8 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
                 "SET cancel_requested = true "
                 "WHERE id = $1 AND user_id = $2 AND status = 'running' "
                 "RETURNING id",
-                run_id, user_id,
+                run_id,
+                user_id,
             )
             return updated is not None
         except Exception as e:
@@ -144,7 +149,8 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
                 "    error_message = 'No heartbeat for >2 minutes' "
                 "WHERE status = 'running' AND heartbeat_at < $2 "
                 "RETURNING id",
-                now_iso, stale_before.isoformat(),
+                now_iso,
+                stale_before.isoformat(),
             )
             return len(rows)
         except Exception as e:
@@ -170,7 +176,8 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
                 "       cost_cents "
                 "FROM agent_runs "
                 "WHERE started_at >= $1 AND started_at < $2",
-                month_start.isoformat(), month_end.isoformat(),
+                month_start.isoformat(),
+                month_end.isoformat(),
             )
         except Exception as e:
             logger.error(f"Failed to load monthly usage: {e}")

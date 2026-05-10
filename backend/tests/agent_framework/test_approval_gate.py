@@ -2,6 +2,7 @@
 
 DBOS recv/send are tested via mock since real DBOS workflow context
 isn't available in unit-test harness."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -117,7 +118,10 @@ def test_signal_calls_dbos_send_with_topic():
 
     with patch.dict("sys.modules", {"dbos": type("M", (), {"DBOS": fake_dbos})}):
         ok = ag.signal_approval_decision(
-            workflow_id=wf_id, approval_id=aid, approved=True, note="lgtm",
+            workflow_id=wf_id,
+            approval_id=aid,
+            approved=True,
+            note="lgtm",
         )
     assert ok is True
     assert captured["workflow_id"] == wf_id
@@ -139,6 +143,8 @@ def test_signal_returns_false_on_dbos_error():
 
     with patch.dict("sys.modules", {"dbos": type("M", (), {"DBOS": fake_dbos})}):
         ok = ag.signal_approval_decision(
-            workflow_id="missing", approval_id=aid, approved=False,
+            workflow_id="missing",
+            approval_id=aid,
+            approved=False,
         )
     assert ok is False

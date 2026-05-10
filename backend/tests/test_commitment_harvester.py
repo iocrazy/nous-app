@@ -1,4 +1,5 @@
 """E1 — commitment harvester: pre-filter + LLM extract + persist."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -7,14 +8,11 @@ import pytest
 
 from app.services.ai.runner.commitment_harvester import (
     HarvestContext,
-    HarvestedCommitment,
-    HarvestResult,
     build_harvest_prompt,
     harvest_commitments,
     has_commitment_cues,
     parse_harvest_output,
 )
-
 
 # ─── has_commitment_cues ─────────────────────────────────────────────
 
@@ -52,9 +50,7 @@ def test_no_cues_in_empty():
 @pytest.mark.unit
 def test_prompt_includes_response_and_now():
     now = datetime(2026, 5, 3, 12, 0, 0, tzinfo=timezone.utc)
-    p = build_harvest_prompt(
-        response_text="I will check tomorrow", now=now
-    )
+    p = build_harvest_prompt(response_text="I will check tomorrow", now=now)
     assert "I will check tomorrow" in p
     assert "2026-05-03" in p
     # Mentions the trigger types
@@ -73,7 +69,7 @@ def test_parse_empty_array():
 
 @pytest.mark.unit
 def test_parse_single_time_commitment():
-    raw = '''[{"description": "remind user", "trigger_type": "time", "trigger_at": "2026-05-04T09:00:00+00:00"}]'''
+    raw = """[{"description": "remind user", "trigger_type": "time", "trigger_at": "2026-05-04T09:00:00+00:00"}]"""
     out = parse_harvest_output(raw)
     assert len(out) == 1
     assert out[0].description == "remind user"
@@ -101,9 +97,9 @@ def test_parse_next_session_commitment():
 @pytest.mark.unit
 def test_parse_strips_markdown_fence():
     """LLMs sometimes wrap in ```json ``` despite instructions."""
-    raw = '''```json
+    raw = """```json
 [{"description": "remind user", "trigger_type": "next_session"}]
-```'''
+```"""
     out = parse_harvest_output(raw)
     assert len(out) == 1
 

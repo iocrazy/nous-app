@@ -17,15 +17,30 @@ from app.workflows.ai_transcription import ai_transcription_workflow  # noqa: F4
 from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
 from app.workflows.download import download_workflow  # noqa: F401
 from app.workflows.issue_lifecycle import execute_issue  # noqa: F401
+
+# A8.5: paperclip-style liveness scanner for agent_runs.
+from app.workflows.liveness_scanner import (  # noqa: F401
+    liveness_scan_scheduled,
+    reconcile_stranded_runs,
+)
 from app.workflows.parse import parse_workflow  # noqa: F401
 from app.workflows.scheduled_cleanup import (  # noqa: F401
     cleanup_old_task_tracking_workflow,
     cleanup_temp_files_workflow,
     cleanup_trashed_resources_workflow,
 )
+from app.workflows.scheduled_commitment_sweeper import (  # noqa: F401
+    commitment_sweeper_workflow,
+)
 from app.workflows.scheduled_health import (  # noqa: F401
     health_check_workflow,
     update_system_status_workflow,
+)
+from app.workflows.scheduled_memory_archival import (  # noqa: F401
+    memory_archival_workflow,
+)
+from app.workflows.scheduled_memory_consolidation import (  # noqa: F401
+    memory_consolidation_workflow,
 )
 from app.workflows.scheduled_quotas import (  # noqa: F401
     grant_daily_free_points_workflow,
@@ -36,20 +51,6 @@ from app.workflows.scheduled_recovery import (  # noqa: F401
     reap_stuck_pending_tasks_workflow,
     recover_stale_orchestrator_locks_workflow,
     retry_failed_downloads_workflow,
-)
-from app.workflows.scheduled_commitment_sweeper import (  # noqa: F401
-    commitment_sweeper_workflow,
-)
-from app.workflows.scheduled_memory_archival import (  # noqa: F401
-    memory_archival_workflow,
-)
-from app.workflows.scheduled_memory_consolidation import (  # noqa: F401
-    memory_consolidation_workflow,
-)
-# A8.5: paperclip-style liveness scanner for agent_runs.
-from app.workflows.liveness_scanner import (  # noqa: F401
-    liveness_scan_scheduled,
-    reconcile_stranded_runs,
 )
 from app.workflows.script_outline import script_outline_workflow  # noqa: F401
 from app.workflows.storyboard import (  # noqa: F401

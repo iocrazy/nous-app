@@ -22,6 +22,7 @@ The recommendation matrix (single-process):
     < 75%  → yellow (WARN)
     >= 75% → red (ERROR — likely to hit wall under any spike)
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,7 +43,9 @@ class DbPoolCapacityReport:
     advice: str
 
 
-async def probe_db_pool_capacity(supabase_client: Any) -> Optional[DbPoolCapacityReport]:
+async def probe_db_pool_capacity(
+    supabase_client: Any,
+) -> Optional[DbPoolCapacityReport]:
     """Read pg_settings.max_connections + current count.
 
     Returns None on RPC failure (fast-fail; not worth blocking startup).
@@ -54,15 +57,22 @@ async def probe_db_pool_capacity(supabase_client: Any) -> Optional[DbPoolCapacit
         # current_setting + pg_stat_activity are usable by service_role
         result = await supabase_client.rpc(
             "exec_sql_for_admin_probe",
-            {"q": "SELECT current_setting('max_connections')::int AS max_conn, "
-                  "(SELECT count(*) FROM pg_stat_activity)::int AS cur_conn"},
+            {
+                "q": "SELECT current_setting('max_connections')::int AS max_conn, "
+                "(SELECT count(*) FROM pg_stat_activity)::int AS cur_conn"
+            },
         ).execute()
     except Exception:
         # No such RPC — try a different shape via raw query through the
         # client's underlying engine (works for some Supabase versions).
         try:
             from app.db import get_async_supabase_admin
-            sb = await get_async_supabase_admin() if supabase_client is None else supabase_client
+
+            sb = (
+                await get_async_supabase_admin()
+                if supabase_client is None
+                else supabase_client
+            )
             # Last-resort path: read pg_settings + pg_stat_activity via
             # the postgrest schema function. If neither RPC exists, the
             # probe just returns None.

@@ -14,6 +14,7 @@ These pin two contracts:
 Live integration tests against a real Supavisor are deferred — that's
 what the prod canary on the feature flag is for.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -51,11 +52,12 @@ def test_factory_returns_asyncpg_when_flag_on_and_pool_configured():
         AgentRunsRepositoryAsyncpg,
     )
 
-    with patch(
-        "app.repositories.agent_runs_repository.settings.USE_ASYNCPG_AGENT_RUNS",
-        True,
-    ), patch(
-        "app.db.pg_pool.is_configured", return_value=True
+    with (
+        patch(
+            "app.repositories.agent_runs_repository.settings.USE_ASYNCPG_AGENT_RUNS",
+            True,
+        ),
+        patch("app.db.pg_pool.is_configured", return_value=True),
     ):
         repo = get_agent_runs_repository()
     assert isinstance(repo, AgentRunsRepositoryAsyncpg)
@@ -67,15 +69,15 @@ def test_factory_falls_back_when_flag_on_but_pool_missing():
     failure mode where someone sets USE_ASYNCPG_AGENT_RUNS=true in
     one env file and forgets SUPAVISOR_DATABASE_URL in another."""
     from app.repositories.agent_runs_repository import (
-        AgentRunsRepository,
         get_agent_runs_repository,
     )
 
-    with patch(
-        "app.repositories.agent_runs_repository.settings.USE_ASYNCPG_AGENT_RUNS",
-        True,
-    ), patch(
-        "app.db.pg_pool.is_configured", return_value=False
+    with (
+        patch(
+            "app.repositories.agent_runs_repository.settings.USE_ASYNCPG_AGENT_RUNS",
+            True,
+        ),
+        patch("app.db.pg_pool.is_configured", return_value=False),
     ):
         repo = get_agent_runs_repository()
     assert type(repo).__name__ == "AgentRunsRepository"
@@ -94,12 +96,13 @@ def test_asyncpg_repo_has_same_public_methods_as_legacy():
     )
 
     legacy_methods = {
-        name for name in dir(AgentRunsRepository)
-        if not name.startswith("_")
-        and callable(getattr(AgentRunsRepository, name))
+        name
+        for name in dir(AgentRunsRepository)
+        if not name.startswith("_") and callable(getattr(AgentRunsRepository, name))
     }
     asyncpg_methods = {
-        name for name in dir(AgentRunsRepositoryAsyncpg)
+        name
+        for name in dir(AgentRunsRepositoryAsyncpg)
         if not name.startswith("_")
         and callable(getattr(AgentRunsRepositoryAsyncpg, name))
     }

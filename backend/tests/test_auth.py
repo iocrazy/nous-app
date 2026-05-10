@@ -14,7 +14,6 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import HTTPException
 
-
 SUPABASE_URL = "http://test-supabase.local"
 EC_KID = "ec-key-1"
 HS_KID = "hs-key-1"
@@ -72,9 +71,7 @@ def jwks_dict(ec_keypair, hs_secret):
 @pytest.fixture
 def jwks_fetch(jwks_dict):
     """Patch PyJWKClient.fetch_data so no real network call happens."""
-    with patch.object(
-        jwt.PyJWKClient, "fetch_data", return_value=jwks_dict
-    ) as m:
+    with patch.object(jwt.PyJWKClient, "fetch_data", return_value=jwks_dict) as m:
         yield m
 
 
@@ -87,9 +84,7 @@ def _make_token(payload_overrides, key, algorithm, kid):
         "exp": int(time.time()) + 3600,
     }
     payload.update(payload_overrides)
-    return jwt.encode(
-        payload, key, algorithm=algorithm, headers={"kid": kid}
-    )
+    return jwt.encode(payload, key, algorithm=algorithm, headers={"kid": kid})
 
 
 def _make_es256(ec_keypair, **overrides):

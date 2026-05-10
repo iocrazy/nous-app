@@ -14,6 +14,7 @@ Mirrors the I4 RedisBoundsRegistry pattern:
 Optional dependency: redis_client=None falls back to pure in-process
 behavior (same shape as Sprint 3 ModelHealthRegistry).
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -22,7 +23,6 @@ from app.agent_framework.model_health import (
     ModelHealth,
     ModelHealthRegistry,
 )
-
 
 KEY_PREFIX = "model_health:cooldown:"
 DEFAULT_LOCAL_TTL_SECONDS = 60.0
@@ -122,9 +122,7 @@ class RedisModelHealthRegistry:
     def report_status(self, model: str, status: int) -> None:
         cooldown = ModelHealthRegistry.cooldown_for_status(status)
         if cooldown > 0:
-            self.mark_cooled_down(
-                model, seconds=cooldown, reason=f"HTTP {status}"
-            )
+            self.mark_cooled_down(model, seconds=cooldown, reason=f"HTTP {status}")
 
     @staticmethod
     def cooldown_for_status(status: int) -> float:

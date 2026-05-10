@@ -3,6 +3,7 @@
 Verifies dispatch by kind (image/video/pdf), failure isolation,
 and the per-turn cap.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -12,6 +13,7 @@ import pytest
 from app.agent_framework.multimodal import AttachmentKind
 from app.schemas.ai_library_chat import AttachmentRequest
 from app.services.ai.chat import chat_attachment_resolver as resolver
+
 # ─── Empty / cap behavior ────────────────────────────────────────────
 
 
@@ -29,8 +31,7 @@ async def test_per_turn_cap_drops_excess():
     """More than MAX_ATTACHMENTS_PER_TURN images → cap silently."""
     n = resolver.MAX_ATTACHMENTS_PER_TURN + 5
     reqs = [
-        AttachmentRequest(kind="image", url=f"https://x.com/{i}.png")
-        for i in range(n)
+        AttachmentRequest(kind="image", url=f"https://x.com/{i}.png") for i in range(n)
     ]
     result = await resolver.resolve_attachments(reqs)
     assert len(result.attachments) == resolver.MAX_ATTACHMENTS_PER_TURN
@@ -61,7 +62,8 @@ async def test_image_pass_through():
 @pytest.mark.asyncio
 async def test_image_with_data_url_passes_through():
     req = AttachmentRequest(
-        kind="image", data_url="data:image/png;base64,abc",
+        kind="image",
+        data_url="data:image/png;base64,abc",
     )
     result = await resolver.resolve_attachments([req])
     assert len(result.attachments) == 1
@@ -86,6 +88,7 @@ async def test_image_with_no_url_or_data_url_is_failure():
 async def test_video_calls_extract_frames(monkeypatch):
     """Video resolves via Q2's extract_frames."""
     from pathlib import Path as _P
+
     from app.agent_framework.multimodal import Attachment, AttachmentKind
     from app.services.media.render.video_frame_extractor import FrameExtractionResult
 
@@ -93,10 +96,14 @@ async def test_video_calls_extract_frames(monkeypatch):
     monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     fake_attachments = [
-        Attachment(kind=AttachmentKind.VIDEO_THUMBNAIL,
-                   data_url="data:image/jpeg;base64,frame1"),
-        Attachment(kind=AttachmentKind.VIDEO_THUMBNAIL,
-                   data_url="data:image/jpeg;base64,frame2"),
+        Attachment(
+            kind=AttachmentKind.VIDEO_THUMBNAIL,
+            data_url="data:image/jpeg;base64,frame1",
+        ),
+        Attachment(
+            kind=AttachmentKind.VIDEO_THUMBNAIL,
+            data_url="data:image/jpeg;base64,frame2",
+        ),
     ]
     fake_result = FrameExtractionResult(
         attachments=fake_attachments,
@@ -119,11 +126,15 @@ async def test_video_calls_extract_frames(monkeypatch):
 @pytest.mark.asyncio
 async def test_video_failure_recorded_not_raised(monkeypatch):
     from pathlib import Path as _P
+
     from app.services.media.render.video_frame_extractor import FrameExtractionResult
+
     monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     fake_result = FrameExtractionResult(
-        attachments=[], duration_seconds=None, sampled_at_seconds=[],
+        attachments=[],
+        duration_seconds=None,
+        sampled_at_seconds=[],
         error="ffmpeg not installed",
     )
 
@@ -155,15 +166,19 @@ async def test_video_without_url_is_failure():
 @pytest.mark.asyncio
 async def test_pdf_calls_render_pdf(monkeypatch):
     from pathlib import Path as _P
+
     from app.agent_framework.multimodal import Attachment, AttachmentKind
     from app.services.media.render.pdf_renderer import PdfRenderResult
+
     monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     fake_attachments = [
         Attachment(kind=AttachmentKind.PDF_PAGE, data_url="data:image/jpeg;base64,p1"),
     ]
     fake_result = PdfRenderResult(
-        attachments=fake_attachments, page_count=1, rendered_pages=[1],
+        attachments=fake_attachments,
+        page_count=1,
+        rendered_pages=[1],
     )
 
     req = AttachmentRequest(kind="pdf", url="/tmp/doc.pdf")
@@ -181,11 +196,15 @@ async def test_pdf_calls_render_pdf(monkeypatch):
 @pytest.mark.asyncio
 async def test_pdf_failure_recorded_not_raised(monkeypatch):
     from pathlib import Path as _P
+
     from app.services.media.render.pdf_renderer import PdfRenderResult
+
     monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     fake_result = PdfRenderResult(
-        attachments=[], page_count=0, rendered_pages=[],
+        attachments=[],
+        page_count=0,
+        rendered_pages=[],
         error="pdf not found: /tmp/missing.pdf",
     )
 
@@ -220,13 +239,17 @@ async def test_unknown_kind_recorded_as_failure():
 async def test_partial_failure_others_succeed(monkeypatch):
     """Mixed batch: image OK + bad video → image still resolves."""
     from pathlib import Path as _P
+
     from app.services.media.render.video_frame_extractor import FrameExtractionResult
+
     monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", _P("/tmp"))
 
     img_req = AttachmentRequest(kind="image", url="https://x.com/i.png")
     vid_req = AttachmentRequest(kind="video", url="/tmp/broken.mp4")
     bad_video = FrameExtractionResult(
-        attachments=[], duration_seconds=None, sampled_at_seconds=[],
+        attachments=[],
+        duration_seconds=None,
+        sampled_at_seconds=[],
         error="ffmpeg failed",
     )
 
@@ -264,7 +287,8 @@ async def test_video_path_traversal_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path / "base")
     (tmp_path / "base").mkdir()
     req = AttachmentRequest(
-        kind="video", url=str(tmp_path / "base" / ".." / "secret.mp4"),
+        kind="video",
+        url=str(tmp_path / "base" / ".." / "secret.mp4"),
     )
     result = await resolver.resolve_attachments([req])
     assert result.attachments == []
@@ -287,13 +311,16 @@ async def test_video_path_inside_base_passes_guard(monkeypatch, tmp_path):
     """Legit upload path under base passes the guard (and reaches the
     extractor — which we mock to confirm it WAS called)."""
     from app.services.media.render.video_frame_extractor import FrameExtractionResult
+
     monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
     legit = tmp_path / "user1" / "abc.mp4"
     legit.parent.mkdir()
     legit.write_bytes(b"fake")
 
     fake_result = FrameExtractionResult(
-        attachments=[], duration_seconds=10.0, sampled_at_seconds=[],
+        attachments=[],
+        duration_seconds=10.0,
+        sampled_at_seconds=[],
     )
     with patch(
         "app.services.media.render.video_frame_extractor.extract_frames",

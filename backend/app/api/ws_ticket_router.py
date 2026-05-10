@@ -41,6 +41,7 @@ Storage choice: Redis instead of a Postgres `ws_tickets` table — this
 is high-frequency, short-TTL data; Redis's EX option auto-expires
 without a sweeper. Single-key lookup; no schema needed.
 """
+
 from __future__ import annotations
 
 import secrets
@@ -52,7 +53,6 @@ from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.core.redis import get_async_redis
-
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 
@@ -85,9 +85,7 @@ async def issue_ws_ticket(auth: AuthDep) -> TicketResponse:
     except Exception as exc:
         logger.exception(f"[ws-ticket] mint failed: {exc}")
         raise HTTPException(500, "ticket store unavailable")
-    return TicketResponse(
-        ticket=ticket, expires_in_seconds=TICKET_TTL_SECONDS
-    )
+    return TicketResponse(ticket=ticket, expires_in_seconds=TICKET_TTL_SECONDS)
 
 
 async def consume_ticket(ticket: str) -> Optional[str]:

@@ -27,6 +27,7 @@ Policy: a (user_id, agent_id, team_id) triple sees memories where:
 This module is data-only — it returns the SQL filter clauses + Python
 predicate functions. The retriever assembles them into actual queries.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -71,8 +72,8 @@ class ScopeFilter:
     to filter against."""
 
     scope: MemoryScope
-    user_id: Optional[str] = None       # if set: filter agent_memories.user_id = this
-    agent_id: Optional[str] = None      # if set: filter on agent_id
+    user_id: Optional[str] = None  # if set: filter agent_memories.user_id = this
+    agent_id: Optional[str] = None  # if set: filter on agent_id
     team_id: Optional[str] = None
     session_id: Optional[str] = None
 

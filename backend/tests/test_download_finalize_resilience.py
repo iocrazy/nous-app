@@ -20,6 +20,7 @@ actual file delivery already succeeded. These tests pin that:
     media_repo.update(status flags) raises
   - both warnings are logged so we can still investigate post-hoc
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -62,12 +63,15 @@ def _call_finalize(
     res_repo_mock.get_versions = AsyncMock(return_value=[])
     res_repo_mock.create_version = AsyncMock()
 
-    with patch(
-        "app.repositories.media_repository.MediaRepository",
-        return_value=media_repo_mock,
-    ), patch(
-        "app.repositories.resources_repository.ResourcesRepository",
-        return_value=res_repo_mock,
+    with (
+        patch(
+            "app.repositories.media_repository.MediaRepository",
+            return_value=media_repo_mock,
+        ),
+        patch(
+            "app.repositories.resources_repository.ResourcesRepository",
+            return_value=res_repo_mock,
+        ),
     ):
         # Invoke the step the same way DBOS would. If the test runner
         # has DBOS-context guards, swap to `.__wrapped__` here.
@@ -82,9 +86,7 @@ def _call_finalize(
         )
 
 
-def test_finalize_swallows_resources_size_update_failure(
-    fresh_media_row, good_results
-):
+def test_finalize_swallows_resources_size_update_failure(fresh_media_row, good_results):
     """update_resource(file_size_bytes=...) raise must NOT escape — the
     file is on disk, the resources row already has the row, the
     file_size mirror is just a UI badge. A 5xx here cannot be allowed
@@ -92,9 +94,7 @@ def test_finalize_swallows_resources_size_update_failure(
     media_repo = type("M", (), {})()
     res_repo = type("R", (), {})()
 
-    res_repo.update_resource = AsyncMock(
-        side_effect=RuntimeError("postgrest 503")
-    )
+    res_repo.update_resource = AsyncMock(side_effect=RuntimeError("postgrest 503"))
     res_repo.get_versions = AsyncMock(return_value=[])
     res_repo.create_version = AsyncMock()
     media_repo.get_by_platform_id = AsyncMock(return_value=fresh_media_row)

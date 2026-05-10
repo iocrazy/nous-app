@@ -558,6 +558,32 @@ uv run uvicorn app.main:app --reload       # Start dev server
 uv run pytest                              # Run tests
 ```
 
+### Pre-commit hooks (recommended)
+
+CI runs `black`, `isort`, and `flake8` on every PR's changed files
+(see `.github/workflows/ci.yml`). Install the matching local hooks
+once per clone so violations are caught at commit time, not after
+a CI round-trip:
+
+```bash
+cd backend && uv sync                      # pulls in pre-commit
+uv run --directory backend pre-commit install
+```
+
+After install, every `git commit` runs the hooks on staged files
+only. Bypass once with `git commit --no-verify` if needed (CI will
+still enforce). Config: `.pre-commit-config.yaml` at repo root.
+
+### Git blame ignores
+
+`.git-blame-ignore-revs` lists one-time format/style sweep commits
+so `git blame` skips them. GitHub picks this up automatically.
+Local opt-in:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 ### Frontend Commands
 
 ```bash

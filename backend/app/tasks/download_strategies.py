@@ -120,7 +120,9 @@ def _do_douyin_download(
                     )
                     try:
                         from app.boundary import validate_url
-                        from app.services.media.parsers.ytdlp_service import YtdlpService
+                        from app.services.media.parsers.ytdlp_service import (
+                            YtdlpService,
+                        )
 
                         # Boundary: SSRF guard. Original_url stored at parse
                         # time was validated, but defensive re-check protects
@@ -196,7 +198,9 @@ def _do_douyin_download(
                         from app.services.media.parsers.douyin_parse.drissionpage_parser import (
                             DrissionPageParser,
                         )
-                        from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
+                        from app.services.media.parsers.douyin_parse.formatter import (
+                            DouyinFormatter,
+                        )
 
                         browser_detail = run_async(
                             DrissionPageParser.fetch_one_video(
@@ -330,8 +334,12 @@ def _do_douyin_download(
                 # Fallback: re-parse to get fresh image URLs and retry
                 try:
                     from app.repositories.media_repository import MediaRepository
-                    from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
-                    from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
+                    from app.services.media.parsers.douyin_parse.formatter import (
+                        DouyinFormatter,
+                    )
+                    from app.services.media.parsers.douyin_parse.ies_parser import (
+                        IesDouyinParser,
+                    )
 
                     logger.info(
                         f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
@@ -340,7 +348,9 @@ def _do_douyin_download(
                     # consistent with the original parse+download chain.
                     _re_ua = user_agent
                     if not _re_ua:
-                        from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
+                        from app.services.media.parsers.douyin_parse.ua_pool import (
+                            pick_ua,
+                        )
 
                         _re_ua = pick_ua()
                     aweme_detail = run_async(

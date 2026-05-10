@@ -21,7 +21,9 @@ from app.core.redis import close_async_redis
 from app.core.utils import Utils
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.services.infra import dbos_orchestrator
-from app.services.media.parsers.douyin_parse.drissionpage_parser import DrissionPageParser
+from app.services.media.parsers.douyin_parse.drissionpage_parser import (
+    DrissionPageParser,
+)
 
 # 在应用启动前设置日志
 Utils.setup_logging()
@@ -81,9 +83,9 @@ async def lifespan(app: FastAPI):
 
             sb = await get_async_supabase_admin()
             required_tables = [
-                "agent_commitments",   # mig 186
-                "ai_session_memory",   # mig 187
-                "user_mcp_servers",    # mig 194
+                "agent_commitments",  # mig 186
+                "ai_session_memory",  # mig 187
+                "user_mcp_servers",  # mig 194
             ]  # extend on each migration that adds a hard-required table
             for table in required_tables:
                 probe = await (
@@ -173,6 +175,7 @@ async def lifespan(app: FastAPI):
     async def _bg_liveness_reconcile() -> None:
         try:
             from app.workflows.liveness_scanner import reconcile_stranded_runs
+
             await reconcile_stranded_runs()
         except Exception as exc:
             logger.warning(f"liveness reconcile on startup failed: {exc!r}")
@@ -191,6 +194,7 @@ async def lifespan(app: FastAPI):
     async def _bg_reap_internal_queue() -> None:
         try:
             import os
+
             import psycopg
 
             dsn = os.environ.get("DBOS_DATABASE_URL")
@@ -241,6 +245,7 @@ async def lifespan(app: FastAPI):
     # file descriptors after pytest crash / dev script Ctrl-C.
     try:
         from app.agent_framework.process_lifecycle import install_cleanup_handlers
+
         install_cleanup_handlers()
         logger.info("D10-7 process cleanup handlers installed")
     except Exception as plc_exc:
@@ -346,19 +351,20 @@ async def lifespan(app: FastAPI):
         # register children against the parent's abort controller so root
         # cancel fans out to the entire delegation tree.
         from app.agent_framework.root_abort_registry import RootAbortRegistry
+
         app.state.root_abort_registry = RootAbortRegistry()
 
         # Wave I (I3): per-process AgentMetrics counters. Admin / health
         # endpoints read .snapshot() for ops dashboards.
         from app.agent_framework.telemetry import AgentMetrics
+
         app.state.agent_metrics = AgentMetrics()
 
         # D10-14: optional Prometheus pushgateway agent. Only fires
         # when PROMETHEUS_PUSHGATEWAY_URL env is set; default off.
         try:
-            from app.agent_framework.prometheus_pusher import (
-                from_env as _pp_from_env,
-            )
+            from app.agent_framework.prometheus_pusher import from_env as _pp_from_env
+
             pusher = _pp_from_env(app.state.agent_metrics)
             if pusher is not None:
                 await pusher.start()
@@ -373,7 +379,6 @@ async def lifespan(app: FastAPI):
             from app.agent_framework import (
                 HookRegistry,
                 wrap_legacy_post,
-                wrap_legacy_pre,
             )
             from app.services.infra.hooks.cost_auditor import CostAuditorHook
             from app.services.infra.hooks.memory_harvester import MemoryHarvesterHook
@@ -390,9 +395,7 @@ async def lifespan(app: FastAPI):
             # BudgetGuard takes constructor args (budget_cents) — caller
             # constructs a per-run instance, not a global one. Skip here.
             app.state.hook_registry = hook_registry
-            logger.info(
-                f"HookRegistry seeded with {len(hook_registry)} legacy hooks"
-            )
+            logger.info(f"HookRegistry seeded with {len(hook_registry)} legacy hooks")
         except Exception as he:
             logger.warning(f"HookRegistry seed failed: {he}")
         # Sprint 6: per-process context-engine registry. Surfaces (chat,
@@ -439,11 +442,10 @@ async def lifespan(app: FastAPI):
                 workflow_names: frozenset[str] = frozenset()
                 try:
                     from app import workflows as _wf  # noqa: F401
+
                     workflow_names = inventory_workflow_names(_wf)
                 except Exception as inv_exc:
-                    logger.warning(
-                        f"Bounds: workflow inventory failed: {inv_exc}"
-                    )
+                    logger.warning(f"Bounds: workflow inventory failed: {inv_exc}")
 
                 agent_slugs = await inventory_agent_slugs(AgentRepository())
                 providers = inventory_providers(settings)

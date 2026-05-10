@@ -1,4 +1,5 @@
 """M1 — episodic memory threading: assign + load."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -11,7 +12,6 @@ from app.services.ai.memory.threading import (
     assign_thread_for,
     load_thread_for_memory,
 )
-
 
 _NOW = datetime(2026, 5, 3, 12, 0, 0)
 
@@ -105,8 +105,14 @@ async def test_skips_rows_without_thread_id():
 
     async def _fetch(*_):
         return [
-            {"thread_id": None, "created_at": (_NOW - timedelta(minutes=2)).isoformat()},
-            {"thread_id": str(target_thread), "created_at": (_NOW - timedelta(minutes=10)).isoformat()},
+            {
+                "thread_id": None,
+                "created_at": (_NOW - timedelta(minutes=2)).isoformat(),
+            },
+            {
+                "thread_id": str(target_thread),
+                "created_at": (_NOW - timedelta(minutes=10)).isoformat(),
+            },
         ]
 
     result = await assign_thread_for(
@@ -143,7 +149,10 @@ async def test_window_param_overrides_default():
 
     async def _fetch(*_):
         return [
-            {"thread_id": str(fresh_thread), "created_at": (_NOW - timedelta(minutes=8)).isoformat()},
+            {
+                "thread_id": str(fresh_thread),
+                "created_at": (_NOW - timedelta(minutes=8)).isoformat(),
+            },
         ]
 
     # window=5 → 8min ago is OUTSIDE window → new thread
@@ -178,9 +187,7 @@ async def test_load_thread_returns_siblings():
     async def _fetch(_mid):
         return siblings
 
-    result = await load_thread_for_memory(
-        memory_id="m2", fetch_thread=_fetch
-    )
+    result = await load_thread_for_memory(memory_id="m2", fetch_thread=_fetch)
     assert len(result) == 3
 
 
@@ -202,7 +209,5 @@ async def test_load_thread_swallows_errors():
     async def _broken(_mid):
         raise RuntimeError("nope")
 
-    result = await load_thread_for_memory(
-        memory_id="m1", fetch_thread=_broken
-    )
+    result = await load_thread_for_memory(memory_id="m1", fetch_thread=_broken)
     assert result == []

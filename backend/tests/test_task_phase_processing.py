@@ -19,6 +19,7 @@ Fix:
 
 These tests pin both pieces.
 """
+
 from __future__ import annotations
 
 import inspect

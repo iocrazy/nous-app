@@ -17,7 +17,9 @@ from app.core.deps import AuthDep
 from app.repositories.tags_repository import TagsRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
-from app.services.media.parsers.douyin_parse.drissionpage_parser import DrissionPageParser
+from app.services.media.parsers.douyin_parse.drissionpage_parser import (
+    DrissionPageParser,
+)
 from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
 from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
 from app.services.media.parsers.ytdlp_service import YtdlpService

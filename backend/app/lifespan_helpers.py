@@ -25,6 +25,7 @@ with a name, exposes a `done()` query for `/readyz`, and on shutdown
 cancels what's still running with `asyncio.gather(return_exceptions=True)`
 so a hung task can't block the rest of the shutdown chain.
 """
+
 from __future__ import annotations
 
 import asyncio

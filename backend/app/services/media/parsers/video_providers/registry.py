@@ -1,7 +1,10 @@
 import logging
 from dataclasses import dataclass
 
-from app.services.media.parsers.video_providers.base import BaseImageProvider, BaseVideoProvider
+from app.services.media.parsers.video_providers.base import (
+    BaseImageProvider,
+    BaseVideoProvider,
+)
 
 logger = logging.getLogger(__name__)
 

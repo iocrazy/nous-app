@@ -339,9 +339,7 @@ def mark_workflow_processing_step(workflow_id: str) -> None:
         try:
             await get_task_manager().start(workflow_id)
         except Exception as e:
-            logger.warning(
-                f"[parse.mark_processing] {workflow_id}: {e}"
-            )
+            logger.warning(f"[parse.mark_processing] {workflow_id}: {e}")
 
     asyncio.run(_do())
 

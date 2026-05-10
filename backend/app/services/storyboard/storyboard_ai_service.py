@@ -27,18 +27,18 @@ from app.core.config import settings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.repositories.storyboard_repository import StoryboardCharacterRepository
-from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.adapters import get_adapter
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
+from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService
-from app.services.storyboard.storyboard_service import StoryboardService
 from app.services.media.parsers.video_providers import (
     ImageGenResult,
     VideoGenResult,
     provider_registry,
 )
+from app.services.storyboard.storyboard_service import StoryboardService
 
 # Agent slug in the ai_agents table (seeded from backend/seeds/agents/storyboard/).
 AGENT_SLUG = "storyboard"
@@ -608,7 +608,9 @@ class StoryboardAIService:
             [{time, image_path, shot_type, camera_angle, movement,
               suggested_prompt}, ...]
         """
-        from app.services.storyboard.storyboard_image_service import StoryboardImageService
+        from app.services.storyboard.storyboard_image_service import (
+            StoryboardImageService,
+        )
 
         image_service = StoryboardImageService()
 

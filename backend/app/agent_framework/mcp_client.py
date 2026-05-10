@@ -33,17 +33,16 @@ Rate limit + billing: caller (AgentRunner) increments
 ``mcp_calls_total`` metric. RunRecorder accumulates the external-call
 count into agent_runs.metadata_json.
 """
+
 from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import uuid4
 
 import httpx
-from loguru import logger
-
 
 PROTOCOL_VERSION = "2024-11-05"
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -73,6 +72,7 @@ class MCPServerConfig:
 @dataclass
 class _ToolsCacheEntry:
     """Cached tools/list response. Stored per server."""
+
     fetched_at: float
     descriptors: list[dict[str, Any]]
 
@@ -101,9 +101,7 @@ class MCPClient:
     ) -> None:
         self.config = config
         self._owned_client = http_client is None
-        self._client = http_client or httpx.AsyncClient(
-            timeout=config.timeout_seconds
-        )
+        self._client = http_client or httpx.AsyncClient(timeout=config.timeout_seconds)
         self._initialized = False
         self._cache_ttl = tools_cache_ttl_seconds
         self._tools_cache: Optional[_ToolsCacheEntry] = None
@@ -166,9 +164,7 @@ class MCPClient:
             err = payload["error"]
             code = err.get("code") if isinstance(err, dict) else "?"
             msg = err.get("message") if isinstance(err, dict) else str(err)
-            raise MCPClientError(
-                f"jsonrpc error {code} from {self.config.name}: {msg}"
-            )
+            raise MCPClientError(f"jsonrpc error {code} from {self.config.name}: {msg}")
 
         if "result" not in payload:
             raise MCPClientError(

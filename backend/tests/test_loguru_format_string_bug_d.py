@@ -17,6 +17,7 @@ stdlib syntax loguru ignores). Source-level grep is sufficient — the
 goal is to catch a future "let me make this look more idiomatic"
 refactor that accidentally puts the bug back.
 """
+
 from __future__ import annotations
 
 import inspect

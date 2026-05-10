@@ -5,6 +5,7 @@ unit-test that. Instead, verify the configuration call: when settings.
 SSRF_PROXY_URL is set, the parser code path invokes ChromiumOptions
 .set_proxy(...) with the boundary URL.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -27,15 +28,18 @@ def test_set_proxy_called_when_ssrf_url_set(monkeypatch):
     class _MockOptions:
         def headless(self):
             return self
+
         def set_proxy(self, url):
             captured["set_proxy"].append(url)
             return self
+
         def set_argument(self, arg):
             captured["set_argument"].append(arg)
             return self
 
     # Patch the ChromiumOptions name in the parser module
     import app.services.media.parsers.douyin_parse.drissionpage_parser as parser_mod
+
     monkeypatch.setattr(parser_mod, "ChromiumOptions", _MockOptions)
     monkeypatch.setattr(parser_mod, "ChromiumPage", MagicMock())
 
@@ -52,9 +56,9 @@ def test_set_proxy_called_when_ssrf_url_set(monkeypatch):
         # We only need to verify set_proxy was called BEFORE any failure.
         pass
 
-    assert "http://127.0.0.1:55001" in captured["set_proxy"], (
-        f"set_proxy not called with boundary URL. captured={captured}"
-    )
+    assert (
+        "http://127.0.0.1:55001" in captured["set_proxy"]
+    ), f"set_proxy not called with boundary URL. captured={captured}"
     # The bypass override is critical — without it Chromium would skip the
     # proxy for localhost / private IPs (defeating the boundary).
     assert "--proxy-bypass-list=<-loopback>" in captured["set_argument"]
@@ -73,13 +77,16 @@ def test_no_proxy_call_when_ssrf_url_empty(monkeypatch):
     class _MockOptions:
         def headless(self):
             return self
+
         def set_proxy(self, url):
             captured["set_proxy"].append(url)
             return self
+
         def set_argument(self, arg):
             return self
 
     import app.services.media.parsers.douyin_parse.drissionpage_parser as parser_mod
+
     monkeypatch.setattr(parser_mod, "ChromiumOptions", _MockOptions)
     monkeypatch.setattr(parser_mod, "ChromiumPage", MagicMock())
 

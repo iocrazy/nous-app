@@ -28,8 +28,8 @@ from app.core.deps import get_current_user
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.agent_workforce_repository import (
-    AgentWorkforceRepository,
     TASK_KIND_AGENT,
+    AgentWorkforceRepository,
     tt_row_to_task_shape,
 )
 

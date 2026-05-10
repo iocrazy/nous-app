@@ -16,10 +16,10 @@ Output (per counter):
 The namespace label keeps these distinguishable from other counters
 that may scrape the same endpoint.
 """
+
 from __future__ import annotations
 
-from app.agent_framework.telemetry import AgentMetrics, COUNTER_NAMES
-
+from app.agent_framework.telemetry import COUNTER_NAMES, AgentMetrics
 
 # Help text per counter — ops-readable. Defaults to the counter name
 # with underscores → spaces if no override.

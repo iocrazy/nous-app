@@ -131,6 +131,7 @@ class SkillToolService:
         can now actually persist a memory mid-turn (extracted_from='active_call').
         """
         from uuid import UUID
+
         from app.services.ai.memory.active_remember import (
             RememberContext,
             handle_remember,
@@ -192,6 +193,7 @@ class SkillToolService:
                     return None
                 new_id = str(rows[0]["id"])
                 from app.agent_framework._metrics_helper import inc_metric
+
                 inc_metric("memory_active_remember_persisted")
 
                 # Wave J (J6): post-insert contradiction check.
@@ -259,9 +261,8 @@ async def _active_remember_contradiction_check(
         select_supersede_targets,
     )
 
-    api_key = (
-        getattr(settings, "DASHSCOPE_API_KEY", None)
-        or getattr(settings, "QWEN_API_KEY", None)
+    api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or getattr(
+        settings, "QWEN_API_KEY", None
     )
     if not api_key:
         return  # no cheap LLM available — skip contradiction check
@@ -302,6 +303,7 @@ async def _active_remember_contradiction_check(
         try:
             from app.schemas.ai_library import ComposedSystemPrompt
             from app.services.ai.providers.ai_provider import QwenAdapter
+
             adapter = QwenAdapter(api_key=api_key, model="qwen-turbo")
             cs = ComposedSystemPrompt(
                 agent_id=None,  # type: ignore[arg-type]
@@ -310,7 +312,8 @@ async def _active_remember_contradiction_check(
                 temperature=0.0,
                 max_tokens=128,
                 system_message="Classify two memories. Output one word.",
-                tools=[], skill_manifest=[],
+                tools=[],
+                skill_manifest=[],
                 cache_fingerprint="active_remember_classifier_v1",
             )
             resp = await adapter.call(cs, [{"role": "user", "content": prompt}])
@@ -339,6 +342,7 @@ async def _active_remember_contradiction_check(
                 .execute()
             )
             from app.agent_framework._metrics_helper import inc_metric
+
             inc_metric("memory_superseded_by_contradiction")
         except Exception:
             pass
@@ -368,12 +372,12 @@ def _execute_todo_impl(svc, args: dict) -> dict:
 
     Returns standard skill envelope: {skill, description, prompt, ...}.
     """
+    from app.agent_framework._metrics_helper import inc_metric
     from app.agent_framework.agent_todo import (
         AgentTodoList,
         TodoStatus,
         TodoValidationError,
     )
-    from app.agent_framework._metrics_helper import inc_metric
 
     if svc.todo_list is None:
         svc.todo_list = AgentTodoList()

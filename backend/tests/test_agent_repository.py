@@ -9,7 +9,6 @@ import pytest
 
 from app.repositories.agent_repository import AgentRepository
 
-
 # ─── Fake Supabase client/query plumbing ──────────────────────────────
 #
 # Captures every chained call so tests can assert on query construction

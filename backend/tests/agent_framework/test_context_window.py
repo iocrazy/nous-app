@@ -7,6 +7,7 @@ the LLM call returns truncated nonsense or fails outright.
 
 Mirrors OpenClaw agents/context-window-guard.ts thresholds.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -19,10 +20,10 @@ from app.agent_framework.context_window import (
     model_window_size,
 )
 
-
 # ============================================================================
 # token estimation
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_estimate_tokens_returns_int():
@@ -56,6 +57,7 @@ def test_estimate_tokens_empty_returns_zero():
 # model window lookup
 # ============================================================================
 
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "model,expected_min",
@@ -87,6 +89,7 @@ def test_unknown_model_uses_settings_default():
 # ============================================================================
 # check_context_budget
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_check_passes_when_system_prompt_is_small():

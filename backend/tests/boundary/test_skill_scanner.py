@@ -1,4 +1,5 @@
 """Skill scanner — pattern detection unit tests."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,6 @@ from app.boundary.skill_scanner import (
     scan,
     to_dict_list,
 )
-
 
 # ─── Clean content ───────────────────────────────────────────────────
 
@@ -199,8 +199,7 @@ def test_hex_decode_then_exec_flagged():
     findings = scan(body)
     # Hex pattern OR the eval line pattern should fire
     assert any(
-        f.category in (Category.OBFUSCATION, Category.DANGEROUS_EXEC)
-        for f in findings
+        f.category in (Category.OBFUSCATION, Category.DANGEROUS_EXEC) for f in findings
     )
 
 
@@ -227,8 +226,12 @@ def test_long_b64_capped_at_3_reports():
 
 @pytest.mark.unit
 def test_findings_sorted_high_severity_first():
-    body = """blob = '""" + "B" * 220 + """'
+    body = (
+        """blob = '"""
+        + "B" * 220
+        + """'
 exec(payload)"""
+    )
     findings = scan(body)
     severities = [f.severity for f in findings]
     # All HIGH come before all WARN

@@ -1,14 +1,14 @@
 """Wave H (B): adapter streaming + AgentRunner.stream_turn."""
+
 from __future__ import annotations
 
-from typing import Any
+from uuid import UUID
 
 import pytest
 
 from app.schemas.ai_library import ComposedSystemPrompt
-from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.adapters.base import StreamChunk
-from uuid import UUID
+from app.services.ai.runner.agent_runner import AgentRunner
 
 
 def _composed(model="qwen-max"):
@@ -47,7 +47,9 @@ class _BufferedOnlyAdapter:
 async def test_stream_turn_falls_back_to_buffered():
     runner = AgentRunner(adapter=_BufferedOnlyAdapter(), skill_tool=None)
     chunks = []
-    async for chunk in runner.stream_turn(_composed(), [{"role": "user", "content": "hi"}]):
+    async for chunk in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "hi"}]
+    ):
         chunks.append(chunk)
     # One synthetic chunk with full content + finish_reason
     assert len(chunks) == 1
@@ -80,7 +82,9 @@ async def test_streaming_adapter_yields_all_chunks():
     runner = AgentRunner(adapter=_StreamingAdapter(), skill_tool=None)
     pieces = []
     finish = None
-    async for chunk in runner.stream_turn(_composed(), [{"role": "user", "content": "hi"}]):
+    async for chunk in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "hi"}]
+    ):
         if chunk.delta_text:
             pieces.append(chunk.delta_text)
         if chunk.finish_reason:
@@ -178,15 +182,28 @@ from app.services.ai.runner.agent_runner import _merge_tool_call_deltas
 @pytest.mark.unit
 def test_merge_tool_call_deltas_basic():
     buf: dict = {}
-    _merge_tool_call_deltas(buf, [
-        {"index": 0, "id": "call_1", "function": {"name": "Skill", "arguments": ""}},
-    ])
-    _merge_tool_call_deltas(buf, [
-        {"index": 0, "function": {"arguments": '{"sk'}},
-    ])
-    _merge_tool_call_deltas(buf, [
-        {"index": 0, "function": {"arguments": 'ill":"x"}'}},
-    ])
+    _merge_tool_call_deltas(
+        buf,
+        [
+            {
+                "index": 0,
+                "id": "call_1",
+                "function": {"name": "Skill", "arguments": ""},
+            },
+        ],
+    )
+    _merge_tool_call_deltas(
+        buf,
+        [
+            {"index": 0, "function": {"arguments": '{"sk'}},
+        ],
+    )
+    _merge_tool_call_deltas(
+        buf,
+        [
+            {"index": 0, "function": {"arguments": 'ill":"x"}'}},
+        ],
+    )
     assert buf[0]["id"] == "call_1"
     assert buf[0]["function"]["name"] == "Skill"
     assert buf[0]["function"]["arguments"] == '{"skill":"x"}'
@@ -195,10 +212,13 @@ def test_merge_tool_call_deltas_basic():
 @pytest.mark.unit
 def test_merge_handles_multiple_calls_by_index():
     buf: dict = {}
-    _merge_tool_call_deltas(buf, [
-        {"index": 0, "id": "a", "function": {"name": "Skill"}},
-        {"index": 1, "id": "b", "function": {"name": "Delegate"}},
-    ])
+    _merge_tool_call_deltas(
+        buf,
+        [
+            {"index": 0, "id": "a", "function": {"name": "Skill"}},
+            {"index": 1, "id": "b", "function": {"name": "Delegate"}},
+        ],
+    )
     assert buf[0]["id"] == "a"
     assert buf[1]["id"] == "b"
 
@@ -222,12 +242,24 @@ class _StreamingAdapterWithToolCall:
     async def stream(self, composed, messages):
         self.iter += 1
         if self.iter == 1:
-            yield StreamChunk(tool_call_delta={"tool_calls": [
-                {"index": 0, "id": "c1", "function": {"name": "Skill", "arguments": ""}},
-            ]})
-            yield StreamChunk(tool_call_delta={"tool_calls": [
-                {"index": 0, "function": {"arguments": '{"skill":"foo"}'}},
-            ]})
+            yield StreamChunk(
+                tool_call_delta={
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "c1",
+                            "function": {"name": "Skill", "arguments": ""},
+                        },
+                    ]
+                }
+            )
+            yield StreamChunk(
+                tool_call_delta={
+                    "tool_calls": [
+                        {"index": 0, "function": {"arguments": '{"skill":"foo"}'}},
+                    ]
+                }
+            )
             yield StreamChunk(
                 finish_reason="tool_calls",
                 usage={"prompt_tokens": 10, "completion_tokens": 3},
@@ -287,9 +319,11 @@ async def test_stream_turn_caller_recorder_overrides_auto(monkeypatch):
         async def __aenter__(self):
             sentinel_calls.append("enter")
             return self
+
         async def __aexit__(self, *a):
             sentinel_calls.append("exit")
             return False
+
         def record_usage(self, **k): ...
         def record_skill(self, *a): ...
 
@@ -346,16 +380,29 @@ class _StreamingAdapterWithMCPCall:
     async def stream(self, composed, messages):
         self.iter += 1
         if self.iter == 1:
-            yield StreamChunk(tool_call_delta={"tool_calls": [
-                {"index": 0, "id": "c1", "function": {
-                    "name": "notion.create_page", "arguments": ""
-                }},
-            ]})
-            yield StreamChunk(tool_call_delta={"tool_calls": [
-                {"index": 0, "function": {
-                    "arguments": '{"title":"my doc"}',
-                }},
-            ]})
+            yield StreamChunk(
+                tool_call_delta={
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "c1",
+                            "function": {"name": "notion.create_page", "arguments": ""},
+                        },
+                    ]
+                }
+            )
+            yield StreamChunk(
+                tool_call_delta={
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "function": {
+                                "arguments": '{"title":"my doc"}',
+                            },
+                        },
+                    ]
+                }
+            )
             yield StreamChunk(
                 finish_reason="tool_calls",
                 usage={"prompt_tokens": 10, "completion_tokens": 3},
@@ -373,21 +420,27 @@ async def test_stream_turn_dispatches_mcp_tool_call():
     """G3: stream_turn discovers MCP tools + routes prefixed tool_calls
     to mcp_registry.call. End-to-end mirrors run_turn behavior."""
     from unittest.mock import AsyncMock, MagicMock
+
     from app.agent_framework.mcp_outbound_registry import QualifiedTool
 
-    qualified = [QualifiedTool(
-        qualified_name="notion.create_page",
-        server_name="notion",
-        raw_name="create_page",
-        description="Create page",
-        input_schema={},
-    )]
+    qualified = [
+        QualifiedTool(
+            qualified_name="notion.create_page",
+            server_name="notion",
+            raw_name="create_page",
+            description="Create page",
+            input_schema={},
+        )
+    ]
     mcp_reg = AsyncMock()
     mcp_reg.all_tools = AsyncMock(return_value=qualified)
     mcp_reg.server_names = MagicMock(return_value=["notion"])
-    mcp_reg.call = AsyncMock(return_value={
-        "content": [{"type": "text", "text": "ok"}], "isError": False,
-    })
+    mcp_reg.call = AsyncMock(
+        return_value={
+            "content": [{"type": "text", "text": "ok"}],
+            "isError": False,
+        }
+    )
 
     runner = AgentRunner(
         adapter=_StreamingAdapterWithMCPCall(),
@@ -413,32 +466,49 @@ async def test_stream_turn_dispatches_mcp_tool_call():
 @pytest.mark.asyncio
 async def test_stream_turn_mcp_transport_error_does_not_crash():
     from unittest.mock import AsyncMock, MagicMock
+
     from app.agent_framework.mcp_client import MCPClientError
     from app.agent_framework.mcp_outbound_registry import QualifiedTool
 
-    qualified = [QualifiedTool(
-        qualified_name="srv.broken", server_name="srv", raw_name="broken",
-        description="", input_schema={},
-    )]
+    qualified = [
+        QualifiedTool(
+            qualified_name="srv.broken",
+            server_name="srv",
+            raw_name="broken",
+            description="",
+            input_schema={},
+        )
+    ]
     mcp_reg = AsyncMock()
     mcp_reg.all_tools = AsyncMock(return_value=qualified)
     mcp_reg.server_names = MagicMock(return_value=["srv"])
     mcp_reg.call = AsyncMock(side_effect=MCPClientError("boom"))
 
     class _Adapter:
-        def __init__(self): self.iter = 0
+        def __init__(self):
+            self.iter = 0
+
         async def call(self, c, m):
             return {"choices": [{"message": {"content": "fb"}}]}
+
         async def stream(self, c, m):
             self.iter += 1
             if self.iter == 1:
-                yield StreamChunk(tool_call_delta={"tool_calls": [
-                    {"index": 0, "id": "c1", "function": {
-                        "name": "srv.broken", "arguments": "{}"
-                    }},
-                ]})
-                yield StreamChunk(finish_reason="tool_calls",
-                                  usage={"prompt_tokens": 1, "completion_tokens": 1})
+                yield StreamChunk(
+                    tool_call_delta={
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "c1",
+                                "function": {"name": "srv.broken", "arguments": "{}"},
+                            },
+                        ]
+                    }
+                )
+                yield StreamChunk(
+                    finish_reason="tool_calls",
+                    usage={"prompt_tokens": 1, "completion_tokens": 1},
+                )
             else:
                 yield StreamChunk(delta_text="acknowledged")
                 yield StreamChunk(finish_reason="stop")

@@ -110,7 +110,10 @@ async def test_analyze_l1_routes_through_runner_with_l1_instruction() -> None:
             "app.services.ai.visual.visual_analysis_service.PromptComposer",
             return_value=composer,
         ),
-        patch("app.services.ai.visual.visual_analysis_service.AgentRunner", return_value=runner),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.AgentRunner",
+            return_value=runner,
+        ),
         patch.object(svc, "_build_adapter", return_value=MagicMock()),
         patch(
             "app.services.ai.visual.visual_analysis_service.SkillToolService",
@@ -175,7 +178,10 @@ async def test_analyze_l2_sends_cover_plus_keyframes() -> None:
             "app.services.ai.visual.visual_analysis_service.PromptComposer",
             return_value=composer,
         ),
-        patch("app.services.ai.visual.visual_analysis_service.AgentRunner", return_value=runner),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.AgentRunner",
+            return_value=runner,
+        ),
         patch.object(svc, "_build_adapter", return_value=MagicMock()),
         patch(
             "app.services.ai.visual.visual_analysis_service.SkillToolService",
@@ -305,7 +311,10 @@ async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
             "app.services.ai.visual.visual_analysis_service.PromptComposer",
             return_value=composer,
         ),
-        patch("app.services.ai.visual.visual_analysis_service.AgentRunner", return_value=runner),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.AgentRunner",
+            return_value=runner,
+        ),
         patch.object(svc, "_build_adapter", build_adapter_spy),
         patch(
             "app.services.ai.visual.visual_analysis_service.SkillToolService",

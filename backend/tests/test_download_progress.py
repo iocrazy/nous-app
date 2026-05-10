@@ -7,7 +7,6 @@ are routed through a tiny fake that records calls.
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 
@@ -112,6 +111,7 @@ def test_second_update_throttled(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Force time.time() to a fixed value so the throttle blocks the second write.
     import time as real_time
+
     base = real_time.time()
 
     times = iter([base, base + 0.1])

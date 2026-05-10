@@ -5,6 +5,7 @@ Design: defang, do not delete. The LLM still sees the bytes but inside
 an EXTERNAL_CONTENT_<random> block (random suffix per call so attackers
 cannot forge the closing marker by writing it in the description).
 """
+
 from __future__ import annotations
 
 import re

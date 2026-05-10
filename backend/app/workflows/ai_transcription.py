@@ -78,9 +78,7 @@ def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]
     # Volcengine path because the API key may only have one resource
     # granted — picking the wrong one returns 45000030 'resource not
     # granted'. master read this same field in ai_tasks.py.
-    task_assignment = (
-        ai_settings.get("task_assignment", {}).get("transcription") or ""
-    )
+    task_assignment = ai_settings.get("task_assignment", {}).get("transcription") or ""
 
     return {
         "audio_path": audio_path,
@@ -257,9 +255,7 @@ def _run_volcengine_asr(
     # only have that resource granted (V2 seed-asr requires a separate
     # entitlement and returns 45000030 'resource not granted' otherwise).
     model_part = (
-        task_assignment.split(":", 1)[1]
-        if ":" in task_assignment
-        else task_assignment
+        task_assignment.split(":", 1)[1] if ":" in task_assignment else task_assignment
     ) or (provider_config.get("model") or "")
     asr_resource = (
         RESOURCE_V2

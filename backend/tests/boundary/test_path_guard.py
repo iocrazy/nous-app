@@ -1,4 +1,5 @@
 """Sprint 7 — path traversal guard."""
+
 from __future__ import annotations
 
 import os

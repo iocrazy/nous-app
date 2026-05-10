@@ -18,13 +18,13 @@ Why not run the LLM call on EVERY turn? — too expensive. The cheap
 heuristic regex pre-filter cuts ~95% of turns before the LLM gets
 involved (most turns don't contain any commitment language).
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
-
 
 # Cheap pre-filter: look for English/Chinese commitment cues. Catches
 # the obvious cases; misses subtle ones (acceptable — false negatives
@@ -159,6 +159,7 @@ def parse_harvest_output(raw: str) -> list[HarvestedCommitment]:
                     parsed_ts = None
                     try:
                         from app.agent_framework._metrics_helper import inc_metric
+
                         inc_metric("commitment_demoted_fuzzy_time")
                     except Exception:
                         pass
@@ -168,6 +169,7 @@ def parse_harvest_output(raw: str) -> list[HarvestedCommitment]:
             ttype = "next_session"
             try:
                 from app.agent_framework._metrics_helper import inc_metric
+
                 inc_metric("commitment_demoted_fuzzy_time")
             except Exception:
                 pass
@@ -232,6 +234,7 @@ async def harvest_commitments(
     """
     if not has_commitment_cues(response_text):
         from app.agent_framework._metrics_helper import inc_metric
+
         inc_metric("commitment_harvest_skipped_no_cues")
         return HarvestResult(candidate_text_had_cues=False)
 
@@ -255,6 +258,7 @@ async def harvest_commitments(
             persisted_ids.append(str(cid))
 
     from app.agent_framework._metrics_helper import inc_metric
+
     if extracted:
         inc_metric("commitment_harvest_extracted", by=len(extracted))
     if persisted_ids:

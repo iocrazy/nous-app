@@ -232,7 +232,10 @@ def finalize_post_download_step(
                             "[download.finalize] file_size mirror failed "
                             "(non-fatal, file is already on disk) "
                             "resource_id=%s actual_size=%d err=%s: %r",
-                            resource_id, actual_size, type(e).__name__, e,
+                            resource_id,
+                            actual_size,
+                            type(e).__name__,
+                            e,
                         )
 
             try:
@@ -311,8 +314,10 @@ def finalize_post_download_step(
                                 "flag update failed (non-fatal, file is "
                                 "already on disk) platform_id=%s "
                                 "needs_update=%s err=%s: %r",
-                                platform_id, needs_update,
-                                type(e).__name__, e,
+                                platform_id,
+                                needs_update,
+                                type(e).__name__,
+                                e,
                             )
 
         return {
@@ -487,9 +492,7 @@ def mark_workflow_processing_step(workflow_id: str) -> None:
         try:
             await get_task_manager().start(workflow_id)
         except Exception as e:
-            logger.warning(
-                f"[download.mark_processing] {workflow_id}: {e}"
-            )
+            logger.warning(f"[download.mark_processing] {workflow_id}: {e}")
 
     asyncio.run(_do())
 

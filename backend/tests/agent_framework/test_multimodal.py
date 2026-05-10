@@ -1,4 +1,5 @@
 """Q1 — multi-modal user message construction."""
+
 from __future__ import annotations
 
 import pytest
@@ -12,7 +13,6 @@ from app.agent_framework.multimodal import (
     looks_like_data_url,
     sniff_supports_vision,
 )
-
 
 # ─── sniff_supports_vision ────────────────────────────────────────────
 
@@ -47,7 +47,9 @@ def test_no_attachments_returns_string_content():
 @pytest.mark.unit
 def test_text_only_model_with_attachments_flattens():
     """Text-only model + image → degrade to placeholder text."""
-    att = Attachment(kind=AttachmentKind.IMAGE, url="https://x.com/img.png", alt_text="diagram")
+    att = Attachment(
+        kind=AttachmentKind.IMAGE, url="https://x.com/img.png", alt_text="diagram"
+    )
     msg = build_user_message("look:", [att], target_model="qwen-max")
     assert isinstance(msg["content"], str)
     assert "diagram" in msg["content"] or "img.png" in msg["content"]
@@ -100,7 +102,10 @@ def test_attachment_without_url_or_data_skipped():
     msg = build_user_message("hi", [att], target_model="gpt-4o")
     parts = msg["content"]
     # Only the text part, skip the empty attachment
-    assert len([p for p in parts if isinstance(p, dict) and p.get("type") == "image_url"]) == 0
+    assert (
+        len([p for p in parts if isinstance(p, dict) and p.get("type") == "image_url"])
+        == 0
+    )
 
 
 # ─── flatten_attachments_to_text ──────────────────────────────────────
@@ -134,11 +139,14 @@ def test_flatten_string_content_passthrough():
 
 @pytest.mark.unit
 def test_flatten_multipart_drops_image_keeps_text_with_marker():
-    msg = {"role": "user", "content": [
-        {"type": "text", "text": "before"},
-        {"type": "image_url", "image_url": {"url": "https://x.com/i.png"}},
-        {"type": "text", "text": "after"},
-    ]}
+    msg = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "before"},
+            {"type": "image_url", "image_url": {"url": "https://x.com/i.png"}},
+            {"type": "text", "text": "after"},
+        ],
+    }
     out = flatten_to_text(msg)
     assert "before" in out
     assert "after" in out
@@ -148,9 +156,10 @@ def test_flatten_multipart_drops_image_keeps_text_with_marker():
 
 @pytest.mark.unit
 def test_flatten_unknown_part_type_marked():
-    msg = {"role": "user", "content": [
-        {"type": "fictional_future_type", "data": "..."}
-    ]}
+    msg = {
+        "role": "user",
+        "content": [{"type": "fictional_future_type", "data": "..."}],
+    }
     out = flatten_to_text(msg)
     assert "[fictional_future_type]" in out
 

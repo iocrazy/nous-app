@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -37,8 +37,10 @@ class _StatusError(Exception):
 
 def _make_factory(model_to_adapter: dict[str, AsyncMock]):
     """Build an adapter_factory closure that returns a pre-configured AsyncMock per model."""
+
     def factory(model: str):
         return model_to_adapter[model]
+
     return factory
 
 
@@ -109,8 +111,16 @@ async def test_primary_and_fallback_zero_fail_fallback_one_succeeds():
     assert response["_actual_model"] == "qwen-turbo"
     log = response["_fallback_meta"]["switch_log"]
     assert len(log) == 2
-    assert log[0] == {"from": "qwen-max", "to": "qwen-plus", "reason": "retries_exhausted"}
-    assert log[1] == {"from": "qwen-plus", "to": "qwen-turbo", "reason": "retries_exhausted"}
+    assert log[0] == {
+        "from": "qwen-max",
+        "to": "qwen-plus",
+        "reason": "retries_exhausted",
+    }
+    assert log[1] == {
+        "from": "qwen-plus",
+        "to": "qwen-turbo",
+        "reason": "retries_exhausted",
+    }
 
 
 @pytest.mark.unit

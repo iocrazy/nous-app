@@ -30,6 +30,7 @@ Adapted from openclaw/security/skill-scanner.ts. Two layers:
 
 Output is a list of Finding(line, category, severity, snippet, message).
 """
+
 from __future__ import annotations
 
 import re
@@ -39,9 +40,9 @@ from typing import List, Sequence
 
 
 class Severity(str, Enum):
-    INFO = "info"           # mention; rarely actionable on its own
-    WARN = "warn"           # show in UI; user should review
-    HIGH = "high"           # show prominently; consider blocking
+    INFO = "info"  # mention; rarely actionable on its own
+    WARN = "warn"  # show in UI; user should review
+    HIGH = "high"  # show prominently; consider blocking
 
 
 class Category(str, Enum):
@@ -54,11 +55,11 @@ class Category(str, Enum):
 
 @dataclass(frozen=True)
 class Finding:
-    line: int               # 1-indexed; 0 for source-level findings
+    line: int  # 1-indexed; 0 for source-level findings
     category: Category
     severity: Severity
-    snippet: str            # ≤ 120 chars from the matched region
-    message: str            # human-readable explanation
+    snippet: str  # ≤ 120 chars from the matched region
+    message: str  # human-readable explanation
 
 
 # ─── Per-line patterns ──────────────────────────────────────────────
@@ -68,83 +69,101 @@ _LINE_PATTERNS: List[tuple[re.Pattern[str], Category, Severity, str]] = [
     # dangerous_exec
     (
         re.compile(r"\bos\.system\s*\("),
-        Category.DANGEROUS_EXEC, Severity.HIGH,
+        Category.DANGEROUS_EXEC,
+        Severity.HIGH,
         "os.system invokes a shell — prefer subprocess with args list",
     ),
     (
-        re.compile(r"\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(.*shell\s*=\s*True"),
-        Category.DANGEROUS_EXEC, Severity.HIGH,
+        re.compile(
+            r"\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(.*shell\s*=\s*True"
+        ),
+        Category.DANGEROUS_EXEC,
+        Severity.HIGH,
         "subprocess with shell=True allows command injection",
     ),
     (
         re.compile(r"\bexec\s*\("),
-        Category.DANGEROUS_EXEC, Severity.HIGH,
+        Category.DANGEROUS_EXEC,
+        Severity.HIGH,
         "exec() runs arbitrary code at runtime",
     ),
     (
         re.compile(r"(?<!\w)eval\s*\("),
-        Category.DANGEROUS_EXEC, Severity.HIGH,
+        Category.DANGEROUS_EXEC,
+        Severity.HIGH,
         "eval() runs arbitrary expression at runtime",
     ),
     (
         re.compile(r"\b__import__\s*\(\s*['\"](?:os|subprocess|sys)['\"]"),
-        Category.DANGEROUS_EXEC, Severity.HIGH,
+        Category.DANGEROUS_EXEC,
+        Severity.HIGH,
         "dynamic __import__ of os/subprocess/sys is a sandbox escape pattern",
     ),
     (
         re.compile(r"\bpickle\.(?:load|loads)\s*\("),
-        Category.DANGEROUS_EXEC, Severity.HIGH,
+        Category.DANGEROUS_EXEC,
+        Severity.HIGH,
         "pickle load can execute arbitrary code from untrusted bytes",
     ),
     (
         re.compile(r"\bcompile\s*\([^)]+\)\s*[,;)]?\s*\n?\s*(?:exec|eval)\s*\("),
-        Category.DANGEROUS_EXEC, Severity.HIGH,
+        Category.DANGEROUS_EXEC,
+        Severity.HIGH,
         "compile() chained into exec/eval is a known sandbox-bypass pattern",
     ),
-
     # env_harvesting
     (
-        re.compile(r"\bos\.environ(?:\.get)?\s*[\[(]\s*['\"](?:[A-Z_]*(?:KEY|TOKEN|SECRET|PASSWORD|API)[A-Z_]*)['\"]"),
-        Category.ENV_HARVESTING, Severity.HIGH,
+        re.compile(
+            r"\bos\.environ(?:\.get)?\s*[\[(]\s*['\"](?:[A-Z_]*(?:KEY|TOKEN|SECRET|PASSWORD|API)[A-Z_]*)['\"]"
+        ),
+        Category.ENV_HARVESTING,
+        Severity.HIGH,
         "reads a secret-named env var; verify legitimate use",
     ),
     (
-        re.compile(r"\bos\.getenv\s*\(\s*['\"](?:[A-Z_]*(?:KEY|TOKEN|SECRET|PASSWORD|API)[A-Z_]*)['\"]"),
-        Category.ENV_HARVESTING, Severity.HIGH,
+        re.compile(
+            r"\bos\.getenv\s*\(\s*['\"](?:[A-Z_]*(?:KEY|TOKEN|SECRET|PASSWORD|API)[A-Z_]*)['\"]"
+        ),
+        Category.ENV_HARVESTING,
+        Severity.HIGH,
         "reads a secret-named env var; verify legitimate use",
     ),
     (
         re.compile(r"\bos\.environ\s*$|\bdict\s*\(\s*os\.environ\s*\)"),
-        Category.ENV_HARVESTING, Severity.WARN,
+        Category.ENV_HARVESTING,
+        Severity.WARN,
         "snapshotting the full env dict is a common exfil pattern",
     ),
-
     # fs_escape — absolute reads outside any user-scope dir
     (
         re.compile(r"open\s*\(\s*['\"]/(?:etc|root|var/log|proc|sys|home|Users)/"),
-        Category.FS_ESCAPE, Severity.HIGH,
+        Category.FS_ESCAPE,
+        Severity.HIGH,
         "reads absolute system path outside user-scoped storage",
     ),
     (
         re.compile(r"Path\s*\(\s*['\"]/(?:etc|root|var/log|proc|sys|home|Users)/"),
-        Category.FS_ESCAPE, Severity.HIGH,
+        Category.FS_ESCAPE,
+        Severity.HIGH,
         "Path() targets an absolute system path outside user scope",
     ),
     (
         re.compile(r"shutil\.(?:rmtree|copy|move)\s*\(\s*['\"]/"),
-        Category.FS_ESCAPE, Severity.WARN,
+        Category.FS_ESCAPE,
+        Severity.WARN,
         "shutil operating on absolute system path",
     ),
-
     # network_exfil — direct sockets / unconventional posts
     (
         re.compile(r"\bsocket\.create_connection\s*\("),
-        Category.NETWORK_EXFIL, Severity.WARN,
+        Category.NETWORK_EXFIL,
+        Severity.WARN,
         "raw socket connect bypasses the safe_http boundary",
     ),
     (
         re.compile(r"urllib\.(?:request|urlopen)\b"),
-        Category.NETWORK_EXFIL, Severity.WARN,
+        Category.NETWORK_EXFIL,
+        Severity.WARN,
         "urllib bypasses safe_async_client / SSRF guards",
     ),
 ]
@@ -171,7 +190,7 @@ def _snippet(text: str, max_len: int = 120) -> str:
     s = text.replace("\n", " ").strip()
     if len(s) <= max_len:
         return s
-    return s[:max_len - 1] + "…"
+    return s[: max_len - 1] + "…"
 
 
 def scan(content: str) -> List[Finding]:
@@ -184,51 +203,65 @@ def scan(content: str) -> List[Finding]:
         for pattern, category, severity, message in _LINE_PATTERNS:
             m = pattern.search(line)
             if m:
-                findings.append(Finding(
-                    line=line_no,
-                    category=category,
-                    severity=severity,
-                    snippet=_snippet(line),
-                    message=message,
-                ))
+                findings.append(
+                    Finding(
+                        line=line_no,
+                        category=category,
+                        severity=severity,
+                        snippet=_snippet(line),
+                        message=message,
+                    )
+                )
 
     # Layer 2: full-source obfuscation patterns
     if _OBFUSCATION_BASE64_EXEC.search(content):
         # Find the line of the first occurrence for context
         m = _OBFUSCATION_BASE64_EXEC.search(content)
         approx_line = content[: m.start()].count("\n") + 1 if m else 0
-        findings.append(Finding(
-            line=approx_line,
-            category=Category.OBFUSCATION,
-            severity=Severity.HIGH,
-            snippet=_snippet(content[max(0, m.start()):m.end()]),
-            message="base64 decode chained into exec/eval — classic obfuscated payload",
-        ))
+        findings.append(
+            Finding(
+                line=approx_line,
+                category=Category.OBFUSCATION,
+                severity=Severity.HIGH,
+                snippet=_snippet(content[max(0, m.start()) : m.end()]),
+                message="base64 decode chained into exec/eval — classic obfuscated payload",
+            )
+        )
 
     if _OBFUSCATION_HEX_EXEC.search(content):
         m = _OBFUSCATION_HEX_EXEC.search(content)
         approx_line = content[: m.start()].count("\n") + 1 if m else 0
-        findings.append(Finding(
-            line=approx_line,
-            category=Category.OBFUSCATION,
-            severity=Severity.HIGH,
-            snippet=_snippet(content[max(0, m.start()):m.end()]),
-            message="hex-decoded string flows into exec/eval — likely obfuscation",
-        ))
+        findings.append(
+            Finding(
+                line=approx_line,
+                category=Category.OBFUSCATION,
+                severity=Severity.HIGH,
+                snippet=_snippet(content[max(0, m.start()) : m.end()]),
+                message="hex-decoded string flows into exec/eval — likely obfuscation",
+            )
+        )
 
     for m in _LONG_B64_BLOB.finditer(content):
         approx_line = content[: m.start()].count("\n") + 1
-        findings.append(Finding(
-            line=approx_line,
-            category=Category.OBFUSCATION,
-            severity=Severity.WARN,
-            snippet=_snippet(m.group(1), max_len=80),
-            message="long base64-looking blob (≥200 chars) — verify intent",
-        ))
+        findings.append(
+            Finding(
+                line=approx_line,
+                category=Category.OBFUSCATION,
+                severity=Severity.WARN,
+                snippet=_snippet(m.group(1), max_len=80),
+                message="long base64-looking blob (≥200 chars) — verify intent",
+            )
+        )
         # Avoid spamming on a file with many blobs; cap to 3 reports
-        if sum(1 for f in findings
-               if f.category == Category.OBFUSCATION
-               and f.message.startswith("long base64")) >= 3:
+        if (
+            sum(
+                1
+                for f in findings
+                if f.category == Category.OBFUSCATION
+                and f.message.startswith("long base64")
+            )
+            >= 3
+        ):
             break
 
     # Stable sort: HIGH first, then WARN, then INFO; line number tiebreak

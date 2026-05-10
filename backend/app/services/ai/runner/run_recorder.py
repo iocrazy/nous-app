@@ -180,9 +180,7 @@ class RunRecorder:
         # metadata.compaction.{tier_str}_count + total_tokens_saved
         comp = self.metadata.setdefault("compaction", {})
         comp[f"{tier_str}_count"] = int(comp.get(f"{tier_str}_count", 0)) + 1
-        comp["total_tokens_saved"] = int(
-            comp.get("total_tokens_saved", 0)
-        ) + saved
+        comp["total_tokens_saved"] = int(comp.get("total_tokens_saved", 0)) + saved
 
     def note_subagent(self, envelope: dict[str, Any]) -> None:
         """Phase 5 of #199: count sub-agent spawns + their cost so the
@@ -384,6 +382,7 @@ class RunRecorder:
         if status == "completed" and cost_cents is not None and cost_cents > 0:
             try:
                 from app.services.ai.billing.token_billing import reconcile_run
+
                 # cost_cents is the cents amount; PointsService treats
                 # cost_points as the same scalar (1 cent ≈ 1 point in
                 # the current billing model). If a future change splits
@@ -406,9 +405,7 @@ class RunRecorder:
                     action=self.trigger,
                 )
             except Exception as exc:
-                logger.warning(
-                    f"[RunRecorder] reconcile_run failed (non-fatal): {exc}"
-                )
+                logger.warning(f"[RunRecorder] reconcile_run failed (non-fatal): {exc}")
 
 
 def _truncate(text: str, max_chars: int) -> str:

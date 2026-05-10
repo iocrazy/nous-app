@@ -1,5 +1,6 @@
 """Unit tests for DbosAgentWorkforcePool — interface parity with
 AgentWorkerPool, plus enqueue path verification (mocked DBOS Queue)."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -57,13 +58,11 @@ async def test_dispatch_enqueues_with_partition_key_and_workflow_id():
     queue_mock = MagicMock()
     queue_mock.enqueue = MagicMock()
 
-    with patch(
-        "app.workflows.agent_workforce.agent_workforce_queue", queue_mock
-    ), patch(
-        "app.services.workforce.dbos_pool.SetWorkflowID"
-    ) as set_wf, patch(
-        "app.services.workforce.dbos_pool.SetEnqueueOptions"
-    ) as set_opts:
+    with (
+        patch("app.workflows.agent_workforce.agent_workforce_queue", queue_mock),
+        patch("app.services.workforce.dbos_pool.SetWorkflowID") as set_wf,
+        patch("app.services.workforce.dbos_pool.SetEnqueueOptions") as set_opts,
+    ):
         # Patched context managers must support `with ... :` — make them
         # return MagicMocks that are also context-manager-compatible.
         set_wf.return_value.__enter__ = MagicMock()
@@ -102,13 +101,11 @@ async def test_dispatch_duplicate_workflow_id_swallowed():
     queue_mock = MagicMock()
     queue_mock.enqueue = MagicMock(side_effect=Exception("workflow already exists"))
 
-    with patch(
-        "app.workflows.agent_workforce.agent_workforce_queue", queue_mock
-    ), patch(
-        "app.services.workforce.dbos_pool.SetWorkflowID"
-    ) as set_wf, patch(
-        "app.services.workforce.dbos_pool.SetEnqueueOptions"
-    ) as set_opts:
+    with (
+        patch("app.workflows.agent_workforce.agent_workforce_queue", queue_mock),
+        patch("app.services.workforce.dbos_pool.SetWorkflowID") as set_wf,
+        patch("app.services.workforce.dbos_pool.SetEnqueueOptions") as set_opts,
+    ):
         set_wf.return_value.__enter__ = MagicMock()
         set_wf.return_value.__exit__ = MagicMock(return_value=False)
         set_opts.return_value.__enter__ = MagicMock()

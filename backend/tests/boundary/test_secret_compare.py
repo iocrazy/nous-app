@@ -1,4 +1,5 @@
 """Timing-safe secret comparison contract."""
+
 from __future__ import annotations
 
 import pytest

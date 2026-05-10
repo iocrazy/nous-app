@@ -1,4 +1,5 @@
 """subprocess_registry — track child PIDs per workflow_id."""
+
 from __future__ import annotations
 
 import asyncio
@@ -64,7 +65,9 @@ def test_unregister_missing_silent():
 async def test_cancel_workflow_subprocesses_kills_real_subprocess():
     """End-to-end: spawn a real sleeper subprocess, register, cancel."""
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", "import time; time.sleep(60)",
+        sys.executable,
+        "-c",
+        "import time; time.sleep(60)",
         preexec_fn=os.setsid,
     )
     try:

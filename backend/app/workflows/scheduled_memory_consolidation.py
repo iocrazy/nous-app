@@ -13,6 +13,7 @@ Conservative limits: max namespaces per run, max clusters per namespace,
 max members per cluster. Prevents one runaway sweep from spending the
 LLM budget on a single user's pile of duplicates.
 """
+
 from __future__ import annotations
 
 import logging
@@ -45,12 +46,11 @@ async def _cheap_summarizer(memories: list[str]) -> str:
     try:
         from app.core.config import settings
         from app.schemas.ai_library import ComposedSystemPrompt
-        from app.services.ai.providers.ai_provider import QwenAdapter
         from app.services.ai.memory.consolidation import build_consolidation_prompt
+        from app.services.ai.providers.ai_provider import QwenAdapter
 
-        api_key = (
-            getattr(settings, "DASHSCOPE_API_KEY", None)
-            or getattr(settings, "QWEN_API_KEY", None)
+        api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or getattr(
+            settings, "QWEN_API_KEY", None
         )
         if not api_key:
             return ""
@@ -67,9 +67,7 @@ async def _cheap_summarizer(memories: list[str]) -> str:
             cache_fingerprint="memory_consolidator_v1",
         )
         prompt = build_consolidation_prompt(memories)
-        result = await adapter.call(
-            composed, [{"role": "user", "content": prompt}]
-        )
+        result = await adapter.call(composed, [{"role": "user", "content": prompt}])
         return result.get("content") or ""
     except Exception:
         return ""
@@ -188,6 +186,7 @@ async def consolidate_namespaces_step(
 
     if clusters_merged:
         from app.agent_framework._metrics_helper import inc_metric
+
         inc_metric("memory_consolidated", by=clusters_merged)
     return {
         "namespaces": namespaces_processed,
@@ -212,10 +211,7 @@ async def _write_super_and_supersede(
     if not embeddings:
         return ""
     dim = len(embeddings[0])
-    avg = [
-        sum(e[i] for e in embeddings) / len(embeddings)
-        for i in range(dim)
-    ]
+    avg = [sum(e[i] for e in embeddings) / len(embeddings) for i in range(dim)]
 
     try:
         insert_result = (
@@ -231,7 +227,10 @@ async def _write_super_and_supersede(
                     "extracted_from": "active_call",
                     "consolidation_level": (
                         max(
-                            (m.summary.count("[merged-level=") for m in cluster.members),
+                            (
+                                m.summary.count("[merged-level=")
+                                for m in cluster.members
+                            ),
                             default=0,
                         )
                         + 1
@@ -268,7 +267,8 @@ async def _write_super_and_supersede(
         except Exception:
             logger.exception(
                 "[memory.consolidation] failed to mark %s superseded by %s",
-                old_id, super_id,
+                old_id,
+                super_id,
             )
 
     return super_id

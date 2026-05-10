@@ -2,6 +2,7 @@
 
 6 internal call sites pass URLs from parsed metadata fields. Defensive
 validation inside download_file catches anything that bypassed boundary."""
+
 from __future__ import annotations
 
 import pytest
@@ -65,11 +66,14 @@ async def test_download_file_progress_tracker_marked_failed(tmp_path):
             self.failed_called = False
             self.failed_reason = None
             self.complete_called = False
+
         def failed(self, reason: str):
             self.failed_called = True
             self.failed_reason = reason
+
         def complete(self):
             self.complete_called = True
+
         def update(self, *a, **kw):
             pass
 

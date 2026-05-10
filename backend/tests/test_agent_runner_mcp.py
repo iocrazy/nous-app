@@ -7,6 +7,7 @@ Verifies:
   - MCP transport failure converts to a tool-result error (no crash)
   - mcp_registry=None → original behavior (no MCP tools, no dispatch)
 """
+
 from __future__ import annotations
 
 import json
@@ -33,9 +34,7 @@ def _composed():
         temperature=0.0,
         max_tokens=512,
         system_message="sys",
-        tools=[
-            {"type": "function", "function": {"name": "Skill", "parameters": {}}}
-        ],
+        tools=[{"type": "function", "function": {"name": "Skill", "parameters": {}}}],
         skill_manifest=[],
         cache_fingerprint="fp",
     )
@@ -86,7 +85,10 @@ def test_mcp_tools_to_openai_format_round_trip():
             server_name="notion",
             raw_name="create_page",
             description="Create a new page",
-            input_schema={"type": "object", "properties": {"title": {"type": "string"}}},
+            input_schema={
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+            },
         ),
     ]
     result = _mcp_tools_to_openai_format(tools)
@@ -94,15 +96,20 @@ def test_mcp_tools_to_openai_format_round_trip():
     assert result[0]["type"] == "function"
     assert result[0]["function"]["name"] == "notion.create_page"
     assert result[0]["function"]["description"] == "Create a new page"
-    assert result[0]["function"]["parameters"]["properties"]["title"]["type"] == "string"
+    assert (
+        result[0]["function"]["parameters"]["properties"]["title"]["type"] == "string"
+    )
 
 
 @pytest.mark.unit
 def test_mcp_tools_to_openai_format_handles_empty_schema():
     tools = [
         QualifiedTool(
-            qualified_name="srv.tool", server_name="srv", raw_name="tool",
-            description="", input_schema={},
+            qualified_name="srv.tool",
+            server_name="srv",
+            raw_name="tool",
+            description="",
+            input_schema={},
         ),
     ]
     result = _mcp_tools_to_openai_format(tools)
@@ -122,31 +129,37 @@ def _adapter_with_responses(*responses):
 
 def _tool_call_msg(tool_name, args, call_id="c1"):
     return {
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": tool_name,
-                        "arguments": json.dumps(args),
-                    },
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": json.dumps(args),
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1},
     }
 
 
 def _final_msg(text):
     return {
-        "choices": [{
-            "message": {"role": "assistant", "content": text},
-            "finish_reason": "stop",
-        }],
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": "stop",
+            }
+        ],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1},
     }
 
@@ -157,16 +170,24 @@ async def test_mcp_tool_call_routed_through_registry():
     """Happy path: LLM emits notion.create_page, runner dispatches via
     mcp_registry.call, result is appended to messages, second iteration
     returns final text."""
-    qualified = [QualifiedTool(
-        qualified_name="notion.create_page", server_name="notion",
-        raw_name="create_page", description="Create page", input_schema={},
-    )]
+    qualified = [
+        QualifiedTool(
+            qualified_name="notion.create_page",
+            server_name="notion",
+            raw_name="create_page",
+            description="Create page",
+            input_schema={},
+        )
+    ]
     mcp_reg = AsyncMock()
     mcp_reg.all_tools = AsyncMock(return_value=qualified)
     mcp_reg.server_names = MagicMock(return_value=["notion"])
-    mcp_reg.call = AsyncMock(return_value={
-        "content": [{"type": "text", "text": "page created!"}], "isError": False,
-    })
+    mcp_reg.call = AsyncMock(
+        return_value={
+            "content": [{"type": "text", "text": "page created!"}],
+            "isError": False,
+        }
+    )
 
     adapter = _adapter_with_responses(
         _tool_call_msg("notion.create_page", {"title": "hi"}),
@@ -174,7 +195,9 @@ async def test_mcp_tool_call_routed_through_registry():
     )
     runner = AgentRunner(adapter=adapter, skill_tool=None, mcp_registry=mcp_reg)
 
-    result = await runner.run_turn(_composed(), [{"role": "user", "content": "make a page"}])
+    result = await runner.run_turn(
+        _composed(), [{"role": "user", "content": "make a page"}]
+    )
 
     assert result["content"] == "Done — page created."
     mcp_reg.call.assert_awaited_once_with("notion.create_page", {"title": "hi"})
@@ -187,10 +210,15 @@ async def test_mcp_tool_call_routed_through_registry():
 async def test_mcp_tools_injected_into_composed_tools():
     """run_turn enriches composed.tools before adapter.call so the LLM
     knows MCP tools exist."""
-    qualified = [QualifiedTool(
-        qualified_name="srv.foo", server_name="srv", raw_name="foo",
-        description="d", input_schema={"type": "object"},
-    )]
+    qualified = [
+        QualifiedTool(
+            qualified_name="srv.foo",
+            server_name="srv",
+            raw_name="foo",
+            description="d",
+            input_schema={"type": "object"},
+        )
+    ]
     mcp_reg = AsyncMock()
     mcp_reg.all_tools = AsyncMock(return_value=qualified)
     mcp_reg.server_names = MagicMock(return_value=["srv"])
@@ -217,10 +245,15 @@ async def test_mcp_tools_injected_into_composed_tools():
 @pytest.mark.asyncio
 async def test_mcp_transport_failure_yields_tool_error_not_crash():
     """MCPClientError on dispatch → result dict with error, turn continues."""
-    qualified = [QualifiedTool(
-        qualified_name="srv.broken", server_name="srv", raw_name="broken",
-        description="", input_schema={},
-    )]
+    qualified = [
+        QualifiedTool(
+            qualified_name="srv.broken",
+            server_name="srv",
+            raw_name="broken",
+            description="",
+            input_schema={},
+        )
+    ]
     mcp_reg = AsyncMock()
     mcp_reg.all_tools = AsyncMock(return_value=qualified)
     mcp_reg.server_names = MagicMock(return_value=["srv"])
@@ -287,10 +320,15 @@ async def test_mcp_discovery_failure_isolated_run_continues():
 @pytest.mark.asyncio
 async def test_skill_call_still_works_alongside_mcp():
     """Built-in Skill tool dispatch unaffected when MCP is also registered."""
-    qualified = [QualifiedTool(
-        qualified_name="notion.x", server_name="notion", raw_name="x",
-        description="", input_schema={},
-    )]
+    qualified = [
+        QualifiedTool(
+            qualified_name="notion.x",
+            server_name="notion",
+            raw_name="x",
+            description="",
+            input_schema={},
+        )
+    ]
     mcp_reg = AsyncMock()
     mcp_reg.all_tools = AsyncMock(return_value=qualified)
     mcp_reg.server_names = MagicMock(return_value=["notion"])

@@ -6,6 +6,7 @@ fired by external watcher (e.g., DB-polling task watching
 ai_sessions.cancel_requested = True), observed by the LLM call wrapper
 to short-circuit out of the await.
 """
+
 from __future__ import annotations
 
 import asyncio

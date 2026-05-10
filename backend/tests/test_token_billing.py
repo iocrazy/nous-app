@@ -1,4 +1,5 @@
 """Phase 3 — token billing reconciliation + summary tests."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from app.services.ai.billing import token_billing as tb
+
 # ─── summarize_user_usage ────────────────────────────────────────────
 
 
@@ -16,7 +18,9 @@ def _row(model="qwen-max", tokens=100, cost=1.5, days_ago=0):
         "model": model,
         "total_tokens": tokens,
         "cost_points": cost,
-        "created_at": (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(),
+        "created_at": (
+            datetime.now(timezone.utc) - timedelta(days=days_ago)
+        ).isoformat(),
     }
 
 
@@ -42,8 +46,10 @@ async def test_summary_aggregates_by_model_and_day():
         _row("claude-sonnet", tokens=300, cost=5.0, days_ago=1),
     ]
     client = _fake_client_returning(rows)
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=client)):
+    with patch(
+        "app.services.ai.billing.token_billing.get_async_supabase_admin",
+        AsyncMock(return_value=client),
+    ):
         s = await tb.summarize_user_usage(uuid4(), days=7)
 
     assert s.overall_total_tokens == 600
@@ -63,8 +69,10 @@ async def test_summary_aggregates_by_model_and_day():
 @pytest.mark.asyncio
 async def test_summary_handles_empty_rows():
     client = _fake_client_returning([])
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=client)):
+    with patch(
+        "app.services.ai.billing.token_billing.get_async_supabase_admin",
+        AsyncMock(return_value=client),
+    ):
         s = await tb.summarize_user_usage(uuid4(), days=7)
     assert s.overall_total_tokens == 0
     assert s.overall_cost_points == 0.0
@@ -86,8 +94,10 @@ async def test_summary_swallows_db_error():
     table_q.execute = AsyncMock(side_effect=RuntimeError("supabase down"))
     client.table = MagicMock(return_value=table_q)
 
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=client)):
+    with patch(
+        "app.services.ai.billing.token_billing.get_async_supabase_admin",
+        AsyncMock(return_value=client),
+    ):
         s = await tb.summarize_user_usage(uuid4(), days=7)
     assert s.overall_run_count == 0
 
@@ -110,8 +120,10 @@ def _ok_insert_client():
 @pytest.mark.asyncio
 async def test_reconcile_byo_key_skips_points():
     """BYO-key runs log usage but never charge points."""
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=_ok_insert_client())):
+    with patch(
+        "app.services.ai.billing.token_billing.get_async_supabase_admin",
+        AsyncMock(return_value=_ok_insert_client()),
+    ):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),
@@ -135,8 +147,10 @@ async def test_reconcile_byo_key_skips_points():
 @pytest.mark.asyncio
 async def test_reconcile_no_team_skips_points():
     """Personal-scope run (no team_id) just logs."""
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=_ok_insert_client())):
+    with patch(
+        "app.services.ai.billing.token_billing.get_async_supabase_admin",
+        AsyncMock(return_value=_ok_insert_client()),
+    ):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),
@@ -158,8 +172,10 @@ async def test_reconcile_no_team_skips_points():
 @pytest.mark.asyncio
 async def test_reconcile_zero_cost_skips_points():
     """Free run (cost_points=0) doesn't try to charge."""
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=_ok_insert_client())):
+    with patch(
+        "app.services.ai.billing.token_billing.get_async_supabase_admin",
+        AsyncMock(return_value=_ok_insert_client()),
+    ):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),
@@ -184,10 +200,15 @@ async def test_reconcile_platform_run_calls_points_service():
     fake_ps = MagicMock()
     fake_ps.check_and_consume = AsyncMock(return_value=True)
 
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=_ok_insert_client())), \
-         patch("app.services.billing.points_service.PointsService",
-               return_value=fake_ps):
+    with (
+        patch(
+            "app.services.ai.billing.token_billing.get_async_supabase_admin",
+            AsyncMock(return_value=_ok_insert_client()),
+        ),
+        patch(
+            "app.services.billing.points_service.PointsService", return_value=fake_ps
+        ),
+    ):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),
@@ -215,12 +236,19 @@ async def test_reconcile_platform_run_calls_points_service():
 async def test_reconcile_points_failure_does_not_raise():
     """PointsService raising → ReconcileResult with charged=False, not exception."""
     fake_ps = MagicMock()
-    fake_ps.check_and_consume = AsyncMock(side_effect=RuntimeError("insufficient balance"))
+    fake_ps.check_and_consume = AsyncMock(
+        side_effect=RuntimeError("insufficient balance")
+    )
 
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=_ok_insert_client())), \
-         patch("app.services.billing.points_service.PointsService",
-               return_value=fake_ps):
+    with (
+        patch(
+            "app.services.ai.billing.token_billing.get_async_supabase_admin",
+            AsyncMock(return_value=_ok_insert_client()),
+        ),
+        patch(
+            "app.services.billing.points_service.PointsService", return_value=fake_ps
+        ),
+    ):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),
@@ -235,7 +263,7 @@ async def test_reconcile_points_failure_does_not_raise():
             byo_key=False,
         )
     assert result.charged is False
-    assert result.usage_logged is True   # log still wrote
+    assert result.usage_logged is True  # log still wrote
     assert "errored" in (result.note or "")
 
 
@@ -251,8 +279,10 @@ async def test_reconcile_log_failure_still_returns():
     bad_table.insert = MagicMock(return_value=bad_insert)
     bad_client.table = MagicMock(return_value=bad_table)
 
-    with patch("app.services.ai.billing.token_billing.get_async_supabase_admin",
-               AsyncMock(return_value=bad_client)):
+    with patch(
+        "app.services.ai.billing.token_billing.get_async_supabase_admin",
+        AsyncMock(return_value=bad_client),
+    ):
         result = await tb.reconcile_run(
             run_id=uuid4(),
             user_id=uuid4(),

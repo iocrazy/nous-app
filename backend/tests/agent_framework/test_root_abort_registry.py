@@ -1,4 +1,5 @@
 """I1 — RootAbortRegistry: shared abort across delegation tree."""
+
 from __future__ import annotations
 
 import pytest

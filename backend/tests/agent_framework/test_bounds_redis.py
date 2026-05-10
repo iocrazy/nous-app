@@ -1,7 +1,9 @@
 """I4 — Redis-backed BoundsRegistry: serialization + remote apply."""
+
 from __future__ import annotations
 
 import json
+
 import pytest
 
 from app.agent_framework.bounds import BoundsAdvertisement

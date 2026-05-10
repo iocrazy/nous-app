@@ -1,4 +1,5 @@
 """M2 — memory kind classifier (declarative / procedural / episodic)."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,6 @@ from app.services.ai.memory.kind_classifier import (
     classify_with_llm,
     score_modifier_for,
 )
-
 
 # ─── Heuristic ────────────────────────────────────────────────────────
 
@@ -27,7 +27,10 @@ def test_procedural_how_to():
 
 @pytest.mark.unit
 def test_procedural_to_verb():
-    assert classify_heuristic("To deploy the backend, push to master") == MemoryKind.PROCEDURAL
+    assert (
+        classify_heuristic("To deploy the backend, push to master")
+        == MemoryKind.PROCEDURAL
+    )
 
 
 @pytest.mark.unit

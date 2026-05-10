@@ -24,12 +24,14 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
 
@@ -67,9 +69,7 @@ async def test_request_logs_status_group_2xx_uses_range(
     repo = _make_repo(RequestLogsRepository, fake_query)
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=50, status_group="2xx"
-    )
+    await repo.list_with_filters(page=1, page_size=50, status_group="2xx")
 
     gte_values = [c[1] for c in fake_query.calls if c[0] == "gte"]
     lt_values = [c[1] for c in fake_query.calls if c[0] == "lt"]
@@ -84,9 +84,7 @@ async def test_request_logs_status_group_4xx(
     repo = _make_repo(RequestLogsRepository, fake_query)
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=50, status_group="4xx"
-    )
+    await repo.list_with_filters(page=1, page_size=50, status_group="4xx")
 
     gte_values = [c[1] for c in fake_query.calls if c[0] == "gte"]
     lt_values = [c[1] for c in fake_query.calls if c[0] == "lt"]
@@ -101,9 +99,7 @@ async def test_request_logs_status_group_5xx(
     repo = _make_repo(RequestLogsRepository, fake_query)
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=50, status_group="5xx"
-    )
+    await repo.list_with_filters(page=1, page_size=50, status_group="5xx")
 
     gte_values = [c[1] for c in fake_query.calls if c[0] == "gte"]
     lt_values = [c[1] for c in fake_query.calls if c[0] == "lt"]
@@ -118,15 +114,10 @@ async def test_request_logs_ignores_unknown_status_group(
     repo = _make_repo(RequestLogsRepository, fake_query)
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=50, status_group="9xx"
-    )
+    await repo.list_with_filters(page=1, page_size=50, status_group="9xx")
 
     # No status_code gte/lt filters when status_group is invalid
-    assert not any(
-        c[0] == "gte" and c[1][0] == "status_code"
-        for c in fake_query.calls
-    )
+    assert not any(c[0] == "gte" and c[1][0] == "status_code" for c in fake_query.calls)
 
 
 @pytest.mark.asyncio
@@ -168,9 +159,7 @@ async def test_frontend_error_logs_filters_by_error_type(
     repo = _make_repo(FrontendErrorLogsRepository, fake_query)
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=50, error_type="runtime"
-    )
+    await repo.list_with_filters(page=1, page_size=50, error_type="runtime")
 
     eq = next(c for c in fake_query.calls if c[0] == "eq")
     assert eq[1] == ("error_type", "runtime")
@@ -228,9 +217,7 @@ async def test_app_logs_level_is_uppercased(
     repo = _make_repo(AppLogsRepository, fake_query)
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=50, level="error"
-    )
+    await repo.list_with_filters(page=1, page_size=50, level="error")
 
     eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
     assert ("level", "ERROR") in eq_values
@@ -243,9 +230,7 @@ async def test_app_logs_has_exception_true_uses_neq_null(
     repo = _make_repo(AppLogsRepository, fake_query)
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=50, has_exception=True
-    )
+    await repo.list_with_filters(page=1, page_size=50, has_exception=True)
 
     neq_values = [c[1] for c in fake_query.calls if c[0] == "neq"]
     assert ("exception", None) in neq_values
@@ -258,9 +243,7 @@ async def test_app_logs_has_exception_false_uses_is_null(
     repo = _make_repo(AppLogsRepository, fake_query)
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=50, has_exception=False
-    )
+    await repo.list_with_filters(page=1, page_size=50, has_exception=False)
 
     is_values = [c[1] for c in fake_query.calls if c[0] == "is_"]
     assert ("exception", "null") in is_values

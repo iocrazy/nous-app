@@ -4,9 +4,8 @@ B4: sb_ai_router /storyboard/analyze-video + /storyboard/detect-scenes
 B5: visual_analysis_service._encode_image_from_url
 B7: download_progress.download_file_with_progress
 """
-from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from __future__ import annotations
 
 import pytest
 from fastapi import FastAPI
@@ -25,6 +24,7 @@ def _reset_boundary_caches():
 # ============================================================================
 # B4 — sb_ai_router (analyze-video + detect-scenes)
 # ============================================================================
+
 
 @pytest.fixture
 def sb_app() -> FastAPI:
@@ -87,6 +87,7 @@ def test_b4_analyze_video_rejects_decimal_ipv4(sb_app: FastAPI):
 # B5 — visual_analysis._encode_image_from_url
 # ============================================================================
 
+
 @pytest.mark.unit
 async def test_b5_image_url_blocked_returns_none(monkeypatch):
     """When URL fails boundary, _encode_image_from_url returns None
@@ -104,8 +105,10 @@ async def test_b5_image_url_blocked_returns_none(monkeypatch):
         async def __aenter__(self):
             httpx_called["n"] += 1
             return self
+
         async def __aexit__(self, *a):
             return None
+
         async def get(self, *a, **kw):
             httpx_called["n"] += 100
             raise AssertionError("httpx.get must not be called for blocked URL")
@@ -130,12 +133,12 @@ async def test_b5_image_url_decimal_ipv4_blocked(monkeypatch):
 # B7 — download_progress.download_file_with_progress
 # ============================================================================
 
+
 @pytest.mark.unit
 async def test_b7_download_url_blocked_returns_false(tmp_path):
     """Blocked URL must return False AND mark tracker failed,
     without any httpx call."""
     from app.services.media.downloader.download_progress import (
-        DownloadProgressTracker,
         download_file_with_progress,
     )
 
@@ -174,14 +177,22 @@ async def test_b7_download_url_blocked_returns_false(tmp_path):
 
 @pytest.mark.unit
 async def test_b7_download_localhost_suffix_blocked(tmp_path):
-    from app.services.media.downloader.download_progress import download_file_with_progress
+    from app.services.media.downloader.download_progress import (
+        download_file_with_progress,
+    )
 
     class _StubTracker:
         def __init__(self):
             self.failed_called = False
-        def complete(self): pass
-        def failed(self, reason): self.failed_called = True
-        def update(self, *a): pass
+
+        def complete(self):
+            pass
+
+        def failed(self, reason):
+            self.failed_called = True
+
+        def update(self, *a):
+            pass
 
     tracker = _StubTracker()
     out = tmp_path / "x" / "y.bin"

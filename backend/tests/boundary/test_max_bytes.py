@@ -1,4 +1,5 @@
 """Sprint 7 — bounded-byte readers."""
+
 from __future__ import annotations
 
 import io
@@ -12,7 +13,6 @@ from app.boundary.max_bytes import (
     cap_iter,
     read_with_cap,
 )
-
 
 # ─── Sync read_with_cap ───────────────────────────────────────────────
 
@@ -114,9 +114,7 @@ async def test_cap_aiter_yields_until_overrun():
 async def test_cap_aiter_raises_on_overrun():
     received: list[bytes] = []
     with pytest.raises(MaxBytesExceededError):
-        async for chunk in cap_aiter(
-            _aiter([b"abc", b"defghij"]), max_bytes=5
-        ):
+        async for chunk in cap_aiter(_aiter([b"abc", b"defghij"]), max_bytes=5):
             received.append(chunk)
     # Caller saw the safe chunk but NOT the overrun chunk.
     assert received == [b"abc"]

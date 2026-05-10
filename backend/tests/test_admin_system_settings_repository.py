@@ -23,11 +23,13 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
+
         return _R()
 
 
@@ -99,6 +101,7 @@ async def test_exists_false_on_exception(
 ) -> None:
     async def _raises():
         raise RuntimeError("boom")
+
     fake_query.execute = _raises  # type: ignore[assignment]
 
     assert await settings_repo.exists("x") is False

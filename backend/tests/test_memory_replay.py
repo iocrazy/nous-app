@@ -1,4 +1,5 @@
 """R2 — memory replay testing primitive."""
+
 from __future__ import annotations
 
 import pytest
@@ -9,7 +10,6 @@ from app.services.ai.memory.replay import (
     filter_excluding,
     score_influence,
 )
-
 
 # ─── filter_excluding ────────────────────────────────────────────────
 

@@ -19,12 +19,14 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
 
@@ -165,9 +167,7 @@ async def test_update_pricing_none_on_empty(
     repo: AdminCreditsRepository, fake_query: _FakeQuery
 ) -> None:
     fake_query._data = []
-    assert (
-        await repo.update_pricing("transcribe", {"points_cost": 5})
-    ) is None
+    assert (await repo.update_pricing("transcribe", {"points_cost": 5})) is None
 
 
 # ─── Transactions ──────────────────────────────────────────────────
@@ -341,9 +341,7 @@ async def test_orders_by_status_with_since_applies_gte(
     repo: AdminCreditsRepository, fake_query: _FakeQuery
 ) -> None:
     fake_query._data = []
-    await repo.orders_by_status(
-        payment_status="paid", since_iso="2026-04-01"
-    )
+    await repo.orders_by_status(payment_status="paid", since_iso="2026-04-01")
 
     gte = next(c for c in fake_query.calls if c[0] == "gte")
     assert gte[1] == ("paid_at", "2026-04-01")

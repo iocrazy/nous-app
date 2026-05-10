@@ -12,9 +12,9 @@ from app.schemas.script import (
     ExpandChapterRequest,
     GenerateOutlineRequest,
 )
+from app.services.infra.unified_task_manager import get_task_manager
 from app.services.storyboard.script.script_ai_service import ScriptAIService
 from app.services.storyboard.script.script_service import ScriptService
-from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/scripts")
 

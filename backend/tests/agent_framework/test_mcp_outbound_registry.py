@@ -4,6 +4,7 @@ We mock MCPClient via dependency-substitution so the registry's logic
 (namespacing, parallel listing, failure isolation) is tested without
 hitting any HTTP server.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -13,7 +14,6 @@ import pytest
 from app.agent_framework.mcp_client import MCPClientError, MCPServerConfig
 from app.agent_framework.mcp_outbound_registry import (
     MCPOutboundRegistry,
-    QualifiedTool,
 )
 
 
@@ -24,9 +24,13 @@ def _stub_client(tools_payload, *, raise_on_call=None, call_result=None):
     if raise_on_call:
         c.call_tool = AsyncMock(side_effect=raise_on_call)
     else:
-        c.call_tool = AsyncMock(return_value=call_result or {
-            "content": [{"type": "text", "text": "ok"}], "isError": False,
-        })
+        c.call_tool = AsyncMock(
+            return_value=call_result
+            or {
+                "content": [{"type": "text", "text": "ok"}],
+                "isError": False,
+            }
+        )
     c.aclose = AsyncMock()
     return c
 
@@ -76,12 +80,16 @@ async def test_all_tools_namespaces_with_server_name(reg):
     reg.add_server(MCPServerConfig(name="linear", url="https://x"))
 
     # Stub each client's list_tools
-    reg._clients["notion"] = _stub_client([
-        {"name": "create_page", "description": "Create page", "inputSchema": {}},
-    ])
-    reg._clients["linear"] = _stub_client([
-        {"name": "create_issue", "description": "New issue", "inputSchema": {}},
-    ])
+    reg._clients["notion"] = _stub_client(
+        [
+            {"name": "create_page", "description": "Create page", "inputSchema": {}},
+        ]
+    )
+    reg._clients["linear"] = _stub_client(
+        [
+            {"name": "create_issue", "description": "New issue", "inputSchema": {}},
+        ]
+    )
 
     tools = await reg.all_tools()
     qualified = sorted(t.qualified_name for t in tools)
@@ -101,9 +109,11 @@ async def test_one_server_failure_does_not_block_others(reg):
     reg.add_server(MCPServerConfig(name="ok_server", url="https://x"))
     reg.add_server(MCPServerConfig(name="broken", url="https://x"))
 
-    reg._clients["ok_server"] = _stub_client([
-        {"name": "good_tool", "description": "", "inputSchema": {}},
-    ])
+    reg._clients["ok_server"] = _stub_client(
+        [
+            {"name": "good_tool", "description": "", "inputSchema": {}},
+        ]
+    )
     broken = AsyncMock()
     broken.list_tools = AsyncMock(side_effect=MCPClientError("server down"))
     broken.aclose = AsyncMock()
@@ -119,12 +129,14 @@ async def test_one_server_failure_does_not_block_others(reg):
 async def test_malformed_descriptors_skipped(reg):
     """A descriptor missing 'name' is dropped, not crashed on."""
     reg.add_server(MCPServerConfig(name="srv", url="https://x"))
-    reg._clients["srv"] = _stub_client([
-        {"name": "valid", "description": "", "inputSchema": {}},
-        {"description": "no name field"},  # missing name
-        "not a dict",                       # wrong type
-        {"name": "", "description": ""},   # empty name
-    ])
+    reg._clients["srv"] = _stub_client(
+        [
+            {"name": "valid", "description": "", "inputSchema": {}},
+            {"description": "no name field"},  # missing name
+            "not a dict",  # wrong type
+            {"name": "", "description": ""},  # empty name
+        ]
+    )
 
     tools = await reg.all_tools()
     assert [t.qualified_name for t in tools] == ["srv.valid"]
@@ -145,12 +157,20 @@ async def test_call_routes_to_matching_server(reg):
     reg.add_server(MCPServerConfig(name="notion", url="https://x"))
     reg.add_server(MCPServerConfig(name="linear", url="https://x"))
 
-    notion_client = _stub_client([], call_result={
-        "content": [{"type": "text", "text": "from notion"}], "isError": False,
-    })
-    linear_client = _stub_client([], call_result={
-        "content": [{"type": "text", "text": "from linear"}], "isError": False,
-    })
+    notion_client = _stub_client(
+        [],
+        call_result={
+            "content": [{"type": "text", "text": "from notion"}],
+            "isError": False,
+        },
+    )
+    linear_client = _stub_client(
+        [],
+        call_result={
+            "content": [{"type": "text", "text": "from linear"}],
+            "isError": False,
+        },
+    )
     reg._clients["notion"] = notion_client
     reg._clients["linear"] = linear_client
 

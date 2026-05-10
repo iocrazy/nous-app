@@ -4,6 +4,7 @@ The wire-up: settings.SSRF_PROXY_URL is auto-populated by app.main
 lifespan; YtdlpService._get_proxy_args reads it and adds --proxy to
 every yt-dlp cmd unless an external proxy already wins for this URL.
 """
+
 from __future__ import annotations
 
 import pytest
