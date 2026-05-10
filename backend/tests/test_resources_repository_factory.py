@@ -121,9 +121,10 @@ def test_asyncpg_repo_has_same_public_methods_as_legacy():
     )
 
 
-# Phase 3a migrated methods — keep this list in sync with
-# ResourcesRepositoryAsyncpg overrides.
+# Migrated methods — keep this list in sync with
+# ResourcesRepositoryAsyncpg overrides. Grouped by phase for readability.
 _PHASE_3A_METHODS = [
+    # resources table
     "create_resource",
     "get_resource_by_id",
     "get_resource_by_media_id",
@@ -135,9 +136,25 @@ _PHASE_3A_METHODS = [
     "count_resources_by_media_id",
     "find_by_hash",
 ]
+_PHASE_3B_METHODS = [
+    # resource_items table + trash listings
+    "find_resource_item",
+    "create_resource_item",
+    "_resource_ids_for_platforms",
+    "_resource_ids_with_all_tags",
+    "get_resource_item",
+    "get_resource_item_in_folder",
+    "get_first_resource_item",
+    "update_resource_item",
+    "delete_resource_item",
+    "count_resource_items",
+    "get_expired_trashed_resources",
+    "get_trashed_resources",
+]
+_MIGRATED_METHODS = _PHASE_3A_METHODS + _PHASE_3B_METHODS
 
 
-@pytest.mark.parametrize("method_name", _PHASE_3A_METHODS)
+@pytest.mark.parametrize("method_name", _MIGRATED_METHODS)
 def test_asyncpg_signature_matches_legacy(method_name):
     """For each migrated method, the asyncpg impl's signature must
     match the legacy. Catches accidental kwarg renames that would
