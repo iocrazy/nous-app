@@ -45,9 +45,16 @@ from app.repositories.media_repository import MediaRepository
 
 
 def _normalize_for_pg(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Coerce DownloadStatus enum + datetime values to wire-friendly
-    types for the parsed_media table. Returns a NEW dict — caller's
-    input is not mutated (mirrors immutability rule)."""
+    """Coerce DownloadStatus enum values for the parsed_media table.
+    Returns a NEW dict — caller's input is not mutated (mirrors
+    immutability rule).
+
+    Datetimes are passed through AS-IS — asyncpg's timestamp codec
+    expects ``datetime.datetime`` instances, NOT isoformat strings.
+    The legacy supabase-py code had to ``.isoformat()`` because
+    PostgREST consumed JSON. asyncpg is the opposite: ``str`` raises
+    ``DataError: expected a datetime.datetime instance, got 'str'``.
+    Caught by tests/integration/test_asyncpg_repos.py."""
     out = dict(data)
     for field in (
         "video_download_status",
@@ -58,10 +65,6 @@ def _normalize_for_pg(data: Dict[str, Any]) -> Dict[str, Any]:
         v = out.get(field)
         if isinstance(v, DownloadStatus):
             out[field] = v.value
-    for field in ("published_at", "download_time"):
-        v = out.get(field)
-        if isinstance(v, datetime):
-            out[field] = v.isoformat()
     return out
 
 
@@ -96,11 +99,13 @@ class MediaRepositoryAsyncpg(AsyncpgRepository, MediaRepository):
         )
 
     async def get_by_id(self, media_id: str) -> Optional[Dict[str, Any]]:
-        """Lookup by primary key (UUID). asyncpg's uuid codec accepts
-        str input — no coercion needed."""
+        """Lookup by primary key. ``parsed_media.id`` is BIGINT
+        (Snowflake — verified against information_schema, NOT UUID
+        as some legacy docstrings claimed). API path params arrive
+        as str → ``_bigint`` coercion required."""
         return await self.fetch_one(
             "SELECT * FROM parsed_media WHERE id = $1 LIMIT 1",
-            media_id,
+            self._bigint(media_id),
         )
 
     async def update(
@@ -110,7 +115,9 @@ class MediaRepositoryAsyncpg(AsyncpgRepository, MediaRepository):
         before binding (matches legacy)."""
         try:
             normalized = _normalize_for_pg(data)
-            normalized["updated_at"] = datetime.now().isoformat()
+            # asyncpg wants datetime objects directly — NOT isoformat
+            # strings. See _normalize_for_pg docstring for the trap.
+            normalized["updated_at"] = datetime.now()
 
             cols = list(normalized.keys())
             set_pairs = ", ".join(f'"{c}" = ${i + 1}' for i, c in enumerate(cols))

@@ -140,7 +140,9 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
         count for telemetry. Caller (sweeper cron) holds an advisory
         lock so this is serialized."""
         try:
-            now_iso = datetime.now(timezone.utc).isoformat()
+            # asyncpg's timestamp codec wants datetime objects, NOT
+            # isoformat strings — passing str raises DataError.
+            # Caught by tests/integration/test_asyncpg_repos.py.
             rows = await self.fetch_all(
                 "UPDATE agent_runs "
                 "SET status = 'heartbeat_lost', "
@@ -149,8 +151,8 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
                 "    error_message = 'No heartbeat for >2 minutes' "
                 "WHERE status = 'running' AND heartbeat_at < $2 "
                 "RETURNING id",
-                now_iso,
-                stale_before.isoformat(),
+                datetime.now(timezone.utc),
+                stale_before,
             )
             return len(rows)
         except Exception as e:
@@ -170,14 +172,15 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
         is a Phase 5+ optimization, intentionally out of scope here
         to keep the migration mechanical)."""
         try:
+            # datetime objects, not isoformat — see mark_heartbeat_lost.
             return await self.fetch_all(
                 "SELECT agent_id, user_id, team_id, project_id, status, "
                 "       prompt_tokens, completion_tokens, total_tokens, "
                 "       cost_cents "
                 "FROM agent_runs "
                 "WHERE started_at >= $1 AND started_at < $2",
-                month_start.isoformat(),
-                month_end.isoformat(),
+                month_start,
+                month_end,
             )
         except Exception as e:
             logger.error(f"Failed to load monthly usage: {e}")

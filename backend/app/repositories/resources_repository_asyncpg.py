@@ -626,17 +626,18 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
 
             if created_after is not None:
                 where.append(f"r.created_at >= {_ph()}")
+                # asyncpg wants datetime objects, not isoformat strings.
                 args.append(
                     datetime.combine(
                         created_after, datetime.min.time(), tzinfo=timezone.utc
-                    ).isoformat()
+                    )
                 )
             if created_before is not None:
                 where.append(f"r.created_at <= {_ph()}")
                 args.append(
                     datetime.combine(
                         created_before, datetime.max.time(), tzinfo=timezone.utc
-                    ).isoformat()
+                    )
                 )
 
             if duration_min is not None:
@@ -692,9 +693,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     ) -> List[Dict[str, Any]]:
         """Trashed resources older than N days, for permanent cleanup."""
         try:
-            cutoff = (
-                datetime.now(timezone.utc) - timedelta(days=older_than_days)
-            ).isoformat()
+            # datetime object, not isoformat — asyncpg requires it.
+            cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
             return await self.fetch_all(
                 "SELECT id, file_path, cover_image_path FROM resources "
                 "WHERE is_trashed = true AND trashed_at < $1",
