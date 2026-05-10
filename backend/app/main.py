@@ -622,6 +622,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to close async Redis: {e}")
 
+    # Drain asyncpg pool to Supavisor (Phase 1 of supabase-py → asyncpg
+    # migration). No-op when SUPAVISOR_DATABASE_URL is not configured.
+    try:
+        from app.db.pg_pool import close_pool
+
+        await close_pool()
+        logger.info("Asyncpg pool closed (Supavisor)")
+    except Exception as e:
+        logger.warning(f"Failed to close asyncpg pool: {e}")
+
     logger.info(f"{settings.APP_NAME}关闭成功")
 
 
