@@ -91,13 +91,18 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         — caller may already have the parsed_media row cached and
         collapsing into a JOIN would diverge the cache key."""
         try:
-            media_uuid = await self.fetch_value(
+            media_id = await self.fetch_value(
                 "SELECT id FROM parsed_media WHERE platform_id = $1 LIMIT 1",
                 platform_id,
             )
-            if not media_uuid:
+            if not media_id:
                 return None
-            return await self.get_resource_by_media_id(str(media_uuid))
+            # Pass the int through directly. parsed_media.id and
+            # resources.media_id are both BIGINT (Snowflake, migration
+            # 051); asyncpg binds str→bigint as a hard error. The
+            # legacy variable name "media_uuid" was misleading — it's
+            # always been a Snowflake int since the migration.
+            return await self.get_resource_by_media_id(media_id)
         except Exception as e:
             logger.error(
                 f"Failed to get resource by platform_id {platform_id}: {e}"
