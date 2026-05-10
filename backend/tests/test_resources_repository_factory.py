@@ -151,7 +151,18 @@ _PHASE_3B_METHODS = [
     "get_expired_trashed_resources",
     "get_trashed_resources",
 ]
-_MIGRATED_METHODS = _PHASE_3A_METHODS + _PHASE_3B_METHODS
+_PHASE_3C_METHODS = [
+    # resource_versions table
+    "create_version",
+    "get_versions",
+    "get_version_by_id",
+    "get_version_by_number",
+    "delete_version",
+    "update_version",
+    "get_untranscoded_video_versions",
+    "get_next_version_number",
+]
+_MIGRATED_METHODS = _PHASE_3A_METHODS + _PHASE_3B_METHODS + _PHASE_3C_METHODS
 
 
 @pytest.mark.parametrize("method_name", _MIGRATED_METHODS)
