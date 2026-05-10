@@ -62,7 +62,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     ) -> Optional[Dict[str, Any]]:
         try:
             return await self.fetch_one(
-                "SELECT * FROM resources WHERE id = $1", resource_id
+                "SELECT * FROM resources WHERE id = $1",
+                self._bigint(resource_id),
             )
         except Exception as e:
             logger.error(f"Failed to get resource {resource_id}: {e}")
@@ -74,7 +75,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         try:
             return await self.fetch_one(
                 "SELECT * FROM resources WHERE media_id = $1 LIMIT 1",
-                media_id,
+                self._bigint(media_id),
             )
         except Exception as e:
             logger.error(
@@ -116,7 +117,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             return await self.fetch_one(
                 "SELECT * FROM resources "
                 "WHERE media_id = $1 AND creator_id = $2 LIMIT 1",
-                media_id, creator_id,
+                self._bigint(media_id), creator_id,
             )
         except Exception as e:
             logger.error(
@@ -184,7 +185,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
         try:
-            row = await self.update_by_id(resource_id, **data)
+            row = await self.update_by_id(self._bigint(resource_id), **data)
             logger.info(f"Updated resource {resource_id}")
             return row or {}
         except Exception as e:
@@ -194,7 +195,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     async def delete_resource(self, resource_id: str) -> bool:
         try:
             await self.execute(
-                "DELETE FROM resources WHERE id = $1", resource_id
+                "DELETE FROM resources WHERE id = $1",
+                self._bigint(resource_id),
             )
             logger.info(f"Deleted resource {resource_id}")
             return True
@@ -206,7 +208,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         try:
             count = await self.fetch_value(
                 "SELECT count(*) FROM resources WHERE media_id = $1",
-                media_id,
+                self._bigint(media_id),
             )
             return int(count or 0)
         except Exception as e:

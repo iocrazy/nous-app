@@ -43,6 +43,34 @@ class AsyncpgRepository:
 
     TABLE: str = ""
 
+    # ── Type coercion at the boundary ───────────────────────────────
+
+    @staticmethod
+    def _bigint(v: Any) -> Any:
+        """Coerce digit-only strings to int for BIGINT bindings.
+
+        Snowflake IDs travel as strings through FastAPI path params
+        and the supabase-py-shaped legacy callers. asyncpg's int8
+        codec is strict and raises ``DataError: 'str' object cannot
+        be interpreted`` for str input. Wrap any user-supplied
+        BIGINT id in this helper before binding.
+
+        Verified empirically: ``WHERE bigint_col = $1`` with
+        str input fails; with int input works. UUID and text
+        columns are unaffected (their codecs accept str)."""
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError:
+                return v
+        return v
+
+    @staticmethod
+    def _bigint_list(vs: Any) -> list:
+        """Coerce a list of str ids to ints. For ``WHERE col = ANY($1)``
+        bindings against bigint arrays."""
+        return [AsyncpgRepository._bigint(v) for v in (vs or [])]
+
     # ── Low-level access ────────────────────────────────────────────
 
     @asynccontextmanager
