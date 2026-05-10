@@ -41,6 +41,12 @@ dependencies = [
     "rich>=14.0.0",
     "sqlalchemy>=2.0.41",
     "supabase>=2.18.1",
+    # Issue #199 follow-up: Bug C migration to asyncpg + Supavisor.
+    # Direct PG protocol (no HTTP) eliminates the supabase-py httpx
+    # stale-pool failures. Coexists with supabase-py for the time
+    # being; supabase-py will be removed once all repositories are
+    # migrated.
+    "asyncpg>=0.30.0",
     "tqdm>=4.67.1",
     "uvicorn>=0.34.3",
     "yt-dlp>=2024.12.23",

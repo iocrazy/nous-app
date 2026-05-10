@@ -51,6 +51,26 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # Supavisor 直连 PG（绕开 PostgREST/HTTP 层 — Bug C 治本）
+    # ============================================
+    # Format:
+    #   postgresql://postgres.{tenant_id}:{password}@{host}:{port}/{db}
+    # Transaction-mode pooler (port 6543 inside container, ${HOST_PORT}
+    # mapped on host). Tenant ID encoded in user name per Supavisor
+    # convention. Empty string = feature disabled (repository_base
+    # falls back to supabase-py path).
+    SUPAVISOR_DATABASE_URL: str = Field(
+        default="",
+        description="asyncpg DSN to Supavisor transaction-mode pooler",
+    )
+    SUPAVISOR_POOL_MIN_SIZE: int = Field(
+        default=2, description="asyncpg pool min connections"
+    )
+    SUPAVISOR_POOL_MAX_SIZE: int = Field(
+        default=10, description="asyncpg pool max connections"
+    )
+
+    # ============================================
     # 下载设置
     # ============================================
     # Docker 部署时使用默认值 /app/downloads（容器内路径）
