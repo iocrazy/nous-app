@@ -1,12 +1,15 @@
 """Sprint 8.5 — link extraction + injection rendering."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.boundary.external_text import HARD_LIMIT_CHARS, neutralize_external_text
 from app.services.ai.prompts import link_injection as li
-from app.services.ai.prompts.link_understanding import LinkSummary, LinkUnderstandingError
-
+from app.services.ai.prompts.link_understanding import (
+    LinkSummary,
+    LinkUnderstandingError,
+)
 
 # ─── extract_urls ─────────────────────────────────────────────────────
 
@@ -194,6 +197,7 @@ async def test_fetch_and_render_success(monkeypatch):
 async def test_fetch_and_render_failure_keeps_placeholder(monkeypatch):
     """A failed fetch produces a placeholder block — agent still sees
     'we tried this URL' rather than nothing."""
+
     async def _stub(url, **_kw):
         raise LinkUnderstandingError("upstream returned HTTP 404")
 
@@ -225,6 +229,7 @@ async def test_fetch_and_render_mixed_outcomes(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_and_render_unexpected_exception_caught(monkeypatch):
     """Non-LinkUnderstandingError shouldn't crash the batch."""
+
     async def _stub(url, **_kw):
         raise RuntimeError("network exploded")
 

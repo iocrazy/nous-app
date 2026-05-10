@@ -1,4 +1,5 @@
 """K3 — Redis-backed ModelHealthRegistry + LifecycleBus."""
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,6 @@ from app.agent_framework.lifecycle_bus import LifecycleEvent
 from app.agent_framework.lifecycle_bus_redis import RedisLifecycleBus
 from app.agent_framework.model_health import ModelHealth
 from app.agent_framework.model_health_redis import RedisModelHealthRegistry
-
 
 # ─── RedisModelHealthRegistry ────────────────────────────────────────
 
@@ -45,6 +45,7 @@ def test_health_returns_state():
 @pytest.mark.asyncio
 async def test_async_is_available_consults_redis():
     """When Redis says cooled, async returns False even if local is clean."""
+
     class _FakeRedis:
         def __init__(self):
             self.keys = {"model_health:cooldown:gpt-4o"}
@@ -62,6 +63,7 @@ async def test_async_is_available_consults_redis():
 @pytest.mark.asyncio
 async def test_async_redis_failure_falls_back_to_local():
     """Redis exists() throws → fall back to local check (don't 500)."""
+
     class _BrokenRedis:
         async def exists(self, key):
             raise RuntimeError("redis down")

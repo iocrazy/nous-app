@@ -1,8 +1,8 @@
 """Sprint 5.5 — bounds inventory introspection."""
+
 from __future__ import annotations
 
 from types import ModuleType, SimpleNamespace
-from typing import Any
 
 import pytest
 
@@ -12,7 +12,6 @@ from app.agent_framework.bounds_inventory import (
     inventory_workflow_names,
     merge_lane_capacity,
 )
-
 
 # ─── workflow names ───────────────────────────────────────────────────
 
@@ -30,10 +29,12 @@ def _fake_workflow_module(*funcs):
 def test_inventory_workflow_names_basic():
     def download_workflow():  # noqa: D401
         ...
+
     download_workflow.__module__ = "app.workflows.download"
 
     def parse_workflow():  # noqa: D401
         ...
+
     parse_workflow.__module__ = "app.workflows.parse"
 
     mod = _fake_workflow_module(download_workflow, parse_workflow)
@@ -44,12 +45,14 @@ def test_inventory_workflow_names_basic():
 @pytest.mark.unit
 def test_inventory_skips_private_and_imported_modules():
     """Underscore names + imported modules should not count as workflows."""
+
     def real_workflow():  # noqa: D401
         ...
+
     real_workflow.__module__ = "app.workflows.x"
 
-    def _private_helper():
-        ...
+    def _private_helper(): ...
+
     _private_helper.__module__ = "app.workflows.x"
 
     fake_imported = ModuleType("some_other_module")
@@ -64,8 +67,9 @@ def test_inventory_skips_private_and_imported_modules():
 @pytest.mark.unit
 def test_inventory_skips_external_module_callables():
     """Callable defined OUTSIDE app.workflows.* shouldn't be advertised."""
-    def stranger():
-        ...
+
+    def stranger(): ...
+
     stranger.__module__ = "third_party.utils"
 
     mod = _fake_workflow_module(stranger)
@@ -135,6 +139,7 @@ async def test_inventory_agent_slugs_none_repo_returns_empty():
 @pytest.mark.asyncio
 async def test_inventory_agent_slugs_swallows_errors():
     """Best-effort — DB error must not block worker startup."""
+
     class _Broken:
         async def _get_client(self):
             raise RuntimeError("supabase down")

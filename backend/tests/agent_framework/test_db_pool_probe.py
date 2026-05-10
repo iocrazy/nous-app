@@ -1,4 +1,5 @@
 """D10-10 — db_pool_probe classify + log."""
+
 from __future__ import annotations
 
 import logging
@@ -10,7 +11,6 @@ from app.agent_framework.db_pool_probe import (
     _classify,
     log_capacity_report,
 )
-
 
 # ─── _classify ──────────────────────────────────────────────────────
 

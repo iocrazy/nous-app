@@ -33,16 +33,16 @@ cluster-wide caps, DBOS queue concurrency still applies on top of
 this — lane queue limits per-process slot usage; DBOS limits across
 the cluster.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from loguru import logger
-
 
 # ── Lane definitions ────────────────────────────────────────────
 
@@ -50,10 +50,10 @@ from loguru import logger
 # cumulative max = 5 + 3 + 1 + 2 = 11 across all lanes; that's the per-
 # process ceiling. Multi-replica deployments scale by N.
 _LANE_DEFAULTS = {
-    "user":       int(os.environ.get("LANE_QUEUE_USER", "5")),
+    "user": int(os.environ.get("LANE_QUEUE_USER", "5")),
     "background": int(os.environ.get("LANE_QUEUE_BACKGROUND", "3")),
-    "scheduled":  int(os.environ.get("LANE_QUEUE_SCHEDULED", "1")),
-    "subagent":   int(os.environ.get("LANE_QUEUE_SUBAGENT", "2")),
+    "scheduled": int(os.environ.get("LANE_QUEUE_SCHEDULED", "1")),
+    "subagent": int(os.environ.get("LANE_QUEUE_SUBAGENT", "2")),
 }
 
 # Map task_type → lane. Tasks without a mapping land in "background"
@@ -61,27 +61,27 @@ _LANE_DEFAULTS = {
 # lane). Extend as new task_types appear.
 _TASK_TYPE_LANE: Dict[str, str] = {
     # User-clicked
-    "parse":              "user",
-    "download":           "user",
-    "fetch":              "user",
-    "upload":             "user",
+    "parse": "user",
+    "download": "user",
+    "fetch": "user",
+    "upload": "user",
     # Background AI chain
-    "transcode":          "background",
-    "thumbnail":          "background",
-    "ai_extract":         "background",
-    "ai_transcription":   "background",
-    "ai_summary":         "background",
+    "transcode": "background",
+    "thumbnail": "background",
+    "ai_extract": "background",
+    "ai_transcription": "background",
+    "ai_summary": "background",
     "ai_visual_analysis": "background",
     "script_outline_gen": "background",
     # Scheduled / cron
-    "scheduled_master":   "scheduled",
+    "scheduled_master": "scheduled",
     "agent_runs_sweeper": "scheduled",
-    "stuck_task_reaper":  "scheduled",
-    "system_status":      "scheduled",
+    "stuck_task_reaper": "scheduled",
+    "system_status": "scheduled",
     # Subagent / agent workforce
-    "agent_workforce":    "subagent",
-    "agent_inbox":        "subagent",
-    "agent_outbox":       "subagent",
+    "agent_workforce": "subagent",
+    "agent_inbox": "subagent",
+    "agent_outbox": "subagent",
 }
 
 
@@ -108,9 +108,7 @@ class LaneQueue:
     slot is available.
     """
 
-    def __init__(
-        self, lane_capacities: Optional[Dict[str, int]] = None
-    ) -> None:
+    def __init__(self, lane_capacities: Optional[Dict[str, int]] = None) -> None:
         caps = lane_capacities or _LANE_DEFAULTS
         self._lanes: Dict[str, _LaneState] = {
             name: _LaneState(
@@ -129,13 +127,12 @@ class LaneQueue:
         """
         state = self._lanes.get(lane)
         if state is None:
-            logger.debug(
-                f"[lane_queue] unknown lane {lane!r}; routing to background"
-            )
+            logger.debug(f"[lane_queue] unknown lane {lane!r}; routing to background")
             state = self._lanes["background"]
 
         state.queued += 1
         import time
+
         t0 = time.time()
         try:
             await state.sem.acquire()

@@ -23,13 +23,12 @@ Truncation strategy:
     instead the WHOLE call is replaced with a placeholder pointing at
     the original tool_call_id
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
 
 from app.agent_framework.tokenizer import count_tokens
-
 
 # Default per-message cap. 50k tokens ≈ 200KB of text; well above any
 # reasonable single-paste use case but well under any model's window
@@ -78,8 +77,10 @@ def cap_message_tokens(
     before = _measure_message(message, model)
     if before <= cap:
         return TruncationOutcome(
-            message=message, truncated=False,
-            tokens_before=before, tokens_after=before,
+            message=message,
+            truncated=False,
+            tokens_before=before,
+            tokens_after=before,
         )
 
     new_msg = dict(message)
@@ -114,8 +115,10 @@ def cap_message_tokens(
 
     after = _measure_message(new_msg, model)
     return TruncationOutcome(
-        message=new_msg, truncated=True,
-        tokens_before=before, tokens_after=after,
+        message=new_msg,
+        truncated=True,
+        tokens_before=before,
+        tokens_after=after,
     )
 
 
@@ -184,9 +187,11 @@ def _truncate_multipart(parts: list, cap: int, model: str) -> list:
     out = [dict(p) if isinstance(p, dict) else p for p in parts]
     while True:
         total = sum(
-            count_tokens(p.get("text") or str(p), model)
-            if isinstance(p, dict)
-            else count_tokens(str(p), model)
+            (
+                count_tokens(p.get("text") or str(p), model)
+                if isinstance(p, dict)
+                else count_tokens(str(p), model)
+            )
             for p in out
         )
         if total <= cap:

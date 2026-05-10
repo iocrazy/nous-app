@@ -19,12 +19,14 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
 
@@ -113,9 +115,7 @@ async def test_list_with_filters_applies_search_or(
 ) -> None:
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=20, search="cat"
-    )
+    await repo.list_with_filters(page=1, page_size=20, search="cat")
 
     or_call = next(c for c in fake_query.calls if c[0] == "or_")
     assert "title.ilike.%cat%" in or_call[1][0]
@@ -128,9 +128,7 @@ async def test_list_with_filters_invalid_sort_falls_back(
 ) -> None:
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_with_filters(
-        page=1, page_size=20, sort_by="DROP TABLE; --"
-    )
+    await repo.list_with_filters(page=1, page_size=20, sort_by="DROP TABLE; --")
 
     order = next(c for c in fake_query.calls if c[0] == "order")
     assert order[1] == ("created_at",)
@@ -185,6 +183,7 @@ async def test_get_by_id_swallows_exception(
 ) -> None:
     async def _raises():
         raise RuntimeError("db down")
+
     fake_query.execute = _raises  # type: ignore[assignment]
 
     row = await repo.get_by_id(1)

@@ -25,7 +25,6 @@ import pytest
 
 from app.repositories.agent_workforce_repository import AgentWorkforceRepository
 
-
 # ─── helpers ──────────────────────────────────────────────────────────
 
 
@@ -39,9 +38,24 @@ def _result(data: Any = None, count: int | None = None) -> Any:
 def _exec_chain(returns: Any) -> MagicMock:
     """A query chain whose terminal .execute() returns `returns`."""
     chain = MagicMock()
-    for op in ("select", "eq", "neq", "in_", "lt", "lte", "gt", "gte",
-               "order", "limit", "range", "update", "insert", "upsert",
-               "maybe_single", "single"):
+    for op in (
+        "select",
+        "eq",
+        "neq",
+        "in_",
+        "lt",
+        "lte",
+        "gt",
+        "gte",
+        "order",
+        "limit",
+        "range",
+        "update",
+        "insert",
+        "upsert",
+        "maybe_single",
+        "single",
+    ):
         getattr(chain, op).return_value = chain
     chain.execute = AsyncMock(return_value=returns)
     return chain
@@ -175,9 +189,7 @@ async def test_claim_next_unread_uses_cas_guard():
 async def test_claim_next_unread_returns_none_on_empty_inbox():
     select_chain = _exec_chain(_result([]))
     repo = _make_repo({"agent_inbox": select_chain})
-    out = await repo.claim_next_unread(
-        recipient_agent_id=uuid4(), claimed_by="hostA:1"
-    )
+    out = await repo.claim_next_unread(recipient_agent_id=uuid4(), claimed_by="hostA:1")
     assert out is None
 
 

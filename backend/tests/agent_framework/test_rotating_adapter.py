@@ -1,10 +1,10 @@
 """RotatingAdapter — multi-key rotation on 429/auth fail."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.agent_framework import (
-    AllKeysCooledDown,
     KeyRotator,
     RotatingAdapter,
 )
@@ -20,8 +20,10 @@ class _StubAdapter:
     async def call(self, composed, messages):
         spec = self._behavior.get(self.api_key, {"ok": True})
         if "raise_status" in spec:
+
             class HTTPErr(Exception):
                 pass
+
             err = HTTPErr(f"HTTP {spec['raise_status']}")
             err.status_code = spec["raise_status"]  # type: ignore[attr-defined]
             raise err
@@ -33,6 +35,7 @@ class _StubAdapter:
 def _factory(behavior: dict[str, dict]):
     def build(api_key: str) -> _StubAdapter:
         return _StubAdapter(api_key, behavior)
+
     return build
 
 

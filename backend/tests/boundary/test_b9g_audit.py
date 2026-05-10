@@ -1,8 +1,8 @@
 """B9-G — boundary_audit log_block fire-and-forget contract."""
+
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -67,6 +67,7 @@ async def test_log_block_truncates_long_raw_url(monkeypatch):
 async def test_log_block_swallows_write_failure(monkeypatch, caplog):
     """If the DB write raises, the audit caller does NOT see the error
     (best-effort semantics)."""
+
     async def _failing_write(payload: dict) -> None:
         raise RuntimeError("fake supabase down")
 

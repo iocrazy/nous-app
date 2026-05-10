@@ -30,7 +30,6 @@ skips silently (the holder's pass already updated state).
 
 from __future__ import annotations
 
-import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -38,9 +37,8 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
-
 # Threshold defaults (paperclip-aligned). Override with env vars.
-T1_SECONDS = int(os.environ.get("LIVENESS_T1_SECONDS", "60"))   # running → silent
+T1_SECONDS = int(os.environ.get("LIVENESS_T1_SECONDS", "60"))  # running → silent
 T2_SECONDS = int(os.environ.get("LIVENESS_T2_SECONDS", "180"))  # silent  → stuck
 T3_SECONDS = int(os.environ.get("LIVENESS_T3_SECONDS", "300"))  # stuck   → dead
 HEARTBEAT_DEAD_SECONDS = int(os.environ.get("LIVENESS_HEARTBEAT_DEAD_SECONDS", "120"))
@@ -60,9 +58,11 @@ async def liveness_scan_step() -> dict[str, Any]:
     sb = await get_async_supabase_admin()
 
     # Try the advisory lock; bail if another instance is scanning.
-    lock_resp = await sb.rpc(
-        "pg_try_advisory_lock", {"key": SCANNER_LOCK_ID}
-    ).execute() if False else None  # supabase client doesn't expose advisory_lock
+    lock_resp = (
+        await sb.rpc("pg_try_advisory_lock", {"key": SCANNER_LOCK_ID}).execute()
+        if False
+        else None
+    )  # supabase client doesn't expose advisory_lock
     # Fallback: use a SQL RPC wrapper. If you don't have one yet, the
     # scanner runs without a lock — at-most-once write per row is
     # naturally enforced by the WHERE liveness_state = <expected> guard
@@ -168,7 +168,9 @@ async def _transition(sb, run_id: str, expected: str, target: str) -> None:
             .execute()
         )
     except Exception as exc:
-        logger.warning(f"[liveness-scanner] transition {run_id} {expected}->{target} failed: {exc}")
+        logger.warning(
+            f"[liveness-scanner] transition {run_id} {expected}->{target} failed: {exc}"
+        )
 
 
 async def _mark_dead(sb, run_id: str, expected_state: str, *, reason: str) -> None:
@@ -178,13 +180,15 @@ async def _mark_dead(sb, run_id: str, expected_state: str, *, reason: str) -> No
     try:
         await (
             sb.table("agent_runs")
-            .update({
-                "liveness_state": "dead",
-                "status": "failed",
-                "ended_at": datetime.now(timezone.utc).isoformat(),
-                "error_code": reason,
-                "error_message": f"Marked dead by liveness scanner: {reason}",
-            })
+            .update(
+                {
+                    "liveness_state": "dead",
+                    "status": "failed",
+                    "ended_at": datetime.now(timezone.utc).isoformat(),
+                    "error_code": reason,
+                    "error_message": f"Marked dead by liveness scanner: {reason}",
+                }
+            )
             .eq("id", run_id)
             .eq("liveness_state", expected_state)
             .eq("status", "running")
@@ -196,7 +200,9 @@ async def _mark_dead(sb, run_id: str, expected_state: str, *, reason: str) -> No
 
 @DBOS.scheduled("*/30 * * * * *")  # every 30s (6-field cron)
 @DBOS.workflow()
-async def liveness_scan_scheduled(scheduled_at: datetime, actual_at: datetime) -> dict[str, Any]:
+async def liveness_scan_scheduled(
+    scheduled_at: datetime, actual_at: datetime
+) -> dict[str, Any]:
     """Scheduled entry — re-evaluates liveness for all running agent_runs."""
     return await liveness_scan_step()
 
@@ -233,20 +239,24 @@ async def reconcile_stranded_runs() -> dict[str, int]:
     ids = [r["id"] for r in rows]
     update_resp = (
         await sb.table("agent_runs")
-        .update({
-            "liveness_state": "dead",
-            "status": "failed",
-            "ended_at": datetime.now(timezone.utc).isoformat(),
-            "error_code": "stranded_on_restart",
-            "error_message": "Backend restarted while this run was in flight; no heartbeat for >2 minutes.",
-        })
+        .update(
+            {
+                "liveness_state": "dead",
+                "status": "failed",
+                "ended_at": datetime.now(timezone.utc).isoformat(),
+                "error_code": "stranded_on_restart",
+                "error_message": "Backend restarted while this run was in flight; no heartbeat for >2 minutes.",
+            }
+        )
         .in_("id", ids)
         .eq("status", "running")
         .execute()
     )
     n = len(update_resp.data or [])
     if n > 0:
-        logger.warning(f"[liveness-reconcile] marked {n} stranded run(s) dead on startup")
+        logger.warning(
+            f"[liveness-reconcile] marked {n} stranded run(s) dead on startup"
+        )
     return {"reconciled": n}
 
 

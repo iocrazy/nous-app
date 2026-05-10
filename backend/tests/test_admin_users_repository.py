@@ -38,12 +38,14 @@ class _FakeQuery:
         # We route them all through _record and ignore in the return value.
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             return self._record(name, *args, **kwargs)
+
         return _capture
 
     def _result_class(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
     async def _exec(self) -> Any:
@@ -103,9 +105,7 @@ async def test_list_with_filters_applies_search_and_role(
 
     # Verify search filter
     ilike_call = next(
-        (args, kwargs)
-        for name, args, kwargs in fake_query.calls
-        if name == "ilike"
+        (args, kwargs) for name, args, kwargs in fake_query.calls if name == "ilike"
     )
     assert ilike_call[0] == ("username", "%alice%")
 

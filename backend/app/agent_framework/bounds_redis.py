@@ -23,6 +23,7 @@ returns a new RedisBoundsRegistry that satisfies the same interface.
 Callers who want fan-out construct this; everyone else keeps using
 the in-process one.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +33,6 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.agent_framework.bounds import BoundsAdvertisement, BoundsRegistry
-
 
 # Redis key shape:
 #   bounds:hash             → HSET worker_id → JSON-encoded bound
@@ -101,7 +101,9 @@ class RedisBoundsRegistry:
     _subscriber_task: Optional[asyncio.Task] = None
 
     @classmethod
-    def create(cls, redis_client: Any, *, ttl_seconds: int = 90) -> "RedisBoundsRegistry":
+    def create(
+        cls, redis_client: Any, *, ttl_seconds: int = 90
+    ) -> "RedisBoundsRegistry":
         return cls(
             redis_client=redis_client,
             local=BoundsRegistry(stale_after_s=float(ttl_seconds)),

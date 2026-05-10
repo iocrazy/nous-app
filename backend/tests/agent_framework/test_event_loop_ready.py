@@ -10,6 +10,7 @@ checks (default 2), the loop is "ready".
 
 Mirrors OpenClaw gateway/event-loop-ready.ts.
 """
+
 from __future__ import annotations
 
 import asyncio

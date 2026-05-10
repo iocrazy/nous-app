@@ -9,13 +9,12 @@ These don't require a live Supavisor. The point is:
 Live integration tests against a real Supavisor are deferred to Phase 2
 (pilot repo) where the pattern is exercised end-to-end on one table.
 """
+
 from __future__ import annotations
 
-import os
 from unittest.mock import patch
 
 import pytest
-
 
 # ─── pg_pool ───────────────────────────────────────────────────────────
 
@@ -25,6 +24,7 @@ def test_is_configured_false_when_url_blank(monkeypatch):
     code reads is_configured() to decide whether to take the asyncpg
     fast path or fall back to supabase-py during migration."""
     from app.db import pg_pool
+
     with patch.object(pg_pool.settings, "SUPAVISOR_DATABASE_URL", ""):
         assert pg_pool.is_configured() is False
 
@@ -33,6 +33,7 @@ def test_is_configured_true_when_url_set(monkeypatch):
     """Any non-empty DSN flips the feature on. We trust the env to
     contain a valid PG DSN — pool creation handles invalid input."""
     from app.db import pg_pool
+
     with patch.object(
         pg_pool.settings,
         "SUPAVISOR_DATABASE_URL",
@@ -46,6 +47,7 @@ async def test_get_pool_raises_when_not_configured(monkeypatch):
     the caller (repository) can fall back to supabase-py instead of
     hanging or silently using a wrong default."""
     from app.db import pg_pool
+
     with patch.object(pg_pool.settings, "SUPAVISOR_DATABASE_URL", ""):
         # Force the singleton back to None so previous tests don't
         # leak a real pool into this one.
@@ -59,6 +61,7 @@ async def test_close_pool_is_idempotent_when_no_pool():
     not raise when there's nothing to close — typical case in dev /
     test environments where SUPAVISOR_DATABASE_URL is unset."""
     from app.db import pg_pool
+
     pg_pool._pool = None
     await pg_pool.close_pool()  # must not raise
 
@@ -67,6 +70,7 @@ async def test_health_check_false_when_not_configured(monkeypatch):
     """Liveness probe returns False (not raise) on unconfigured —
     monitoring / startup hooks check the bool, no try/except needed."""
     from app.db import pg_pool
+
     with patch.object(pg_pool.settings, "SUPAVISOR_DATABASE_URL", ""):
         pg_pool._pool = None
         assert await pg_pool.health_check() is False
@@ -146,9 +150,7 @@ async def test_update_by_id_uses_id_column_param():
 
     with patch.object(AsyncpgRepository, "fetch_one", fake_fetch_one):
         repo = MediaRepo()
-        result = await repo.update_by_id(
-            "abc", id_column="platform_id", title="new"
-        )
+        result = await repo.update_by_id("abc", id_column="platform_id", title="new")
 
     assert result["title"] == "new"
     assert '"platform_id" = $2' in captured_sql[0]

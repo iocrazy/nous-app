@@ -13,8 +13,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.services.ai.memory.retriever import (
-    DEFAULT_TOP_K_CANDIDATES,
-    DEFAULT_TOP_N_FINAL,
     MemoryRetriever,
 )
 
@@ -159,7 +157,9 @@ async def test_p0_recall_passes_user_id_to_rpc():
     )
     user = uuid4()
     agent = uuid4()
-    await retriever.recall(user_id=user, agent_id=agent, session_id=None, user_query="hi")
+    await retriever.recall(
+        user_id=user, agent_id=agent, session_id=None, user_query="hi"
+    )
 
     client.rpc.assert_called_once()
     args, kwargs = client.rpc.call_args
@@ -199,7 +199,9 @@ async def test_p0_cache_hit_fetch_filters_by_user_id():
         sonnet_call=_sonnet_keep_all,
         redis_client=redis,
     )
-    await retriever.recall(user_id=user, agent_id=agent, session_id=uuid4(), user_query="hi")
+    await retriever.recall(
+        user_id=user, agent_id=agent, session_id=uuid4(), user_query="hi"
+    )
 
     # Verify the .eq() was called with user_id binding.
     client.table.return_value.select.return_value.in_.return_value.eq.assert_called_with(
@@ -218,17 +220,27 @@ def test_salience_reranks_by_reinforcement():
     from app.services.ai.memory import MemoryRecord, MemoryScope
 
     a = MemoryRecord(
-        id=uuid4(), agent_id=uuid4(), user_id=uuid4(),
+        id=uuid4(),
+        agent_id=uuid4(),
+        user_id=uuid4(),
         scope=MemoryScope.AGENT_USER,
-        summary="frequent", when_to_use="w", extracted_from=None,
-        reinforcement_count=100, last_recalled_at=None,
+        summary="frequent",
+        when_to_use="w",
+        extracted_from=None,
+        reinforcement_count=100,
+        last_recalled_at=None,
         created_at=datetime.now(timezone.utc),
     )
     b = MemoryRecord(
-        id=uuid4(), agent_id=uuid4(), user_id=uuid4(),
+        id=uuid4(),
+        agent_id=uuid4(),
+        user_id=uuid4(),
         scope=MemoryScope.AGENT_USER,
-        summary="rare", when_to_use="w", extracted_from=None,
-        reinforcement_count=0, last_recalled_at=None,
+        summary="rare",
+        when_to_use="w",
+        extracted_from=None,
+        reinforcement_count=0,
+        last_recalled_at=None,
         created_at=datetime.now(timezone.utc),
     )
     retriever = MemoryRetriever(

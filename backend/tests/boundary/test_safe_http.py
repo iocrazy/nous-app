@@ -10,6 +10,7 @@ Tests cover the 3 critical guarantees:
 The PinnedDNS transport integration is exercised through the resolver
 mock — we don't need a real DNS lookup in unit tests.
 """
+
 from __future__ import annotations
 
 import httpx
@@ -44,6 +45,7 @@ def _reset_boundary_caches(monkeypatch):
 # Initial URL validation
 # ============================================================================
 
+
 @pytest.mark.unit
 async def test_initial_literal_private_ip_blocked():
     """Direct private IP literal must fail before any network call."""
@@ -64,9 +66,7 @@ async def test_initial_dns_resolves_to_private_blocked():
 @respx.mock
 async def test_initial_public_url_passes():
     """Normal public URL is allowed through."""
-    respx.get("https://example.com/").mock(
-        return_value=httpx.Response(200, text="ok")
-    )
+    respx.get("https://example.com/").mock(return_value=httpx.Response(200, text="ok"))
     async with safe_async_client() as client:
         r = await client.get("https://example.com/")
     assert r.status_code == 200
@@ -76,6 +76,7 @@ async def test_initial_public_url_passes():
 # ============================================================================
 # Redirect Location validation
 # ============================================================================
+
 
 @pytest.mark.unit
 @respx.mock
@@ -98,9 +99,7 @@ async def test_redirect_to_dns_private_blocked():
     respx.get("https://attacker.example.com/").mock(
         return_value=httpx.Response(
             302,
-            headers={
-                "Location": "https://redirect-target-private.example.com/x"
-            },
+            headers={"Location": "https://redirect-target-private.example.com/x"},
         )
     )
     async with safe_async_client() as client:
@@ -129,6 +128,7 @@ async def test_redirect_to_public_followed():
 # ============================================================================
 # Cross-origin sensitive header stripping
 # ============================================================================
+
 
 @pytest.mark.unit
 @respx.mock
@@ -197,9 +197,7 @@ async def test_authorization_preserved_on_same_origin_redirect():
     def _capture(request):
         captured_authorization.append(request.headers.get("Authorization"))
         if request.url.path == "/a":
-            return httpx.Response(
-                302, headers={"Location": "https://example.com/b"}
-            )
+            return httpx.Response(302, headers={"Location": "https://example.com/b"})
         return httpx.Response(200)
 
     respx.route().mock(side_effect=_capture)
@@ -219,6 +217,7 @@ async def test_authorization_preserved_on_same_origin_redirect():
 # Max redirects
 # ============================================================================
 
+
 @pytest.mark.unit
 @respx.mock
 async def test_max_redirects_enforced():
@@ -237,6 +236,7 @@ async def test_max_redirects_enforced():
 # ============================================================================
 # Class form
 # ============================================================================
+
 
 @pytest.mark.unit
 async def test_safe_async_client_class_form_works():

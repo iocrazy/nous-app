@@ -27,7 +27,9 @@ def _dsn() -> str:
 def resolve_analyze_provider(user_id: Optional[str]) -> dict[str, Any]:
     """Resolve provider key + config + model name. Mirrors
     analysis_tasks._resolve_analyze_provider_config."""
-    from app.services.ai.providers.ai_provider_helpers import resolve_analyze_provider_config
+    from app.services.ai.providers.ai_provider_helpers import (
+        resolve_analyze_provider_config,
+    )
 
     provider_key, provider_config, agent_model = resolve_analyze_provider_config(
         user_id

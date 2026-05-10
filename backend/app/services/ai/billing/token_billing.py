@@ -21,6 +21,7 @@ Used by:
   - RunRecorder hook (one extra call after the existing agent_runs write)
   - GET /api/v1/ai-library/usage/summary endpoint (UI dashboard)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,15 +38,16 @@ from app.db.supabase_client import get_async_supabase_admin
 @dataclass(frozen=True)
 class UsageSummaryRow:
     """One row in summarize_user_usage output."""
+
     model: str
     total_tokens: int
-    cost_points: float    # Decimal-friendly float — fine for display
+    cost_points: float  # Decimal-friendly float — fine for display
     run_count: int
 
 
 @dataclass(frozen=True)
 class DailyUsage:
-    date: str             # YYYY-MM-DD
+    date: str  # YYYY-MM-DD
     total_tokens: int
     cost_points: float
     run_count: int
@@ -167,10 +169,11 @@ async def summarize_user_usage(
 @dataclass(frozen=True)
 class ReconcileResult:
     """Outcome of reconcile_run — used by callers + telemetry."""
-    charged: bool         # true iff PointsService.check_and_consume succeeded
+
+    charged: bool  # true iff PointsService.check_and_consume succeeded
     charged_points: float
-    byo_key: bool         # true iff this run used the user's own provider key
-    usage_logged: bool    # true iff ai_usage_logs row written
+    byo_key: bool  # true iff this run used the user's own provider key
+    usage_logged: bool  # true iff ai_usage_logs row written
     note: Optional[str] = None
 
 
@@ -208,19 +211,21 @@ async def reconcile_run(
     try:
         await (
             client.table("ai_usage_logs")
-            .insert({
-                "user_id": str(user_id),
-                "team_id": team_id,
-                "project_id": project_id,
-                "session_id": str(session_id) if session_id else None,
-                "agent_id": str(agent_id) if agent_id else None,
-                "action": action,
-                "model": model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-                "cost_points": cost_points,
-            })
+            .insert(
+                {
+                    "user_id": str(user_id),
+                    "team_id": team_id,
+                    "project_id": project_id,
+                    "session_id": str(session_id) if session_id else None,
+                    "agent_id": str(agent_id) if agent_id else None,
+                    "action": action,
+                    "model": model,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "cost_points": cost_points,
+                }
+            )
             .execute()
         )
         usage_logged = True
@@ -248,6 +253,7 @@ async def reconcile_run(
 
     try:
         from app.services.billing.points_service import PointsService
+
         ps = PointsService()
         # PointsService rounds + writes to point_consumption_log internally.
         ok = await ps.check_and_consume(

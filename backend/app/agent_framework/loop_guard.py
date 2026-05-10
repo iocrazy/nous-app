@@ -26,6 +26,7 @@ Design choices:
     paginated reads) shouldn't abort. The runner's max_tool_iterations
     is the kill switch.
 """
+
 from __future__ import annotations
 
 import hashlib

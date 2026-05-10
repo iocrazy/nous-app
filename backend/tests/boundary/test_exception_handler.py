@@ -1,4 +1,5 @@
 """Global BoundaryError exception handler maps to safe HTTP 400."""
+
 from __future__ import annotations
 
 import pytest

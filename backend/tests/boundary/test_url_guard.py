@@ -1,15 +1,15 @@
 """url_guard — SSRF + scheme + dev allowlist + DNS rebinding."""
+
 from __future__ import annotations
 
 import asyncio
 import socket
-from unittest.mock import AsyncMock
 
 import pytest
 
+from app.boundary import url_guard
 from app.boundary.errors import URLBlockedError
 from app.boundary.types import ValidatedURL
-from app.boundary import url_guard
 from app.boundary.url_guard import validate_url, validate_url_async
 
 
@@ -26,6 +26,7 @@ def _reset_caches():
 # ============================================================================
 # Public URL passes
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_public_https_literal_ip_passes(monkeypatch):
@@ -50,6 +51,7 @@ def test_public_dns_passes(monkeypatch):
 # ============================================================================
 # Bad schemes
 # ============================================================================
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
@@ -83,6 +85,7 @@ def test_no_scheme_rejected():
 # Literal IPv4 — canonical form
 # ============================================================================
 
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "url",
@@ -107,14 +110,15 @@ def test_canonical_private_ipv4_rejected(url: str):
 # Literal IPv4 — non-canonical (CEO C1 — decimal/octal/hex)
 # ============================================================================
 
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "url",
     [
-        "http://2130706433/",      # decimal == 127.0.0.1
-        "http://3232248329/",      # decimal == 192.168.50.9
-        "http://0x7f000001/",      # hex == 127.0.0.1
-        "http://0177.0.0.1/",      # dotted octal first octet == 127.0.0.1
+        "http://2130706433/",  # decimal == 127.0.0.1
+        "http://3232248329/",  # decimal == 192.168.50.9
+        "http://0x7f000001/",  # hex == 127.0.0.1
+        "http://0177.0.0.1/",  # dotted octal first octet == 127.0.0.1
     ],
 )
 def test_decimal_octal_hex_ipv4_rejected(url: str):
@@ -127,14 +131,15 @@ def test_decimal_octal_hex_ipv4_rejected(url: str):
 # Literal IPv6
 # ============================================================================
 
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "url",
     [
-        "http://[::1]/",                  # loopback
-        "http://[::ffff:127.0.0.1]/",     # IPv4-mapped loopback
-        "http://[fc00::1]/",              # ULA
-        "http://[fe80::1]/",              # link-local
+        "http://[::1]/",  # loopback
+        "http://[::ffff:127.0.0.1]/",  # IPv4-mapped loopback
+        "http://[fc00::1]/",  # ULA
+        "http://[fe80::1]/",  # link-local
     ],
 )
 def test_private_ipv6_rejected(url: str):
@@ -145,6 +150,7 @@ def test_private_ipv6_rejected(url: str):
 # ============================================================================
 # Hostname suffixes (CEO C2)
 # ============================================================================
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
@@ -167,6 +173,7 @@ def test_blocked_hostname_suffix_rejected(url: str):
 # Cloud metadata server hostnames (CEO C3)
 # ============================================================================
 
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "url",
@@ -183,6 +190,7 @@ def test_blocked_metadata_hostnames_rejected(url: str):
 # ============================================================================
 # Dev allowlist (UC4)
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_dev_allowlist_overrides_block(monkeypatch):
@@ -219,6 +227,7 @@ def test_dev_allowlist_does_not_allow_unspecified(monkeypatch):
 # Settings-configurable extra blocked networks (E8)
 # ============================================================================
 
+
 @pytest.mark.unit
 def test_extra_blocked_networks_from_settings(monkeypatch):
     """SSRF_EXTRA_BLOCKED_NETWORKS adds custom blocks beyond stdlib."""
@@ -238,6 +247,7 @@ def test_extra_blocked_networks_from_settings(monkeypatch):
 # ============================================================================
 # DNS rebinding
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_dns_resolves_to_private_rejected(monkeypatch):
@@ -267,6 +277,7 @@ def test_dns_mixed_addresses_any_private_rejected(monkeypatch):
 @pytest.mark.unit
 def test_dns_failure_rejected(monkeypatch):
     """Fail closed on DNS errors."""
+
     def boom(h: str) -> list[str]:
         raise socket.gaierror("NXDOMAIN")
 
@@ -278,6 +289,7 @@ def test_dns_failure_rejected(monkeypatch):
 # ============================================================================
 # IPv6 zone IDs (E11)
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_ipv6_zone_id_stripped(monkeypatch):
@@ -293,6 +305,7 @@ def test_ipv6_zone_id_stripped(monkeypatch):
 # ============================================================================
 # DNS cache
 # ============================================================================
+
 
 @pytest.mark.unit
 def test_dns_cache_amortizes_calls(monkeypatch):
@@ -313,6 +326,7 @@ def test_dns_cache_amortizes_calls(monkeypatch):
 # ============================================================================
 # Async path (E1) — must use loop.getaddrinfo with timeout
 # ============================================================================
+
 
 @pytest.mark.unit
 async def test_validate_url_async_passes_public(monkeypatch):
@@ -345,10 +359,12 @@ async def test_validate_url_async_dns_timeout_rejects(monkeypatch):
     # Patch _resolve_host_async itself to simulate hang inside it
     async def slow_outer(host: str) -> list[str]:
         # call the timeout-wrapped real one with a fake getaddrinfo
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
+
         async def fake_loop_getaddrinfo(*a, **kw):
             await asyncio.sleep(10)
             return []
+
         # Actually simulate timeout from the wrapper by raising
         raise asyncio.TimeoutError()
 

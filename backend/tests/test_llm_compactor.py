@@ -11,11 +11,9 @@ import pytest
 from app.services.ai.llm.llm_compactor import (
     DEFAULT_AUTO_COMPACTION_INPUT_TOKENS,
     DEFAULT_KEEP_FLOOR_TURNS,
-    CompactionResult,
     compact_messages,
     estimate_tokens,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -78,9 +76,7 @@ async def test_under_threshold_returns_unchanged():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_empty_messages_no_op():
-    result = await compact_messages(
-        [], summarizer=_fake_summary, max_input_tokens=10
-    )
+    result = await compact_messages([], summarizer=_fake_summary, max_input_tokens=10)
     assert result.compacted is False
     assert result.messages == []
 
@@ -305,9 +301,7 @@ def test_estimate_tokens_ascii_heuristic():
 
 @pytest.mark.unit
 def test_estimate_tokens_includes_tool_calls_arguments():
-    msg = _assistant(
-        tool_calls=[_tool_call("tc1", "Skill", '{"skill": "x"}')]
-    )
+    msg = _assistant(tool_calls=[_tool_call("tc1", "Skill", '{"skill": "x"}')])
     # Wave 5a (A1): per-message overhead + name + args tokens; just check
     # the args ARE counted (non-zero, > overhead alone)
     assert estimate_tokens([msg]) >= 4
@@ -355,9 +349,9 @@ def _assert_no_orphan_tool_replies(messages: list[dict]) -> None:
                     issued_ids.add(cid)
         elif role == "tool":
             cid = msg.get("tool_call_id")
-            assert cid in issued_ids, (
-                f"orphaned tool reply: tool_call_id={cid} has no preceding assistant tool_use"
-            )
+            assert (
+                cid in issued_ids
+            ), f"orphaned tool reply: tool_call_id={cid} has no preceding assistant tool_use"
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +387,9 @@ def test_token_budget_tail_enforces_min_turns():
 def test_token_budget_tail_returns_zero_when_all_fits():
     """Conversation entirely within budget → split index 0."""
     msgs = [_user("short msg") for _ in range(5)]
-    split = _candidate_split_by_token_budget(msgs, tail_token_budget=1_000_000, model="")
+    split = _candidate_split_by_token_budget(
+        msgs, tail_token_budget=1_000_000, model=""
+    )
     assert split == 0
 
 
@@ -495,13 +491,19 @@ async def test_pre_prune_reduces_token_count_below_threshold():
     BACK under threshold so no compaction LLM call is needed at all."""
 
     def _tcall(tcid):
-        return {"id": tcid, "type": "function", "function": {"name": "read", "arguments": '{"path":"x.py"}'}}
+        return {
+            "id": tcid,
+            "type": "function",
+            "function": {"name": "read", "arguments": '{"path":"x.py"}'},
+        }
 
     big_body = "y" * 50_000  # ~12.5k tokens
     msgs = []
     # 5 duplicate (read x.py) tool_call → tool_reply pairs, each with big body
     for i in range(5):
-        msgs.append({"role": "assistant", "content": "", "tool_calls": [_tcall(f"c{i}")]})
+        msgs.append(
+            {"role": "assistant", "content": "", "tool_calls": [_tcall(f"c{i}")]}
+        )
         msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": big_body})
 
     summarizer_called = {"n": 0}
@@ -512,9 +514,7 @@ async def test_pre_prune_reduces_token_count_below_threshold():
 
     # Threshold ≈ total/2: prune should kick in (>= 70% of threshold)
     # and dedupe 4 duplicates (~50k tokens dropped) → drops below threshold
-    result = await compact_messages(
-        msgs, summarizer=_summ, max_input_tokens=20_000
-    )
+    result = await compact_messages(msgs, summarizer=_summ, max_input_tokens=20_000)
     # Pre-prune kept conversation under threshold → no full compaction
     assert result.compacted is False or result.head_message_count == 0
     # Summarizer NOT called (or called with much smaller head)
@@ -526,11 +526,17 @@ async def test_pre_prune_disabled_when_flag_off():
     """prune_tool_results=False skips the pre-pass entirely."""
 
     def _tcall(tcid):
-        return {"id": tcid, "type": "function", "function": {"name": "read", "arguments": '{}'}}
+        return {
+            "id": tcid,
+            "type": "function",
+            "function": {"name": "read", "arguments": "{}"},
+        }
 
     msgs = []
     for i in range(5):
-        msgs.append({"role": "assistant", "content": "", "tool_calls": [_tcall(f"c{i}")]})
+        msgs.append(
+            {"role": "assistant", "content": "", "tool_calls": [_tcall(f"c{i}")]}
+        )
         msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": "y" * 50_000})
 
     async def _summ(head):

@@ -6,6 +6,7 @@ not fail the whole request.
 
 Mirrors OpenClaw agents/api-key-rotation.ts.
 """
+
 from __future__ import annotations
 
 import time

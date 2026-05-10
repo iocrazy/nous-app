@@ -18,7 +18,7 @@ from loguru import logger
 
 # from app.db.session import get_async_transaction_session
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
-from app.boundary import URLBlockedError, safe_async_client
+from app.boundary import safe_async_client
 from app.core.config import settings
 from app.core.enums import DownloadStatus
 from app.core.utils import Utils

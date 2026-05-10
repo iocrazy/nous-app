@@ -36,6 +36,7 @@ What this does NOT do (deferred to Phase 5+):
   - Spawn multiple sub-agents in parallel — ``Task(parallel=true,...)``
     is a Phase 6 idea
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -49,7 +50,6 @@ from app.services.workforce.delegate_tool import (
     MAX_DELEGATION_DEPTH,
     _check_rate_limit,
 )
-
 
 # Envelope keys returned to the parent agent. Pinned in tests so
 # downstream consumers (parent agent prompt, frontend Runs UI) can
@@ -157,7 +157,8 @@ class SubAgentTaskService:
         if rl_error is not None:
             logger.warning(
                 "[subagent_task] rate-limit hit caller={} slug={}",
-                self.caller_agent_id, slug,
+                self.caller_agent_id,
+                slug,
             )
             return self._failed(rl_error.get("error") or "rate limit")
 
@@ -188,6 +189,7 @@ class SubAgentTaskService:
                 PromptComposer,
             )
             from app.services.ai.runner.run_recorder import RunRecorder
+
             # _attach_to_parent_run is private to agent_worker; keep an
             # eye on it during workforce refactors. The function writes
             # agent_runs.parent_run_id + root_run_id; if it ever moves
@@ -273,7 +275,9 @@ class SubAgentTaskService:
                 metadata={
                     "subagent_type": slug,
                     "description": description or None,
-                    "parent_run_id": str(self.parent_run_id) if self.parent_run_id else None,
+                    "parent_run_id": (
+                        str(self.parent_run_id) if self.parent_run_id else None
+                    ),
                     "agent_depth": self.agent_depth + 1,
                 },
             ) as recorder:

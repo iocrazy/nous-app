@@ -16,6 +16,7 @@ escalation. No DB required; pure functions.
 The retriever (M3.D wire-up) reads ``kind`` and adjusts the salience
 formula per row.
 """
+
 from __future__ import annotations
 
 import re

@@ -14,6 +14,7 @@ non-douyin URLs. These tests pin:
   - the parse_workflow + step signatures (so a future refactor can't
     silently drop the `platform` kwarg again)
 """
+
 from __future__ import annotations
 
 import inspect
@@ -78,10 +79,13 @@ def test_fetch_and_parse_ytdlp_maps_tags_to_text_extra(fake_ytdlp_info):
     async def _async_return(*_a, **_kw):
         return fake_ytdlp_info
 
-    with patch(
-        "app.services.media.parsers.ytdlp_service.YtdlpService.fetch_metadata",
-        side_effect=_async_return,
-    ), patch("app.boundary.validate_url") as mock_validate:
+    with (
+        patch(
+            "app.services.media.parsers.ytdlp_service.YtdlpService.fetch_metadata",
+            side_effect=_async_return,
+        ),
+        patch("app.boundary.validate_url") as mock_validate,
+    ):
         from app.boundary import ValidatedURL
 
         mock_validate.return_value = ValidatedURL(
@@ -122,10 +126,13 @@ def test_fetch_and_parse_ytdlp_handles_empty_tags():
     async def _async_return(*_a, **_kw):
         return info_no_tags
 
-    with patch(
-        "app.services.media.parsers.ytdlp_service.YtdlpService.fetch_metadata",
-        side_effect=_async_return,
-    ), patch("app.boundary.validate_url") as mock_validate:
+    with (
+        patch(
+            "app.services.media.parsers.ytdlp_service.YtdlpService.fetch_metadata",
+            side_effect=_async_return,
+        ),
+        patch("app.boundary.validate_url") as mock_validate,
+    ):
         from app.boundary import ValidatedURL
 
         mock_validate.return_value = ValidatedURL("https://example.com/v1")

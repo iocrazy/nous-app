@@ -33,9 +33,7 @@ class _FakeRepo:
     async def get_by_id(self, library_id: str) -> Optional[dict[str, Any]]:
         return self.library_by_id.get(library_id)
 
-    async def update(
-        self, library_id: str, data: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update(self, library_id: str, data: dict[str, Any]) -> dict[str, Any]:
         self.updated.append((library_id, data))
         return {"id": library_id, **data}
 

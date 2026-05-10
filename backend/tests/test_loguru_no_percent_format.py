@@ -15,6 +15,7 @@ Source-level grep is the right tool. AST analysis would catch subtler
 cases (concat / multi-line) but loguru's silent-drop is so quiet that
 even one literal ``%s`` in the wild is a regression worth flagging.
 """
+
 from __future__ import annotations
 
 import re
@@ -26,8 +27,7 @@ BACKEND_APP = Path(__file__).resolve().parent.parent / "app"
 # to single-line opens because loguru calls are almost never split
 # across lines for the format-string portion specifically.
 _PAT = re.compile(
-    r'logger\.(?:error|warning|info|debug|exception|success)\(\s*'
-    r'"[^"]*%[srdfx]'
+    r"logger\.(?:error|warning|info|debug|exception|success)\(\s*" r'"[^"]*%[srdfx]'
 )
 
 # Files that legitimately use %-formatting for non-loguru reasons
@@ -57,11 +57,10 @@ def test_no_loguru_percent_format_calls_in_backend():
             if _PAT.search(line):
                 offenders.append((rel, line_no, line.strip()))
 
-    assert not offenders, (
-        "loguru %-format calls re-introduced — these will silently "
-        "render literal '%s' in production logs. Convert to f-strings:\n"
-        + "\n".join(
-            f"  {p}:{n}  {l[:120]}" for p, n, l in offenders[:20]
-        )
-        + (f"\n  ... and {len(offenders) - 20} more" if len(offenders) > 20 else "")
+    assert (
+        not offenders
+    ), "loguru %-format calls re-introduced — these will silently " "render literal '%s' in production logs. Convert to f-strings:\n" + "\n".join(
+        f"  {p}:{n}  {l[:120]}" for p, n, l in offenders[:20]
+    ) + (
+        f"\n  ... and {len(offenders) - 20} more" if len(offenders) > 20 else ""
     )

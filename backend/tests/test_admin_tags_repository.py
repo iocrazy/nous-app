@@ -19,12 +19,14 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
 
@@ -129,9 +131,7 @@ async def test_list_tags_uncategorized_uses_is_null(
 ) -> None:
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_tags(
-        page=1, page_size=50, group_id="uncategorized"
-    )
+    await repo.list_tags(page=1, page_size=50, group_id="uncategorized")
 
     is_calls = [c for c in fake_query.calls if c[0] == "is_"]
     assert ("group_id", "null") in [c[1] for c in is_calls]
@@ -168,9 +168,7 @@ async def test_list_tags_custom_sort(
 ) -> None:
     fake_query._data = []
     fake_query._count = 0
-    await repo.list_tags(
-        page=1, page_size=50, sort_by="name", sort_order="asc"
-    )
+    await repo.list_tags(page=1, page_size=50, sort_by="name", sort_order="asc")
 
     order = next(c for c in fake_query.calls if c[0] == "order")
     assert order[1] == ("name",)

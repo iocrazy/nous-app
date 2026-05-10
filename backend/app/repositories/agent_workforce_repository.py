@@ -57,15 +57,16 @@ TASK_KIND_AGENT = "agent_task"
 TASK_TYPE_AGENT = "agent_task"
 
 LIFECYCLE_TO_STATUS: Dict[str, str] = {
-    "queued":            "pending",
-    "assigned":          "pending",
-    "in_progress":       "processing",
+    "queued": "pending",
+    "assigned": "pending",
+    "in_progress": "processing",
     "waiting_for_other": "processing",
-    "blocked":           "processing",
-    "done":              "completed",
-    "failed":            "failed",
-    "cancelled":         "cancelled",
+    "blocked": "processing",
+    "done": "completed",
+    "failed": "failed",
+    "cancelled": "cancelled",
 }
+
 
 # task_tracking PK 没有 default —— 必须应用层显式提供（migration 180 swap PK
 # 后 dbos_workflow_id 没 gen_random_uuid default）。
@@ -83,24 +84,24 @@ def tt_row_to_task_shape(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
         return None
     md = row.get("metadata") or {}
     return {
-        "id":                row.get("dbos_workflow_id"),
-        "agent_id":          row.get("agent_id"),
-        "user_id":           row.get("user_id"),
-        "title":             row.get("title"),
-        "payload":           md.get("agent_payload") or {},
-        "lifecycle_status":  row.get("phase") or "queued",
-        "current_run_id":    md.get("current_run_id"),
-        "result":            md.get("agent_result"),
-        "error_code":        md.get("error_code") or row.get("error_code"),
-        "error_message":     row.get("error_msg"),
-        "parent_task_id":    row.get("parent_task_id"),
-        "root_task_id":      row.get("root_task_id"),
-        "inbox_message_id":  row.get("inbox_message_id"),
-        "created_at":        row.get("created_at"),
-        "assigned_at":       md.get("assigned_at"),
-        "started_at":        row.get("started_at"),
-        "ended_at":          row.get("completed_at"),
-        "updated_at":        row.get("updated_at"),
+        "id": row.get("dbos_workflow_id"),
+        "agent_id": row.get("agent_id"),
+        "user_id": row.get("user_id"),
+        "title": row.get("title"),
+        "payload": md.get("agent_payload") or {},
+        "lifecycle_status": row.get("phase") or "queued",
+        "current_run_id": md.get("current_run_id"),
+        "result": md.get("agent_result"),
+        "error_code": md.get("error_code") or row.get("error_code"),
+        "error_message": row.get("error_msg"),
+        "parent_task_id": row.get("parent_task_id"),
+        "root_task_id": row.get("root_task_id"),
+        "inbox_message_id": row.get("inbox_message_id"),
+        "created_at": row.get("created_at"),
+        "assigned_at": md.get("assigned_at"),
+        "started_at": row.get("started_at"),
+        "ended_at": row.get("completed_at"),
+        "updated_at": row.get("updated_at"),
     }
 
 
@@ -441,26 +442,26 @@ class AgentWorkforceRepository:
         new_id = _new_task_id()
         # 如果上层没传 root，自身就是树根（取代以前 INSERT 后再 UPDATE 的 round-trip）。
         root_id_str = (
-            str(root_task_id) if root_task_id else (
-                str(parent_task_id) if parent_task_id else new_id
-            )
+            str(root_task_id)
+            if root_task_id
+            else (str(parent_task_id) if parent_task_id else new_id)
         )
         # task_tracking PK 是 TEXT，parent/root 列也是 TEXT（A4 加的列）。
         record: Dict[str, Any] = {
             "dbos_workflow_id": new_id,
-            "task_kind":        TASK_KIND_AGENT,
-            "task_type":        TASK_TYPE_AGENT,
-            "agent_id":         str(agent_id),
-            "user_id":          str(user_id),
-            "title":            (title or "Agent task").strip() or "Agent task",
-            "status":           "pending",
-            "phase":            "queued",
-            "progress":         0,
+            "task_kind": TASK_KIND_AGENT,
+            "task_type": TASK_TYPE_AGENT,
+            "agent_id": str(agent_id),
+            "user_id": str(user_id),
+            "title": (title or "Agent task").strip() or "Agent task",
+            "status": "pending",
+            "phase": "queued",
+            "progress": 0,
             "metadata": {
-                "agent_payload":   payload,
+                "agent_payload": payload,
             },
-            "parent_task_id":   str(parent_task_id) if parent_task_id else None,
-            "root_task_id":     root_id_str,
+            "parent_task_id": str(parent_task_id) if parent_task_id else None,
+            "root_task_id": root_id_str,
             "inbox_message_id": str(inbox_message_id) if inbox_message_id else None,
         }
         try:
@@ -498,8 +499,8 @@ class AgentWorkforceRepository:
                 await client.table(self.TASKS_TABLE)
                 .update(
                     {
-                        "phase":    "assigned",
-                        "status":   LIFECYCLE_TO_STATUS["assigned"],
+                        "phase": "assigned",
+                        "status": LIFECYCLE_TO_STATUS["assigned"],
                         "metadata": existing_md,
                     }
                 )
@@ -558,8 +559,8 @@ class AgentWorkforceRepository:
             md["assigned_at"] = now_iso
 
         payload: Dict[str, Any] = {
-            "phase":    lifecycle_status,
-            "status":   LIFECYCLE_TO_STATUS.get(lifecycle_status, "pending"),
+            "phase": lifecycle_status,
+            "status": LIFECYCLE_TO_STATUS.get(lifecycle_status, "pending"),
             "metadata": md,
         }
         if error_message is not None:
@@ -662,10 +663,10 @@ class AgentWorkforceRepository:
                 await client.table(self.TASKS_TABLE)
                 .update(
                     {
-                        "phase":      "queued",
-                        "status":     LIFECYCLE_TO_STATUS["queued"],
+                        "phase": "queued",
+                        "status": LIFECYCLE_TO_STATUS["queued"],
                         "started_at": None,
-                        "metadata":   md,
+                        "metadata": md,
                     }
                 )
                 .eq("task_kind", TASK_KIND_AGENT)

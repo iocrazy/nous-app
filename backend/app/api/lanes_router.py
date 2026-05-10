@@ -7,15 +7,15 @@ is saturated (e.g., background AI piling up while user lane is idle).
 Process-local: each backend replica returns its own state. To see
 cluster-wide saturation, frontend should query every replica.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import List
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-
 
 router = APIRouter(prefix="/lanes", tags=["Lanes"])
 

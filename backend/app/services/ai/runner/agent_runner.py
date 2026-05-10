@@ -34,6 +34,8 @@ if TYPE_CHECKING:
 
 from app.agent_framework import ContextCompactor
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.ai.runner.run_recorder import RunRecorder
+from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.infra.hooks import (
     HookContext,
     HookRegistry,
@@ -41,8 +43,6 @@ from app.services.infra.hooks import (
     PostToolUseHook,
     PreToolUseHook,
 )
-from app.services.ai.runner.run_recorder import RunRecorder
-from app.services.ai.skills.skill_tool_service import SkillToolService
 
 logger = logging.getLogger(__name__)
 
@@ -173,8 +173,7 @@ class AgentRunner:
         same as run_turn().
         """
         from contextlib import AsyncExitStack
-        from app.agent_framework import RunAborted, ToolCallLoopGuard
-        from app.services.ai.adapters.base import StreamChunk, StreamingNotSupported
+
         from app.agent_framework._metrics_helper import inc_metric
 
         # R4: optionally wrap in RunRecorder when caller didn't supply one
@@ -192,8 +191,10 @@ class AgentRunner:
                 inc_metric("stream_turn_auto_recorder")
 
             async for _chunk in self._stream_turn_inner(
-                composed, user_messages,
-                recorder=recorder, abort=abort,
+                composed,
+                user_messages,
+                recorder=recorder,
+                abort=abort,
             ):
                 yield _chunk
 
@@ -208,8 +209,8 @@ class AgentRunner:
         """R4: extracted inner generator so stream_turn can wrap us in
         an optional RunRecorder context without nesting concerns."""
         from app.agent_framework import RunAborted, ToolCallLoopGuard
-        from app.services.ai.adapters.base import StreamChunk, StreamingNotSupported
         from app.agent_framework._metrics_helper import inc_metric
+        from app.services.ai.adapters.base import StreamChunk, StreamingNotSupported
 
         stream_method = getattr(self.adapter, "stream", None)
         if stream_method is None:
@@ -236,9 +237,11 @@ class AgentRunner:
                 qualified = await self.mcp_registry.all_tools()
                 if qualified:
                     extra_tools = _mcp_tools_to_openai_format(qualified)
-                    composed = composed.model_copy(update={
-                        "tools": list(composed.tools or []) + extra_tools,
-                    })
+                    composed = composed.model_copy(
+                        update={
+                            "tools": list(composed.tools or []) + extra_tools,
+                        }
+                    )
                     mcp_tool_names = {qt.qualified_name for qt in qualified}
                     inc_metric("mcp_tools_injected", by=len(extra_tools))
             except Exception as exc:
@@ -284,8 +287,12 @@ class AgentRunner:
                         final_usage = chunk.usage
                         if recorder is not None and chunk.usage:
                             recorder.record_usage(
-                                prompt_tokens=int(chunk.usage.get("prompt_tokens") or 0),
-                                completion_tokens=int(chunk.usage.get("completion_tokens") or 0),
+                                prompt_tokens=int(
+                                    chunk.usage.get("prompt_tokens") or 0
+                                ),
+                                completion_tokens=int(
+                                    chunk.usage.get("completion_tokens") or 0
+                                ),
                             )
                         break
             except StreamingNotSupported:
@@ -322,12 +329,14 @@ class AgentRunner:
             # Execute each tool, append tool reply, yield synthetic
             # delta describing each.
             import json as _json
+
             for call in tool_calls_to_run:
                 fn = call.get("function") or {}
                 tool_name = fn.get("name", "")
                 # G3: accept MCP tools alongside built-in Skill / Delegate
                 is_mcp = tool_name in mcp_tool_names or _is_mcp_tool_name(
-                    tool_name, self.mcp_registry,
+                    tool_name,
+                    self.mcp_registry,
                 )
                 if not is_mcp and tool_name not in SUPPORTED_TOOLS:
                     continue
@@ -337,9 +346,7 @@ class AgentRunner:
                     args = {}
 
                 # Yield synthetic UI hint
-                hint_label = (
-                    args.get("skill") or "" if tool_name == "Skill" else ""
-                )
+                hint_label = args.get("skill") or "" if tool_name == "Skill" else ""
                 yield StreamChunk(
                     delta_text=f"\n\n→ Running {tool_name}({hint_label})...\n",
                 )
@@ -376,12 +383,14 @@ class AgentRunner:
                     else:
                         result = await self.delegate_tool.execute(args)
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": call.get("id"),
-                    "name": tool_name,
-                    "content": _json.dumps(result, ensure_ascii=False),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("id"),
+                        "name": tool_name,
+                        "content": _json.dumps(result, ensure_ascii=False),
+                    }
+                )
 
                 if loop_guard.is_looping():
                     warning = loop_guard.render_warning()
@@ -488,6 +497,7 @@ class AgentRunner:
         # rather than letting it burn the iteration budget on a stuck
         # repeat. Per-instance state — different runs are independent.
         from app.agent_framework import ToolCallLoopGuard, ToolResultCache
+
         loop_guard = ToolCallLoopGuard(repeat_threshold=3, window=5)
         loop_warning_already_injected = False
         # Phase L (L1): per-run tool result cache. Skill must opt in via
@@ -519,11 +529,14 @@ class AgentRunner:
                 qualified = await self.mcp_registry.all_tools()
                 if qualified:
                     extra_tools = _mcp_tools_to_openai_format(qualified)
-                    composed = composed.model_copy(update={
-                        "tools": list(composed.tools or []) + extra_tools,
-                    })
+                    composed = composed.model_copy(
+                        update={
+                            "tools": list(composed.tools or []) + extra_tools,
+                        }
+                    )
                     mcp_tool_names = {qt.qualified_name for qt in qualified}
                     from app.agent_framework._metrics_helper import inc_metric
+
                     inc_metric("mcp_tools_injected", by=len(extra_tools))
             except Exception as exc:
                 logger.warning(
@@ -559,6 +572,7 @@ class AgentRunner:
                         update={"max_tokens": budget.max_tokens}
                     )
                     from app.agent_framework._metrics_helper import inc_metric
+
                     inc_metric("output_budget_tightened")
                     logger.debug(
                         f"[AgentRunner] output budget tightened: "
@@ -670,13 +684,18 @@ class AgentRunner:
                 if cached_result is not None:
                     result = cached_result
                     from app.agent_framework._metrics_helper import inc_metric
+
                     inc_metric("tool_cache_hit")
                 elif tool_name == "Skill":
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
                     result = await self.skill_tool.execute(args)
                     # Cache result if this skill is idempotent
-                    if cache_key is not None and isinstance(result, dict) and not result.get("error"):
+                    if (
+                        cache_key is not None
+                        and isinstance(result, dict)
+                        and not result.get("error")
+                    ):
                         tool_cache.put(cache_key, result)
                 elif is_mcp:
                     # Q5: route to outbound MCP server. Tool errors
@@ -686,6 +705,7 @@ class AgentRunner:
                     # which we catch and convert to a result dict so
                     # the LLM gets feedback instead of crashing the run.
                     from app.agent_framework._metrics_helper import inc_metric
+
                     try:
                         result = await self.mcp_registry.call(tool_name, args)
                         inc_metric("mcp_tool_call")
@@ -733,6 +753,7 @@ class AgentRunner:
                 loop_guard.observe(tool_name, args_repr)
                 # J1 telemetry
                 from app.agent_framework._metrics_helper import inc_metric
+
                 inc_metric("loop_guard_observed")
 
                 messages.append(
@@ -748,10 +769,7 @@ class AgentRunner:
                 # ONE system warning into messages. Subsequent iterations
                 # don't re-inject (avoid repeated warnings polluting the
                 # context). LLM must self-correct on next turn.
-                if (
-                    not loop_warning_already_injected
-                    and loop_guard.is_looping()
-                ):
+                if not loop_warning_already_injected and loop_guard.is_looping():
                     warning = loop_guard.render_warning()
                     if warning:
                         messages.append({"role": "system", "content": warning})
@@ -984,9 +1002,7 @@ class AgentRunner:
 # ─── Phase P (P1) helpers ─────────────────────────────────────────────
 
 
-def _merge_tool_call_deltas(
-    buf: dict, deltas: list[dict]
-) -> None:
+def _merge_tool_call_deltas(buf: dict, deltas: list[dict]) -> None:
     """Merge OpenAI-style tool_call deltas into ``buf`` keyed by index.
 
     Each delta carries ``index`` (which tool slot) + partial ``id`` /
@@ -995,11 +1011,14 @@ def _merge_tool_call_deltas(
     """
     for d in deltas or []:
         idx = d.get("index", 0)
-        slot = buf.setdefault(idx, {
-            "id": "",
-            "type": "function",
-            "function": {"name": "", "arguments": ""},
-        })
+        slot = buf.setdefault(
+            idx,
+            {
+                "id": "",
+                "type": "function",
+                "function": {"name": "", "arguments": ""},
+            },
+        )
         if d.get("id"):
             slot["id"] = d["id"]
         fn_delta = d.get("function") or {}

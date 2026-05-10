@@ -1,18 +1,15 @@
 """D10-14 — PrometheusPusher: from_env + push_url + start/stop."""
-from __future__ import annotations
 
-import asyncio
+from __future__ import annotations
 
 import pytest
 
 from app.agent_framework.prometheus_pusher import (
-    DEFAULT_INTERVAL_SECONDS,
     DEFAULT_JOB,
     PrometheusPusher,
     from_env,
 )
 from app.agent_framework.telemetry import AgentMetrics
-
 
 # ─── from_env ────────────────────────────────────────────────────────
 
@@ -78,9 +75,7 @@ def test_push_url_strips_trailing_slash():
 
 @pytest.mark.unit
 def test_default_instance_includes_pid():
-    p = PrometheusPusher(
-        gateway_url="http://gw", metrics=AgentMetrics(), job="j"
-    )
+    p = PrometheusPusher(gateway_url="http://gw", metrics=AgentMetrics(), job="j")
     assert "pid" in p.instance
 
 

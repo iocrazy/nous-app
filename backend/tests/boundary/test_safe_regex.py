@@ -1,4 +1,5 @@
 """Sprint 7 — safe regex (ReDoS guard)."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,6 @@ from app.boundary.safe_regex import (
     search_safe,
     vet_pattern,
 )
-
 
 # ─── vet_pattern (static lint) ────────────────────────────────────────
 

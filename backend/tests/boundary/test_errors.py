@@ -1,4 +1,5 @@
 """Boundary error hierarchy contract."""
+
 from __future__ import annotations
 
 import pytest

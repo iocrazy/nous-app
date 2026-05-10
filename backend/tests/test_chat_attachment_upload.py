@@ -1,4 +1,5 @@
 """B — chat attachment upload endpoint smoke tests."""
+
 from __future__ import annotations
 
 import sys
@@ -10,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 import app.api.ai_library_router  # noqa: F401
+
 router_module = sys.modules["app.api.ai_library_router"]
 
 
@@ -51,6 +53,7 @@ async def test_upload_image_routes_to_image_kind(tmp_path, monkeypatch):
 
     async def _form():
         return {"file": upload}
+
     req.form = _form
 
     monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)
@@ -74,7 +77,10 @@ async def test_upload_pdf_routes_to_pdf_kind(tmp_path, monkeypatch):
     payload = b"%PDF-1.4\nfake pdf content"  # real PDF magic bytes
     upload = _FakeUpload("doc.pdf", payload, content_type="application/pdf")
     req = _fake_request(content_length=len(payload))
-    async def _form(): return {"file": upload}
+
+    async def _form():
+        return {"file": upload}
+
     req.form = _form
 
     monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)
@@ -94,7 +100,10 @@ async def test_upload_video_routes_to_video_kind(tmp_path, monkeypatch):
     payload = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00mp42mp41"
     upload = _FakeUpload("clip.mp4", payload, content_type="video/mp4")
     req = _fake_request(content_length=len(payload))
-    async def _form(): return {"file": upload}
+
+    async def _form():
+        return {"file": upload}
+
     req.form = _form
 
     monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)
@@ -118,7 +127,10 @@ async def test_upload_rejects_extension_spoofing_via_magic_bytes(tmp_path, monke
     payload = b"MZ\x90\x00\x03\x00\x00\x00fake exe payload"
     upload = _FakeUpload("malware.jpg", payload, content_type="image/jpeg")
     req = _fake_request(content_length=len(payload))
-    async def _form(): return {"file": upload}
+
+    async def _form():
+        return {"file": upload}
+
     req.form = _form
 
     monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)
@@ -147,7 +159,9 @@ def test_check_magic_bytes_webp_offset_8_signature():
     head = b"RIFF\x00\x00\x00\x00WEBPVP8 fake"
     assert router_module._check_magic_bytes(".webp", head) is True
     # Wrong offset payload
-    assert router_module._check_magic_bytes(".webp", b"RIFF\x00\x00\x00\x00FAKE") is False
+    assert (
+        router_module._check_magic_bytes(".webp", b"RIFF\x00\x00\x00\x00FAKE") is False
+    )
 
 
 @pytest.mark.unit
@@ -161,7 +175,10 @@ async def test_upload_rejects_disallowed_extension(tmp_path, monkeypatch):
     auth.user_id = str(user_id)
     upload = _FakeUpload("hax.exe", b"MZ\x00\x00")
     req = _fake_request()
-    async def _form(): return {"file": upload}
+
+    async def _form():
+        return {"file": upload}
+
     req.form = _form
 
     monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)
@@ -182,7 +199,10 @@ async def test_upload_rejects_oversize_via_content_length(tmp_path, monkeypatch)
     auth.user_id = str(user_id)
     upload = _FakeUpload("huge.mp4", b"")  # body irrelevant; CL trips first
     req = _fake_request(content_length=100 * 1024 * 1024)  # 100 MB
-    async def _form(): return {"file": upload}
+
+    async def _form():
+        return {"file": upload}
+
     req.form = _form
 
     monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)
@@ -201,7 +221,10 @@ async def test_upload_missing_file_field_returns_400(tmp_path, monkeypatch):
     auth = MagicMock()
     auth.user_id = str(user_id)
     req = _fake_request()
-    async def _form(): return {}  # no file
+
+    async def _form():
+        return {}  # no file
+
     req.form = _form
 
     monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)
@@ -215,12 +238,15 @@ async def test_upload_missing_file_field_returns_400(tmp_path, monkeypatch):
 async def test_upload_reaps_old_files(tmp_path, monkeypatch):
     """Files older than TTL get unlinked when a new upload triggers reap."""
     import os
+
     user_id = uuid4()
     user_dir = tmp_path / str(user_id)
     user_dir.mkdir()
     old_file = user_dir / "old.jpg"
     old_file.write_bytes(b"x")
-    old_mtime = router_module._time.time() - (router_module._CHAT_ATTACHMENT_TTL_SECONDS + 100)
+    old_mtime = router_module._time.time() - (
+        router_module._CHAT_ATTACHMENT_TTL_SECONDS + 100
+    )
     os.utime(old_file, (old_mtime, old_mtime))
 
     fresh_file = user_dir / "fresh.jpg"
@@ -231,7 +257,10 @@ async def test_upload_reaps_old_files(tmp_path, monkeypatch):
     new_payload = b"\xff\xd8\xff\xe0fresh"
     upload = _FakeUpload("new.jpg", new_payload, content_type="image/jpeg")
     req = _fake_request(content_length=len(new_payload))
-    async def _form(): return {"file": upload}
+
+    async def _form():
+        return {"file": upload}
+
     req.form = _form
 
     monkeypatch.setattr(router_module, "_CHAT_ATTACHMENTS_BASE", tmp_path)

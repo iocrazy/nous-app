@@ -1,4 +1,5 @@
 """P1-7 — MCP registry built from real skill/agent rows."""
+
 from __future__ import annotations
 
 import pytest
@@ -119,6 +120,7 @@ async def test_agent_registration_persona_handler():
 @pytest.mark.asyncio
 async def test_skill_repo_failure_does_not_crash():
     """Best-effort: DB error in skill pass leaves agent pass intact."""
+
     class _BrokenSkillRepo:
         async def list_skills(self):
             raise RuntimeError("DB exploded")

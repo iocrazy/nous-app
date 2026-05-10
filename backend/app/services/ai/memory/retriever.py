@@ -111,9 +111,8 @@ class MemoryRetriever:
         if agent_row is not None:
             try:
                 from app.services.ai.memory.budget import resolve_top_n
-                effective_top_n = resolve_top_n(
-                    agent_row, code_default=self.top_n
-                )
+
+                effective_top_n = resolve_top_n(agent_row, code_default=self.top_n)
                 if effective_top_n == 0:
                     return []  # agent opted out of memory recall
             except Exception:
@@ -277,10 +276,8 @@ class MemoryRetriever:
             if created_at is None:
                 # Fallback to legacy formula — keeps tests / older data
                 # paths working.
-                s = (
-                    _COSINE_WEIGHT * cosine
-                    + _SALIENCE_WEIGHT
-                    * math.log(1 + max(0, rec.reinforcement_count))
+                s = _COSINE_WEIGHT * cosine + _SALIENCE_WEIGHT * math.log(
+                    1 + max(0, rec.reinforcement_count)
                 )
             else:
                 last_recalled = getattr(rec, "last_recalled_at", None)

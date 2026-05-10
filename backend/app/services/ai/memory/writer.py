@@ -91,6 +91,7 @@ class MemoryWriter:
         if session_id is not None:
             try:
                 from datetime import datetime, timezone
+
                 from app.services.ai.memory.threading import assign_thread_for
 
                 async def _fetch_recent(aid, uid, sid, limit):
@@ -233,11 +234,13 @@ class MemoryWriter:
                         .execute()
                     )
                     from app.agent_framework._metrics_helper import inc_metric
+
                     inc_metric("memory_superseded_by_contradiction")
                 except Exception:
                     logger.exception(
                         "[memory.writer] failed to mark %s superseded by %s",
-                        old_id, new_id,
+                        old_id,
+                        new_id,
                     )
 
     async def _nearest_existing(
@@ -305,6 +308,7 @@ class MemoryWriter:
         # Phase N (N2): cheap heuristic kind classification at write time.
         # The retriever uses kind for per-kind weight modifiers (M2).
         from app.services.ai.memory.kind_classifier import classify_heuristic
+
         kind = classify_heuristic(fact.summary).value
 
         row = {

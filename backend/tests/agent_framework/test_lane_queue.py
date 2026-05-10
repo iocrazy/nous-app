@@ -11,6 +11,7 @@ mediahub lanes:
   SCHEDULED    cron jobs — maxConcurrent 1 (avoid overlap)
   SUBAGENT     AgentRunner internal delegate — maxConcurrent 2
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -80,9 +81,7 @@ async def test_lanes_independent():
     await started.wait()  # scheduled lane is busy
 
     # USER lane must be unblocked
-    result = await asyncio.wait_for(
-        q.submit(Lane.USER, quick_user()), timeout=0.5
-    )
+    result = await asyncio.wait_for(q.submit(Lane.USER, quick_user()), timeout=0.5)
     assert result == "user-fast"
 
     release.set()

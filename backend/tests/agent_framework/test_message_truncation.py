@@ -1,4 +1,5 @@
 """A2 — per-message size cap."""
+
 from __future__ import annotations
 
 import pytest
@@ -9,7 +10,6 @@ from app.agent_framework.message_truncation import (
     cap_message_tokens,
     cap_messages_tokens,
 )
-
 
 # ─── No-op for under-cap messages ─────────────────────────────────────
 

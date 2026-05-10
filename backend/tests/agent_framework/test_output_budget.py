@@ -1,10 +1,10 @@
 """C2 — output token budget."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.agent_framework.output_budget import (
-    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MIN_OUTPUT_TOKENS,
     PROVIDER_HARD_CAPS,
     derive_output_budget,
@@ -46,9 +46,7 @@ def test_budget_unknown_model_uses_safe_default_window():
 
 @pytest.mark.unit
 def test_custom_fraction():
-    b = derive_output_budget(
-        model="qwen-plus", consumed_input_tokens=0, fraction=0.5
-    )
+    b = derive_output_budget(model="qwen-plus", consumed_input_tokens=0, fraction=0.5)
     # 50% of 131k = 65k, clamped to provider cap 8192
     assert b.max_tokens == 8_192
 

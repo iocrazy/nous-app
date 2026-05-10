@@ -1,7 +1,7 @@
 """P2-10 — Supabase client drain on loop swap (issue #21 mitigation)."""
+
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 from typing import Any
 

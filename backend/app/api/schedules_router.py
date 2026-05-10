@@ -13,6 +13,7 @@ Endpoints
 * DELETE  /api/v1/schedules/{id}   — delete
 * POST    /api/v1/schedules/{id}/fire-now — manual one-shot trigger
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -25,13 +26,16 @@ from pydantic import BaseModel, Field
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 
-
 router = APIRouter(prefix="/schedules", tags=["Schedules"])
 
 
 _ALLOWED_TASK_TYPES = {
-    "parse", "download", "transcode",
-    "ai_summary", "ai_transcription", "ai_visual_analysis",
+    "parse",
+    "download",
+    "transcode",
+    "ai_summary",
+    "ai_transcription",
+    "ai_visual_analysis",
 }
 
 
@@ -216,7 +220,7 @@ async def fire_schedule_now(schedule_id: str, auth: AuthDep) -> Dict[str, Any]:
     )
     if not row_resp or not row_resp.data:
         raise HTTPException(404, "schedule not found")
-    row = row_resp.data
+    row_resp.data
 
     # Force next_fire_at to now so the master scheduler picks it up on
     # next tick (within 1 min). Cleaner than duplicating dispatch logic

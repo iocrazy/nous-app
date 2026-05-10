@@ -139,7 +139,9 @@ def _try_drissionpage(
     cover_bool: bool,
 ):
     """DrissionPage browser fallback (slow, last resort)."""
-    from app.services.media.parsers.douyin_parse.drissionpage_parser import DrissionPageParser
+    from app.services.media.parsers.douyin_parse.drissionpage_parser import (
+        DrissionPageParser,
+    )
     from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
 
     try:
@@ -242,9 +244,7 @@ def fetch_and_parse_ytdlp(
 
     validated = validate_url(valid_url)
     ytdlp_info = _run_async(
-        YtdlpService.fetch_metadata(
-            validated, user_id=user_id, user_agent=user_agent
-        )
+        YtdlpService.fetch_metadata(validated, user_id=user_id, user_agent=user_agent)
     )
     parsed_data = YtdlpService._map_metadata_to_media(ytdlp_info, valid_url)
 

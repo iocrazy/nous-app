@@ -1,4 +1,5 @@
 """R3 — memory snapshot + rollback primitive."""
+
 from __future__ import annotations
 
 import json
@@ -7,9 +8,6 @@ from datetime import datetime, timezone
 import pytest
 
 from app.services.ai.memory.snapshot import (
-    MemorySnapshotEntry,
-    RollbackPlan,
-    SnapshotManifest,
     build_manifest,
     deserialize_manifest,
     diff_manifests,
@@ -28,7 +26,9 @@ def _row(id_, summary="x", status="active", when_to_use="y"):
 @pytest.mark.unit
 def test_build_manifest_freezes_rows():
     m = build_manifest(
-        agent_id="a", user_id="u", scope="agent_user",
+        agent_id="a",
+        user_id="u",
+        scope="agent_user",
         rows=[_row("m1"), _row("m2", summary="hello")],
     )
     assert m.namespace_key == "a:u:agent_user"
@@ -40,7 +40,9 @@ def test_build_manifest_freezes_rows():
 def test_build_manifest_sorts_by_id():
     """Deterministic order — important for diff stability."""
     m = build_manifest(
-        agent_id="a", user_id="u", scope="agent_user",
+        agent_id="a",
+        user_id="u",
+        scope="agent_user",
         rows=[_row("z"), _row("a"), _row("m")],
     )
     ids = [e.id for e in m.entries]
@@ -50,7 +52,10 @@ def test_build_manifest_sorts_by_id():
 @pytest.mark.unit
 def test_build_manifest_empty():
     m = build_manifest(
-        agent_id="a", user_id="u", scope="agent_user", rows=[],
+        agent_id="a",
+        user_id="u",
+        scope="agent_user",
+        rows=[],
     )
     assert m.entries == ()
 
@@ -58,11 +63,15 @@ def test_build_manifest_empty():
 @pytest.mark.unit
 def test_build_manifest_content_hash_changes_with_summary():
     m1 = build_manifest(
-        agent_id="a", user_id="u", scope="agent_user",
+        agent_id="a",
+        user_id="u",
+        scope="agent_user",
         rows=[_row("m1", summary="A")],
     )
     m2 = build_manifest(
-        agent_id="a", user_id="u", scope="agent_user",
+        agent_id="a",
+        user_id="u",
+        scope="agent_user",
         rows=[_row("m1", summary="B")],
     )
     assert m1.entries[0].content_hash != m2.entries[0].content_hash
@@ -74,7 +83,9 @@ def test_build_manifest_content_hash_changes_with_summary():
 @pytest.mark.unit
 def test_active_ids_excludes_archived():
     m = build_manifest(
-        agent_id="a", user_id="u", scope="agent_user",
+        agent_id="a",
+        user_id="u",
+        scope="agent_user",
         rows=[
             _row("m1", status="active"),
             _row("m2", status="archived"),
@@ -91,7 +102,9 @@ def test_active_ids_excludes_archived():
 @pytest.mark.unit
 def test_diff_added_removed_status_content():
     before = build_manifest(
-        agent_id="a", user_id="u", scope="x",
+        agent_id="a",
+        user_id="u",
+        scope="x",
         rows=[
             _row("kept_same", summary="A"),
             _row("status_flipped", status="active"),
@@ -100,7 +113,9 @@ def test_diff_added_removed_status_content():
         ],
     )
     after = build_manifest(
-        agent_id="a", user_id="u", scope="x",
+        agent_id="a",
+        user_id="u",
+        scope="x",
         rows=[
             _row("kept_same", summary="A"),
             _row("status_flipped", status="archived"),
@@ -133,11 +148,15 @@ def test_diff_identical_returns_all_empty():
 @pytest.mark.unit
 def test_plan_restores_archived_active_at_snapshot():
     snap = build_manifest(
-        agent_id="a", user_id="u", scope="x",
+        agent_id="a",
+        user_id="u",
+        scope="x",
         rows=[_row("m1"), _row("m2")],  # both active
     )
     cur = build_manifest(
-        agent_id="a", user_id="u", scope="x",
+        agent_id="a",
+        user_id="u",
+        scope="x",
         rows=[_row("m1", status="archived"), _row("m2")],  # m1 archived since
     )
     plan = plan_rollback_to(snap, cur)
@@ -150,10 +169,15 @@ def test_plan_restores_archived_active_at_snapshot():
 def test_plan_surfaces_new_since_snapshot():
     """Rows added after snapshot — caller decides whether to delete."""
     snap = build_manifest(
-        agent_id="a", user_id="u", scope="x", rows=[_row("m1")],
+        agent_id="a",
+        user_id="u",
+        scope="x",
+        rows=[_row("m1")],
     )
     cur = build_manifest(
-        agent_id="a", user_id="u", scope="x",
+        agent_id="a",
+        user_id="u",
+        scope="x",
         rows=[_row("m1"), _row("m2_new")],
     )
     plan = plan_rollback_to(snap, cur)
@@ -167,11 +191,15 @@ def test_plan_skips_fully_deleted_rows():
     """Memory existed in snapshot but completely gone from current —
     can't UPDATE it back; just leave it (caller could rebuild from blob)."""
     snap = build_manifest(
-        agent_id="a", user_id="u", scope="x",
+        agent_id="a",
+        user_id="u",
+        scope="x",
         rows=[_row("m1"), _row("m2")],
     )
     cur = build_manifest(
-        agent_id="a", user_id="u", scope="x",
+        agent_id="a",
+        user_id="u",
+        scope="x",
         rows=[_row("m1")],  # m2 deleted
     )
     plan = plan_rollback_to(snap, cur)
@@ -185,8 +213,13 @@ def test_plan_skips_fully_deleted_rows():
 @pytest.mark.unit
 def test_serialize_roundtrip():
     original = build_manifest(
-        agent_id="a", user_id="u", scope="x",
-        rows=[_row("m1", summary="hello", status="active"), _row("m2", status="archived")],
+        agent_id="a",
+        user_id="u",
+        scope="x",
+        rows=[
+            _row("m1", summary="hello", status="active"),
+            _row("m2", status="archived"),
+        ],
         captured_at=datetime(2026, 5, 3, 12, 0, 0, tzinfo=timezone.utc),
     )
     blob = serialize_manifest(original)
@@ -200,10 +233,12 @@ def test_serialize_roundtrip():
 @pytest.mark.unit
 def test_deserialize_tolerates_missing_fields():
     """Forward-compat: extra fields ignored, missing optionals default."""
-    blob = json.dumps({
-        "namespace_key": "n",
-        "entries": [{"id": "x"}],
-    })
+    blob = json.dumps(
+        {
+            "namespace_key": "n",
+            "entries": [{"id": "x"}],
+        }
+    )
     m = deserialize_manifest(blob)
     assert m.entries[0].id == "x"
     assert m.entries[0].summary == ""

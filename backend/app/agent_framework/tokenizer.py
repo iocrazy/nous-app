@@ -23,12 +23,11 @@ Public surface:
   count_tokens(text, model="") -> int
   count_messages_tokens(messages, model="") -> int
 """
+
 from __future__ import annotations
 
-import unicodedata
 from functools import lru_cache
 from typing import Any, Optional
-
 
 # ─── Provider detection ───────────────────────────────────────────────
 
@@ -89,6 +88,7 @@ def _count_openai(text: str, model: str) -> Optional[int]:
 def _has_dashscope() -> bool:
     try:
         import dashscope  # type: ignore[import-not-found]  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -99,10 +99,13 @@ def _count_qwen(text: str, _model: str) -> Optional[int]:
         return None
     try:
         from dashscope import Tokenization  # type: ignore[import-not-found]
+
         # Dashscope's Tokenization API counts tokens for Qwen models.
         # In offline mode we don't actually want a network call — guard
         # against any HTTP attempt by catching all exceptions.
-        result = Tokenization.call(model="qwen-turbo", messages=[{"role": "user", "content": text}])
+        result = Tokenization.call(
+            model="qwen-turbo", messages=[{"role": "user", "content": text}]
+        )
         usage = getattr(result, "usage", None)
         if usage and "input_tokens" in usage:
             return int(usage["input_tokens"])

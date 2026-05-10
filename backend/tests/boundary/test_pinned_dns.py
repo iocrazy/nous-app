@@ -2,10 +2,10 @@
 
 Foundation primitive for B9-B (SafeAsyncClient) and B9-D (SsrfProxy).
 """
+
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -42,6 +42,7 @@ async def test_resolves_once_and_pins(monkeypatch):
 @pytest.mark.unit
 async def test_blocks_resolved_private_ip(monkeypatch):
     """Validation runs on the resolved IP — private ranges raise."""
+
     async def fake_resolve(host: str) -> list[str]:
         return ["192.168.50.9"]
 
@@ -56,6 +57,7 @@ async def test_blocks_resolved_private_ip(monkeypatch):
 async def test_blocks_when_any_resolved_addr_private(monkeypatch):
     """If multiple A records and ANY is private, reject (consistent with
     validate_url_async behaviour — defends mixed-record attacks)."""
+
     async def fake_resolve(host: str) -> list[str]:
         return ["8.8.8.8", "10.0.0.1"]
 
@@ -100,9 +102,7 @@ async def test_ttl_expires(monkeypatch):
 
     # Advance time past TTL by monkey-patching time.time
     real_time = time.time
-    monkeypatch.setattr(
-        "app.boundary.pinned_dns.time.time", lambda: real_time() + 5
-    )
+    monkeypatch.setattr("app.boundary.pinned_dns.time.time", lambda: real_time() + 5)
     await pinner.resolve_and_validate("example.com")
     assert call_count["n"] == 2
 
@@ -146,6 +146,7 @@ async def test_dns_failure_propagates(monkeypatch):
 @pytest.mark.unit
 async def test_picks_first_allowed_ip(monkeypatch):
     """When multiple public IPs returned, pin the first."""
+
     async def fake_resolve(host: str) -> list[str]:
         return ["8.8.8.8", "1.1.1.1"]
 

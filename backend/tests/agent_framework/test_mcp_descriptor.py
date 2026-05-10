@@ -1,4 +1,5 @@
 """Sprint 8 — MCP tool descriptor + registry."""
+
 from __future__ import annotations
 
 import pytest
@@ -90,7 +91,9 @@ def test_tool_call_result_text_error():
 @pytest.mark.unit
 def test_register_and_get():
     reg = MCPToolRegistry()
-    t = Tool(name="a", description="", input_schema=ToolInputSchema(), handler=_noop_handler)
+    t = Tool(
+        name="a", description="", input_schema=ToolInputSchema(), handler=_noop_handler
+    )
     reg.register(t)
     assert reg.get("a") is t
     assert "a" in reg
@@ -100,16 +103,37 @@ def test_register_and_get():
 @pytest.mark.unit
 def test_register_duplicate_rejected():
     reg = MCPToolRegistry()
-    reg.register(Tool(name="dup", description="", input_schema=ToolInputSchema(), handler=_noop_handler))
+    reg.register(
+        Tool(
+            name="dup",
+            description="",
+            input_schema=ToolInputSchema(),
+            handler=_noop_handler,
+        )
+    )
     with pytest.raises(DuplicateToolError, match="dup"):
-        reg.register(Tool(name="dup", description="", input_schema=ToolInputSchema(), handler=_noop_handler))
+        reg.register(
+            Tool(
+                name="dup",
+                description="",
+                input_schema=ToolInputSchema(),
+                handler=_noop_handler,
+            )
+        )
 
 
 @pytest.mark.unit
 def test_register_empty_name_rejected():
     reg = MCPToolRegistry()
     with pytest.raises(ValueError, match="non-empty"):
-        reg.register(Tool(name="", description="", input_schema=ToolInputSchema(), handler=_noop_handler))
+        reg.register(
+            Tool(
+                name="",
+                description="",
+                input_schema=ToolInputSchema(),
+                handler=_noop_handler,
+            )
+        )
 
 
 @pytest.mark.unit
@@ -122,8 +146,22 @@ def test_get_returns_none_for_missing():
 def test_list_descriptors_sorted_and_serializable():
     """tools/list response — must be deterministic order + no handler."""
     reg = MCPToolRegistry()
-    reg.register(Tool(name="b", description="bee", input_schema=ToolInputSchema(), handler=_noop_handler))
-    reg.register(Tool(name="a", description="ay", input_schema=ToolInputSchema(), handler=_noop_handler))
+    reg.register(
+        Tool(
+            name="b",
+            description="bee",
+            input_schema=ToolInputSchema(),
+            handler=_noop_handler,
+        )
+    )
+    reg.register(
+        Tool(
+            name="a",
+            description="ay",
+            input_schema=ToolInputSchema(),
+            handler=_noop_handler,
+        )
+    )
     descs = reg.list_descriptors()
     assert [d["name"] for d in descs] == ["a", "b"]
     assert all("handler" not in d for d in descs)

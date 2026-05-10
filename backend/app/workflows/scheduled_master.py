@@ -30,16 +30,15 @@ Timer safety guards (borrowed from openclaw cron/service/timer.ts:780)
   (each tick is a separate workflow invocation; long ones don't
   block subsequent ticks because DBOS uses workflow_id dedup).
 """
+
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from dbos import DBOS
 from loguru import logger
-
 
 _MIN_REFIRE_GAP_MS = 100
 _BATCH_SIZE = 100  # don't dispatch more than this per tick
@@ -175,15 +174,19 @@ async def _resolve_workflow_callable(task_type: str):
     user-facing schedule UI. Unknown types return None (caller logs)."""
     if task_type == "parse":
         from app.workflows.parse import parse_workflow
+
         return parse_workflow
     if task_type == "download":
         from app.workflows.download import download_workflow
+
         return download_workflow
     if task_type == "ai_summary":
         from app.workflows.ai_summary import ai_summary_workflow
+
         return ai_summary_workflow
     if task_type == "transcode":
         from app.workflows.transcode import transcode_workflow
+
         return transcode_workflow
     return None
 
@@ -217,9 +220,7 @@ def _compute_next_fire(cron_expr: str) -> datetime:
 
 @DBOS.scheduled("* * * * *")  # every minute
 @DBOS.workflow()
-def scheduled_master_workflow(
-    scheduled_time: datetime, actual_time: datetime
-) -> None:
+def scheduled_master_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
     """One tick. Counters are logged at INFO when there's actual work
     so a quiet system doesn't spam the log."""
     counters = asyncio.run(fire_due_schedules_step())

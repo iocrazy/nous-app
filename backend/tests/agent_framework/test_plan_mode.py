@@ -1,4 +1,5 @@
 """L4 — PlanMode primitive: parse / render / approval."""
+
 from __future__ import annotations
 
 import json
@@ -20,36 +21,37 @@ from app.agent_framework.plan_mode import (
     render_plan_for_user,
 )
 
-
-_VALID_PLAN_JSON = json.dumps({
-    "summary": "Refactor the auth module + run tests.",
-    "steps": [
-        {
-            "id": 1,
-            "description": "Read auth.py and identify duplication",
-            "tool": None,
-            "args_summary": None,
-            "side_effects": [],
-        },
-        {
-            "id": 2,
-            "description": "Extract common code into auth_helpers.py",
-            "tool": "Skill",
-            "args_summary": "Edit 2 files",
-            "side_effects": ["modify auth.py", "create auth_helpers.py"],
-        },
-        {
-            "id": 3,
-            "description": "Run full test suite",
-            "tool": "Skill",
-            "args_summary": "pytest",
-            "side_effects": ["spawn subprocess pytest"],
-        },
-    ],
-    "estimated_cost_usd": 0.05,
-    "estimated_seconds": 60,
-    "risks": ["may break existing imports"],
-})
+_VALID_PLAN_JSON = json.dumps(
+    {
+        "summary": "Refactor the auth module + run tests.",
+        "steps": [
+            {
+                "id": 1,
+                "description": "Read auth.py and identify duplication",
+                "tool": None,
+                "args_summary": None,
+                "side_effects": [],
+            },
+            {
+                "id": 2,
+                "description": "Extract common code into auth_helpers.py",
+                "tool": "Skill",
+                "args_summary": "Edit 2 files",
+                "side_effects": ["modify auth.py", "create auth_helpers.py"],
+            },
+            {
+                "id": 3,
+                "description": "Run full test suite",
+                "tool": "Skill",
+                "args_summary": "pytest",
+                "side_effects": ["spawn subprocess pytest"],
+            },
+        ],
+        "estimated_cost_usd": 0.05,
+        "estimated_seconds": 60,
+        "risks": ["may break existing imports"],
+    }
+)
 
 
 # ─── PlanMode enum ────────────────────────────────────────────────────
@@ -121,43 +123,53 @@ def test_parse_empty_steps_raises():
 
 @pytest.mark.unit
 def test_parse_steps_must_be_sequential():
-    bad = json.dumps({
-        "summary": "x",
-        "steps": [
-            {"id": 1, "description": "a"},
-            {"id": 3, "description": "c"},  # skipped 2
-        ],
-    })
+    bad = json.dumps(
+        {
+            "summary": "x",
+            "steps": [
+                {"id": 1, "description": "a"},
+                {"id": 3, "description": "c"},  # skipped 2
+            ],
+        }
+    )
     with pytest.raises(PlanValidationError, match="sequential"):
         parse_plan_response(bad)
 
 
 @pytest.mark.unit
 def test_parse_too_many_steps():
-    bad = json.dumps({
-        "summary": "x",
-        "steps": [{"id": i, "description": f"step {i}"} for i in range(1, MAX_STEPS + 2)],
-    })
+    bad = json.dumps(
+        {
+            "summary": "x",
+            "steps": [
+                {"id": i, "description": f"step {i}"} for i in range(1, MAX_STEPS + 2)
+            ],
+        }
+    )
     with pytest.raises(PlanValidationError, match="too many"):
         parse_plan_response(bad)
 
 
 @pytest.mark.unit
 def test_parse_oversized_summary():
-    bad = json.dumps({
-        "summary": "x" * (MAX_SUMMARY_LEN + 1),
-        "steps": [{"id": 1, "description": "x"}],
-    })
+    bad = json.dumps(
+        {
+            "summary": "x" * (MAX_SUMMARY_LEN + 1),
+            "steps": [{"id": 1, "description": "x"}],
+        }
+    )
     with pytest.raises(PlanValidationError, match="summary too long"):
         parse_plan_response(bad)
 
 
 @pytest.mark.unit
 def test_parse_oversized_description():
-    bad = json.dumps({
-        "summary": "x",
-        "steps": [{"id": 1, "description": "x" * (MAX_DESCRIPTION_LEN + 1)}],
-    })
+    bad = json.dumps(
+        {
+            "summary": "x",
+            "steps": [{"id": 1, "description": "x" * (MAX_DESCRIPTION_LEN + 1)}],
+        }
+    )
     with pytest.raises(PlanValidationError, match="description too long"):
         parse_plan_response(bad)
 
@@ -166,11 +178,13 @@ def test_parse_oversized_description():
 def test_parse_invalid_cost_silently_dropped():
     """LLM might emit 'estimated_cost_usd': '0.05' (string) — accept by
     coercing; on failure silently drop to None."""
-    val = json.dumps({
-        "summary": "x",
-        "steps": [{"id": 1, "description": "x"}],
-        "estimated_cost_usd": "garbage",
-    })
+    val = json.dumps(
+        {
+            "summary": "x",
+            "steps": [{"id": 1, "description": "x"}],
+            "estimated_cost_usd": "garbage",
+        }
+    )
     plan = parse_plan_response(val)
     assert plan.estimated_cost_usd is None
 

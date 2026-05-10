@@ -25,6 +25,7 @@ Validation invariants:
   - id is sequential 1-N within the list
   - max 30 items (anti-noise; agents that need more should split goals)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -93,9 +94,9 @@ class AgentTodoList:
         idx = self._index_of(item_id)
         if idx is None:
             raise TodoValidationError(f"unknown todo id: {item_id}")
-        if (
-            new_status == TodoStatus.IN_PROGRESS
-            and self.in_progress_id() not in (None, item_id)
+        if new_status == TodoStatus.IN_PROGRESS and self.in_progress_id() not in (
+            None,
+            item_id,
         ):
             raise TodoValidationError(
                 f"another todo is already in_progress "
@@ -145,9 +146,11 @@ class AgentTodoList:
                 TodoStatus.IN_PROGRESS: "🔄",
                 TodoStatus.COMPLETED: "✅",
             }[it.status]
-            label = it.active_form if (
-                it.status == TodoStatus.IN_PROGRESS and it.active_form
-            ) else it.content
+            label = (
+                it.active_form
+                if (it.status == TodoStatus.IN_PROGRESS and it.active_form)
+                else it.content
+            )
             lines.append(f"  {mark} {it.id}. {label}")
         lines.append("</todo_list>")
         return "\n".join(lines)

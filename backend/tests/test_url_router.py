@@ -6,7 +6,6 @@ import pytest
 
 from app.services.media.parsers.url_router import URLRouter
 
-
 # ─── detect_platform ────────────────────────────────────────────────
 
 

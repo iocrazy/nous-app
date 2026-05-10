@@ -20,12 +20,14 @@ class _FakeQuery:
         def _capture(*args: Any, **kwargs: Any) -> "_FakeQuery":
             self.calls.append((name, args, kwargs))
             return self
+
         return _capture
 
     async def execute(self) -> Any:
         class _R:
             data = self._data
             count = self._count
+
         return _R()
 
 
@@ -84,9 +86,7 @@ async def test_count_parsed_media_status_filter(
     repo: AdminStatsRepository, fake_query: _FakeQuery
 ) -> None:
     fake_query._count = 100
-    count = await repo.count_parsed_media(
-        video_download_status="completed"
-    )
+    count = await repo.count_parsed_media(video_download_status="completed")
     assert count == 100
 
     eq_call = next(c for c in fake_query.calls if c[0] == "eq")
@@ -99,9 +99,7 @@ async def test_count_parsed_media_combines_status_and_since(
 ) -> None:
     fake_query._count = 7
     since = datetime(2026, 4, 1, tzinfo=timezone.utc)
-    await repo.count_parsed_media(
-        video_download_status="completed", since=since
-    )
+    await repo.count_parsed_media(video_download_status="completed", since=since)
 
     assert any(
         c[0] == "eq" and c[1] == ("video_download_status", "completed")
@@ -114,9 +112,7 @@ async def test_count_parsed_media_combines_status_and_since(
 
 
 @pytest.mark.asyncio
-async def test_count_teams(
-    repo: AdminStatsRepository, fake_query: _FakeQuery
-) -> None:
+async def test_count_teams(repo: AdminStatsRepository, fake_query: _FakeQuery) -> None:
     fake_query._count = 42
     assert await repo.count_teams() == 42
 
@@ -144,11 +140,10 @@ async def test_distinct_active_users_returns_zero_on_error(
 ) -> None:
     async def _raises():
         raise RuntimeError("table missing")
+
     fake_query.execute = _raises  # type: ignore[assignment]
 
-    count = await repo.distinct_active_users_since(
-        datetime.now(tz=timezone.utc)
-    )
+    count = await repo.distinct_active_users_since(datetime.now(tz=timezone.utc))
     assert count == 0
 
 

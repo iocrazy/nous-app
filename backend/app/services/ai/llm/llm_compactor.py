@@ -133,8 +133,11 @@ async def compact_messages(
             messages = pruned
             estimated_before = estimate_tokens(messages, model)
             from app.agent_framework._metrics_helper import inc_metric
-            inc_metric("compaction_pre_pass_pruned",
-                       by=prune_stats.duplicates_replaced + prune_stats.aged_results)
+
+            inc_metric(
+                "compaction_pre_pass_pruned",
+                by=prune_stats.duplicates_replaced + prune_stats.aged_results,
+            )
             logger.info(
                 "[Compactor] pre-pass pruned %d dups + %d aged "
                 "(%d chars dropped); new estimate=%d",
@@ -218,6 +221,7 @@ async def compact_messages(
 
     # Wave I (I3) + J1: telemetry via helper.
     from app.agent_framework._metrics_helper import inc_metric
+
     inc_metric("compaction_triggered")
     inc_metric(
         "compaction_used_session_memory"
@@ -338,7 +342,10 @@ def _candidate_split_by_token_budget(
         # min_tail_turns: force at least min_tail_turns into tail even
         # if they exceed budget (any single huge msg already capped by A2)
         included_so_far = n - i
-        if accumulated + msg_tokens > tail_token_budget and included_so_far > min_tail_turns:
+        if (
+            accumulated + msg_tokens > tail_token_budget
+            and included_so_far > min_tail_turns
+        ):
             break
         accumulated += msg_tokens
         tail_start = i

@@ -1,4 +1,5 @@
 """D3 — memory contradiction resolution: writer-time conflict checks."""
+
 from __future__ import annotations
 
 import pytest
@@ -14,7 +15,6 @@ from app.services.ai.memory.contradiction import (
     parse_verdict,
     select_supersede_targets,
 )
-
 
 # ─── parse_verdict ────────────────────────────────────────────────────
 
@@ -99,6 +99,7 @@ async def test_classify_classifier_failure_returns_none():
 @pytest.mark.asyncio
 async def test_classify_unparseable_output_keeps_both():
     """LLM returns garbage → verdict UNRELATED → both memories kept."""
+
     async def _confused(prompt):
         return "I'm not sure"
 

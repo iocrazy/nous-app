@@ -28,18 +28,18 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
-from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.adapters import get_adapter
 from app.services.ai.adapters.factory import get_adapter_for_user
+from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
+from app.services.ai.memory.retriever import MemoryRetriever
+from app.services.ai.prompts.prompt_composer import RecalledMemory
 from app.services.ai.providers.embedding_service import EmbeddingService
+from app.services.ai.runner.agent_runner import AgentRunner
+from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.infra.hooks import HookRegistry
 from app.services.infra.hooks.budget_guard import BudgetGuardHook
 from app.services.infra.hooks.cost_auditor import CostAuditorHook
 from app.services.infra.hooks.memory_harvester import MemoryHarvesterHook
-from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
-from app.services.ai.memory.retriever import MemoryRetriever
-from app.services.ai.prompts.prompt_composer import RecalledMemory
-from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.workforce.delegate_tool import DelegateToolService
 
 logger = logging.getLogger(__name__)
@@ -176,6 +176,7 @@ async def build_agent_runner_stack(
     health_registry = None
     try:
         from app.main import app as _app  # late import to avoid cycle
+
         health_registry = getattr(_app.state, "model_health", None)
     except Exception:
         health_registry = None
@@ -218,23 +219,28 @@ async def build_agent_runner_stack(
             mcp_registry = MCPOutboundRegistry()
             for row in mcp_rows:
                 try:
-                    mcp_registry.add_server(MCPServerConfig(
-                        name=row.name,
-                        url=row.url,
-                        bearer_token=row.bearer_token,
-                    ))
+                    mcp_registry.add_server(
+                        MCPServerConfig(
+                            name=row.name,
+                            url=row.url,
+                            bearer_token=row.bearer_token,
+                        )
+                    )
                 except ValueError as exc:
                     # name conflict / invalid name — log + skip the row
                     from loguru import logger as _logger
+
                     _logger.warning(
                         f"[chat_wiring] skipping MCP server '{row.name}' for user "
                         f"{user_id}: {exc}"
                     )
             from app.agent_framework._metrics_helper import inc_metric
+
             inc_metric("chat_mcp_registry_built", by=len(mcp_rows))
     except Exception as exc:
         # MCP wiring failures are non-fatal — chat continues without MCP
         from loguru import logger as _logger
+
         _logger.warning(f"[chat_wiring] MCP registry build skipped: {exc}")
         mcp_registry = None
 

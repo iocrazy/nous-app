@@ -1,4 +1,5 @@
 """Sprint 5 — BoundsAdvertisement + BoundsRegistry."""
+
 from __future__ import annotations
 
 import time

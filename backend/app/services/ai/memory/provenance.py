@@ -18,9 +18,9 @@ column for last_verified_at).
 
 This module is fully testable without DB or LLM.
 """
+
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Awaitable, Callable, Optional
@@ -122,11 +122,7 @@ def select_outdated(
 ) -> list[str]:
     """Filter to ids that the LLM marked outdated. UNVERIFIABLE rows
     are intentionally NOT in this list — caller leaves them alone."""
-    return [
-        d.memory_id
-        for d in decisions
-        if d.verdict == VerificationVerdict.OUTDATED
-    ]
+    return [d.memory_id for d in decisions if d.verdict == VerificationVerdict.OUTDATED]
 
 
 __all__ = [

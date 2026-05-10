@@ -6,6 +6,7 @@ human decision. Used by:
   - approval router (lists pending / records decision)
   - sweeper (marks expired rows after expires_at)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ class ApprovalRequest:
     hook_name: str
     reason: str
     payload: dict
-    status: str            # pending / approved / rejected / expired / cancelled
+    status: str  # pending / approved / rejected / expired / cancelled
     decided_at: Optional[datetime]
     decided_by: Optional[UUID]
     decision_note: Optional[str]
@@ -83,16 +84,18 @@ class ApprovalRequestsRepository:
             expires = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
             result = (
                 await client.table(self.TABLE)
-                .insert({
-                    "user_id": str(user_id),
-                    "agent_id": str(agent_id),
-                    "session_id": str(session_id) if session_id else None,
-                    "run_id": str(run_id) if run_id else None,
-                    "hook_name": hook_name,
-                    "reason": reason,
-                    "payload": payload or {},
-                    "expires_at": expires.isoformat(),
-                })
+                .insert(
+                    {
+                        "user_id": str(user_id),
+                        "agent_id": str(agent_id),
+                        "session_id": str(session_id) if session_id else None,
+                        "run_id": str(run_id) if run_id else None,
+                        "hook_name": hook_name,
+                        "reason": reason,
+                        "payload": payload or {},
+                        "expires_at": expires.isoformat(),
+                    }
+                )
                 .execute()
             )
             if not result.data:
@@ -156,15 +159,17 @@ class ApprovalRequestsRepository:
             client = await self._client()
             await (
                 client.table(self.TABLE)
-                .update({
-                    "status": "approved" if approve else "rejected",
-                    "decided_at": datetime.now(timezone.utc).isoformat(),
-                    "decided_by": str(owner_user_id),
-                    "decision_note": note,
-                })
+                .update(
+                    {
+                        "status": "approved" if approve else "rejected",
+                        "decided_at": datetime.now(timezone.utc).isoformat(),
+                        "decided_by": str(owner_user_id),
+                        "decision_note": note,
+                    }
+                )
                 .eq("id", str(request_id))
-                .eq("user_id", str(owner_user_id))   # defensive
-                .eq("status", "pending")              # only pending → terminal
+                .eq("user_id", str(owner_user_id))  # defensive
+                .eq("status", "pending")  # only pending → terminal
                 .execute()
             )
             return True
@@ -179,10 +184,12 @@ class ApprovalRequestsRepository:
             cutoff = (now or datetime.now(timezone.utc)).isoformat()
             result = (
                 await client.table(self.TABLE)
-                .update({
-                    "status": "expired",
-                    "decided_at": cutoff,
-                })
+                .update(
+                    {
+                        "status": "expired",
+                        "decided_at": cutoff,
+                    }
+                )
                 .eq("status", "pending")
                 .lt("expires_at", cutoff)
                 .execute()

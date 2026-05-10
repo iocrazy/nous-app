@@ -28,6 +28,7 @@ When launched, the parent (Claude Desktop config, etc.) talks JSON-RPC
 2.0 over our stdin/stdout. Logging goes to stderr — never stdout, that
 would corrupt the protocol stream.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,7 +42,6 @@ from app.agent_framework.mcp_descriptor import (
     Tool,
     ToolCallResult,
 )
-
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "mediahub"
@@ -75,7 +75,9 @@ def _ok(rid: Any, result: dict[str, Any]) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": rid, "result": result}
 
 
-def _err(rid: Any, code: int, message: str, data: Optional[Any] = None) -> dict[str, Any]:
+def _err(
+    rid: Any, code: int, message: str, data: Optional[Any] = None
+) -> dict[str, Any]:
     err: dict[str, Any] = {"code": code, "message": message}
     if data is not None:
         err["data"] = data
@@ -185,9 +187,7 @@ async def _call_tool(
         # Spec distinction: protocol errors (transport-level) vs tool
         # errors (handler returned an error). Tool errors come back
         # as a successful JSON-RPC response with isError=true.
-        wrapped = ToolCallResult.text(
-            f"{type(exc).__name__}: {exc}", is_error=True
-        )
+        wrapped = ToolCallResult.text(f"{type(exc).__name__}: {exc}", is_error=True)
         return _ok(rid, wrapped.to_dict())
 
     if isinstance(result, ToolCallResult):
@@ -242,9 +242,7 @@ async def serve(
         if request.get("method") == "exit":
             break
 
-        response = await _dispatch(
-            request, registry, session_state=session_state
-        )
+        response = await _dispatch(request, registry, session_state=session_state)
         if response is not None:
             _write(writer, response)
 
@@ -272,6 +270,7 @@ async def _build_default_registry_async() -> MCPToolRegistry:
     """
     try:
         from app.services.ai.skills.mcp_tool_registration import build_mcp_registry
+
         return await build_mcp_registry()
     except Exception:
         return MCPToolRegistry()

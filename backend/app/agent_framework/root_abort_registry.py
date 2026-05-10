@@ -21,6 +21,7 @@ This registry is the bridge:
 Per-process; for multi-process worker fleet (future) we'd back this
 with Redis pub/sub. For NAS single-process, in-memory is enough.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

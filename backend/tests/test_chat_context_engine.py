@@ -1,4 +1,5 @@
 """Sprint 6.5 — ChatContextEngine adapter."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -9,7 +10,6 @@ from app.agent_framework.context_engine import ContextEngine, ContextPayload
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.chat.chat_context_engine import ChatContextEngine
 from app.services.ai.prompts.prompt_composer import ComposerInput, RecalledMemory
-
 
 _AGENT_ID = uuid4()
 
@@ -73,9 +73,7 @@ async def test_assemble_returns_payload_with_composed_in_metadata(engine):
 @pytest.mark.asyncio
 async def test_assemble_passes_user_messages_through(engine):
     msgs = [{"role": "user", "content": "hi"}]
-    payload = await engine.assemble(
-        {"agent_slug": "x", "user_messages": msgs}
-    )
+    payload = await engine.assemble({"agent_slug": "x", "user_messages": msgs})
     assert payload.user_messages == msgs
     # Defensive copy — engine's caller can mutate without affecting input
     assert payload.user_messages is not msgs
@@ -117,9 +115,7 @@ async def test_assemble_normalizes_recalled_memory_dicts(engine):
 async def test_assemble_accepts_recalled_memory_objects(engine):
     mem = RecalledMemory(id=uuid4(), summary="x", when_to_use="y")
     composer: _FakeComposer = engine._composer  # noqa: SLF001
-    await engine.assemble(
-        {"agent_slug": "x", "recalled_memories": [mem]}
-    )
+    await engine.assemble({"agent_slug": "x", "recalled_memories": [mem]})
     assert composer.received.recalled_memories == [mem]
 
 

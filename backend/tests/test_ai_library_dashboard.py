@@ -14,7 +14,7 @@ these tests pin:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -24,7 +24,6 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
-
 
 BASE = "/api/v1/ai-library"
 FAKE_USER_ID = str(uuid4())
@@ -139,9 +138,24 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
     # `dbos_workflow_id` as PK) so it travels through tt_row_to_task_shape() the
     # same way real rows do.
     tasks_14d = [
-        {"dbos_workflow_id": str(uuid4()), "phase": "queued", "created_at": today_iso, "title": "Hire eng"},
-        {"dbos_workflow_id": str(uuid4()), "phase": "done",   "created_at": today_iso, "title": "Pick stack"},
-        {"dbos_workflow_id": str(uuid4()), "phase": "done",   "created_at": today_iso, "title": "Approve"},
+        {
+            "dbos_workflow_id": str(uuid4()),
+            "phase": "queued",
+            "created_at": today_iso,
+            "title": "Hire eng",
+        },
+        {
+            "dbos_workflow_id": str(uuid4()),
+            "phase": "done",
+            "created_at": today_iso,
+            "title": "Pick stack",
+        },
+        {
+            "dbos_workflow_id": str(uuid4()),
+            "phase": "done",
+            "created_at": today_iso,
+            "title": "Approve",
+        },
     ]
     recent_tasks = tasks_14d[:5]
     recent_runs = runs_14d[:10]
@@ -149,20 +163,23 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
     fake_client = _client_for(
         {
             "agent_runs": [
-                runs_14d,    # 14d list
+                runs_14d,  # 14d list
                 [latest_run],  # latest 1
                 recent_runs,  # recent 10
             ],
             "task_tracking": [
-                tasks_14d,     # 14d list for status counts
+                tasks_14d,  # 14d list for status counts
                 recent_tasks,  # recent 5
             ],
         }
     )
 
-    with patch("app.api.ai_library_router.AgentRepository") as mock_repo, patch(
-        "app.api.ai_library_router.get_async_supabase_admin",
-        AsyncMock(return_value=fake_client),
+    with (
+        patch("app.api.ai_library_router.AgentRepository") as mock_repo,
+        patch(
+            "app.api.ai_library_router.get_async_supabase_admin",
+            AsyncMock(return_value=fake_client),
+        ),
     ):
         mock_repo.return_value.get_by_slug = AsyncMock(
             return_value={**agent_row, "id": agent_id}
@@ -189,9 +206,7 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
         d for d in body["run_activity_14d"] if d["date"] == today_date
     )
     assert today_activity["count"] == 2
-    today_success = next(
-        d for d in body["success_rate_14d"] if d["date"] == today_date
-    )
+    today_success = next(d for d in body["success_rate_14d"] if d["date"] == today_date)
     assert today_success == {"date": today_date, "success": 1, "total": 2}
 
     # Costs summary
@@ -220,13 +235,16 @@ async def test_dashboard_empty_agent_returns_zero_buckets(
     fake_client = _client_for(
         {
             "agent_runs": [[], [], []],  # 14d, latest, recent
-            "task_tracking": [[], []],   # A4: was `agent_tasks` before mig 200
+            "task_tracking": [[], []],  # A4: was `agent_tasks` before mig 200
         }
     )
 
-    with patch("app.api.ai_library_router.AgentRepository") as mock_repo, patch(
-        "app.api.ai_library_router.get_async_supabase_admin",
-        AsyncMock(return_value=fake_client),
+    with (
+        patch("app.api.ai_library_router.AgentRepository") as mock_repo,
+        patch(
+            "app.api.ai_library_router.get_async_supabase_admin",
+            AsyncMock(return_value=fake_client),
+        ),
     ):
         mock_repo.return_value.get_by_slug = AsyncMock(
             return_value={

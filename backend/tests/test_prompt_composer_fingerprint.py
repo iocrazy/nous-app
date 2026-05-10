@@ -38,7 +38,9 @@ def _skill_dict(_id=1, slug="script-outline"):
     }
 
 
-def _make_composer_with_fixed_repos(agent: dict, skills: list[dict], skill_ids: list[int]):
+def _make_composer_with_fixed_repos(
+    agent: dict, skills: list[dict], skill_ids: list[int]
+):
     composer = PromptComposer(agent_repo=None, skill_repo=None)
 
     class _AgentRepo:

@@ -21,13 +21,13 @@ Half-life calibration: 30-day default. Conversational facts
 ("deploying tonight") fades fast. M2.B consolidation later allows
 per-memory half_life override.
 """
+
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
-
 
 # Default half-life: memory loses half its weight after 30 days of
 # no activity. 30 days picked because most of mediahub's facts (user

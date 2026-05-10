@@ -29,6 +29,7 @@ Design notes:
     annotations stored for them yet. Tighten when skill_files grows
     a `parameters_json` column.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -60,8 +61,7 @@ def _make_skill_handler(skill_row: dict[str, Any]):
     async def _handler(**_kw):
         if not body:
             return ToolCallResult.text(
-                f"skill '{slug}' has no body_md — "
-                "check seed loading or DB row.",
+                f"skill '{slug}' has no body_md — " "check seed loading or DB row.",
                 is_error=True,
             )
         return ToolCallResult.text(body)

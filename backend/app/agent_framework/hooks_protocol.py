@@ -17,6 +17,7 @@ keep working — they're not migrated by this commit. New hooks should
 use the new protocol; migration of existing ones is deferred to keep
 this change reviewable.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -68,7 +69,9 @@ class HookResult:
     note: Optional[str] = None  # for audit trail
 
     @classmethod
-    def continue_(cls, *, patch: Optional[dict[str, Any]] = None, note: Optional[str] = None) -> "HookResult":
+    def continue_(
+        cls, *, patch: Optional[dict[str, Any]] = None, note: Optional[str] = None
+    ) -> "HookResult":
         return cls(decision=HookDecision.CONTINUE, payload_patch=patch, note=note)
 
     @classmethod
@@ -114,9 +117,7 @@ class HookRegistry:
         if not hook.name:
             raise ValueError("hook.name must be non-empty")
         if hook.name in self._hooks:
-            raise DuplicateHookError(
-                f"hook '{hook.name}' is already registered"
-            )
+            raise DuplicateHookError(f"hook '{hook.name}' is already registered")
         self._hooks[hook.name] = hook
 
     def unregister(self, name: str) -> bool:
@@ -159,6 +160,7 @@ class HookRegistry:
                 last_note = res.note
             if res.decision == HookDecision.ABORT_RUN:
                 from app.agent_framework._metrics_helper import inc_metric
+
                 inc_metric("hook_aborted_run")
                 return HookResult.abort(
                     res.note or f"hook '{hook.name}' aborted the run"

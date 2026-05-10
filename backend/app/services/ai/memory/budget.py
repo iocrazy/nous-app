@@ -4,12 +4,12 @@ Phase M (M3.D). Reads ``ai_agents.memory_injection_top_n`` (nullable)
 and falls back to the code default when unset. Pure helper — caller
 (MemoryRetriever wiring) passes in the agent row.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
 
 from app.services.ai.memory.retriever import DEFAULT_TOP_N_FINAL
-
 
 # Hard upper bound — admins can override per agent up to this cap. Beyond
 # 20 the prompt becomes noise + cost balloons.

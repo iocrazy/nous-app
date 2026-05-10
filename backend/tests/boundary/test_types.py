@@ -1,5 +1,6 @@
 """ValidatedURL wrapper contract — must behave as str at runtime,
 distinct identity for runtime isinstance guards."""
+
 from __future__ import annotations
 
 import pytest

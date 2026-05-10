@@ -13,6 +13,7 @@ is more than fast enough.
 Conservative: archives in batches of N (default 500) per agent_user
 namespace per run, with no failure cascading. A bad row logs + skips.
 """
+
 from __future__ import annotations
 
 import logging
@@ -106,13 +107,16 @@ async def archive_decayed_memories_step(
 
     if archived:
         from app.agent_framework._metrics_helper import inc_metric
+
         inc_metric("memory_archived", by=archived)
     return {"checked": len(rows), "archived": archived}
 
 
 @DBOS.scheduled("0 3 * * 0")  # Sunday 03:00 UTC
 @DBOS.workflow()
-async def memory_archival_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
+async def memory_archival_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
     """Weekly memory archival pass.
 
     Async so DBOS dispatches via its BackgroundEventLoop → main loop;

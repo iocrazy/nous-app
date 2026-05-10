@@ -4,6 +4,7 @@ We mock httpx.AsyncClient.post to feed canned responses; the goal is to
 prove the JSON-RPC framing + error handling, not exercise a real MCP
 server.
 """
+
 from __future__ import annotations
 
 import json
@@ -65,11 +66,13 @@ def mock_http():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_initialize_sends_protocol_and_marks_initialized(cfg, mock_http):
-    mock_http.post.return_value = _ok_response({
-        "protocolVersion": "2024-11-05",
-        "capabilities": {},
-        "serverInfo": {"name": "testsrv", "version": "1.0"},
-    })
+    mock_http.post.return_value = _ok_response(
+        {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "serverInfo": {"name": "testsrv", "version": "1.0"},
+        }
+    )
     c = MCPClient(cfg, http_client=mock_http)
 
     info = await c.initialize()
@@ -111,9 +114,13 @@ async def test_request_no_auth_header_when_no_token(cfg, mock_http):
 async def test_list_tools_caches_within_ttl(cfg, mock_http):
     """Second call within TTL should hit cache, not the wire."""
     init = _ok_response({})
-    listing = _ok_response({"tools": [
-        {"name": "t1", "description": "first", "inputSchema": {}},
-    ]})
+    listing = _ok_response(
+        {
+            "tools": [
+                {"name": "t1", "description": "first", "inputSchema": {}},
+            ]
+        }
+    )
     mock_http.post.side_effect = [init, listing]
     c = MCPClient(cfg, http_client=mock_http, tools_cache_ttl_seconds=300)
 
@@ -130,7 +137,9 @@ async def test_list_tools_caches_within_ttl(cfg, mock_http):
 async def test_list_tools_force_refresh_bypasses_cache(cfg, mock_http):
     init = _ok_response({})
     listing = _ok_response({"tools": []})
-    listing2 = _ok_response({"tools": [{"name": "n2", "description": "", "inputSchema": {}}]})
+    listing2 = _ok_response(
+        {"tools": [{"name": "n2", "description": "", "inputSchema": {}}]}
+    )
     mock_http.post.side_effect = [init, listing, listing2]
     c = MCPClient(cfg, http_client=mock_http)
 

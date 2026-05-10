@@ -22,11 +22,12 @@ Worker registration shape:
   bound = BoundsAdvertisement(worker_id=..., role=..., workflows=..., ...)
   registry.register(bound)
 """
+
 from __future__ import annotations
 
 import inspect
 from types import ModuleType
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 
 def inventory_workflow_names(workflows_module: ModuleType) -> frozenset[str]:
@@ -75,11 +76,7 @@ async def inventory_agent_slugs(agent_repo: Any) -> frozenset[str]:
         # Generic fallback path: read via the underlying admin client.
         client = await agent_repo._get_client()  # noqa: SLF001
         result = await client.table("ai_agents").select("slug").execute()
-        return frozenset(
-            row["slug"]
-            for row in (result.data or [])
-            if row.get("slug")
-        )
+        return frozenset(row["slug"] for row in (result.data or []) if row.get("slug"))
     except Exception:
         return frozenset()
 

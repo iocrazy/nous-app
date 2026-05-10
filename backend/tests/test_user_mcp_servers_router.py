@@ -4,27 +4,35 @@ Mocks the repository layer; verifies the route layer's auth wiring,
 response shaping (token masking), and ownership checks on
 PATCH/DELETE.
 """
+
 from __future__ import annotations
 
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 
-import sys
-
 # The package __init__ rebinds `app.api.ai_library_router` to the
 # router instance (`from ... import router as ai_library_router`).
 # Force-load the module file via sys.modules so we can call the
 # top-level handler functions directly.
 import app.api.ai_library_router  # noqa: F401 — populates sys.modules
+
 router_module = sys.modules["app.api.ai_library_router"]
 from app.repositories.user_mcp_servers_repository import UserMCPServer
 
 
-def _row(user_id, *, name="srv1", url="https://x.com/jsonrpc",
-         token="sekret", desc="d", enabled=True):
+def _row(
+    user_id,
+    *,
+    name="srv1",
+    url="https://x.com/jsonrpc",
+    token="sekret",
+    desc="d",
+    enabled=True,
+):
     return UserMCPServer(
         id=uuid4(),
         user_id=user_id,
@@ -119,7 +127,8 @@ async def test_create_bubbles_repo_error_as_409():
     auth = MagicMock()
     auth.user_id = str(uuid4())
     payload = router_module._MCPServerCreate(
-        name="dup", url="https://x.com",
+        name="dup",
+        url="https://x.com",
     )
     with patch(
         "app.repositories.user_mcp_servers_repository.UserMCPServersRepository",

@@ -18,11 +18,11 @@ makes int += int atomic for CPython; the values are eventually
 consistent across asyncio tasks. We don't care about lost updates
 under contention — the counters are advisory.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-
 
 # Canonical counter names. Frozen to keep call sites consistent + admin
 # UI labels stable. Add new ones by appending here.
@@ -87,7 +87,9 @@ class AgentMetrics:
     """In-process counter store. Per-process; multi-replica aggregation
     deferred (would need redis HINCRBY or a real metrics backend)."""
 
-    counters: dict[str, int] = field(default_factory=lambda: {n: 0 for n in COUNTER_NAMES})
+    counters: dict[str, int] = field(
+        default_factory=lambda: {n: 0 for n in COUNTER_NAMES}
+    )
 
     def inc(self, name: str, *, by: int = 1) -> None:
         """Increment ``name`` by ``by`` (default 1).
@@ -111,9 +113,7 @@ class AgentMetrics:
         """JSON-friendly view: all canonical counters + any unknown ones
         collected since process start. Sorted keys for stable display."""
         canonical = {n: self.counters.get(n, 0) for n in COUNTER_NAMES}
-        unknown = {
-            k: v for k, v in self.counters.items() if k not in COUNTER_NAMES
-        }
+        unknown = {k: v for k, v in self.counters.items() if k not in COUNTER_NAMES}
         out: dict[str, Any] = dict(sorted(canonical.items()))
         if unknown:
             out["_unknown"] = dict(sorted(unknown.items()))

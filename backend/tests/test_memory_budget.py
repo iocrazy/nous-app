@@ -1,4 +1,5 @@
 """M3 — memory injection budget resolver."""
+
 from __future__ import annotations
 
 import pytest

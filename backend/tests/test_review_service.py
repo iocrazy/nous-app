@@ -39,21 +39,16 @@ class _FakeRepo:
         status: Optional[str],
     ) -> list[dict[str, Any]]:
         return [
-            c for c in self.comments.values()
-            if c.get("resource_id") == resource_id
+            c for c in self.comments.values() if c.get("resource_id") == resource_id
         ]
 
     async def get_replies(self, comment_id: str) -> list[dict[str, Any]]:
         return self.replies.get(comment_id, [])
 
-    async def get_annotations_by_comment(
-        self, comment_id: str
-    ) -> list[dict[str, Any]]:
+    async def get_annotations_by_comment(self, comment_id: str) -> list[dict[str, Any]]:
         return self.annotations.get(comment_id, [])
 
-    async def get_comment_by_id(
-        self, comment_id: str
-    ) -> Optional[dict[str, Any]]:
+    async def get_comment_by_id(self, comment_id: str) -> Optional[dict[str, Any]]:
         return self.comments.get(comment_id)
 
     async def update_comment(
@@ -71,24 +66,18 @@ class _FakeRepo:
     async def get_comment_count(
         self, resource_id: str, version_id: Optional[str]
     ) -> int:
-        return len([
-            c for c in self.comments.values()
-            if c.get("resource_id") == resource_id
-        ])
+        return len(
+            [c for c in self.comments.values() if c.get("resource_id") == resource_id]
+        )
 
-    async def upsert_review_status(
-        self, data: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def upsert_review_status(self, data: dict[str, Any]) -> dict[str, Any]:
         self.upserts.append(data)
         return {"id": "rs-1", **data}
 
     async def get_review_statuses(
         self, resource_id: str, version_id: Optional[str]
     ) -> list[dict[str, Any]]:
-        return [
-            s for s in self.review_statuses
-            if s.get("resource_id") == resource_id
-        ]
+        return [s for s in self.review_statuses if s.get("resource_id") == resource_id]
 
 
 @pytest.fixture
@@ -107,9 +96,7 @@ async def test_create_comment_minimal(
     service: tuple[ReviewService, _FakeRepo],
 ) -> None:
     svc, fake = service
-    result = await svc.create_comment(
-        resource_id="r-1", author_id="u-1", content="Hi"
-    )
+    result = await svc.create_comment(resource_id="r-1", author_id="u-1", content="Hi")
     assert result["resource_id"] == "r-1"
     assert result["annotations"] == []
 
@@ -218,7 +205,12 @@ async def test_resolve_comment_sets_status_resolved(
     service: tuple[ReviewService, _FakeRepo],
 ) -> None:
     svc, fake = service
-    fake.comments["c-1"] = {"id": "c-1", "author_id": "u-1", "content": "x", "status": "open"}
+    fake.comments["c-1"] = {
+        "id": "c-1",
+        "author_id": "u-1",
+        "content": "x",
+        "status": "open",
+    }
     await svc.resolve_comment("c-1", "u-other")  # any user
     _, updates = fake.updated_comments[0]
     assert updates == {"status": "resolved"}
@@ -229,7 +221,12 @@ async def test_reopen_comment_sets_status_open(
     service: tuple[ReviewService, _FakeRepo],
 ) -> None:
     svc, fake = service
-    fake.comments["c-1"] = {"id": "c-1", "author_id": "u-1", "content": "x", "status": "resolved"}
+    fake.comments["c-1"] = {
+        "id": "c-1",
+        "author_id": "u-1",
+        "content": "x",
+        "status": "resolved",
+    }
     await svc.reopen_comment("c-1", "u-other")
     _, updates = fake.updated_comments[0]
     assert updates == {"status": "open"}
@@ -279,9 +276,7 @@ async def test_set_review_status_accepts_all_valid_statuses(
 ) -> None:
     svc, fake = service
     for status in ("pending", "approved", "needs_changes", "rejected"):
-        await svc.set_review_status(
-            resource_id="r-1", reviewer_id="u-1", status=status
-        )
+        await svc.set_review_status(resource_id="r-1", reviewer_id="u-1", status=status)
     assert len(fake.upserts) == 4
 
 

@@ -21,6 +21,7 @@ Why ``statement_cache_size=0``:
   txn lands on a different backend. Disabling client-side cache
   is the documented Supavisor + asyncpg pattern.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +31,6 @@ import asyncpg
 from loguru import logger
 
 from app.core.config import settings
-
 
 _pool: Optional[asyncpg.Pool] = None
 _pool_lock = asyncio.Lock()

@@ -19,11 +19,11 @@ Schema validation:
   - when_to_use: 5-200 chars (the embedding source per RemiMem pattern)
   - scope: must match agent_memories.scope CHECK enum
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
-
 
 # Mirrors agent_memories.scope CHECK constraint (migration 156).
 ALLOWED_SCOPES = frozenset(

@@ -52,9 +52,7 @@ def record_workflow_failure(
     inner_errors = getattr(error, "errors", None)
     if inner_errors:
         last = inner_errors[-1]
-        underlying_msg = (
-            f"{type(last).__name__}: {last}" if last else underlying_msg
-        )
+        underlying_msg = f"{type(last).__name__}: {last}" if last else underlying_msg
     err_msg = (underlying_msg or err_type)[:500]
     ctx = context or {}
 

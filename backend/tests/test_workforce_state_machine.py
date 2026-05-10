@@ -22,7 +22,6 @@ from app.services.workforce.state_machine import (
     WorkerStateMachine,
 )
 
-
 # ─── helpers ──────────────────────────────────────────────────────────
 
 
@@ -46,8 +45,12 @@ def _build_repo(*, current_state: str | None) -> MagicMock:
 @pytest.mark.unit
 def test_transition_table_targets_are_valid_states():
     valid = {
-        "idle", "working", "waiting_for_other",
-        "blocked", "paused", "terminated",
+        "idle",
+        "working",
+        "waiting_for_other",
+        "blocked",
+        "paused",
+        "terminated",
     }
     for (_, _trigger), to_state in ALLOWED_TRANSITIONS.items():
         assert to_state in valid, f"Bad target: {to_state}"
@@ -87,9 +90,7 @@ async def test_transition_invalid_pair_raises_and_does_not_persist():
     sm = WorkerStateMachine(repo=repo)
 
     with pytest.raises(InvalidTransitionError) as excinfo:
-        await sm.transition(
-            agent_id=uuid4(), trigger="task_completed"
-        )
+        await sm.transition(agent_id=uuid4(), trigger="task_completed")
     assert excinfo.value.from_state == "idle"
     assert excinfo.value.trigger == "task_completed"
 

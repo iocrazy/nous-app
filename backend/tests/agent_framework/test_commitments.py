@@ -1,4 +1,5 @@
 """Sprint 4 — Commitment value-object + state machine."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -6,13 +7,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.agent_framework.commitments import (
+    TERMINAL_STATUSES,
     Commitment,
     CommitmentStatus,
     InvalidCommitmentError,
-    TERMINAL_STATUSES,
     TriggerType,
 )
-
 
 _AGENT = "00000000-0000-0000-0000-000000000001"
 _NOW = datetime(2026, 5, 2, 12, 0, 0, tzinfo=timezone.utc)
@@ -174,9 +174,9 @@ def test_terminal_is_sticky():
             status=status,
         )
         for target in CommitmentStatus:
-            assert c.can_transition_to(target) is False, (
-                f"{status} should not transition to {target}"
-            )
+            assert (
+                c.can_transition_to(target) is False
+            ), f"{status} should not transition to {target}"
 
 
 @pytest.mark.unit

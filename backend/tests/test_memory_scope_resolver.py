@@ -1,4 +1,5 @@
 """D5 — multi-scope resolution: visible_scopes + is_writeable_by."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,6 @@ from app.services.ai.memory.scope_resolver import (
     is_writeable_by,
     visible_scopes,
 )
-
 
 # ─── visible_scopes ───────────────────────────────────────────────────
 
@@ -44,18 +44,14 @@ def test_user_plus_agent_sees_agent_user():
 
 @pytest.mark.unit
 def test_team_membership_unlocks_team_agent():
-    out = visible_scopes(
-        CallerIdentity(user_id="u1", agent_id="a1", team_id="t1")
-    )
+    out = visible_scopes(CallerIdentity(user_id="u1", agent_id="a1", team_id="t1"))
     scopes = [f.scope for f in out]
     assert MemoryScope.TEAM_AGENT in scopes
 
 
 @pytest.mark.unit
 def test_session_id_unlocks_session_scope():
-    out = visible_scopes(
-        CallerIdentity(user_id="u1", agent_id="a1", session_id="s1")
-    )
+    out = visible_scopes(CallerIdentity(user_id="u1", agent_id="a1", session_id="s1"))
     scopes = [f.scope for f in out]
     assert MemoryScope.SESSION in scopes
 

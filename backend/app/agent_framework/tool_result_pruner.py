@@ -24,11 +24,11 @@ existing ``_safe_split_index`` enforces are unaffected.
 Both pass functions return a NEW messages list — caller's input is
 not mutated.
 """
+
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-
 
 # Reference text that replaces a duplicate tool_result body. Includes
 # the original tool_call_id so the agent can trace back if needed.
@@ -104,9 +104,7 @@ def dedupe_tool_results(
                     new_msgs.append(
                         {
                             **msg,
-                            "content": DUPLICATE_REFERENCE.format(
-                                original_tcid=first
-                            ),
+                            "content": DUPLICATE_REFERENCE.format(original_tcid=first),
                         }
                     )
                     duplicates_replaced += 1

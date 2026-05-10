@@ -17,6 +17,7 @@ forbidden list. ALLOWED_PATHS lets us whitelist genuinely-OK uses
 
 Adding a new known-drift trap: extend FORBIDDEN_REFERENCES below.
 """
+
 from __future__ import annotations
 
 import re
@@ -64,9 +65,7 @@ ALLOWED_PATHS: frozenset[str] = frozenset(
 )
 
 
-def _check_table_column_combo(
-    content: str, table: str, column: str
-) -> list[int]:
+def _check_table_column_combo(content: str, table: str, column: str) -> list[int]:
     """Return line numbers where the forbidden column appears as a
     QUERY STRING LITERAL near a mention of the offending table.
 
@@ -93,7 +92,7 @@ def _check_table_column_combo(
         # Single-line triple-quoted string (open + close on same line)
         for q in ('"""', "'''"):
             if stripped.startswith(q):
-                rest = stripped[len(q):]
+                rest = stripped[len(q) :]
                 if q in rest:
                     code_lines.append(False)
                     break
@@ -112,12 +111,8 @@ def _check_table_column_combo(
     # (e.g. ``"id, transcript_status"`` — common SELECT-list shape).
     # Heuristic: column has a string quote somewhere on the line + the
     # column name appears as a whole word.
-    column_pattern = re.compile(
-        rf"""['"][^'"]*\b{re.escape(column)}\b[^'"]*['"]"""
-    )
-    table_pattern = re.compile(
-        rf"""['"][^'"]*\b{re.escape(table)}\b[^'"]*['"]"""
-    )
+    column_pattern = re.compile(rf"""['"][^'"]*\b{re.escape(column)}\b[^'"]*['"]""")
+    table_pattern = re.compile(rf"""['"][^'"]*\b{re.escape(table)}\b[^'"]*['"]""")
 
     table_lines: set[int] = set()
     for i, line in enumerate(lines):
@@ -145,7 +140,7 @@ def test_no_known_schema_drift_traps() -> None:
     offenders: list[tuple[str, int, str, str]] = []
 
     for py_file in BACKEND_APP.rglob("*.py"):
-        rel_path = py_file.relative_to(BACKEND_APP.parent).as_posix()
+        py_file.relative_to(BACKEND_APP.parent).as_posix()
         # The backend/ prefix isn't in rel_path because we walk from app/
         rel_path_full = str(py_file.relative_to(BACKEND_APP.parent))
         if rel_path_full in ALLOWED_PATHS:
@@ -176,17 +171,15 @@ def test_no_known_schema_drift_traps() -> None:
 def test_lint_catches_real_query_pattern() -> None:
     """Synthetic example: confirm the heuristic actually flags the
     dangerous shape (so a regression of the heuristic itself surfaces)."""
-    bad_code = '''
+    bad_code = """
 def fetch_status(client):
     return (
         client.table("parsed_media")
         .select("id, transcript_status")
         .execute()
     )
-    '''
-    offenders = _check_table_column_combo(
-        bad_code, "parsed_media", "transcript_status"
-    )
+    """
+    offenders = _check_table_column_combo(bad_code, "parsed_media", "transcript_status")
     assert offenders, "lint should flag dangerous pattern"
 
 

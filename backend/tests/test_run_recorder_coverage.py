@@ -31,7 +31,6 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # Updated 2026-05-06: paths reorganised under sub-packages
     # (services/ai/runner, services/ai/llm, services/ai/chat, etc).
     # See `services/__init__.py` re-exports for the historical shape.
-
     # RunRecorder is the telemetry anchor itself — no recorder to wrap.
     "services/ai/runner/run_recorder.py": "telemetry implementation",
     # AgentRunner drives the adapter — callers wrap the whole runner in
@@ -143,10 +142,7 @@ def test_no_direct_llm_calls_outside_run_recorder() -> None:
                     break
 
     if offenders:
-        lines = [
-            f"  {path}:{lineno}  →  {text}"
-            for path, lineno, text in offenders
-        ]
+        lines = [f"  {path}:{lineno}  →  {text}" for path, lineno, text in offenders]
         msg = (
             "Direct LLM adapter calls outside RunRecorder coverage:\n"
             + "\n".join(lines)

@@ -1,4 +1,5 @@
 """B3 — SessionMemory primitive: trigger + schema + service."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,7 +17,6 @@ from app.agent_framework.session_memory import (
     parse_md_sections,
     render_md,
 )
-
 
 # ─── Trigger ──────────────────────────────────────────────────────────
 
@@ -45,7 +45,9 @@ def test_trigger_fires_on_token_delta():
 @pytest.mark.unit
 def test_trigger_fires_on_tool_call_delta():
     """Even tiny token delta — if tool_calls jumped, fire."""
-    t = SessionMemoryTrigger(min_total_tokens=1000, delta_tokens=10000, delta_tool_calls=3)
+    t = SessionMemoryTrigger(
+        min_total_tokens=1000, delta_tokens=10000, delta_tool_calls=3
+    )
     current = _metrics(tokens=2000, calls=10)
     baseline = _metrics(tokens=1900, calls=5)
     # token delta=100 < 10000, but tool delta=5 ≥ 3
@@ -191,8 +193,17 @@ class _FakeRepo:
     async def load(self, sid):
         return self._row
 
-    async def upsert(self, sid, *, body_md, sections_json, tokens_at_update,
-                     tool_calls_at_update, turns_at_update, **kw):
+    async def upsert(
+        self,
+        sid,
+        *,
+        body_md,
+        sections_json,
+        tokens_at_update,
+        tool_calls_at_update,
+        turns_at_update,
+        **kw,
+    ):
         self.upsert_calls += 1
         self._row = _StoredRow(
             session_id=sid,
@@ -255,9 +266,13 @@ async def test_service_force_overrides_trigger():
     svc = SessionMemoryService(
         repo=repo,
         summarizer=_summ,
-        trigger=SessionMemoryTrigger(min_total_tokens=10_000_000),  # never naturally fires
+        trigger=SessionMemoryTrigger(
+            min_total_tokens=10_000_000
+        ),  # never naturally fires
     )
-    out = await svc.maybe_update("sess-1", [{"role": "user", "content": "tiny"}], force=True)
+    out = await svc.maybe_update(
+        "sess-1", [{"role": "user", "content": "tiny"}], force=True
+    )
     assert out is not None
     assert "Forced" in repo._row.body_md
 

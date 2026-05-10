@@ -8,6 +8,7 @@ primary (waits N retries again) before falling to fallback — wastes
 This module remembers which models are cooled-down and lets the chain
 skip them until the cooldown expires.
 """
+
 from __future__ import annotations
 
 import time
@@ -92,9 +93,7 @@ def test_pick_first_available_skips_cooled_down():
     reg = ModelHealthRegistry()
     reg.mark_cooled_down("qwen-max")
 
-    available = reg.pick_first_available(
-        ["qwen-max", "qwen-plus", "doubao-pro"]
-    )
+    available = reg.pick_first_available(["qwen-max", "qwen-plus", "doubao-pro"])
     assert available == "qwen-plus"
 
 

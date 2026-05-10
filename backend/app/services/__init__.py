@@ -13,23 +13,23 @@ import shape so callers don't have to chase paths. New code should
 import from the sub-package directly.
 """
 
+from app.services.ai.providers.embedding_service import EmbeddingService
+from app.services.ai.visual.visual_analysis_service import (
+    VisualAnalysisResult,
+    VisualAnalysisService,
+)
+from app.services.infra.supabase_auth_service import (
+    SupabaseAdminAuthService,
+    SupabaseAuthService,
+)
+from app.services.media.downloader.downloader import DownloaderService
 from app.services.media.parsers.douyin_parse import (
     ABogusDouyinParser,
     DouyinFormatter,
     DrissionPageParser,
     IesDouyinParser,
 )
-from app.services.media.downloader.downloader import DownloaderService
-from app.services.ai.providers.embedding_service import EmbeddingService
 from app.services.media.parsers.media_service import MediaService
-from app.services.infra.supabase_auth_service import (
-    SupabaseAdminAuthService,
-    SupabaseAuthService,
-)
-from app.services.ai.visual.visual_analysis_service import (
-    VisualAnalysisResult,
-    VisualAnalysisService,
-)
 
 __all__ = [
     "ABogusDouyinParser",

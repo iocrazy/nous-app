@@ -25,10 +25,10 @@ from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.schemas.media import MediaTypeFetchRequest
+from app.services.billing.points_service import PointsService
 from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
 from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
 from app.services.media.parsers.media_service import MediaService
-from app.services.billing.points_service import PointsService
 from app.services.media.parsers.url_router import URLRouter
 
 router = APIRouter()

@@ -64,9 +64,7 @@ class WhisperService:
 
             joined = os.path.join(_settings.DOWNLOAD_PATH, audio_path)
             if os.path.exists(joined):
-                logger.info(
-                    f"Audio path {audio_path} relative; resolved to {joined}"
-                )
+                logger.info(f"Audio path {audio_path} relative; resolved to {joined}")
                 audio_path = joined
             else:
                 import glob

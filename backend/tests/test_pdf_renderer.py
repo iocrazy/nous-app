@@ -3,15 +3,17 @@
 Uses a real pypdfium2 in-memory PDF document for end-to-end coverage of
 the actual render path. No mocks needed for the PDF library itself.
 """
+
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
 import pytest
 
 from app.agent_framework.multimodal import AttachmentKind
 from app.services.media.render import pdf_renderer as pr
+
+
 @pytest.fixture
 def tiny_pdf(tmp_path: Path) -> Path:
     """Create a real 3-page PDF on disk via pypdfium2."""
@@ -43,9 +45,9 @@ def test_clamping_dpi_jpeg_max_pages(tiny_pdf):
     """All numeric inputs clamped to safe ranges."""
     result = pr.render_pdf(
         str(tiny_pdf),
-        dpi=9999,         # → 300
-        jpeg_quality=200, # → 100
-        max_pages=999,    # → 50 (but only 3 pages exist)
+        dpi=9999,  # → 300
+        jpeg_quality=200,  # → 100
+        max_pages=999,  # → 50 (but only 3 pages exist)
     )
     assert result.error is None
     assert len(result.attachments) == 3  # only 3 pages exist
@@ -72,6 +74,7 @@ def test_attachments_are_pdf_page_kind_with_data_url(tiny_pdf):
         assert a.data_url and a.data_url.startswith("data:image/jpeg;base64,")
         # Decode → non-empty
         import base64
+
         b64_part = a.data_url.split(",", 1)[1]
         decoded = base64.b64decode(b64_part)
         assert len(decoded) > 100  # real JPEG, not just header
@@ -117,6 +120,7 @@ def test_page_range_negative_start_clamps(tiny_pdf):
 def test_pypdfium2_missing_returns_error(tiny_pdf, monkeypatch):
     """Simulate pypdfium2 import failure — should not crash."""
     import sys
+
     real_pypdfium2 = sys.modules.pop("pypdfium2", None)
 
     def _broken_import(name, *args, **kwargs):
@@ -125,6 +129,7 @@ def test_pypdfium2_missing_returns_error(tiny_pdf, monkeypatch):
         return _orig_import(name, *args, **kwargs)
 
     import builtins
+
     _orig_import = builtins.__import__
     monkeypatch.setattr(builtins, "__import__", _broken_import)
     try:

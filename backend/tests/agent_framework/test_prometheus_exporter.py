@@ -1,10 +1,11 @@
 """K4 — Prometheus text-format exporter."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.agent_framework.prometheus_exporter import render_prometheus
-from app.agent_framework.telemetry import AgentMetrics, COUNTER_NAMES
+from app.agent_framework.telemetry import COUNTER_NAMES, AgentMetrics
 
 
 @pytest.mark.unit
@@ -49,10 +50,7 @@ def test_render_namespace_label_consistent():
     m = AgentMetrics()
     m.inc("compaction_triggered")
     body = render_prometheus(m)
-    value_lines = [
-        ln for ln in body.splitlines()
-        if ln and not ln.startswith("#")
-    ]
+    value_lines = [ln for ln in body.splitlines() if ln and not ln.startswith("#")]
     for ln in value_lines:
         assert 'namespace="harness"' in ln
 

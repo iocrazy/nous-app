@@ -20,6 +20,7 @@ async def get_celery_workers():
     runs in the FastAPI host process. Payload mirrors the legacy
     Celery-shape so the admin UI keeps rendering."""
     from app.services.infra import dbos_orchestrator
+
     if not dbos_orchestrator.is_enabled():
         return {"online": 0, "total": 0, "workers": []}
 
@@ -51,6 +52,7 @@ async def get_celery_queues():
     empty list of legacy queue names for back-compat with the admin
     frontend that may still iterate them."""
     from app.services.infra import dbos_orchestrator
+
     queues: list[dict] = []
     if dbos_orchestrator.is_enabled():
         try:

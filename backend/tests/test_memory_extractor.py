@@ -32,8 +32,14 @@ async def test_user_extractor_returns_parsed_facts():
         captured_prompt["text"] = prompt
         return _ok_response(
             [
-                {"summary": "User prefers short replies", "when_to_use": "When drafting responses"},
-                {"summary": "User works in marketing", "when_to_use": "When choosing tone"},
+                {
+                    "summary": "User prefers short replies",
+                    "when_to_use": "When drafting responses",
+                },
+                {
+                    "summary": "User works in marketing",
+                    "when_to_use": "When choosing tone",
+                },
             ]
         )
 
@@ -84,7 +90,12 @@ async def test_user_extractor_llm_failure_returns_empty():
 async def test_assistant_extractor_marks_assistant_msg_source():
     async def fake_llm(prompt: str) -> str:
         return _ok_response(
-            [{"summary": "Used cinematic tone", "when_to_use": "Future scenes for this user"}]
+            [
+                {
+                    "summary": "Used cinematic tone",
+                    "when_to_use": "Future scenes for this user",
+                }
+            ]
         )
 
     extractor = AssistantMemoryExtractor(llm_call=fake_llm)
@@ -131,19 +142,27 @@ def test_parse_facts_accepts_clean_json():
 
 @pytest.mark.unit
 def test_parse_facts_strips_markdown_fences():
-    raw = "```json\n" + json.dumps({"facts": [{"summary": "x", "when_to_use": "y"}]}) + "\n```"
+    raw = (
+        "```json\n"
+        + json.dumps({"facts": [{"summary": "x", "when_to_use": "y"}]})
+        + "\n```"
+    )
     facts = _parse_facts(raw, ExtractedFrom.USER_MSG)
     assert len(facts) == 1
 
 
 @pytest.mark.unit
 def test_parse_facts_drops_malformed_items():
-    raw = json.dumps({"facts": [
-        {"summary": "ok", "when_to_use": "ok"},
-        {"summary": "", "when_to_use": "no summary"},
-        {"summary": "no when", "when_to_use": ""},
-        "not even a dict",
-    ]})
+    raw = json.dumps(
+        {
+            "facts": [
+                {"summary": "ok", "when_to_use": "ok"},
+                {"summary": "", "when_to_use": "no summary"},
+                {"summary": "no when", "when_to_use": ""},
+                "not even a dict",
+            ]
+        }
+    )
     facts = _parse_facts(raw, ExtractedFrom.USER_MSG)
     assert len(facts) == 1
 

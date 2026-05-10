@@ -218,9 +218,7 @@ class TestCharacterCRUD:
             ) as MockRepo:
                 instance = MockRepo.return_value
                 instance.list_by_project = AsyncMock(return_value=[_FAKE_CHAR])
-                resp = await client.get(
-                    f"{BASE}/projects/{FAKE_PROJECT_ID}/characters"
-                )
+                resp = await client.get(f"{BASE}/projects/{FAKE_PROJECT_ID}/characters")
         assert resp.status_code == 200
         assert len(resp.json()["data"]) == 1
 
@@ -313,9 +311,7 @@ class TestExport:
         # isolated from DBOS init.
         with (
             _svc_patch("verify_project_access"),
-            patch(
-                "app.api.sb_export_router.get_task_manager"
-            ) as mock_mgr_fn,
+            patch("app.api.sb_export_router.get_task_manager") as mock_mgr_fn,
             patch(
                 "app.services.infra.dbos_orchestrator.start_workflow_routed",
                 new_callable=AsyncMock,

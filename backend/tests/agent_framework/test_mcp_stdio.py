@@ -1,4 +1,5 @@
 """Sprint 8.5 — minimal MCP JSON-RPC stdio transport."""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,16 +25,13 @@ from app.agent_framework.mcp_stdio import (
     serve,
 )
 
-
 # ─── _dispatch (unit-level) ───────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_initialize_returns_protocol_version_and_serverinfo():
     reg = MCPToolRegistry()
-    resp = await _dispatch(
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize"}, reg
-    )
+    resp = await _dispatch({"jsonrpc": "2.0", "id": 1, "method": "initialize"}, reg)
     assert resp["id"] == 1
     assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
     assert resp["result"]["serverInfo"]["name"] == "mediahub"
@@ -50,9 +48,7 @@ async def test_tools_list_returns_descriptors():
     reg.register(
         Tool(name="x", description="d", input_schema=ToolInputSchema(), handler=_h)
     )
-    resp = await _dispatch(
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, reg
-    )
+    resp = await _dispatch({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, reg)
     assert resp["id"] == 2
     assert [t["name"] for t in resp["result"]["tools"]] == ["x"]
     # Descriptor must NOT include the internal handler reference
@@ -176,9 +172,7 @@ async def test_tools_call_argument_mismatch_returns_invalid_params():
 @pytest.mark.asyncio
 async def test_unknown_method_returns_method_not_found():
     reg = MCPToolRegistry()
-    resp = await _dispatch(
-        {"jsonrpc": "2.0", "id": 8, "method": "fake/thing"}, reg
-    )
+    resp = await _dispatch({"jsonrpc": "2.0", "id": 8, "method": "fake/thing"}, reg)
     assert resp["error"]["code"] == METHOD_NOT_FOUND
 
 
@@ -186,18 +180,14 @@ async def test_unknown_method_returns_method_not_found():
 async def test_notification_returns_none():
     """Notifications (no 'id') accepted silently — no response."""
     reg = MCPToolRegistry()
-    resp = await _dispatch(
-        {"jsonrpc": "2.0", "method": "notifications/cancelled"}, reg
-    )
+    resp = await _dispatch({"jsonrpc": "2.0", "method": "notifications/cancelled"}, reg)
     assert resp is None
 
 
 @pytest.mark.asyncio
 async def test_shutdown_acks():
     reg = MCPToolRegistry()
-    resp = await _dispatch(
-        {"jsonrpc": "2.0", "id": 9, "method": "shutdown"}, reg
-    )
+    resp = await _dispatch({"jsonrpc": "2.0", "id": 9, "method": "shutdown"}, reg)
     assert resp["result"] == {}
 
 
@@ -211,8 +201,7 @@ class _CapturingWriter:
     def write(self, s: str) -> None:
         self.buf.write(s)
 
-    def flush(self) -> None:
-        ...
+    def flush(self) -> None: ...
 
     def lines(self) -> list[dict[str, Any]]:
         return [json.loads(line) for line in self.buf.getvalue().splitlines() if line]

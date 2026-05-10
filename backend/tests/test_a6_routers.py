@@ -23,9 +23,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.deps import AuthContext, get_auth
 from app.core.admin_deps import get_admin_auth
-
+from app.core.deps import AuthContext, get_auth
 
 # Import the actual SUBMODULES (not the router attribute that
 # app.api.__init__.py rebinds onto the package namespace).
@@ -127,8 +126,17 @@ async def test_consume_ticket_uses_atomic_getdel() -> None:
 def _supabase_chain(execute_data: Any) -> MagicMock:
     chain = MagicMock()
     for op in (
-        "select", "eq", "in_", "order", "limit", "range",
-        "update", "insert", "delete", "maybe_single", "single",
+        "select",
+        "eq",
+        "in_",
+        "order",
+        "limit",
+        "range",
+        "update",
+        "insert",
+        "delete",
+        "maybe_single",
+        "single",
     ):
         getattr(chain, op).return_value = chain
     res = MagicMock()

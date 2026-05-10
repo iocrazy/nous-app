@@ -7,6 +7,7 @@ not await this — it just dispatches an asyncio task and returns.
 Failures here are SILENT by design: a stale session_memory is preferable
 to breaking chat. Errors log + the next maybe_update gets another shot.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -27,8 +28,8 @@ async def _default_summarizer(prompt: str) -> str:
     """Cheap LLM call for session-memory maintenance. Routes through the
     qwen-flash / qwen-turbo adapter — same one chat compactor uses."""
     try:
-        from app.services.ai.providers.ai_provider import QwenAdapter
         from app.core.config import settings
+        from app.services.ai.providers.ai_provider import QwenAdapter
 
         api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or getattr(
             settings, "QWEN_API_KEY", None
@@ -39,6 +40,7 @@ async def _default_summarizer(prompt: str) -> str:
         adapter = QwenAdapter(api_key=api_key, model="qwen-turbo")
         # Minimal "messages" shape the adapter accepts.
         from app.schemas.ai_library import ComposedSystemPrompt
+
         composed = ComposedSystemPrompt(
             agent_id=None,  # type: ignore[arg-type]  — runner doesn't need it
             agent_slug="session_memory_updater",

@@ -26,14 +26,14 @@ Usage from AgentRunner:
     if skill_is_idempotent(skill_slug):
         cache.put(key, result)
 """
+
 from __future__ import annotations
 
 import hashlib
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
-
 
 DEFAULT_TTL_SECONDS = 60.0
 DEFAULT_MAX_ENTRIES = 256
@@ -46,6 +46,7 @@ def _canonical_args(args: Any) -> str:
         # repr() if a value isn't JSON-serializable.
         try:
             import json
+
             return json.dumps(args, sort_keys=True, default=str)
         except (TypeError, ValueError):
             return repr(sorted(args.items()))
@@ -90,7 +91,9 @@ class ToolResultCache:
         if not tool_name:
             tool_name = "?"
         canon = f"{tool_name}\x00{_canonical_args(args)}"
-        return hashlib.sha1(canon.encode("utf-8"), usedforsecurity=False).hexdigest()[:24]
+        return hashlib.sha1(canon.encode("utf-8"), usedforsecurity=False).hexdigest()[
+            :24
+        ]
 
     def get(self, key: str, *, now: Optional[float] = None) -> Optional[Any]:
         """Returns cached value if present + unexpired; None otherwise.

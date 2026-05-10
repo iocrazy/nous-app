@@ -29,6 +29,7 @@ Telemetry: ``CompactionStats`` is returned alongside the new messages
 list so the caller can persist counts to ``agent_runs.metadata`` for
 observability + cost analysis.
 """
+
 from __future__ import annotations
 
 import os
@@ -235,7 +236,12 @@ class ContextCompactor:
 
         logger.info(
             "[compactor] tier={} model={} window={} before={} after={} saved={}",
-            tier.value, model, window, total, final_total, total - final_total,
+            tier.value,
+            model,
+            window,
+            total,
+            final_total,
+            total - final_total,
         )
 
         return capped, CompactionStats(

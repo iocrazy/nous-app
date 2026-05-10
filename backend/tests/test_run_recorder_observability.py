@@ -14,9 +14,9 @@ We don't open a real RunRecorder lifecycle (that needs DB) — we
 construct one with mocked async hooks so the metadata accumulator
 under test runs without supabase.
 """
+
 from __future__ import annotations
 
-from unittest.mock import patch
 from uuid import uuid4
 
 from app.agent_framework.context_compactor import (
@@ -53,18 +53,30 @@ def test_note_compaction_accumulates_per_tier_count():
     tier counter. The Runs UI surfaces these to show how often a long
     conversation hit the compactor."""
     rec = _make_recorder()
-    rec.note_compaction(CompactionStats(
-        tier=CompactionTier.YELLOW,
-        tokens_before=1000, tokens_after=700, tokens_saved=300,
-    ))
-    rec.note_compaction(CompactionStats(
-        tier=CompactionTier.YELLOW,
-        tokens_before=900, tokens_after=600, tokens_saved=300,
-    ))
-    rec.note_compaction(CompactionStats(
-        tier=CompactionTier.ORANGE,
-        tokens_before=2000, tokens_after=1200, tokens_saved=800,
-    ))
+    rec.note_compaction(
+        CompactionStats(
+            tier=CompactionTier.YELLOW,
+            tokens_before=1000,
+            tokens_after=700,
+            tokens_saved=300,
+        )
+    )
+    rec.note_compaction(
+        CompactionStats(
+            tier=CompactionTier.YELLOW,
+            tokens_before=900,
+            tokens_after=600,
+            tokens_saved=300,
+        )
+    )
+    rec.note_compaction(
+        CompactionStats(
+            tier=CompactionTier.ORANGE,
+            tokens_before=2000,
+            tokens_after=1200,
+            tokens_saved=800,
+        )
+    )
 
     comp = rec.metadata["compaction"]
     assert comp["yellow_count"] == 2
@@ -76,10 +88,14 @@ def test_note_compaction_skips_zero_savings():
     """Green tier returns CompactionStats with tokens_saved=0 — those
     are noop calls and shouldn't pollute the per-tier counters."""
     rec = _make_recorder()
-    rec.note_compaction(CompactionStats(
-        tier=CompactionTier.GREEN,
-        tokens_before=100, tokens_after=100, tokens_saved=0,
-    ))
+    rec.note_compaction(
+        CompactionStats(
+            tier=CompactionTier.GREEN,
+            tokens_before=100,
+            tokens_after=100,
+            tokens_saved=0,
+        )
+    )
     assert "compaction" not in rec.metadata
 
 
@@ -104,12 +120,8 @@ def test_note_subagent_counts_spawn_and_tokens():
     them up so the parent run's metadata exposes how many sub-agents
     fan out and how many tokens that cost across the tree."""
     rec = _make_recorder()
-    rec.note_subagent({
-        "status": "success", "tokens_used": 1234, "sub_run_id": "a"
-    })
-    rec.note_subagent({
-        "status": "success", "tokens_used": 567, "sub_run_id": "b"
-    })
+    rec.note_subagent({"status": "success", "tokens_used": 1234, "sub_run_id": "a"})
+    rec.note_subagent({"status": "success", "tokens_used": 567, "sub_run_id": "b"})
 
     sub = rec.metadata["subagents"]
     assert sub["count"] == 2

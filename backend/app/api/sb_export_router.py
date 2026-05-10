@@ -15,8 +15,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
-from app.services.storyboard.storyboard_service import StoryboardService
 from app.services.infra.unified_task_manager import get_task_manager
+from app.services.storyboard.storyboard_service import StoryboardService
 
 router = APIRouter(prefix="/storyboard")
 

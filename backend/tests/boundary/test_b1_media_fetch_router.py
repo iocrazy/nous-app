@@ -1,8 +1,9 @@
 """B1 retro-fit — media_fetch_router.fetch_video must reject SSRF URLs
 at the boundary, before any service / points / DB call."""
+
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -77,12 +78,11 @@ def test_fetch_video_boundary_fires_after_extract_passes(
     from app.core.utils import Utils
 
     # Make extract_valid_url accept anything (returns the URL as-is)
-    monkeypatch.setattr(
-        Utils, "extract_valid_url", staticmethod(lambda url: [url])
-    )
+    monkeypatch.setattr(Utils, "extract_valid_url", staticmethod(lambda url: [url]))
     # Mock DNS resolver to return private IP — boundary must reject
     monkeypatch.setattr(
-        url_guard, "_resolve_host_async",
+        url_guard,
+        "_resolve_host_async",
         AsyncMock(return_value=["192.168.50.9"]),
     )
 

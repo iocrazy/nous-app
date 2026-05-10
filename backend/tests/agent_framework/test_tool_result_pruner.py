@@ -1,16 +1,14 @@
 """A4 — tool_result dedupe + aging passes."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.agent_framework.tool_result_pruner import (
-    AGING_GIST,
-    DUPLICATE_REFERENCE,
     age_old_tool_results,
     dedupe_tool_results,
     prune,
 )
-
 
 # ─── Fixtures ─────────────────────────────────────────────────────────
 
@@ -19,12 +17,16 @@ def _user(text: str) -> dict:
     return {"role": "user", "content": text}
 
 
-def _assistant_with_tool_call(tcid: str, name: str = "read", args: str = '{}') -> dict:
+def _assistant_with_tool_call(tcid: str, name: str = "read", args: str = "{}") -> dict:
     return {
         "role": "assistant",
         "content": "",
         "tool_calls": [
-            {"id": tcid, "type": "function", "function": {"name": name, "arguments": args}}
+            {
+                "id": tcid,
+                "type": "function",
+                "function": {"name": name, "arguments": args},
+            }
         ],
     }
 

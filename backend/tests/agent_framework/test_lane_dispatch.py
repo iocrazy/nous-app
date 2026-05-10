@@ -1,4 +1,5 @@
 """lane_dispatch — Origin → Lane mapping + dispatch helper."""
+
 from __future__ import annotations
 
 import asyncio
@@ -37,7 +38,9 @@ async def test_dispatch_uses_explicit_queue():
         return "ok"
 
     result = await dispatch_in_lane(
-        task(), origin=Origin.USER_CLICK, queue=queue,
+        task(),
+        origin=Origin.USER_CLICK,
+        queue=queue,
     )
     assert result == "ok"
 
@@ -81,7 +84,9 @@ async def test_dispatch_lane_independence():
     # USER lane should be unblocked
     result = await asyncio.wait_for(
         dispatch_in_lane(
-            fast_user(), origin=Origin.USER_CLICK, queue=queue,
+            fast_user(),
+            origin=Origin.USER_CLICK,
+            queue=queue,
         ),
         timeout=0.5,
     )

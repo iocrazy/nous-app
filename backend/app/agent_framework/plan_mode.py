@@ -25,21 +25,22 @@ This module is the SHAPE-only layer:
 Wiring (chat service / runner integration) is L4.5 / future. The
 primitive here is testable end-to-end without DB or LLM.
 """
+
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
 
 class PlanMode(str, Enum):
     """How the runner should treat agent plans this turn."""
 
-    AUTO = "auto"            # skip plan checkpoint (back-compat)
+    AUTO = "auto"  # skip plan checkpoint (back-compat)
     PROMPT_USER = "prompt_user"  # surface plan; wait for explicit approve
-    DRY_RUN = "dry_run"      # emit plan only, never execute
+    DRY_RUN = "dry_run"  # emit plan only, never execute
 
 
 class PlanValidationError(ValueError):
@@ -152,9 +153,7 @@ def parse_plan_response(raw: str) -> ProposedPlan:
     if not isinstance(steps_raw, list) or not steps_raw:
         raise PlanValidationError("plan.steps is required and non-empty")
     if len(steps_raw) > MAX_STEPS:
-        raise PlanValidationError(
-            f"too many steps ({len(steps_raw)} > {MAX_STEPS})"
-        )
+        raise PlanValidationError(f"too many steps ({len(steps_raw)} > {MAX_STEPS})")
 
     steps: list[PlanStep] = []
     for i, raw_step in enumerate(steps_raw, start=1):
@@ -181,9 +180,7 @@ def parse_plan_response(raw: str) -> ProposedPlan:
             args_summary = str(args_summary)
         side_effects_raw = raw_step.get("side_effects") or []
         if not isinstance(side_effects_raw, list):
-            raise PlanValidationError(
-                f"step {i}: side_effects must be a list"
-            )
+            raise PlanValidationError(f"step {i}: side_effects must be a list")
         side_effects = tuple(str(s) for s in side_effects_raw)
 
         steps.append(

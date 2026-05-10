@@ -10,6 +10,7 @@ Use:
 
 If app.state isn't ready yet (CLI scripts, tests) → silent no-op.
 """
+
 from __future__ import annotations
 
 
@@ -17,6 +18,7 @@ def inc_metric(name: str, *, by: int = 1) -> None:
     """Best-effort metric increment. Never raises."""
     try:
         from app.main import app as _app
+
         m = getattr(_app.state, "agent_metrics", None)
         if m is not None:
             m.inc(name, by=by)

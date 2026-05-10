@@ -12,6 +12,7 @@ Tests cover:
 - HTTPS CONNECT path: public host tunneled, private host returns 403
 - Server stops cleanly
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -55,6 +56,7 @@ async def proxy():
 # Lifecycle
 # ============================================================================
 
+
 @pytest.mark.unit
 async def test_proxy_starts_and_binds(proxy: SsrfProxy):
     """After start(), the proxy has a bound port on 127.0.0.1."""
@@ -80,6 +82,7 @@ async def test_proxy_stops_cleanly():
 # ============================================================================
 # HTTPS CONNECT path
 # ============================================================================
+
 
 async def _send_connect(proxy_port: int, target: str) -> tuple[int, bytes]:
     """Open a TCP connection to the proxy and send a CONNECT request.
@@ -124,6 +127,7 @@ async def test_connect_to_invalid_target_returns_400(proxy: SsrfProxy):
 # ============================================================================
 # HTTP forward path
 # ============================================================================
+
 
 async def _send_http_get(proxy_port: int, absolute_url: str) -> tuple[int, bytes]:
     """Send a proxied HTTP GET (RFC 7230 §5.3.2 absolute-form)."""

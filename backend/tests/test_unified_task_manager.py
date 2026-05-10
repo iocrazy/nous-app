@@ -10,13 +10,12 @@ from __future__ import annotations
 import pytest
 
 from app.services.infra.unified_task_manager import (
+    _PHASE_TO_STATUS,
+    VALID_TRANSITIONS,
     TaskPhase,
     UnifiedTaskManager,
-    VALID_TRANSITIONS,
-    _PHASE_TO_STATUS,
     get_task_manager,
 )
-
 
 # ─── Phase transitions ─────────────────────────────────────────────
 
@@ -94,16 +93,28 @@ class TestMakeDedupKey:
 
 class TestClassifyError:
     def test_network_timeout(self) -> None:
-        assert UnifiedTaskManager.classify_error(Exception("connection timed out")) == "NETWORK_TIMEOUT"
+        assert (
+            UnifiedTaskManager.classify_error(Exception("connection timed out"))
+            == "NETWORK_TIMEOUT"
+        )
 
     def test_resource_404(self) -> None:
-        assert UnifiedTaskManager.classify_error(Exception("HTTP 404 Not Found")) == "RESOURCE_404"
+        assert (
+            UnifiedTaskManager.classify_error(Exception("HTTP 404 Not Found"))
+            == "RESOURCE_404"
+        )
 
     def test_rate_limited(self) -> None:
-        assert UnifiedTaskManager.classify_error(Exception("429 too many requests")) == "RATE_LIMITED"
+        assert (
+            UnifiedTaskManager.classify_error(Exception("429 too many requests"))
+            == "RATE_LIMITED"
+        )
 
     def test_transcode_failed(self) -> None:
-        assert UnifiedTaskManager.classify_error(Exception("ffmpeg exited with code 1")) == "TRANSCODE_FAILED"
+        assert (
+            UnifiedTaskManager.classify_error(Exception("ffmpeg exited with code 1"))
+            == "TRANSCODE_FAILED"
+        )
 
     def test_ai_quota_exceeded_on_ai_keyword(self) -> None:
         # 'openai' keyword falls through to AI_QUOTA_EXCEEDED branch
@@ -119,7 +130,9 @@ class TestClassifyError:
         )
 
     def test_storage_full(self) -> None:
-        assert UnifiedTaskManager.classify_error(Exception("disk full")) == "STORAGE_FULL"
+        assert (
+            UnifiedTaskManager.classify_error(Exception("disk full")) == "STORAGE_FULL"
+        )
 
     def test_ai_storage_full_becomes_ai_quota(self) -> None:
         # "openai ... quota exceeded" → AI_QUOTA_EXCEEDED branch

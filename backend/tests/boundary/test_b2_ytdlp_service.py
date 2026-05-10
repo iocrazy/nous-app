@@ -1,6 +1,7 @@
 """B2 — YtdlpService runtime asserts. Three public methods now require
 ValidatedURL; passing raw str must crash at function entry, not run yt-dlp
 with unvalidated input."""
+
 from __future__ import annotations
 
 import pytest
@@ -49,8 +50,10 @@ async def test_fetch_metadata_accepts_validated_url(monkeypatch):
         # Return an object whose communicate() returns valid JSON
         class _Proc:
             returncode = 0
+
             async def communicate(self):
                 return (b'{"title": "stub"}', b"")
+
         return _Proc()
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subprocess)

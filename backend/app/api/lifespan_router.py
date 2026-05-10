@@ -16,6 +16,7 @@ Distinct from the existing `/health` family:
 The split lets the dev supervisor distinguish "starting up — wait" from
 "wedged — kill". Matches k8s probe semantics.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict

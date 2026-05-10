@@ -1,4 +1,5 @@
 """K1 — ToolResultCache: LRU + TTL + canonical key."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,7 +9,6 @@ from app.agent_framework.tool_result_cache import (
     DEFAULT_TTL_SECONDS,
     ToolResultCache,
 )
-
 
 # ─── Constructor validation ──────────────────────────────────────────
 
@@ -62,6 +62,7 @@ def test_key_handles_non_dict_args():
 @pytest.mark.unit
 def test_key_handles_non_serializable_args():
     """Object that's not JSON-serializable — falls back to repr() via default=str."""
+
     class _Opaque:
         def __repr__(self):
             return "<opaque>"

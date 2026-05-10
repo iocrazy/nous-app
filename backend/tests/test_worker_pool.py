@@ -19,7 +19,6 @@ import pytest
 
 from app.services.workforce.worker_pool import AgentWorkerPool
 
-
 # ─── helpers ──────────────────────────────────────────────────────────
 
 
@@ -66,18 +65,21 @@ async def test_same_agent_dispatches_run_serially():
     # the full slice yielded, t2 shouldn't have entered the runner yet
     # — the lock is held by t1.
     await asyncio.sleep(0.05)
-    assert log == [("enter", t1["id"])], (
-        "t2 must not have entered runner while t1 holds the lock"
-    )
+    assert log == [
+        ("enter", t1["id"])
+    ], "t2 must not have entered runner while t1 holds the lock"
 
     # Release t1; both should complete.
     proceed.set()
     await pool.shutdown(drain_timeout=2.0)
 
     sequence = [step for step, _ in log]
-    assert sequence == ["enter", "exit", "enter", "exit"], (
-        f"expected serial order, got {log}"
-    )
+    assert sequence == [
+        "enter",
+        "exit",
+        "enter",
+        "exit",
+    ], f"expected serial order, got {log}"
 
 
 # ─── cross-agent parallelism ──────────────────────────────────────────

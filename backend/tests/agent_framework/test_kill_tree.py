@@ -6,11 +6,11 @@ whisper, ffmpeg) that need to be killed too. Otherwise the workflow
 "completes cancel" but the subprocess keeps running, holding the GPU
 or filesystem locks.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
-import signal
 import sys
 import time
 
@@ -23,7 +23,9 @@ from app.agent_framework.kill_tree import kill_process_tree
 async def test_kill_tree_terminates_simple_subprocess():
     """A subprocess that sleeps forever gets killed by kill_process_tree."""
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", "import time; time.sleep(60)",
+        sys.executable,
+        "-c",
+        "import time; time.sleep(60)",
         preexec_fn=os.setsid,  # new process group so we can signal it
     )
     try:
@@ -58,7 +60,9 @@ async def test_kill_tree_kills_child_processes():
         "time.sleep(60)"
     )
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", parent_script,
+        sys.executable,
+        "-c",
+        parent_script,
         preexec_fn=os.setsid,
     )
     try:
@@ -78,7 +82,9 @@ async def test_kill_tree_kills_child_processes():
 async def test_kill_tree_handles_already_dead_process():
     """Killing a PID that's already gone must not raise."""
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", "pass",
+        sys.executable,
+        "-c",
+        "pass",
         preexec_fn=os.setsid,
     )
     await proc.wait()
@@ -106,7 +112,9 @@ async def test_kill_tree_escalates_to_sigkill_when_sigterm_ignored():
         "time.sleep(60)"
     )
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", script,
+        sys.executable,
+        "-c",
+        script,
         preexec_fn=os.setsid,
     )
     try:

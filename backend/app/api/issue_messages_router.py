@@ -15,8 +15,8 @@ visibility in Python via the same pattern as issues_router.
 
 from __future__ import annotations
 
-from typing import Any, Optional
-from uuid import UUID, uuid4
+from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
@@ -31,7 +31,6 @@ from app.schemas.issue_message import (
     IssueMessagePost,
     IssueMessagePostResponse,
 )
-
 
 router = APIRouter(prefix="/issues", tags=["Issue Messages"])
 
@@ -147,9 +146,7 @@ async def post_issue_message(
         try:
             await sb.table("agent_runs").insert(run_payload).execute()
         except Exception as exc:
-            logger.exception(
-                f"agent_run insert failed (issue_id={issue_id}): {exc}"
-            )
+            logger.exception(f"agent_run insert failed (issue_id={issue_id}): {exc}")
             # Don't fail the whole request — comment is already posted.
 
         # The dispatch trigger emitted the chat row; fetch it so the
@@ -167,9 +164,7 @@ async def post_issue_message(
             if chat_resp.data:
                 agent_run = IssueMessage.model_validate(chat_resp.data[0])
         except Exception as exc:
-            logger.exception(
-                f"fetch agent_run chat row after dispatch failed: {exc}"
-            )
+            logger.exception(f"fetch agent_run chat row after dispatch failed: {exc}")
 
     return IssueMessagePostResponse(comment=comment, agent_run=agent_run)
 
@@ -192,6 +187,7 @@ async def simulate_agent_run_complete(
     it only affects rows the user can already see (issue visibility +
     explicit run_id)."""
     from datetime import datetime, timezone
+
     await _assert_issue_visible(issue_id, auth)
 
     sb = await get_async_supabase_admin()
@@ -210,7 +206,9 @@ async def simulate_agent_run_complete(
     if row.get("issue_id") != issue_id:
         raise HTTPException(400, "run does not belong to this issue")
     if row.get("status") != "running":
-        raise HTTPException(400, f"run already in status={row.get('status')}; cannot simulate")
+        raise HTTPException(
+            400, f"run already in status={row.get('status')}; cannot simulate"
+        )
 
     summary = output_summary or (
         "(simulated) 我已经看完上下文，上面这条 reply 涉及 mediahub 的 paperclip-style "
@@ -222,14 +220,16 @@ async def simulate_agent_run_complete(
     try:
         await (
             sb.table("agent_runs")
-            .update({
-                "status": "completed",
-                "ended_at": now,
-                "output_summary": summary,
-                "cost_cents": 4,
-                "prompt_tokens": int(row.get("prompt_tokens") or 0) + 240,
-                "completion_tokens": int(row.get("completion_tokens") or 0) + 180,
-            })
+            .update(
+                {
+                    "status": "completed",
+                    "ended_at": now,
+                    "output_summary": summary,
+                    "cost_cents": 4,
+                    "prompt_tokens": int(row.get("prompt_tokens") or 0) + 240,
+                    "completion_tokens": int(row.get("completion_tokens") or 0) + 180,
+                }
+            )
             .eq("id", str(run_id))
             .eq("status", "running")  # CAS guard
             .execute()
@@ -238,7 +238,11 @@ async def simulate_agent_run_complete(
         logger.exception(f"simulate-complete update failed (run_id={run_id}): {exc}")
         raise HTTPException(500, "simulate-complete update failed")
 
-    return {"run_id": str(run_id), "status": "completed", "summary_preview": summary[:80]}
+    return {
+        "run_id": str(run_id),
+        "status": "completed",
+        "summary_preview": summary[:80],
+    }
 
 
 __all__ = ["router"]

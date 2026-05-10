@@ -1,4 +1,5 @@
 """cancel_watcher — bridge cancel signals to AbortController."""
+
 from __future__ import annotations
 
 import asyncio
@@ -91,7 +92,9 @@ async def test_watcher_can_be_cancelled_by_caller():
     `try/finally: watcher.cancel()` doesn't need to ignore CancelledError."""
     rec = _FakeRecorder()  # never True
     abort = AbortController()
-    task = asyncio.create_task(watch_cancel_loop(rec, abort, poll_interval_seconds=0.01))
+    task = asyncio.create_task(
+        watch_cancel_loop(rec, abort, poll_interval_seconds=0.01)
+    )
     await asyncio.sleep(0.05)
     task.cancel()
     # Watcher absorbs CancelledError → task completes cleanly with None

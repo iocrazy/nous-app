@@ -26,10 +26,12 @@ from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
-from app.services.ai.runner.agent_runner import AgentRunner  # noqa: F401  patched in tests
 from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
+from app.services.ai.runner.agent_runner import (  # noqa: F401  patched in tests
+    AgentRunner,
+)
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService  # noqa: F401
 
@@ -411,6 +413,7 @@ class AILibraryChatService:
         # next turn (no PlanMode flag → default execute behavior).
         if plan_mode in ("prompt_user", "dry_run"):
             from app.agent_framework.plan_mode import build_plan_prompt
+
             request_instructions = build_plan_prompt()
         else:
             request_instructions = (
@@ -468,9 +471,7 @@ class AILibraryChatService:
                         f"[chat] G8 surfaced {len(pending)} next_session commitments"
                     )
             except Exception as g8_exc:
-                logger.warning(
-                    f"next_session surface skipped (non-fatal): {g8_exc}"
-                )
+                logger.warning(f"next_session surface skipped (non-fatal): {g8_exc}")
 
         # P1-6: link-injection wire-up. Pull URLs out of the latest user
         # message, fetch via boundary-safe link_understanding, prepend
@@ -550,8 +551,11 @@ class AILibraryChatService:
         attachment_failures: list = []
         if attachments:
             try:
-                from app.services.ai.chat.chat_attachment_resolver import resolve_attachments
                 from app.agent_framework.multimodal import build_user_message
+                from app.services.ai.chat.chat_attachment_resolver import (
+                    resolve_attachments,
+                )
+
                 resolved = await resolve_attachments(attachments)
                 attachment_failures = list(resolved.failures)
                 new_user_msg = build_user_message(
@@ -581,6 +585,7 @@ class AILibraryChatService:
         # typically machine-generated when triggered.
         try:
             from app.agent_framework import cap_messages_tokens
+
             outcomes = cap_messages_tokens(
                 user_messages,
                 model=model_for_estimate(composed) if False else "",  # noqa
@@ -600,9 +605,7 @@ class AILibraryChatService:
         # threshold. Compactor preserves tool_use/result pairs so the
         # next API call won't 400. Failure degrades to "send full history
         # and let the model deal with it" — never breaks the chat.
-        user_messages = await self._maybe_compact(
-            user_messages, session_id=session_id
-        )
+        user_messages = await self._maybe_compact(user_messages, session_id=session_id)
 
         model = composed.model or ""
         try:
@@ -687,7 +690,10 @@ class AILibraryChatService:
                 # In the streaming path, ``result`` was never built; backfill
                 # what downstream code references.
                 if chunk_callback is not None:
-                    result = {"content": assistant_content, "tool_calls": tool_calls_trace}
+                    result = {
+                        "content": assistant_content,
+                        "tool_calls": tool_calls_trace,
+                    }
         except AgentPausedError as err:
             logger.warning(f"[ChatService] agent paused: {err}")
             # Mark the user message with a hint so the UI can show "the
@@ -713,6 +719,7 @@ class AILibraryChatService:
                 from app.repositories.approval_requests_repository import (
                     ApprovalRequestsRepository,
                 )
+
                 _ar_repo = ApprovalRequestsRepository()
                 _row = await _ar_repo.create(
                     user_id=user_id,
@@ -789,7 +796,9 @@ class AILibraryChatService:
             from app.repositories.session_memory_repository import (
                 SessionMemoryRepository,
             )
-            from app.services.ai.runner.session_memory_runner import maybe_update_session_memory
+            from app.services.ai.runner.session_memory_runner import (
+                maybe_update_session_memory,
+            )
 
             full_messages = user_messages + [
                 {"role": "assistant", "content": assistant_content}
@@ -804,9 +813,7 @@ class AILibraryChatService:
                 name=f"session-memory-update-{session_id}",
             )
         except Exception as sm_exc:
-            logger.warning(
-                f"session_memory dispatch skipped (non-fatal): {sm_exc}"
-            )
+            logger.warning(f"session_memory dispatch skipped (non-fatal): {sm_exc}")
 
         # Wave F (F8): fire-and-forget commitment harvester. Pre-filter
         # makes ~95% of turns skip without an LLM call. Real persistor
@@ -838,9 +845,8 @@ class AILibraryChatService:
                     from app.schemas.ai_library import ComposedSystemPrompt
                     from app.services.ai.providers.ai_provider import QwenAdapter
 
-                    api_key = (
-                        getattr(settings, "DASHSCOPE_API_KEY", None)
-                        or getattr(settings, "QWEN_API_KEY", None)
+                    api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or getattr(
+                        settings, "QWEN_API_KEY", None
                     )
                     if not api_key:
                         return ""
@@ -856,9 +862,7 @@ class AILibraryChatService:
                         skill_manifest=[],
                         cache_fingerprint="commitment_harvester_v1",
                     )
-                    resp = await adapter.call(
-                        cs, [{"role": "user", "content": prompt}]
-                    )
+                    resp = await adapter.call(cs, [{"role": "user", "content": prompt}])
                     return resp.get("content") or ""
                 except Exception:
                     return ""

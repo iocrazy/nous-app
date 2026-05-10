@@ -22,6 +22,7 @@ For N memories this is O(N^2) which is fine — typical user has
 < 1000 active leaves per (agent, user, scope) namespace. If it grows
 we can swap to HNSW-based clustering, same interface.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -116,7 +117,11 @@ def mergeable_clusters(
     min_size: int = 2,
 ) -> list[Cluster]:
     """Convenience: cluster, drop singletons, return only mergeable groups."""
-    return [c for c in cluster_by_similarity(candidates, threshold=threshold) if len(c.members) >= min_size]
+    return [
+        c
+        for c in cluster_by_similarity(candidates, threshold=threshold)
+        if len(c.members) >= min_size
+    ]
 
 
 # ─── LLM summarization step ──────────────────────────────────────────

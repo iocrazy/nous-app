@@ -25,9 +25,7 @@ class _FakeProjectRepo:
     async def get_by_id(self, script_id: str) -> Optional[dict[str, Any]]:
         return self.projects.get(script_id)
 
-    async def update(
-        self, script_id: str, data: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update(self, script_id: str, data: dict[str, Any]) -> dict[str, Any]:
         self.updates.append((script_id, data))
         existing = self.projects.get(script_id, {"id": script_id})
         merged = {**existing, **data}
@@ -56,18 +54,14 @@ class _FakeChapterRepo:
         self.created.append(data)
         return {"id": "ch-new", **data}
 
-    async def update(
-        self, chapter_id: str, data: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update(self, chapter_id: str, data: dict[str, Any]) -> dict[str, Any]:
         self.updated.append((chapter_id, data))
         return {"id": chapter_id, **data}
 
     async def delete(self, chapter_id: str) -> None:
         self.deleted.append(chapter_id)
 
-    async def bulk_upsert(
-        self, script_id: str, rows: list[dict[str, Any]]
-    ) -> None:
+    async def bulk_upsert(self, script_id: str, rows: list[dict[str, Any]]) -> None:
         self.bulk_upserts.append((script_id, rows))
 
 
@@ -116,9 +110,18 @@ class _FakeLinkRepo:
 
 
 @pytest.fixture
-def service() -> tuple[ScriptService, _FakeProjectRepo, _FakeChapterRepo, _FakeAssetRepo, _FakeLinkRepo]:
+def service() -> (
+    tuple[
+        ScriptService, _FakeProjectRepo, _FakeChapterRepo, _FakeAssetRepo, _FakeLinkRepo
+    ]
+):
     svc = ScriptService()
-    p, c, a, l = _FakeProjectRepo(), _FakeChapterRepo(), _FakeAssetRepo(), _FakeLinkRepo()
+    p, c, a, l = (
+        _FakeProjectRepo(),
+        _FakeChapterRepo(),
+        _FakeAssetRepo(),
+        _FakeLinkRepo(),
+    )
     svc.project_repo = p  # type: ignore[assignment]
     svc.chapter_repo = c  # type: ignore[assignment]
     svc.asset_repo = a  # type: ignore[assignment]
@@ -148,9 +151,7 @@ async def test_create_project_stamps_display_code(
     )
     assert result["display_code"] == "S-202604001"
     # display_code update was written via project_repo.update
-    assert any(
-        "display_code" in data for _, data in project_repo.updates
-    )
+    assert any("display_code" in data for _, data in project_repo.updates)
 
 
 @pytest.mark.asyncio
@@ -200,7 +201,9 @@ async def test_update_viewport_writes_viewport_json(
 ) -> None:
     svc, project_repo, *_ = service
     await svc.update_viewport("sp-1", {"x": 10, "y": 20, "zoom": 1.5})
-    assert project_repo.updates == [("sp-1", {"viewport_json": {"x": 10, "y": 20, "zoom": 1.5}})]
+    assert project_repo.updates == [
+        ("sp-1", {"viewport_json": {"x": 10, "y": 20, "zoom": 1.5}})
+    ]
 
 
 @pytest.mark.asyncio
@@ -250,7 +253,9 @@ async def test_sync_canvas_skips_updates_without_id(
 ) -> None:
     svc, _, chapter_repo, *_ = service
     chapter_repo.chapters["sp-1"] = []
-    await svc.sync_canvas("sp-1", added=[], updated=[{"title": "no-id"}], deleted_ids=[])
+    await svc.sync_canvas(
+        "sp-1", added=[], updated=[{"title": "no-id"}], deleted_ids=[]
+    )
     assert chapter_repo.updated == []
 
 

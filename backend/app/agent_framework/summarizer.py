@@ -24,6 +24,7 @@ ID-shaped token (≥ 8 digits, snowflake-like, UUID, etc.) that appeared
 in the head. Without that, the main agent loses the ability to look up
 files referenced in earlier turns.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -214,9 +215,7 @@ async def summarize(
             f"[summarizer] {provider} timed out after {SUMMARIZE_TIMEOUT_S}s"
         ) from exc
     except Exception as exc:
-        raise RuntimeError(
-            f"[summarizer] {provider} call failed: {exc}"
-        ) from exc
+        raise RuntimeError(f"[summarizer] {provider} call failed: {exc}") from exc
 
     text = (resp or {}).get("content") or ""
     if not isinstance(text, str) or not text.strip():

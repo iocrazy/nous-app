@@ -16,6 +16,7 @@ Sizing notes:
   - 120 DPI ≈ 1000 px wide (default — clear text, ~80 KB JPEG/page)
   - 150+ DPI rapidly inflates payload — only useful for fine print
 """
+
 from __future__ import annotations
 
 import base64
@@ -27,7 +28,6 @@ from typing import List, Optional
 from loguru import logger
 
 from app.agent_framework.multimodal import Attachment, AttachmentKind
-
 
 DEFAULT_DPI = 120
 DEFAULT_JPEG_QUALITY = 80
@@ -160,9 +160,7 @@ def render_pdf(
                     )
                     rendered.append(idx + 1)
             except Exception as exc:
-                logger.warning(
-                    f"[PdfRenderer] page {idx + 1} render failed: {exc}"
-                )
+                logger.warning(f"[PdfRenderer] page {idx + 1} render failed: {exc}")
                 continue
     finally:
         try:

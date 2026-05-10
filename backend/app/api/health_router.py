@@ -18,6 +18,7 @@ All probes run with short timeout; one slow subsystem doesn't block
 the response. Each subsystem returns {status, message, ms}; aggregate
 status is worst case across all (healthy → degraded → unhealthy).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +26,6 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Request
-
 
 router = APIRouter()
 
@@ -43,13 +43,18 @@ async def _safe_probe(coro):
         msg = await asyncio.wait_for(coro, timeout=PROBE_TIMEOUT_SECONDS)
         return "ok", msg or "ok", int((time.time() - start) * 1000)
     except asyncio.TimeoutError:
-        return "degraded", f"timeout after {PROBE_TIMEOUT_SECONDS}s", int((time.time() - start) * 1000)
+        return (
+            "degraded",
+            f"timeout after {PROBE_TIMEOUT_SECONDS}s",
+            int((time.time() - start) * 1000),
+        )
     except Exception as exc:
         return "down", f"{type(exc).__name__}: {exc}", int((time.time() - start) * 1000)
 
 
 async def _probe_supabase() -> str:
     from app.db import get_async_supabase_admin
+
     sb = await get_async_supabase_admin()
     # Trivial table read
     result = await sb.table("ai_agents").select("id", count="exact").limit(1).execute()
@@ -59,6 +64,7 @@ async def _probe_supabase() -> str:
 async def _probe_redis() -> str:
     try:
         from app.core.redis import get_async_redis
+
         client = await get_async_redis()
         if client is None:
             return "not configured"
@@ -70,6 +76,7 @@ async def _probe_redis() -> str:
 
 async def _probe_dbos() -> str:
     from app.services.infra import dbos_orchestrator as dbos_orch
+
     return f"enabled={dbos_orch.is_enabled()}"
 
 
@@ -117,30 +124,33 @@ async def health_deep(request: Request) -> dict[str, Any]:
 
     in_proc = {
         "process_role": getattr(getattr(state, "process_role", None), "value", None),
-        "bounds": _snap("bounds_registry", lambda r: {
-            "live_count": len(r.live_bounds()),
-        }),
+        "bounds": _snap(
+            "bounds_registry",
+            lambda r: {
+                "live_count": len(r.live_bounds()),
+            },
+        ),
         "hooks_registered": len(getattr(state, "hook_registry", []) or []),
         "context_engines": (
             getattr(state, "context_engines", None).names()
             if getattr(state, "context_engines", None) is not None
             else []
         ),
-        "model_health_snapshot": _snap(
-            "model_health", lambda m: m.snapshot()
-        ),
+        "model_health_snapshot": _snap("model_health", lambda m: m.snapshot()),
         "lane_queue_depth": _snap(
             "lane_queue",
-            lambda lq: {lane.value: q.qsize() for lane, q in (lq._queues.items() if hasattr(lq, '_queues') else [])},
+            lambda lq: {
+                lane.value: q.qsize()
+                for lane, q in (lq._queues.items() if hasattr(lq, "_queues") else [])
+            },
         ),
         "agent_metrics_keys_in_use": _snap(
             "agent_metrics",
             lambda m: sum(1 for v in m.counters.values() if v > 0),
         ),
-        "prometheus_pusher_active": getattr(state, "prometheus_pusher", None) is not None,
-        "root_aborts_count": _snap(
-            "root_abort_registry", lambda r: len(r)
-        ),
+        "prometheus_pusher_active": getattr(state, "prometheus_pusher", None)
+        is not None,
+        "root_aborts_count": _snap("root_abort_registry", lambda r: len(r)),
     }
 
     aggregate = _aggregate_status(probes)

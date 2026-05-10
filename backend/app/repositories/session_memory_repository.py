@@ -3,6 +3,7 @@
 One row per ai_sessions row. Body is markdown source-of-truth + parsed
 sections_json for query convenience.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -106,9 +107,7 @@ class SessionMemoryRepository:
                 return None
             return self._row_to_obj(result.data[0])
         except Exception as exc:
-            logger.error(
-                "session_memory upsert %s failed: %s", session_id, exc
-            )
+            logger.error(f"session_memory upsert {session_id} failed: {exc}")
             return None
 
     async def delete(self, session_id: UUID | str) -> bool:
@@ -125,9 +124,7 @@ class SessionMemoryRepository:
             )
             return bool(result.data)
         except Exception as exc:
-            logger.error(
-                "session_memory delete %s failed: %s", session_id, exc
-            )
+            logger.error(f"session_memory delete {session_id} failed: {exc}")
             return False
 
 

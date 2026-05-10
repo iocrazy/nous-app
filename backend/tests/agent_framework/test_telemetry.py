@@ -1,4 +1,5 @@
 """I3 — AgentMetrics counter store."""
+
 from __future__ import annotations
 
 import pytest

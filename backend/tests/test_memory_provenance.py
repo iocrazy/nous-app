@@ -1,4 +1,5 @@
 """R1 — memory provenance verification."""
+
 from __future__ import annotations
 
 import pytest
@@ -11,7 +12,6 @@ from app.services.ai.memory.provenance import (
     select_outdated,
     verify_one,
 )
-
 
 # ─── parse_verdict ────────────────────────────────────────────────────
 
@@ -32,8 +32,7 @@ def test_parse_tolerates_case_and_punct():
 @pytest.mark.unit
 def test_parse_takes_first_token():
     assert (
-        parse_verdict("outdated. Because user said...")
-        == VerificationVerdict.OUTDATED
+        parse_verdict("outdated. Because user said...") == VerificationVerdict.OUTDATED
     )
 
 
@@ -110,6 +109,7 @@ async def test_verify_classifier_failure_returns_none():
 @pytest.mark.asyncio
 async def test_verify_garbled_output_unverifiable():
     """Tolerant parse → safe default."""
+
     async def _confused(prompt):
         return "I'm not sure"
 

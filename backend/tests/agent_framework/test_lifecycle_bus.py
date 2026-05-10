@@ -9,6 +9,7 @@ emitted the event.
 Mirrors OpenClaw sessions/session-lifecycle-events.ts (28-line module
 that punches above its weight).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -150,9 +151,7 @@ async def test_listeners_run_concurrently():
     bus.subscribe("test", slow)
     bus.subscribe("test", fast)
 
-    emit_task = asyncio.create_task(
-        bus.emit(LifecycleEvent(type="test", payload={}))
-    )
+    emit_task = asyncio.create_task(bus.emit(LifecycleEvent(type="test", payload={})))
     # Fast listener should finish first
     await asyncio.wait_for(fast_done.wait(), timeout=0.3)
     assert not slow_done.is_set()

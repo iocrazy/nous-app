@@ -19,19 +19,19 @@ lives strictly under CHAT_ATTACHMENT_BASE_DIR and contains no '..'
 traversal. Image attachments are url/data_url only — those go to the
 LLM which fetches them itself, so the constraint doesn't apply.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from loguru import logger
 
 from app.agent_framework.multimodal import Attachment, AttachmentKind
 from app.schemas.ai_library_chat import AttachmentRequest
-
 
 # Cap how much per-turn we'll do — protects against a user pasting 12
 # huge PDFs and OOM-ing the chat process.
@@ -172,6 +172,7 @@ async def _resolve_one(req: AttachmentRequest) -> List[Attachment]:
         # Run frame extraction in a thread (ffmpeg is blocking via
         # subprocess.communicate)
         from app.services.media.render.video_frame_extractor import extract_frames
+
         result = await extract_frames(
             req.url,
             num_frames=MAX_VIDEO_FRAMES_PER_ATTACHMENT,
@@ -185,10 +186,9 @@ async def _resolve_one(req: AttachmentRequest) -> List[Attachment]:
             return []
         # C1: same path-traversal defense for pdf
         if not _path_is_inside_base(req.url, CHAT_ATTACHMENT_BASE_DIR):
-            raise ValueError(
-                f"pdf path outside chat attachment base dir: {req.url!r}"
-            )
+            raise ValueError(f"pdf path outside chat attachment base dir: {req.url!r}")
         from app.services.media.render.pdf_renderer import render_pdf
+
         # Sync (CPU-bound pdfium decode); thread-pool offload
         result = await asyncio.to_thread(
             render_pdf,

@@ -133,9 +133,7 @@ class AgentRunsRepository:
             )
             return result.data or []
         except Exception as e:
-            logger.error(
-                f"Failed to list children for parent={parent_run_id}: {e}"
-            )
+            logger.error(f"Failed to list children for parent={parent_run_id}: {e}")
             return []
 
     # ------------------------------------------------------------------
@@ -232,9 +230,9 @@ class AgentRunsRepository:
 # ─── Factory ──────────────────────────────────────────────────────────
 
 
-def get_agent_runs_repository() -> Union[
-    AgentRunsRepository, "AgentRunsRepositoryAsyncpg"
-]:
+def get_agent_runs_repository() -> (
+    Union[AgentRunsRepository, "AgentRunsRepositoryAsyncpg"]
+):
     """Return the active AgentRunsRepository implementation.
 
     Routing:

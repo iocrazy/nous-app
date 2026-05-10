@@ -13,6 +13,7 @@ GET /api/v1/admin/agent-metrics → {
 
 Read-only; no mutation endpoints.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Request

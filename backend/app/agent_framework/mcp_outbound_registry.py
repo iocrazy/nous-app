@@ -22,6 +22,7 @@ Failure isolation: if server A is down, server B's tools still work.
 Errors from one server are logged + that server's tool list returns
 empty for the cache window.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -101,8 +102,10 @@ class MCPOutboundRegistry:
             try:
                 await c.aclose()
             except Exception as exc:
-                logger.warning(f"[MCPOutboundRegistry] aclose for "
-                               f"'{c.config.name}' failed: {exc}")
+                logger.warning(
+                    f"[MCPOutboundRegistry] aclose for "
+                    f"'{c.config.name}' failed: {exc}"
+                )
 
     async def all_tools(self) -> list[QualifiedTool]:
         """Aggregate tools from every registered server.

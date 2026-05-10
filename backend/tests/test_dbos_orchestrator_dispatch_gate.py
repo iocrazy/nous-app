@@ -1,16 +1,20 @@
 """Sprint 5.5 — bounds dispatch gate in start_workflow_routed."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.agent_framework.bounds import BoundsAdvertisement, BoundsRegistry
 from app.services.infra import dbos_orchestrator
+
+
 @pytest.fixture
 def registered_workflow_callable():
     """Stand-in for a @DBOS.workflow function — only its __name__ matters
     for the gate check."""
-    def my_workflow(*args, **kwargs):
-        ...
+
+    def my_workflow(*args, **kwargs): ...
+
     my_workflow.__name__ = "my_workflow"
     return my_workflow
 
@@ -28,6 +32,7 @@ def _reset_state(monkeypatch):
 async def test_no_registry_skips_gate(monkeypatch, registered_workflow_callable):
     """Combined-mode (no registry wired) — gate is a no-op, dispatch
     proceeds. Validates back-compat with existing single-process deploys."""
+
     # Stub routing + DBOS-enabled + DBOS.start_workflow
     async def _routing(_):
         return dbos_orchestrator.RoutingDecision(task_type="x", mode="dbos")
@@ -44,18 +49,18 @@ async def test_no_registry_skips_gate(monkeypatch, registered_workflow_callable)
             return _Handle()
 
     class _SetWorkflowID:
-        def __init__(self, *_):
-            ...
+        def __init__(self, *_): ...
         def __enter__(self):
             return self
+
         def __exit__(self, *_):
             return False
 
     class _Auth:
-        def __init__(self, *_, **__):
-            ...
+        def __init__(self, *_, **__): ...
         def __enter__(self):
             return self
+
         def __exit__(self, *_):
             return False
 
@@ -74,9 +79,7 @@ async def test_no_registry_skips_gate(monkeypatch, registered_workflow_callable)
 
 
 @pytest.mark.asyncio
-async def test_empty_registry_skips_gate(
-    monkeypatch, registered_workflow_callable
-):
+async def test_empty_registry_skips_gate(monkeypatch, registered_workflow_callable):
     """Registry wired but no live bounds (pre-discovery / startup race) —
     don't block dispatch."""
     dbos_orchestrator.set_bounds_registry(BoundsRegistry())
@@ -97,8 +100,11 @@ async def test_empty_registry_skips_gate(
 
     class _Ctx:
         def __init__(self, *_, **__): ...
-        def __enter__(self): return self
-        def __exit__(self, *_): return False
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
 
     import sys
 
@@ -144,8 +150,11 @@ async def test_registry_with_live_worker_advertising_workflow_passes(
 
     class _Ctx:
         def __init__(self, *_, **__): ...
-        def __enter__(self): return self
-        def __exit__(self, *_): return False
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
 
     import sys
 
@@ -193,8 +202,11 @@ async def test_combined_mode_self_bound_passes_naturally(
 
     class _Ctx:
         def __init__(self, *_, **__): ...
-        def __enter__(self): return self
-        def __exit__(self, *_): return False
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
 
     import sys
 

@@ -42,16 +42,15 @@ twice is safe.
 For multiprocessing.Process children: we use multiprocessing._children
 which the stdlib maintains; iterating it gives us all alive children.
 """
+
 from __future__ import annotations
 
 import atexit
 import os
 import signal
 import sys
-from typing import Optional
 
 from loguru import logger
-
 
 _INSTALLED = False
 _PRIOR_SIGINT_HANDLER = None
@@ -91,7 +90,9 @@ def _signal_handler(signum: int, frame) -> None:
     finally:
         # Restore prior handler + re-raise — keeps stack trace + exit
         # code correct
-        prior = _PRIOR_SIGINT_HANDLER if signum == signal.SIGINT else _PRIOR_SIGTERM_HANDLER
+        prior = (
+            _PRIOR_SIGINT_HANDLER if signum == signal.SIGINT else _PRIOR_SIGTERM_HANDLER
+        )
         if callable(prior):
             try:
                 prior(signum, frame)
@@ -127,7 +128,6 @@ def _cleanup_subprocess_registry() -> None:
     """Reach into subprocess_registry's internal dict + kill_process_tree
     everything still registered."""
     from app.agent_framework import subprocess_registry as sr
-    from app.agent_framework.kill_tree import kill_process_tree
 
     # Internal dict access — the public API is async (cancel_workflow_subprocesses);
     # at exit time we can't reliably await. Direct walk is safe-enough here.
@@ -224,6 +224,7 @@ def bind_to_parent_death() -> bool:
 
     try:
         import ctypes
+
         libc = ctypes.CDLL("libc.so.6", use_errno=True)
         PR_SET_PDEATHSIG = 1  # from <sys/prctl.h>
         rc = libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)

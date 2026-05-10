@@ -4,10 +4,10 @@ ffmpeg is mocked at the asyncio.create_subprocess_exec layer; we don't
 shell out for unit tests. A separate (manual) integration test would
 exercise real ffmpeg.
 """
+
 from __future__ import annotations
 
 import asyncio
-import base64
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -15,6 +15,8 @@ import pytest
 
 from app.agent_framework.multimodal import AttachmentKind
 from app.services.media.render import video_frame_extractor as vfx
+
+
 @pytest.fixture
 def fake_video(tmp_path: Path) -> Path:
     """Create a fake video file (just needs to exist for path checks)."""
@@ -58,6 +60,7 @@ async def test_num_frames_clamped_high(fake_video, monkeypatch):
 
     # Simulate probe (duration=10s) then per-frame ffmpeg calls
     call_count = 0
+
     async def _fake_exec(*args, **kwargs):
         nonlocal call_count
         call_count += 1
@@ -104,8 +107,10 @@ async def test_three_frames_with_duration(fake_video, monkeypatch, tmp_path):
     assert result.error is None
     assert len(result.attachments) == 3
     assert all(a.kind == AttachmentKind.VIDEO_THUMBNAIL for a in result.attachments)
-    assert all(a.data_url and a.data_url.startswith("data:image/jpeg;base64,")
-               for a in result.attachments)
+    assert all(
+        a.data_url and a.data_url.startswith("data:image/jpeg;base64,")
+        for a in result.attachments
+    )
     assert len(result.sampled_at_seconds) == 3
     # Should sample evenly across the usable middle 90% of duration
     # (margin = 5%, so [1.5, 28.5])
@@ -177,6 +182,7 @@ async def test_per_frame_timeout_skips_failing_frame(fake_video, monkeypatch):
     fake_jpeg = b"\xff\xd8\xff\xe0jpg"
 
     call_idx = -1
+
     async def _fake_exec(*args, **kwargs):
         nonlocal call_idx
         call_idx += 1
