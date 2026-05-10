@@ -158,6 +158,31 @@ def test_asyncpg_signature_matches_legacy(method_name):
     )
 
 
+def test_bigint_helper_coerces_str_input():
+    """Lock in the str→int coercion at the asyncpg boundary.
+
+    asyncpg's int8 codec is strict — passing a str to a bigint column
+    raises ``DataError: 'str' object cannot be interpreted``. API
+    path params and legacy supabase-py callers send Snowflake IDs as
+    str. The ``_bigint`` helper bridges that boundary; without it,
+    every method that takes a str id raises at runtime."""
+    from app.db.repository_base import AsyncpgRepository
+
+    # Strings that look like ints get coerced.
+    assert AsyncpgRepository._bigint("12345") == 12345
+    assert AsyncpgRepository._bigint("-1") == -1
+    # Ints pass through.
+    assert AsyncpgRepository._bigint(12345) == 12345
+    # Non-numeric strings pass through (caller's problem).
+    assert AsyncpgRepository._bigint("not-a-number") == "not-a-number"
+    # None passes through.
+    assert AsyncpgRepository._bigint(None) is None
+    # List variant covers ANY($1::bigint[]) bindings.
+    assert AsyncpgRepository._bigint_list(["1", 2, "3"]) == [1, 2, 3]
+    assert AsyncpgRepository._bigint_list(None) == []
+    assert AsyncpgRepository._bigint_list([]) == []
+
+
 def test_unmigrated_methods_inherit_from_legacy():
     """Strangler fig sanity check: a method we did NOT migrate (e.g.
     ``get_folders``) should resolve to the LEGACY implementation via
