@@ -22,8 +22,10 @@
 Run from backend/:
     uv run python scripts/poc11_dbos_auth_context.py
 """
+
 from __future__ import annotations
 
+import os
 import sys
 import time
 
@@ -34,16 +36,22 @@ USER_B = "61f15833-2b2b-4a53-b126-16897f9184a8"
 
 
 def _admin_dsn() -> str:
+    pwd = os.environ.get("DEV_PG_PASSWORD")
+    if not pwd:
+        raise SystemExit(
+            "DEV_PG_PASSWORD env var required. Export it from 1Password / NAS .env."
+        )
     return (
-        "host=127.0.0.1 port=55433 dbname=postgres "
-        "user=postgres.heygo-dev password=MediaHub_Dev_WtB2bzyMup1n0KY2P5gWoA "
-        "sslmode=disable connect_timeout=8"
+        f"host=127.0.0.1 port=55433 dbname=postgres "
+        f"user=postgres.heygo-dev password={pwd} "
+        f"sslmode=disable connect_timeout=8"
     )
 
 
 def _dbos_dsn() -> str:
     """DBOS runtime connection (mediahub_dbos role)."""
     from pathlib import Path
+
     env = Path(__file__).resolve().parent.parent / ".env.local"
     for line in env.read_text().splitlines():
         if line.startswith("DBOS_DATABASE_URL="):
@@ -95,7 +103,9 @@ def main() -> int:
     with psycopg.connect(_admin_dsn()) as conn:
         with conn.transaction():
             conn.execute("SET LOCAL ROLE authenticated")
-            conn.execute(f"SET LOCAL request.jwt.claims = '{{\"sub\":\"{USER_A}\",\"role\":\"authenticated\"}}'")
+            conn.execute(
+                f'SET LOCAL request.jwt.claims = \'{{"sub":"{USER_A}","role":"authenticated"}}\''
+            )
             try:
                 conn.execute(
                     "INSERT INTO public._poc11_issues (identifier, title, created_by_user_id) VALUES (%s, %s, %s)",
@@ -107,7 +117,9 @@ def main() -> int:
                 print("  PASS RLS WITH CHECK blocks created_by_user_id spoof")
 
     # ---- Phase B: legitimate path — handler validates, then workflow uses service_role ----
-    print("\n=== Phase B: legitimate path — handler validates, workflow uses service_role ===")
+    print(
+        "\n=== Phase B: legitimate path — handler validates, workflow uses service_role ==="
+    )
 
     # 1) Handler step: validate user identity (here: just use auth.uid() == USER_A — pretend
     #    real handler decoded JWT)
@@ -154,7 +166,9 @@ def main() -> int:
     # Debug: inspect table state immediately
     with psycopg.connect(_admin_dsn(), autocommit=True) as dbg:
         dbg.execute("SET ROLE service_role")
-        cur = dbg.execute("SELECT id, identifier, created_by_user_id::text FROM public._poc11_issues ORDER BY id")
+        cur = dbg.execute(
+            "SELECT id, identifier, created_by_user_id::text FROM public._poc11_issues ORDER BY id"
+        )
         print(f"  DEBUG table contents post-workflow: {cur.fetchall()}")
 
     # Verify the row landed correctly. Note: postgres role (Supavisor connect target)
@@ -163,14 +177,22 @@ def main() -> int:
         with conn.transaction():
             conn.execute("SET LOCAL ROLE service_role")
             cur = conn.execute(
-                "SELECT created_by_user_id, title FROM public._poc11_issues WHERE id=%s", (result["id"],)
+                "SELECT created_by_user_id, title FROM public._poc11_issues WHERE id=%s",
+                (result["id"],),
             )
             row = cur.fetchone()
         if row is None:
-            fails.append(f"workflow-written row id={result['id']} not found via service_role SELECT")
+            fails.append(
+                f"workflow-written row id={result['id']} not found via service_role SELECT"
+            )
             print(f"  FAIL row id={result['id']} not found")
         else:
-            assert_eq("workflow-written row creator matches handler-validated user", str(row[0]), USER_A, fails)
+            assert_eq(
+                "workflow-written row creator matches handler-validated user",
+                str(row[0]),
+                USER_A,
+                fails,
+            )
 
     # ---- Phase C: defensive — DBOS connection role does NOT bypass RLS ----
     print("\n=== Phase C: mediahub_dbos role is NOT BYPASSRLS (defensive check) ===")
@@ -182,10 +204,14 @@ def main() -> int:
                     "INSERT INTO public._poc11_issues (identifier, title, created_by_user_id) VALUES (%s, %s, %s)",
                     ("MH-direct", "DBOS direct write should fail", USER_A),
                 )
-                fails.append("mediahub_dbos was able to bypass RLS — role hardening broken")
+                fails.append(
+                    "mediahub_dbos was able to bypass RLS — role hardening broken"
+                )
                 print("  FAIL mediahub_dbos bypassed RLS (should not!)")
             except psycopg.errors.InsufficientPrivilege:
-                print("  PASS mediahub_dbos blocked by RLS — must use service_role to write public.*")
+                print(
+                    "  PASS mediahub_dbos blocked by RLS — must use service_role to write public.*"
+                )
 
     # Verify role attributes
     with psycopg.connect(_admin_dsn()) as conn:
@@ -193,7 +219,7 @@ def main() -> int:
             "SELECT rolname, rolbypassrls FROM pg_roles WHERE rolname IN ('mediahub_dbos','service_role') ORDER BY rolname"
         )
         for r in cur.fetchall():
-            expected = (r[0] == "service_role")  # only service_role should have BYPASSRLS
+            expected = r[0] == "service_role"  # only service_role should have BYPASSRLS
             assert_eq(f"{r[0]}.rolbypassrls", r[1], expected, fails)
 
     # Teardown
@@ -203,7 +229,8 @@ def main() -> int:
 
     if fails:
         print("\nFAIL items:")
-        for f in fails: print(f"  - {f}")
+        for f in fails:
+            print(f"  - {f}")
         return 1
     print("\nPASS — DBOS auth-context work mode validated:")
     print("  1) RLS catches malicious spoof at PG layer (defense in depth)")

@@ -11,9 +11,11 @@ Tests:
 Run from backend/:
     uv run python scripts/pr_d2_1_verify.py
 """
+
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 import psycopg
@@ -23,9 +25,16 @@ USER_B = "61f15833-2b2b-4a53-b126-16897f9184a8"
 
 
 def admin_dsn(user: str = "supabase_admin.heygo-dev") -> str:
+    pwd = os.environ.get("DEV_PG_PASSWORD")
+    if not pwd:
+        raise RuntimeError(
+            "DEV_PG_PASSWORD env var required. "
+            "Get the password from 1Password / NAS .env, then:\n"
+            "  export DEV_PG_PASSWORD='...'"
+        )
     return (
         f"host=127.0.0.1 port=55433 dbname=postgres "
-        f"user={user} password=MediaHub_Dev_WtB2bzyMup1n0KY2P5gWoA "
+        f"user={user} password={pwd} "
         f"sslmode=disable connect_timeout=8"
     )
 
@@ -78,16 +87,18 @@ def main() -> int:
         with conn.transaction():
             conn.execute("SET LOCAL ROLE authenticated")
             conn.execute(
-                f"SET LOCAL request.jwt.claims = '{{\"sub\":\"{USER_A}\",\"role\":\"authenticated\"}}'"
+                f'SET LOCAL request.jwt.claims = \'{{"sub":"{USER_A}","role":"authenticated"}}\''
             )
             # Allowed: change title
-            conn.execute("UPDATE public.issues SET title='retitled' WHERE id=%s", (issue_id,))
+            conn.execute(
+                "UPDATE public.issues SET title='retitled' WHERE id=%s", (issue_id,)
+            )
             print("  PASS A can UPDATE allowed column (title)")
 
         with conn.transaction():
             conn.execute("SET LOCAL ROLE authenticated")
             conn.execute(
-                f"SET LOCAL request.jwt.claims = '{{\"sub\":\"{USER_A}\",\"role\":\"authenticated\"}}'"
+                f'SET LOCAL request.jwt.claims = \'{{"sub":"{USER_A}","role":"authenticated"}}\''
             )
             try:
                 conn.execute(
@@ -102,7 +113,7 @@ def main() -> int:
         with conn.transaction():
             conn.execute("SET LOCAL ROLE authenticated")
             conn.execute(
-                f"SET LOCAL request.jwt.claims = '{{\"sub\":\"{USER_A}\",\"role\":\"authenticated\"}}'"
+                f'SET LOCAL request.jwt.claims = \'{{"sub":"{USER_A}","role":"authenticated"}}\''
             )
             try:
                 conn.execute(
@@ -156,18 +167,20 @@ def main() -> int:
         with conn.transaction():
             conn.execute("SET LOCAL ROLE authenticated")
             conn.execute(
-                f"SET LOCAL request.jwt.claims = '{{\"sub\":\"{USER_A}\",\"role\":\"authenticated\"}}'"
+                f'SET LOCAL request.jwt.claims = \'{{"sub":"{USER_A}","role":"authenticated"}}\''
             )
             # First allocate identifier as service_role (separate tx)
         with conn.transaction():
             conn.execute("SET LOCAL ROLE service_role")
-            cur = conn.execute("SELECT issue_number, identifier FROM public.issue_next_identifier()")
+            cur = conn.execute(
+                "SELECT issue_number, identifier FROM public.issue_next_identifier()"
+            )
             n, ident = cur.fetchone()
 
         with conn.transaction():
             conn.execute("SET LOCAL ROLE authenticated")
             conn.execute(
-                f"SET LOCAL request.jwt.claims = '{{\"sub\":\"{USER_A}\",\"role\":\"authenticated\"}}'"
+                f'SET LOCAL request.jwt.claims = \'{{"sub":"{USER_A}","role":"authenticated"}}\''
             )
             try:
                 conn.execute(
@@ -202,14 +215,20 @@ def main() -> int:
         if row and row[0]:
             published = list(row[0])
             print(f"  published columns: {len(published)}")
-            for excluded in ("execution_state", "execution_locked_at", "dbos_workflow_id"):
+            for excluded in (
+                "execution_state",
+                "execution_locked_at",
+                "dbos_workflow_id",
+            ):
                 ok = excluded not in published
                 print(f"  {'PASS' if ok else 'FAIL'} {excluded} excluded")
                 if not ok:
                     fails.append(f"{excluded} should be excluded from realtime")
         else:
             # Older PG: full table publication; skip this test
-            print("  SKIP — pg_publication_tables.attnames returned NULL (full-table publication)")
+            print(
+                "  SKIP — pg_publication_tables.attnames returned NULL (full-table publication)"
+            )
 
     print("\n=== Test 5: issue_create_atomic stored proc ===")
     with psycopg.connect(admin_dsn(), autocommit=True) as conn:
@@ -230,8 +249,15 @@ def main() -> int:
         row = cur.fetchone()
         col_names = [d.name for d in cur.description]
         rec = dict(zip(col_names, row))
-        print(f"  inserted via proc: id={rec['id']} identifier={rec['identifier']} status={rec['status']}")
-        assert_eq("identifier matches MH-N pattern", rec["identifier"].startswith("MH-"), True, fails)
+        print(
+            f"  inserted via proc: id={rec['id']} identifier={rec['identifier']} status={rec['status']}"
+        )
+        assert_eq(
+            "identifier matches MH-N pattern",
+            rec["identifier"].startswith("MH-"),
+            True,
+            fails,
+        )
         assert_eq("title roundtrip", rec["title"], "PR-D2.1 atomic test", fails)
         # cleanup
         conn.execute("DELETE FROM public.issues WHERE id=%s", (rec["id"],))
@@ -240,7 +266,9 @@ def main() -> int:
     with psycopg.connect(admin_dsn()) as conn:
         with conn.transaction():
             conn.execute("SET LOCAL ROLE service_role")
-            cur = conn.execute("SELECT counter FROM public.issue_sequence WHERE scope='global'")
+            cur = conn.execute(
+                "SELECT counter FROM public.issue_sequence WHERE scope='global'"
+            )
             counter_before = cur.fetchone()[0]
 
         # Attempt stored proc with bad payload that fails CHECK
@@ -249,16 +277,25 @@ def main() -> int:
                 conn.execute("SET LOCAL ROLE service_role")
                 conn.execute(
                     "SELECT public.issue_create_atomic(%s::jsonb)",
-                    (json.dumps({"title": "", "created_by_user_id": USER_A}),),  # empty title violates CHECK
+                    (
+                        json.dumps({"title": "", "created_by_user_id": USER_A}),
+                    ),  # empty title violates CHECK
                 )
         except (psycopg.errors.CheckViolation, psycopg.errors.RaiseException):
             pass  # expected
 
         with conn.transaction():
             conn.execute("SET LOCAL ROLE service_role")
-            cur = conn.execute("SELECT counter FROM public.issue_sequence WHERE scope='global'")
+            cur = conn.execute(
+                "SELECT counter FROM public.issue_sequence WHERE scope='global'"
+            )
             counter_after = cur.fetchone()[0]
-        assert_eq("counter unchanged after stored proc CHECK failure", counter_after, counter_before, fails)
+        assert_eq(
+            "counter unchanged after stored proc CHECK failure",
+            counter_after,
+            counter_before,
+            fails,
+        )
 
     # Final cleanup
     with psycopg.connect(admin_dsn(), autocommit=True) as conn:

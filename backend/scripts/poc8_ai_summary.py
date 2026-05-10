@@ -19,6 +19,7 @@ Verifies:
 Run from backend/:
     uv run python scripts/poc8_ai_summary.py
 """
+
 from __future__ import annotations
 
 import json
@@ -46,10 +47,15 @@ def _load_dbos_dsn() -> str:
 
 def _admin_dsn() -> str:
     # supabase_admin via Supavisor — used for direct PG queries that bypass RLS
+    pwd = os.environ.get("DEV_PG_PASSWORD")
+    if not pwd:
+        raise SystemExit(
+            "DEV_PG_PASSWORD env var required. Export it from 1Password / NAS .env."
+        )
     return (
-        "host=127.0.0.1 port=55433 dbname=postgres "
-        "user=postgres.heygo-dev password=MediaHub_Dev_WtB2bzyMup1n0KY2P5gWoA "
-        "sslmode=disable connect_timeout=8"
+        f"host=127.0.0.1 port=55433 dbname=postgres "
+        f"user=postgres.heygo-dev password={pwd} "
+        f"sslmode=disable connect_timeout=8"
     )
 
 
@@ -102,13 +108,25 @@ def _build_workflow():
     @DBOS.step(retries_allowed=True, max_attempts=2)
     def call_llm(transcript: str, doubao_cfg: dict) -> str:
         with LLM_CALL_LOG.open("a") as fh:
-            fh.write(json.dumps({"pid": os.getpid(), "ts": time.time(), "transcript_len": len(transcript)}) + "\n")
+            fh.write(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "ts": time.time(),
+                        "transcript_len": len(transcript),
+                    }
+                )
+                + "\n"
+            )
         client = OpenAI(api_key=doubao_cfg["api_key"], base_url=doubao_cfg["base_url"])
         model = doubao_cfg.get("selected_model") or "doubao-seed-2-0-pro-260215"
         resp = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": "你是视频内容总结助手。给定视频转录文本，输出一段 80-120 字中文摘要，不要列表，不要emoji。"},
+                {
+                    "role": "system",
+                    "content": "你是视频内容总结助手。给定视频转录文本，输出一段 80-120 字中文摘要，不要列表，不要emoji。",
+                },
                 {"role": "user", "content": transcript[:4000]},
             ],
             temperature=0.3,
@@ -158,7 +176,9 @@ def main() -> int:
     print(f"=== PoC #8 ai_summary against parsed_media id={PARSED_MEDIA_ID} ===")
 
     doubao_cfg = _load_doubao_config()
-    print(f"loaded doubao config: model={doubao_cfg.get('selected_model')} key_len={len(doubao_cfg.get('api_key',''))}")
+    print(
+        f"loaded doubao config: model={doubao_cfg.get('selected_model')} key_len={len(doubao_cfg.get('api_key',''))}"
+    )
 
     from dbos import DBOS, SetWorkflowID
 
@@ -192,13 +212,17 @@ def main() -> int:
     print(f"parsed_media.ai_rewrite_text length: {slen}")
     print(f"summary preview: {summary_preview[:120] if summary_preview else None}...")
     print(f"results equal: {result1 == result2}")
-    print(f"total LLM API calls: {calls_after_2} (expect 1 — second run should hit DBOS memoization)")
+    print(
+        f"total LLM API calls: {calls_after_2} (expect 1 — second run should hit DBOS memoization)"
+    )
 
     fails = []
     if not slen or slen < 30:
         fails.append("summary not saved or too short")
     if calls_after_2 != 1:
-        fails.append(f"expected exactly 1 LLM call, got {calls_after_2} — memoization broken")
+        fails.append(
+            f"expected exactly 1 LLM call, got {calls_after_2} — memoization broken"
+        )
     if result1 != result2:
         fails.append("run1 != run2 — workflow output not deterministic across replay")
 
