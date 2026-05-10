@@ -4,8 +4,8 @@ Migration of the legacy supabase-py ``ResourcesRepository`` to direct
 asyncpg + Supavisor. Lands in phases so each PR stays reviewable:
 
   - Phase 3a: ``resources`` table core (10 methods) — shipped #213
-  - Phase 3b: ``resource_items`` table (12 methods) — this file
-  - Phase 3c: ``resource_versions`` table — pending
+  - Phase 3b: ``resource_items`` table (12 methods) — shipped #214
+  - Phase 3c: ``resource_versions`` table (8 methods) — this file
   - Phase 3d: ``folders`` table — pending
 
 Strategy: multiple inheritance from ``AsyncpgRepository`` and the
@@ -516,7 +516,6 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             logger.error(f"Failed to get trashed resources: {e}")
             return []
 
-
     # ── Resource Items ──────────────────────────────────────────────
     #
     # ``resource_items`` is the workspace-scope/folder routing layer
@@ -543,7 +542,9 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                     "  AND scope_id = $3 "
                     "  AND folder_id = $4 "
                     "LIMIT 1",
-                    self._bigint(resource_id), scope_type, scope_id,
+                    self._bigint(resource_id),
+                    scope_type,
+                    scope_id,
                     self._bigint(folder_id),
                 )
             return await self.fetch_one(
@@ -553,15 +554,15 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 "  AND scope_id = $3 "
                 "  AND folder_id IS NULL "
                 "LIMIT 1",
-                self._bigint(resource_id), scope_type, scope_id,
+                self._bigint(resource_id),
+                scope_type,
+                scope_id,
             )
         except Exception as e:
             logger.error(f"Failed to find resource_item: {e}")
             return None
 
-    async def create_resource_item(
-        self, data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def create_resource_item(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             cols = list(data.keys())
             placeholders = ", ".join(f"${i + 1}" for i in range(len(cols)))
@@ -580,9 +581,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             logger.error(f"Failed to create resource_item: {e}")
             raise
 
-    async def _resource_ids_for_platforms(
-        self, platforms: List[str]
-    ) -> List[str]:
+    async def _resource_ids_for_platforms(self, platforms: List[str]) -> List[str]:
         """Resource ids whose linked parsed_media.source_platform is in
         ``platforms``. Two-step lookup retained for parity (the legacy
         version avoided a nested PostgREST `in` filter; we keep the
@@ -606,21 +605,16 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             if not media_ids_int:
                 return []
             resource_rows = await self.fetch_all(
-                "SELECT id FROM resources "
-                "WHERE media_id = ANY($1::bigint[])",
+                "SELECT id FROM resources " "WHERE media_id = ANY($1::bigint[])",
                 media_ids_int,
             )
             # Stringify on the way out for the legacy caller contract.
             return [str(row["id"]) for row in resource_rows]
         except Exception as e:
-            logger.error(
-                f"Failed to resolve resource ids for platforms: {e}"
-            )
+            logger.error(f"Failed to resolve resource ids for platforms: {e}")
             return []
 
-    async def _resource_ids_with_all_tags(
-        self, tag_ids: List[str]
-    ) -> List[str]:
+    async def _resource_ids_with_all_tags(self, tag_ids: List[str]) -> List[str]:
         """Resource ids that carry EVERY tag in ``tag_ids`` (AND).
 
         Single-query GROUP BY HAVING count = N is correct here and
@@ -638,7 +632,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 "WHERE tag_id = ANY($1::uuid[]) "
                 "GROUP BY resource_id "
                 "HAVING count(DISTINCT tag_id) = $2",
-                tag_ids, len(set(tag_ids)),
+                tag_ids,
+                len(set(tag_ids)),
             )
             return [str(r["resource_id"]) for r in rows]
         except Exception as e:
@@ -655,7 +650,9 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 "  AND scope_type = $2 "
                 "  AND scope_id = $3 "
                 "LIMIT 1",
-                self._bigint(resource_id), scope_type, scope_id,
+                self._bigint(resource_id),
+                scope_type,
+                scope_id,
             )
         except Exception as e:
             logger.error(f"Failed to get resource_item: {e}")
@@ -677,7 +674,9 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                     "  AND scope_id = $3 "
                     "  AND folder_id = $4 "
                     "LIMIT 1",
-                    self._bigint(resource_id), scope_type, scope_id,
+                    self._bigint(resource_id),
+                    scope_type,
+                    scope_id,
                     self._bigint(folder_id),
                 )
             return await self.fetch_one(
@@ -687,7 +686,9 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 "  AND scope_id = $3 "
                 "  AND folder_id IS NULL "
                 "LIMIT 1",
-                self._bigint(resource_id), scope_type, scope_id,
+                self._bigint(resource_id),
+                scope_type,
+                scope_id,
             )
         except Exception as e:
             logger.error(f"Failed to get resource_item in folder: {e}")
@@ -698,9 +699,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     ) -> Optional[Dict[str, Any]]:
         try:
             return await self.fetch_one(
-                "SELECT * FROM resource_items "
-                "WHERE resource_id = $1 "
-                "LIMIT 1",
+                "SELECT * FROM resource_items " "WHERE resource_id = $1 " "LIMIT 1",
                 self._bigint(resource_id),
             )
         except Exception as e:
@@ -712,16 +711,12 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     ) -> Dict[str, Any]:
         try:
             cols = list(data.keys())
-            set_pairs = ", ".join(
-                f'"{c}" = ${i + 1}' for i, c in enumerate(cols)
-            )
+            set_pairs = ", ".join(f'"{c}" = ${i + 1}' for i, c in enumerate(cols))
             sql = (
                 f'UPDATE "resource_items" SET {set_pairs} '
                 f"WHERE id = ${len(cols) + 1} RETURNING *"
             )
-            row = await self.fetch_one(
-                sql, *data.values(), self._bigint(item_id)
-            )
+            row = await self.fetch_one(sql, *data.values(), self._bigint(item_id))
             return row or {}
         except Exception as e:
             logger.error(f"Failed to update resource_item {item_id}: {e}")
@@ -749,9 +744,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             )
             return int(count or 0)
         except Exception as e:
-            logger.error(
-                f"Failed to count items for resource {resource_id}: {e}"
-            )
+            logger.error(f"Failed to count items for resource {resource_id}: {e}")
             return 0
 
     # ── Trash listing ───────────────────────────────────────────────
@@ -762,8 +755,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         """Trashed resources older than N days, for permanent cleanup."""
         try:
             cutoff = (
-                datetime.now(timezone.utc)
-                - timedelta(days=older_than_days)
+                datetime.now(timezone.utc) - timedelta(days=older_than_days)
             ).isoformat()
             return await self.fetch_all(
                 "SELECT id, file_path, cover_image_path FROM resources "
@@ -771,9 +763,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 cutoff,
             )
         except Exception as e:
-            logger.error(
-                f"Failed to get expired trashed resources: {e}"
-            )
+            logger.error(f"Failed to get expired trashed resources: {e}")
             return []
 
     async def get_trashed_resources(
@@ -800,7 +790,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 "  AND i.scope_id = $2 "
                 "  AND r.is_trashed = true "
                 "ORDER BY i.created_at DESC",
-                scope_type, scope_id,
+                scope_type,
+                scope_id,
             )
             for row in rows:
                 resource = row.get("resource")
@@ -812,6 +803,135 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         except Exception as e:
             logger.error(f"Failed to get trashed resources: {e}")
             return []
+
+    # ── Resource Versions ───────────────────────────────────────────
+    #
+    # ``resource_versions`` is append-only history per resource. The
+    # version_number column is monotonic per resource_id; reads almost
+    # always sort DESC to get the latest first.
+
+    async def create_version(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            cols = list(data.keys())
+            placeholders = ", ".join(f"${i + 1}" for i in range(len(cols)))
+            col_list = ", ".join(f'"{c}"' for c in cols)
+            sql = (
+                f'INSERT INTO "resource_versions" ({col_list}) '
+                f"VALUES ({placeholders}) RETURNING *"
+            )
+            row = await self.fetch_one(sql, *data.values())
+            logger.info(
+                f"Created version {data.get('version_number')} "
+                f"for resource {data.get('resource_id')}"
+            )
+            return row or {}
+        except Exception as e:
+            logger.error(f"Failed to create version: {e}")
+            raise
+
+    async def get_versions(self, resource_id: str) -> List[Dict[str, Any]]:
+        try:
+            return await self.fetch_all(
+                "SELECT * FROM resource_versions "
+                "WHERE resource_id = $1 "
+                "ORDER BY version_number DESC",
+                self._bigint(resource_id),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get versions for resource {resource_id}: {e}")
+            return []
+
+    async def get_version_by_id(self, version_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.fetch_one(
+                "SELECT * FROM resource_versions WHERE id = $1",
+                self._bigint(version_id),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get version {version_id}: {e}")
+            return None
+
+    async def get_version_by_number(
+        self, resource_id: str, version_number: int
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.fetch_one(
+                "SELECT * FROM resource_versions "
+                "WHERE resource_id = $1 AND version_number = $2 "
+                "LIMIT 1",
+                self._bigint(resource_id),
+                int(version_number),
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to get version {version_number} for " f"{resource_id}: {e}"
+            )
+            return None
+
+    async def delete_version(self, version_id: str) -> bool:
+        try:
+            await self.execute(
+                "DELETE FROM resource_versions WHERE id = $1",
+                self._bigint(version_id),
+            )
+            logger.info(f"Deleted version {version_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete version {version_id}: {e}")
+            raise
+
+    async def update_version(
+        self, version_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        try:
+            cols = list(data.keys())
+            set_pairs = ", ".join(f'"{c}" = ${i + 1}' for i, c in enumerate(cols))
+            sql = (
+                f'UPDATE "resource_versions" SET {set_pairs} '
+                f"WHERE id = ${len(cols) + 1} RETURNING *"
+            )
+            row = await self.fetch_one(sql, *data.values(), self._bigint(version_id))
+            return row or {}
+        except Exception as e:
+            logger.error(f"Failed to update version {version_id}: {e}")
+            raise
+
+    async def get_untranscoded_video_versions(
+        self,
+    ) -> List[Dict[str, Any]]:
+        """Video versions that have never been transcoded — NULL
+        ``transcode_status`` AND non-NULL ``file_path``. The legacy
+        version pulled this via PostgREST's ``.like`` + ``.is_`` +
+        ``.not_.is_`` chain; SQL says it directly."""
+        try:
+            return await self.fetch_all(
+                "SELECT id, resource_id, mime_type, file_path "
+                "FROM resource_versions "
+                "WHERE mime_type LIKE 'video/%' "
+                "  AND transcode_status IS NULL "
+                "  AND file_path IS NOT NULL"
+            )
+        except Exception as e:
+            logger.error(f"Failed to get untranscoded video versions: {e}")
+            return []
+
+    async def get_next_version_number(self, resource_id: str) -> int:
+        """Next monotonic version_number for a resource. Returns 1
+        when the resource has no versions yet. Single COALESCE-MAX
+        query — cheaper than the legacy SELECT...ORDER...LIMIT 1
+        round-trip."""
+        try:
+            current = await self.fetch_value(
+                "SELECT COALESCE(MAX(version_number), 0) "
+                "FROM resource_versions WHERE resource_id = $1",
+                self._bigint(resource_id),
+            )
+            return int(current or 0) + 1
+        except Exception as e:
+            logger.error(
+                f"Failed to get next version for resource " f"{resource_id}: {e}"
+            )
+            return 1
 
 
 __all__ = ["ResourcesRepositoryAsyncpg"]
