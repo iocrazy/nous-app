@@ -1441,3 +1441,37 @@ class ResourcesRepository:
             return any(results)
 
         return [item for item in items if matches_tags(item.get("resource_id", ""))]
+
+
+# ─── asyncpg + Supavisor migration factory ─────────────────────────────
+#
+# Phase 3a of the supabase-py → asyncpg cutover (Bug C #194). Routes
+# ``ResourcesRepository`` through the asyncpg subclass when both
+# ``USE_ASYNCPG_RESOURCES=true`` and ``SUPAVISOR_DATABASE_URL`` are
+# configured. Half-configured deploys (flag on, URL missing) fall back
+# to the legacy path with a single warning so a misconfigured env
+# never crashes the worker.
+#
+# Call sites should use ``get_resources_repository()`` rather than
+# ``ResourcesRepository()`` directly. Existing ``ResourcesRepository()``
+# constructors keep working — they bypass the flag and stay on the
+# legacy supabase-py path. New code goes through the factory.
+
+
+def get_resources_repository():
+    """Return the right ResourcesRepository implementation per env."""
+    from app.core.config import settings
+
+    if settings.USE_ASYNCPG_RESOURCES:
+        from app.db.pg_pool import is_configured
+
+        if is_configured():
+            from app.repositories.resources_repository_asyncpg import (
+                ResourcesRepositoryAsyncpg,
+            )
+            return ResourcesRepositoryAsyncpg()
+        logger.warning(
+            "USE_ASYNCPG_RESOURCES=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return ResourcesRepository()

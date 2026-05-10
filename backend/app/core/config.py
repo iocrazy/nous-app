@@ -77,6 +77,12 @@ class Settings(BaseSettings):
         default=False,
         description="Route AgentRunsRepository through asyncpg + Supavisor",
     )
+    USE_ASYNCPG_RESOURCES: bool = Field(
+        default=False,
+        description="Route ResourcesRepository through asyncpg + Supavisor "
+        "(Phase 3a — covers the 10 methods on the resources table; "
+        "items / versions / folders still use legacy supabase-py)",
+    )
 
     # ============================================
     # 下载设置
