@@ -102,6 +102,7 @@ dev-dependencies = [
     "flake8>=6.0.0",
     "autoflake>=2.3.1",
     "respx>=0.21.0",  # httpx response mocking — for safe_http boundary tests
+    "pre-commit>=3.7.0",  # local hook runner; mirrors CI's lint scope
 ]
 
 [tool.black]

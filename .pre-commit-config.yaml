@@ -1,0 +1,49 @@
+# Pre-commit hooks. Run automatically on `git commit` once installed:
+#
+#   uv run --directory backend pre-commit install
+#
+# Or with system pre-commit:
+#
+#   pip install pre-commit && pre-commit install
+#
+# Mirrors what CI checks for backend/app + backend/tests so violations
+# are caught at commit time, not after a CI round-trip. Changed-files
+# only — pre-commit by default passes only the staged files to each
+# hook, matching the .github/workflows/ci.yml `Backend Lint & Deps`
+# behavior (#217).
+
+repos:
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        # Match backend/pyproject.toml: line-length = 88, py313 target.
+        args: [--line-length=88]
+        files: ^backend/(app|tests)/.*\.py$
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        # Match backend/pyproject.toml: profile = black, line_length = 88.
+        args: [--profile=black, --line-length=88]
+        files: ^backend/(app|tests)/.*\.py$
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8
+        # Honors backend/.flake8 config (max-line-length 120, per-file-ignores).
+        files: ^backend/(app|tests)/.*\.py$
+        args: [--config=backend/.flake8]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        files: ^backend/(app|tests)/.*\.py$
+      - id: end-of-file-fixer
+        files: ^backend/(app|tests)/.*\.py$
+      - id: check-merge-conflict
+      - id: check-yaml
+        files: ^(\.github/|backend/).*\.ya?ml$

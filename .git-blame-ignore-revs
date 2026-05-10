@@ -1,0 +1,13 @@
+# Revisions listed here are skipped by `git blame` so a one-time
+# format/style sweep doesn't pollute the per-line authorship history.
+#
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub picks this file up automatically — its blame view skips
+# these commits without per-user config.
+
+# 2026-05-10 — black + isort sweep over backend/app + backend/tests.
+# Tracked debt cleared in PR (style/format-backend-master). Body of
+# the commit message has full context.
+9be54b4dcb857b5fd6f86d8e7b4225abb395944d
