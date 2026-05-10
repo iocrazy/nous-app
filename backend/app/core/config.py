@@ -83,6 +83,12 @@ class Settings(BaseSettings):
         "(Phase 3a — covers the 10 methods on the resources table; "
         "items / versions / folders still use legacy supabase-py)",
     )
+    USE_ASYNCPG_MEDIA: bool = Field(
+        default=False,
+        description="Route MediaRepository through asyncpg + Supavisor "
+        "(Phase 4a — covers parsed_media CRUD; lists / search / "
+        "statistics still use legacy supabase-py)",
+    )
 
     # ============================================
     # 下载设置
