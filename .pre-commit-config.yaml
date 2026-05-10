@@ -47,3 +47,22 @@ repos:
       - id: check-merge-conflict
       - id: check-yaml
         files: ^(\.github/|backend/).*\.ya?ml$
+
+  # ── Secret scanning (added 2026-05-10 after a real prod incident) ──
+  #
+  # Detects accidental commits of API keys, PG passwords, JWT tokens,
+  # AWS / GCP / Aliyun credentials, etc. Catches the pattern that bit
+  # us with the NAS dev PG password literal in 5 PoC scripts (#229)
+  # and the prod PG password leaking via a screenshot of a spike file.
+  #
+  # Config: .gitleaks.toml at repo root (allowlist for known false
+  # positives — UUIDs in test fixtures, etc.). Runs against staged
+  # diff only (fast, doesn't scan the whole tree on every commit).
+  #
+  # Bypass: `git commit --no-verify` if you absolutely have to commit
+  # a secret-shaped string (CI still re-scans). Tell yourself why
+  # before reaching for that flag.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
