@@ -645,3 +645,34 @@ class MediaRepository:
                 "total_storage_bytes": 0,
                 "unique_authors": 0,
             }
+
+
+# ─── asyncpg + Supavisor migration factory ─────────────────────────────
+#
+# Phase 4 of the supabase-py → asyncpg cutover (Bug C #194). Same
+# Strangler Fig pattern as ResourcesRepository: factory routes
+# MediaRepository through the asyncpg subclass when both
+# USE_ASYNCPG_MEDIA=true and SUPAVISOR_DATABASE_URL is configured.
+# Half-configured deploys (flag on, URL missing) fall back to the
+# legacy path with a warning so a misconfigured env never crashes
+# the worker.
+
+
+def get_media_repository():
+    """Return the right MediaRepository implementation per env."""
+    from app.core.config import settings
+
+    if settings.USE_ASYNCPG_MEDIA:
+        from app.db.pg_pool import is_configured
+
+        if is_configured():
+            from app.repositories.media_repository_asyncpg import (
+                MediaRepositoryAsyncpg,
+            )
+
+            return MediaRepositoryAsyncpg()
+        logger.warning(
+            "USE_ASYNCPG_MEDIA=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return MediaRepository()
