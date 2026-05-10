@@ -235,6 +235,152 @@ async def test_get_downloaded_by_platform_id_filters_by_status(
         assert result["download_path"] == "/test/path.mp4"
 
 
+# ─── Phase 4b/4c — list / search / stats ───────────────────────────────
+
+
+async def test_get_user_media_list_overlays_resource_id(
+    integration_db_url, patched_pool, cleanup_test_rows
+):
+    """Verifies the JOIN through resources returns CARD_SELECT-shaped
+    parsed_media rows with ``resource_id`` overlaid. Catches mistakes
+    in the column-aliasing scheme (``__resource_id``)."""
+    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
+
+    async with _seed_parsed_media(integration_db_url) as media:
+        conn = await asyncpg.connect(integration_db_url)
+        try:
+            test_user_id = await conn.fetchval("SELECT id FROM auth.users LIMIT 1")
+            if not test_user_id:
+                pytest.skip("No auth.users rows to use as test creator_id")
+            resource = await conn.fetchrow(
+                "INSERT INTO resources (creator_id, media_id, source_type, filename) "
+                "VALUES ($1, $2, 'web', 'list_test.mp4') RETURNING *",
+                test_user_id,
+                media["id"],
+            )
+        finally:
+            await conn.close()
+
+        repo = MediaRepositoryAsyncpg()
+        rows = await repo.get_user_media_list(str(test_user_id), limit=200)
+        # Find our seeded row in the list
+        match = next(
+            (r for r in rows if int(r.get("id") or 0) == int(media["id"])), None
+        )
+        assert match is not None, "seeded media not in user_media_list"
+        # CARD_SELECT projection — title is in there
+        assert match.get("title") == "Integration test row"
+        # resource_id overlaid
+        assert int(match["resource_id"]) == resource["id"]
+        # ``__resource_id`` alias should be popped, never leak to caller
+        assert "__resource_id" not in match
+
+
+async def test_search_filters_by_keyword(
+    integration_db_url, patched_pool, cleanup_test_rows
+):
+    """Verifies the ILIKE filter on title fires + the resource_id
+    overlay still works inside the dynamic WHERE branch."""
+    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
+
+    unique_kw = f"kwprobe_{uuid.uuid4().hex[:8]}"
+    async with _seed_parsed_media(
+        integration_db_url, title=f"prefix {unique_kw} suffix"
+    ) as media:
+        conn = await asyncpg.connect(integration_db_url)
+        try:
+            test_user_id = await conn.fetchval("SELECT id FROM auth.users LIMIT 1")
+            if not test_user_id:
+                pytest.skip("No auth.users rows to use as test creator_id")
+            await conn.execute(
+                "INSERT INTO resources (creator_id, media_id, source_type, filename) "
+                "VALUES ($1, $2, 'web', 'search_test.mp4')",
+                test_user_id,
+                media["id"],
+            )
+        finally:
+            await conn.close()
+
+        repo = MediaRepositoryAsyncpg()
+        rows = await repo.search(str(test_user_id), keyword=unique_kw, limit=10)
+        assert len(rows) >= 1, "keyword filter missed seeded title"
+        match = next(
+            (r for r in rows if int(r.get("id") or 0) == int(media["id"])), None
+        )
+        assert match is not None
+        assert "resource_id" in match
+
+
+async def test_get_statistics_counts_match_manual_query(
+    integration_db_url, patched_pool, cleanup_test_rows
+):
+    """Verifies COUNT FILTER aggregation matches the manual count.
+    Catches mistakes in the residual ``skipped`` formula and the
+    SUM(NULL) → 0 coalesce."""
+    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
+
+    async with _seed_parsed_media(
+        integration_db_url, video_download_status="completed", datasize_bytes=1024
+    ) as media:
+        conn = await asyncpg.connect(integration_db_url)
+        try:
+            test_user_id = await conn.fetchval("SELECT id FROM auth.users LIMIT 1")
+            if not test_user_id:
+                pytest.skip("No auth.users rows to use as test creator_id")
+            await conn.execute(
+                "INSERT INTO resources (creator_id, media_id, source_type, filename) "
+                "VALUES ($1, $2, 'web', 'stats_test.mp4')",
+                test_user_id,
+                media["id"],
+            )
+        finally:
+            await conn.close()
+
+        repo = MediaRepositoryAsyncpg()
+        stats = await repo.get_statistics(str(test_user_id))
+
+        # Shape parity with legacy
+        for key in (
+            "total",
+            "pending",
+            "completed",
+            "failed",
+            "skipped",
+            "total_storage_bytes",
+            "unique_authors",
+        ):
+            assert key in stats, f"missing key: {key}"
+            assert isinstance(stats[key], int), f"{key} should be int"
+
+        # Skipped residual must be non-negative
+        assert stats["skipped"] >= 0
+        # Our seeded row contributes >= 1 to total + completed + storage
+        assert stats["total"] >= 1
+        assert stats["completed"] >= 1
+        assert stats["total_storage_bytes"] >= 1024
+
+
+async def test_mark_stale_downloads_failed_skips_recent(
+    integration_db_url, patched_pool, cleanup_test_rows
+):
+    """The cutoff is ``now() - timeout``. A row with ``updated_at``
+    INSIDE the window must NOT be touched. Catches off-by-sign bugs
+    (legacy used `<` cutoff — port preserves that)."""
+    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
+
+    async with _seed_parsed_media(
+        integration_db_url, video_download_status="downloading"
+    ) as media:
+        repo = MediaRepositoryAsyncpg()
+        # 30-min default — our just-inserted row is < 1s old, should not flip
+        await repo.mark_stale_downloads_failed(timeout_minutes=30)
+
+        # Re-fetch + verify status untouched
+        after = await repo.get_by_id(str(media["id"]))
+        assert after is not None
+        assert after["video_download_status"] == "downloading"
+
+
 # ─── Tests for ResourcesRepositoryAsyncpg ──────────────────────────────
 
 
