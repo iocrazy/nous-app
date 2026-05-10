@@ -54,6 +54,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need full history so the diff against the PR base branch
+          # can find the merge-base. Without this we can't compute
+          # the changed-files set and the lint scope falls back to
+          # everything (or fails to find origin/<base>).
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v4
         with:
@@ -66,14 +72,47 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # Lint scope: only Python files this PR added / modified / renamed
+      # under backend/. Computed from the merge-base diff with the PR
+      # base branch — running the full-tree lint on every PR is unfair
+      # when master carries pre-existing format debt (any PR would be
+      # red through no fault of its author).
+      - name: Compute changed Python files
+        id: changed
+        working-directory: ${{ github.workspace }}
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1 2>/dev/null || true
+          # --diff-filter=AMR: Added, Modified, Renamed (skip Deleted —
+          # nothing to lint on a removed file).
+          # Pathspec scopes to backend/ then we filter .py via grep —
+          # the `**/*.py` pathspec form skips files at depth 1 (e.g.
+          # tests/foo.py directly under tests/), which is wrong.
+          CHANGED=$(git diff --name-only --diff-filter=AMR \
+            "origin/${{ github.base_ref }}...HEAD" \
+            -- 'backend/app/**' 'backend/tests/**' \
+            | grep -E '\.py$' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No backend Python files changed in this PR."
+            echo "files=" >> "$GITHUB_OUTPUT"
+          else
+            # Strip backend/ prefix so the paths work in subsequent
+            # steps that run with working-directory: backend.
+            RELATIVE=$(echo "$CHANGED" | sed 's|^backend/||' | tr '\n' ' ')
+            echo "files=$RELATIVE" >> "$GITHUB_OUTPUT"
+            echo "Changed files: $RELATIVE"
+          fi
+
       - name: Check code formatting (black)
-        run: uv run black --check app/
+        if: steps.changed.outputs.files != ''
+        run: uv run black --check ${{ steps.changed.outputs.files }}
 
       - name: Check import ordering (isort)
-        run: uv run isort --check-only app/
+        if: steps.changed.outputs.files != ''
+        run: uv run isort --check-only ${{ steps.changed.outputs.files }}
 
       - name: Lint (flake8)
-        run: uv run flake8 app/
+        if: steps.changed.outputs.files != ''
+        run: uv run flake8 ${{ steps.changed.outputs.files }}
 
       - name: Run tests (pytest)
         env:
