@@ -59,6 +59,7 @@ dependencies = [
     "dbos>=2.19.0",  # PoC #1-12 validated on 2.19.0; pin major version
     "pypdfium2>=5.7.1",
     "croniter>=6.2.2",
+    "brotli>=1.2.0",
 ]
 
 [project.optional-dependencies]
