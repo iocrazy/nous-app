@@ -14,7 +14,6 @@ workflow + lifecycle status updates on parsed_media / resources".
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from typing import Any
@@ -122,7 +121,7 @@ def assert_audio_present_step(audio_path: str) -> str:
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-def run_whisper(
+async def run_whisper(
     audio_path: str,
     resource_id: str,
     *,
@@ -131,7 +130,7 @@ def run_whisper(
     language: str,
     task_assignment: str = "",
 ) -> dict[str, Any]:
-    """Invoke transcription synchronously inside the DBOS step.
+    """Invoke transcription inside the DBOS step.
 
     Volcengine has its own ASR API (bigasr / seedasr — not OpenAI-compatible),
     so it special-cases through VolcengineASRService. All other providers
@@ -144,9 +143,12 @@ def run_whisper(
     DBOS workflow the volcengine branch was dropped, so every transcribe
     click since failed with "DoubaoProvider does not support transcription"
     until DBOSMaxStepRetriesExceeded.
-    """
+
+    PR #237 audit: was sync ``def`` with two ``asyncio.run()`` calls
+    (one here, one in _run_volcengine_asr). Now async — same fix as
+    workflow_health_sweeper / agent_runs_sweeper."""
     if provider_key == "volcengine":
-        return _run_volcengine_asr(
+        return await _run_volcengine_asr(
             audio_path=audio_path,
             resource_id=resource_id,
             provider_config=provider_config,
@@ -157,12 +159,10 @@ def run_whisper(
     from app.services.ai.transcribe.whisper_service import WhisperService
 
     svc = WhisperService(provider_key=provider_key, provider_config=provider_config)
-    result = asyncio.run(
-        svc.transcribe_and_save(
-            resource_id=resource_id,
-            audio_path=audio_path,
-            language=language,
-        )
+    result = await svc.transcribe_and_save(
+        resource_id=resource_id,
+        audio_path=audio_path,
+        language=language,
     )
     if result is None:
         raise RuntimeError("transcribe_and_save returned None")
@@ -175,7 +175,7 @@ def run_whisper(
     }
 
 
-def _run_volcengine_asr(
+async def _run_volcengine_asr(
     audio_path: str,
     resource_id: str,
     provider_config: dict[str, Any],
@@ -268,12 +268,10 @@ def _run_volcengine_asr(
         access_token=provider_config.get("api_key", ""),
         asr_resource_id=asr_resource,
     )
-    result = asyncio.run(
-        service.transcribe_and_save(
-            resource_id=resource_id,
-            audio_url=audio_url,
-            audio_format=audio_format,
-        )
+    result = await service.transcribe_and_save(
+        resource_id=resource_id,
+        audio_url=audio_url,
+        audio_format=audio_format,
     )
     if result is None:
         raise RuntimeError("Volcengine ASR returned None")
@@ -298,7 +296,9 @@ def mark_transcript_completed(parsed_media_id: int) -> None:
 
 
 @DBOS.workflow()
-def ai_transcription_workflow(parsed_media_id: int, user_id: str) -> dict[str, Any]:
+async def ai_transcription_workflow(
+    parsed_media_id: int, user_id: str
+) -> dict[str, Any]:
     """DBOS port of transcribe_audio_task. Same input/output contract:
     parsed_media_id + user_id → transcript persisted to resource_transcripts +
     resources.transcript_status='completed'.
@@ -314,7 +314,7 @@ def ai_transcription_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
         # gated on parsed_media.music_download_status='completed', so
         # this is a defense-in-depth check, not a wait loop.
         audio_path = assert_audio_present_step(inputs["audio_path"])
-        summary = run_whisper(
+        summary = await run_whisper(
             audio_path=audio_path,
             resource_id=inputs["resource_id"],
             provider_key=inputs["provider_key"],
@@ -325,7 +325,7 @@ def ai_transcription_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
         mark_transcript_completed(parsed_media_id)
         return {"parsed_media_id": parsed_media_id, **summary}
     except Exception as e:  # noqa: BLE001
-        return record_workflow_failure(
+        return await record_workflow_failure(
             workflow_id=DBOS.workflow_id,
             error=e,
             context={

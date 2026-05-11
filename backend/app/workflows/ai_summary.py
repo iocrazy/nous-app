@@ -12,7 +12,6 @@ IDENTITY/SOUL/AGENT prompt + AgentRunner + RunRecorder so:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from typing import Any, Optional
@@ -99,7 +98,7 @@ def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-def run_summarize_agent(
+async def run_summarize_agent(
     *,
     transcript: str,
     title: str,
@@ -110,17 +109,18 @@ def run_summarize_agent(
 ) -> dict[str, Any]:
     """Invoke the `summarize` agent via SummarizeService → AgentRunner.
     Returns {summary, key_points, topics}. Each retry is a fresh agent
-    call (token cost + agent_runs row each time)."""
+    call (token cost + agent_runs row each time).
+
+    PR #237 audit: was sync ``def`` with ``asyncio.run()``. Now async
+    so the AgentRunner / asyncpg pool stays on the executor's loop."""
     from app.services.ai.summarize.summarize_service import SummarizeService
 
     svc = SummarizeService(provider_key=provider_key, provider_config=provider_config)
-    result = asyncio.run(
-        svc.summarize(
-            transcript=transcript,
-            user_id=user_id,
-            parsed_media_id=parsed_media_id,
-            title=title,
-        )
+    result = await svc.summarize(
+        transcript=transcript,
+        user_id=user_id,
+        parsed_media_id=parsed_media_id,
+        title=title,
     )
     if result is None:
         raise RuntimeError("summarize agent returned None")
@@ -197,7 +197,7 @@ def persist_summary(
 
 
 @DBOS.workflow()
-def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, Any]:
+async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     """Production-shaped DBOS port of the ai_summary Celery task.
 
     - input: parsed_media_id (int) + user_id (uuid str)
@@ -215,7 +215,7 @@ def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, Any]:
 
     try:
         inputs = load_summary_inputs(parsed_media_id, user_id)
-        agent_out = run_summarize_agent(
+        agent_out = await run_summarize_agent(
             transcript=inputs["transcript"],
             title=inputs.get("title", ""),
             user_id=user_id,
@@ -231,7 +231,7 @@ def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, Any]:
             topics=agent_out["topics"],
         )
     except Exception as e:  # noqa: BLE001
-        return record_workflow_failure(
+        return await record_workflow_failure(
             workflow_id=DBOS.workflow_id,
             error=e,
             context={
