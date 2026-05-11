@@ -570,6 +570,23 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => document.removeEventListener('visibilitychange', handler);
   }, [currentUserId, refreshTasks]);
 
+  // ─── Polling backstop ───────────────────────────────────
+  // When Realtime AND WS are BOTH down (both connections lost simultaneously),
+  // neither push channel will tell us about state changes. Poll every 30s
+  // until at least one channel comes back. Stops polling once any channel
+  // reconnects so we don't double-pull when healthy.
+  const bothChannelsDown = !state.isConnected && !state.isWsConnected;
+  useEffect(() => {
+    if (!currentUserId || !bothChannelsDown) return;
+    const timer = setInterval(() => {
+      // Skip when tab is hidden — visibilitychange handler covers resume.
+      if (document.visibilityState === 'visible') {
+        refreshTasks();
+      }
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [currentUserId, bothChannelsDown, refreshTasks]);
+
   // Derived state
   const activeTasks = state.tasks.filter(
     t => t.status === 'pending' || t.status === 'processing'
