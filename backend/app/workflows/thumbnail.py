@@ -9,7 +9,6 @@ crash skip the ffmpeg pass on the second attempt.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from dbos import DBOS
@@ -17,16 +16,16 @@ from loguru import logger
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-def generate_thumbnail_step(resource_id: str, file_path: str, mime_type: str) -> bool:
+async def generate_thumbnail_step(
+    resource_id: str, file_path: str, mime_type: str
+) -> bool:
     from app.services.media.render.thumbnail_service import ThumbnailService
 
     try:
-        asyncio.run(
-            ThumbnailService().generate_thumbnail(
-                resource_id=resource_id,
-                file_path=file_path,
-                mime_type=mime_type,
-            )
+        await ThumbnailService().generate_thumbnail(
+            resource_id=resource_id,
+            file_path=file_path,
+            mime_type=mime_type,
         )
         logger.info(f"[Thumbnail] resource={resource_id} generated")
         return True
@@ -38,8 +37,8 @@ def generate_thumbnail_step(resource_id: str, file_path: str, mime_type: str) ->
 
 
 @DBOS.workflow()
-def thumbnail_workflow(
+async def thumbnail_workflow(
     resource_id: str, file_path: str, mime_type: str
 ) -> dict[str, Any]:
-    success = generate_thumbnail_step(resource_id, file_path, mime_type)
+    success = await generate_thumbnail_step(resource_id, file_path, mime_type)
     return {"resource_id": resource_id, "success": success}

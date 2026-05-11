@@ -13,7 +13,6 @@ NEXT chat, not the current one. DBOS retry policy is conservative
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Optional
 from uuid import UUID
 
@@ -24,40 +23,37 @@ _RECENT_TURNS_PER_CHANNEL = 10
 
 
 @DBOS.step()
-def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
+async def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
     """Pull last N user + N assistant messages from ai_messages."""
     from app.db import get_async_supabase_admin
 
-    async def _load() -> dict[str, list[str]]:
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("ai_messages")
-            .select("role, content")
-            .eq("session_id", session_id)
-            .order("created_at", desc=True)
-            .limit(_RECENT_TURNS_PER_CHANNEL * 4)
-            .execute()
-        )
-        rows = result.data or []
-        user_msgs: list[str] = []
-        asst_msgs: list[str] = []
-        for row in rows:
-            role = row.get("role")
-            content = row.get("content") or ""
-            if role == "user" and len(user_msgs) < _RECENT_TURNS_PER_CHANNEL:
-                user_msgs.append(content)
-            elif role == "assistant" and len(asst_msgs) < _RECENT_TURNS_PER_CHANNEL:
-                asst_msgs.append(content)
-        return {
-            "user_msgs": list(reversed(user_msgs)),
-            "asst_msgs": list(reversed(asst_msgs)),
-        }
-
-    return asyncio.run(_load())
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("ai_messages")
+        .select("role, content")
+        .eq("session_id", session_id)
+        .order("created_at", desc=True)
+        .limit(_RECENT_TURNS_PER_CHANNEL * 4)
+        .execute()
+    )
+    rows = result.data or []
+    user_msgs: list[str] = []
+    asst_msgs: list[str] = []
+    for row in rows:
+        role = row.get("role")
+        content = row.get("content") or ""
+        if role == "user" and len(user_msgs) < _RECENT_TURNS_PER_CHANNEL:
+            user_msgs.append(content)
+        elif role == "assistant" and len(asst_msgs) < _RECENT_TURNS_PER_CHANNEL:
+            asst_msgs.append(content)
+    return {
+        "user_msgs": list(reversed(user_msgs)),
+        "asst_msgs": list(reversed(asst_msgs)),
+    }
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-def extract_and_persist_memories_step(
+async def extract_and_persist_memories_step(
     *,
     run_id: Optional[str],
     agent_id: str,
@@ -75,28 +71,25 @@ def extract_and_persist_memories_step(
     from app.services.ai.memory.writer import MemoryWriter
     from app.services.ai.providers.embedding_service import EmbeddingService
 
-    async def _do() -> dict[str, Any]:
-        client = await get_async_supabase_admin()
-        llm_call = await _build_cheap_llm_call()
-        user_extractor = UserMemoryExtractor(llm_call=llm_call)
-        asst_extractor = AssistantMemoryExtractor(llm_call=llm_call)
+    client = await get_async_supabase_admin()
+    llm_call = await _build_cheap_llm_call()
+    user_extractor = UserMemoryExtractor(llm_call=llm_call)
+    asst_extractor = AssistantMemoryExtractor(llm_call=llm_call)
 
-        writer = MemoryWriter(
-            user_extractor=user_extractor,
-            assistant_extractor=asst_extractor,
-            embedding_service=EmbeddingService(),
-            supabase_client=client,
-        )
-        rows = await writer.write(
-            agent_id=UUID(agent_id),
-            user_id=UUID(user_id),
-            run_id=UUID(run_id) if run_id else None,
-            user_messages=user_msgs,
-            assistant_messages=asst_msgs,
-        )
-        return {"rows_written": rows}
-
-    result = asyncio.run(_do())
+    writer = MemoryWriter(
+        user_extractor=user_extractor,
+        assistant_extractor=asst_extractor,
+        embedding_service=EmbeddingService(),
+        supabase_client=client,
+    )
+    rows = await writer.write(
+        agent_id=UUID(agent_id),
+        user_id=UUID(user_id),
+        run_id=UUID(run_id) if run_id else None,
+        user_messages=user_msgs,
+        assistant_messages=asst_msgs,
+    )
+    result = {"rows_written": rows}
     logger.info(
         f"[write_memory] wrote {result['rows_written']} rows "
         f"agent={agent_id} user={user_id}"
@@ -133,7 +126,7 @@ async def _build_cheap_llm_call():
 
 
 @DBOS.workflow()
-def write_memory_workflow(
+async def write_memory_workflow(
     *,
     agent_id: str,
     user_id: str,
@@ -153,11 +146,11 @@ def write_memory_workflow(
     if not session_id:
         return {"rows_written": 0, "reason": "no_session_id"}
 
-    msgs = load_recent_messages_step(session_id)
+    msgs = await load_recent_messages_step(session_id)
     if not msgs["user_msgs"] and not msgs["asst_msgs"]:
         return {"rows_written": 0, "reason": "no_messages"}
 
-    return extract_and_persist_memories_step(
+    return await extract_and_persist_memories_step(
         run_id=run_id,
         agent_id=agent_id,
         user_id=user_id,
