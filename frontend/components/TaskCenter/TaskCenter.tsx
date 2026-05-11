@@ -9,8 +9,8 @@
  * (still pending its rewrite as of A7).
  */
 
-import React, { useMemo, useState } from 'react';
-import { ListTodo } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ListTodo, WifiOff } from 'lucide-react';
 import { useTaskManager, type TaskStatus, type TaskType, type UnifiedTask } from '../../contexts/TaskManagerContext';
 import {
   filterTasks, groupTasks, sortTasks,
@@ -28,7 +28,7 @@ interface TaskCenterProps {
 }
 
 export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
-  const { tasks, isLoading, refreshTasks } = useTaskManager();
+  const { tasks, isLoading, refreshTasks, isConnected, isWsConnected } = useTaskManager();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<Set<TaskStatus>>(new Set());
@@ -75,6 +75,22 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
     [search, statusFilter, typeFilter],
   );
 
+  // ─── Stale connection banner ──────────────────────────
+  // Suppress flicker during initial mount: wait 3s after !isLoading before
+  // surfacing a disconnection. SUBSCRIBED + WS open arrive within ~1s of
+  // first paint in healthy cases; if either is still down at 3s, the user
+  // is genuinely on stale data.
+  const isAnyConnectionDown = !isConnected || !isWsConnected;
+  const [showStaleBanner, setShowStaleBanner] = useState(false);
+  useEffect(() => {
+    if (isLoading || !isAnyConnectionDown) {
+      setShowStaleBanner(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowStaleBanner(true), 3000);
+    return () => clearTimeout(timer);
+  }, [isLoading, isAnyConnectionDown]);
+
   const filtered = useMemo(() => filterTasks(tasks, filterSpec), [tasks, filterSpec]);
   const sorted = useMemo(() => sortTasks(filtered, sortBy), [filtered, sortBy]);
   const groups = useMemo(() => groupTasks(sorted, groupBy), [sorted, groupBy]);
@@ -103,6 +119,17 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
 
   return (
     <div className={containerClass}>
+      {showStaleBanner && (
+        <button
+          type="button"
+          onClick={handleRefresh}
+          className="flex items-center gap-2 px-4 py-2 text-xs bg-amber-500/10 text-amber-300 border-b border-amber-500/30 hover:bg-amber-500/15 transition-colors"
+          title={`Realtime: ${isConnected ? 'connected' : 'down'} · WebSocket: ${isWsConnected ? 'connected' : 'down'}. Click to refresh.`}
+        >
+          <WifiOff size={12} />
+          <span>Live updates paused — click to refresh</span>
+        </button>
+      )}
       <TaskToolbar
         search={search}
         onSearchChange={setSearch}

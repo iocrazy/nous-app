@@ -91,7 +91,10 @@ export function isAISubTask(type: TaskType): boolean {
 export interface TaskManagerState {
   tasks: UnifiedTask[];
   isLoading: boolean;
+  /** Supabase Realtime channel (task_tracking postgres_changes) subscribed? */
   isConnected: boolean;
+  /** Redis WebSocket (/ws/task-progress for fine-grained download progress) open? */
+  isWsConnected: boolean;
 }
 
 interface TaskManagerContextType extends TaskManagerState {
@@ -137,7 +140,8 @@ type Action =
   | { type: 'DOWNLOAD_STARTED'; payload: WsDownloadStartedPayload }
   | { type: 'DELETE'; id: string }
   | { type: 'SET_LOADING'; loading: boolean }
-  | { type: 'SET_CONNECTED'; connected: boolean };
+  | { type: 'SET_CONNECTED'; connected: boolean }
+  | { type: 'SET_WS_CONNECTED'; connected: boolean };
 
 /** task_tracking row → UnifiedTask. The table has no `id` column
  * anymore (PK = dbos_workflow_id, see migration 180), so adapt by
@@ -266,6 +270,8 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
       return { ...state, isLoading: action.loading };
     case 'SET_CONNECTED':
       return { ...state, isConnected: action.connected };
+    case 'SET_WS_CONNECTED':
+      return { ...state, isWsConnected: action.connected };
     default:
       return state;
   }
@@ -371,6 +377,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     tasks: [],
     isLoading: true,
     isConnected: false,
+    isWsConnected: false,
   });
   const channelRef = useRef<ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null>(null);
 
@@ -502,6 +509,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
       ws.onopen = () => {
         console.debug('[TaskManager/WS] Connected');
         wsReconnectDelay.current = 1000; // reset backoff
+        dispatch({ type: 'SET_WS_CONNECTED', connected: true });
       };
 
       ws.onmessage = (event) => {
@@ -518,6 +526,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
       };
 
       ws.onclose = () => {
+        dispatch({ type: 'SET_WS_CONNECTED', connected: false });
         if (unmounted) return;
         console.debug(`[TaskManager/WS] Disconnected, reconnecting in ${wsReconnectDelay.current}ms`);
         wsReconnectTimer.current = setTimeout(() => {
@@ -544,6 +553,22 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
     };
   }, [currentUserId]);
+
+  // ─── Resume on tab focus ────────────────────────────────
+  // Realtime + WS can silently drop while the tab is hidden (mobile suspend,
+  // OS sleep, network reshuffle). On return to visibility, re-pull the truth
+  // from the DB so the UI doesn't show stale "Initializing… 30%" rows that
+  // actually finished an hour ago.
+  useEffect(() => {
+    if (!currentUserId) return;
+    const handler = () => {
+      if (document.visibilityState === 'visible') {
+        refreshTasks();
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, [currentUserId, refreshTasks]);
 
   // Derived state
   const activeTasks = state.tasks.filter(

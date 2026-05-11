@@ -1,18 +1,45 @@
 # app/db/supabase_client.py
 
 """
-Supabase client module
+Supabase client module — per-loop instances via WeakKeyDictionary.
 
-Provides async Supabase client initialization and management for database,
-auth, and storage operations.
+Each running asyncio event loop gets its own ``AsyncClient`` (and its own
+httpx pool). Entries are held by a ``WeakKeyDictionary`` keyed by the loop
+object itself, so when a loop is garbage-collected (e.g., ``asyncio.run()``
+exits) its client entry vanishes naturally.
 
-The singleton is event-loop-aware: when the running loop changes (e.g.
-successive asyncio.run() calls in Celery workers), the cached client is
-automatically recreated so that its httpx transport matches the current loop.
+Why this design (was an incident; do not regress)
+-------------------------------------------------
+The previous "single shared client + drain-on-loop-change" design worked
+fine when uvicorn was the only event loop in the process. But DBOS workflows
+sprinkle ``asyncio.run()`` across many call sites; each one spins up a fresh
+event loop, runs a coroutine, then disposes the loop. Under the old design,
+every such loop change called ``_drain_old_client(...)`` on the uvicorn
+loop's cached client — that helper called ``aclose()`` on the httpx pool
+*of the wrong loop*, killing fire-and-forget tasks (request logging,
+progress writes) mid-flight with ``RuntimeError: Cannot send a request,
+as the client has been closed.`` Failure rate observed in prod: 10-26% of
+request log writes; user-facing 500s on routes that race the drain.
+
+A per-loop ``WeakKeyDictionary`` avoids this entirely:
+
+* Each loop only ever uses its own client; no cross-loop interference.
+* When a loop dies, Python GC reclaims it and its dict entry vanishes —
+  no need to call ``aclose()`` on a dead-loop client (would itself raise).
+* ``id(loop)`` is **not** used as the key because Python reuses object ids
+  after GC (empirically 8/10 collisions in tight ``asyncio.run()`` loops).
+  The loop object itself is hashable, so ``WeakKeyDictionary[loop, client]``
+  is the right primitive.
+
+The historical motivation for the drain was a ``uvicorn --reload`` fd leak
+(P2-10 / issue #21, commit 8a04d127). Prod doesn't run ``--reload`` so that
+leak is dev-only; with WeakKeyDictionary the dev case also self-cleans
+when the reloader replaces the worker process.
 """
 
 import asyncio
-from typing import Optional
+import weakref
+from typing import MutableMapping
 
 from loguru import logger
 from supabase import AsyncClientOptions
@@ -32,136 +59,119 @@ def _get_client_options() -> AsyncClientOptions:
 
 
 class AsyncSupabaseClient:
-    """Event-loop-aware Supabase async client singleton.
+    """Per-loop Supabase async client cache.
 
-    Tracks the event loop each client was created on. If the current running
-    loop differs (common in Celery workers using asyncio.run()), the stale
-    client is discarded and a fresh one is created on the new loop.
+    Two dicts (anon + service-role) keyed by event loop. Entries are
+    auto-evicted on loop GC.
+
+    See module docstring for the full rationale.
     """
 
-    _instance: Optional[AsyncClient] = None
-    _admin_instance: Optional[AsyncClient] = None
-    _instance_loop_id: Optional[int] = None
-    _admin_instance_loop_id: Optional[int] = None
-
-    @classmethod
-    async def _drain_old_client(cls, old: Optional[AsyncClient]) -> None:
-        """Close the underlying httpx pools on a stale Supabase client.
-
-        P2-10 / issue #21: when ``uvicorn --reload`` swaps event loops,
-        the previous loop's Supabase client (held in cls._instance) was
-        getting *abandoned* — replaced by reference, but its postgrest /
-        gotrue / storage httpx connection pools were never closed. After
-        2-3 days of reload churn, file descriptor / socket exhaustion
-        manifests as the "endpoint LISTEN but every request times out"
-        deadlock symptom.
-
-        This drain hook calls aclose() on each sub-client's httpx
-        session. Best-effort: any one failure logs + continues so a bad
-        sub-client can't block the rest of the cleanup.
-        """
-        if old is None:
-            return
-        # Sub-clients each hold their own httpx.AsyncClient session.
-        # Order chosen so the "core" (postgrest) is drained last —
-        # nothing depends on its lifetime here, but keep deterministic.
-        for attr in ("storage", "auth", "postgrest"):
-            sub = getattr(old, attr, None)
-            if sub is None:
-                continue
-            # postgrest exposes .aclose() directly; storage/auth wrap
-            # their session and need .session.aclose()
-            session_close = None
-            if hasattr(sub, "aclose") and callable(sub.aclose):
-                session_close = sub.aclose
-            elif hasattr(sub, "session") and hasattr(sub.session, "aclose"):
-                session_close = sub.session.aclose
-            if session_close is None:
-                continue
-            try:
-                await session_close()
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    f"Supabase drain: {attr}.aclose() raised {exc!r} (ignored)"
-                )
+    # ``WeakKeyDictionary`` annotated as a generic ``MutableMapping`` so type
+    # checkers don't choke on parameterised weakref types across Python
+    # versions.
+    _instances: MutableMapping[asyncio.AbstractEventLoop, AsyncClient] = (
+        weakref.WeakKeyDictionary()
+    )
+    _admin_instances: MutableMapping[asyncio.AbstractEventLoop, AsyncClient] = (
+        weakref.WeakKeyDictionary()
+    )
 
     @classmethod
     async def get_client(cls) -> AsyncClient:
-        """Get async Supabase client (anon key)."""
-        current_loop_id = id(asyncio.get_running_loop())
+        """Get async Supabase client (anon key) for the current event loop."""
+        loop = asyncio.get_running_loop()
+        client = cls._instances.get(loop)
+        if client is not None:
+            return client
 
-        if cls._instance is None or cls._instance_loop_id != current_loop_id:
-            # P2-10: drain the previous loop's client before discarding
-            # the reference, otherwise its httpx pools leak across reloads.
-            if cls._instance is not None:
-                await cls._drain_old_client(cls._instance)
+        if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
+            raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be configured")
 
-            if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
-                raise ValueError(
-                    "SUPABASE_URL and SUPABASE_ANON_KEY must be configured"
-                )
-
-            cls._instance = await create_async_client(
-                settings.SUPABASE_URL,
-                settings.SUPABASE_ANON_KEY,
-                options=_get_client_options(),
-            )
-            cls._instance_loop_id = current_loop_id
-            logger.debug("Supabase async client initialized")
-
-        return cls._instance
+        client = await create_async_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_ANON_KEY,
+            options=_get_client_options(),
+        )
+        cls._instances[loop] = client
+        logger.debug("Supabase async client initialized (per-loop)")
+        return client
 
     @classmethod
     async def get_admin_client(cls) -> AsyncClient:
-        """Get async Supabase admin client (service_role key)."""
-        current_loop_id = id(asyncio.get_running_loop())
+        """Get async Supabase admin client (service_role key) for the current loop."""
+        loop = asyncio.get_running_loop()
+        client = cls._admin_instances.get(loop)
+        if client is not None:
+            return client
 
-        if (
-            cls._admin_instance is None
-            or cls._admin_instance_loop_id != current_loop_id
-        ):
-            # P2-10: drain old client before swap (see get_client docstring)
-            if cls._admin_instance is not None:
-                await cls._drain_old_client(cls._admin_instance)
-
-            if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
-                raise ValueError(
-                    "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured"
-                )
-
-            cls._admin_instance = await create_async_client(
-                settings.SUPABASE_URL,
-                settings.SUPABASE_SERVICE_ROLE_KEY,
-                options=_get_client_options(),
+        if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
+            raise ValueError(
+                "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured"
             )
-            cls._admin_instance_loop_id = current_loop_id
-            logger.debug("Supabase async admin client initialized")
 
-        return cls._admin_instance
+        client = await create_async_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_SERVICE_ROLE_KEY,
+            options=_get_client_options(),
+        )
+        cls._admin_instances[loop] = client
+        logger.debug("Supabase async admin client initialized (per-loop)")
+        return client
 
     @classmethod
-    async def close(cls):
-        """Close async client connections."""
-        if cls._instance:
+    async def close(cls) -> None:
+        """Close the current loop's clients (called from FastAPI lifespan shutdown).
+
+        Only the current loop's clients are closed. Other loops' clients (if
+        any are still alive) are owned by their respective loops and will be
+        GC'd when those loops are. We never call ``aclose()`` on a client
+        bound to a different loop — that's the exact bug this redesign fixes.
+        """
+        loop = asyncio.get_running_loop()
+
+        client = cls._instances.pop(loop, None)
+        if client is not None:
             try:
-                await cls._instance.auth.sign_out()
+                await client.auth.sign_out()
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f"sign_out raised {exc!r} (ignored)")
-            await cls._drain_old_client(cls._instance)
-            cls._instance = None
-            cls._instance_loop_id = None
-        if cls._admin_instance:
-            await cls._drain_old_client(cls._admin_instance)
-            cls._admin_instance = None
-            cls._admin_instance_loop_id = None
-            logger.info("Supabase async clients closed")
+            await _aclose_subclients(client)
+
+        admin_client = cls._admin_instances.pop(loop, None)
+        if admin_client is not None:
+            await _aclose_subclients(admin_client)
+            logger.info("Supabase async clients closed (current loop)")
+
+
+async def _aclose_subclients(client: AsyncClient) -> None:
+    """Best-effort close of postgrest / auth / storage httpx sessions on ``client``.
+
+    Only safe to call from the loop that owns ``client``. Errors are
+    swallowed because shutdown failures shouldn't crash the process.
+    """
+    for attr in ("storage", "auth", "postgrest"):
+        sub = getattr(client, attr, None)
+        if sub is None:
+            continue
+        session_close = None
+        if hasattr(sub, "aclose") and callable(sub.aclose):
+            session_close = sub.aclose
+        elif hasattr(sub, "session") and hasattr(sub.session, "aclose"):
+            session_close = sub.session.aclose
+        if session_close is None:
+            continue
+        try:
+            await session_close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"Supabase close: {attr}.aclose() raised {exc!r} (ignored)")
 
 
 async def get_async_supabase() -> AsyncClient:
-    """Get async Supabase client."""
+    """Get async Supabase client (anon key) for the current event loop."""
     return await AsyncSupabaseClient.get_client()
 
 
 async def get_async_supabase_admin() -> AsyncClient:
-    """Get async Supabase admin client."""
+    """Get async Supabase admin client (service_role key) for the current loop."""
     return await AsyncSupabaseClient.get_admin_client()
