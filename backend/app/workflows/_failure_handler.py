@@ -17,26 +17,37 @@ This helper gives every workflow a one-line tail-catch that:
 
 Use:
     @DBOS.workflow()
-    def my_workflow(...):
+    async def my_workflow(...):
         try:
             ... # original body
         except Exception as e:  # noqa: BLE001
-            return record_workflow_failure(
+            return await record_workflow_failure(
                 workflow_id=DBOS.workflow_id,
                 error=e,
                 context={"k": "v", ...},
             )
+
+Why this is async (PR #237 audit)
+---------------------------------
+Originally sync ``def`` with two ``asyncio.run(_do())`` calls inside
+(one for ``mgr.fail``, one for ``bus.emit``). Worked under supabase-py
+because httpx is loop-agnostic. Under asyncpg the pool is loop-bound,
+so ``asyncio.run()`` from a sync DBOS workflow body would crash with
+"Event loop is closed" the second time the same pool was reused.
+Converting to ``async def`` + ``await`` keeps everything on the
+DBOS executor's owned loop. All 3 callers (analyze_l1 / ai_summary /
+ai_transcription) have been converted to async workflows in the same
+audit PR.
 """
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Optional
 
 from loguru import logger
 
 
-def record_workflow_failure(
+async def record_workflow_failure(
     *,
     workflow_id: Optional[str],
     error: BaseException,
@@ -63,25 +74,21 @@ def record_workflow_failure(
             from app.services.infra.unified_task_manager import get_task_manager
 
             mgr = get_task_manager()
-
-            async def _do() -> None:
-                try:
-                    await mgr.fail(
-                        workflow_id,
-                        error_msg=f"{err_type}: {err_msg}",
-                        error_code=err_type,
-                    )
-                except Exception as inner:
-                    # mgr.fail is itself idempotent / no-op when the row
-                    # is already terminal — but if it raises (network,
-                    # auth) we still don't want to bring the workflow
-                    # down trying to record the failure.
-                    logger.warning(
-                        f"[workflow.fail] task_tracking.fail({workflow_id}) "
-                        f"raised: {inner!r}"
-                    )
-
-            asyncio.run(_do())
+            try:
+                await mgr.fail(
+                    workflow_id,
+                    error_msg=f"{err_type}: {err_msg}",
+                    error_code=err_type,
+                )
+            except Exception as inner:
+                # mgr.fail is itself idempotent / no-op when the row
+                # is already terminal — but if it raises (network,
+                # auth) we still don't want to bring the workflow
+                # down trying to record the failure.
+                logger.warning(
+                    f"[workflow.fail] task_tracking.fail({workflow_id}) "
+                    f"raised: {inner!r}"
+                )
         except Exception as outer:
             logger.warning(
                 f"[workflow.fail] failed to schedule task_tracking update: {outer!r}"
@@ -93,7 +100,7 @@ def record_workflow_failure(
     # decoupling. The bus listener-exception isolation contract means
     # a buggy listener can't crash the failure handler that emitted it.
     try:
-        _emit_lifecycle_workflow_fail(workflow_id, err_type, err_msg, ctx)
+        await _emit_lifecycle_workflow_fail(workflow_id, err_type, err_msg, ctx)
     except Exception as e:
         logger.debug(f"[workflow.fail] lifecycle emit failed: {e}")
 
@@ -105,7 +112,7 @@ def record_workflow_failure(
     }
 
 
-def _emit_lifecycle_workflow_fail(
+async def _emit_lifecycle_workflow_fail(
     workflow_id: Optional[str],
     err_type: str,
     err_msg: str,
@@ -128,23 +135,20 @@ def _emit_lifecycle_workflow_fail(
         if bus is None:
             return
 
-        async def _do() -> None:
-            await bus.emit(
-                LifecycleEvent(
-                    type=EVT_WORKFLOW_FAIL,
-                    payload={
-                        "workflow_id": workflow_id,
-                        "error_type": err_type,
-                        "error_msg": err_msg,
-                        "context": ctx,
-                    },
-                )
+        await bus.emit(
+            LifecycleEvent(
+                type=EVT_WORKFLOW_FAIL,
+                payload={
+                    "workflow_id": workflow_id,
+                    "error_type": err_type,
+                    "error_msg": err_msg,
+                    "context": ctx,
+                },
             )
-
-        asyncio.run(_do())
+        )
     except (ImportError, RuntimeError):
         # ImportError: agent_framework or app.main not yet importable
-        # (cold start race). RuntimeError: no running loop / asyncio.run
-        # called from inside a running loop. Swallow either silently —
-        # we already recorded the failure.
+        # (cold start race). RuntimeError: bus implementation may have
+        # raised — swallow either silently, we already recorded the
+        # failure.
         pass

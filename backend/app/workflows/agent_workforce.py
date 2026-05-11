@@ -32,7 +32,6 @@ Concurrency tuning rationale:
 
 from __future__ import annotations
 
-import asyncio
 import os
 from typing import Any
 
@@ -74,8 +73,8 @@ _RUN_TIMEOUT_S = float(os.environ.get("AGENT_RUN_TIMEOUT_S", "600"))
 
 
 @DBOS.step()
-def run_one_task_step(task: dict[str, Any]) -> dict[str, Any]:
-    """Sync wrapper that runs the existing async ``run_one_task``.
+async def run_one_task_step(task: dict[str, Any]) -> dict[str, Any]:
+    """Async wrapper that runs the existing async ``run_one_task``.
 
     All task lifecycle bookkeeping (queued → assigned → in_progress →
     done/failed) happens inside ``run_one_task`` via
@@ -87,7 +86,11 @@ def run_one_task_step(task: dict[str, Any]) -> dict[str, Any]:
     isn't in 'queued'/'assigned' state any more, so re-execution after
     a worker crash short-circuits cleanly.
 
-    See module-level docstring for ``AGENT_RUN_ISOLATION`` modes."""
+    See module-level docstring for ``AGENT_RUN_ISOLATION`` modes.
+
+    Why ``async def`` (PR #237 audit): formerly used ``asyncio.run()``
+    which broke under asyncpg's loop-bound pool — see
+    workflow_health_sweeper.py / agent_runs_sweeper.py headers."""
     if _ISOLATION_MODE == "subprocess":
         # Phase 2 path: fresh process per run, full crash isolation.
         from app.services.workforce.isolated_runner import run_isolated
@@ -103,11 +106,11 @@ def run_one_task_step(task: dict[str, Any]) -> dict[str, Any]:
     # graduates from staging.
     from app.services.workforce.agent_worker import run_one_task
 
-    return asyncio.run(run_one_task(task))
+    return await run_one_task(task)
 
 
 @DBOS.workflow()
-def agent_workforce_workflow(task: dict[str, Any]) -> dict[str, Any]:
+async def agent_workforce_workflow(task: dict[str, Any]) -> dict[str, Any]:
     """DBOS port of the AgentWorkerPool dispatch.
 
     Recommended workflow_id: ``f"workforce-{task['id']}"`` so a
@@ -121,4 +124,4 @@ def agent_workforce_workflow(task: dict[str, Any]) -> dict[str, Any]:
 
     Returns the same shape as run_one_task:
         {"task_id": str, "status": str, "run_id": str|None}"""
-    return run_one_task_step(task)
+    return await run_one_task_step(task)
