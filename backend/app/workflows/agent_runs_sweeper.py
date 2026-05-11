@@ -14,11 +14,28 @@ Two jobs (unchanged from the Celery version):
   2. recompute monthly token/cost spend per agent → flip
      ai_agents.paused_reason='budget' on overrun, clear it on
      undershoot (without clobbering manual pauses)
+
+Why steps + workflow are ALL ``async def``
+------------------------------------------
+Originally written as ``def + asyncio.run(_do())`` because supabase-py
+worked fine across short-lived event loops — every call recreated its
+httpx client. asyncpg's pool is the opposite: it BINDS to the loop
+where it was first awaited. Each ``asyncio.run()`` opens a new loop,
+runs the coroutine, and closes the loop — but the global ``_pool``
+cache in ``app.db.pg_pool`` still points at the (now-dead) first-loop
+pool. Second tick onwards crashes with ``Event loop is closed`` and
+``cannot perform operation: another operation is in progress``.
+
+DBOS supports ``async def`` workflows + steps natively. Awaiting from
+the same loop the executor owns means the asyncpg pool stays bound to
+a long-lived loop — the symptom disappears at the source.
+
+Same fix shape as PR #227 (workflow_health_sweeper) — see that file's
+header for the longer cascade explanation.
 """
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 
 from dbos import DBOS
@@ -28,107 +45,101 @@ HEARTBEAT_STALENESS_SECONDS = 120
 
 
 @DBOS.step()
-def mark_heartbeat_lost_step() -> int:
+async def mark_heartbeat_lost_step() -> int:
     """Flip running rows whose heartbeat is older than 2 minutes."""
     from app.repositories.agent_runs_repository import get_agent_runs_repository
 
-    async def _do() -> int:
-        runs_repo = get_agent_runs_repository()
-        stale_before = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(
-            seconds=HEARTBEAT_STALENESS_SECONDS
-        )
-        return await runs_repo.mark_heartbeat_lost(stale_before=stale_before)
-
-    return asyncio.run(_do())
+    runs_repo = get_agent_runs_repository()
+    stale_before = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(
+        seconds=HEARTBEAT_STALENESS_SECONDS
+    )
+    return await runs_repo.mark_heartbeat_lost(stale_before=stale_before)
 
 
 @DBOS.step()
-def recompute_monthly_budgets_step() -> int:
+async def recompute_monthly_budgets_step() -> int:
     """Sum this month's spend per agent, flip paused_reason='budget' on
     overrun. Returns count of agents whose paused_reason transitioned."""
     from app.db.supabase_client import get_async_supabase_admin
     from app.repositories.agent_runs_repository import get_agent_runs_repository
 
-    async def _do() -> int:
-        client = await get_async_supabase_admin()
-        now = datetime.now(timezone.utc)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    client = await get_async_supabase_admin()
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        runs_repo = get_agent_runs_repository()
-        rows = await runs_repo.monthly_usage_by_agent(
-            month_start=month_start,
-            month_end=now.replace(microsecond=0),
-        )
+    runs_repo = get_agent_runs_repository()
+    rows = await runs_repo.monthly_usage_by_agent(
+        month_start=month_start,
+        month_end=now.replace(microsecond=0),
+    )
 
-        totals: dict[str, dict[str, float]] = {}
-        for r in rows:
-            aid = r["agent_id"]
-            bucket = totals.setdefault(aid, {"tokens": 0, "cost_cents": 0.0})
-            bucket["tokens"] += int(r.get("total_tokens") or 0)
-            if r.get("cost_cents") is not None:
-                bucket["cost_cents"] += float(r["cost_cents"])
+    totals: dict[str, dict[str, float]] = {}
+    for r in rows:
+        aid = r["agent_id"]
+        bucket = totals.setdefault(aid, {"tokens": 0, "cost_cents": 0.0})
+        bucket["tokens"] += int(r.get("total_tokens") or 0)
+        if r.get("cost_cents") is not None:
+            bucket["cost_cents"] += float(r["cost_cents"])
 
-        if not totals:
-            return 0
+    if not totals:
+        return 0
 
-        agents_result = (
-            await client.table("ai_agents")
-            .select("id,monthly_token_budget,monthly_cost_cents_budget,paused_reason")
-            .in_("id", list(totals.keys()))
-            .execute()
-        )
+    agents_result = (
+        await client.table("ai_agents")
+        .select("id,monthly_token_budget,monthly_cost_cents_budget,paused_reason")
+        .in_("id", list(totals.keys()))
+        .execute()
+    )
 
-        transitions = 0
-        for agent in agents_result.data or []:
-            aid = agent["id"]
-            t = totals.get(aid, {"tokens": 0, "cost_cents": 0.0})
-            token_budget = agent.get("monthly_token_budget")
-            cost_budget = agent.get("monthly_cost_cents_budget")
-            paused_reason = agent.get("paused_reason")
+    transitions = 0
+    for agent in agents_result.data or []:
+        aid = agent["id"]
+        t = totals.get(aid, {"tokens": 0, "cost_cents": 0.0})
+        token_budget = agent.get("monthly_token_budget")
+        cost_budget = agent.get("monthly_cost_cents_budget")
+        paused_reason = agent.get("paused_reason")
 
-            over_tokens = token_budget is not None and t["tokens"] > int(token_budget)
-            over_cost = cost_budget is not None and t["cost_cents"] > float(cost_budget)
-            should_pause = over_tokens or over_cost
+        over_tokens = token_budget is not None and t["tokens"] > int(token_budget)
+        over_cost = cost_budget is not None and t["cost_cents"] > float(cost_budget)
+        should_pause = over_tokens or over_cost
 
-            if should_pause and paused_reason != "budget":
-                # Don't clobber a manual pause.
-                if paused_reason is None:
-                    await (
-                        client.table("ai_agents")
-                        .update({"paused_reason": "budget"})
-                        .eq("id", aid)
-                        .execute()
-                    )
-                    transitions += 1
-                    logger.info(
-                        f"[sweeper] agent {aid} paused_by_budget "
-                        f"(tokens={t['tokens']}, cost={t['cost_cents']})"
-                    )
-            elif not should_pause and paused_reason == "budget":
+        if should_pause and paused_reason != "budget":
+            # Don't clobber a manual pause.
+            if paused_reason is None:
                 await (
                     client.table("ai_agents")
-                    .update({"paused_reason": None})
+                    .update({"paused_reason": "budget"})
                     .eq("id", aid)
                     .execute()
                 )
                 transitions += 1
-                logger.info(f"[sweeper] agent {aid} unpaused (budget cleared)")
+                logger.info(
+                    f"[sweeper] agent {aid} paused_by_budget "
+                    f"(tokens={t['tokens']}, cost={t['cost_cents']})"
+                )
+        elif not should_pause and paused_reason == "budget":
+            await (
+                client.table("ai_agents")
+                .update({"paused_reason": None})
+                .eq("id", aid)
+                .execute()
+            )
+            transitions += 1
+            logger.info(f"[sweeper] agent {aid} unpaused (budget cleared)")
 
-        return transitions
-
-    return asyncio.run(_do())
+    return transitions
 
 
 @DBOS.scheduled("* * * * *")  # every minute
 @DBOS.workflow()
-def agent_runs_sweeper_workflow(
+async def agent_runs_sweeper_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
     """Run a single sweeper tick. DBOS dedup via workflow_id =
     `sched-agent_runs_sweeper_workflow-<iso>` ensures only one worker
     fires per cron tick across the cluster."""
-    heartbeat_lost = mark_heartbeat_lost_step()
-    transitions = recompute_monthly_budgets_step()
+    heartbeat_lost = await mark_heartbeat_lost_step()
+    transitions = await recompute_monthly_budgets_step()
     if heartbeat_lost or transitions:
         logger.info(
             f"[sweeper] heartbeat_lost={heartbeat_lost} "
