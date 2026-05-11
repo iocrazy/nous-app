@@ -33,7 +33,6 @@ Timer safety guards (borrowed from openclaw cron/service/timer.ts:780)
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -220,10 +219,12 @@ def _compute_next_fire(cron_expr: str) -> datetime:
 
 @DBOS.scheduled("* * * * *")  # every minute
 @DBOS.workflow()
-def scheduled_master_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
+async def scheduled_master_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
     """One tick. Counters are logged at INFO when there's actual work
     so a quiet system doesn't spam the log."""
-    counters = asyncio.run(fire_due_schedules_step())
+    counters = await fire_due_schedules_step()
     if counters.get("fired") or counters.get("errors"):
         logger.info(f"[scheduled_master] tick: {counters}")
 

@@ -15,7 +15,6 @@ DBOS layering:
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Optional
 
 from dbos import DBOS
@@ -27,7 +26,7 @@ _START_Y = 100
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-def generate_outline_chapters(
+async def generate_outline_chapters(
     premise: str,
     chapter_count: int,
     style_guide: Optional[str],
@@ -35,17 +34,14 @@ def generate_outline_chapters(
     """Run the LLM outline call. Returns list of {title, summary} dicts."""
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
-    async def _call() -> list[dict[str, Any]]:
-        ai_svc = ScriptAIService()
-        return await ai_svc.generate_outline(premise, chapter_count, style_guide)
-
-    chapters = asyncio.run(_call())
+    ai_svc = ScriptAIService()
+    chapters = await ai_svc.generate_outline(premise, chapter_count, style_guide)
     logger.info(f"[script_outline][step] LLM returned {len(chapters)} chapters")
     return chapters
 
 
 @DBOS.step()
-def persist_outline_chapters(
+async def persist_outline_chapters(
     script_id: str,
     chapters: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -54,23 +50,19 @@ def persist_outline_chapters(
     rather than re-inserting."""
     from app.services.storyboard.script.script_service import ScriptService
 
-    async def _persist() -> list[str]:
-        script_svc = ScriptService()
-        created_ids: list[str] = []
-        for i, ch in enumerate(chapters):
-            chapter_data = {
-                "script_id": script_id,
-                "title": ch["title"],
-                "summary": ch["summary"],
-                "chapter_number": i + 1,
-                "position_x": _START_X,
-                "position_y": _START_Y + i * _VERTICAL_GAP,
-            }
-            result = await script_svc.chapter_repo.create(chapter_data)
-            created_ids.append(result.get("id", ""))
-        return created_ids
-
-    created_ids = asyncio.run(_persist())
+    script_svc = ScriptService()
+    created_ids: list[str] = []
+    for i, ch in enumerate(chapters):
+        chapter_data = {
+            "script_id": script_id,
+            "title": ch["title"],
+            "summary": ch["summary"],
+            "chapter_number": i + 1,
+            "position_x": _START_X,
+            "position_y": _START_Y + i * _VERTICAL_GAP,
+        }
+        result = await script_svc.chapter_repo.create(chapter_data)
+        created_ids.append(result.get("id", ""))
     return {
         "status": "success",
         "chapter_count": len(chapters),
@@ -79,7 +71,7 @@ def persist_outline_chapters(
 
 
 @DBOS.workflow()
-def script_outline_workflow(
+async def script_outline_workflow(
     script_id: str,
     premise: str,
     *,
@@ -97,5 +89,5 @@ def script_outline_workflow(
     subscribe to dbos workflow status (D4 work) instead of the
     task_tracking bridge.
     """
-    chapters = generate_outline_chapters(premise, chapter_count, style_guide)
-    return persist_outline_chapters(script_id, chapters)
+    chapters = await generate_outline_chapters(premise, chapter_count, style_guide)
+    return await persist_outline_chapters(script_id, chapters)

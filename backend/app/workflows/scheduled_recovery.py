@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -28,7 +27,7 @@ from loguru import logger
 
 
 @DBOS.step()
-def retry_failed_downloads_step() -> dict[str, Any]:
+async def retry_failed_downloads_step() -> dict[str, Any]:
     """Find FAILED downloads, reset to PENDING, re-dispatch download task.
     Skips orphan rows (user_id IS NULL) per CLAUDE.md regression notes.
 
@@ -39,128 +38,124 @@ def retry_failed_downloads_step() -> dict[str, Any]:
     from app.services.infra.dbos_orchestrator import start_workflow_routed
     from app.workflows.download import download_workflow
 
-    async def _do() -> dict[str, int]:
-        repo = MediaRepository()
-        failed = await repo.get_pending_downloads(
-            status=DownloadStatus.FAILED, limit=50
-        )
-        if not failed:
-            return {"total_failed": 0, "retried": 0, "skipped_orphan": 0}
-
-        retried = 0
-        skipped_orphan = 0
-        for video in failed:
-            platform_id = video.get("platform_id")
-            media_type = video.get("media_type", 0)
-            user_id = video.get("user_id")
-
-            if not user_id:
-                skipped_orphan += 1
-                continue
-
-            try:
-                await repo.update(
-                    platform_id,
-                    {
-                        "video_download_status": DownloadStatus.PENDING.value,
-                        "error_message": None,
-                    },
-                )
-                await start_workflow_routed(
-                    "download",
-                    dbos_workflow_callable=download_workflow,
-                    dbos_workflow_kwargs={
-                        "platform_id": platform_id,
-                        "user_id": user_id,
-                        "download_video": True,
-                        "download_cover": True,
-                        "media_type": int(media_type),
-                    },
-                )
-                retried += 1
-            except Exception as e:
-                logger.warning(f"[retry_failed_downloads] {platform_id}: {e}")
-
+    repo = MediaRepository()
+    failed = await repo.get_pending_downloads(status=DownloadStatus.FAILED, limit=50)
+    if not failed:
         return {
-            "total_failed": len(failed),
-            "retried": retried,
-            "skipped_orphan": skipped_orphan,
+            "status": "success",
+            "total_failed": 0,
+            "retried": 0,
+            "skipped_orphan": 0,
         }
 
-    result = asyncio.run(_do())
-    return {"status": "success", **result}
+    retried = 0
+    skipped_orphan = 0
+    for video in failed:
+        platform_id = video.get("platform_id")
+        media_type = video.get("media_type", 0)
+        user_id = video.get("user_id")
+
+        if not user_id:
+            skipped_orphan += 1
+            continue
+
+        try:
+            await repo.update(
+                platform_id,
+                {
+                    "video_download_status": DownloadStatus.PENDING.value,
+                    "error_message": None,
+                },
+            )
+            await start_workflow_routed(
+                "download",
+                dbos_workflow_callable=download_workflow,
+                dbos_workflow_kwargs={
+                    "platform_id": platform_id,
+                    "user_id": user_id,
+                    "download_video": True,
+                    "download_cover": True,
+                    "media_type": int(media_type),
+                },
+            )
+            retried += 1
+        except Exception as e:
+            logger.warning(f"[retry_failed_downloads] {platform_id}: {e}")
+
+    return {
+        "status": "success",
+        "total_failed": len(failed),
+        "retried": retried,
+        "skipped_orphan": skipped_orphan,
+    }
 
 
 @DBOS.step()
-def reap_stuck_pending_tasks_step() -> dict[str, Any]:
+async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     """Two passes: (1) flip queued task_tracking rows >1h old to failed,
     (2) flip resources.{ai_*}_status from pending to failed when no live
     matching unified_task exists."""
     from app.db.supabase_client import get_async_supabase_admin
 
-    async def _do() -> tuple[int, int]:
-        supabase = await get_async_supabase_admin()
-        # Use timezone-aware UTC so the ISO string carries +00:00 and
-        # PostgreSQL doesn't fall back to interpreting it in the
-        # connection's local TZ. Naive `datetime.now()` was reaping
-        # 25-second-old DBOS workflows because Mac local time +8h
-        # made cutoff far in the future of any UTC timestamptz row.
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        now_iso = datetime.now(timezone.utc).isoformat()
+    supabase = await get_async_supabase_admin()
+    # Use timezone-aware UTC so the ISO string carries +00:00 and
+    # PostgreSQL doesn't fall back to interpreting it in the
+    # connection's local TZ. Naive `datetime.now()` was reaping
+    # 25-second-old DBOS workflows because Mac local time +8h
+    # made cutoff far in the future of any UTC timestamptz row.
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Sprint 2: status='lost' (was 'failed') — orphan tasks are a
-        # system issue (DBOS crash / never claimed), not a business
-        # failure. Lets operators distinguish in dashboards.
-        result = (
-            await supabase.table("task_tracking")
-            .update(
-                {
-                    "status": "lost",
-                    "phase": "lost",
-                    "error_msg": (
-                        "Worker never claimed this task within 1h — "
-                        "DBOS workflow may have crashed or never "
-                        "executed. Use Retry to re-queue."
-                    ),
-                    "error_code": "WORKER_LOST",
-                    "updated_at": now_iso,
-                }
-            )
-            .eq("status", "pending")
-            .eq("phase", "queued")
-            .is_("started_at", "null")
-            .lt("created_at", cutoff)
-            .execute()
+    # Sprint 2: status='lost' (was 'failed') — orphan tasks are a
+    # system issue (DBOS crash / never claimed), not a business
+    # failure. Lets operators distinguish in dashboards.
+    result = (
+        await supabase.table("task_tracking")
+        .update(
+            {
+                "status": "lost",
+                "phase": "lost",
+                "error_msg": (
+                    "Worker never claimed this task within 1h — "
+                    "DBOS workflow may have crashed or never "
+                    "executed. Use Retry to re-queue."
+                ),
+                "error_code": "WORKER_LOST",
+                "updated_at": now_iso,
+            }
         )
-        tasks_reaped = len(result.data) if result.data else 0
+        .eq("status", "pending")
+        .eq("phase", "queued")
+        .is_("started_at", "null")
+        .lt("created_at", cutoff)
+        .execute()
+    )
+    tasks_reaped = len(result.data) if result.data else 0
 
-        resources_reaped = 0
-        for field in ("transcript_status", "summary_status", "visual_analysis_status"):
-            sql = f"""
-            WITH live AS (
-              SELECT DISTINCT resource_id::text AS rid
-              FROM task_tracking
-              WHERE status IN ('pending','processing','running')
-                AND task_type IN ('ai_extract','ai_transcription','ai_summary','ai_pipeline','ai_visual_analysis')
-                AND resource_id IS NOT NULL
-            )
-            UPDATE resources
-               SET {field} = 'failed'
-             WHERE {field} = 'pending'
-               AND updated_at < NOW() - INTERVAL '1 hour'
-               AND id::text NOT IN (SELECT rid FROM live)
-             RETURNING id
-            """
-            try:
-                r = await supabase.rpc("exec_sql", {"sql": sql}).execute()
-                resources_reaped += len(r.data) if r and r.data else 0
-            except Exception:
-                # exec_sql RPC absent — skip silently (matches legacy behaviour).
-                break
+    resources_reaped = 0
+    for field in ("transcript_status", "summary_status", "visual_analysis_status"):
+        sql = f"""
+        WITH live AS (
+          SELECT DISTINCT resource_id::text AS rid
+          FROM task_tracking
+          WHERE status IN ('pending','processing','running')
+            AND task_type IN ('ai_extract','ai_transcription','ai_summary','ai_pipeline','ai_visual_analysis')
+            AND resource_id IS NOT NULL
+        )
+        UPDATE resources
+           SET {field} = 'failed'
+         WHERE {field} = 'pending'
+           AND updated_at < NOW() - INTERVAL '1 hour'
+           AND id::text NOT IN (SELECT rid FROM live)
+         RETURNING id
+        """
+        try:
+            r = await supabase.rpc("exec_sql", {"sql": sql}).execute()
+            resources_reaped += len(r.data) if r and r.data else 0
+        except Exception:
+            # exec_sql RPC absent — skip silently (matches legacy behaviour).
+            break
 
-        return tasks_reaped, resources_reaped
-
-    tasks_reaped, resources_reaped = asyncio.run(_do())
     return {
         "status": "success",
         "tasks_reaped": tasks_reaped,
@@ -169,7 +164,7 @@ def reap_stuck_pending_tasks_step() -> dict[str, Any]:
 
 
 @DBOS.step()
-def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
+async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
     """Release dedup locks held by task_tracking stuck in 'processing'.
 
     Per-type ceiling (D11 / agent_framework.workflow_timeout_policy):
@@ -182,110 +177,106 @@ def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
     from app.agent_framework import is_stuck
     from app.services.infra.unified_task_manager import get_task_manager
 
-    async def _do() -> int:
-        mgr = get_task_manager()
-        client = await mgr._get_client()
-        # Pull a generous window — 2h covers the longest configured
-        # ceiling (ai_visual_analysis = 60min) plus headroom; per-row
-        # filtering by task_type ceiling happens below.
-        broad_cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    mgr = get_task_manager()
+    client = await mgr._get_client()
+    # Pull a generous window — 2h covers the longest configured
+    # ceiling (ai_visual_analysis = 60min) plus headroom; per-row
+    # filtering by task_type ceiling happens below.
+    broad_cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
 
-        stale = await (
-            client.table("task_tracking")
-            .select("dbos_workflow_id, dedup_key, task_type, started_at")
-            .eq("phase", "processing")
-            .lt("started_at", broad_cutoff)
-            .execute()
-        )
+    stale = await (
+        client.table("task_tracking")
+        .select("dbos_workflow_id, dedup_key, task_type, started_at")
+        .eq("phase", "processing")
+        .lt("started_at", broad_cutoff)
+        .execute()
+    )
 
-        # Also catch tasks past their per-type ceiling but inside the
-        # broad cutoff. Two-window query: broad + narrow per type.
-        narrow_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-        narrow = await (
-            client.table("task_tracking")
-            .select("dbos_workflow_id, dedup_key, task_type, started_at")
-            .eq("phase", "processing")
-            .lt("started_at", narrow_cutoff)
-            .execute()
-        )
+    # Also catch tasks past their per-type ceiling but inside the
+    # broad cutoff. Two-window query: broad + narrow per type.
+    narrow_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    narrow = await (
+        client.table("task_tracking")
+        .select("dbos_workflow_id, dedup_key, task_type, started_at")
+        .eq("phase", "processing")
+        .lt("started_at", narrow_cutoff)
+        .execute()
+    )
 
-        # Dedup the union by dbos_workflow_id
-        seen: set[str] = set()
-        candidates: list[dict[str, Any]] = []
-        for row in (stale.data or []) + (narrow.data or []):
-            wid = row.get("dbos_workflow_id")
-            if wid and wid not in seen:
-                seen.add(wid)
-                candidates.append(row)
+    # Dedup the union by dbos_workflow_id
+    seen: set[str] = set()
+    candidates: list[dict[str, Any]] = []
+    for row in (stale.data or []) + (narrow.data or []):
+        wid = row.get("dbos_workflow_id")
+        if wid and wid not in seen:
+            seen.add(wid)
+            candidates.append(row)
 
-        now_utc = datetime.now(timezone.utc)
-        recovered = 0
-        for task in candidates:
-            tid = task.get("dbos_workflow_id")
-            task_type = task.get("task_type") or ""
-            started_at_str = task.get("started_at")
-            elapsed = 0.0
-            if started_at_str:
-                try:
-                    started_dt = datetime.fromisoformat(
-                        started_at_str.replace("Z", "+00:00")
-                    )
-                    elapsed = (now_utc - started_dt).total_seconds()
-                except (ValueError, TypeError):
-                    elapsed = 0.0
-
-            if not is_stuck(task_type, elapsed_seconds=elapsed):
-                # Within ceiling — leave alone
-                continue
-
+    now_utc = datetime.now(timezone.utc)
+    recovered = 0
+    for task in candidates:
+        tid = task.get("dbos_workflow_id")
+        task_type = task.get("task_type") or ""
+        started_at_str = task.get("started_at")
+        elapsed = 0.0
+        if started_at_str:
             try:
-                if tid:
-                    # Use mark_lost (Sprint 2): system-level orphan / worker
-                    # died, NOT business-level failure. Operators can query
-                    # status='lost' GROUP BY task_type to spot infra issues
-                    # vs application bugs.
-                    await mgr.mark_lost(
-                        tid,
-                        f"Stuck {task_type} timeout (elapsed {int(elapsed)}s, "
-                        f"ceiling per workflow_timeout_policy)",
-                        error_code="WORKER_LOST",
-                    )
-                if task.get("dedup_key"):
-                    mgr.release_lock(task["dedup_key"])
-                recovered += 1
-            except Exception as e:
-                logger.warning(f"[recover_stale_orchestrator_locks] task {tid}: {e}")
-        return recovered
+                started_dt = datetime.fromisoformat(
+                    started_at_str.replace("Z", "+00:00")
+                )
+                elapsed = (now_utc - started_dt).total_seconds()
+            except (ValueError, TypeError):
+                elapsed = 0.0
 
-    count = asyncio.run(_do())
-    return {"status": "success", "recovered": count}
+        if not is_stuck(task_type, elapsed_seconds=elapsed):
+            # Within ceiling — leave alone
+            continue
+
+        try:
+            if tid:
+                # Use mark_lost (Sprint 2): system-level orphan / worker
+                # died, NOT business-level failure. Operators can query
+                # status='lost' GROUP BY task_type to spot infra issues
+                # vs application bugs.
+                await mgr.mark_lost(
+                    tid,
+                    f"Stuck {task_type} timeout (elapsed {int(elapsed)}s, "
+                    f"ceiling per workflow_timeout_policy)",
+                    error_code="WORKER_LOST",
+                )
+            if task.get("dedup_key"):
+                mgr.release_lock(task["dedup_key"])
+            recovered += 1
+        except Exception as e:
+            logger.warning(f"[recover_stale_orchestrator_locks] task {tid}: {e}")
+    return {"status": "success", "recovered": recovered}
 
 
 @DBOS.scheduled("0 * * * *")  # hourly at :00
 @DBOS.workflow()
-def retry_failed_downloads_workflow(
+async def retry_failed_downloads_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    result = retry_failed_downloads_step()
+    result = await retry_failed_downloads_step()
     if result.get("retried") or result.get("skipped_orphan"):
         logger.info(f"[retry_failed_downloads] {result}")
 
 
 @DBOS.scheduled("*/15 * * * *")  # every 15 minutes
 @DBOS.workflow()
-def reap_stuck_pending_tasks_workflow(
+async def reap_stuck_pending_tasks_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    result = reap_stuck_pending_tasks_step()
+    result = await reap_stuck_pending_tasks_step()
     if result.get("tasks_reaped") or result.get("resources_reaped"):
         logger.warning(f"[reap_stuck_pending_tasks] {result}")
 
 
 @DBOS.scheduled("30 * * * *")  # hourly at :30 (offset from retry workflow)
 @DBOS.workflow()
-def recover_stale_orchestrator_locks_workflow(
+async def recover_stale_orchestrator_locks_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    result = recover_stale_orchestrator_locks_step()
+    result = await recover_stale_orchestrator_locks_step()
     if result.get("recovered"):
         logger.info(f"[recover_stale_orchestrator_locks] {result}")
