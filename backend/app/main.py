@@ -265,14 +265,23 @@ async def lifespan(app: FastAPI):
             # `app.state.workforce_scheduler = ...` assignment below.
             from app import workflows  # noqa: F401 — registers @DBOS decorators
 
-            if process_role.runs_dbos_workers:
-                dbos_orchestrator.launch_dbos()
-                logger.info("DBOS orchestrator launched")
-            else:
-                logger.info(
-                    f"DBOS orchestrator initialised but launch skipped "
-                    f"(role={process_role.value} — gateway dispatches only)"
-                )
+            # PR #172 originally gated launch_dbos() behind
+            # ``process_role.runs_dbos_workers`` so gateway-only containers
+            # would dispatch without consuming. In practice DBOS SDK requires
+            # ``_launch()`` to populate ``_sys_db_field`` even for dispatch —
+            # without it, ``DBOS.start_workflow()`` raises "System database
+            # accessed before DBOS was launched" 100% of the time. After PR
+            # #172 deployed, every gateway restart opened a 30s-2min window
+            # where ``POST /api/v1/media/fetch`` returned 500 because some
+            # background lazy-launch path was racing the user's request.
+            #
+            # Solution: always launch. The container split (PR #172) is kept
+            # for failure isolation (worker OOM doesn't kill HTTP), but the
+            # role-based launch gate is reverted so dispatch is reliable.
+            dbos_orchestrator.launch_dbos()
+            logger.info(
+                f"DBOS orchestrator launched (role={process_role.value})"
+            )
     except Exception as e:
         logger.error(
             f"DBOS orchestrator startup failed: {e!r} — continuing without DBOS"
