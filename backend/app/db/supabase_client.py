@@ -86,9 +86,7 @@ class AsyncSupabaseClient:
             return client
 
         if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
-            raise ValueError(
-                "SUPABASE_URL and SUPABASE_ANON_KEY must be configured"
-            )
+            raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be configured")
 
         client = await create_async_client(
             settings.SUPABASE_URL,

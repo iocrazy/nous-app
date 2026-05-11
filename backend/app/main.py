@@ -279,9 +279,7 @@ async def lifespan(app: FastAPI):
             # for failure isolation (worker OOM doesn't kill HTTP), but the
             # role-based launch gate is reverted so dispatch is reliable.
             dbos_orchestrator.launch_dbos()
-            logger.info(
-                f"DBOS orchestrator launched (role={process_role.value})"
-            )
+            logger.info(f"DBOS orchestrator launched (role={process_role.value})")
     except Exception as e:
         logger.error(
             f"DBOS orchestrator startup failed: {e!r} — continuing without DBOS"
