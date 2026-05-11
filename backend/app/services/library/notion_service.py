@@ -1,7 +1,8 @@
 import asyncio
 import datetime
 import ssl
-from typing import Any, Dict, Optional
+import weakref
+from typing import Any, Dict, MutableMapping, Optional
 
 import httpx
 from loguru import logger
@@ -20,71 +21,72 @@ class NotionError(Exception):
 
 
 class NotionService:
-    """Notion API服务 - 单例模式实现"""
+    """Notion API service — per-event-loop client cache.
 
-    _instance: Optional["NotionService"] = None
-    _client: Optional[AsyncClient] = None
-    _initialized: bool = False
-    _lock = asyncio.Lock()  # 为初始化过程添加一个异步锁
+    Each running event loop gets its own ``notion_client.AsyncClient`` (which
+    wraps its own httpx pool). Entries are held by a ``WeakKeyDictionary``
+    keyed by the loop object, so when a loop is GC'd (e.g., ``asyncio.run()``
+    exits) the entry is auto-evicted.
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    Why this shape: the previous design was a class-level singleton with a
+    module-level ``asyncio.Lock()`` and shared ``_client``. That works in a
+    single-loop process, but DBOS workflows that use ``asyncio.run()`` spin
+    up fresh loops; sharing an httpx client across loops causes
+    "Future attached to a different loop" / "client has been closed" errors.
+    Same root cause as the Supabase singleton fix in PR #238.
+    """
 
-    # 定义一个异步初始化方法
-    async def initialize(self) -> None:
-        async with self._lock:  # 使用锁确保初始化过程是原子的
-            if self._initialized:
-                return
-
-            if not settings.NOTION_API_KEY:
-                logger.warning("Notion API密钥未配置，客户端未初始化")
-                return
-
-            try:
-                http_client = httpx.AsyncClient(
-                    http2=True,
-                    verify=True,
-                    timeout=settings.HTTP_TIMEOUT,
-                    limits=httpx.Limits(
-                        max_connections=10, max_keepalive_connections=5
-                    ),
-                )
-                self._client = AsyncClient(
-                    auth=settings.NOTION_API_KEY, client=http_client
-                )
-                self._initialized = True
-                logger.info("Notion客户端初始化成功")
-
-            except Exception as e:
-                logger.error(f"Notion客户端初始化失败: {e}")
-                # 如果初始化失败，可以将 _initialized 设为 False，或抛出异常
-                # 确保下次调用 initialize() 时会重试
-                self._client = None  # 清理掉可能部分创建的客户端
-
-    @property
-    def client(self) -> AsyncClient:
-        if not self._initialized or self._client is None:
-            raise RuntimeError("NotionService 未初始化，请先调用 .initialize() 方法")
-        return self._client
+    _clients: MutableMapping[asyncio.AbstractEventLoop, AsyncClient] = (
+        weakref.WeakKeyDictionary()
+    )
 
     @classmethod
-    async def get_client(cls) -> AsyncClient:
-        """获取Notion客户端实例，如果不存在则创建"""
-        if cls._instance is None or cls._instance._client is None:
-            cls._instance = cls()
-            if cls._instance._client is None:
-                await cls._instance.initialize()
+    async def get_client(cls) -> Optional[AsyncClient]:
+        """Return the current loop's Notion async client (lazily created).
 
-        return cls._instance._client
+        Returns ``None`` when ``NOTION_API_KEY`` is unset — callers must
+        handle that case (caller code already does; see push_to_notion etc).
+        """
+        if not settings.NOTION_API_KEY:
+            logger.warning("Notion API密钥未配置，客户端未初始化")
+            return None
+
+        loop = asyncio.get_running_loop()
+        client = cls._clients.get(loop)
+        if client is not None:
+            return client
+
+        try:
+            http_client = httpx.AsyncClient(
+                http2=True,
+                verify=True,
+                timeout=settings.HTTP_TIMEOUT,
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            )
+            client = AsyncClient(auth=settings.NOTION_API_KEY, client=http_client)
+            cls._clients[loop] = client
+            logger.debug("Notion客户端初始化成功 (per-loop)")
+            return client
+        except Exception as e:
+            logger.error(f"Notion客户端初始化失败: {e}")
+            return None
 
     @classmethod
     async def close_client(cls) -> None:
-        """关闭客户端连接"""
-        if cls._instance and cls._instance._client:
-            await cls._instance._client.aclose()
-            cls._instance._client = None
+        """Close the current loop's Notion client.
+
+        Only the current loop's client is closed. Other loops' clients (if
+        any are still alive) are owned by their respective loops and will be
+        GC'd when those loops are.
+        """
+        loop = asyncio.get_running_loop()
+        client = cls._clients.pop(loop, None)
+        if client is None:
+            return
+        try:
+            await client.aclose()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"Notion client.aclose() raised {exc!r} (ignored)")
 
     # todo push_to_notion
     # todo update_notion_page
