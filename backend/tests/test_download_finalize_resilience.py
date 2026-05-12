@@ -45,7 +45,7 @@ def good_results() -> dict:
     return {"video": "completed", "cover": "completed"}
 
 
-def _call_finalize(
+async def _call_finalize(
     *,
     media_repo_mock,
     res_repo_mock,
@@ -73,9 +73,7 @@ def _call_finalize(
             return_value=res_repo_mock,
         ),
     ):
-        # Invoke the step the same way DBOS would. If the test runner
-        # has DBOS-context guards, swap to `.__wrapped__` here.
-        return finalize_post_download_step(
+        return await finalize_post_download_step(
             platform_id="p1",
             user_id="u1",
             resource_id="r1",
@@ -86,7 +84,9 @@ def _call_finalize(
         )
 
 
-def test_finalize_swallows_resources_size_update_failure(fresh_media_row, good_results):
+async def test_finalize_swallows_resources_size_update_failure(
+    fresh_media_row, good_results
+):
     """update_resource(file_size_bytes=...) raise must NOT escape — the
     file is on disk, the resources row already has the row, the
     file_size mirror is just a UI badge. A 5xx here cannot be allowed
@@ -100,7 +100,7 @@ def test_finalize_swallows_resources_size_update_failure(fresh_media_row, good_r
     media_repo.get_by_platform_id = AsyncMock(return_value=fresh_media_row)
     media_repo.update = AsyncMock()
 
-    out = _call_finalize(
+    out = await _call_finalize(
         media_repo_mock=media_repo,
         res_repo_mock=res_repo,
         fresh_media_row=fresh_media_row,
@@ -115,7 +115,7 @@ def test_finalize_swallows_resources_size_update_failure(fresh_media_row, good_r
     media_repo.update.assert_awaited_once()
 
 
-def test_finalize_swallows_parsed_media_status_update_failure(
+async def test_finalize_swallows_parsed_media_status_update_failure(
     fresh_media_row, good_results
 ):
     """media_repo.update({video_download_status: completed, ...}) raise
@@ -133,7 +133,7 @@ def test_finalize_swallows_parsed_media_status_update_failure(
         side_effect=RuntimeError("APIError 23505 unique constraint")
     )
 
-    out = _call_finalize(
+    out = await _call_finalize(
         media_repo_mock=media_repo,
         res_repo_mock=res_repo,
         fresh_media_row=fresh_media_row,
@@ -146,7 +146,7 @@ def test_finalize_swallows_parsed_media_status_update_failure(
     media_repo.update.assert_awaited_once()
 
 
-def test_finalize_succeeds_on_happy_path(fresh_media_row, good_results):
+async def test_finalize_succeeds_on_happy_path(fresh_media_row, good_results):
     """Sanity: with both updates succeeding, finalize returns the same
     shape (`fresh_download_path` + `actual_size`) callers depend on."""
     media_repo = type("M", (), {})()
@@ -158,7 +158,7 @@ def test_finalize_succeeds_on_happy_path(fresh_media_row, good_results):
     media_repo.get_by_platform_id = AsyncMock(return_value=fresh_media_row)
     media_repo.update = AsyncMock()
 
-    out = _call_finalize(
+    out = await _call_finalize(
         media_repo_mock=media_repo,
         res_repo_mock=res_repo,
         fresh_media_row=fresh_media_row,
