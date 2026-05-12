@@ -604,11 +604,18 @@ async def download_workflow(
             outcome="failed",
             error=str(e),
         )
-        return {
-            "status": "failed",
-            "platform_id": platform_id,
-            "error": str(e),
-        }
+        # Re-raise so DBOS marks the workflow FAILED and the
+        # mirror_dbos_lifecycle_to_tracking trigger writes
+        # phase=failed + error_msg to task_tracking.
+        #
+        # Returning a `{"status":"failed",...}` dict here used to let
+        # DBOS think the workflow succeeded — trigger then mirrored
+        # phase=completed to task_tracking, while parsed_media kept
+        # `video_download_status='failed'`. The frontend showed the
+        # task as ✅ done, but no file was on disk. That's the "假
+        # completed" symptom hit by all 4 failed bilibili/douyin
+        # downloads on 2026-05-12 (CLAUDE.md 路线 C 第 4 条).
+        raise
 
     results = download_result["results"]
     has_failures = bool(download_result["failed_parts"])
