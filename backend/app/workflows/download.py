@@ -137,10 +137,7 @@ def run_download_step(
     asyncio.run() needed — UnifiedProgressTracker uses sync Redis."""
     from app.core.redis import get_sync_redis
     from app.tasks.download_progress import UnifiedProgressTracker
-    from app.tasks.download_strategies import (
-        _do_douyin_download,
-        _do_ytdlp_download,
-    )
+    from app.tasks.download_strategies import _do_douyin_download
 
     tracker = UnifiedProgressTracker(
         task_id=workflow_id,  # used as Redis key suffix `download_progress:{id}`
@@ -150,26 +147,33 @@ def run_download_step(
         user_id=user_id,
     )
 
-    if url:
-        results = _do_ytdlp_download(
-            url=url,
-            platform_id=platform_id,
-            user_id=user_id,
-            download_video=download_video,
-            download_cover=download_cover,
-            tracker=tracker,
-            user_agent=user_agent,
-        )
-    else:
-        results = _do_douyin_download(
-            platform_id=platform_id,
-            user_id=user_id,
-            download_video=download_video,
-            download_cover=download_cover,
-            media_type=media_type,
-            tracker=tracker,
-            user_agent=user_agent,
-        )
+    # Unified strategy for ALL platforms. The name `_do_douyin_download` is
+    # historical — internally it routes by `source_platform` (reads
+    # video_download_urls / cover_urls from DB, falls back to yt-dlp with
+    # `original_url` when httpx fails). This works for douyin / bilibili /
+    # xhs / youtube / twitter / etc.
+    #
+    # Why no `if url: _do_ytdlp_download else: ...` branch:
+    # PR #246/#247 introduced `_do_ytdlp_download` + url-presence dispatch
+    # to send non-douyin platforms straight to yt-dlp. The dispatch was
+    # broken — douyin's `v.douyin.com` short URLs got routed to yt-dlp's
+    # generic webpage scraper, which times out (Read timed out 20s). After
+    # PR #247 plumbed the url through, EVERY download started failing
+    # this way. The unified strategy already handles all platforms
+    # correctly via its internal source_platform routing + yt-dlp
+    # fallback, so we collapse back to that single path. `url` is kept in
+    # the signature for future re-introduction of a *platform-aware*
+    # dispatch (e.g. URLRouter.detect_platform), but is currently unused.
+    _ = url  # silence linter; see dispatch comment above
+    results = _do_douyin_download(
+        platform_id=platform_id,
+        user_id=user_id,
+        download_video=download_video,
+        download_cover=download_cover,
+        media_type=media_type,
+        tracker=tracker,
+        user_agent=user_agent,
+    )
 
     completed = [k for k, v in results.items() if v == "completed"]
     failed = [k for k, v in results.items() if v not in (None, "completed")]
