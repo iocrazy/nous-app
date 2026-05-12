@@ -144,6 +144,7 @@ def _do_douyin_download(
                                 str(storage_dir),
                                 platform_id,
                                 progress_callback=on_progress,
+                                user_id=user_id,
                                 user_agent=user_agent,
                             )
                         )
@@ -498,6 +499,7 @@ def _do_ytdlp_download(
                 str(storage_dir),
                 platform_id,
                 progress_callback=on_progress,
+                user_id=user_id,
                 user_agent=user_agent,
             )
         )
