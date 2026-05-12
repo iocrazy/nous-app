@@ -3,9 +3,19 @@
 """
 Download Strategies
 
-Concrete download implementations:
-- _do_douyin_download: reads URLs from DB, downloads via httpx (Douyin path)
-- _do_ytdlp_download: downloads directly from URL via yt-dlp
+Unified download implementation. The single public entrypoint is
+`_do_douyin_download` — the name is historical, the function routes by
+`source_platform` and handles douyin / bilibili / xhs / youtube /
+twitter via DB-cached URLs (httpx) with a yt-dlp fallback for cases
+where the parse-stage URLs expired or are gated.
+
+The previous `_do_ytdlp_download` (PR #246's "skip DB, hand
+`original_url` straight to yt-dlp") was removed in PR #254: routing on
+URL presence sent douyin short URLs (`v.douyin.com/...`) into yt-dlp's
+generic webpage scraper, which times out (Read timed out 20s). The
+unified path was already working pre-PR-#246, so we collapsed back to
+it. Reintroduce a yt-dlp-only path only behind a *platform-aware*
+dispatch (e.g. `URLRouter.detect_platform`), not URL-presence.
 """
 
 import os
@@ -431,147 +441,6 @@ def _do_douyin_download(
             else "unknown"
         )
         logger.info(f"[Download/Exec] cover: {results['cover']} for {platform_id}")
-
-        # Mark cover stage complete
-        if "cover" in stages:
-            cover_end = stages["cover"][0] + stages["cover"][1]
-            force_progress(tracker, cover_end)
-
-    return results
-
-
-def _do_ytdlp_download(
-    url: str,
-    platform_id: str,
-    user_id: str,
-    download_video: bool,
-    download_cover: bool,
-    tracker: UnifiedProgressTracker,
-    user_agent: str | None = None,
-) -> dict:
-    """yt-dlp download strategy: downloads via yt-dlp using original URL.
-
-    user_agent: same UA as the parse phase (Douyin only — None for other
-    platforms, which leaves yt-dlp's default behaviour unchanged).
-    """
-    from app.boundary import URLBlockedError, validate_url
-    from app.repositories.media_repository import MediaRepository
-    from app.services.media.parsers.url_router import URLRouter
-    from app.services.media.parsers.ytdlp_service import YtdlpService
-
-    results = {"video": None, "music": None, "cover": None}
-
-    # Boundary: SSRF guard. URL is workflow-internal but defensively
-    # re-validated to protect against rows pre-dating boundary layer.
-    try:
-        validated_url = validate_url(url)
-    except URLBlockedError as e:
-        logger.warning(f"[Download/Exec] yt-dlp URL blocked by boundary: {e}")
-        results["video"] = "failed"
-        return results
-
-    # Calculate stage progress ranges
-    stages = calc_stage_ranges(download_video, download_cover)
-
-    detected_platform, _ = URLRouter.detect_platform(validated_url)
-    repo = MediaRepository()
-    media = run_async(repo.get_by_platform_id(platform_id))
-    media_id = str(media["id"]) if media else platform_id  # fallback to platform_id
-    storage_dir, relative_prefix = Utils.create_web_resource_path(
-        detected_platform, media_id
-    )
-
-    if download_video:
-        # Mark video stage start
-        if "video" in stages:
-            offset, weight = stages["video"]
-            tracker.set_stage(offset, weight)
-            force_progress(tracker, offset, subtitle="Downloading video...")
-
-        logger.info(f"[Download/Exec] video: downloading via yt-dlp {platform_id}...")
-
-        async def on_progress(downloaded: int, total: int, speed: str):
-            await tracker.update(downloaded, total)
-
-        result = run_async(
-            YtdlpService.download_video(
-                validated_url,
-                str(storage_dir),
-                platform_id,
-                progress_callback=on_progress,
-                user_id=user_id,
-                user_agent=user_agent,
-            )
-        )
-        if result.get("file_path"):
-            file_name = os.path.basename(result["file_path"])
-            relative_path = f"{relative_prefix}/{file_name}"
-            repo = MediaRepository()
-            run_async(
-                repo.mark_media_as_downloaded(
-                    platform_id=platform_id,
-                    download_path=relative_path,
-                    duration=0,
-                    storage_size=result.get("file_size", 0),
-                )
-            )
-            run_async(
-                DownloaderService.optimize_video_for_streaming(result["file_path"])
-            )
-            results["video"] = DownloadStatus.COMPLETED.value
-            logger.info(f"[Download/Exec] video: completed for {platform_id}")
-        else:
-            results["video"] = DownloadStatus.FAILED.value
-            logger.warning(
-                f"[Download/Exec] video failed via yt-dlp for {platform_id}: no output file"
-            )
-
-        # Mark video stage complete
-        if "video" in stages:
-            video_end = stages["video"][0] + stages["video"][1]
-            force_progress(tracker, video_end)
-
-        # Auto-extract audio from downloaded video via ffmpeg (instant, no network)
-        if results.get("video") == DownloadStatus.COMPLETED.value:
-            logger.info(
-                f"[Download/Exec] music: extracting from video for {platform_id}..."
-            )
-            if extract_audio_from_video(platform_id):
-                results["music"] = DownloadStatus.COMPLETED.value
-                logger.info(
-                    f"[Download/Exec] music: extracted successfully for {platform_id}"
-                )
-            else:
-                logger.warning(
-                    f"[Download/Exec] music: extraction failed for {platform_id}"
-                )
-                results["music"] = DownloadStatus.FAILED.value
-
-    if download_cover:
-        # Mark cover stage start
-        if "cover" in stages:
-            offset, weight = stages["cover"]
-            tracker.set_stage(offset, weight)
-            force_progress(tracker, offset, subtitle="Downloading cover...")
-
-        logger.info(f"[Download/Exec] cover: downloading {platform_id}...")
-        cover_result = run_async(
-            DownloaderService.download_cover_by_platform_id(
-                platform_id,
-                user_id=user_id,
-                user_agent=user_agent,
-            )
-        )
-        if (
-            cover_result
-            and cover_result.cover_download_status == DownloadStatus.COMPLETED
-        ):
-            results["cover"] = DownloadStatus.COMPLETED.value
-            logger.info(f"[Download/Exec] cover: completed for {platform_id}")
-        else:
-            error = cover_result.error if cover_result else "Unknown error"
-            logger.warning(f"[Download/Exec] cover failed for {platform_id}: {error}")
-            results["cover"] = DownloadStatus.FAILED.value
 
         # Mark cover stage complete
         if "cover" in stages:

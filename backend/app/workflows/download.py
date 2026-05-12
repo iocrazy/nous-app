@@ -3,8 +3,8 @@
 The legacy file is 484 LOC; about 60% is unified_task_manager
 lifecycle glue + Celery retry boilerplate that DBOS handles natively.
 The actual download work delegates to:
-    - download_strategies._do_douyin_download (no url; reads URLs from DB)
-    - download_strategies._do_ytdlp_download (url given; yt-dlp pulls)
+    - download_strategies._do_douyin_download (unified strategy —
+      reads URLs from DB, httpx direct + yt-dlp fallback)
 
 Both strategy functions accept a UnifiedProgressTracker. We pass one
 with unified_tracker=None — the tracker degrades to pure Redis pub/sub
@@ -116,14 +116,13 @@ def run_download_step(
     workflow_id: str,
     platform_id: str,
     user_id: str,
-    url: Optional[str],
     download_video: bool,
     download_cover: bool,
     media_type: int,
     user_agent: Optional[str],
 ) -> dict[str, Any]:
-    """Dispatch to the right strategy. Returns the per-asset
-    {video, cover, music} → status dict from the strategy.
+    """Drive the unified download strategy. Returns the per-asset
+    {video, cover, music} → status dict.
 
     `workflow_id` is the parent DBOS workflow's id (= task_tracking PK).
     Passed in (rather than read from `DBOS.workflow_id` here) because we
@@ -131,10 +130,13 @@ def run_download_step(
     payload carries the same id the frontend reducer matches against
     (`t.id === payload.unified_task_id`).
 
-    Stays sync because both strategy fns (_do_ytdlp_download /
-    _do_douyin_download) are pure-sync external-tool dispatches
-    (yt-dlp subprocess; DrissionPage / cookie-aware HTTP client). No
-    asyncio.run() needed — UnifiedProgressTracker uses sync Redis."""
+    Stays sync because `_do_douyin_download` is a pure-sync external-tool
+    dispatch (httpx + yt-dlp subprocess) with sync Redis tracker.
+
+    The previous URL-presence dispatch (`if url: _do_ytdlp_download
+    else: _do_douyin_download`) was removed in PR #254 — see
+    `download_strategies` module docstring for the douyin short-URL
+    failure mode that motivated it."""
     from app.core.redis import get_sync_redis
     from app.tasks.download_progress import UnifiedProgressTracker
     from app.tasks.download_strategies import _do_douyin_download
@@ -147,24 +149,6 @@ def run_download_step(
         user_id=user_id,
     )
 
-    # Unified strategy for ALL platforms. The name `_do_douyin_download` is
-    # historical — internally it routes by `source_platform` (reads
-    # video_download_urls / cover_urls from DB, falls back to yt-dlp with
-    # `original_url` when httpx fails). This works for douyin / bilibili /
-    # xhs / youtube / twitter / etc.
-    #
-    # Why no `if url: _do_ytdlp_download else: ...` branch:
-    # PR #246/#247 introduced `_do_ytdlp_download` + url-presence dispatch
-    # to send non-douyin platforms straight to yt-dlp. The dispatch was
-    # broken — douyin's `v.douyin.com` short URLs got routed to yt-dlp's
-    # generic webpage scraper, which times out (Read timed out 20s). After
-    # PR #247 plumbed the url through, EVERY download started failing
-    # this way. The unified strategy already handles all platforms
-    # correctly via its internal source_platform routing + yt-dlp
-    # fallback, so we collapse back to that single path. `url` is kept in
-    # the signature for future re-introduction of a *platform-aware*
-    # dispatch (e.g. URLRouter.detect_platform), but is currently unused.
-    _ = url  # silence linter; see dispatch comment above
     results = _do_douyin_download(
         platform_id=platform_id,
         user_id=user_id,
@@ -491,7 +475,6 @@ async def download_workflow(
     platform_id: str,
     user_id: str,
     *,
-    url: Optional[str] = None,
     download_video: bool = True,
     download_cover: bool = True,
     media_type: int = 0,
@@ -513,7 +496,11 @@ async def download_workflow(
     # TaskMonitor display "WORKER Idle" mid-download.
     await mark_workflow_processing_step(DBOS.workflow_id)
 
-    strategy = "yt-dlp" if url else "douyin"
+    # Single unified strategy (PR #254). Strategy label kept on audit
+    # logs so older log queries (`strategy=douyin` / `strategy=yt-dlp`)
+    # still match in spirit; future platform-aware dispatch can stamp
+    # a real label here.
+    strategy = "unified"
 
     # 1. Cache short-circuit
     cache = await check_global_cache_step(
@@ -569,7 +556,6 @@ async def download_workflow(
             workflow_id=DBOS.workflow_id,
             platform_id=platform_id,
             user_id=user_id,
-            url=url,
             download_video=download_video,
             download_cover=download_cover,
             media_type=media_type,
