@@ -36,6 +36,7 @@ from app.workflows.scheduled_health import (  # noqa: F401
     health_check_workflow,
     update_system_status_workflow,
 )
+from app.workflows.scheduled_master import scheduled_master_workflow  # noqa: F401
 from app.workflows.scheduled_memory_archival import (  # noqa: F401
     memory_archival_workflow,
 )
@@ -93,6 +94,7 @@ __all__ = [
     "cleanup_old_task_tracking_workflow",
     "update_system_status_workflow",
     "health_check_workflow",
+    "scheduled_master_workflow",
     "retry_failed_downloads_workflow",
     "reap_stuck_pending_tasks_workflow",
     "recover_stale_orchestrator_locks_workflow",
