@@ -111,7 +111,6 @@ def dispatch_download_step(
     *,
     platform_id: str,
     user_id: str,
-    url: Optional[str] = None,
     download_video: bool,
     download_cover: bool,
     media_type: int,
@@ -163,7 +162,6 @@ def dispatch_download_step(
             dbos_workflow_kwargs={
                 "platform_id": platform_id,
                 "user_id": user_id,
-                "url": url,
                 "download_video": download_video,
                 "download_cover": download_cover,
                 "media_type": media_type,
@@ -450,7 +448,6 @@ def parse_workflow(
         download_dispatch = dispatch_download_step(
             platform_id=platform_id,
             user_id=user_id,
-            url=url,
             download_video=video_bool,
             download_cover=cover_bool,
             media_type=int(media_type),

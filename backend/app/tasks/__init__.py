@@ -9,7 +9,7 @@ were physically deleted. The only files that remain are pure helpers
 
     - utils.py              (run_async helper)
     - download_progress.py  (UnifiedProgressTracker class)
-    - download_strategies.py (_do_douyin_download / _do_ytdlp_download)
+    - download_strategies.py (_do_douyin_download — unified strategy)
     - download_helpers.py   (maybe_chain_*, ensure_download_urls,
                              extract_audio_from_video, validate_*)
 
