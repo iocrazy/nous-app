@@ -1151,6 +1151,35 @@ async def health_check():
     return {"status": "healthy", "message": "Service is running"}
 
 
+@app.get("/api/version")
+async def api_version():
+    """Build identity for deploy-verify.
+
+    CI's deploy-backend workflow polls this after the Watchtower webhook
+    and asserts the response carries the just-built `commit_sha`. Without
+    this check, a Watchtower webhook that 504s but is still recorded as
+    "✅ triggered" silently leaves prod on the previous image — exactly
+    the failure mode that wasted hours on 2026-05-12.
+    """
+    import json
+    from pathlib import Path
+
+    build_info_path = Path("/app/build-info.json")
+    if not build_info_path.exists():
+        return {"commit_sha": None, "available": False}
+    try:
+        info = json.loads(build_info_path.read_text(encoding="utf-8"))
+        return {
+            "commit_sha": info.get("commit_sha"),
+            "commit_count": info.get("commit_count"),
+            "service": info.get("service", "backend"),
+            "version": info.get("version") or "latest",
+            "available": True,
+        }
+    except Exception:
+        return {"commit_sha": None, "available": False}
+
+
 # 前端静态文件服务（Docker 部署时使用）
 frontend_path = Path("/app/static")
 if frontend_path.exists():
