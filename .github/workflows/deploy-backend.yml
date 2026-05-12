@@ -194,10 +194,16 @@ jobs:
           while [ "$(date +%s)" -lt "$DEADLINE" ]; do
             ATTEMPT=$((ATTEMPT + 1))
             RESPONSE=$(curl -sf -m 8 "$PROD_VERSION_URL" 2>/dev/null || echo "")
-            ACTUAL_SHA=$(echo "$RESPONSE" | python3 -c "import sys, json
-try: print(json.loads(sys.stdin.read()).get('commit_sha', '') or '')
-except Exception: print('')
-" 2>/dev/null)
+            # Parse commit_sha out of the JSON response. Using jq (always
+            # present on GH runners) avoids embedding a multi-line
+            # `python3 -c` heredoc inside the YAML `run: |` block — those
+            # continuation lines need column-0 indent to satisfy Python's
+            # `try:`/`except:`, but column-0 inside `run: |` makes YAML
+            # think they're sibling keys and fails the whole workflow file
+            # to parse (broke master after PR #253 was merged on 2026-05-12).
+            # `-r` strips quotes, `// ""` defaults null → "" so the
+            # following string compare doesn't trip on a JSON null.
+            ACTUAL_SHA=$(echo "$RESPONSE" | jq -r '.commit_sha // ""' 2>/dev/null || echo "")
             if [ -n "$ACTUAL_SHA" ] && [ "${ACTUAL_SHA:0:7}" = "$EXPECTED_SHA_SHORT" ]; then
               echo "✅ Prod is on $ACTUAL_SHA after $ATTEMPT probe(s)"
               echo "- **Verified prod SHA:** \`$ACTUAL_SHA\` ✅" >> $GITHUB_STEP_SUMMARY
