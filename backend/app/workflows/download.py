@@ -34,7 +34,6 @@ ported) — D4 wiring will swap parse → download chain.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -43,7 +42,7 @@ from loguru import logger
 
 
 @DBOS.step()
-def check_global_cache_step(
+async def check_global_cache_step(
     *,
     platform_id: str,
     media_type: int,
@@ -78,40 +77,37 @@ def check_global_cache_step(
         except OSError:
             return False
 
-    async def _do() -> dict[str, Any]:
-        media_repo = MediaRepository()
-        global_media = await media_repo.get_by_platform_id(platform_id)
-        if not global_media:
-            return {"cache_hit": False}
+    media_repo = MediaRepository()
+    global_media = await media_repo.get_by_platform_id(platform_id)
+    if not global_media:
+        return {"cache_hit": False}
 
-        video_path = global_media.get("download_path")
-        cover_path = global_media.get("cover_download_path")
-        has_video_path = bool(video_path)
-        has_cover_path = bool(cover_path)
+    video_path = global_media.get("download_path")
+    cover_path = global_media.get("cover_download_path")
+    has_video_path = bool(video_path)
+    has_cover_path = bool(cover_path)
 
-        all_cached = True
-        if download_video:
-            video_status_ok = (
-                global_media.get("image_download_status") == "completed"
-                if int(media_type) in (2, 68)
-                else global_media.get("video_download_status") == "completed"
-            )
-            all_cached = (
-                all_cached
-                and video_status_ok
-                and has_video_path
-                and _file_present(video_path)
-            )
-        if download_cover:
-            all_cached = (
-                all_cached
-                and global_media.get("cover_download_status") == "completed"
-                and has_cover_path
-                and _file_present(cover_path)
-            )
-        return {"cache_hit": bool(all_cached)}
-
-    return asyncio.run(_do())
+    all_cached = True
+    if download_video:
+        video_status_ok = (
+            global_media.get("image_download_status") == "completed"
+            if int(media_type) in (2, 68)
+            else global_media.get("video_download_status") == "completed"
+        )
+        all_cached = (
+            all_cached
+            and video_status_ok
+            and has_video_path
+            and _file_present(video_path)
+        )
+    if download_cover:
+        all_cached = (
+            all_cached
+            and global_media.get("cover_download_status") == "completed"
+            and has_cover_path
+            and _file_present(cover_path)
+        )
+    return {"cache_hit": bool(all_cached)}
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3)
@@ -133,7 +129,12 @@ def run_download_step(
     Passed in (rather than read from `DBOS.workflow_id` here) because we
     need it to flow into UnifiedProgressTracker so the Redis pub/sub
     payload carries the same id the frontend reducer matches against
-    (`t.id === payload.unified_task_id`)."""
+    (`t.id === payload.unified_task_id`).
+
+    Stays sync because both strategy fns (_do_ytdlp_download /
+    _do_douyin_download) are pure-sync external-tool dispatches
+    (yt-dlp subprocess; DrissionPage / cookie-aware HTTP client). No
+    asyncio.run() needed — UnifiedProgressTracker uses sync Redis."""
     from app.core.redis import get_sync_redis
     from app.tasks.download_progress import UnifiedProgressTracker
     from app.tasks.download_strategies import (
@@ -180,7 +181,7 @@ def run_download_step(
 
 
 @DBOS.step()
-def finalize_post_download_step(
+async def finalize_post_download_step(
     *,
     platform_id: str,
     user_id: str,
@@ -199,136 +200,131 @@ def finalize_post_download_step(
     from app.repositories.media_repository import MediaRepository
     from app.repositories.resources_repository import ResourcesRepository
 
-    async def _do() -> dict[str, Any]:
-        media_repo = MediaRepository()
-        fresh_download_path: Optional[str] = None
-        actual_size = 0
+    media_repo = MediaRepository()
+    fresh_download_path: Optional[str] = None
+    actual_size = 0
 
-        if resource_id:
-            res_repo = ResourcesRepository()
+    if resource_id:
+        res_repo = ResourcesRepository()
 
-            fresh_media = await media_repo.get_by_platform_id(platform_id)
-            if fresh_media:
-                fresh_download_path = fresh_media.get("download_path")
-                actual_size = (
-                    fresh_media.get("storage_size")
-                    or fresh_media.get("datasize_bytes")
-                    or 0
+        fresh_media = await media_repo.get_by_platform_id(platform_id)
+        if fresh_media:
+            fresh_download_path = fresh_media.get("download_path")
+            actual_size = (
+                fresh_media.get("storage_size")
+                or fresh_media.get("datasize_bytes")
+                or 0
+            )
+            if actual_size > 0:
+                # File is already on disk + parsed_media row carries the
+                # canonical size; the resources.file_size_bytes mirror is
+                # a UI nicety. Don't let a transient PostgREST hiccup
+                # here promote a successful download to a failed task —
+                # downstream `mark_task_user_visible_complete_step`
+                # would never get a chance to run, and 资源库 already
+                # shows the file the user wanted.
+                try:
+                    await res_repo.update_resource(
+                        resource_id, {"file_size_bytes": actual_size}
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[download.finalize] file_size mirror failed "
+                        "(non-fatal, file is already on disk) "
+                        "resource_id=%s actual_size=%d err=%s: %r",
+                        resource_id,
+                        actual_size,
+                        type(e).__name__,
+                        e,
+                    )
+
+        try:
+            existing_versions = await res_repo.get_versions(resource_id)
+            if not existing_versions and fresh_download_path:
+                file_path = fresh_download_path
+                filename = (
+                    file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
                 )
-                if actual_size > 0:
-                    # File is already on disk + parsed_media row carries the
-                    # canonical size; the resources.file_size_bytes mirror is
-                    # a UI nicety. Don't let a transient PostgREST hiccup
-                    # here promote a successful download to a failed task —
-                    # downstream `mark_task_user_visible_complete_step`
-                    # would never get a chance to run, and 资源库 already
-                    # shows the file the user wanted.
-                    try:
-                        await res_repo.update_resource(
-                            resource_id, {"file_size_bytes": actual_size}
+                mime_type = "video/mp4"
+                if filename.endswith(".webm"):
+                    mime_type = "video/webm"
+                elif filename.endswith(".mkv"):
+                    mime_type = "video/x-matroska"
+                version_data = {
+                    "resource_id": resource_id,
+                    "version_number": 1,
+                    "filename": filename,
+                    "file_path": file_path,
+                    "file_size_bytes": actual_size if actual_size > 0 else None,
+                    "mime_type": mime_type,
+                    "uploaded_by": user_id,
+                }
+                await res_repo.create_version(version_data)
+            elif existing_versions and actual_size > 0:
+                for ver in existing_versions:
+                    if not ver.get("file_size_bytes"):
+                        await res_repo.update_version(
+                            ver["id"], {"file_size_bytes": actual_size}
                         )
+        except Exception as ve:
+            logger.warning(f"[download.finalize] resource_version backfill: {ve}")
+
+        # parsed_media status fallback
+        pm_status_updates: dict[str, str] = {}
+        if download_video:
+            v = results.get("video")
+            if v == "completed":
+                if int(media_type) in (2, 68):
+                    pm_status_updates["image_download_status"] = "completed"
+                else:
+                    pm_status_updates["video_download_status"] = "completed"
+            m = results.get("music")
+            if m == "completed":
+                pm_status_updates["music_download_status"] = "completed"
+        if download_cover and results.get("cover") == "completed":
+            pm_status_updates["cover_download_status"] = "completed"
+
+        if pm_status_updates:
+            current_pm = fresh_media or await media_repo.get_by_platform_id(platform_id)
+            if current_pm:
+                needs_update = {
+                    k: v
+                    for k, v in pm_status_updates.items()
+                    if current_pm.get(k) != "completed"
+                }
+                if needs_update:
+                    # Same rationale as the file_size_bytes mirror above —
+                    # this update flips parsed_media.*_download_status
+                    # flags from 'pending' to 'completed' for UI badges.
+                    # The file is already on disk; if PostgREST is
+                    # momentarily unavailable here we'd otherwise mark
+                    # the whole download workflow failed and stomp the
+                    # subtitle the user sees, even though the user can
+                    # already open the file in 资源库. (Reproducer:
+                    # download_workflow 2d9d667d 2026-05-08, file
+                    # landed but task_tracking ended up phase=failed
+                    # subtitle stuck on "video + cover".)
+                    try:
+                        await media_repo.update(platform_id, needs_update)
                     except Exception as e:
                         logger.warning(
-                            "[download.finalize] file_size mirror failed "
-                            "(non-fatal, file is already on disk) "
-                            "resource_id=%s actual_size=%d err=%s: %r",
-                            resource_id,
-                            actual_size,
+                            "[download.finalize] parsed_media status "
+                            "flag update failed (non-fatal, file is "
+                            "already on disk) platform_id=%s "
+                            "needs_update=%s err=%s: %r",
+                            platform_id,
+                            needs_update,
                             type(e).__name__,
                             e,
                         )
 
-            try:
-                existing_versions = await res_repo.get_versions(resource_id)
-                if not existing_versions and fresh_download_path:
-                    file_path = fresh_download_path
-                    filename = (
-                        file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
-                    )
-                    mime_type = "video/mp4"
-                    if filename.endswith(".webm"):
-                        mime_type = "video/webm"
-                    elif filename.endswith(".mkv"):
-                        mime_type = "video/x-matroska"
-                    version_data = {
-                        "resource_id": resource_id,
-                        "version_number": 1,
-                        "filename": filename,
-                        "file_path": file_path,
-                        "file_size_bytes": actual_size if actual_size > 0 else None,
-                        "mime_type": mime_type,
-                        "uploaded_by": user_id,
-                    }
-                    await res_repo.create_version(version_data)
-                elif existing_versions and actual_size > 0:
-                    for ver in existing_versions:
-                        if not ver.get("file_size_bytes"):
-                            await res_repo.update_version(
-                                ver["id"], {"file_size_bytes": actual_size}
-                            )
-            except Exception as ve:
-                logger.warning(f"[download.finalize] resource_version backfill: {ve}")
-
-            # parsed_media status fallback
-            pm_status_updates: dict[str, str] = {}
-            if download_video:
-                v = results.get("video")
-                if v == "completed":
-                    if int(media_type) in (2, 68):
-                        pm_status_updates["image_download_status"] = "completed"
-                    else:
-                        pm_status_updates["video_download_status"] = "completed"
-                m = results.get("music")
-                if m == "completed":
-                    pm_status_updates["music_download_status"] = "completed"
-            if download_cover and results.get("cover") == "completed":
-                pm_status_updates["cover_download_status"] = "completed"
-
-            if pm_status_updates:
-                current_pm = fresh_media or await media_repo.get_by_platform_id(
-                    platform_id
-                )
-                if current_pm:
-                    needs_update = {
-                        k: v
-                        for k, v in pm_status_updates.items()
-                        if current_pm.get(k) != "completed"
-                    }
-                    if needs_update:
-                        # Same rationale as the file_size_bytes mirror above —
-                        # this update flips parsed_media.*_download_status
-                        # flags from 'pending' to 'completed' for UI badges.
-                        # The file is already on disk; if PostgREST is
-                        # momentarily unavailable here we'd otherwise mark
-                        # the whole download workflow failed and stomp the
-                        # subtitle the user sees, even though the user can
-                        # already open the file in 资源库. (Reproducer:
-                        # download_workflow 2d9d667d 2026-05-08, file
-                        # landed but task_tracking ended up phase=failed
-                        # subtitle stuck on "video + cover".)
-                        try:
-                            await media_repo.update(platform_id, needs_update)
-                        except Exception as e:
-                            logger.warning(
-                                "[download.finalize] parsed_media status "
-                                "flag update failed (non-fatal, file is "
-                                "already on disk) platform_id=%s "
-                                "needs_update=%s err=%s: %r",
-                                platform_id,
-                                needs_update,
-                                type(e).__name__,
-                                e,
-                            )
-
-        return {
-            "fresh_download_path": fresh_download_path,
-            "actual_size": actual_size,
-        }
-
-    return asyncio.run(_do())
+    return {
+        "fresh_download_path": fresh_download_path,
+        "actual_size": actual_size,
+    }
 
 
-def chain_followups_step(
+async def chain_followups_step(
     *,
     platform_id: str,
     user_id: str,
@@ -357,16 +353,14 @@ def chain_followups_step(
             from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.thumbnail import thumbnail_workflow
 
-            asyncio.run(
-                start_workflow_routed(
-                    "thumbnail",
-                    dbos_workflow_callable=thumbnail_workflow,
-                    dbos_workflow_kwargs={
-                        "resource_id": resource_id,
-                        "file_path": fresh_download_path,
-                        "mime_type": mime_type,
-                    },
-                )
+            await start_workflow_routed(
+                "thumbnail",
+                dbos_workflow_callable=thumbnail_workflow,
+                dbos_workflow_kwargs={
+                    "resource_id": resource_id,
+                    "file_path": fresh_download_path,
+                    "mime_type": mime_type,
+                },
             )
         except Exception as e:
             logger.warning(f"[download.chain] thumbnail: {type(e).__name__}: {e!r}")
@@ -390,7 +384,7 @@ def chain_followups_step(
 
 
 @DBOS.step()
-def log_download_outcome_step(
+async def log_download_outcome_step(
     *,
     user_id: str,
     platform_id: str,
@@ -403,34 +397,31 @@ def log_download_outcome_step(
     """Audit row in user_logs. Best-effort."""
     from app.repositories.user_logs_repository import log_user_action
 
-    async def _do() -> None:
-        try:
-            if outcome == "success":
-                await log_user_action(
-                    user_id=user_id,
-                    action="download",
-                    message=(f"Download completed ({strategy}): {video_title[:30]}..."),
-                    status="success",
-                    aweme_id=platform_id,
-                    details={"media_type": media_type},
-                )
-            else:
-                await log_user_action(
-                    user_id=user_id,
-                    action="download",
-                    message=f"Download failed ({strategy}): {video_title[:30]}...",
-                    status="error",
-                    aweme_id=platform_id,
-                    details={"error": (error or "unknown")[:200]},
-                )
-        except Exception as e:
-            logger.warning(f"[download.log] {e}")
-
-    asyncio.run(_do())
+    try:
+        if outcome == "success":
+            await log_user_action(
+                user_id=user_id,
+                action="download",
+                message=(f"Download completed ({strategy}): {video_title[:30]}..."),
+                status="success",
+                aweme_id=platform_id,
+                details={"media_type": media_type},
+            )
+        else:
+            await log_user_action(
+                user_id=user_id,
+                action="download",
+                message=f"Download failed ({strategy}): {video_title[:30]}...",
+                status="error",
+                aweme_id=platform_id,
+                details={"error": (error or "unknown")[:200]},
+            )
+    except Exception as e:
+        logger.warning(f"[download.log] {e}")
 
 
 @DBOS.step()
-def mark_task_user_visible_complete_step(
+async def mark_task_user_visible_complete_step(
     *,
     workflow_id: str,
     subtitle: str,
@@ -455,29 +446,26 @@ def mark_task_user_visible_complete_step(
     """
     from app.services.infra.unified_task_manager import get_task_manager
 
-    async def _do() -> None:
-        try:
-            await get_task_manager()._atomic_update(
-                workflow_id,
-                {
-                    "phase": "completed",
-                    "status": "completed",
-                    "progress": 100,
-                    "subtitle": subtitle[:120],
-                    "completed_at": datetime.now(timezone.utc).isoformat(),
-                },
-            )
-        except Exception as e:
-            logger.warning(
-                f"[download.mark_complete] failed to early-mark "
-                f"task_tracking complete for {workflow_id}: {e}"
-            )
-
-    asyncio.run(_do())
+    try:
+        await get_task_manager()._atomic_update(
+            workflow_id,
+            {
+                "phase": "completed",
+                "status": "completed",
+                "progress": 100,
+                "subtitle": subtitle[:120],
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as e:
+        logger.warning(
+            f"[download.mark_complete] failed to early-mark "
+            f"task_tracking complete for {workflow_id}: {e}"
+        )
 
 
 @DBOS.step()
-def mark_workflow_processing_step(workflow_id: str) -> None:
+async def mark_workflow_processing_step(workflow_id: str) -> None:
     """Push task_tracking.phase 'queued' → 'processing'. Same rationale
     as parse.mark_workflow_processing_step — `mirror_dbos_lifecycle_to_tracking`
     only writes `status`, leaving `phase` stuck at 'queued' for the
@@ -488,17 +476,14 @@ def mark_workflow_processing_step(workflow_id: str) -> None:
     cosmetic; the file will still download regardless."""
     from app.services.infra.unified_task_manager import get_task_manager
 
-    async def _do() -> None:
-        try:
-            await get_task_manager().start(workflow_id)
-        except Exception as e:
-            logger.warning(f"[download.mark_processing] {workflow_id}: {e}")
-
-    asyncio.run(_do())
+    try:
+        await get_task_manager().start(workflow_id)
+    except Exception as e:
+        logger.warning(f"[download.mark_processing] {workflow_id}: {e}")
 
 
 @DBOS.workflow()
-def download_workflow(
+async def download_workflow(
     platform_id: str,
     user_id: str,
     *,
@@ -522,12 +507,12 @@ def download_workflow(
     # it, mirror_dbos_lifecycle_to_tracking would only update `status`
     # and `phase` stays 'queued' until terminal — which is what made
     # TaskMonitor display "WORKER Idle" mid-download.
-    mark_workflow_processing_step(DBOS.workflow_id)
+    await mark_workflow_processing_step(DBOS.workflow_id)
 
     strategy = "yt-dlp" if url else "douyin"
 
     # 1. Cache short-circuit
-    cache = check_global_cache_step(
+    cache = await check_global_cache_step(
         platform_id=platform_id,
         media_type=media_type,
         download_video=download_video,
@@ -545,7 +530,7 @@ def download_workflow(
             synthetic_results["video"] = "completed"
         if download_cover:
             synthetic_results["cover"] = "completed"
-        finalize_post_download_step(
+        await finalize_post_download_step(
             platform_id=platform_id,
             user_id=user_id,
             resource_id=resource_id,
@@ -554,11 +539,11 @@ def download_workflow(
             media_type=media_type,
             results=synthetic_results,
         )
-        mark_task_user_visible_complete_step(
+        await mark_task_user_visible_complete_step(
             workflow_id=DBOS.workflow_id,
             subtitle=f"{video_title or 'Cached'} (cache hit)",
         )
-        log_download_outcome_step(
+        await log_download_outcome_step(
             user_id=user_id,
             platform_id=platform_id,
             video_title=video_title,
@@ -574,6 +559,8 @@ def download_workflow(
 
     # 2. Strategy dispatch
     try:
+        # run_download_step stays sync — it dispatches yt-dlp /
+        # DrissionPage subprocesses with sync Redis tracker. No await.
         download_result = run_download_step(
             workflow_id=DBOS.workflow_id,
             platform_id=platform_id,
@@ -589,24 +576,22 @@ def download_workflow(
         # the legacy task did inside its except branch.
         from app.repositories.media_repository import MediaRepository
 
-        async def _mark_failed() -> None:
-            try:
-                repo = MediaRepository()
-                fail_updates: dict[str, str] = {}
-                if download_video:
-                    if int(media_type) in (2, 68):
-                        fail_updates["image_download_status"] = "failed"
-                    else:
-                        fail_updates["video_download_status"] = "failed"
-                if download_cover:
-                    fail_updates["cover_download_status"] = "failed"
-                if fail_updates:
-                    await repo.update(platform_id, fail_updates)
-            except Exception:
-                pass
+        try:
+            repo = MediaRepository()
+            fail_updates: dict[str, str] = {}
+            if download_video:
+                if int(media_type) in (2, 68):
+                    fail_updates["image_download_status"] = "failed"
+                else:
+                    fail_updates["video_download_status"] = "failed"
+            if download_cover:
+                fail_updates["cover_download_status"] = "failed"
+            if fail_updates:
+                await repo.update(platform_id, fail_updates)
+        except Exception:
+            pass
 
-        asyncio.run(_mark_failed())
-        log_download_outcome_step(
+        await log_download_outcome_step(
             user_id=user_id,
             platform_id=platform_id,
             video_title=video_title,
@@ -625,7 +610,7 @@ def download_workflow(
     has_failures = bool(download_result["failed_parts"])
 
     # 3. Post-download bookkeeping
-    finalize = finalize_post_download_step(
+    finalize = await finalize_post_download_step(
         platform_id=platform_id,
         user_id=user_id,
         resource_id=resource_id,
@@ -639,13 +624,13 @@ def download_workflow(
     # disk and visible in 资源库. The remaining steps (audit log + chain
     # follow-ups) take 30s+ and would otherwise leave the Task Center
     # showing "downloading…" while 资源库 already shows the file.
-    mark_task_user_visible_complete_step(
+    await mark_task_user_visible_complete_step(
         workflow_id=DBOS.workflow_id,
         subtitle=video_title or "Downloaded",
     )
 
     # 4. Audit log
-    log_download_outcome_step(
+    await log_download_outcome_step(
         user_id=user_id,
         platform_id=platform_id,
         video_title=video_title,
@@ -660,7 +645,7 @@ def download_workflow(
     )
 
     # 5. Chain follow-ups (best-effort, never fails the workflow)
-    chain_followups_step(
+    await chain_followups_step(
         platform_id=platform_id,
         user_id=user_id,
         resource_id=resource_id,
