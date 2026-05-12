@@ -96,6 +96,16 @@ class PinnedDNSResolver:
         # Raises URLBlockedError if any addr is in a blocked range.
         _ug._check_resolved_addrs(addrs, host)
 
+        # IPv4 preference: getaddrinfo may return AAAA records first when
+        # the host has IPv6 routing, but the Docker bridge network inside
+        # our prod backend container has no IPv6 egress — picking IPv6
+        # then makes asyncio.open_connection hang until socket timeout
+        # (bilibili download `Read timed out`, 2026-05-12). Stable sort so
+        # IPv4 stays before IPv6 without disturbing relative order within
+        # each family (DNS round-robin within v4 still rotates).
+        if settings.SSRF_PREFER_IPV4:
+            addrs = sorted(addrs, key=lambda a: ":" in a)
+
         pinned = addrs[0]
         self._cache[host] = (pinned, now + self._ttl)
         return pinned
