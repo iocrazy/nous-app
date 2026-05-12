@@ -202,6 +202,14 @@ class Settings(BaseSettings):
         "Empty value means proxy not started — clients run unproxied "
         "(degraded boundary).",
     )
+    SSRF_PREFER_IPV4: bool = Field(
+        default=True,
+        description="When True, pinned_dns picks an IPv4 address before "
+        "an IPv6 one even if getaddrinfo returns AAAA first. Default ON "
+        "because the prod NAS Docker bridge network has no IPv6 route — "
+        "an AAAA-first pick caused yt-dlp `Read timed out` on bilibili "
+        "(2026-05-12). Set False on hosts with working IPv6 egress.",
+    )
 
     # ============================================
     # OpenAI Configuration (for visual analysis)
