@@ -1,0 +1,101 @@
+# Watchtower compose snapshot — what should be on NAS
+#
+# Live location:  /volume1/docker/portainer/data/compose/2/docker-compose.yml
+# Live stack:     `heygo_watchtower` container (managed via Portainer)
+#
+# This file is the recommended target state after the 2026-05-12
+# investigation that found:
+#
+# 1) WATCHTOWER_POLL_INTERVAL=3600 (1 hour) — too slow, every PR has up
+#    to 1 hour deploy latency before Watchtower notices the new image.
+#
+# 2) No HTTP API token / port exposed — so the GH Actions webhook step
+#    that curl's `WATCHTOWER_URL` was hitting *something else* that
+#    returned 200/504, and reported "✅ triggered" even though the new
+#    image was never pulled. Hours of "downloads broken on prod" while
+#    CI showed every deploy as success.
+#
+# To apply this snapshot on NAS:
+#
+#   1. Set WATCHTOWER_HTTP_API_TOKEN to a fresh random string in
+#      /volume1/docker/portainer/data/compose/2/.env  (create if absent)
+#   2. Replace the live compose with this file's content:
+#        ssh nas 'sudo cp /volume1/docker/portainer/data/compose/2/docker-compose.yml{,.bak-$(date +%Y%m%d)}'
+#        scp deploy/nas/watchtower-docker-compose.yml \
+#            nas:/tmp/watchtower-docker-compose.yml
+#        ssh nas 'sudo cp /tmp/watchtower-docker-compose.yml \
+#            /volume1/docker/portainer/data/compose/2/docker-compose.yml'
+#   3. Recreate the container (NOT just `restart` — env / port changes
+#      need a full recreate):
+#        ssh nas 'cd /volume1/docker/portainer/data/compose/2 && \
+#                 sudo docker compose up -d watchtower'
+#   4. Verify HTTP API is up:
+#        ssh nas 'curl -sS -o /dev/null -w "%{http_code}\n" \
+#            -H "Authorization: Bearer $WATCHTOWER_HTTP_API_TOKEN" \
+#            http://localhost:8083/v1/update'
+#      Expected: 200 (triggers a poll). Anything else means the env or
+#      port mapping didn't take — re-check step 3.
+#   5. Update GH repo secrets:
+#        WATCHTOWER_URL   → http://<nas-public-host>:8083/v1/update
+#        WATCHTOWER_TOKEN → same value as WATCHTOWER_HTTP_API_TOKEN
+#      (or a Cloudflare-tunnelled HTTPS equivalent if exposing 8083
+#      to the public internet isn't acceptable)
+
+services:
+  watchtower:
+    image: containrrr/watchtower
+    container_name: heygo_watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # 5 min poll: bounded deploy latency without burning a poll-storm.
+      # The CI verify step (deploy-backend.yml) gives this 10 min to
+      # land, so 5 min cadence has comfortable headroom (≤2 polls
+      # within the verify budget).
+      - WATCHTOWER_POLL_INTERVAL=300
+
+      # HTTP API for explicit webhook trigger from GH Actions. The CI
+      # workflow's "Trigger Watchtower update" step calls this; the
+      # newly-added "Verify deploy" step independently asserts the
+      # outcome by polling backend /api/version, so we get both
+      # immediate trigger + verification.
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN}
+      - WATCHTOWER_HTTP_API_UPDATE=true
+
+      # Cleanup dangling old images after a successful pull. Without
+      # this, /volume1 fills up over weeks of deploys.
+      - WATCHTOWER_CLEANUP=true
+
+      # Don't restart EVERY container Watchtower can see — only ones
+      # opting in via the `com.centurylinklabs.watchtower.enable=true`
+      # label. Prevents Watchtower from accidentally restarting
+      # unrelated services (Emby, Jellyfin, ...) when their images
+      # update.
+      - WATCHTOWER_LABEL_ENABLE=true
+
+    ports:
+      # Expose HTTP API on host 8083 → container 8080. The mediahub
+      # backend uses the SAME host port number (8080 → container
+      # 8080) under a different container name, so we shift this one
+      # to 8083 to avoid conflict.
+      - "8083:8080"
+
+    restart: unless-stopped
+    network_mode: bridge
+
+# Containers that Watchtower should auto-update need this label in
+# their own compose (not here):
+#
+#   labels:
+#     - "com.centurylinklabs.watchtower.enable=true"
+#
+# Currently expected to be on:
+#   - mediahub-app-backend  (mediahub/docker-compose.yml: `mediahub`)
+#   - mediahub-admin        (when re-deployed)
+#   - mediahub-worker       (when re-deployed)
+#
+# Do NOT add this label to:
+#   - mediahub-app-redis      (data loss on accidental restart)
+#   - mediahub-sb-prod-*      (Supabase stack — has its own update cadence)
+#   - mediahub-sb-dev-*       (ditto)
+#   - nginx-hls               (host-network, restart breaks live streams)
