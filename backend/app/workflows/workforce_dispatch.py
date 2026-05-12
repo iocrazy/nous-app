@@ -40,7 +40,6 @@ safety net.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Dict
 
@@ -49,41 +48,37 @@ from loguru import logger
 
 
 @DBOS.step()
-def outbox_dispatch_tick_step() -> Dict[str, int]:
-    """Synchronous wrapper around the existing async OutboxDispatcher.
+async def outbox_dispatch_tick_step() -> Dict[str, int]:
+    """Drain agent_outbox via OutboxDispatcher.
 
-    Returns the same shape OutboxDispatcher.tick() returns so the
-    scheduled workflow can log it for observability:
+    Returns OutboxDispatcher.tick() shape so the scheduled workflow can
+    log it for observability:
         {"scanned": int, "delivered": int, "errors": int}
     """
     from app.services.workforce.outbox_dispatcher import OutboxDispatcher
 
-    async def _do() -> Dict[str, int]:
-        dispatcher = OutboxDispatcher()
-        return await dispatcher.tick()
-
-    return asyncio.run(_do())
+    dispatcher = OutboxDispatcher()
+    return await dispatcher.tick()
 
 
 @DBOS.step()
-def inbox_dispatch_tick_step() -> Dict[str, int]:
-    """Synchronous wrapper around the existing async InboxProcessor.
+async def inbox_dispatch_tick_step() -> Dict[str, int]:
+    """Drain agent_inbox via InboxProcessor.
 
     Returns InboxProcessor.tick()'s shape:
         {"agents_scanned": int, "tasks_enqueued": int, ...}
     """
     from app.services.workforce.inbox_processor import InboxProcessor
 
-    async def _do() -> Dict[str, int]:
-        processor = InboxProcessor()
-        return await processor.tick()
-
-    return asyncio.run(_do())
+    processor = InboxProcessor()
+    return await processor.tick()
 
 
 @DBOS.scheduled("*/5 * * * * *")  # every 5 seconds
 @DBOS.workflow()
-def outbox_dispatch_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
+async def outbox_dispatch_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
     """Drain undelivered agent_outbox rows.
 
     Workflow_id is auto-set by DBOS to
@@ -91,7 +86,7 @@ def outbox_dispatch_workflow(scheduled_time: datetime, actual_time: datetime) ->
     cluster — only one worker fires per scheduled tick.
     """
     try:
-        result = outbox_dispatch_tick_step()
+        result = await outbox_dispatch_tick_step()
     except Exception as e:
         # Step retries handle transient failures; if we still get here,
         # log loud and let the next tick try again. Don't raise — DBOS
@@ -106,10 +101,12 @@ def outbox_dispatch_workflow(scheduled_time: datetime, actual_time: datetime) ->
 
 @DBOS.scheduled("*/10 * * * * *")  # every 10 seconds
 @DBOS.workflow()
-def inbox_dispatch_workflow(scheduled_time: datetime, actual_time: datetime) -> None:
+async def inbox_dispatch_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
     """Drain unread agent_inbox rows into the agent_workforce queue."""
     try:
-        result = inbox_dispatch_tick_step()
+        result = await inbox_dispatch_tick_step()
     except Exception as e:
         logger.exception(f"[workforce-dispatch] inbox tick crashed: {e}")
         return
