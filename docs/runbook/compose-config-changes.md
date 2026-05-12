@@ -85,6 +85,8 @@ If we ever change this calculus, the place to wire it is
 
 ## Related
 
+- [`watchtower-config.md`](./watchtower-config.md) — Watchtower poll
+  interval / HTTP API config + the 2026-05-12 假成功-deploy incident
 - [#172 PR — gateway/worker split](https://github.com/iocrazy/mediahub/pull/172)
 - [#176 PR — workflow health classifier](https://github.com/iocrazy/mediahub/pull/176)
   (this is what triggered the executor cascade that masked the

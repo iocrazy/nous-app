@@ -25,6 +25,7 @@ Result: `mediahub-admin` 192.168.50.9:3097 was 100% unreachable for an unknown d
 | `docker/docker-compose.yml` | Future / new deploys | Aspirational + future-ready (gateway/worker split, autoheal sidecar, pre-bake DBOS env). Used by anyone setting up a fresh NAS. |
 | `deploy/nas/docker-compose.yml` | Current prod NAS | Mirrors what's running RIGHT NOW. Updated whenever the NAS file changes. Source of truth for "what would `docker compose up -d` actually do on the NAS today". |
 | `deploy/nas/.env.example` | Current prod NAS | Mirrors the env keys (no values) the NAS .env defines. Recovery from scratch checklist. |
+| `deploy/nas/watchtower-docker-compose.yml` | Watchtower stack | Target state for the **separate** Portainer-managed watchtower stack (live at `/volume1/docker/portainer/data/compose/2/`). Sets POLL_INTERVAL=300 + real HTTP API. See [`docs/runbook/watchtower-config.md`](../../docs/runbook/watchtower-config.md). |
 
 ## Sync procedure
 
@@ -78,5 +79,6 @@ Manual reconciliation has the property that **every NAS change ends up in a git 
 ## See also
 
 - `docs/runbook/compose-config-changes.md` — Watchtower vs `docker compose up -d` semantics
+- `docs/runbook/watchtower-config.md` — POLL_INTERVAL + HTTP API token + the 2026-05-12 假成功-deploy incident
 - `docs/runbook/asyncpg-canary.md` — DBOS / Supavisor connection knobs
 - Memory file `reference_nas_ssh.md` — NAS SSH access + known gotchas
