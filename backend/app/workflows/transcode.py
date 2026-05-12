@@ -25,7 +25,6 @@ What's deferred:
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any, Optional
 
@@ -34,26 +33,23 @@ from loguru import logger
 
 
 @DBOS.step()
-def resolve_resource_title_step(resource_id: str, version_id: str) -> str:
+async def resolve_resource_title_step(resource_id: str, version_id: str) -> str:
     """Cheap lookup for log/audit messages. Falls back to first 8 chars
     of version_id when filename isn't available."""
     from app.repositories.resources_repository import ResourcesRepository
 
-    async def _do() -> str:
-        repo = ResourcesRepository()
-        try:
-            resource = await repo.get_resource_by_id(resource_id)
-            if resource and resource.get("filename"):
-                return resource["filename"]
-        except Exception:
-            pass
-        return version_id[:8]
-
-    return asyncio.run(_do())
+    repo = ResourcesRepository()
+    try:
+        resource = await repo.get_resource_by_id(resource_id)
+        if resource and resource.get("filename"):
+            return resource["filename"]
+    except Exception:
+        pass
+    return version_id[:8]
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3)
-def transcode_to_hls_step(
+async def transcode_to_hls_step(
     resource_id: str,
     version_id: str,
     user_id: Optional[str],
@@ -64,42 +60,39 @@ def transcode_to_hls_step(
     `task_progress:{user_id}` for the WebSocket layer."""
     from app.services.media.transcode.transcode_service import TranscodeService
 
-    async def _do() -> Optional[str]:
-        svc = TranscodeService()
+    svc = TranscodeService()
 
-        # Build progress callback only if we have a user channel to publish to.
-        on_progress = None
-        if user_id:
-            from app.core.redis import get_sync_redis
+    # Build progress callback only if we have a user channel to publish to.
+    on_progress = None
+    if user_id:
+        from app.core.redis import get_sync_redis
 
-            _redis = get_sync_redis()
-            _channel = f"task_progress:{user_id}"
+        _redis = get_sync_redis()
+        _channel = f"task_progress:{user_id}"
 
-            async def _report_progress(progress: int, subtitle: str = "") -> None:
-                pct = min(max(int(progress), 0), 99)
-                try:
-                    _redis.publish(
-                        _channel,
-                        json.dumps(
-                            {
-                                "workflow_kind": "transcode",
-                                "version_id": version_id,
-                                "status": "transcoding",
-                                "percent": pct,
-                                "subtitle": subtitle,
-                            }
-                        ),
-                    )
-                except Exception:
-                    pass
+        async def _report_progress(progress: int, subtitle: str = "") -> None:
+            pct = min(max(int(progress), 0), 99)
+            try:
+                _redis.publish(
+                    _channel,
+                    json.dumps(
+                        {
+                            "workflow_kind": "transcode",
+                            "version_id": version_id,
+                            "status": "transcoding",
+                            "percent": pct,
+                            "subtitle": subtitle,
+                        }
+                    ),
+                )
+            except Exception:
+                pass
 
-            on_progress = _report_progress
+        on_progress = _report_progress
 
-        return await svc.transcode_version(
-            resource_id, version_id, on_progress=on_progress
-        )
-
-    hls_path = asyncio.run(_do())
+    hls_path = await svc.transcode_version(
+        resource_id, version_id, on_progress=on_progress
+    )
     if hls_path:
         return {
             "status": "completed",
@@ -116,7 +109,7 @@ def transcode_to_hls_step(
 
 
 @DBOS.step()
-def log_transcode_outcome_step(
+async def log_transcode_outcome_step(
     *,
     user_id: Optional[str],
     resource_title: str,
@@ -130,52 +123,49 @@ def log_transcode_outcome_step(
     from app.repositories.resources_repository import ResourcesRepository
     from app.repositories.user_logs_repository import log_user_action
 
-    async def _do() -> None:
-        if outcome["status"] == "completed":
-            if user_id:
-                try:
-                    await log_user_action(
-                        user_id=user_id,
-                        action="transcode",
-                        message=f"Transcode completed: {resource_title[:50]}...",
-                        status="success",
-                        details={
-                            "resource_id": resource_id,
-                            "version_id": version_id,
-                            "hls_path": outcome.get("hls_path"),
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"[transcode] log_user_action: {e}")
-            return
-
-        # failed
-        try:
-            repo = ResourcesRepository()
-            await repo.update_version(version_id, {"transcode_status": "failed"})
-        except Exception as e:
-            logger.warning(f"[transcode] update_version on failure: {e}")
+    if outcome["status"] == "completed":
         if user_id:
             try:
                 await log_user_action(
                     user_id=user_id,
                     action="transcode",
-                    message=f"Transcode failed: {resource_title[:50]}...",
-                    status="error",
+                    message=f"Transcode completed: {resource_title[:50]}...",
+                    status="success",
                     details={
                         "resource_id": resource_id,
                         "version_id": version_id,
-                        "error": str(outcome.get("error", ""))[:200],
+                        "hls_path": outcome.get("hls_path"),
                     },
                 )
             except Exception as e:
-                logger.warning(f"[transcode] log_user_action on failure: {e}")
+                logger.warning(f"[transcode] log_user_action: {e}")
+        return
 
-    asyncio.run(_do())
+    # failed
+    try:
+        repo = ResourcesRepository()
+        await repo.update_version(version_id, {"transcode_status": "failed"})
+    except Exception as e:
+        logger.warning(f"[transcode] update_version on failure: {e}")
+    if user_id:
+        try:
+            await log_user_action(
+                user_id=user_id,
+                action="transcode",
+                message=f"Transcode failed: {resource_title[:50]}...",
+                status="error",
+                details={
+                    "resource_id": resource_id,
+                    "version_id": version_id,
+                    "error": str(outcome.get("error", ""))[:200],
+                },
+            )
+        except Exception as e:
+            logger.warning(f"[transcode] log_user_action on failure: {e}")
 
 
 @DBOS.workflow()
-def transcode_workflow(
+async def transcode_workflow(
     resource_id: str,
     version_id: str,
     *,
@@ -187,9 +177,9 @@ def transcode_workflow(
     the same version short-circuits to the cached output (replaces the
     legacy `acquire_or_subscribe` dedup pattern).
     """
-    title = resolve_resource_title_step(resource_id, version_id)
-    outcome = transcode_to_hls_step(resource_id, version_id, user_id)
-    log_transcode_outcome_step(
+    title = await resolve_resource_title_step(resource_id, version_id)
+    outcome = await transcode_to_hls_step(resource_id, version_id, user_id)
+    await log_transcode_outcome_step(
         user_id=user_id,
         resource_title=title,
         resource_id=resource_id,
