@@ -540,22 +540,37 @@ class YtdlpService:
              via YT_DLP_PROXY_YOUTUBE / YT_DLP_PROXY / HTTPS_PROXY env.
              yt-dlp can only use ONE --proxy at a time, so when the user
              needs an external VPN proxy for international content the
-             boundary SsrfProxy is bypassed for that single hop. The
-             external proxy provides its own egress controls; the L4
-             firewall (B9-H) gives kernel-level fallback.
-          2. BOUNDARY SsrfProxy (settings.SSRF_PROXY_URL) for everything
-             else (Douyin / Bilibili / unknown). yt-dlp routes through
-             our local proxy which validates URL + redirect destinations
-             via the unified boundary policy.
-          3. No proxy if neither is set (degraded — happens during dev
-             before lifespan starts the proxy).
+             boundary SsrfProxy is bypassed for that single hop.
+          2. TRUSTED PLATFORM direct connect (no proxy) for any URL whose
+             host matches URLRouter.PLATFORM_PATTERNS (douyin / bilibili /
+             xhs / tiktok / instagram). The entry URL was already validated
+             at parse time via app.boundary.validate_url, and yt-dlp's
+             internal hops then target the platform's hardcoded extractor
+             endpoints (api.bilibili.com, *.bilivideo.com, ...) which are
+             NOT user-controlled — there is no SSRF surface to defend at
+             this layer. 2026-05-13 incident: routing every hop through
+             SsrfProxy added a transparent TCP tunnel hop without idle
+             timeout, so when bilibili upstream went silent post-TLS-
+             handshake the tunnel stalled for 60s before yt-dlp's own
+             socket-timeout fired (ssrf_proxy.py::_pipe). Bypassing for
+             trusted hosts lets yt-dlp see upstream failures directly and
+             retry via --retries 3 within its own timeout budget.
+          3. BOUNDARY SsrfProxy (settings.SSRF_PROXY_URL) only for
+             *unknown* hostnames — defense-in-depth, since unknown URLs
+             could theoretically be user-controlled and might dispatch
+             yt-dlp's generic webpage scraper.
+          4. No proxy if neither path applies (degraded — happens during
+             dev before lifespan starts the proxy).
         """
         import os
         from urllib.parse import urlparse
 
         from app.core.config import settings
+        from app.services.media.parsers.url_router import URLRouter
 
         host = (urlparse(url).hostname or "").lower()
+
+        # Step 1: international VPN proxy for YouTube/Twitter.
         needs_external_hosts = ("youtube.com", "youtu.be", "twitter.com", "x.com")
         if any(h in host for h in needs_external_hosts):
             external = (
@@ -567,9 +582,17 @@ class YtdlpService:
             )
             if external:
                 return ["--proxy", external]
-            # Fall through to boundary proxy if no external configured.
+            # No external configured → fall through to trusted-platform
+            # direct connect (YouTube is in PLATFORM_PATTERNS).
 
-        # Default: route through the boundary SsrfProxy if it's running.
+        # Step 2: any URL detected as a known platform connects directly.
+        # Entry URL was validated at boundary; yt-dlp's downstream hops
+        # are platform-internal endpoints, not user-influenced.
+        platform, _ = URLRouter.detect_platform(url)
+        if platform != "unknown":
+            return []
+
+        # Step 3: unknown host → SsrfProxy defense-in-depth (if running).
         boundary_proxy = settings.SSRF_PROXY_URL
         if boundary_proxy:
             return ["--proxy", boundary_proxy]
