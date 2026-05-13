@@ -197,7 +197,23 @@ def _do_douyin_download(
                     )
 
                 # ── BrowserAuto fallback: re-parse via DrissionPage when httpx+yt-dlp both fail ──
-                if results["video"] != "completed" and original_url:
+                # DrissionPage + DouyinFormatter are douyin-specific (the
+                # browser scraper targets douyin's share page DOM, and the
+                # formatter expects aweme_detail-shaped input). Running
+                # them on bilibili / youtube / etc. wastes ~30s loading a
+                # headless Chromium and always returns empty parsed data.
+                # 2026-05-13: confirmed on prod — bilibili tasks reached
+                # this branch and spent 30s in DrissionPage before the
+                # PR #264 partial-fail raise kicked in. Skip for non-
+                # douyin platforms; let the raise fire immediately.
+                source_platform = (
+                    (media or {}).get("source_platform") if media else None
+                )
+                if (
+                    results["video"] != "completed"
+                    and original_url
+                    and source_platform in ("douyin", "tiktok")
+                ):
                     logger.info(
                         f"[Download/Exec] video: httpx+yt-dlp both failed, trying BrowserAuto "
                         f"(DrissionPage) to get fresh URLs for {platform_id}"
