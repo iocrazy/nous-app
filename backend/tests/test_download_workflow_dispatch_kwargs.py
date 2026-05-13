@@ -33,9 +33,7 @@ def _signature_accepts(fn, kwarg: str) -> bool:
     sig = inspect.signature(fn)
     if kwarg in sig.parameters:
         return True
-    return any(
-        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-    )
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
 
 
 def _kwarg_keys_passed_to_download_workflow(source: str) -> set[str]:
