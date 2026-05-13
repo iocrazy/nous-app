@@ -189,7 +189,21 @@ jobs:
           EXPECTED_SHA_SHORT="${EXPECTED_SHA_FULL:0:7}"
           echo "⏳ Polling $PROD_VERSION_URL for commit_sha starting with $EXPECTED_SHA_SHORT..."
 
-          DEADLINE=$(( $(date +%s) + 600 ))   # 10-minute budget
+          # 15-minute budget — 2026-05-13 smoke test (run #25771304695)
+          # landed in 11 min, 25 sec over the original 10-min limit. Path
+          # breakdown when the webhook trigger no-ops (current reality
+          # until WATCHTOWER_URL is publicly routed to NAS:8083):
+          #
+          #   t+0:00  verify step starts (image already in ACR)
+          #   t+0–5:00  wait for Watchtower's 5-min poll cycle
+          #   t+5:30  Watchtower stops + recreates container
+          #   t+6:00–8:00  uv sync inside container (~2 min, not pre-baked)
+          #   t+8:30  uvicorn up, /api/version serves new SHA
+          #
+          # 15-min budget gives ~2× headroom for that path. Once the
+          # webhook fast-path actually works, this can drop back to 10
+          # since fast-path completes within 3-4 min total.
+          DEADLINE=$(( $(date +%s) + 900 ))
           ATTEMPT=0
           while [ "$(date +%s)" -lt "$DEADLINE" ]; do
             ATTEMPT=$((ATTEMPT + 1))
@@ -213,9 +227,9 @@ jobs:
             sleep 15
           done
 
-          echo "::error::Deploy verify timed out after 10 min. Prod did not pick up commit $EXPECTED_SHA_SHORT."
+          echo "::error::Deploy verify timed out after 15 min. Prod did not pick up commit $EXPECTED_SHA_SHORT."
           echo "## ❌ Deploy NOT verified" >> $GITHUB_STEP_SUMMARY
-          echo "Watchtower webhook reported success but prod is still on the previous SHA after 10 minutes." >> $GITHUB_STEP_SUMMARY
+          echo "Watchtower webhook reported success but prod is still on the previous SHA after 15 minutes." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Run on NAS to force-recreate:" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
