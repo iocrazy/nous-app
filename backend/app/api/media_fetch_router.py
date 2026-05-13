@@ -300,12 +300,6 @@ async def fetch_media_by_type(
                         "duration",
                         "cover_urls",
                         "video_download_urls",
-                        # ytdlp_formats: stream URLs + headers, feeds the
-                        # DirectStream downloader path (migration 216).
-                        # Token-limited (~hours), MUST be refreshed on
-                        # every Fetch Video — that's what this re-parse
-                        # is for.
-                        "ytdlp_formats",
                         "like_count",
                         "comment_count",
                         "hashtags",

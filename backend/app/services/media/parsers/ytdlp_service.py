@@ -485,17 +485,6 @@ class YtdlpService:
         tags = ytdlp_info.get("tags") or []
         hashtags = " ".join(f"#{t}" for t in tags[:20]) if tags else None
 
-        # Preserve formats[] so the download stage can pull stream m4s
-        # directly via httpx + ffmpeg merge, bypassing a second yt-dlp
-        # invocation. Without this the download stage re-fetches the
-        # share-page HTML / wbi-sign / playurl API and is exactly where
-        # the 2026-05-13 bilibili 60s upstream stall hit.
-        #
-        # Spike confirmed (2026-05-13): video.m4s 0.72s for 12MB,
-        # audio.m4s 2.4s for 12MB, ffmpeg -c copy merge ~instant —
-        # ~10-20× faster than re-running yt-dlp.
-        ytdlp_formats = YtdlpService._project_formats(ytdlp_info.get("formats") or [])
-
         return {
             "platform_id": platform_id,
             "source_platform": platform,
@@ -516,45 +505,7 @@ class YtdlpService:
             "published_at": published_at,
             "cover_urls": cover_urls,
             "video_download_urls": [original_url],
-            "ytdlp_formats": ytdlp_formats,
         }
-
-    @staticmethod
-    def _project_formats(raw_formats: list[dict]) -> list[dict]:
-        """Project raw yt-dlp formats[] to the storage subset.
-
-        Kept fields:
-          * format_id, url, ext, vcodec, acodec — selection inputs
-          * tbr, filesize / filesize_approx, width, height — UI + ranking
-          * http_headers — REQUIRED for bilibili m4s direct fetch
-            (Referer header, in particular)
-
-        Anything else is dropped to keep the jsonb column lean. The
-        stream URLs are time-limited (token in querystring expires in
-        hours), so this whole projection is meant to be re-populated on
-        every Fetch Video re-parse (media_fetch_router yt-dlp branch)."""
-        projected: list[dict] = []
-        for f in raw_formats:
-            if not isinstance(f, dict):
-                continue
-            url = f.get("url")
-            if not url:
-                continue
-            projected.append(
-                {
-                    "format_id": f.get("format_id"),
-                    "url": url,
-                    "ext": f.get("ext"),
-                    "vcodec": f.get("vcodec"),
-                    "acodec": f.get("acodec"),
-                    "tbr": f.get("tbr"),
-                    "filesize": f.get("filesize") or f.get("filesize_approx"),
-                    "width": f.get("width"),
-                    "height": f.get("height"),
-                    "http_headers": f.get("http_headers") or {},
-                }
-            )
-        return projected
 
     @staticmethod
     async def _fetch_bilibili_stats(bvid: str) -> Optional[dict]:
