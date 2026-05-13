@@ -486,7 +486,21 @@ export const fetchLibraryPaginated = async (
     // failure, so log at debug (still visible in DevTools verbose mode
     // but doesn't fire console.error + the React fiber-unwind cascade)
     // and re-throw so callers can ``catch`` and skip state updates.
-    if (err?.name === 'AbortError') {
+    //
+    // 2026-05-13: prod showed 284× `Library query failed: AbortError`
+    // console.error on a single library load — `err.name === 'AbortError'`
+    // didn't match. postgrest-js sometimes re-throws the AbortError as
+    // itself (name preserved), but other times wraps it in a plain Error
+    // whose `name` is undefined but `message` still carries
+    // "AbortError: signal is aborted without reason". Recognise the
+    // wrapped form via the signal flag + a message-substring check;
+    // useLibrary already did the same defensively at its catch level,
+    // but by then the console.error had already fired here.
+    const isAbort =
+      err?.name === 'AbortError' ||
+      Boolean(signal?.aborted) ||
+      (typeof err?.message === 'string' && err.message.includes('aborted'));
+    if (isAbort) {
       console.debug('Library query aborted (in-flight cancelled by next load)');
       throw err;
     }
