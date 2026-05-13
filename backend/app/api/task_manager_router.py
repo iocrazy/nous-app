@@ -268,9 +268,11 @@ async def retry_task(task_id: str, auth: AuthDep):
                 "download",
                 dbos_workflow_callable=download_workflow,
                 dbos_workflow_kwargs={
+                    # download_workflow doesn't take `url` (PR #254 dropped
+                    # url plumbing) — passing it TypeErrors the workflow
+                    # before it starts.
                     "platform_id": media_id,
                     "user_id": user_id,
-                    "url": None,  # Douyin path
                     "download_video": want_video,
                     "download_cover": want_cover or True,
                     "media_type": int(media.get("media_type") or 0),
