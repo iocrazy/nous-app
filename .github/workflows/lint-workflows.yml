@@ -1,0 +1,47 @@
+# Lint GitHub Actions workflow YAML on every PR that touches them.
+#
+# Why: PR #253 broke master's deploy workflow with a multi-line
+# `python3 -c "..."` heredoc inside `run: |`. The Python continuation
+# lines (`try:`/`except:`) at column 0 made YAML parse the whole file
+# as a malformed map. All 4 follow-up deploy runs (PRs #252-#255)
+# silently failed on the ACR-login step because the workflow file
+# itself wouldn't parse cleanly. Hotfix in PR #256 unblocked it but
+# cost a full CI cycle.
+#
+# Scope of this gate (kept narrow on purpose):
+# - YAML syntax    — block (the actual incident-class regression)
+# - actionlint syntax / unknown-action / expression-typo  — block
+# - shellcheck *errors*  — block
+# - shellcheck info/style/warning  — DON'T block (would gate on the
+#   repo's pre-existing tech debt without adding signal)
+name: Lint workflows
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:latest
+        with:
+          # `-shellcheck=...` flag sets the path/args for the bundled
+          # shellcheck invocation. Setting --severity=error means we
+          # only fail on shellcheck's `error` class — info/warning/
+          # style (e.g. SC2086 unquoted variable, SC2129 multi-redirect)
+          # are reported but don't fail CI. Adjust upward as the repo's
+          # workflow hygiene improves.
+          args: -color -shellcheck="shellcheck --severity=error"
