@@ -121,9 +121,88 @@ def _do_douyin_download(
                     f"[Download/Exec] video failed for {platform_id}: {error_msg}"
                 )
 
-                # ── yt-dlp fallback: try downloading via yt-dlp if httpx failed ──
+                # ── DirectStream: pull m4s directly from cached ytdlp_formats ──
+                # Preferred over yt-dlp subprocess because:
+                #   * Skips the second webpage→wbi-sign→playurl round-trip
+                #     (root cause of the 2026-05-13 bilibili 60s stall)
+                #   * 10-20× faster (spike: 12MB video.m4s in 0.72s vs
+                #     yt-dlp full chain 4-60s)
+                #   * Direct httpx → ffmpeg merge, no subprocess re-entry
+                # Falls through to yt-dlp subprocess on any failure
+                # (token expired / network blip / ffmpeg missing).
+                ytdlp_formats = media.get("ytdlp_formats") if media else None
+                if ytdlp_formats:
+                    try:
+                        from app.services.media.downloader.direct_stream import (
+                            DirectStreamUnavailable,
+                            download_from_ytdlp_formats,
+                        )
+
+                        source_platform = (
+                            media.get("source_platform", "unknown")
+                            if media
+                            else "unknown"
+                        )
+                        media_id = (
+                            str(media["id"])
+                            if media and media.get("id")
+                            else platform_id
+                        )
+                        storage_dir, relative_prefix = Utils.create_web_resource_path(
+                            source_platform, media_id
+                        )
+
+                        async def _ds_progress(downloaded: int, total: int):
+                            await tracker.update(downloaded, total)
+
+                        ds_result = run_async(
+                            download_from_ytdlp_formats(
+                                ytdlp_formats=ytdlp_formats,
+                                output_dir=str(storage_dir),
+                                platform_id=platform_id,
+                                progress_callback=_ds_progress,
+                            )
+                        )
+                        file_name = os.path.basename(ds_result.file_path)
+                        relative_path = f"{relative_prefix}/{file_name}"
+                        from app.repositories.media_repository import (
+                            MediaRepository as _MR_ds,
+                        )
+
+                        run_async(
+                            _MR_ds().mark_media_as_downloaded(
+                                platform_id=platform_id,
+                                download_path=relative_path,
+                                duration=0,
+                                storage_size=ds_result.file_size,
+                            )
+                        )
+                        run_async(
+                            DownloaderService.optimize_video_for_streaming(
+                                ds_result.file_path
+                            )
+                        )
+                        results["video"] = DownloadStatus.COMPLETED.value
+                        logger.success(
+                            f"[Download/Exec] video: DirectStream succeeded for "
+                            f"{platform_id} (v={ds_result.video_format_id} "
+                            f"a={ds_result.audio_format_id})"
+                        )
+                    except DirectStreamUnavailable as e:
+                        logger.info(
+                            f"[Download/Exec] video: DirectStream skipped for "
+                            f"{platform_id} (will try yt-dlp): {e}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[Download/Exec] video: DirectStream failed for "
+                            f"{platform_id} (will try yt-dlp): "
+                            f"{type(e).__name__}: {e}"
+                        )
+
+                # ── yt-dlp fallback: try downloading via yt-dlp if DirectStream not OK ──
                 original_url = media.get("original_url") if media else None
-                if original_url:
+                if results["video"] != "completed" and original_url:
                     logger.info(
                         f"[Download/Exec] video: httpx failed, trying yt-dlp fallback "
                         f"with original URL for {platform_id}"
