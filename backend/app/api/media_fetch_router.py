@@ -270,6 +270,53 @@ async def fetch_media_by_type(
                 logger.warning(
                     f"[Refetch] Re-parse failed for {platform_id}, proceeding with existing URLs: {e}"
                 )
+        elif platform and original_url:
+            # yt-dlp platforms (bilibili / youtube / twitter / ...). Re-
+            # parse before dispatch so title / cover / counters / tags
+            # reflect the current state — catches taken-down videos
+            # early and refreshes 资源库 metadata alongside the download.
+            #
+            # video_download_urls intentionally stays as [page_url] on
+            # yt-dlp platforms: the real stream URL is resolved by yt-
+            # dlp at download time (DASH streams + ffmpeg merge,
+            # token-protected). Storing it here would be stale within
+            # hours.
+            try:
+                from app.services.media.parsers.ytdlp_service import YtdlpService
+
+                validated = await validate_url_async(original_url)
+                ytdlp_info = await YtdlpService.fetch_metadata(
+                    validated, user_id=auth.user_id
+                )
+                new_parsed = YtdlpService._map_metadata_to_media(
+                    ytdlp_info, original_url
+                )
+                if new_parsed:
+                    update_fields: dict = {}
+                    for field in [
+                        "title",
+                        "description",
+                        "author",
+                        "duration",
+                        "cover_urls",
+                        "video_download_urls",
+                        "like_count",
+                        "comment_count",
+                        "hashtags",
+                    ]:
+                        if new_parsed.get(field) is not None:
+                            update_fields[field] = new_parsed[field]
+                    if update_fields:
+                        await repo.update(platform_id, update_fields)
+                        logger.info(
+                            f"[Refetch] yt-dlp re-parsed {platform_id}: "
+                            f"updated {sorted(update_fields.keys())}"
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"[Refetch] yt-dlp re-parse failed for {platform_id}, "
+                    f"proceeding with existing metadata: {e}"
+                )
 
         dispatch_result = await dedup_and_dispatch(
             platform_id=platform_id,
