@@ -80,3 +80,43 @@ def test_workflow_still_marks_parsed_media_failed_before_raising():
         "before raising; UI reads those decoration fields."
     )
     assert "await repo.update(platform_id, fail_updates)" in except_body
+
+
+def test_workflow_raises_when_video_partial_failed():
+    """Static check: after run_download_step returns, if download_video was
+    requested but results["video"] != "completed", the workflow must
+    raise — not silently return status="partial". Otherwise DBOS treats
+    the workflow as SUCCESS, trigger stamps task_tracking.phase=completed,
+    and UI shows ✅ next to tasks that have no video file (the 2026-05-13
+    bilibili "cover-only" symptom).
+
+    This is the second half of CLAUDE.md 路线 C 第 4 条 — the except
+    branch (catastrophic exception) was covered by PR #252, but
+    "run_download_step returned a partial-failure dict" wasn't, until
+    this fix."""
+    source = inspect.getsource(download_module.download_workflow)
+
+    # Locate the partial-failure check block. We anchor on the
+    # post-step result extraction so the test moves with the code.
+    assert 'results = download_result["results"]' in source
+
+    # The check must compare results["video"] against "completed" AND
+    # raise. We don't pin exact wording so the message can evolve.
+    assert 'results.get("video") != "completed"' in source, (
+        "download_workflow must short-circuit when video was requested "
+        "but didn't complete — otherwise the workflow returns "
+        '"partial" and DBOS marks task_tracking.phase=completed even '
+        "though no file is on disk. See CLAUDE.md 路线 C 第 4 条."
+    )
+
+    # And the branch must raise (not return).
+    # We grep around the partial-check line for `raise` within the
+    # immediate block (capped to avoid false positives from the
+    # earlier except branch).
+    check_idx = source.index('results.get("video") != "completed"')
+    next_section = source.find("# 3.", check_idx)
+    block = source[check_idx : next_section if next_section != -1 else len(source)]
+    assert "raise " in block, (
+        "Partial-failure branch must raise, not return — see "
+        "CLAUDE.md 路线 C 第 4 条."
+    )

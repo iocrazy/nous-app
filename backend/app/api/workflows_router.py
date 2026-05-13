@@ -256,48 +256,109 @@ async def restart_workflow(
     }
 
 
+def _serialize_task_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Project a task_tracking row into the workflows list shape.
+
+    Renames the FK `dbos_workflow_id` to `workflow_id` so the wire
+    contract reads naturally — every consumer thinks in terms of
+    workflows, not tracking-row internals."""
+    return {
+        "workflow_id": row.get("dbos_workflow_id"),
+        "task_type": row.get("task_type"),
+        "task_kind": row.get("task_kind"),
+        "status": row.get("status"),
+        "phase": row.get("phase"),
+        "title": row.get("title"),
+        "subtitle": row.get("subtitle"),
+        "progress": row.get("progress"),
+        "error_msg": row.get("error_msg"),
+        "created_at": row.get("created_at"),
+        "started_at": row.get("started_at"),
+        "completed_at": row.get("completed_at"),
+        "updated_at": row.get("updated_at"),
+        "media_id": row.get("media_id"),
+        "resource_id": row.get("resource_id"),
+        "group_id": row.get("group_id"),
+    }
+
+
+# DBOS status names some legacy callers may still pass on the query
+# string. task_tracking uses lowercase business statuses, so we
+# transparently map the old values across.
+_LEGACY_DBOS_STATUS_MAP = {
+    "PENDING": "pending",
+    "ENQUEUED": "pending",
+    "SUCCESS": "completed",
+    "ERROR": "failed",
+    "RETRIES_EXCEEDED": "failed",
+    "CANCELLED": "cancelled",
+}
+
+
 @router.get("")
 async def list_workflows(
     auth: AuthDep,
     name: Optional[str] = Query(
-        None, description="Workflow name filter (e.g. parse_workflow)"
+        None,
+        description="Filter by task_type (e.g. download / parse / ai_transcription)",
     ),
     workflow_status: Optional[str] = Query(
         None,
-        description="DBOS status filter: PENDING / ENQUEUED / SUCCESS / ERROR / CANCELLED",
+        description=(
+            "Status filter (task_tracking values): pending / processing / "
+            "completed / failed / cancelled / lost. Legacy DBOS names "
+            "(PENDING / SUCCESS / ERROR / ...) are still accepted and mapped."
+        ),
     ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     sort_desc: bool = Query(True, description="Newest first"),
 ) -> dict[str, Any]:
-    """List the authenticated user's DBOS workflows.
+    """List the authenticated user's workflows from task_tracking.
 
-    Backed directly by `dbos.workflow_status` — no task_tracking read.
-    Frontend Task Center should subscribe via Supabase Realtime to
-    `dbos.workflow_status` for push updates and use this endpoint for
-    initial load + pagination.
+    Reads task_tracking (CLAUDE.md 路线 C rule 1 — task_tracking is the
+    UI source of truth). Previously this endpoint read dbos.workflow_status
+    directly, which could diverge from the trigger-mirrored task_tracking
+    state during the brief sync window — risking the same dual-source
+    inconsistency that motivated 路线 C ("Engine 108 queued but Settings
+    only 38 rows", 2026-05-05).
+
+    Per-workflow detail / control endpoints (/status, /events, /steps,
+    /cancel, /resume, /restart) still call DBOS directly because they
+    need execution-engine state (input/output, step list, cancel signals)
+    that task_tracking deliberately does NOT carry.
     """
-    if not dbos_orchestrator.is_enabled():
-        raise HTTPException(503, detail="DBOS not enabled")
-    from dbos import DBOS
+    from app.db import get_async_supabase_admin
+
+    sb = await get_async_supabase_admin()
+    q = (
+        sb.table("task_tracking")
+        .select(
+            "dbos_workflow_id, task_type, task_kind, status, phase, "
+            "title, subtitle, progress, error_msg, created_at, "
+            "started_at, completed_at, updated_at, media_id, "
+            "resource_id, group_id"
+        )
+        .eq("user_id", str(auth.user_id))
+    )
+    if name:
+        q = q.eq("task_type", name)
+    if workflow_status:
+        normalized = _LEGACY_DBOS_STATUS_MAP.get(
+            workflow_status, workflow_status.lower()
+        )
+        q = q.eq("status", normalized)
+    q = q.order("created_at", desc=sort_desc).range(offset, offset + limit - 1)
 
     try:
-        rows = await DBOS.list_workflows_async(
-            user=auth.user_id,
-            name=name,
-            status=workflow_status,
-            limit=limit,
-            offset=offset,
-            sort_desc=sort_desc,
-            load_input=True,  # cheap; lets UI render "Parse <url>" titles
-            load_output=False,  # output can be large; fetch via /status
-        )
+        result = await q.execute()
     except Exception as e:
-        logger.warning(f"[workflows] list({auth.user_id[:8]}): {e}")
+        logger.warning(f"[workflows] list({str(auth.user_id)[:8]}): {e}")
         raise HTTPException(500, detail=str(e))
 
+    rows = result.data or []
     return {
-        "workflows": [_serialize_status(r, include_io=True) for r in rows],
+        "workflows": [_serialize_task_row(r) for r in rows],
         "total": len(rows),
         "offset": offset,
         "limit": limit,

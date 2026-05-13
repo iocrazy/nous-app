@@ -606,6 +606,47 @@ async def download_workflow(
     results = download_result["results"]
     has_failures = bool(download_result["failed_parts"])
 
+    # 2b. Treat "user asked for video, video didn't complete" as a full
+    # workflow failure even when cover succeeded. Without this, the
+    # workflow returned status="partial" → DBOS treated it as SUCCESS →
+    # mirror_dbos_lifecycle_to_tracking stamped task_tracking.phase
+    # =completed, while parsed_media.video_download_status stayed
+    # 'failed'. UI showed ✅ next to tasks that had no video file on
+    # disk — the "假 completed" anti-pattern (CLAUDE.md 路线 C 第 4 条).
+    #
+    # The PR #252 fix only handled catastrophic exceptions from
+    # run_download_step; this catches the orthogonal case where the
+    # step returns "partial" with video among failed_parts. Image
+    # downloads (media_type 2/68) also write their status into
+    # results["video"], so this single check covers both.
+    if download_video and results.get("video") != "completed":
+        from app.repositories.media_repository import MediaRepository
+
+        try:
+            repo = MediaRepository()
+            fail_updates: dict[str, str] = {}
+            if int(media_type) in (2, 68):
+                fail_updates["image_download_status"] = "failed"
+            else:
+                fail_updates["video_download_status"] = "failed"
+            await repo.update(platform_id, fail_updates)
+        except Exception:
+            pass
+
+        await log_download_outcome_step(
+            user_id=user_id,
+            platform_id=platform_id,
+            video_title=video_title,
+            strategy=strategy,
+            media_type=media_type,
+            outcome="failed",
+            error=f"Video download did not complete (result={results.get('video')!r})",
+        )
+        raise RuntimeError(
+            f"Video download did not complete for {platform_id}: "
+            f"video={results.get('video')!r}, failed_parts={download_result['failed_parts']!r}"
+        )
+
     # 3. Post-download bookkeeping
     finalize = await finalize_post_download_step(
         platform_id=platform_id,

@@ -124,10 +124,14 @@ class YtdlpService:
             "--no-download",
             "--no-warnings",
             "--no-playlist",
+            # 2026-05-13: bumped from 15s/2 → 30s/3 after 4 bilibili tasks
+            # silently failed (cover-only). bilibili was hitting the yt-dlp
+            # internal 20s requests-read-timeout when its CDN was slow,
+            # blowing past our 15s subprocess timeout before retries fired.
             "--socket-timeout",
-            "15",
+            "30",
             "--retries",
-            "2",
+            "3",
             *ua_args,
             *YtdlpService._get_proxy_args(url),
             *YtdlpService._get_cookie_args(url, user_id=user_id),
@@ -223,6 +227,14 @@ class YtdlpService:
             "--no-playlist",
             "--no-warnings",
             "--newline",
+            # 2026-05-13: without these, yt-dlp uses the internal
+            # requests 20s read-timeout and no retries, so a slow
+            # bilibili CDN response sinks the whole download (the
+            # exact failure that hit 4 tasks on 2026-05-13).
+            "--socket-timeout",
+            "60",
+            "--retries",
+            "3",
             "--progress-template",
             "download:%(progress._percent_str)s %(progress._downloaded_bytes)s %(progress._total_bytes_estimate)s %(progress._speed_str)s",
             *ua_args,
