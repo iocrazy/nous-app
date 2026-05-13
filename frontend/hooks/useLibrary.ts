@@ -295,9 +295,24 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   isLoadingMoreRef.current = isLoadingMore;
   isSearchActiveRef.current = isSearchActive;
 
-  // Intersection Observer for infinite scroll
-  // library.length is in deps so the observer is recreated after the grid
-  // renders (loadMoreRef.current is set by a child component via context)
+  // Intersection Observer for infinite scroll.
+  //
+  // 2026-05-13 calm-down: rootMargin shrunk from '600px' → '50px'. The
+  // 600px preload zone caused an auto-fill cascade: after a load
+  // succeeded, library.length grew → useEffect re-fired → observer
+  // recreated → if the new sentinel was within 600px of the viewport
+  // bottom (very common after a single page), `isIntersecting` was
+  // immediately true → loadMoreLibrary() fired → load completes →
+  // length grows → repeat. This presented as visible 抖动 (flashing)
+  // on the Load More UI.
+  //
+  // 50px keeps a tiny preload margin (so the next page starts loading
+  // just before the user hits the literal bottom) without firing
+  // multiple cascading pages purely on layout change.
+  //
+  // The 'belt-and-suspenders' scroll listener in DownloadsView.tsx is
+  // still active for cases where this IO can't see the sentinel
+  // (intermediate scroll containers); it has its own debouncing via rAF.
   useEffect(() => {
     if (!loadMoreRef.current) return;
     const observer = new IntersectionObserver(
@@ -307,7 +322,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
           loadMoreLibrary();
         }
       },
-      { threshold: 0.01, rootMargin: '600px' }
+      { threshold: 0.01, rootMargin: '50px' }
     );
     observer.observe(loadMoreRef.current);
     return () => observer.disconnect();

@@ -218,9 +218,13 @@ export const DownloadsView: React.FC = () => {
     if (scroller) {
       scroller.addEventListener('scroll', checkSentinel, { passive: true });
     }
-    // Also check once on mount in case the sentinel is already in zone
-    // (happens when initial page doesn't fill the viewport).
-    checkSentinel();
+    // NOTE (2026-05-13): the "also check once on mount" call was removed
+    // here. This useEffect re-mounts on every library.length / isLoadingMore
+    // change (deps below), and calling checkSentinel() synchronously on
+    // each re-mount fired the auto-fill cascade: load returns → length
+    // grows → effect remounts → checkSentinel() → loadMore again. The
+    // IntersectionObserver in useLibrary already covers the initial
+    // "sentinel in zone from page 1" case; scroll events drive the rest.
     return () => {
       if (rafId != null) cancelAnimationFrame(rafId);
       window.removeEventListener('scroll', checkSentinel);
