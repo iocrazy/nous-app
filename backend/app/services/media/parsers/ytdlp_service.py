@@ -168,7 +168,13 @@ class YtdlpService:
         if proc.returncode != 0:
             error_msg = stderr.decode("utf-8", errors="replace").strip()
             parsed_error = YtdlpService._parse_error(error_msg)
-            logger.error(f"[yt-dlp] Metadata fetch failed: {parsed_error}")
+            logger.error(
+                f"[yt-dlp] Metadata fetch failed: {parsed_error}\n"
+                f"--- raw stderr (first 2000 chars) ---\n"
+                f"{error_msg[:2000]}\n"
+                f"--- cmd argv ---\n"
+                f"{' '.join(cmd)}"
+            )
             raise RuntimeError(f"yt-dlp failed: {parsed_error}")
 
         try:
@@ -308,7 +314,19 @@ class YtdlpService:
         if proc.returncode != 0:
             error_msg = "".join(stderr_lines).strip()
             parsed_error = YtdlpService._parse_error(error_msg)
-            logger.error(f"[yt-dlp] Download failed: {parsed_error}")
+            # 2026-05-13: log raw stderr alongside the parsed-down message
+            # so we can tell *which* downstream API actually returned the
+            # error code. Without this, "Video not found (404)" hides
+            # whether the 404 came from the webpage, wbi-sign, playurl,
+            # or stream m4s — a critical distinction when debugging
+            # cookie / format / quality / risk-control issues.
+            logger.error(
+                f"[yt-dlp] Download failed: {parsed_error}\n"
+                f"--- raw stderr (first 2000 chars) ---\n"
+                f"{error_msg[:2000]}\n"
+                f"--- cmd argv ---\n"
+                f"{' '.join(cmd)}"
+            )
             raise RuntimeError(f"yt-dlp download failed: {parsed_error}")
 
         # Find the downloaded file
