@@ -235,9 +235,14 @@ async def dedup_and_dispatch(
                 "download",
                 dbos_workflow_callable=download_workflow,
                 dbos_workflow_kwargs={
+                    # download_workflow doesn't take `url` (PR #254 dropped
+                    # url plumbing). Passing it produces TypeError before the
+                    # workflow body even runs — task_tracking stays stuck on
+                    # phase=queued and the UI shows a stale "Downloading X%"
+                    # because no one updates progress on a workflow that
+                    # never started.
                     "platform_id": platform_id,
                     "user_id": user_id,
-                    "url": url,
                     "download_video": dl_video,
                     "download_cover": dl_cover,
                     "media_type": media_type,
