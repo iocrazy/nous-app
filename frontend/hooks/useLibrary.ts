@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { ParsedMedia, Video, Collection } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import {
@@ -119,8 +119,24 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   // Abort controller for in-flight library queries — cancelled on re-load/unmount
   const libraryAbortRef = useRef<AbortController | null>(null);
 
+  // State refs — read inside the useCallback-wrapped loaders so the
+  // closure stays stable across renders even when state changes. Without
+  // these, every state update gave `loadMoreLibrary` a fresh identity,
+  // which made DownloadsView's "belt-and-suspenders infinite scroll"
+  // useEffect (deps include `loadMoreLibrary`) re-fire on every realtime
+  // tick + every state update. Each re-fire called checkSentinel() at
+  // mount, which fired loadMore again, which aborted the in-flight
+  // request → 284× AbortError on a single page mount (2026-05-13 bug).
+  const stateRef = useRef({
+    currentPage,
+    nextCursor,
+    hasMoreData,
+    isLoadingMore,
+  });
+  stateRef.current = { currentPage, nextCursor, hasMoreData, isLoadingMore };
+
   // --- Data Loading ---
-  const loadLibraryData = async () => {
+  const loadLibraryData = useCallback(async () => {
     // Cancel any previous in-flight request
     libraryAbortRef.current?.abort();
     const controller = new AbortController();
@@ -173,19 +189,28 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         setInitialLoadComplete(true);
       }
     }
-  };
+  // Stable identity: state is read via stateRef / filterParamsRef.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const loadMoreLibrary = async () => {
-    if (!hasMoreData || isLoadingMore || !isSupabaseConfigured()) return;
-    if (!nextCursor) {
+  const loadMoreLibrary = useCallback(async () => {
+    const s = stateRef.current;
+    // Re-entrancy guard via ref — state updates batch, so two synchronous
+    // calls in the same render tick would both see isLoadingMore=false
+    // before setIsLoadingMore(true) flushes. The ref is mutated
+    // synchronously and prevents the double-fire that caused the abort
+    // storm.
+    if (!s.hasMoreData || s.isLoadingMore || !isSupabaseConfigured()) return;
+    if (!s.nextCursor) {
       // No cursor → no next page (or initial load hasn't completed yet).
       // Don't fall back to OFFSET — that would re-fetch page 1.
       setHasMoreData(false);
       return;
     }
+    stateRef.current.isLoadingMore = true;
     setIsLoadingMore(true);
     try {
-      const nextPage = currentPage + 1;
+      const nextPage = s.currentPage + 1;
       const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
       const controller = new AbortController();
       libraryAbortRef.current?.abort();
@@ -195,7 +220,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         isMobile ? 10 : 20,
         controller.signal,
         filterParamsRef.current,
-        nextCursor,
+        s.nextCursor,
       );
       if (controller.signal.aborted) return;
       if (result.data.length > 0) {
@@ -213,9 +238,12 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
       }
       console.error("Failed to load more library data:", err);
     } finally {
+      stateRef.current.isLoadingMore = false;
       setIsLoadingMore(false);
     }
-  };
+  // Stable identity — see comment on loadLibraryData.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch library on auth
   useEffect(() => {
