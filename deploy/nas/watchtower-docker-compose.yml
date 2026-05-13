@@ -47,6 +47,13 @@ services:
     container_name: heygo_watchtower
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # ACR private-registry auth. Without this Watchtower can SEE
+      # labelled mediahub containers but fails every pull with:
+      #   "pull access denied for crpi-...aliyuncs.com/heygo/mediahub-backend"
+      # The NAS root user did `docker login` once and the resulting
+      # credentials live in /root/.docker/config.json; mount as
+      # /config.json (the path Watchtower auto-discovers).
+      - /root/.docker/config.json:/config.json:ro
     environment:
       # 5 min poll: bounded deploy latency without burning a poll-storm.
       # The CI verify step (deploy-backend.yml) gives this 10 min to
@@ -61,6 +68,13 @@ services:
       # immediate trigger + verification.
       - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN}
       - WATCHTOWER_HTTP_API_UPDATE=true
+      # Without this, Watchtower 1.7+ treats `HTTP_API_UPDATE=true` as
+      # "HTTP only, no polling" and logs `Periodic runs are not
+      # enabled`. We want BOTH paths active: webhook from GH Actions
+      # (fast path) + 5-min poll fallback (resilience against webhook
+      # delivery failures, which is exactly the failure mode that bit
+      # us on 2026-05-12).
+      - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
 
       # Cleanup dangling old images after a successful pull. Without
       # this, /volume1 fills up over weeks of deploys.
