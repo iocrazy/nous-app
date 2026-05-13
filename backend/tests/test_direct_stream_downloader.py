@@ -24,7 +24,6 @@ from app.services.media.downloader.direct_stream import (
 )
 from app.services.media.parsers.ytdlp_service import YtdlpService
 
-
 # ────────────────────────────────────────────────────────────────
 # Format projection (ytdlp_service._project_formats)
 # ────────────────────────────────────────────────────────────────
