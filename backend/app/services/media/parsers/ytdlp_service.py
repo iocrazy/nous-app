@@ -470,7 +470,8 @@ class YtdlpService:
             if best.get("url"):
                 cover_urls.append(best["url"])
 
-        # Video download URL (the original URL, yt-dlp will handle actual download)
+        # webpage_url for original_url field (canonical landing page).
+        # NOT used as a download URL — see video_download_urls below.
         original_url = ytdlp_info.get("webpage_url") or url
 
         # Description / title
@@ -504,7 +505,16 @@ class YtdlpService:
             "hashtags": hashtags,
             "published_at": published_at,
             "cover_urls": cover_urls,
-            "video_download_urls": [original_url],
+            # Empty list — yt-dlp platforms (bilibili / youtube / twitter)
+            # have token-protected DASH streams that yt-dlp resolves at
+            # download time. Writing the page URL here (PR #266 did this)
+            # made download_strategies.py treat it as an httpx GET target,
+            # which silently downloaded the bilibili HTML page into
+            # video.mp4 and reported "moov atom not found" — every
+            # bilibili Fetch wasted ~3s before falling back to the real
+            # yt-dlp path. download_video_by_platform_id sees the empty
+            # list and returns FAILED early, so the fallback runs cleanly.
+            "video_download_urls": [],
         }
 
     @staticmethod
