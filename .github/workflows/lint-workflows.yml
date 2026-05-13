@@ -1,0 +1,37 @@
+# Lint GitHub Actions workflow YAML on every PR that touches them.
+#
+# Why: PR #253 broke master's deploy workflow with a multi-line
+# `python3 -c "..."` heredoc inside `run: |`. The continuation lines'
+# column-0 indentation made YAML parse the file as a malformed map.
+# All 4 follow-up deploy runs (PRs #252, #253, #254, #255) failed
+# silently on ACR-login because the workflow file itself wouldn't
+# parse. Hotfix in PR #256 unblocked it but cost a full CI cycle.
+#
+# actionlint catches the syntax error + dozens of other classes
+# (shellcheck on `run:` blocks, expression typos, unknown action
+# refs, etc) so this kind of regression never lands again.
+name: Lint workflows
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:latest
+        with:
+          args: -color

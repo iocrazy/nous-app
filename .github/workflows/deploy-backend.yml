@@ -63,15 +63,23 @@ jobs:
 
       - name: Extract version from tag
         id: version
+        # Use $GITHUB_REF (env, well-typed) instead of `${{ github.ref }}`
+        # so shellcheck can reason about the glob match. The literal form
+        # `[[ "${{ github.ref }}" == refs/tags/v* ]]` triggers SC2193 —
+        # shellcheck sees an opaque expression and thinks the comparison
+        # can never hold. case-on-env is unambiguous.
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "is_release=true" >> $GITHUB_OUTPUT
-          else
-            echo "version=latest" >> $GITHUB_OUTPUT
-            echo "is_release=false" >> $GITHUB_OUTPUT
-          fi
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              VERSION=${GITHUB_REF#refs/tags/}
+              echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+              echo "is_release=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "version=latest" >> "$GITHUB_OUTPUT"
+              echo "is_release=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
 
       - name: Generate build-info.json (commits since last tag/20 commits)
         run: |
