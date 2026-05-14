@@ -8,10 +8,11 @@ Upload, duplicate detection, link-existing, and permission endpoints.
 
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.library.permission_service import PermissionService
 from app.services.library.resources_service import ResourcesService
@@ -127,8 +128,13 @@ async def upload_resource(
     folder_id: Optional[str] = Query(None),
     library_id: Optional[str] = Query(None),
     file: UploadFile = File(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
-    """Upload a file to the resource library."""
+    """Upload a file to the resource library.
+
+    `_scope_guard` enforces that the caller owns `scope_id` (personal scope)
+    or is a member of it (team scope) before the handler runs.
+    """
     from app.services.infra.unified_task_manager import get_task_manager
 
     tracker = get_task_manager()

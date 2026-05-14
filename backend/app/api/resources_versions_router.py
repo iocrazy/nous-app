@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import (
     APIRouter,
     BackgroundTasks,
+    Depends,
     File,
     Header,
     HTTPException,
@@ -23,6 +24,7 @@ from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_guards import verify_resource_write_access
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.library.resources_service import ResourcesService
 from app.services.media.render.thumbnail_service import ThumbnailService
@@ -56,8 +58,13 @@ async def upload_version(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     notes: Optional[str] = Query(None),
+    _resource_guard: None = Depends(verify_resource_write_access),
 ):
-    """Upload a new version of a resource."""
+    """Upload a new version of a resource.
+
+    `_resource_guard` enforces that the caller is the resource creator
+    before the handler runs.
+    """
     try:
         if file.size and file.size > MAX_UPLOAD_SIZE:
             raise HTTPException(
