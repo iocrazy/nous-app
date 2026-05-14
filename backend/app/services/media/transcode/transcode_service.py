@@ -95,18 +95,40 @@ class TranscodeService:
 
     @staticmethod
     async def _probe_encoder(encoder_name: str) -> bool:
-        """Test if ffmpeg supports the given encoder."""
+        """Test if the given encoder actually works on THIS machine.
+
+        `ffmpeg -encoders` only reflects what ffmpeg was *compiled* with —
+        a build with nvenc support lists `h264_nvenc` even on a box with no
+        GPU. Probing that way made the NAS pick `h264_nvenc`, fail every
+        tier with "No device available", and only then fall back to
+        libx264 — one wasted failed attempt per tier plus ERROR-level log
+        spam on every transcode. Instead, actually run a 1-frame encode and
+        check the return code: a missing GPU / CUDA driver makes this fail
+        fast, so the encoder is correctly skipped.
+        """
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg",
                 "-hide_banner",
-                "-encoders",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "nullsrc=s=64x64:d=0.1",
+                "-c:v",
+                encoder_name,
+                "-frames:v",
+                "1",
+                "-f",
+                "null",
+                "-",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 **safe_popen_kwargs(),
             )
-            stdout, _ = await proc.communicate()
-            return encoder_name in stdout.decode()
+            await proc.communicate()
+            return proc.returncode == 0
         except Exception:
             return False
 
