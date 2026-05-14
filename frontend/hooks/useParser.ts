@@ -277,6 +277,7 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
 
       const response = await parseShareLink(urlInput, {
         video_bool: downloadOptions.video,
+        tag_ids: selectedTagIds,
       });
 
       // L2 backstop response: backend told us the user already owns it
@@ -394,6 +395,7 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
 
       const response = await parseBatchLinks(links, {
         video_bool: downloadOptions.video,
+        tag_ids: selectedTagIds,
       });
 
       setTaskProgress(50);
