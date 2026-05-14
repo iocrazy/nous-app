@@ -3,6 +3,7 @@ import {
   Link as LinkIcon, AlertCircle, Loader2,
   Layers, Download, CheckCircle2,
   ListVideo, HardDrive, X, ChevronDown, ChevronUp,
+  Mic, FileText, Eye,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Video, Tag } from '../types';
@@ -55,6 +56,31 @@ export function ParserPage() {
     setCurrentResult,
     isAuthenticated: true,
   });
+
+  // AI intent options — checking one attaches the matching system tag,
+  // which the post-download chain (chain_ai_workflows_after_download)
+  // turns into an AI workflow: Transcript → transcription,
+  // Summary → summary (implies transcript), Analyze → cover analysis.
+  const AI_INTENTS = [
+    { name: 'Transcript', label: 'Transcript', Icon: Mic },
+    { name: 'Summary', label: 'Summary', Icon: FileText },
+    { name: 'Analyze', label: 'Analyze', Icon: Eye },
+  ] as const;
+
+  const aiTagId = (name: string): string | undefined => {
+    const tag =
+      allTags.find(tg => tg.name === name && tg.type === 'system') ??
+      allTags.find(tg => tg.name === name);
+    return tag ? String(tag.id) : undefined;
+  };
+
+  const toggleAiIntent = (name: string) => {
+    const id = aiTagId(name);
+    if (!id) return;
+    setSelectedTagIds(prev =>
+      prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
+    );
+  };
 
   return (
     <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -144,6 +170,34 @@ export function ParserPage() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* AI Processing — checking one attaches the system tag that
+          triggers the matching post-download AI workflow */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3">
+        <div className="text-xs font-medium text-zinc-400 mb-2 px-1">AI Processing</div>
+        <div className="grid grid-cols-3 gap-2">
+          {AI_INTENTS.map(({ name, label, Icon }) => {
+            const id = aiTagId(name);
+            const checked = id ? selectedTagIds.includes(id) : false;
+            return (
+              <button
+                key={name}
+                type="button"
+                disabled={!id}
+                onClick={() => toggleAiIntent(name)}
+                className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                  checked
+                    ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
+                    : 'border-zinc-800 bg-zinc-900/50 text-zinc-500 hover:border-zinc-700'
+                }`}
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
