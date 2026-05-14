@@ -12,16 +12,23 @@ import asyncio
 import hashlib
 import json
 import mimetypes
-import re
+import os
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import aiofiles
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
+from app.core.file_utils import (
+    MAX_UPLOAD_SIZE,
+    sanitize_filename,
+    sniff_mime,
+    stream_upload_to_disk,
+)
 from app.repositories.resources_repository import ResourcesRepository
 
 
@@ -54,43 +61,59 @@ class ResourcesService:
         5. Create V1 version record
         6. Create resource_item linking to scope/folder
         """
-        safe_name = self._sanitize_filename(file.filename)
-        content = await file.read()
+        safe_name = sanitize_filename(file.filename)
 
-        # Compute SHA-256 hash for duplicate detection
-        file_hash = hashlib.sha256(content).hexdigest()
+        # Stream to a temp file first: the final path needs the resource_id
+        # (assigned by the DB insert), but we must not hold the whole upload
+        # in RAM. Once the row exists, move the temp file into place.
+        tmp_fd, tmp_name = tempfile.mkstemp()
+        os.close(tmp_fd)
+        tmp_path = Path(tmp_name)
+        try:
+            file_size, file_hash = await stream_upload_to_disk(
+                file, tmp_path, MAX_UPLOAD_SIZE
+            )
 
-        # Classify
-        mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
-        file_type = self._classify_file_type(mime)
+            # Classify — sniff real content type first so a binary
+            # masquerading as media via a forged Content-Type is recorded
+            # as what it actually is, not what the client claimed.
+            mime = (
+                sniff_mime(tmp_path)
+                or file.content_type
+                or mimetypes.guess_type(safe_name)[0]
+                or ""
+            )
+            file_type = self._classify_file_type(mime)
 
-        # Create resource record first to get ID for storage path
-        resource_data = {
-            "creator_id": user_id,
-            "source_type": "upload",
-            "filename": safe_name,
-            "file_type": file_type,
-            "mime_type": mime,
-            "file_size_bytes": len(content),
-            "current_version": 1,
-            "file_hash": file_hash,
-        }
-        resource = await self.repo.create_resource(resource_data)
-        resource_id = str(resource["id"])
+            # Create resource record first to get ID for storage path
+            resource_data = {
+                "creator_id": user_id,
+                "source_type": "upload",
+                "filename": safe_name,
+                "file_type": file_type,
+                "mime_type": mime,
+                "file_size_bytes": file_size,
+                "current_version": 1,
+                "file_hash": file_hash,
+            }
+            resource = await self.repo.create_resource(resource_data)
+            resource_id = str(resource["id"])
 
-        # Save to disk — teams/{scope_id}/uploads/{resource_id}/v1/
-        save_dir = (
-            Path(settings.DOWNLOAD_PATH)
-            / "teams"
-            / scope_id
-            / "uploads"
-            / resource_id
-            / "v1"
-        )
-        save_dir.mkdir(parents=True, exist_ok=True)
-        target = save_dir / safe_name
-        async with aiofiles.open(target, "wb") as f:
-            await f.write(content)
+            # Move the streamed file into teams/{scope_id}/uploads/{id}/v1/
+            save_dir = (
+                Path(settings.DOWNLOAD_PATH)
+                / "teams"
+                / scope_id
+                / "uploads"
+                / resource_id
+                / "v1"
+            )
+            save_dir.mkdir(parents=True, exist_ok=True)
+            target = save_dir / safe_name
+            await asyncio.to_thread(shutil.move, str(tmp_path), str(target))
+        finally:
+            # No-op if the move succeeded (tmp_path no longer exists).
+            tmp_path.unlink(missing_ok=True)
 
         relative_path = f"teams/{scope_id}/uploads/{resource_id}/v1/{safe_name}"
 
@@ -109,7 +132,7 @@ class ResourcesService:
             "version_number": 1,
             "filename": safe_name,
             "file_path": relative_path,
-            "file_size_bytes": len(content),
+            "file_size_bytes": file_size,
             "mime_type": mime,
             "uploaded_by": user_id,
             "file_hash": file_hash,
@@ -156,11 +179,7 @@ class ResourcesService:
 
         next_version = await self.repo.get_next_version_number(resource_id)
 
-        safe_name = self._sanitize_filename(file.filename)
-        content = await file.read()
-
-        # Compute SHA-256 hash for duplicate detection
-        file_hash = hashlib.sha256(content).hexdigest()
+        safe_name = sanitize_filename(file.filename)
 
         # Determine storage base path from existing file_path or resource_items
         existing_path = resource.get("file_path", "")
@@ -184,10 +203,16 @@ class ResourcesService:
         save_dir = Path(settings.DOWNLOAD_PATH) / base_relative / f"v{next_version}"
         save_dir.mkdir(parents=True, exist_ok=True)
         target = save_dir / safe_name
-        async with aiofiles.open(target, "wb") as f:
-            await f.write(content)
+        file_size, file_hash = await stream_upload_to_disk(
+            file, target, MAX_UPLOAD_SIZE
+        )
 
-        mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
+        mime = (
+            sniff_mime(target)
+            or file.content_type
+            or mimetypes.guess_type(safe_name)[0]
+            or ""
+        )
         file_type = self._classify_file_type(mime)
         metadata = {}
         if file_type in ("video", "audio"):
@@ -199,7 +224,7 @@ class ResourcesService:
             "version_number": next_version,
             "filename": safe_name,
             "file_path": relative_path,
-            "file_size_bytes": len(content),
+            "file_size_bytes": file_size,
             "mime_type": mime,
             "uploaded_by": user_id,
             "notes": notes,
@@ -212,7 +237,7 @@ class ResourcesService:
         update_data = {
             "current_version": next_version,
             "file_path": relative_path,
-            "file_size_bytes": len(content),
+            "file_size_bytes": file_size,
             "mime_type": mime,
             "filename": safe_name,
             "file_hash": file_hash,
@@ -719,12 +744,8 @@ class ResourcesService:
         )
 
     # ------------------------------------------------------------------ #
-    # Helpers (reused from projects_service)
+    # Helpers
     # ------------------------------------------------------------------ #
-
-    def _sanitize_filename(self, filename: str) -> str:
-        name = re.sub(r'[<>:"/\\|?*]', "_", filename)
-        return name[:255]
 
     def _classify_file_type(self, mime: str) -> str:
         if not mime:

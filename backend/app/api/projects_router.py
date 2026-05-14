@@ -10,10 +10,11 @@ Requires authentication (JWT or API Key).
 
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_guards import verify_project_write_access
 from app.schemas.projects import (
     AddMemberRequest,
     CreateCollectionRequest,
@@ -170,11 +171,15 @@ async def upload_file(
     auth: AuthDep,
     file: UploadFile = File(...),
     notes: Optional[str] = Query(None, description="Optional notes for the file"),
+    _project_guard: None = Depends(verify_project_write_access),
 ):
     """
     Upload a file to a project.
 
     Max file size: 500 MB. Video files will have metadata extracted via ffprobe.
+
+    `_project_guard` enforces that the caller owns the project or is a member
+    of its team before the handler runs.
     """
     try:
         if file.size and file.size > MAX_UPLOAD_SIZE:
@@ -414,8 +419,12 @@ async def upload_version(
     auth: AuthDep,
     file: UploadFile = File(...),
     notes: Optional[str] = Query(None, description="Optional notes for this version"),
+    _project_guard: None = Depends(verify_project_write_access),
 ):
-    """Upload a new version of a file."""
+    """Upload a new version of a file.
+
+    `_project_guard` enforces project ownership / team membership before run.
+    """
     try:
         if file.size and file.size > MAX_UPLOAD_SIZE:
             raise HTTPException(

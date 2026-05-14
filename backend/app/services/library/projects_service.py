@@ -10,15 +10,19 @@ file uploads with metadata extraction (ffprobe), and video linking.
 import asyncio
 import json
 import mimetypes
-import re
 from pathlib import Path
 from typing import Optional
 
-import aiofiles
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
+from app.core.file_utils import (
+    MAX_UPLOAD_SIZE,
+    sanitize_filename,
+    sniff_mime,
+    stream_upload_to_disk,
+)
 from app.repositories.projects_repository import ProjectsRepository
 
 
@@ -169,7 +173,7 @@ class ProjectsService:
             raise ValueError("Project not found")
 
         # Save to disk
-        safe_name = self._sanitize_filename(file.filename)
+        safe_name = sanitize_filename(file.filename)
         save_dir = Path(settings.DOWNLOAD_PATH) / "mediatrack" / project_id
         save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -182,12 +186,16 @@ class ProjectsService:
             target = save_dir / f"{stem}_{counter}{suffix}"
             counter += 1
 
-        content = await file.read()
-        async with aiofiles.open(target, "wb") as f:
-            await f.write(content)
+        file_size, _ = await stream_upload_to_disk(file, target, MAX_UPLOAD_SIZE)
 
-        # Classify
-        mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
+        # Classify — sniff real content type first so a forged Content-Type
+        # cannot mislabel a binary as media.
+        mime = (
+            sniff_mime(target)
+            or file.content_type
+            or mimetypes.guess_type(safe_name)[0]
+            or ""
+        )
         file_type = self._classify_file_type(mime)
 
         # Extract video metadata
@@ -203,7 +211,7 @@ class ProjectsService:
             "file_type": file_type,
             "mime_type": mime,
             "file_path": relative_path,
-            "file_size_bytes": len(content),
+            "file_size_bytes": file_size,
             "uploaded_by": user_id,
             "notes": notes,
             **metadata,
@@ -216,7 +224,7 @@ class ProjectsService:
             "version_number": 1,
             "filename": target.name,
             "file_path": relative_path,
-            "file_size_bytes": len(content),
+            "file_size_bytes": file_size,
             "mime_type": mime,
             "uploaded_by": user_id,
             "notes": notes,
@@ -307,7 +315,7 @@ class ProjectsService:
         next_version = await self.repo.get_next_version_number(file_id)
 
         # Save to disk
-        safe_name = self._sanitize_filename(file.filename)
+        safe_name = sanitize_filename(file.filename)
         save_dir = (
             Path(settings.DOWNLOAD_PATH)
             / "mediatrack"
@@ -318,12 +326,15 @@ class ProjectsService:
         save_dir.mkdir(parents=True, exist_ok=True)
 
         target = save_dir / f"v{next_version}_{safe_name}"
-        content = await file.read()
-        async with aiofiles.open(target, "wb") as f:
-            await f.write(content)
+        file_size, _ = await stream_upload_to_disk(file, target, MAX_UPLOAD_SIZE)
 
-        # Classify and extract metadata
-        mime = file.content_type or mimetypes.guess_type(safe_name)[0] or ""
+        # Classify and extract metadata — sniff real content type first.
+        mime = (
+            sniff_mime(target)
+            or file.content_type
+            or mimetypes.guess_type(safe_name)[0]
+            or ""
+        )
         file_type = self._classify_file_type(mime)
         metadata = {}
         if file_type == "video":
@@ -338,7 +349,7 @@ class ProjectsService:
             "version_number": next_version,
             "filename": safe_name,
             "file_path": relative_path,
-            "file_size_bytes": len(content),
+            "file_size_bytes": file_size,
             "mime_type": mime,
             "uploaded_by": user_id,
             "notes": notes,
@@ -350,7 +361,7 @@ class ProjectsService:
         update_data = {
             "current_version": next_version,
             "file_path": relative_path,
-            "file_size_bytes": len(content),
+            "file_size_bytes": file_size,
             "mime_type": mime,
             "filename": safe_name,
             **metadata,
@@ -695,11 +706,6 @@ class ProjectsService:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
-
-    def _sanitize_filename(self, filename: str) -> str:
-        """Remove invalid filesystem characters and truncate to 255 chars."""
-        name = re.sub(r'[<>:"/\\|?*]', "_", filename)
-        return name[:255]
 
     def _classify_file_type(self, mime: str) -> str:
         """Classify a MIME type into video/image/document."""
