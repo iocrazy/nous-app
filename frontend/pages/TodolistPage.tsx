@@ -22,6 +22,7 @@ import { aiLibraryService } from '../services/aiLibraryService';
 import type { AILibraryAgent } from '../types';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { getSupabaseClient } from '../supabaseClient';
 // useAuth gives currentUserId via context; UserProfile shape doesn't carry id.
 
 const AGENT_PALETTE = [
@@ -151,6 +152,51 @@ export function TodolistPage() {
     })();
     return () => { cancelled = true; };
   }, [identifier, agentsById]);
+
+  // Realtime: keep the issues list in sync without a manual refresh.
+  // `issues` is in the supabase_realtime publication — subscribe so status
+  // changes (agent updates, other users) reflect live in the list instead
+  // of going stale until onRefresh / re-navigation.
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    const filter = teamIdNum != null ? `team_id=eq.${teamIdNum}` : undefined;
+    const channel = supabase
+      .channel('issues_list_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'issues',
+          ...(filter ? { filter } : {}),
+        },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            const oldId = (payload.old as { id?: number })?.id;
+            if (oldId != null) {
+              setIssues((prev) => prev.filter((i) => i.id !== oldId));
+            }
+            return;
+          }
+          const raw = payload.new as Issue;
+          if (!raw?.id) return;
+          const ui = toUiIssue(raw, agentsById);
+          setIssues((prev) => {
+            const idx = prev.findIndex((i) => i.id === ui.id);
+            if (idx < 0) return [ui, ...prev]; // INSERT
+            const next = [...prev]; // UPDATE
+            next[idx] = ui;
+            return next;
+          });
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [teamIdNum, agentsById]);
 
   const handleCreate = async (payload: IssueCreatePayload) => {
     try {
