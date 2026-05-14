@@ -188,6 +188,32 @@ class TranscodeService:
             logger.error(f"Version {version_id} has no file_path")
             return None
 
+        # Size gate (admin-configured). transcode_min_size_mb lives in
+        # system_settings and main.py loads it into settings at startup,
+        # but the transcode trigger path stopped consuming it during the
+        # PR-D7 workflow refactor — small files were transcoded regardless
+        # of the admin threshold. Restoring the gate here covers every
+        # trigger path (DBOS workflow, chained-from-download, manual
+        # re-transcode). min_size_mb = 0 means "transcode everything".
+        min_size_raw = self._get_db_setting("transcode_min_size_mb")
+        try:
+            min_size_mb = (
+                int(min_size_raw)
+                if min_size_raw is not None
+                else settings.TRANSCODE_MIN_SIZE_MB
+            )
+        except (TypeError, ValueError):
+            min_size_mb = settings.TRANSCODE_MIN_SIZE_MB
+        file_size_bytes = version.get("file_size_bytes") or 0
+        if min_size_mb > 0 and file_size_bytes < min_size_mb * 1024 * 1024:
+            logger.info(
+                f"[Transcode] Version {version_id} "
+                f"({file_size_bytes / 1024 / 1024:.1f} MB) is below the "
+                f"{min_size_mb} MB admin threshold — skipping HLS transcode"
+            )
+            await self.repo.update_version(version_id, {"transcode_status": "skipped"})
+            return None
+
         # Mark as processing
         await self.repo.update_version(version_id, {"transcode_status": "processing"})
 
