@@ -77,6 +77,43 @@ async def mark_extract_audio_processing_step(workflow_id: str) -> None:
         logger.warning(f"[extract_audio.mark_processing] {workflow_id}: {e}")
 
 
+@DBOS.step()
+async def log_extract_audio_outcome_step(
+    *,
+    user_id: str,
+    platform_id: str,
+    video_title: str,
+    outcome: str,
+    error: Optional[str] = None,
+) -> None:
+    """Audit row in user_logs (Activity Logs panel). Best-effort — mirrors
+    download.log_download_outcome_step so extract_audio shows up alongside
+    download / cover entries instead of silently disappearing from the log."""
+    from app.repositories.user_logs_repository import log_user_action
+
+    title_clip = (video_title or platform_id or "")[:30]
+    try:
+        if outcome == "success":
+            await log_user_action(
+                user_id=user_id,
+                action="extract_audio",
+                message=f"Audio extracted: {title_clip}...",
+                status="success",
+                aweme_id=platform_id,
+            )
+        else:
+            await log_user_action(
+                user_id=user_id,
+                action="extract_audio",
+                message=f"Audio extraction failed: {title_clip}...",
+                status="error",
+                aweme_id=platform_id,
+                details={"error": (error or "unknown")[:200]},
+            )
+    except Exception as e:
+        logger.warning(f"[extract_audio.log] {e}")
+
+
 @DBOS.workflow()
 async def extract_audio_workflow(
     platform_id: str,
@@ -84,6 +121,7 @@ async def extract_audio_workflow(
     *,
     resource_id: Optional[str] = None,
     flow_id: Optional[str] = None,
+    video_title: str = "",
 ) -> dict[str, Any]:
     """Extract audio from the downloaded video, then chain
     transcript/summary if the resource carries those intent tags.
@@ -98,15 +136,35 @@ async def extract_audio_workflow(
         ok = run_extract_audio_step(platform_id)
     except Exception as e:
         await mark_extract_audio_status_step(platform_id, "failed")
+        await log_extract_audio_outcome_step(
+            user_id=user_id,
+            platform_id=platform_id,
+            video_title=video_title,
+            outcome="failed",
+            error=str(e),
+        )
         # Re-raise so DBOS marks the workflow FAILED and the
         # mirror_dbos_lifecycle_to_tracking trigger writes phase=failed.
         raise RuntimeError(f"audio extraction errored for {platform_id}: {e}") from e
 
     if not ok:
         await mark_extract_audio_status_step(platform_id, "failed")
+        await log_extract_audio_outcome_step(
+            user_id=user_id,
+            platform_id=platform_id,
+            video_title=video_title,
+            outcome="failed",
+            error="ffmpeg returned non-success",
+        )
         raise RuntimeError(f"audio extraction failed for {platform_id}")
 
     await mark_extract_audio_status_step(platform_id, "completed")
+    await log_extract_audio_outcome_step(
+        user_id=user_id,
+        platform_id=platform_id,
+        video_title=video_title,
+        outcome="success",
+    )
 
     # Chain transcript/summary IFF the resource carries the intent tags.
     # Called from the workflow body (not a @DBOS.step) because it calls
@@ -116,7 +174,9 @@ async def extract_audio_workflow(
     try:
         from app.tasks.download_helpers import chain_transcript_summary_for_tags
 
-        chain_transcript_summary_for_tags(platform_id, user_id, flow_id=flow_id)
+        chain_transcript_summary_for_tags(
+            platform_id, user_id, flow_id=flow_id, video_title=video_title
+        )
     except Exception as e:
         logger.warning(
             f"[extract_audio] transcript/summary chain failed for "

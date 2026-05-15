@@ -19,7 +19,11 @@ from app.tasks.utils import run_async
 
 
 def maybe_chain_transcode(
-    platform_id: str, user_id: str, *, flow_id: str | None = None
+    platform_id: str,
+    user_id: str,
+    *,
+    flow_id: str | None = None,
+    video_title: str = "",
 ):
     """Chain HLS transcoding after download if the resource is a video.
 
@@ -61,13 +65,14 @@ def maybe_chain_transcode(
             f"version={version_id}, mime={mime}, platform_id={platform_id}"
         )
 
+        title_clip = (video_title or resource.get("filename") or platform_id or "")[:50]
         wf_id = str(_uuid.uuid4())
         try:
             run_async(
                 get_task_manager().create(
                     user_id=user_id,
                     task_type="transcode",
-                    title="Transcode",
+                    title=f"Transcode {title_clip}",
                     media_id=str(platform_id),
                     resource_id=resource_id,
                     dbos_workflow_id=wf_id,
@@ -119,6 +124,7 @@ def chain_transcript_summary_for_tags(
     user_id: str,
     *,
     flow_id: str | None = None,
+    video_title: str = "",
 ):
     """Dispatch ai_transcription / ai_summary for a resource IFF it
     carries the matching intent tags. Called by ``extract_audio_workflow``
@@ -167,6 +173,9 @@ def chain_transcript_summary_for_tags(
             return
 
         mgr = get_task_manager()
+        title_clip = (video_title or (media or {}).get("title") or platform_id or "")[
+            :50
+        ]
 
         from app.workflows.ai_transcription import ai_transcription_workflow
 
@@ -176,7 +185,7 @@ def chain_transcript_summary_for_tags(
                 mgr.create(
                     user_id=user_id,
                     task_type="ai_transcription",
-                    title="Transcript",
+                    title=f"Transcript {title_clip}",
                     media_id=str(platform_id),
                     resource_id=resource_id,
                     dbos_workflow_id=tr_wf_id,
@@ -206,7 +215,7 @@ def chain_transcript_summary_for_tags(
                     mgr.create(
                         user_id=user_id,
                         task_type="ai_summary",
-                        title="Summary",
+                        title=f"Summary {title_clip}",
                         media_id=str(platform_id),
                         resource_id=resource_id,
                         dbos_workflow_id=sm_wf_id,
@@ -239,7 +248,11 @@ def chain_transcript_summary_for_tags(
 
 
 def maybe_chain_ai_pipeline(
-    platform_id: str, user_id: str, *, flow_id: str | None = None
+    platform_id: str,
+    user_id: str,
+    *,
+    flow_id: str | None = None,
+    video_title: str = "",
 ):
     """Chain the cover-analysis workflow after download IFF the resource
     carries the "Analyze" intent tag.
@@ -290,13 +303,16 @@ def maybe_chain_ai_pipeline(
 
         from app.workflows.analyze_l1 import analyze_l1_workflow
 
+        title_clip = (video_title or (media or {}).get("title") or platform_id or "")[
+            :50
+        ]
         wf_id = str(_uuid.uuid4())
         try:
             run_async(
                 get_task_manager().create(
                     user_id=user_id,
                     task_type="ai_extract",
-                    title="Analyze",
+                    title=f"Analyze {title_clip}",
                     media_id=str(platform_id),
                     resource_id=resource_id,
                     dbos_workflow_id=wf_id,
