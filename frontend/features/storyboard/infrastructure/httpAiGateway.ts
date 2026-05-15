@@ -104,36 +104,63 @@ export class HttpAiGateway implements AiGateway {
     error?: string | null;
   }> {
     const headers = await getAuthHeaders();
-    // Use the Celery task status endpoint
-    const res = await fetch(`${this.apiBase}/api/v1/tasks/${jobId}`, {
-      headers,
-    });
+    // Hits the DBOS workflow status endpoint. The legacy /api/v1/tasks/
+    // endpoint is now a 410 Gone tombstone (Celery removed in PR-D7) —
+    // calling it silently turned every job into status='not_found' and
+    // the canvas never saw real progress (issue #282).
+    const res = await fetch(
+      `${this.apiBase}/api/v1/workflows/${encodeURIComponent(jobId)}/status`,
+      { headers },
+    );
 
-    if (!res.ok) {
+    if (res.status === 404) {
       return { job_id: jobId, status: 'not_found' };
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return {
+        job_id: jobId,
+        status: 'failed',
+        error: text || `HTTP ${res.status}`,
+      };
     }
 
     const body = await handleJsonResponse<{
-      task_id: string;
-      status: string;
-      result?: Record<string, unknown> | null;
+      workflow_id?: string;
+      status?: string;
+      output?: Record<string, unknown> | string | null;
       error?: string | null;
     }>(res);
 
-    // Map Celery statuses to our gateway statuses
+    // Map DBOS WorkflowStatusString → gateway statuses. Source of truth:
+    // backend mirror_dbos_lifecycle_to_tracking trigger (mig 184).
     const statusMap: Record<string, 'queued' | 'running' | 'succeeded' | 'failed' | 'not_found'> = {
       PENDING: 'queued',
+      ENQUEUED: 'queued',
       STARTED: 'running',
+      RUNNING: 'running',
       SUCCESS: 'succeeded',
-      FAILURE: 'failed',
-      RETRY: 'running',
-      REVOKED: 'failed',
+      ERROR: 'failed',
+      RETRIES_EXCEEDED: 'failed',
+      MAX_RECOVERY_ATTEMPTS_EXCEEDED: 'failed',
+      CANCELLED: 'failed',
     };
 
-    const mappedStatus = statusMap[body.status] ?? 'queued';
-    const imageUrl = body.result && typeof body.result === 'object'
-      ? (body.result as Record<string, unknown>).image_url as string | undefined
-      : undefined;
+    const mappedStatus = statusMap[body.status ?? ''] ?? 'queued';
+
+    // storyboard_image_workflow returns {status, node_id, result: <url>}.
+    // The DBOS status endpoint exposes that as `output`. Pull the URL out.
+    let imageUrl: string | undefined;
+    const out = body.output;
+    if (out && typeof out === 'object') {
+      const outRec = out as Record<string, unknown>;
+      const candidate = outRec.result ?? outRec.image_url;
+      if (typeof candidate === 'string') {
+        imageUrl = candidate;
+      }
+    } else if (typeof out === 'string') {
+      imageUrl = out;
+    }
 
     return {
       job_id: jobId,
