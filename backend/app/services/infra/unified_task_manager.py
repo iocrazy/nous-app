@@ -209,12 +209,18 @@ class UnifiedTaskManager:
         subtitle: Optional[str] = None,
         metadata: Optional[dict] = None,
         dedup_key: Optional[str] = None,
+        flow_id: Optional[str] = None,
     ) -> str:
         """Create a task_tracking row. Returns the task UUID.
 
         Sets phase=QUEUED and status=pending at creation time.
         If dedup_key is provided it is written in the same INSERT,
         eliminating the former two-step create+patch pattern.
+
+        ``flow_id`` links this task to a parent ``task_flows`` row so the
+        UI can render parse → download → transcode/extract_audio/ai_* as
+        one chain. It is a business decoration field (not phase/status/
+        progress) so writing it here is route-C compliant.
         """
         client = await self._get_client()
         row: Dict[str, Any] = {
@@ -241,11 +247,49 @@ class UnifiedTaskManager:
             row["metadata"] = metadata
         if dedup_key:
             row["dedup_key"] = dedup_key
+        if flow_id:
+            row["flow_id"] = flow_id
 
         result = await client.table("task_tracking").insert(row).execute()
         task_id = result.data[0]["dbos_workflow_id"]
         logger.debug(f"[TaskManager] Created {task_type} task {task_id}: {title[:40]}")
         return task_id
+
+    # ── Lifecycle: create_flow ────────────────────────────────────────
+
+    async def create_flow(
+        self,
+        user_id: str,
+        name: str,
+        *,
+        metadata: Optional[dict] = None,
+    ) -> Optional[str]:
+        """Create a ``task_flows`` parent row and return its id.
+
+        One flow == one user submission (e.g. "Process URL X"). Child
+        task_tracking rows reference it via ``flow_id``. The aggregate
+        counters + derived state are maintained by the DB trigger
+        ``trg_task_tracking_flow_aggregate`` (migration 203) — this method
+        only creates the parent row.
+
+        Best-effort: returns None on failure so the caller can still
+        dispatch the pipeline un-grouped rather than aborting.
+        """
+        try:
+            client = await self._get_client()
+            row: Dict[str, Any] = {
+                "user_id": user_id,
+                "name": name[:200] if name else "Untitled",
+            }
+            if metadata:
+                row["metadata"] = metadata
+            result = await client.table("task_flows").insert(row).execute()
+            flow_id = result.data[0]["id"]
+            logger.debug(f"[TaskManager] Created flow {flow_id}: {name[:40]}")
+            return flow_id
+        except Exception as e:
+            logger.warning(f"[TaskManager] create_flow failed (non-fatal): {e}")
+            return None
 
     # ── Lifecycle: start ──────────────────────────────────────────────
 

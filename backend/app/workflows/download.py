@@ -318,9 +318,14 @@ async def chain_followups_step(
     user_id: str,
     resource_id: Optional[str],
     fresh_download_path: Optional[str],
+    flow_id: Optional[str] = None,
 ) -> None:
-    """Dispatch thumbnail + transcode + AI pipeline. Best-effort —
-    failures here never fail the workflow.
+    """Dispatch thumbnail + extract_audio + transcode + AI pipeline.
+    Best-effort — failures here never fail the workflow.
+
+    Every dispatched workflow pre-creates its own task_tracking row
+    carrying ``flow_id`` so the UI can render parse → download →
+    thumbnail / extract_audio / transcode / ai_* as one chain.
 
     NOT a `@DBOS.step` — `start_workflow_routed` calls
     `DBOS.start_workflow` which asserts when invoked from inside a step
@@ -337,10 +342,27 @@ async def chain_followups_step(
         mime_type = "video/x-matroska"
 
     if mime_type.startswith("video/"):
-        try:
-            from app.services.infra.dbos_orchestrator import start_workflow_routed
-            from app.workflows.thumbnail import thumbnail_workflow
+        import uuid as _uuid
 
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
+        from app.workflows.thumbnail import thumbnail_workflow
+
+        # thumbnail (also produces preview_sprite.jpg inside the service)
+        try:
+            thumb_wf_id = str(_uuid.uuid4())
+            try:
+                await get_task_manager().create(
+                    user_id=user_id,
+                    task_type="thumbnail",
+                    title="Thumbnail",
+                    media_id=str(platform_id) if platform_id else None,
+                    resource_id=str(resource_id),
+                    dbos_workflow_id=thumb_wf_id,
+                    flow_id=flow_id,
+                )
+            except Exception as e:
+                logger.warning(f"[download.chain] pre-create thumbnail row: {e}")
             await start_workflow_routed(
                 "thumbnail",
                 dbos_workflow_callable=thumbnail_workflow,
@@ -349,22 +371,52 @@ async def chain_followups_step(
                     "file_path": fresh_download_path,
                     "mime_type": mime_type,
                 },
+                workflow_id=thumb_wf_id,
             )
         except Exception as e:
             logger.warning(f"[download.chain] thumbnail: {type(e).__name__}: {e!r}")
 
+        # extract_audio — own workflow + own task_tracking row/status.
+        # It chains ai_transcription / ai_summary on completion when the
+        # resource carries the matching intent tags.
+        try:
+            from app.workflows.extract_audio import extract_audio_workflow
+
+            audio_wf_id = str(_uuid.uuid4())
+            try:
+                await get_task_manager().create(
+                    user_id=user_id,
+                    task_type="extract_audio",
+                    title="Extract audio",
+                    media_id=str(platform_id) if platform_id else None,
+                    resource_id=str(resource_id),
+                    dbos_workflow_id=audio_wf_id,
+                    flow_id=flow_id,
+                )
+            except Exception as e:
+                logger.warning(f"[download.chain] pre-create extract_audio row: {e}")
+            await start_workflow_routed(
+                "extract_audio",
+                dbos_workflow_callable=extract_audio_workflow,
+                dbos_workflow_kwargs={
+                    "platform_id": platform_id,
+                    "user_id": user_id,
+                    "resource_id": resource_id,
+                    "flow_id": flow_id,
+                },
+                workflow_id=audio_wf_id,
+            )
+        except Exception as e:
+            logger.warning(f"[download.chain] extract_audio: {type(e).__name__}: {e!r}")
+
     try:
-        # PR-D7 phase 3: maybe_chain_* helpers stay in app.tasks.download_helpers
-        # since they're pure helpers (no @shared_task). They internally still
-        # reach into legacy task .delay() — to be rewired in a follow-up
-        # commit when those task callsites are also routed.
         from app.tasks.download_helpers import (
             maybe_chain_ai_pipeline,
             maybe_chain_transcode,
         )
 
-        maybe_chain_transcode(platform_id, user_id)
-        maybe_chain_ai_pipeline(platform_id, user_id)
+        maybe_chain_transcode(platform_id, user_id, flow_id=flow_id)
+        maybe_chain_ai_pipeline(platform_id, user_id, flow_id=flow_id)
     except Exception as e:
         logger.warning(
             f"[download.chain] transcode/ai chain: {type(e).__name__}: {e!r}"
@@ -481,6 +533,7 @@ async def download_workflow(
     video_title: str = "undefined",
     resource_id: Optional[str] = None,
     user_agent: Optional[str] = None,
+    flow_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """DBOS port of download_unified_task.
 
@@ -688,6 +741,7 @@ async def download_workflow(
         user_id=user_id,
         resource_id=resource_id,
         fresh_download_path=finalize.get("fresh_download_path"),
+        flow_id=flow_id,
     )
 
     return {

@@ -27,7 +27,6 @@ from app.core.utils import Utils
 from app.services.media.downloader.downloader import DownloaderService
 from app.tasks.download_helpers import (
     ensure_download_urls,
-    extract_audio_from_video,
     validate_and_refresh_urls,
 )
 from app.tasks.download_progress import (
@@ -304,21 +303,9 @@ def _do_douyin_download(
                 video_end = stages["video"][0] + stages["video"][1]
                 force_progress(tracker, video_end)
 
-            # Auto-extract audio from downloaded video via ffmpeg (instant, no network)
-            if results.get("video") == "completed":
-                logger.info(
-                    f"[Download/Exec] music: extracting from video for {platform_id}..."
-                )
-                if extract_audio_from_video(platform_id):
-                    results["music"] = DownloadStatus.COMPLETED.value
-                    logger.info(
-                        f"[Download/Exec] music: extracted successfully for {platform_id}"
-                    )
-                else:
-                    logger.warning(
-                        f"[Download/Exec] music: extraction failed for {platform_id}"
-                    )
-                    results["music"] = DownloadStatus.FAILED.value
+            # Audio extraction moved to extract_audio_workflow (own DBOS
+            # workflow with task_tracking row + status). Dispatched from
+            # download.chain_followups_step after the video lands.
 
     elif int(media_type) in (2, 68):  # Image types
         if download_video:  # "video" flag used for images too

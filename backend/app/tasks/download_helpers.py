@@ -18,14 +18,17 @@ from app.tasks.utils import run_async
 # ─── Post-download chain helpers ─────────────────────────────────────
 
 
-def maybe_chain_transcode(platform_id: str, user_id: str):
+def maybe_chain_transcode(platform_id: str, user_id: str, *, flow_id: str | None = None):
     """Chain HLS transcoding after download if the resource is a video.
 
-    PR-D7 phase 3: dispatch goes through start_workflow_routed so
-    it lands on the DBOS transcode workflow instead of Celery."""
+    Pre-creates the transcode task_tracking row carrying ``flow_id`` so
+    it shows up under the same pipeline chain as download in the UI."""
     try:
+        import uuid as _uuid
+
         from app.repositories.resources_repository import ResourcesRepository
         from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.transcode import transcode_workflow
 
         repo = ResourcesRepository()
@@ -56,6 +59,22 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
             f"version={version_id}, mime={mime}, platform_id={platform_id}"
         )
 
+        wf_id = str(_uuid.uuid4())
+        try:
+            run_async(
+                get_task_manager().create(
+                    user_id=user_id,
+                    task_type="transcode",
+                    title="Transcode",
+                    media_id=str(platform_id),
+                    resource_id=resource_id,
+                    dbos_workflow_id=wf_id,
+                    flow_id=flow_id,
+                )
+            )
+        except Exception as e:
+            logger.warning(f"[Transcode/Chain] pre-create task_tracking row: {e}")
+
         run_async(
             start_workflow_routed(
                 "transcode",
@@ -65,43 +84,179 @@ def maybe_chain_transcode(platform_id: str, user_id: str):
                     "version_id": version_id,
                     "user_id": user_id,
                 },
+                workflow_id=wf_id,
             )
         )
     except Exception as e:
         logger.error(f"[Transcode/Chain] Failed for {platform_id}: {e}", exc_info=True)
 
 
-def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
-    """Chain AI workflows after download iff the user attached the
-    matching intent tag to the resource.
+async def read_resource_tag_names(resource_id: str) -> set[str]:
+    """Tag names attached to a resource. Uses the supabase admin client
+    so RLS doesn't get in the way of chain helpers / workflow steps."""
+    from app.db.supabase_client import get_async_supabase_admin
 
-    Old model (removed): read user_settings.ai_settings.auto_transcribe
-    / auto_summarize and fire on every download — wasteful, surprising,
-    "我没标 tag 不该跑 AI" was the feedback.
+    client = await get_async_supabase_admin()
+    r = await (
+        client.table("resource_tags")
+        .select("tags(name)")
+        .eq("resource_id", resource_id)
+        .execute()
+    )
+    names: set[str] = set()
+    for row in r.data or []:
+        t = row.get("tags") or {}
+        n = t.get("name")
+        if n:
+            names.add(n)
+    return names
 
-    New model: look up the user's resource for this platform_id, read
-    its tag set, and dispatch one workflow per attached AI intent tag:
+
+def chain_transcript_summary_for_tags(
+    platform_id: str,
+    user_id: str,
+    *,
+    flow_id: str | None = None,
+):
+    """Dispatch ai_transcription / ai_summary for a resource IFF it
+    carries the matching intent tags. Called by ``extract_audio_workflow``
+    once the audio asset is on disk — so no audio-ready gate is needed
+    here (the caller guarantees it).
 
       tag "Transcript" → ai_transcription_workflow
-      tag "Summary"    → ai_summary_workflow (also implies Transcript:
-                         the summary step needs transcript text)
-      tag "Analyze"    → analyze_l1_workflow (cover analysis)
+      tag "Summary"    → ai_summary_workflow (implies Transcript: the
+                         summary step needs transcript text)
 
-    Tags must be attached BEFORE this fires (i.e. selected on the
-    parse page tag picker, or added to a previously-saved resource via
-    the MediaCard picker — that latter path needs a separate
-    re-dispatch endpoint, not in scope here)."""
+    Each dispatched workflow pre-creates its task_tracking row with
+    ``flow_id`` so it shows up under the same pipeline chain."""
     try:
+        import uuid as _uuid
+
         from app.repositories.media_repository import MediaRepository
         from app.repositories.resources_repository import ResourcesRepository
         from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
 
         media = run_async(MediaRepository().get_by_platform_id(platform_id))
         parsed_media_id = (media or {}).get("id")
         if not parsed_media_id:
-            logger.warning(
-                f"[AI] No parsed_media row for {platform_id}, skipping AI chain"
+            logger.warning(f"[AI] No parsed_media row for {platform_id}, skip")
+            return
+
+        res_repo = ResourcesRepository()
+        resource = run_async(
+            res_repo.get_resource_by_media_id_and_creator(str(parsed_media_id), user_id)
+        )
+        if not resource:
+            logger.debug(
+                f"[AI] No resource for media={parsed_media_id} user={user_id}, skip"
             )
+            return
+        resource_id = str(resource["id"])
+
+        tag_names = run_async(read_resource_tag_names(resource_id))
+        want_transcript = "Transcript" in tag_names or "Summary" in tag_names
+        want_summary = "Summary" in tag_names
+
+        if not want_transcript:
+            logger.debug(
+                f"[AI] No Transcript/Summary tag on resource={resource_id}, skip"
+            )
+            return
+
+        mgr = get_task_manager()
+
+        from app.workflows.ai_transcription import ai_transcription_workflow
+
+        tr_wf_id = str(_uuid.uuid4())
+        try:
+            run_async(
+                mgr.create(
+                    user_id=user_id,
+                    task_type="ai_transcription",
+                    title="Transcript",
+                    media_id=str(platform_id),
+                    resource_id=resource_id,
+                    dbos_workflow_id=tr_wf_id,
+                    flow_id=flow_id,
+                )
+            )
+        except Exception as e:
+            logger.warning(f"[AI] pre-create ai_transcription row: {e}")
+        run_async(
+            start_workflow_routed(
+                "ai_transcription",
+                dbos_workflow_callable=ai_transcription_workflow,
+                dbos_workflow_kwargs={
+                    "parsed_media_id": int(parsed_media_id),
+                    "user_id": user_id,
+                },
+                workflow_id=tr_wf_id,
+            )
+        )
+
+        if want_summary:
+            from app.workflows.ai_summary import ai_summary_workflow
+
+            sm_wf_id = str(_uuid.uuid4())
+            try:
+                run_async(
+                    mgr.create(
+                        user_id=user_id,
+                        task_type="ai_summary",
+                        title="Summary",
+                        media_id=str(platform_id),
+                        resource_id=resource_id,
+                        dbos_workflow_id=sm_wf_id,
+                        flow_id=flow_id,
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"[AI] pre-create ai_summary row: {e}")
+            run_async(
+                start_workflow_routed(
+                    "ai_summary",
+                    dbos_workflow_callable=ai_summary_workflow,
+                    dbos_workflow_kwargs={
+                        "parsed_media_id": int(parsed_media_id),
+                        "user_id": user_id,
+                    },
+                    workflow_id=sm_wf_id,
+                )
+            )
+
+        logger.info(
+            f"[AI] transcript/summary chained for {platform_id} "
+            f"(summary={want_summary}, resource={resource_id})"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[AI] chain_transcript_summary_for_tags failed for {platform_id}: "
+            f"{type(e).__name__}: {e!r}"
+        )
+
+
+def maybe_chain_ai_pipeline(platform_id: str, user_id: str, *, flow_id: str | None = None):
+    """Chain the cover-analysis workflow after download IFF the resource
+    carries the "Analyze" intent tag.
+
+    Transcript/Summary are NOT dispatched here anymore — they depend on
+    the extracted audio asset, so ``extract_audio_workflow`` dispatches
+    them via ``chain_transcript_summary_for_tags`` once the audio is on
+    disk. Analyze only needs the cover, so it stays in the download
+    chain (decoupled from audio extraction success)."""
+    try:
+        import uuid as _uuid
+
+        from app.repositories.media_repository import MediaRepository
+        from app.repositories.resources_repository import ResourcesRepository
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
+
+        media = run_async(MediaRepository().get_by_platform_id(platform_id))
+        parsed_media_id = (media or {}).get("id")
+        if not parsed_media_id:
+            logger.warning(f"[AI] No parsed_media row for {platform_id}, skip analyze")
             return
 
         res_repo = ResourcesRepository()
@@ -111,123 +266,60 @@ def maybe_chain_ai_pipeline(platform_id: str, user_id: str):
         if not resource:
             logger.debug(
                 f"[AI] No resource for media={parsed_media_id} user={user_id}, "
-                "skipping AI chain"
+                "skip analyze"
             )
             return
         resource_id = str(resource["id"])
 
-        # Pull tag names attached to this resource. Use the supabase admin
-        # client so RLS doesn't get in the way of the chain helper.
-        from app.db.supabase_client import get_async_supabase_admin
-
-        async def _read_tag_names() -> set[str]:
-            client = await get_async_supabase_admin()
-            r = await (
-                client.table("resource_tags")
-                .select("tags(name)")
-                .eq("resource_id", resource_id)
-                .execute()
-            )
-            names: set[str] = set()
-            for row in r.data or []:
-                t = row.get("tags") or {}
-                n = t.get("name")
-                if n:
-                    names.add(n)
-            return names
-
-        tag_names = run_async(_read_tag_names())
-
-        want_transcript = "Transcript" in tag_names or "Summary" in tag_names
-        want_summary = "Summary" in tag_names
-        want_analyze = "Analyze" in tag_names
-
-        if not (want_transcript or want_summary or want_analyze):
+        tag_names = run_async(read_resource_tag_names(resource_id))
+        if "Analyze" not in tag_names:
             logger.debug(
-                f"[AI] No AI intent tags on resource={resource_id}, "
-                f"tags={tag_names}, skipping AI chain"
+                f"[AI] No Analyze tag on resource={resource_id}, skip analyze chain"
             )
             return
 
-        # Event-driven gating for transcript/summary: don't dispatch
-        # transcription until the audio asset is actually ready on disk.
-        # We rely on parsed_media.music_download_status (set by
-        # extract_audio_from_video → "completed" only after the post-write
-        # exists+getsize check passes). When the audio isn't ready we
-        # simply skip — a follow-up trigger (manual button click on the
-        # MediaCard, or a future audio-extraction-completed callback)
-        # will redispatch. Replaces the polling wait_for_audio_step
-        # which sleep-waited inside the workflow body.
-        audio_ready = (media or {}).get("music_download_status") == "completed"
+        cover_urls = (media or {}).get("cover_urls") or []
+        cover_url = cover_urls[0] if cover_urls else None
+        if not cover_url:
+            logger.info(f"[AI] No cover_url for {platform_id}, skip analyze")
+            return
 
-        if want_transcript and not audio_ready:
-            logger.info(
-                f"[AI] Transcript skipped for {platform_id}: audio not "
-                f"yet extracted (music_download_status="
-                f"{(media or {}).get('music_download_status')!r}). "
-                "Will fire when user manually triggers or after audio "
-                "extraction completes."
-            )
-            want_transcript = False
-            want_summary = False  # summary depends on transcript
+        from app.workflows.analyze_l1 import analyze_l1_workflow
 
-        if want_transcript:
-            from app.workflows.ai_transcription import ai_transcription_workflow
-
+        wf_id = str(_uuid.uuid4())
+        try:
             run_async(
-                start_workflow_routed(
-                    "ai_transcription",
-                    dbos_workflow_callable=ai_transcription_workflow,
-                    dbos_workflow_kwargs={
-                        "parsed_media_id": int(parsed_media_id),
-                        "user_id": user_id,
-                    },
+                get_task_manager().create(
+                    user_id=user_id,
+                    task_type="ai_extract",
+                    title="Analyze",
+                    media_id=str(platform_id),
+                    resource_id=resource_id,
+                    dbos_workflow_id=wf_id,
+                    flow_id=flow_id,
                 )
             )
-
-        if want_summary:
-            from app.workflows.ai_summary import ai_summary_workflow
-
-            run_async(
-                start_workflow_routed(
-                    "ai_summary",
-                    dbos_workflow_callable=ai_summary_workflow,
-                    dbos_workflow_kwargs={
-                        "parsed_media_id": int(parsed_media_id),
-                        "user_id": user_id,
-                    },
-                )
+        except Exception as e:
+            logger.warning(f"[AI] pre-create analyze task_tracking row: {e}")
+        run_async(
+            start_workflow_routed(
+                "ai_extract",
+                dbos_workflow_callable=analyze_l1_workflow,
+                dbos_workflow_kwargs={
+                    "media_id": parsed_media_id,
+                    "cover_url": cover_url,
+                    "title": (media or {}).get("title") or "",
+                    "description": (media or {}).get("description") or "",
+                    "user_id": user_id,
+                },
+                workflow_id=wf_id,
             )
-
-        if want_analyze:
-            cover_url = (media or {}).get("cover_urls") or []
-            cover_url = cover_url[0] if cover_url else None
-            if cover_url:
-                from app.workflows.analyze_l1 import analyze_l1_workflow
-
-                run_async(
-                    start_workflow_routed(
-                        "ai_extract",
-                        dbos_workflow_callable=analyze_l1_workflow,
-                        dbos_workflow_kwargs={
-                            "media_id": parsed_media_id,
-                            "cover_url": cover_url,
-                            "title": (media or {}).get("title") or "",
-                            "description": (media or {}).get("description") or "",
-                            "user_id": user_id,
-                        },
-                    )
-                )
-
-        logger.info(
-            f"[AI] Pipeline chained after download: {platform_id} "
-            f"(transcript={want_transcript}, summary={want_summary}, "
-            f"analyze={want_analyze}, resource={resource_id})"
         )
+        logger.info(f"[AI] analyze chained after download: {platform_id}")
 
     except Exception as e:
         logger.warning(
-            f"[AI] Failed to chain AI pipeline for {platform_id}: "
+            f"[AI] Failed to chain analyze for {platform_id}: "
             f"{type(e).__name__}: {e!r}"
         )
 

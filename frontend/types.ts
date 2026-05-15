@@ -46,6 +46,7 @@ export interface ParsedMedia {
   // Audio Info
   music_download_path?: string;   // BGM downloaded from separate music URL
   extract_audio_path?: string;    // audio track extracted from the video itself
+  extract_audio_status?: 'pending' | 'processing' | 'completed' | 'failed' | 'skipped';
   music_name?: string;
 
   // Cover Info

@@ -16,6 +16,7 @@ from app.workflows.ai_summary import ai_summary_workflow  # noqa: F401
 from app.workflows.ai_transcription import ai_transcription_workflow  # noqa: F401
 from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
 from app.workflows.download import download_workflow  # noqa: F401
+from app.workflows.extract_audio import extract_audio_workflow  # noqa: F401
 from app.workflows.issue_lifecycle import execute_issue  # noqa: F401
 
 # A8.5: paperclip-style liveness scanner for agent_runs.
@@ -103,6 +104,7 @@ __all__ = [
     "reclaim_daily_free_points_workflow",
     "transcode_workflow",
     "download_workflow",
+    "extract_audio_workflow",
     "parse_workflow",
     # storyboard bucket
     "storyboard_image_workflow",

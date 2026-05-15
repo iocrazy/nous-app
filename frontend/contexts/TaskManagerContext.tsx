@@ -52,6 +52,10 @@ export interface UnifiedTask {
   /** @deprecated Use media_id instead */
   video_id?: string;
   group_id?: string;
+  /** Parent task_flows row id — links sibling tasks of one user
+   * submission (parse → download → transcode/extract_audio/ai_*) so the
+   * UI can render them as one chain. NULL for legacy / standalone tasks. */
+  flow_id?: string;
   metadata: Record<string, unknown>;
   created_at: string;
   started_at?: string;
