@@ -267,8 +267,12 @@ def attach_tags_step(*, resource_id: str, tag_ids: list[str]) -> int:
 
 
 @DBOS.step()
-def mark_workflow_processing_step(workflow_id: str) -> None:
+def mark_parse_processing_step(workflow_id: str) -> None:
     """Push task_tracking.phase from 'queued' to 'processing'.
+
+    Renamed from ``mark_workflow_processing_step`` (was the same name
+    in download.py + parse.py, triggering DBOS's "Duplicate registration
+    of function 'mark_workflow_processing_step'" warning at import).
 
     Best-effort. Background:
     `mirror_dbos_lifecycle_to_tracking` only writes `status` (not
@@ -317,7 +321,7 @@ def parse_workflow(
     # running (the `mirror_dbos_lifecycle_to_tracking` trigger only
     # touches `status`, not `phase`, so without this call the row
     # would stay phase='queued' for the full lifetime of the run).
-    mark_workflow_processing_step(DBOS.workflow_id)
+    mark_parse_processing_step(DBOS.workflow_id)
 
     # 1. URL validation (sync, fast)
     #
