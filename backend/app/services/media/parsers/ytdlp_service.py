@@ -228,6 +228,15 @@ class YtdlpService:
             "yt-dlp",
             "-f",
             "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+            # Sort the matched formats so 1080p wins over 720p when both
+            # are returned. yt-dlp's default sort doesn't always prefer
+            # the highest resolution — bilibili logged-in users were
+            # still getting 720p (~10-43 MB files) even though their
+            # SESSDATA cookie unlocked the 1080p variants. Explicit
+            # `-S "res,fps,br,codec:avc1"` makes it pick the highest
+            # resolution available in the cookie's quota.
+            "-S",
+            "res,fps,br,codec:avc1",
             "--merge-output-format",
             "mp4",
             "--no-playlist",
