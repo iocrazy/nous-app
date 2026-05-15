@@ -14,8 +14,12 @@ workflow was actively running. Two-part root cause:
 
 Fix:
   - `get_queue_status` filter changed to 'processing'.
-  - parse_workflow + download_workflow both call a new
-    `mark_workflow_processing_step` at body entry to transition phase.
+  - parse_workflow + download_workflow each call a per-workflow
+    "mark processing" DBOS step at body entry to transition phase
+    (renamed from a single shared `mark_workflow_processing_step`
+    to `mark_parse_processing_step` / `mark_download_processing_step`
+    in the post-PR-283 cleanup so DBOS doesn't warn about a duplicate
+    step name registration).
 
 These tests pin both pieces.
 """
@@ -46,21 +50,21 @@ def test_get_queue_status_filters_on_processing():
 
 
 def test_parse_workflow_calls_mark_processing():
-    """parse_workflow body must call `mark_workflow_processing_step`
-    so phase is bumped to 'processing' on dispatch. Source grep
-    instead of mocking DBOS — the workflow runs in DBOS context
-    only, so functional invocation is too brittle to test here."""
+    """parse_workflow body must call `mark_parse_processing_step` so
+    phase is bumped to 'processing' on dispatch. Source grep instead of
+    mocking DBOS — the workflow runs in DBOS context only, so functional
+    invocation is too brittle to test here."""
     from app.workflows import parse
 
     src = inspect.getsource(parse.parse_workflow)
-    assert "mark_workflow_processing_step" in src
+    assert "mark_parse_processing_step" in src
 
 
 def test_download_workflow_calls_mark_processing():
-    """Same contract for download_workflow — without this the WORKER
-    stat ticks back to 'Idle' the moment a download takes over from
-    parse."""
+    """Same contract for download_workflow (`mark_download_processing_step`).
+    Without this the WORKER stat ticks back to 'Idle' the moment a download
+    takes over from parse."""
     from app.workflows import download
 
     src = inspect.getsource(download.download_workflow)
-    assert "mark_workflow_processing_step" in src
+    assert "mark_download_processing_step" in src
