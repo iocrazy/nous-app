@@ -266,9 +266,13 @@ async def finalize_post_download_step(
                     pm_status_updates["image_download_status"] = "completed"
                 else:
                     pm_status_updates["video_download_status"] = "completed"
-            m = results.get("music")
-            if m == "completed":
-                pm_status_updates["music_download_status"] = "completed"
+            # ffmpeg-extracted audio used to set results["music"] here so
+            # this block could mirror it onto music_download_status. After
+            # PR #283 the inline extraction moved to extract_audio_workflow,
+            # results["music"] is never set, and ffmpeg-extracted audio
+            # writes its own extract_audio_path/extract_audio_status fields.
+            # music_download_status is now reserved for URL-downloaded
+            # music (set by downloader.py directly).
         if download_cover and results.get("cover") == "completed":
             pm_status_updates["cover_download_status"] = "completed"
 
@@ -329,9 +333,8 @@ async def chain_followups_step(
 
     NOT a `@DBOS.step` — `start_workflow_routed` calls
     `DBOS.start_workflow` which asserts when invoked from inside a step
-    context (same constraint as dispatch_download_step /
-    dispatch_l1_analysis_step). Must run in workflow body where the
-    workflow context is active."""
+    context (same constraint as dispatch_download_step). Must run in
+    workflow body where the workflow context is active."""
     if not resource_id or not fresh_download_path:
         return
 

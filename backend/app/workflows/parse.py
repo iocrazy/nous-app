@@ -178,61 +178,6 @@ def dispatch_download_step(
     return asyncio.run(_do())
 
 
-def dispatch_l1_analysis_step(
-    *,
-    media_id: Any,
-    cover_url: str,
-    title: str,
-    description: str,
-    user_id: str,
-    flow_id: Optional[str] = None,
-) -> dict[str, Any]:
-    """Route L1 cover analysis via the migration table. Best-effort —
-    pre-creates a task_tracking row with a friendly title; never raises.
-
-    NOT a `@DBOS.step` for the same reason as dispatch_download_step."""
-    import uuid as _uuid
-
-    try:
-        from app.services.infra.dbos_orchestrator import start_workflow_routed
-        from app.services.infra.unified_task_manager import get_task_manager
-        from app.workflows.analyze_l1 import analyze_l1_workflow
-
-        wf_id = str(_uuid.uuid4())
-
-        async def _do() -> dict[str, Any]:
-            try:
-                await get_task_manager().create(
-                    user_id=user_id,
-                    task_type="ai_extract",
-                    title=f"Analyze {(title or media_id)[:40]}",
-                    subtitle="L1 cover analysis",
-                    media_id=str(media_id) if media_id else None,
-                    dbos_workflow_id=wf_id,
-                    flow_id=flow_id,
-                )
-            except Exception as e:
-                logger.warning(f"[parse] pre-create analyze task_tracking: {e}")
-
-            return await start_workflow_routed(
-                "ai_extract",
-                dbos_workflow_callable=analyze_l1_workflow,
-                dbos_workflow_kwargs={
-                    "media_id": media_id,
-                    "cover_url": cover_url,
-                    "title": title,
-                    "description": description,
-                    "user_id": user_id,
-                },
-                workflow_id=wf_id,
-            )
-
-        return asyncio.run(_do())
-    except Exception as e:
-        logger.warning(f"[parse] L1 analysis dispatch failed: {e}")
-        return {"mode": "skipped", "error": str(e)}
-
-
 @DBOS.step()
 def update_parse_tracking_step(
     *,
@@ -465,9 +410,9 @@ def parse_workflow(
 
     # 6. (removed) Auto-dispatch of L1 cover analysis.
     # D9 design: AI tasks (analyze / summary / transcript) are user-triggered
-    # via tag intents on the resource card, not chained off parse.
-    # The dispatch_l1_analysis_step helper above is kept so the tag handler
-    # can call it directly when the user opts in.
+    # via tag intents on the resource card, not chained off parse. The
+    # download chain's maybe_chain_ai_pipeline handles the analyze dispatch
+    # when the resource carries the "Analyze" tag.
 
     # 7. Audit log
     log_parse_outcome_step(

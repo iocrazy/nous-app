@@ -96,13 +96,13 @@ def assert_audio_present_step(audio_path: str) -> str:
     invoking the (expensive + network-bound) whisper call.
 
     Replaces the previous wait_for_audio_step which polled inside the
-    workflow body. Polling was the wrong abstraction: the right one is
-    event/state — `maybe_chain_ai_pipeline` and the manual trigger
-    endpoints now check `parsed_media.music_download_status='completed'`
-    BEFORE dispatching this workflow, so by the time we arrive here the
-    file should already be on disk. This step is a one-shot assertion
-    that catches the rare desync (file deleted between dispatch and
-    execution); it raises immediately rather than sleep-waiting, and
+    workflow body. The structural fix is event/state, not polling:
+    extract_audio_workflow runs first, only chains this workflow on its
+    success, and the manual-trigger endpoints in ai_router gate on
+    extract_audio_path / music_download_path being on disk. By the time
+    we arrive here the file should already exist. This step is a one-shot
+    assertion that catches the rare desync (file deleted between dispatch
+    and execution); it raises immediately rather than sleep-waiting, and
     the workflow's top-level try/except converts the failure into a
     task_tracking row with status='failed' instead of a hung worker."""
     from app.core.config import settings
@@ -310,9 +310,10 @@ async def ai_transcription_workflow(
 
     try:
         inputs = load_transcribe_inputs(parsed_media_id, user_id)
-        # Cheap on-disk assertion (one stat call). Dispatcher already
-        # gated on parsed_media.music_download_status='completed', so
-        # this is a defense-in-depth check, not a wait loop.
+        # Cheap on-disk assertion (one stat call). The chain dispatcher
+        # only fires us after extract_audio_workflow succeeds, and the
+        # manual trigger gate checks extract_audio_path/music_download_path
+        # on disk, so this is a defense-in-depth check, not a wait loop.
         audio_path = assert_audio_present_step(inputs["audio_path"])
         summary = await run_whisper(
             audio_path=audio_path,
