@@ -15,7 +15,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Coroutine, List, Optional, Tuple
+from typing import Any, Callable, Coroutine, List, Optional, Tuple
 
 from loguru import logger
 
@@ -157,15 +157,23 @@ class TranscodeService:
         resource_id: str,
         version_id: str,
         on_progress: Optional["TranscodeService.ProgressCallback"] = None,
-    ) -> Optional[str]:
+    ) -> dict[str, Any]:
         """
         Transcode a resource version to HLS multi-bitrate.
 
         Args:
             on_progress: Optional async callback(progress_int, subtitle_str) for task tracking.
 
-        Returns the relative hls_path (e.g. "teams/.../v1/hls/master.m3u8")
-        or None on failure.
+        Returns a structured outcome dict:
+          - {"status": "completed", "hls_path": "teams/.../master.m3u8"}
+          - {"status": "skipped", "reason": "..."} when intentionally skipped
+            (transcoding disabled, file below admin size threshold, etc.)
+          - {"status": "failed", "reason": "..."} on real failure (missing
+            version row, missing source file, ffmpeg crash, etc.)
+
+        The workflow distinguishes "skipped" from "failed" so a small file
+        below the admin threshold isn't surfaced to the user as a transcode
+        failure in Activity Logs.
         """
         # Master toggle check (read from DB for Celery worker compatibility)
         db_enabled = self._get_db_setting("transcode_enabled")
@@ -176,17 +184,17 @@ class TranscodeService:
         )
         if not is_enabled:
             logger.info("[Transcode] Transcoding is disabled via settings")
-            return None
+            return {"status": "skipped", "reason": "transcoding disabled in settings"}
 
         version = await self.repo.get_version_by_id(version_id)
         if not version:
             logger.error(f"Version {version_id} not found")
-            return None
+            return {"status": "failed", "reason": f"version {version_id} not found"}
 
         file_path = version.get("file_path")
         if not file_path:
             logger.error(f"Version {version_id} has no file_path")
-            return None
+            return {"status": "failed", "reason": "version has no file_path"}
 
         # Size gate (admin-configured). transcode_min_size_mb lives in
         # system_settings and main.py loads it into settings at startup,
@@ -206,13 +214,16 @@ class TranscodeService:
             min_size_mb = settings.TRANSCODE_MIN_SIZE_MB
         file_size_bytes = version.get("file_size_bytes") or 0
         if min_size_mb > 0 and file_size_bytes < min_size_mb * 1024 * 1024:
+            size_mb = file_size_bytes / 1024 / 1024
             logger.info(
-                f"[Transcode] Version {version_id} "
-                f"({file_size_bytes / 1024 / 1024:.1f} MB) is below the "
-                f"{min_size_mb} MB admin threshold — skipping HLS transcode"
+                f"[Transcode] Version {version_id} ({size_mb:.1f} MB) is "
+                f"below the {min_size_mb} MB admin threshold — skipping HLS"
             )
             await self.repo.update_version(version_id, {"transcode_status": "skipped"})
-            return None
+            return {
+                "status": "skipped",
+                "reason": f"file {size_mb:.1f} MB below {min_size_mb} MB threshold",
+            }
 
         # Mark as processing
         await self.repo.update_version(version_id, {"transcode_status": "processing"})
@@ -223,7 +234,7 @@ class TranscodeService:
         if not source.exists():
             logger.error(f"Source file not found: {source}")
             await self.repo.update_version(version_id, {"transcode_status": "failed"})
-            return None
+            return {"status": "failed", "reason": f"source file not found: {source}"}
 
         # Determine HLS output directory: sibling hls/ folder next to the source file
         hls_dir = source.parent / "hls"
@@ -238,7 +249,10 @@ class TranscodeService:
                 await self.repo.update_version(
                     version_id, {"transcode_status": "failed"}
                 )
-                return None
+                return {
+                    "status": "failed",
+                    "reason": "could not probe video resolution",
+                }
 
             total_duration = await self._probe_duration(str(source))
 
@@ -350,7 +364,7 @@ class TranscodeService:
 
                     if on_progress:
                         await on_progress(100, "Done")
-                    return relative_hls
+                    return {"status": "completed", "hls_path": relative_hls}
 
             # ============================================================
             # Standard Path: full encoding (non-H.264 or passthrough failed)
@@ -360,9 +374,12 @@ class TranscodeService:
             if not applicable:
                 logger.info(f"No applicable tiers for {width}x{height}, skipping")
                 await self.repo.update_version(
-                    version_id, {"transcode_status": "failed"}
+                    version_id, {"transcode_status": "skipped"}
                 )
-                return None
+                return {
+                    "status": "skipped",
+                    "reason": f"no applicable tiers for {width}x{height}",
+                }
 
             # Ensure tier directories exist
             for tier in applicable:
@@ -383,7 +400,7 @@ class TranscodeService:
                 await self.repo.update_version(
                     version_id, {"transcode_status": "failed"}
                 )
-                return None
+                return {"status": "failed", "reason": "all tier encodings failed"}
 
             # Add passthrough "Original" tier (copy codec, no re-encoding)
             if on_progress:
@@ -428,12 +445,12 @@ class TranscodeService:
                 f"Transcode completed: resource={resource_id}, version={version_id}, "
                 f"tiers={[t.name for t in encoded_tiers]}"
             )
-            return relative_hls
+            return {"status": "completed", "hls_path": relative_hls}
 
         except Exception as e:
             logger.error(f"Transcode failed for version {version_id}: {e}")
             await self.repo.update_version(version_id, {"transcode_status": "failed"})
-            return None
+            return {"status": "failed", "reason": str(e)[:200]}
 
     # ------------------------------------------------------------------ #
     # Tier encoding (shared by both fast-path and standard-path)

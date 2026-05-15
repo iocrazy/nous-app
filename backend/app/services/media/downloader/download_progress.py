@@ -159,7 +159,12 @@ async def download_file_with_progress(
                     async for chunk in response.aiter_bytes(chunk_size=8192):
                         await f.write(chunk)
                         downloaded += len(chunk)
-                        tracker.update(downloaded, total)
+                        # tracker.update is async — must be awaited or
+                        # the coroutine is dropped and the Redis publish
+                        # never fires (which is what made the download
+                        # progress bar look like it jumped from "no bar
+                        # visible" straight to "completed").
+                        await tracker.update(downloaded, total)
 
                 tracker.complete()
                 logger.success(f"Downloaded: {os.path.basename(file_path)}")
