@@ -90,21 +90,15 @@ async def transcode_to_hls_step(
 
         on_progress = _report_progress
 
-    hls_path = await svc.transcode_version(
+    result = await svc.transcode_version(
         resource_id, version_id, on_progress=on_progress
     )
-    if hls_path:
-        return {
-            "status": "completed",
-            "resource_id": resource_id,
-            "version_id": version_id,
-            "hls_path": hls_path,
-        }
+    # Service now returns {"status": completed|skipped|failed, "hls_path"?,
+    # "reason"?}. Pass through the status; tag the IDs for downstream.
     return {
-        "status": "failed",
+        **result,
         "resource_id": resource_id,
         "version_id": version_id,
-        "error": "Transcode returned no output",
     }
 
 
@@ -117,13 +111,18 @@ async def log_transcode_outcome_step(
     version_id: str,
     outcome: dict[str, Any],
 ) -> None:
-    """Audit row in user_logs + on terminal failure flip
+    """Audit row in user_logs. Skipped outcomes (small file, transcode
+    disabled, no applicable tiers) are NOT logged — they were quiet
+    no-ops that don't deserve a "Transcode failed" entry in Activity
+    Logs. Real failures still write user_logs + flip
     resources_versions.transcode_status='failed' so the UI surfaces a
     Retry button. Best-effort — never raises."""
     from app.repositories.resources_repository import ResourcesRepository
     from app.repositories.user_logs_repository import log_user_action
 
-    if outcome["status"] == "completed":
+    status = outcome.get("status")
+
+    if status == "completed":
         if user_id:
             try:
                 await log_user_action(
@@ -139,6 +138,16 @@ async def log_transcode_outcome_step(
                 )
             except Exception as e:
                 logger.warning(f"[transcode] log_user_action: {e}")
+        return
+
+    if status == "skipped":
+        # Quiet skip — the service already wrote transcode_status='skipped'
+        # on the version row. Don't pollute Activity Logs with a failure
+        # entry the user shouldn't have to triage.
+        logger.info(
+            f"[transcode] version={version_id} skipped: "
+            f"{outcome.get('reason', 'unknown')}"
+        )
         return
 
     # failed
@@ -157,7 +166,7 @@ async def log_transcode_outcome_step(
                 details={
                     "resource_id": resource_id,
                     "version_id": version_id,
-                    "error": str(outcome.get("error", ""))[:200],
+                    "error": str(outcome.get("reason", ""))[:200],
                 },
             )
         except Exception as e:

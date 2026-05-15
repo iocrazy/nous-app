@@ -49,7 +49,10 @@ async def test_size_gate_skips_file_below_threshold(monkeypatch):
 
     result = await svc.transcode_version("r1", "v1")
 
-    assert result is None
+    # Outcome dict (post-PR #286) carries the skip status explicitly so
+    # the workflow can distinguish "intentional skip" from "real failure".
+    assert result["status"] == "skipped"
+    assert "below" in result["reason"]
     # Gate hit before "mark processing" — the only update is the skip.
     assert svc.repo.updates == [("v1", {"transcode_status": "skipped"})]
 
@@ -67,7 +70,10 @@ async def test_size_gate_passes_file_above_threshold(monkeypatch):
 
     result = await svc.transcode_version("r1", "v1")
 
-    assert result is None  # fails later (source missing), not gated
+    # Past the gate but the source file is missing → real failure, NOT a
+    # skip. Confirms the gate let it through and the failure is on the
+    # downstream source-not-found check.
+    assert result["status"] == "failed"
     statuses = [data.get("transcode_status") for _, data in svc.repo.updates]
     assert "skipped" not in statuses
     assert "processing" in statuses  # gate passed → proceeded

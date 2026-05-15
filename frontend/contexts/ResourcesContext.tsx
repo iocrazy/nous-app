@@ -31,6 +31,7 @@ import { fetchLibraries } from '../services/libraryService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
 import { useTaskManager } from './TaskManagerContext';
+import { useAuth } from './AuthContext';
 import { usePermission } from '../hooks/usePermission';
 import { useToast } from '../components/Toast';
 import { getSupabaseClient } from '../supabaseClient';
@@ -196,6 +197,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 }) => {
   const { t } = useTranslation();
   const { tasks: allUnifiedTasks } = useTaskManager();
+  const { currentUserId } = useAuth();
   const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -352,6 +354,76 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       console.error('[ResourcesContext] reloadResources failed:', err);
     }
   }, [scopeType, scopeId, selectedFolderId, selectedLibraryId]);
+
+  // Keep a stable handle on reloadResources so the realtime subscription
+  // below doesn't tear down + re-subscribe on every scope/filter change.
+  const reloadResourcesRef = useRef(reloadResources);
+  useEffect(() => {
+    reloadResourcesRef.current = reloadResources;
+  }, [reloadResources]);
+
+  // ── Realtime: refresh the list when a new resource is created for the
+  // current user, so a freshly-downloaded video shows up + becomes
+  // clickable without a manual page refresh. Subscribes broadly to the
+  // user's resources.creator_id and debounces reloads to avoid thrashing
+  // when a download produces multiple INSERTs in quick succession (the
+  // resource itself + resource_versions writes etc).
+  useEffect(() => {
+    if (!currentUserId) return;
+    const supabase = getSupabaseClient();
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => {
+        pending = null;
+        reloadResourcesRef.current().catch(() => {});
+      }, 400);
+    };
+
+    const channel = supabase
+      .channel(`resources-realtime-${currentUserId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'resources',
+          filter: `creator_id=eq.${currentUserId}`,
+        },
+        () => scheduleReload(),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'resources',
+          filter: `creator_id=eq.${currentUserId}`,
+        },
+        (payload) => {
+          // Only reload on user-visible field changes (not every metadata
+          // tick from background workflows). filename/notes/thumbnail
+          // changes warrant a refresh; transcode_status etc. don't move
+          // the card around so we ignore them here.
+          const changed = (payload as Record<string, unknown>).new as Record<string, unknown> | undefined;
+          if (!changed) return;
+          if (
+            changed.filename !== undefined ||
+            changed.is_trashed !== undefined ||
+            changed.folder_id !== undefined ||
+            changed.thumbnail_path !== undefined
+          ) {
+            scheduleReload();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      if (pending) clearTimeout(pending);
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId]);
 
   // Initial data load on scope change
   useEffect(() => {
