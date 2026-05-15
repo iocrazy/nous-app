@@ -17,7 +17,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate migration file exists
+      - name: Validate + encode migration file
+        id: encode
         run: |
           if [ ! -f "${{ inputs.migration_file }}" ]; then
             echo "::error::Migration file not found: ${{ inputs.migration_file }}"
@@ -26,30 +27,41 @@ jobs:
           echo "Migration file: ${{ inputs.migration_file }}"
           echo "--- Contents ---"
           cat "${{ inputs.migration_file }}"
+          # Inline the SQL via base64 so the SSH job doesn't depend on
+          # the NAS having a checked-out copy of the repo. The earlier
+          # `cd $NAS_PROJECT_PATH && psql < <relative-path>` failed
+          # because deploy is image-only — no git checkout on the host.
+          {
+            echo 'sql_b64<<MIGRATION_EOF'
+            base64 < "${{ inputs.migration_file }}"
+            echo 'MIGRATION_EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run migration via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          SQL_B64: ${{ steps.encode.outputs.sql_b64 }}
         with:
           host: ${{ secrets.NAS_HOST }}
           port: ${{ secrets.NAS_PORT }}
           username: ${{ secrets.NAS_USER }}
           key: ${{ secrets.NAS_SSH_KEY }}
           command_timeout: 5m
+          envs: SQL_B64
           script: |
             set -e
             export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-            echo "Finding Supabase DB container..."
             DB_CONTAINER="mediahub-sb-db"
             echo "Using DB container: $DB_CONTAINER"
 
-            MIGRATION_FILE="${{ inputs.migration_file }}"
-            echo "Running migration: $MIGRATION_FILE"
+            TMP=$(mktemp /tmp/mediahub-migration-XXXXXX.sql)
+            trap 'rm -f "$TMP"' EXIT
+            printf '%s' "$SQL_B64" | base64 -d > "$TMP"
+            echo "Decoded migration to $TMP ($(wc -c < "$TMP") bytes)"
 
-            cd ${{ secrets.NAS_PROJECT_PATH }}
-            sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres < "$MIGRATION_FILE"
-
-            echo "Migration complete!"
+            echo "Running migration..."
+            sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres < "$TMP"
 
             echo "Reloading PostgREST schema cache..."
             sudo docker kill --signal=SIGUSR1 mediahub-sb-rest 2>/dev/null || true

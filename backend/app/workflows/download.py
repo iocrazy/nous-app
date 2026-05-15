@@ -323,6 +323,7 @@ async def chain_followups_step(
     resource_id: Optional[str],
     fresh_download_path: Optional[str],
     flow_id: Optional[str] = None,
+    video_title: str = "",
 ) -> None:
     """Dispatch thumbnail + extract_audio + transcode + AI pipeline.
     Best-effort — failures here never fail the workflow.
@@ -351,6 +352,11 @@ async def chain_followups_step(
         from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.thumbnail import thumbnail_workflow
 
+        # Friendly title prefix for the chained tasks so TaskCenter shows
+        # "Thumbnail 惨！视频生成skill..." instead of a bare "Thumbnail" row
+        # that the user can't tell which media it belongs to.
+        title_clip = (video_title or platform_id or "")[:50]
+
         # thumbnail (also produces preview_sprite.jpg inside the service)
         try:
             thumb_wf_id = str(_uuid.uuid4())
@@ -358,7 +364,7 @@ async def chain_followups_step(
                 await get_task_manager().create(
                     user_id=user_id,
                     task_type="thumbnail",
-                    title="Thumbnail",
+                    title=f"Thumbnail {title_clip}",
                     media_id=str(platform_id) if platform_id else None,
                     resource_id=str(resource_id),
                     dbos_workflow_id=thumb_wf_id,
@@ -390,7 +396,7 @@ async def chain_followups_step(
                 await get_task_manager().create(
                     user_id=user_id,
                     task_type="extract_audio",
-                    title="Extract audio",
+                    title=f"Audio {title_clip}",
                     media_id=str(platform_id) if platform_id else None,
                     resource_id=str(resource_id),
                     dbos_workflow_id=audio_wf_id,
@@ -406,6 +412,7 @@ async def chain_followups_step(
                     "user_id": user_id,
                     "resource_id": resource_id,
                     "flow_id": flow_id,
+                    "video_title": video_title,
                 },
                 workflow_id=audio_wf_id,
             )
@@ -418,8 +425,12 @@ async def chain_followups_step(
             maybe_chain_transcode,
         )
 
-        maybe_chain_transcode(platform_id, user_id, flow_id=flow_id)
-        maybe_chain_ai_pipeline(platform_id, user_id, flow_id=flow_id)
+        maybe_chain_transcode(
+            platform_id, user_id, flow_id=flow_id, video_title=video_title
+        )
+        maybe_chain_ai_pipeline(
+            platform_id, user_id, flow_id=flow_id, video_title=video_title
+        )
     except Exception as e:
         logger.warning(
             f"[download.chain] transcode/ai chain: {type(e).__name__}: {e!r}"
@@ -745,6 +756,7 @@ async def download_workflow(
         resource_id=resource_id,
         fresh_download_path=finalize.get("fresh_download_path"),
         flow_id=flow_id,
+        video_title=video_title,
     )
 
     return {
