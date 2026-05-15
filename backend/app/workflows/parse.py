@@ -117,6 +117,7 @@ def dispatch_download_step(
     video_title: str,
     user_agent: str,
     resource_id: Optional[str] = None,
+    flow_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Route the download via the migration table. Pre-creates the
     task_tracking row with a friendly title so admin/Task Center see
@@ -152,6 +153,7 @@ def dispatch_download_step(
                 media_id=str(platform_id) if platform_id else None,
                 resource_id=str(resource_id) if resource_id else None,
                 dbos_workflow_id=wf_id,
+                flow_id=flow_id,
             )
         except Exception as e:
             logger.warning(f"[parse] pre-create download task_tracking: {e}")
@@ -168,6 +170,7 @@ def dispatch_download_step(
                 "video_title": video_title,
                 "user_agent": user_agent,
                 "resource_id": resource_id,
+                "flow_id": flow_id,
             },
             workflow_id=wf_id,
         )
@@ -182,6 +185,7 @@ def dispatch_l1_analysis_step(
     title: str,
     description: str,
     user_id: str,
+    flow_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Route L1 cover analysis via the migration table. Best-effort —
     pre-creates a task_tracking row with a friendly title; never raises.
@@ -205,6 +209,7 @@ def dispatch_l1_analysis_step(
                     subtitle="L1 cover analysis",
                     media_id=str(media_id) if media_id else None,
                     dbos_workflow_id=wf_id,
+                    flow_id=flow_id,
                 )
             except Exception as e:
                 logger.warning(f"[parse] pre-create analyze task_tracking: {e}")
@@ -354,6 +359,7 @@ def parse_workflow(
     categories: Optional[str] = None,
     tag_ids: Optional[list[str]] = None,
     platform: str = "douyin",
+    flow_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """DBOS port of parse_single_link_task.
 
@@ -454,6 +460,7 @@ def parse_workflow(
             video_title=video_title,
             user_agent=legacy_ua,
             resource_id=str(resource_id) if resource_id else None,
+            flow_id=flow_id,
         )
 
     # 6. (removed) Auto-dispatch of L1 cover analysis.

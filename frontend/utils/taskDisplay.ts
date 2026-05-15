@@ -117,7 +117,10 @@ export function groupTasks(tasks: UnifiedTask[], by: GroupBy): TaskGroup[] {
     } else if (by === 'type') {
       ensure(t.task_type, t.task_type).tasks.push(t);
     } else if (by === 'flow') {
-      const flowId = (t.metadata as Record<string, unknown> | undefined)?.['flow_id'] as string | undefined;
+      // Prefer the task_tracking.flow_id column; metadata fallback covers
+      // legacy rows that wrote flow into metadata before the column wired.
+      const metaFlow = (t.metadata as Record<string, unknown> | undefined)?.['flow_id'] as string | undefined;
+      const flowId = t.flow_id ?? metaFlow;
       const key = flowId ?? '__standalone__';
       const label = flowId ? `Flow ${flowId.slice(0, 8)}` : 'Standalone';
       ensure(key, label).tasks.push(t);

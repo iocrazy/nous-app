@@ -155,12 +155,16 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
     # pushes status changes back to the frontend.
     _orphan_task_id: str | None = None
 
-    # Audio-readiness gate (event-driven, not polling): the workflow's
-    # whisper step needs audio.m4a on disk. If extraction hasn't run
-    # yet, fail fast with a clear 409 instead of dispatching a workflow
-    # that we know will fail. The user can re-trigger after the audio
-    # extraction completes (chain or manual).
-    if (media or {}).get("music_download_status") != "completed":
+    # Audio-readiness gate: the workflow's whisper step needs an audio
+    # file on disk. Check the actual on-disk fields, not
+    # music_download_status — that one means "music URL was downloaded",
+    # which is a different concern from "ffmpeg extracted audio from a
+    # video". The MediaCard green icon already uses this same union; the
+    # gate is now consistent with what the UI reports.
+    if not (
+        (media or {}).get("extract_audio_path")
+        or (media or {}).get("music_download_path")
+    ):
         raise HTTPException(
             status_code=409,
             detail=(
@@ -509,10 +513,14 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
         _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
-    # Audio-readiness gate (event-driven): bail with 409 if the audio
-    # asset isn't on disk yet. Mirrors the resource_id endpoint above.
+    # Audio-readiness gate: same union check as the resource_id endpoint
+    # above — extract_audio_path (ffmpeg-extracted) OR music_download_path
+    # (URL-downloaded music). Matches the MediaCard green icon.
     _media_check = await _get_media_or_404(platform_id)
-    if (_media_check or {}).get("music_download_status") != "completed":
+    if not (
+        (_media_check or {}).get("extract_audio_path")
+        or (_media_check or {}).get("music_download_path")
+    ):
         raise HTTPException(
             status_code=409,
             detail=(

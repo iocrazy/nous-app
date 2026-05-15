@@ -43,7 +43,9 @@ const TaskRow: React.FC<{
 }> = ({ task, expanded, onToggle }) => {
   const md = (task.metadata ?? {}) as Record<string, unknown>;
   const agentId = md.agent_id as string | undefined;
-  const flowId = md.flow_id as string | undefined;
+  // Prefer the task_tracking.flow_id column; fall back to metadata.flow_id
+  // for legacy rows that stamped flow into metadata before the column wired.
+  const flowId = task.flow_id ?? (md.flow_id as string | undefined);
   return (
     <>
       <button

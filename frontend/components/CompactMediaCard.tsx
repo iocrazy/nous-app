@@ -382,9 +382,23 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
         {/* AI Status Icons — prefer resource status over parsed_media status */}
         <div className="flex items-center gap-1.5">
-          <div title={data.extract_audio_path || data.music_download_path ? 'Audio extracted' : 'No audio'}>
-            <AudioLines size={11} className={data.extract_audio_path || data.music_download_path ? 'text-emerald-400' : 'text-zinc-700'} />
-          </div>
+          {(() => {
+            // Prefer extract_audio_status (3-state). Legacy rows without
+            // status fall back to "file on disk?" so older media still
+            // shows green if the audio file exists.
+            let audioState: string | undefined = data.extract_audio_status;
+            if (
+              (!audioState || audioState === 'pending' || audioState === 'skipped') &&
+              (data.extract_audio_path || data.music_download_path)
+            ) {
+              audioState = 'completed';
+            }
+            return (
+              <div title={`Audio: ${audioState || 'none'}`}>
+                <AudioLines size={11} className={getAIStatusClass(audioState, 'text-emerald-400')} />
+              </div>
+            );
+          })()}
           <div title={`Transcript: ${aiStatus?.transcript_status || data.transcript_status || 'none'}`}>
             <FileText size={11} className={getAIStatusClass(aiStatus?.transcript_status || data.transcript_status, 'text-indigo-400')} />
           </div>

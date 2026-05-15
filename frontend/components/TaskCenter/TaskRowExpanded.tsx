@@ -74,13 +74,16 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
         <Field label="Completed">{task.completed_at ? relativeTime(task.completed_at) : '-'}</Field>
         <Field label="Resource ID">{task.resource_id ?? '-'}</Field>
         <Field label="Media ID">{task.media_id ?? '-'}</Field>
-        {typeof md.flow_id === 'string' && (
-          <Field label="Flow">
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px] ring-1 ring-emerald-500/30">
-              {md.flow_id.slice(0, 8)} <ExternalLink size={9} />
-            </span>
-          </Field>
-        )}
+        {(() => {
+          const flowId = task.flow_id ?? (typeof md.flow_id === 'string' ? md.flow_id : undefined);
+          return flowId ? (
+            <Field label="Flow">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px] ring-1 ring-emerald-500/30">
+                {flowId.slice(0, 8)} <ExternalLink size={9} />
+              </span>
+            </Field>
+          ) : null;
+        })()}
         {typeof md.agent_id === 'string' && (
           <Field label="Agent">
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 text-[10px] ring-1 ring-purple-500/30">

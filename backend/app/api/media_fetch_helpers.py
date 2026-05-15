@@ -211,6 +211,13 @@ async def dedup_and_dispatch(
 
         task_id = str(_uuid.uuid4())
 
+        # Standalone download (no parse entry) — download is the pipeline
+        # root, so the flow is created here and threaded into the chain.
+        flow_id = await orchestrator.create_flow(
+            user_id=user_id,
+            name=f"Download {video_title[:50] if video_title else platform_id}",
+        )
+
         try:
             dl_parts = [t.capitalize() for t in types_to_download]
             dl_subtitle = " + ".join(dl_parts)
@@ -222,6 +229,7 @@ async def dedup_and_dispatch(
                 media_id=platform_id,
                 resource_id=resource_id,
                 dbos_workflow_id=task_id,
+                flow_id=flow_id,
             )
         except Exception as e:
             logger.warning(f"[Download/Dedup] Pre-create unified_task failed: {e}")
@@ -248,6 +256,7 @@ async def dedup_and_dispatch(
                     "media_type": media_type,
                     "video_title": (video_title[:50] if video_title else "undefined"),
                     "resource_id": resource_id,
+                    "flow_id": flow_id,
                 },
                 workflow_id=task_id,
             )
@@ -507,6 +516,15 @@ async def handle_media_fetch_dispatch(
     url_hash = hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
     dbos_wf_id = f"parse-{auth.user_id[:8]}-{url_hash}-{bucket}"
 
+    # URL submission — parse is the pipeline root. Create the flow here
+    # and thread flow_id through parse → download → transcode/ai/...
+    # On an L3 idempotent re-submit the mgr.create() below raises a
+    # unique-violation and this flow row is left as a harmless orphan.
+    flow_id = await mgr.create_flow(
+        user_id=auth.user_id,
+        name=f"Process {url[:60]}",
+    )
+
     unified_task_id = dbos_wf_id  # PK on task_tracking is dbos_workflow_id
     try:
         unified_task_id = await mgr.create(
@@ -516,6 +534,7 @@ async def handle_media_fetch_dispatch(
             subtitle="Initializing...",
             dedup_key=dedup_key,
             dbos_workflow_id=dbos_wf_id,
+            flow_id=flow_id,
         )
     except Exception as e:
         # Within the 30-s bucket the row may already exist — that's the
@@ -547,6 +566,9 @@ async def handle_media_fetch_dispatch(
             # detected the right platform up at the API edge; just thread
             # it through.
             "platform": platform,
+            # Thread the pipeline flow so download + chained workflows
+            # all attach to the same task_flows row.
+            "flow_id": flow_id,
         },
         workflow_id=dbos_wf_id,
     )

@@ -41,7 +41,7 @@ const KanbanCard: React.FC<{
 }> = ({ task, selected, onClick }) => {
   const md = (task.metadata ?? {}) as Record<string, unknown>;
   const agentId = md.agent_id as string | undefined;
-  const flowId = md.flow_id as string | undefined;
+  const flowId = task.flow_id ?? (md.flow_id as string | undefined);
   return (
     <button
       type="button"
