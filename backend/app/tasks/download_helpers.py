@@ -18,7 +18,9 @@ from app.tasks.utils import run_async
 # ─── Post-download chain helpers ─────────────────────────────────────
 
 
-def maybe_chain_transcode(platform_id: str, user_id: str, *, flow_id: str | None = None):
+def maybe_chain_transcode(
+    platform_id: str, user_id: str, *, flow_id: str | None = None
+):
     """Chain HLS transcoding after download if the resource is a video.
 
     Pre-creates the transcode task_tracking row carrying ``flow_id`` so
@@ -236,7 +238,9 @@ def chain_transcript_summary_for_tags(
         )
 
 
-def maybe_chain_ai_pipeline(platform_id: str, user_id: str, *, flow_id: str | None = None):
+def maybe_chain_ai_pipeline(
+    platform_id: str, user_id: str, *, flow_id: str | None = None
+):
     """Chain the cover-analysis workflow after download IFF the resource
     carries the "Analyze" intent tag.
 

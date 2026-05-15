@@ -86,9 +86,7 @@ class TestCreateFlow:
         client, captured_insert = _mock_table_insert({"id": "f"})
 
         with patch.object(mgr, "_get_client", AsyncMock(return_value=client)):
-            await mgr.create_flow(
-                user_id="u", name="n", metadata={"source": "parse"}
-            )
+            await mgr.create_flow(user_id="u", name="n", metadata={"source": "parse"})
 
         row = captured_insert.call_args[0][0]
         assert row["metadata"] == {"source": "parse"}
@@ -113,9 +111,7 @@ class TestCreateWithFlowId:
     @pytest.mark.asyncio
     async def test_flow_id_written_when_provided(self) -> None:
         mgr = UnifiedTaskManager()
-        client, captured_insert = _mock_table_insert(
-            {"dbos_workflow_id": "wf-1"}
-        )
+        client, captured_insert = _mock_table_insert({"dbos_workflow_id": "wf-1"})
 
         with patch.object(mgr, "_get_client", AsyncMock(return_value=client)):
             await mgr.create(
@@ -133,9 +129,7 @@ class TestCreateWithFlowId:
     @pytest.mark.asyncio
     async def test_flow_id_omitted_when_none(self) -> None:
         mgr = UnifiedTaskManager()
-        client, captured_insert = _mock_table_insert(
-            {"dbos_workflow_id": "wf-1"}
-        )
+        client, captured_insert = _mock_table_insert({"dbos_workflow_id": "wf-1"})
 
         with patch.object(mgr, "_get_client", AsyncMock(return_value=client)):
             await mgr.create(
@@ -170,9 +164,7 @@ class TestExtractAudioWorkflowLogic:
     def test_extract_audio_from_video_returns_false_when_no_media(self) -> None:
         from app.tasks import download_helpers
 
-        with patch.object(
-            download_helpers, "_MR_extract", create=True
-        ):
+        with patch.object(download_helpers, "_MR_extract", create=True):
             # The MediaRepository is imported inside the function; intercept it.
             with patch(
                 "app.repositories.media_repository.MediaRepository"

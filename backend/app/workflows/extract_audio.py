@@ -100,9 +100,7 @@ async def extract_audio_workflow(
         await mark_extract_audio_status_step(platform_id, "failed")
         # Re-raise so DBOS marks the workflow FAILED and the
         # mirror_dbos_lifecycle_to_tracking trigger writes phase=failed.
-        raise RuntimeError(
-            f"audio extraction errored for {platform_id}: {e}"
-        ) from e
+        raise RuntimeError(f"audio extraction errored for {platform_id}: {e}") from e
 
     if not ok:
         await mark_extract_audio_status_step(platform_id, "failed")
