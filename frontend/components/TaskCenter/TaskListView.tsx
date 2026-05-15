@@ -12,6 +12,7 @@ import type { UnifiedTask, TaskStatus } from '../../contexts/TaskManagerContext'
 import { taskTypeLabel } from '../../contexts/TaskManagerContext';
 import { taskIdLabel, statusVisual, relativeTime, type TaskGroup } from '../../utils/taskDisplay';
 import { TaskRowExpanded } from './TaskRowExpanded';
+import { FlowGroupCard } from './FlowGroupCard';
 
 interface TaskListViewProps {
   groups: TaskGroup[];
@@ -96,22 +97,32 @@ const GroupSection: React.FC<{
   onToggle: (t: UnifiedTask) => void;
 }> = ({ group, expandedIds, onToggle }) => {
   const [open, setOpen] = useState(true);
+
+  const renderRow = (t: UnifiedTask) => (
+    <TaskRow
+      key={t.id}
+      task={t}
+      expanded={expandedIds.has(t.id)}
+      onToggle={() => onToggle(t)}
+    />
+  );
+
   // Empty label = "no grouping" (groupBy='none' returns a single bucket
   // with label=''). Render rows flat without a header — paperclip-style.
   if (!group.label) {
-    return (
-      <div>
-        {group.tasks.map((t) => (
-          <TaskRow
-            key={t.id}
-            task={t}
-            expanded={expandedIds.has(t.id)}
-            onToggle={() => onToggle(t)}
-          />
-        ))}
-      </div>
-    );
+    return <div>{group.tasks.map(renderRow)}</div>;
   }
+
+  // groupBy='flow' upgrades the section into a FlowGroupCard with
+  // aggregate progress + cascade-cancel. taskDisplay.ts seeds the group
+  // key as the actual flow_id (or '__standalone__' for ungrouped rows).
+  // The standalone bucket falls through to the plain section header.
+  if (group.key !== '__standalone__' && group.tasks.some((t) => t.flow_id || (t.metadata as Record<string, unknown> | undefined)?.['flow_id'])) {
+    const t0 = group.tasks[0];
+    const flowId = (t0.flow_id ?? ((t0.metadata as Record<string, unknown> | undefined)?.['flow_id'] as string | undefined)) || group.key;
+    return <FlowGroupCard group={group} flowId={flowId} renderTask={renderRow} />;
+  }
+
   return (
     <div className="border-b border-zinc-800/80 last:border-b-0">
       <button
@@ -126,14 +137,7 @@ const GroupSection: React.FC<{
       </button>
       {open && (
         <div className="bg-zinc-950/30">
-          {group.tasks.map((t) => (
-            <TaskRow
-              key={t.id}
-              task={t}
-              expanded={expandedIds.has(t.id)}
-              onToggle={() => onToggle(t)}
-            />
-          ))}
+          {group.tasks.map(renderRow)}
         </div>
       )}
     </div>
