@@ -11,12 +11,32 @@ in the legacy tasks module.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
 
 
 def _run_async(coro):
+    """Run a coroutine from sync code, safely whether or not the calling
+    thread already has a running event loop.
+
+    Background: this helper is invoked from sync ``@DBOS.step`` functions
+    that DBOS schedules on a thread pool. In some DBOS versions the thread
+    already has a running loop (DBOS internally awaits step completion),
+    so a plain ``asyncio.run(coro)`` raises ``RuntimeError: asyncio.run()
+    cannot be called from a running event loop``. That regressed every
+    ``analyze_l1_workflow`` run via the post-PR-283 ``maybe_chain_ai_pipeline``
+    Analyze branch (QA 2026-05-17). Same loop-safe pattern as
+    ``ytdlp_service._get_cookie_args``.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            return pool.submit(asyncio.run, coro).result()
     return asyncio.run(coro)
 
 

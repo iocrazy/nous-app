@@ -20,6 +20,7 @@ from typing import Any
 
 import psycopg
 from dbos import DBOS
+from loguru import logger
 
 
 def _dsn() -> str:
@@ -324,6 +325,20 @@ async def ai_transcription_workflow(
             task_assignment=inputs.get("task_assignment", ""),
         )
         mark_transcript_completed(parsed_media_id)
+        # Chain ai_summary AFTER transcript completes (was concurrent in
+        # download_helpers.chain_transcript_summary_for_tags pre-this-fix —
+        # ai_summary fired alongside transcript and failed with "no
+        # transcript" because transcript wasn't written yet. QA 2026-05-17
+        # task #24.) Best-effort; transcript success is what counts.
+        try:
+            from app.tasks.download_helpers import chain_summary_for_tags
+
+            chain_summary_for_tags(parsed_media_id, user_id)
+        except Exception as e:
+            logger.warning(
+                f"[ai_transcription] post-success summary chain failed for "
+                f"parsed_media_id={parsed_media_id}: {type(e).__name__}: {e!r}"
+            )
         return {"parsed_media_id": parsed_media_id, **summary}
     except Exception as e:  # noqa: BLE001
         return await record_workflow_failure(

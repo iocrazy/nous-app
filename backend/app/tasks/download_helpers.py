@@ -126,14 +126,18 @@ def chain_transcript_summary_for_tags(
     flow_id: str | None = None,
     video_title: str = "",
 ):
-    """Dispatch ai_transcription / ai_summary for a resource IFF it
-    carries the matching intent tags. Called by ``extract_audio_workflow``
-    once the audio asset is on disk — so no audio-ready gate is needed
-    here (the caller guarantees it).
+    """Dispatch ai_transcription for a resource IFF it carries Transcript
+    or Summary tags. Called by ``extract_audio_workflow`` once the audio
+    asset is on disk — so no audio-ready gate is needed here (the caller
+    guarantees it).
 
       tag "Transcript" → ai_transcription_workflow
-      tag "Summary"    → ai_summary_workflow (implies Transcript: the
-                         summary step needs transcript text)
+      tag "Summary"    → handled by ai_transcription_workflow's success
+                         hook (it chains ai_summary_workflow when the
+                         resource has Summary tag). Dispatching summary
+                         concurrently with transcript caused "no
+                         transcript yet" failures (QA 2026-05-17 #24);
+                         summary is now strictly downstream of transcript.
 
     Each dispatched workflow pre-creates its task_tracking row with
     ``flow_id`` so it shows up under the same pipeline chain."""
@@ -164,11 +168,36 @@ def chain_transcript_summary_for_tags(
 
         tag_names = run_async(read_resource_tag_names(resource_id))
         want_transcript = "Transcript" in tag_names or "Summary" in tag_names
-        want_summary = "Summary" in tag_names
 
         if not want_transcript:
             logger.debug(
                 f"[AI] No Transcript/Summary tag on resource={resource_id}, skip"
+            )
+            return
+
+        # Pre-check user_settings: ai_transcription.load_transcribe_inputs
+        # raises "no user_settings for {user_id}" when the row is absent
+        # (every first-time user before they configure AI). With chain
+        # auto-dispatch (post-PR-283), this guarantees a red error per
+        # download for every new user. Detect upfront and skip both
+        # transcript and summary dispatch with an INFO log.
+        # QA evidence: tasks #24 (2026-05-17).
+        from app.repositories.user_settings_repository import UserSettingsRepository
+
+        try:
+            settings_row = run_async(UserSettingsRepository().get_by_user_id(user_id))
+        except Exception as e:
+            logger.warning(
+                f"[AI] user_settings probe failed for {user_id} ({e!r}); "
+                "skipping transcript/summary chain to avoid red error"
+            )
+            return
+        if not settings_row:
+            logger.info(
+                f"[AI] No user_settings for {user_id} — skipping "
+                f"transcript/summary chain (user has not configured AI). "
+                f"Tags {tag_names} on resource={resource_id} would otherwise "
+                "have triggered ai_transcription/ai_summary."
             )
             return
 
@@ -205,45 +234,110 @@ def chain_transcript_summary_for_tags(
                 workflow_id=tr_wf_id,
             )
         )
-
-        if want_summary:
-            from app.workflows.ai_summary import ai_summary_workflow
-
-            sm_wf_id = str(_uuid.uuid4())
-            try:
-                run_async(
-                    mgr.create(
-                        user_id=user_id,
-                        task_type="ai_summary",
-                        title=f"Summary {title_clip}",
-                        media_id=str(platform_id),
-                        resource_id=resource_id,
-                        dbos_workflow_id=sm_wf_id,
-                        flow_id=flow_id,
-                    )
-                )
-            except Exception as e:
-                logger.warning(f"[AI] pre-create ai_summary row: {e}")
-            run_async(
-                start_workflow_routed(
-                    "ai_summary",
-                    dbos_workflow_callable=ai_summary_workflow,
-                    dbos_workflow_kwargs={
-                        "parsed_media_id": int(parsed_media_id),
-                        "user_id": user_id,
-                    },
-                    workflow_id=sm_wf_id,
-                )
-            )
-
+        # Summary is dispatched by ai_transcription_workflow's success
+        # hook (chain_summary_for_tags), not here. See docstring for why.
         logger.info(
-            f"[AI] transcript/summary chained for {platform_id} "
-            f"(summary={want_summary}, resource={resource_id})"
+            f"[AI] transcript chained for {platform_id} (resource={resource_id})"
         )
     except Exception as e:
         logger.warning(
             f"[AI] chain_transcript_summary_for_tags failed for {platform_id}: "
             f"{type(e).__name__}: {e!r}"
+        )
+
+
+def chain_summary_for_tags(parsed_media_id: int, user_id: str):
+    """Dispatch ai_summary_workflow IFF the resource tied to
+    ``parsed_media_id`` carries the Summary tag. Called by
+    ``ai_transcription_workflow``'s success path so summary always runs
+    after transcript completes (vs the pre-this-fix concurrent dispatch
+    that hit "no transcript yet" 100% of the time — QA 2026-05-17 #24).
+
+    Best-effort. Failures are logged and swallowed — transcript success
+    is what counts.
+    """
+    try:
+        import uuid as _uuid
+
+        from app.repositories.media_repository import MediaRepository
+        from app.repositories.resources_repository import ResourcesRepository
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
+        from app.workflows.ai_summary import ai_summary_workflow
+
+        media = run_async(MediaRepository().get_by_id(int(parsed_media_id)))
+        if not media:
+            logger.debug(f"[AI] summary chain: no parsed_media {parsed_media_id}")
+            return
+        platform_id = media.get("platform_id")
+
+        res_repo = ResourcesRepository()
+        resource = run_async(
+            res_repo.get_resource_by_media_id_and_creator(str(parsed_media_id), user_id)
+        )
+        if not resource:
+            return
+        resource_id = str(resource["id"])
+
+        tag_names = run_async(read_resource_tag_names(resource_id))
+        if "Summary" not in tag_names:
+            return
+
+        # Inherit flow_id from the transcript task on the same chain so
+        # the summary card lands in the same FlowGroupCard as parse →
+        # download → extract_audio → transcript.
+        from app.db.supabase_client import get_async_supabase_admin
+
+        async def _read_flow_id() -> str | None:
+            client = await get_async_supabase_admin()
+            r = await (
+                client.table("task_tracking")
+                .select("flow_id")
+                .eq("media_id", str(platform_id) if platform_id else "")
+                .eq("task_type", "ai_transcription")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            rows = r.data or []
+            return rows[0].get("flow_id") if rows else None
+
+        flow_id = run_async(_read_flow_id())
+
+        title_clip = (media.get("title") or platform_id or str(parsed_media_id))[:50]
+        sm_wf_id = str(_uuid.uuid4())
+        try:
+            run_async(
+                get_task_manager().create(
+                    user_id=user_id,
+                    task_type="ai_summary",
+                    title=f"Summary {title_clip}",
+                    media_id=str(platform_id) if platform_id else None,
+                    resource_id=resource_id,
+                    dbos_workflow_id=sm_wf_id,
+                    flow_id=flow_id,
+                )
+            )
+        except Exception as e:
+            logger.warning(f"[AI] pre-create ai_summary row: {e}")
+        run_async(
+            start_workflow_routed(
+                "ai_summary",
+                dbos_workflow_callable=ai_summary_workflow,
+                dbos_workflow_kwargs={
+                    "parsed_media_id": int(parsed_media_id),
+                    "user_id": user_id,
+                },
+                workflow_id=sm_wf_id,
+            )
+        )
+        logger.info(
+            f"[AI] summary chained post-transcript for parsed_media_id={parsed_media_id}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[AI] chain_summary_for_tags failed for "
+            f"parsed_media_id={parsed_media_id}: {type(e).__name__}: {e!r}"
         )
 
 
