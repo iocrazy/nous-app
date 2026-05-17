@@ -1,6 +1,15 @@
 name: Run SQL Migration on NAS
 
+# Two trigger modes:
+#  (1) push to master that adds new files under supabase/migrations/** —
+#      auto-applies them in alpha-numeric order. Avoids the 2026-05-15
+#      incident where PR #283 shipped mig 218 but it never landed in
+#      prod and extract_audio_workflow PGRST204-stormed for hours.
+#  (2) workflow_dispatch — manual single-file apply (debug / replay).
 on:
+  push:
+    branches: [master]
+    paths: ['supabase/migrations/**']
   workflow_dispatch:
     inputs:
       migration_file:
@@ -16,55 +25,95 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Need previous commit to diff added migration files on push.
+          fetch-depth: 2
 
-      - name: Validate + encode migration file
-        id: encode
+      - name: Build batch SQL
+        id: collect
         run: |
-          if [ ! -f "${{ inputs.migration_file }}" ]; then
-            echo "::error::Migration file not found: ${{ inputs.migration_file }}"
-            exit 1
+          set -e
+          batch=$(mktemp /tmp/batch-XXXXXX.sql)
+          echo "\set ON_ERROR_STOP on" > "$batch"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            file="${{ inputs.migration_file }}"
+            if [ ! -f "$file" ]; then
+              echo "::error::Migration file not found: $file"
+              exit 1
+            fi
+            echo "Mode: workflow_dispatch (single file)"
+            files="$file"
+          else
+            echo "Mode: push to master (auto-detect new migrations)"
+            files=$(git diff --name-only --diff-filter=A HEAD~1 HEAD -- 'supabase/migrations/*.sql' | sort)
+            if [ -z "$files" ]; then
+              echo "No new migration files added in this push. Exiting clean."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
-          echo "Migration file: ${{ inputs.migration_file }}"
-          echo "--- Contents ---"
-          cat "${{ inputs.migration_file }}"
-          # Inline the SQL via base64 so the SSH job doesn't depend on
-          # the NAS having a checked-out copy of the repo. The earlier
-          # `cd $NAS_PROJECT_PATH && psql < <relative-path>` failed
-          # because deploy is image-only — no git checkout on the host.
+
+          count=0
+          for f in $files; do
+            name=$(basename "$f")
+            {
+              echo ""
+              echo "-- ============================================================"
+              echo "-- $name"
+              echo "-- ============================================================"
+              echo "\\echo '>> Applying $name'"
+              cat "$f"
+              echo ""
+              echo "\\echo '<< $name applied'"
+            } >> "$batch"
+            count=$((count + 1))
+          done
+
+          echo ""
+          echo "Will apply $count file(s):"
+          for f in $files; do echo "  - $f"; done
+
           {
             echo 'sql_b64<<MIGRATION_EOF'
-            base64 < "${{ inputs.migration_file }}"
+            base64 < "$batch"
             echo 'MIGRATION_EOF'
           } >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          rm -f "$batch"
 
-      - name: Run migration via SSH
+      - name: Run migrations via SSH
+        if: steps.collect.outputs.skip != 'true'
         uses: appleboy/ssh-action@v1.0.3
         env:
-          SQL_B64: ${{ steps.encode.outputs.sql_b64 }}
+          SQL_B64: ${{ steps.collect.outputs.sql_b64 }}
         with:
           host: ${{ secrets.NAS_HOST }}
           port: ${{ secrets.NAS_PORT }}
           username: ${{ secrets.NAS_USER }}
           key: ${{ secrets.NAS_SSH_KEY }}
-          command_timeout: 5m
+          command_timeout: 10m
           envs: SQL_B64
           script: |
             set -e
             export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
             DB_CONTAINER="mediahub-sb-db"
-            echo "Using DB container: $DB_CONTAINER"
-
             TMP=$(mktemp /tmp/mediahub-migration-XXXXXX.sql)
             trap 'rm -f "$TMP"' EXIT
-            printf '%s' "$SQL_B64" | base64 -d > "$TMP"
-            echo "Decoded migration to $TMP ($(wc -c < "$TMP") bytes)"
 
-            echo "Running migration..."
+            printf '%s' "$SQL_B64" | base64 -d > "$TMP"
+            echo "Decoded batch SQL ($(wc -c < "$TMP") bytes, $(grep -c '^-- ==' "$TMP" | head -1) markers)"
+
+            echo ""
+            echo "Running batch via psql (\\set ON_ERROR_STOP on)..."
             sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres < "$TMP"
 
-            echo "Reloading PostgREST schema cache..."
+            echo ""
+            echo "Reloading PostgREST schema cache (sb-rest)..."
             sudo docker kill --signal=SIGUSR1 mediahub-sb-rest 2>/dev/null || true
-            echo "Reloaded PostgREST: mediahub-sb-rest"
+            echo "Done."
 
-            echo "Done!"
+      - name: Skip note
+        if: steps.collect.outputs.skip == 'true'
+        run: echo "No new migrations in this push. Nothing to apply."
