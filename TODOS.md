@@ -256,3 +256,20 @@
 **Context**: Adversarial review MEDIUM. `app/services/workforce/outbox_dispatcher.py:76-84`.
 
 **Status**: pending — M2 follow-up before public launch
+
+---
+
+## TODO-CLEANUP-001: Delete recover_stale_orchestrator_locks workflow (D3d residue)
+
+**What**: Remove the transitional `recover_stale_orchestrator_locks_workflow` from `backend/app/workflows/scheduled_recovery.py` and its scheduled cron registration.
+
+**Why**: Workflow was D3d's "release dedup locks" job for the legacy orchestrator dedup model that PR-D7 replaced with DBOS-native workflow_id dedup. Original `_DEFERRED_TASKS.md` flagged it for deletion as transitional, but the deletion never happened. Now runs hourly doing nothing useful.
+
+**Pros**: 1 fewer scheduled task firing; clearer scheduled_recovery.py.
+
+**Cons**: ~120 lines of code to remove + 1 test file to update. Need to verify no live dedup pattern still relies on it.
+
+**Context**: From deleted `backend/app/workflows/_DEFERRED_TASKS.md` (cleaned up 2026-05-17). Search history: `git log --oneline -- backend/app/workflows/_DEFERRED_TASKS.md`. Implementation at `scheduled_recovery.py:167` (step) + `:277` (workflow). Cron registration is `@DBOS.scheduled("30 * * * *")`.
+
+**Status**: pending — P3 housekeeping
+**Created**: 2026-05-17
