@@ -8,6 +8,8 @@
 .claude/skills/
 .claude/scheduled_tasks.lock
 .superpowers/
+# MCP server config — contains API keys; each dev maintains own copy from .mcp.json.example
+.mcp.json
 
 # Local files
 downloads-snapshot.md
