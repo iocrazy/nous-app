@@ -8,10 +8,12 @@ Regular folder and smart folder CRUD operations.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_guards import verify_scope_access
+from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.resources import (
     FolderCreate,
@@ -57,6 +59,7 @@ async def list_smart_folders(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
     """List smart folders in a scope."""
     try:
@@ -119,6 +122,7 @@ async def smart_folder_results(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
     """Execute smart folder rules and return matching resources."""
     try:
@@ -154,6 +158,7 @@ async def list_folders(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
     """List folders in a scope."""
     try:
@@ -232,6 +237,43 @@ async def get_folder_content_count(folder_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to count folder contents")
 
 
+async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
+    """Inline ownership check for destructive folder operations.
+
+    Stopgap until TODO-SECURITY-001 ships the proper `verify_folder_access`
+    dependency. Applied directly inside the handler bodies for the
+    CRITICAL cascading endpoints (DELETE + cascade trash) — per the
+    2026-05-18 #299 review, those cascade-destructive holes cannot be
+    deferred even by 24h to the SECURITY-001 follow-up PR.
+    """
+    scope_type = folder.get("scope_type")
+    scope_id = folder.get("scope_id")
+    if scope_type == "personal":
+        if str(scope_id) != str(auth.user_id):
+            raise HTTPException(status_code=403, detail="You do not own this folder")
+        return
+    if scope_type == "team":
+        client = await get_async_supabase_admin()
+        result = (
+            await client.table("team_members")
+            .select("team_id")
+            .eq("team_id", str(scope_id))
+            .eq("user_id", str(auth.user_id))
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not a member of this folder's team",
+            )
+        return
+    raise HTTPException(
+        status_code=500,
+        detail=f"Folder has invalid scope_type: {scope_type!r}",
+    )
+
+
 @router.post("/folders/{folder_id}/trash")
 async def trash_folder_cascade(folder_id: str, auth: AuthDep):
     """Move a folder, all sub-folders, and their resources to the recycle bin."""
@@ -240,6 +282,7 @@ async def trash_folder_cascade(folder_id: str, auth: AuthDep):
         folder = await repo.get_folder_by_id(folder_id)
         if not folder:
             raise HTTPException(status_code=404, detail="Folder not found")
+        await _verify_folder_ownership_inline(folder, auth)
 
         result = await repo.trash_folder_cascade(folder_id)
         return {"success": True, "data": result}
@@ -277,6 +320,7 @@ async def delete_folder(folder_id: str, auth: AuthDep):
         folder = await repo.get_folder_by_id(folder_id)
         if not folder:
             raise HTTPException(status_code=404, detail="Folder not found")
+        await _verify_folder_ownership_inline(folder, auth)
 
         result = await svc.permanent_delete_folder(folder_id, auth.user_id)
         return {
