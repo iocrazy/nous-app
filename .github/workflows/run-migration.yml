@@ -98,7 +98,27 @@ jobs:
             set -e
             export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-            DB_CONTAINER="mediahub-sb-db"
+            # Container names per the 2026-04 prod-supabase rename:
+            #   - DB:   mediahub-sb-prod-db (was: mediahub-sb-db)
+            #   - REST: mediahub-sb-prod-rest (was: mediahub-sb-rest)
+            # See scripts/rename-prod-supabase.sh + scripts/migrate-prod-data.sh.
+            # The PR #283 mig 218 silently "ran" against the old name and
+            # the workflow exited green because nobody verified the docker
+            # exec output — auto-trigger (PR #293) caught this when mig 219
+            # surfaced the stale name. Detect by docker ps so future
+            # renames also self-heal.
+            DB_CONTAINER=$(sudo docker ps --format '{{.Names}}' \
+              | grep -E '^mediahub-sb(-prod)?-db$' | head -1)
+            REST_CONTAINER=$(sudo docker ps --format '{{.Names}}' \
+              | grep -E '^mediahub-sb(-prod)?-rest$' | head -1)
+            if [ -z "$DB_CONTAINER" ]; then
+              echo "::error::No running container matching ^mediahub-sb(-prod)?-db$ — list:"
+              sudo docker ps --format '{{.Names}}'
+              exit 1
+            fi
+            echo "Using DB container: $DB_CONTAINER"
+            echo "Using REST container: ${REST_CONTAINER:-<none found, will skip reload>}"
+
             TMP=$(mktemp /tmp/mediahub-migration-XXXXXX.sql)
             trap 'rm -f "$TMP"' EXIT
 
@@ -110,8 +130,12 @@ jobs:
             sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres < "$TMP"
 
             echo ""
-            echo "Reloading PostgREST schema cache (sb-rest)..."
-            sudo docker kill --signal=SIGUSR1 mediahub-sb-rest 2>/dev/null || true
+            if [ -n "$REST_CONTAINER" ]; then
+              echo "Reloading PostgREST schema cache ($REST_CONTAINER)..."
+              sudo docker kill --signal=SIGUSR1 "$REST_CONTAINER" 2>/dev/null || true
+            else
+              echo "REST container not found, skipping schema cache reload."
+            fi
             echo "Done."
 
       - name: Skip note
