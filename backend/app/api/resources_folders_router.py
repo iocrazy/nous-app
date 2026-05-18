@@ -250,9 +250,7 @@ async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
     scope_id = folder.get("scope_id")
     if scope_type == "personal":
         if str(scope_id) != str(auth.user_id):
-            raise HTTPException(
-                status_code=403, detail="You do not own this folder"
-            )
+            raise HTTPException(status_code=403, detail="You do not own this folder")
         return
     if scope_type == "team":
         client = await get_async_supabase_admin()
