@@ -287,12 +287,21 @@ def update_parse_subtitle_step(workflow_id: str, subtitle: str) -> None:
     freely. (error_msg is trigger-managed and stays off-limits.)
 
     Best-effort — never raises (a subtitle update failure shouldn't kill
-    the real workflow)."""
+    the real workflow).
+
+    Implementation note: uses ``_atomic_update`` (not ``update_progress``).
+    ``update_progress`` requires a ``progress: int`` positional that we
+    don't have at these checkpoints; passing 0 would visually reset the
+    progress bar mid-flight. ``_atomic_update`` lets us PATCH just the
+    subtitle column, which is what ``update_parse_tracking_step`` already
+    does on line 200 of this file for the same reason."""
     from app.services.infra.unified_task_manager import get_task_manager
 
     async def _do() -> None:
         try:
-            await get_task_manager().update_progress(workflow_id, subtitle=subtitle)
+            await get_task_manager()._atomic_update(
+                workflow_id, {"subtitle": subtitle[:120]}
+            )
         except Exception as e:
             logger.warning(f"[parse.update_subtitle] {workflow_id}: {e}")
 
