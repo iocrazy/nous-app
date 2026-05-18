@@ -345,78 +345,91 @@ def _do_douyin_download(
                     f"[Download/Exec] image failed for {platform_id}: {error_msg}"
                 )
 
-                # Fallback: re-parse to get fresh image URLs and retry
-                try:
-                    from app.repositories.media_repository import MediaRepository
-                    from app.services.media.parsers.douyin_parse.formatter import (
-                        DouyinFormatter,
-                    )
-                    from app.services.media.parsers.douyin_parse.ies_parser import (
-                        IesDouyinParser,
-                    )
-
+                # Fallback: re-parse to get fresh image URLs and retry.
+                # Image slides only exist on douyin/tiktok — IES is the right
+                # tool there. For yt-dlp platforms image fallback never
+                # applies; skip to avoid noisy "URL 模式不匹配" / NO_ROUTER_DATA logs.
+                image_source_platform = (media or {}).get("source_platform")
+                if image_source_platform not in ("douyin", "tiktok"):
                     logger.info(
-                        f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
+                        f"[Download/Exec] image: skip IES re-parse for "
+                        f"{image_source_platform} platform_id={platform_id}"
                     )
-                    # Use the task's chosen UA so re-parse request is
-                    # consistent with the original parse+download chain.
-                    _re_ua = user_agent
-                    if not _re_ua:
-                        from app.services.media.parsers.douyin_parse.ua_pool import (
-                            pick_ua,
+                else:
+                    try:
+                        from app.repositories.media_repository import MediaRepository
+                        from app.services.media.parsers.douyin_parse.formatter import (
+                            DouyinFormatter,
+                        )
+                        from app.services.media.parsers.douyin_parse.ies_parser import (
+                            IesDouyinParser,
                         )
 
-                        _re_ua = pick_ua()
-                    aweme_detail = run_async(
-                        IesDouyinParser._fetch_share_page(
-                            platform_id, user_agent=_re_ua
+                        logger.info(
+                            f"[Download/Exec] image: re-parsing for fresh URLs {platform_id}"
                         )
-                    )
-                    if aweme_detail:
-                        IesDouyinParser._process_video_urls(aweme_detail)
-                        new_parsed = run_async(
-                            DouyinFormatter.parse_aweme_detail(
-                                aweme_detail=aweme_detail,
-                                valid_url=media.get("original_url", ""),
-                                download_video=True,
-                                download_music=False,
-                                download_cover=False,
+                        # Use the task's chosen UA so re-parse request is
+                        # consistent with the original parse+download chain.
+                        _re_ua = user_agent
+                        if not _re_ua:
+                            from app.services.media.parsers.douyin_parse.ua_pool import (
+                                pick_ua,
+                            )
+
+                            _re_ua = pick_ua()
+                        aweme_detail = run_async(
+                            IesDouyinParser._fetch_share_page(
+                                platform_id, user_agent=_re_ua
                             )
                         )
-                        if new_parsed:
-                            # Update DB with fresh URLs
-                            update_fields = {}
-                            for field in ("image_download_urls", "video_download_urls"):
-                                if new_parsed.get(field):
-                                    update_fields[field] = new_parsed[field]
-                            if update_fields:
-                                repo = MediaRepository()
-                                run_async(repo.update(platform_id, update_fields))
+                        if aweme_detail:
+                            IesDouyinParser._process_video_urls(aweme_detail)
+                            new_parsed = run_async(
+                                DouyinFormatter.parse_aweme_detail(
+                                    aweme_detail=aweme_detail,
+                                    valid_url=media.get("original_url", ""),
+                                    download_video=True,
+                                    download_music=False,
+                                    download_cover=False,
+                                )
+                            )
+                            if new_parsed:
+                                # Update DB with fresh URLs
+                                update_fields = {}
+                                for field in (
+                                    "image_download_urls",
+                                    "video_download_urls",
+                                ):
+                                    if new_parsed.get(field):
+                                        update_fields[field] = new_parsed[field]
+                                if update_fields:
+                                    repo = MediaRepository()
+                                    run_async(repo.update(platform_id, update_fields))
+                                    logger.info(
+                                        f"[Download/Exec] image: re-parsed {platform_id}, "
+                                        f"updated {list(update_fields.keys())}"
+                                    )
+
+                                # Retry download with fresh URLs
+                                video_result = run_async(
+                                    DownloaderService.download_images_by_platform_id(
+                                        platform_id, user_id=user_id
+                                    )
+                                )
+                                results["video"] = (
+                                    video_result.video_download_status.value
+                                    if hasattr(video_result, "video_download_status")
+                                    else "unknown"
+                                )
                                 logger.info(
-                                    f"[Download/Exec] image: re-parsed {platform_id}, "
-                                    f"updated {list(update_fields.keys())}"
+                                    f"[Download/Exec] image retry: "
+                                    f"{results['video']} for {platform_id}"
                                 )
-
-                            # Retry download with fresh URLs
-                            video_result = run_async(
-                                DownloaderService.download_images_by_platform_id(
-                                    platform_id, user_id=user_id
-                                )
-                            )
-                            results["video"] = (
-                                video_result.video_download_status.value
-                                if hasattr(video_result, "video_download_status")
-                                else "unknown"
-                            )
-                            logger.info(
-                                f"[Download/Exec] image retry: "
-                                f"{results['video']} for {platform_id}"
-                            )
-                except Exception as reparse_err:
-                    logger.warning(
-                        f"[Download/Exec] image: re-parse fallback failed "
-                        f"for {platform_id}: {reparse_err}"
-                    )
+                    except Exception as reparse_err:
+                        logger.warning(
+                            f"[Download/Exec] image: re-parse fallback failed "
+                            f"for {platform_id}: {reparse_err}"
+                        )
 
             # Mark image stage complete
             if "video" in stages:

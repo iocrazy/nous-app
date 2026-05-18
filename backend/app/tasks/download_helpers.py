@@ -483,6 +483,19 @@ def ensure_download_urls(
         )
         return media
 
+    # IES + DrissionPage are douyin-specific. For yt-dlp platforms
+    # (bilibili / youtube / twitter / xhs / ...), calling them just wastes
+    # two HTTP calls + emits noisy "URL 模式不匹配" / "NO_ROUTER_DATA" logs
+    # while the outer caller's yt-dlp fallback (download_strategies.py
+    # video failure branch) is the actually-correct recovery path.
+    source_platform = media.get("source_platform")
+    if source_platform not in ("douyin", "tiktok"):
+        logger.info(
+            f"[Download/URL] Skip IES/Browser re-parse for {source_platform} "
+            f"platform_id={platform_id} — yt-dlp fallback owns recovery"
+        )
+        return media
+
     try:
         from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
         from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
