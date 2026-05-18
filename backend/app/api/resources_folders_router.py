@@ -8,10 +8,11 @@ Regular folder and smart folder CRUD operations.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.resources import (
     FolderCreate,
@@ -57,6 +58,7 @@ async def list_smart_folders(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
     """List smart folders in a scope."""
     try:
@@ -119,6 +121,7 @@ async def smart_folder_results(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
     """Execute smart folder rules and return matching resources."""
     try:
@@ -154,6 +157,7 @@ async def list_folders(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
     """List folders in a scope."""
     try:

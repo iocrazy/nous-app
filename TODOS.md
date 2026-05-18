@@ -273,3 +273,54 @@
 
 **Status**: pending — P3 housekeeping
 **Created**: 2026-05-17
+
+---
+
+## TODO-SECURITY-001: verify_folder_access guard for 7 folder-id endpoints
+
+**What**: Write `verify_folder_access(folder_id, auth)` helper in `app/core/scope_guards.py` and apply to 7 endpoints in `resources_folders_router.py` that act on a folder_id with no ownership check.
+
+**Why**: Audited 2026-05-18 (post PR #298). All 7 endpoints (DELETE /folders/{id}, POST trash/restore, PATCH, GET content-count, DELETE/PATCH smart-folders/{id}) currently use admin client, lookup folder by id, then mutate/read without verifying caller owns it. CRITICAL because DELETE /folders/{id} cascade-deletes contained resources.
+
+**Pros**: Closes 7 horizontal-authz holes in one focused PR. Helper is reusable.
+
+**Cons**: New helper needs design: read vs write semantics (does team member have folder write?). Test surface.
+
+**Context**: Full triage at `docs/security/2026-05-18-resources-routers-full-audit.md` § resources_folders_router → "Still open".
+
+**Status**: pending — HIGH security
+**Created**: 2026-05-18
+
+---
+
+## TODO-SECURITY-002: verify_resource_read_access guard for 6 versions endpoints
+
+**What**: Write `verify_resource_read_access(resource_id, auth)` helper and apply to 6 endpoints in `resources_versions_router.py` (GET versions list, POST set-current, DELETE version, GET hls/file, POST retry_transcode).
+
+**Why**: Audited 2026-05-18. PR #274 added `verify_resource_write_access` for upload; sibling endpoints (read, set-current, delete, file-serve) all unguarded. Includes file-content leak (hls/file endpoints) and abuse vector (transcode trigger costs $).
+
+**Pros**: Closes 6 horizontal-authz holes. Read semantics may differ from write (team members read team resources).
+
+**Cons**: Read vs write semantics needs design (PR #274's write-only check may be too strict for reads).
+
+**Context**: Full triage at `docs/security/2026-05-18-resources-routers-full-audit.md` § resources_versions_router.
+
+**Status**: pending — HIGH security
+**Created**: 2026-05-18
+
+---
+
+## TODO-SECURITY-003: verify_scope_access_optional + 3 trash-by-id endpoints
+
+**What**: Write `verify_scope_access_optional(scope_type, scope_id, auth)` variant (handles `Optional[str] scope_id` default = caller's user_id) and apply to 3 endpoints in `resources_crud_router.py`: `/resources/by-platform-id/{id}` trash + by-media-id + unlink.
+
+**Why**: These 3 took `Optional[str] scope_id` so the required-Query version of `verify_scope_access` from PR #274 / #298 couldn't be slotted in. With `Optional`, the default flow probably falls back to caller's user_id (= safe), but when caller PASSES scope_id, no validation runs (= leak).
+
+**Pros**: ~30min PR, small helper variant.
+
+**Cons**: Need to re-read each handler to understand the optional-default behavior before guarding.
+
+**Context**: Full triage at `docs/security/2026-05-18-resources-routers-full-audit.md` § resources_crud_router → "Still open".
+
+**Status**: pending — MEDIUM security
+**Created**: 2026-05-18
