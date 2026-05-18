@@ -1,8 +1,14 @@
-# Resources routers — full horizontal-authz audit
+# Resources routers — horizontal-authz audit (first pass)
 
 Date: 2026-05-18
-Triggered by: PR #298 (closed `list_resources` leak from task #20). Once that confirmed the pattern, did a full audit across all 4 resources routers.
-Status of this PR: ships the next batch of obvious wins (folders read endpoints — same shape as #298). Larger remaining work is **documented as security TODOs below**, not silently deferred.
+Triggered by: PR #298 (closed `list_resources` leak from task #20). Once that confirmed the pattern, did a first-pass audit across all 4 resources routers.
+
+> **Post-review note (added 2026-05-18 after #299 review):** an adversarial review flagged that the `resources_crud_router` enumeration below omits several scope-bearing endpoints — `PATCH /{id}`, `DELETE /{id}/permanent`, `POST /{id}/restore`, `POST /{id}/move`, `POST /transcode/batch`, `GET /{id}/file`, `GET /{id}/cover`, `GET /{id}/preview-sprite`, plus `link-existing` in upload_router. Folders count also off by one (9 open, not 10). A complete second-pass enumeration is tracked as TODO-SECURITY-004; doesn't block the 3 helper-PRs already in flight.
+
+Status of this PR (#299):
+- Ships the 3 obvious folders GET wins (same shape as #298).
+- Inline ownership check on the 2 CRITICAL cascade endpoints (`DELETE /folders/{id}` + `POST /folders/{id}/trash`) — added per #299 review feedback; couldn't wait for SECURITY-001 even by 24h.
+- Other 14 endpoints (now ~24 counting the second-pass additions) tracked as security TODOs below.
 
 ## Status matrix (4 resources sub-routers)
 

@@ -324,3 +324,20 @@
 
 **Status**: pending — MEDIUM security
 **Created**: 2026-05-18
+
+---
+
+## TODO-SECURITY-004: complete resources_crud + upload second-pass audit
+
+**What**: Re-enumerate every endpoint in `resources_crud_router.py` (19 decorators) and `resources_upload_router.py` (4 decorators), confirm authz posture for each. First-pass audit (PR #299) listed only the scope_id-Query ones and missed scope-bearing endpoints that take resource_id from path or scope in body.
+
+**Why**: First pass focused on the obvious shape matching PR #298. Adversarial review of #299 surfaced ~10 omitted endpoints in crud_router (PATCH /{id}, /permanent, /restore, /move, /transcode/batch, /file, /cover, /preview-sprite) plus `link-existing` in upload_router. Some (file/cover serving) may leak file content; some (transcode/batch) are abuse vectors.
+
+**Pros**: Closes the audit's blind spot before SECURITY-001/002/003 helpers ship.
+
+**Cons**: Pure investigation, no code changes in this TODO. Findings feed into SECURITY-001/002/003 scope.
+
+**Context**: `docs/security/2026-05-18-resources-routers-full-audit.md` post-review note.
+
+**Status**: pending — MEDIUM (investigation, blocks SECURITY-001/002/003 scope confirmation)
+**Created**: 2026-05-18
