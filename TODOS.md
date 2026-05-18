@@ -14,7 +14,7 @@
 
 **Cons**: 现阶段不需要任何代码改动，只是监控提醒。
 
-**Context**: 来自 plan-eng-review 2026-04-25 outside voice 提示。`agent_run_events` 表设计在 M1.A migration 里。CostAuditor hook 实现见 `backend/app/services/hooks/cost_auditor.py`。
+**Context**: 来自 plan-eng-review 2026-04-25 outside voice 提示。`agent_run_events` 表设计在 M1.A migration 里。CostAuditor hook 实现见 `backend/app/services/infra/hooks/cost_auditor.py`（path updated 2026-05-17 reap — moved during services 8-subpackage refactor）。
 
 **Depends on**: M1.A 完成 + M3 启动。
 
@@ -34,7 +34,7 @@
 
 **Cons**: 需要 streaming 协议支持，要改前端 SSE 处理逻辑。
 
-**Context**: 来自 plan-eng-review 2026-04-25 outside voice 提示。Compaction 实现见 `backend/app/services/llm_compactor.py`（M1.A 周 5）。
+**Context**: 来自 plan-eng-review 2026-04-25 outside voice 提示。Compaction 实现见 `backend/app/services/ai/llm/llm_compactor.py`（path updated 2026-05-17 reap）。
 
 **Depends on**: M1.A Compaction 完成 + M3 启动。
 
@@ -54,7 +54,7 @@
 
 **Cons**: 短轮询是固定 5s 延迟下限。
 
-**Context**: 来自 plan-eng-review 2026-04-25 outside voice 提示。Message bus 设计在 M2 design doc。`backend/app/services/agent_workers/inbox_processor.py`（M2 创建）。
+**Context**: 来自 plan-eng-review 2026-04-25 outside voice 提示。Message bus 设计在 M2 design doc。`backend/app/services/workforce/inbox_processor.py`（path updated 2026-05-17 reap — workforce M2 已合 master via PRs #175/#208/etc）。
 
 **Depends on**: M2 启动。
 
@@ -90,7 +90,7 @@
 
 **Why**: At Qwen-Max prices, overshooting by one call = 5-10¢ on a 50¢ budget = 10-20% overshoot.
 
-**Context**: Adversarial review #1. `agent_runner.py:78` calls adapter.call BEFORE PreToolUse hook.
+**Context**: Adversarial review #1. `backend/app/services/ai/runner/agent_runner.py` adapter.call runs before BudgetGuard hook. BudgetGuard at `backend/app/services/infra/hooks/budget_guard.py:50-57` still checks `accumulated_cost_cents >= budget_cents` after the call (re-verified 2026-05-17 reap).
 
 **Status**: pending — M2
 
@@ -102,7 +102,7 @@
 
 **Context**: Adversarial review #15, #16. `tasks/memory_tasks.py:51-55`.
 
-**Status**: pending — M2
+**Status**: ❌ SUPERSEDED — verified 2026-05-17. `backend/app/tasks/memory_tasks.py` was deleted by commit `1e87274c feat(dbos): D7 phase 3b — physical Celery cleanup`. Memory writes are now driven by `memory_harvester` PostToolUse hook inline within the agent runner — no per-task asyncio.run() overhead, no concurrent-second double-write window. Original concern no longer applies. See `docs/cleanup/2026-05-17-todos-reap.md`.
 
 ---
 
@@ -110,7 +110,7 @@
 
 **What**: Worst case retry+fallback can spin 7-15 min before final fail. Cancel polling depends on Supabase round-trip which may itself be the cause of failures being retried. Add total_deadline_seconds ceiling.
 
-**Context**: Adversarial review #9. `llm_retry_middleware.py:204`, `llm_fallback_chain.py:101`.
+**Context**: Adversarial review #9. `backend/app/services/ai/llm/llm_retry_middleware.py`, `backend/app/services/ai/llm/llm_fallback_chain.py` (paths updated 2026-05-17 reap).
 
 **Status**: pending — M2
 
@@ -120,7 +120,7 @@
 
 **What**: Empty recall results cached for full 5min TTL. User rephrases 3s later, still no recall. Use 30s TTL for empty results.
 
-**Context**: Adversarial review #14. `retriever.py:130`.
+**Context**: Adversarial review #14. `backend/app/services/ai/memory/retriever.py:147` — re-verified 2026-05-17 reap, empty result still cached with `DEFAULT_CACHE_TTL_S = 300`.
 
 **Status**: pending
 
@@ -130,9 +130,9 @@
 
 **What**: Compaction algo may miss orphans when multi-call assistant replies are split across boundary by interleaved system messages. Need iterative re-discovery loop.
 
-**Context**: Adversarial review #4, #5. `llm_compactor.py:222-235`.
+**Context**: Adversarial review #4, #5. `backend/app/services/ai/llm/llm_compactor.py:249-318::_safe_split_index` (path updated 2026-05-17 reap).
 
-**Status**: pending — M2
+**Status**: ✅ DONE — verified 2026-05-17. `_safe_split_index()` already implements the iterative re-discovery: outer `while candidate > 0:` re-checks orphans each pass; inner `while new_candidate >= 0:` walks back to the assistant message owning the orphan tool_call_id. Likely fixed during M1.B without closing the TODO. See `docs/cleanup/2026-05-17-todos-reap.md`.
 
 ---
 
@@ -207,7 +207,7 @@
 
 **Context**: Adversarial review HIGH #4. `app/services/workforce/delegate_tool.py:execute`. Module docstring updated to acknowledge depth-only protection.
 
-**Status**: pending — M3
+**Status**: ✅ DONE — verified 2026-05-17. `backend/app/services/workforce/delegate_tool.py:181-195::_detect_cycle(target_agent_id=...)` walks parent chain via `parent_run_id`; rejects if target's agent_id appears in ancestor chain with `cycle_run_id` returned. Module docstring now reads "Rejects self-dispatch and cycles (parent chain check)" (line 7). See `docs/cleanup/2026-05-17-todos-reap.md`.
 
 ---
 
@@ -229,7 +229,7 @@
 
 **Fix**: replace with SQL `SELECT DISTINCT recipient_agent_id FROM agent_inbox WHERE status='unread'` via RPC (PostgREST `?select=...&limit=500` does NOT dedupe server-side).
 
-**Context**: Adversarial review MEDIUM. `app/services/workforce/inbox_processor.py:217-244`.
+**Context**: Adversarial review MEDIUM. `backend/app/services/workforce/inbox_processor.py:233-258::_agents_with_unread_messages` (line range updated 2026-05-17 reap — still .select("recipient_agent_id").limit(500) + Python set()).
 
 **Status**: pending — fix when first observed in production telemetry
 
@@ -241,7 +241,7 @@
 
 **Fix**: split into `register_worker` (insert-only with `ON CONFLICT DO NOTHING`) vs `update_worker_state` (the existing one); only bump `state_changed_at` when state actually changes.
 
-**Context**: Adversarial review MEDIUM. `app/repositories/agent_workforce_repository.py:73-101`.
+**Context**: Adversarial review MEDIUM. `backend/app/repositories/agent_workforce_repository.py:144-180::upsert_worker` (line range updated 2026-05-17 reap — still always stomps state / state_changed_at / worker_pid / worker_hostname).
 
 **Status**: pending — M2 follow-up
 
