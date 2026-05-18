@@ -38,6 +38,7 @@ def client(monkeypatch):
     so the team-scope branch of verify_scope_access cannot accidentally
     pass — we only want to exercise the personal-scope policy here.
     """
+
     # Stub the admin client used inside verify_scope_access so the team
     # branch's PostgREST call doesn't try to reach a real Supabase.
     class _FakeQuery:
@@ -60,9 +61,7 @@ def client(monkeypatch):
     async def _fake_admin():
         return _FakeClient()
 
-    monkeypatch.setattr(
-        "app.core.scope_guards.get_async_supabase_admin", _fake_admin
-    )
+    monkeypatch.setattr("app.core.scope_guards.get_async_supabase_admin", _fake_admin)
 
     from app.main import app
 
