@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from fastapi import (
     APIRouter,
+    Depends,
     Header,
     HTTPException,
     Query,
@@ -22,6 +23,7 @@ from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.resources import (
     ResourceMoveRequest,
@@ -50,6 +52,7 @@ async def list_resources(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
     folder_id: Optional[str] = Query(None),
     tag_ids: Optional[List[str]] = Query(
         None,
@@ -280,6 +283,7 @@ async def list_trashed_resources(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
     """List trashed resources in a scope."""
     try:
@@ -296,6 +300,7 @@ async def list_trashed_folders(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
 ):
     """List trashed folders in a scope."""
     try:
@@ -768,6 +773,7 @@ async def delete_resource(
     auth: AuthDep,
     scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    _scope_guard: None = Depends(verify_scope_access),
     folder_id: Optional[str] = Query(None),
 ):
     """Remove a resource from a specific folder.
