@@ -267,6 +267,48 @@ def attach_tags_step(*, resource_id: str, tag_ids: list[str]) -> int:
 
 
 @DBOS.step()
+def update_parse_subtitle_step(workflow_id: str, subtitle: str) -> None:
+    """Update task_tracking.subtitle in place (no phase change).
+
+    Called between major steps so a mid-workflow raise leaves the row
+    with a useful "stuck at X step" subtitle rather than the placeholder
+    "Initializing..." that ``manager.create()`` writes at task creation.
+
+    Background: ``mirror_dbos_lifecycle_to_tracking`` populates ``status``
+    and ``error_msg`` on workflow ERROR, but ``error_msg`` collapses to
+    "Workflow failed — open detail to see the exception." for the
+    pickled-exception payloads DBOS persists (see migration 180:188 —
+    SQL can't unpickle Python objects). So the only signal a user sees
+    is ``subtitle``; keeping it progressing through the workflow gives
+    them at least a hint of which step failed.
+
+    Per CLAUDE.md 路线 C 第 3 条: subtitle is a business-decorated field,
+    not a trigger-managed lifecycle field, so business code may PATCH it
+    freely. (error_msg is trigger-managed and stays off-limits.)
+
+    Best-effort — never raises (a subtitle update failure shouldn't kill
+    the real workflow).
+
+    Implementation note: uses ``_atomic_update`` (not ``update_progress``).
+    ``update_progress`` requires a ``progress: int`` positional that we
+    don't have at these checkpoints; passing 0 would visually reset the
+    progress bar mid-flight. ``_atomic_update`` lets us PATCH just the
+    subtitle column, which is what ``update_parse_tracking_step`` already
+    does on line 200 of this file for the same reason."""
+    from app.services.infra.unified_task_manager import get_task_manager
+
+    async def _do() -> None:
+        try:
+            await get_task_manager()._atomic_update(
+                workflow_id, {"subtitle": subtitle[:120]}
+            )
+        except Exception as e:
+            logger.warning(f"[parse.update_subtitle] {workflow_id}: {e}")
+
+    asyncio.run(_do())
+
+
+@DBOS.step()
 def mark_parse_processing_step(workflow_id: str) -> None:
     """Push task_tracking.phase from 'queued' to 'processing'.
 
@@ -323,6 +365,11 @@ def parse_workflow(
     # would stay phase='queued' for the full lifetime of the run).
     mark_parse_processing_step(DBOS.workflow_id)
 
+    # Subtitle progression — see `update_parse_subtitle_step` docstring
+    # for why we do this (failure error_msg collapses to a placeholder,
+    # so subtitle is the only mid-flight signal the user sees).
+    update_parse_subtitle_step(DBOS.workflow_id, "Validating URL...")
+
     # 1. URL validation (sync, fast)
     #
     # Short-circuit failures MUST raise so DBOS marks the workflow ERROR
@@ -339,6 +386,8 @@ def parse_workflow(
         valid_url = extract_url_step(url)
     except ValueError as e:
         raise RuntimeError(f"Invalid URL: {e}") from e
+
+    update_parse_subtitle_step(DBOS.workflow_id, "Fetching metadata...")
 
     # 2. Fetch + parse (heavy)
     from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
@@ -360,6 +409,8 @@ def parse_workflow(
     media_type = parsed_data.get("media_type", 0)
     video_title = parsed_data.get("title", "undefined")
     parsed_data["user_id"] = user_id
+
+    update_parse_subtitle_step(DBOS.workflow_id, "Saving metadata...")
 
     # 3. Save metadata — same short-circuit-by-raise rule.
     saved_video = save_media_step(parsed_data, platform_id, video_bool)
