@@ -90,6 +90,12 @@ export const TagsSettings: React.FC = () => {
   const [forceTagNameEqEn, setForceTagNameEqEn] = useState(false);
   const [forceEditTagNameEqEn, setForceEditTagNameEqEn] = useState(false);
 
+  // Inline-in-dialog delete confirmation. Separate from ``deletingTagId``
+  // (which controls the inline confirm in the tag list — would render
+  // behind the modal and the user would see nothing).
+  const [confirmingEditDelete, setConfirmingEditDelete] = useState(false);
+  const [isDeletingEdit, setIsDeletingEdit] = useState(false);
+
   // Delete confirmation
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
 
@@ -368,6 +374,21 @@ export const TagsSettings: React.FC = () => {
     setEditTagColor('');
     setEditTagGroupId(null);
     setForceEditTagNameEqEn(false);
+    setConfirmingEditDelete(false);
+  };
+
+  const handleConfirmEditDelete = async () => {
+    if (!editingTag) return;
+    setIsDeletingEdit(true);
+    try {
+      await deleteTag(editingTag.id);
+      setTags((prev) => prev.filter((t) => t.id !== editingTag.id));
+      handleCancelEdit();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete tag');
+    } finally {
+      setIsDeletingEdit(false);
+    }
   };
 
   // Handle delete tag
@@ -1340,24 +1361,57 @@ export const TagsSettings: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-between">
-              <button
-                onClick={() => setDeletingTagId(editingTag.id)}
-                className="px-4 py-2.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors font-medium text-sm flex items-center gap-2"
-              >
-                <Trash2 size={14} />
-                {t('common.delete')}
-              </button>
+            <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-between items-center">
+              {confirmingEditDelete ? (
+                /* Inline confirmation — the old setDeletingTagId path
+                   rendered the confirm UI in the tag list BEHIND the
+                   modal, so the user saw nothing happen. */
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-500/40 bg-red-500/10">
+                  <Trash2 size={14} className="text-red-400" />
+                  <span className="text-sm text-red-300">
+                    {t('settings.tags.deleteConfirm', 'Delete this tag?')}
+                  </span>
+                  <button
+                    onClick={handleConfirmEditDelete}
+                    disabled={isDeletingEdit}
+                    className="p-1 text-red-400 hover:text-red-300 disabled:opacity-50"
+                    title={t('common.confirm', 'Confirm')}
+                  >
+                    {isDeletingEdit ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Check size={14} />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingEditDelete(false)}
+                    disabled={isDeletingEdit}
+                    className="p-1 text-zinc-400 hover:text-zinc-300 disabled:opacity-50"
+                    title={t('common.cancel', 'Cancel')}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingEditDelete(true)}
+                  className="px-4 py-2.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors font-medium text-sm flex items-center gap-2"
+                >
+                  <Trash2 size={14} />
+                  {t('common.delete')}
+                </button>
+              )}
               <div className="flex gap-3">
                 <button
                   onClick={handleCancelEdit}
-                  className="px-5 py-2.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors font-medium text-sm"
+                  disabled={isDeletingEdit}
+                  className="px-5 py-2.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors font-medium text-sm disabled:opacity-50"
                 >
                   {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleSaveEdit}
-                  disabled={!editTagName.trim() || isSaving}
+                  disabled={!editTagName.trim() || isSaving || confirmingEditDelete || isDeletingEdit}
                   className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isSaving ? (
