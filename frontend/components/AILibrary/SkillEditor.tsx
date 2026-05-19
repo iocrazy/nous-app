@@ -411,9 +411,23 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
             <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
               {t('aiLibrary.skills.metaUsedBy', 'Used by')}
             </span>
-            <span className="text-zinc-500">
-              {t('aiLibrary.skills.usedByPlaceholder', 'No agents attached')}
-            </span>
+            {skill.agents && skill.agents.length > 0 ? (
+              <span className="flex flex-wrap gap-1.5">
+                {skill.agents.map((a) => (
+                  <span
+                    key={a.slug}
+                    className="inline-flex items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[11px] text-indigo-300"
+                    title={a.slug}
+                  >
+                    {a.name}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="text-zinc-500">
+                {t('aiLibrary.skills.usedByPlaceholder', 'No agents attached')}
+              </span>
+            )}
           </div>
         </div>
 
