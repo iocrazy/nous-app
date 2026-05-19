@@ -125,7 +125,11 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const { t } = useTranslation();
   const { userProfile } = useAuth();
   const { addToast } = useToast();
-  const isAdmin = userProfile?.role === 'admin';
+  // ``userProfile.role === 'admin'`` no longer gates the delete button —
+  // backend rejects DELETE on bundled skills for everyone in Phase 1
+  // (same shape as the agent preset read-only rule fixed in PR #309).
+  // Keeping the destructure so callers down-tree don't break.
+  void userProfile;
 
   const [skill, setSkill] = useState<AILibrarySkill | null>(null);
   const [activeTab, setActiveTab] = useState<string>(SKILL_MD);
@@ -218,7 +222,10 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
         'Bundled MediaHub skills are read-only. Fork to edit.',
       )
     : '';
-  const canDelete = isPreset ? isAdmin : true;
+  // Bundled (preset) skills are read-only for everyone in Phase 1; the
+  // backend DELETE route returns 403. UI matches so we don't lure the
+  // user into a confirm dialog that ends with a raw 403.
+  const canDelete = !isPreset;
   const source = skillSource(skill);
   const SourceIcon = source.icon;
 
