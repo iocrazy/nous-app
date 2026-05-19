@@ -495,6 +495,9 @@ function formatCost(centsFractional: number | null | undefined): string {
   if (centsFractional == null) return '—';
   const cents = Number(centsFractional);
   if (!Number.isFinite(cents)) return '—';
+  // Drop noisy three-decimal precision when there's no spend yet — "0.000¢"
+  // on the dashboard top card reads as broken data, not zero.
+  if (cents === 0) return '0';
   if (cents < 1) return `${cents.toFixed(3)}¢`;
   if (cents < 100) return `${cents.toFixed(2)}¢`;
   return `$${(cents / 100).toFixed(2)}`;

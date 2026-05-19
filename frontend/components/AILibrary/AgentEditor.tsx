@@ -515,7 +515,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                 min={0}
                 max={2}
                 value={draft.temperature ?? 0}
-                onChange={(e) => updateDraft('temperature', Number(e.target.value))}
+                onChange={(e) => {
+                  // Round to one decimal so 0.7 doesn't round-trip as
+                  // 0.6999999... (the float the DB stores after a
+                  // 0.1+0.1+0.1+... seed). One decimal matches the
+                  // step= attribute and the UX intent.
+                  const raw = Number(e.target.value);
+                  const tidy = Number.isFinite(raw) ? Math.round(raw * 10) / 10 : 0;
+                  updateDraft('temperature', tidy);
+                }}
                 disabled={readOnly}
                 className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
               />
@@ -1029,12 +1037,18 @@ const SkillScopeBadge: React.FC<{ skill: AILibrarySkill }> = ({ skill }) => {
  * is_system_preset, skill_ids, ownership FKs).
  */
 function buildDraft(a: AILibraryAgent): Partial<AILibraryAgent> {
+  // Round temperature to one decimal so a noisy DB value (e.g.
+  // 0.6999999988079071 from 0.1+0.1+0.1+... seed) gets cleaned up on
+  // first save instead of being faithfully re-PATCHed.
+  const tidyTemp = Number.isFinite(a.temperature)
+    ? Math.round((a.temperature as number) * 10) / 10
+    : a.temperature;
   return {
     name: a.name,
     description: a.description ?? '',
     icon: a.icon ?? null,
     model: a.model,
-    temperature: a.temperature,
+    temperature: tidyTemp,
     max_tokens: a.max_tokens,
     enabled: a.enabled,
     identity_md: a.identity_md ?? '',

@@ -220,7 +220,7 @@ export const WorkforcePage: React.FC = () => {
         <div className="rounded-md border border-zinc-800/60 bg-zinc-900/40 px-4 py-12 text-center text-sm text-zinc-500">
           {t(
             'workforce.empty',
-            'No persistent agents. Promote an agent with persistent=true to see it here.',
+            'No persistent agents yet. Mark an agent as persistent in its settings to schedule recurring runs here.',
           )}
         </div>
       ) : (
