@@ -156,6 +156,13 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
           </div>
         ) : (
           <SkillEditor
+            // ``key={selectedSlug}`` forces a full remount when the slug
+            // changes so a pending in-flight fetch from the previous slug
+            // can't land late and setSkill() the stale source skill on top
+            // of the newly-forked one — caught by the QA tour where forking
+            // Script Outline left the editor stuck on Script Outline until
+            // the user manually reloaded.
+            key={selectedSlug}
             slug={selectedSlug}
             filePath={selectedFilePath ?? ''}
             hideBack

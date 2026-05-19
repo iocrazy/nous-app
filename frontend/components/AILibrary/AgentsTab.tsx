@@ -65,6 +65,12 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange }) => {
   return (
     <div className="h-full overflow-y-auto p-6">
       <AgentEditor
+        // ``key={slug}`` forces a full remount when the slug changes so a
+        // pending in-flight fetch from the previous slug can't land late and
+        // setAgent() the old data on top of the new one — caught when the
+        // skill fork flow showed stale Script Outline content after URL
+        // navigated to the fresh fork (parent's ``await loadAgents()`` race).
+        key={slug}
         slug={slug}
         onAgentForked={(newSlug) => {
           if (onSlugChange) onSlugChange(newSlug);
