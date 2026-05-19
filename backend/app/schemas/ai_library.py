@@ -131,6 +131,14 @@ class SkillFileUpsert(BaseModel):
     binary_url: Optional[str] = None
 
 
+class SkillAgentRef(BaseModel):
+    """Slug + name of an agent that binds this skill. Used by SkillOut.agents
+    to drive the "Used by" badge in the skill detail UI."""
+
+    slug: str
+    name: str
+
+
 class SkillOut(BaseModel):
     id: int
     slug: Optional[str] = None
@@ -145,6 +153,11 @@ class SkillOut(BaseModel):
     output_format: Optional[str] = None
     frontmatter_json: dict = Field(default_factory=dict)
     files: list[SkillFileOut] = Field(default_factory=list)
+    # Reverse index of which agents bind this skill. Populated by the
+    # skill detail endpoint via an agent_skills join. Empty list for
+    # un-bound skills. The list endpoint leaves this empty for
+    # performance — UI's "Used by" badge only renders in the detail view.
+    agents: list[SkillAgentRef] = Field(default_factory=list)
     updated_at: datetime
     # Phase 2 minor cleanup — denormalized names for the scope badge in the UI.
     # Populated by the router when team_id / project_id is set. Both optional

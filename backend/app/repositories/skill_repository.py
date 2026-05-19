@@ -209,6 +209,39 @@ class SkillRepository(BaseRepository):
     # AI Library Phase 1 — skill_files CRUD
     # ------------------------------------------------------------------
 
+    async def list_binding_agents(self, skill_id: int) -> List[Dict[str, str]]:
+        """Reverse index: agents that bind this skill.
+
+        Returns a list of ``{slug, name}`` dicts ordered by agent name.
+        Empty if the skill is unbound. Powers the "Used by" badge on the
+        skill detail page.
+
+        Uses a PostgREST embedded select rather than a manual two-step
+        because the alternative ("SELECT agent_id from agent_skills WHERE
+        skill_id=...", then "SELECT slug,name FROM ai_agents WHERE id IN
+        (...)") was double the round-trips for the same join.
+        """
+        try:
+            client = await self._get_client()
+            result = (
+                await client.table("agent_skills")
+                .select("ai_agents(slug, name)")
+                .eq("skill_id", skill_id)
+                .execute()
+            )
+            rows = result.data or []
+            agents: list[dict[str, str]] = []
+            for row in rows:
+                inner = row.get("ai_agents")
+                if isinstance(inner, dict) and inner.get("slug") and inner.get("name"):
+                    agents.append({"slug": inner["slug"], "name": inner["name"]})
+            # Sort by agent name for stable display.
+            agents.sort(key=lambda a: a["name"])
+            return agents
+        except Exception as e:
+            logger.error(f"Failed to list binding agents for skill {skill_id}: {e}")
+            return []
+
     async def list_files(self, skill_id: int) -> List[Dict[str, Any]]:
         """List all files for a skill, ordered by sort_order then path."""
         try:

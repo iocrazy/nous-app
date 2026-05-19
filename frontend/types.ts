@@ -1017,6 +1017,11 @@ export interface AILibrarySkillFile {
   updated_at: string;
 }
 
+export interface AILibrarySkillAgentRef {
+  slug: string;
+  name: string;
+}
+
 export interface AILibrarySkill {
   id: number; // BIGINT
   slug?: string;
@@ -1031,6 +1036,10 @@ export interface AILibrarySkill {
   output_format?: string | null;
   frontmatter_json: Record<string, unknown>;
   files: AILibrarySkillFile[];
+  // Reverse index: agents that bind this skill. Populated by the skill
+  // detail endpoint only — list endpoint leaves this empty for
+  // performance.
+  agents?: AILibrarySkillAgentRef[];
   updated_at: string;
   // Phase 2 minor cleanup — denormalized by the backend for scope badges.
   team_name?: string | null;

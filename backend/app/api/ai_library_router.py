@@ -614,7 +614,11 @@ async def get_skill(slug: str, auth: AuthDep) -> Dict[str, Any]:
             status_code=status.HTTP_404_NOT_FOUND, detail="skill not found"
         )
     skill_id = int(skill["id"])
-    row = {**skill, "files": await skill_repo.list_files(skill_id)}
+    row = {
+        **skill,
+        "files": await skill_repo.list_files(skill_id),
+        "agents": await skill_repo.list_binding_agents(skill_id),
+    }
     enriched = await _enrich_skills_with_scope_names([row])
     return enriched[0]
 
