@@ -147,6 +147,41 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   // Preset agents are read-only unless the caller is an admin.
   const readOnly = isPreset && !isAdmin;
 
+  // Provider preflight: the agent's model belongs to a provider the
+  // current user hasn't configured (no API key / disabled). Invocations
+  // would fail at the LLM call step; surface this as a banner instead
+  // of leaving it as a 5-char "(提供方未启用)" suffix in the model dropdown
+  // that users miss.
+  const enabledModels = new Set(modelGroups.flatMap((g) => g.models));
+  const modelProviderDisabled = !!agent.model && !enabledModels.has(agent.model);
+  const firstEnabledModel = modelGroups[0]?.models?.[0];
+
+  const switchToFirstEnabled = async () => {
+    if (readOnly || !firstEnabledModel) return;
+    setSaving(true);
+    try {
+      const updated = await aiLibraryService.updateAgent(slug, {
+        model: firstEnabledModel,
+      });
+      setAgent(updated);
+      setDraft(buildDraft(updated));
+      addToast(
+        t('aiLibrary.agents.modelSwitched', 'Switched to {{model}}', {
+          model: firstEnabledModel,
+        }),
+        'success',
+      );
+    } catch (err) {
+      console.error('[AgentEditor] switchToFirstEnabled failed:', err);
+      addToast(
+        `${t('aiLibrary.agents.modelSwitchFailed', 'Failed to switch model')}: ${err instanceof Error ? err.message : String(err)}`,
+        'error',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Skills dirty check — structural compare of the ordered id array.
   const skillsDirty =
     JSON.stringify(localSkillIds) !== JSON.stringify(agent.skill_ids);
@@ -302,6 +337,37 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           )}
         </div>
       </header>
+
+      {modelProviderDisabled && (
+        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200/90 flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="font-medium">
+              {t(
+                'aiLibrary.agents.providerDisabledTitle',
+                'Provider not configured',
+              )}
+            </div>
+            <div className="text-xs text-amber-200/70">
+              {t(
+                'aiLibrary.agents.providerDisabledBody',
+                'Model {{model}} belongs to a provider this account hasn\'t configured. Invocations of this agent will fail. Pick another model below or configure the provider in AI Settings.',
+                { model: agent.model },
+              )}
+            </div>
+          </div>
+          {!readOnly && firstEnabledModel && (
+            <button
+              onClick={switchToFirstEnabled}
+              disabled={saving}
+              className="shrink-0 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+            >
+              {t('aiLibrary.agents.switchToModel', 'Switch to {{model}}', {
+                model: firstEnabledModel,
+              })}
+            </button>
+          )}
+        </div>
+      )}
 
       <nav className="mb-4 flex gap-1 border-b border-zinc-800">
         {subTabs.map((k) => (
