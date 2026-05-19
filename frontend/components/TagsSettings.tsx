@@ -294,7 +294,13 @@ export const TagsSettings: React.FC = () => {
     setEditTagName(tag.name);
     setEditTagNameZh(tag.name_zh || '');
     setEditTagColor(tag.color || TAG_COLORS[5].value);
-    setEditTagGroupId((tag as any).group_id ?? null);
+    // Normalize to string so the <select> value attribute matches
+    // <option value={String(g.id)}> regardless of how the API serializes
+    // the bigint (number vs string), and so handleSaveEdit's comparison
+    // path is type-stable on first open.
+    setEditTagGroupId(
+      (tag as any).group_id == null ? null : String((tag as any).group_id),
+    );
     // Auto-detect "EN locked" — if the stored ZH literally equals EN,
     // open the dialog with the lock already on so the user sees the
     // truth and can toggle off if they want a real translation.
@@ -307,10 +313,12 @@ export const TagsSettings: React.FC = () => {
     if (!editingTag || !editTagName.trim()) return;
     setIsSaving(true);
     try {
-      // Only send fields the user actually changed. Empty-string for
-      // name_zh is the "clear it" signal; backend repo accepts that
-      // because the None-filter happens at the boundary, not on ''.
-      const originalGroupId = (editingTag as any).group_id ?? null;
+      // Compare group_id as strings so bigint-vs-string type mismatch
+      // (API may serialize bigint as number, our state holds string)
+      // doesn't false-positive the "user changed group" branch.
+      const normalizeGid = (v: unknown) => (v == null ? null : String(v));
+      const originalGroupId = normalizeGid((editingTag as any).group_id);
+      const currentGroupId = normalizeGid(editTagGroupId);
       const originalNameZh = editingTag.name_zh || '';
       const trimmedZh = editTagNameZh.trim();
       const updates: {
@@ -325,11 +333,26 @@ export const TagsSettings: React.FC = () => {
       if (trimmedZh !== originalNameZh) {
         updates.name_zh = trimmedZh;
       }
-      if (editTagGroupId !== originalGroupId) {
+      if (currentGroupId !== originalGroupId) {
         updates.group_id = editTagGroupId;
       }
       const updated = await updateTag(editingTag.id, updates);
-      setTags((prev) => prev.map((t) => (t.id === editingTag.id ? updated : t)));
+      // PUT /tags/:id returns the row WITHOUT the tag_groups join, so
+      // ``updated.group_name`` is undefined even when group_id is set —
+      // which would make the optimistic UI flip the tag into
+      // Uncategorized until the next loadData() refresh.
+      // Derive group_name client-side from local groups before patching.
+      const derivedGroupId = (updated as any).group_id;
+      const derivedGroupName =
+        derivedGroupId == null
+          ? null
+          : groups.find((g) => String(g.id) === String(derivedGroupId))?.name ??
+            null;
+      const patched: Tag = {
+        ...(updated as any),
+        group_name: derivedGroupName,
+      };
+      setTags((prev) => prev.map((t) => (t.id === editingTag.id ? patched : t)));
       setEditingTag(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update tag');
@@ -1281,7 +1304,7 @@ export const TagsSettings: React.FC = () => {
                     {t('settings.tags.uncategorized', 'Uncategorized')}
                   </option>
                   {visibleGroups.map((g) => (
-                    <option key={g.id} value={g.id}>
+                    <option key={g.id} value={String(g.id)}>
                       {g.name}
                     </option>
                   ))}

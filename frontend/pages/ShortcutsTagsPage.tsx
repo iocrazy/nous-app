@@ -124,9 +124,12 @@ export const ShortcutsTagsPage: React.FC = () => {
       }
     }
     const entries = Array.from(map.entries());
-    // Append ungrouped tags to the last group if any, otherwise skip
-    if (ungrouped.length > 0 && entries.length > 0) {
-      entries[entries.length - 1][1].push(...ungrouped);
+    // Ungrouped tags always render as their own "未分类" section — never
+    // tail-appended to the last group (would visually bleed into it; same
+    // bug the chrome-extension v1.1.4 had — fixed in v1.1.5 by pushing
+    // a dedicated entry instead).
+    if (ungrouped.length > 0) {
+      entries.push(['未分类', ungrouped]);
     }
     return entries;
   }, [tags]);
