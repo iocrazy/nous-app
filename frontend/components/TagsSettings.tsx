@@ -584,7 +584,7 @@ export const TagsSettings: React.FC = () => {
   const enabledCount = tags.filter((t) => t.enabled !== false).length;
 
   return (
-    <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
+    <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300 flex flex-col max-h-[80vh]">
       {/* Header */}
       <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -620,10 +620,14 @@ export const TagsSettings: React.FC = () => {
         </div>
       )}
 
-      {/* Main layout: Sidebar + Content */}
-      <div className="flex">
+      {/* Main layout: Sidebar + Content. Both columns scroll
+          independently so dragging a tag (right) onto a sidebar group
+          row keeps the sidebar in view — previously the outer page
+          scroll moved both columns together and the sidebar drifted
+          off-screen mid-drag. */}
+      <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
-        <div className="w-56 shrink-0 border-r border-zinc-800 bg-zinc-950/30">
+        <div className="w-56 shrink-0 border-r border-zinc-800 bg-zinc-950/30 overflow-y-auto">
           <div className="p-3 space-y-0.5">
             {/* All */}
             <button
@@ -829,10 +833,11 @@ export const TagsSettings: React.FC = () => {
           </div>
         </div>
 
-        {/* Right content */}
-        <div className="flex-1 min-w-0">
-          {/* Search */}
-          <div className="p-4 border-b border-zinc-800">
+        {/* Right content: search row stays pinned, only the tag list
+            scrolls — drag-to-sidebar stays usable with long tag lists. */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* Search (pinned) */}
+          <div className="p-4 border-b border-zinc-800 shrink-0">
             <div className="relative">
               <Search
                 size={16}
@@ -848,8 +853,8 @@ export const TagsSettings: React.FC = () => {
             </div>
           </div>
 
-          {/* Tags by Group */}
-          <div className="p-4">
+          {/* Tags by Group (independent scroll) */}
+          <div className="p-4 flex-1 overflow-y-auto min-h-0">
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 size={24} className="animate-spin text-zinc-500" />
