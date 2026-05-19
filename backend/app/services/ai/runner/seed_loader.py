@@ -46,6 +46,24 @@ def _sha(*chunks: Any) -> str:
     return h.hexdigest()
 
 
+def _extract_description_from_identity(identity_md: Optional[str]) -> Optional[str]:
+    """Derive a UI description from an agent's IDENTITY.md first line.
+
+    Convention used by all preset IDENTITY files: the opening sentence
+    reads ``I am the MediaHub <Name> AI — <one-line role>.`` We take the
+    text after the em-dash (or en-dash / hyphen fallback) and strip a
+    trailing period. Returns None when no separator is present so we
+    surface a missing description rather than dumping the full first line.
+    """
+    if not identity_md:
+        return None
+    first_line = identity_md.strip().split("\n", 1)[0].strip()
+    for sep in (" — ", " – ", " - "):
+        if sep in first_line:
+            return first_line.split(sep, 1)[1].strip().rstrip(".")
+    return None
+
+
 def _format_error(exc: BaseException) -> dict[str, Any]:
     """Extract structured fields from a Supabase/postgrest/httpx exception.
 
@@ -141,11 +159,13 @@ class SeedLoader:
                 return txt or None
             return None
 
+        identity_md = read_if_exists("IDENTITY.md")
         name = slug.replace("_", " ").title()
         return {
             "slug": slug,
             "name": name,
-            "identity_md": read_if_exists("IDENTITY.md"),
+            "description": _extract_description_from_identity(identity_md),
+            "identity_md": identity_md,
             "soul_md": read_if_exists("SOUL.md"),
             "agent_md": read_if_exists("AGENT.md"),
             "is_system_preset": True,
@@ -157,6 +177,7 @@ class SeedLoader:
             fields.get("soul_md"),
             fields.get("agent_md"),
             fields.get("name"),
+            fields.get("description"),
         )
         fields_with_hash = {**fields, "seed_hash": seed_hash}
 
