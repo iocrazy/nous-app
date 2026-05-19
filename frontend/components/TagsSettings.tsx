@@ -79,7 +79,14 @@ export const TagsSettings: React.FC = () => {
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
   const [editTagName, setEditTagName] = useState('');
   const [editTagColor, setEditTagColor] = useState('');
+  // Edit-dialog group selector (null = uncategorized).
+  const [editTagGroupId, setEditTagGroupId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // "= EN" lock for the create-tag dialog: when on, ZH field mirrors EN
+  // verbatim and auto-translate is suppressed. Click the chip again to
+  // unlock (restores auto-translate; doesn't clear the field).
+  const [forceTagNameEqEn, setForceTagNameEqEn] = useState(false);
 
   // Delete confirmation
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
@@ -269,6 +276,7 @@ export const TagsSettings: React.FC = () => {
       setTags((prev) => [...prev, newTag]);
       setNewTagName('');
       setNewTagNameZh('');
+      setForceTagNameEqEn(false);
       setShowCreateForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create tag');
@@ -283,16 +291,28 @@ export const TagsSettings: React.FC = () => {
     setEditingTag(tag);
     setEditTagName(tag.name);
     setEditTagColor(tag.color || TAG_COLORS[5].value);
+    setEditTagGroupId((tag as any).group_id ?? null);
   };
 
   const handleSaveEdit = async () => {
     if (!editingTag || !editTagName.trim()) return;
     setIsSaving(true);
     try {
-      const updated = await updateTag(editingTag.id, {
+      // group_id is sent only when it actually changed — sending `null`
+      // explicitly is the correct "move to Uncategorized" signal.
+      const originalGroupId = (editingTag as any).group_id ?? null;
+      const updates: {
+        name: string;
+        color: string;
+        group_id?: string | null;
+      } = {
         name: editTagName.trim(),
         color: editTagColor,
-      });
+      };
+      if (editTagGroupId !== originalGroupId) {
+        updates.group_id = editTagGroupId;
+      }
+      const updated = await updateTag(editingTag.id, updates);
       setTags((prev) => prev.map((t) => (t.id === editingTag.id ? updated : t)));
       setEditingTag(null);
     } catch (err) {
@@ -306,6 +326,7 @@ export const TagsSettings: React.FC = () => {
     setEditingTag(null);
     setEditTagName('');
     setEditTagColor('');
+    setEditTagGroupId(null);
   };
 
   // Handle delete tag
@@ -577,13 +598,28 @@ export const TagsSettings: React.FC = () => {
               <span className="text-xs text-zinc-500">{tags.length}</span>
             </button>
 
-            {/* Uncategorized */}
+            {/* Uncategorized — also a valid drop target. Dragging a tag
+                onto this row clears its group_id (move to no-group). */}
             <button
               onClick={() => setSelectedGroup('__uncategorized__')}
+              onDragOver={(e) => {
+                if (dragTagId) {
+                  e.preventDefault();
+                  setTagDropTargetGroupId('__uncategorized__');
+                }
+              }}
+              onDragLeave={() => {
+                if (tagDropTargetGroupId === '__uncategorized__') {
+                  setTagDropTargetGroupId(null);
+                }
+              }}
+              onDrop={() => handleDrop('__uncategorized__')}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-                selectedGroup === '__uncategorized__'
-                  ? 'bg-indigo-500/15 text-indigo-400'
-                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+                tagDropTargetGroupId === '__uncategorized__'
+                  ? 'ring-2 ring-indigo-500 bg-indigo-500/10'
+                  : selectedGroup === '__uncategorized__'
+                    ? 'bg-indigo-500/15 text-indigo-400'
+                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
               }`}
             >
               <Circle size={15} />
@@ -913,7 +949,10 @@ export const TagsSettings: React.FC = () => {
                 {t('settings.tags.createNew')}
               </h3>
               <button
-                onClick={() => setShowCreateForm(false)}
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setForceTagNameEqEn(false);
+                }}
                 className="text-zinc-500 hover:text-zinc-300"
               >
                 <X size={20} />
@@ -931,7 +970,13 @@ export const TagsSettings: React.FC = () => {
                   onChange={(e) => {
                     const value = e.target.value;
                     setNewTagName(value);
-                    scheduleTranslate(value, 'en');
+                    if (forceTagNameEqEn) {
+                      // Mirror EN→ZH live while locked. Skip the
+                      // auto-translate path — equality is the contract.
+                      setNewTagNameZh(value);
+                    } else {
+                      scheduleTranslate(value, 'en');
+                    }
                   }}
                   className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   autoFocus
@@ -944,26 +989,51 @@ export const TagsSettings: React.FC = () => {
                     {t('settings.tags.tagName')} (中文)
                     <span className="text-zinc-500 text-xs ml-2">Optional</span>
                   </label>
-                  {/* "=" — chrome-extension parity. For terms that should
-                      stay identical in both languages (Agent, Skill,
-                      LLM, brand names), click to copy the English value
-                      into this field verbatim and skip translation. */}
+                  {/* "= EN" — chrome-extension parity. Toggle: when ON
+                      (highlighted), ZH mirrors EN verbatim and the
+                      auto-translate loop is suppressed (useful for
+                      brand names / Agent / Skill / LLM). Click again to
+                      unlock — restores auto-translate without clearing
+                      the field, so the user can edit the ZH again. */}
                   <button
                     type="button"
                     onClick={() => {
-                      // Cancel any pending auto-translate so it doesn't
-                      // overwrite the value we just copied in.
+                      if (forceTagNameEqEn) {
+                        // Unlock — leave the current ZH value in place,
+                        // just stop forcing it. Auto-translate becomes
+                        // active again on subsequent typing.
+                        setForceTagNameEqEn(false);
+                        return;
+                      }
+                      // Lock — copy EN→ZH now and cancel any pending
+                      // auto-translate so it doesn't overwrite us.
+                      const src = newTagName.trim();
+                      if (!src) return;
                       if (translateTimerRef.current) {
                         window.clearTimeout(translateTimerRef.current);
                         translateTimerRef.current = null;
                       }
-                      const src = newTagName.trim();
-                      if (!src) return;
                       setNewTagNameZh(src);
+                      setForceTagNameEqEn(true);
                     }}
-                    disabled={!newTagName.trim()}
-                    title={t('settings.tags.sameAsEnglish', 'Use the same value as English (skip translation)')}
-                    className="text-[11px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    disabled={!newTagName.trim() && !forceTagNameEqEn}
+                    aria-pressed={forceTagNameEqEn}
+                    title={
+                      forceTagNameEqEn
+                        ? t(
+                            'settings.tags.eqEnLocked',
+                            'Chinese locked to English — click to unlock and restore auto-translate',
+                          )
+                        : t(
+                            'settings.tags.sameAsEnglish',
+                            'Use the same value as English (skip translation)',
+                          )
+                    }
+                    className={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      forceTagNameEqEn
+                        ? 'border-indigo-500 bg-indigo-500/15 text-indigo-300'
+                        : 'border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+                    }`}
                   >
                     = EN
                   </button>
@@ -973,11 +1043,17 @@ export const TagsSettings: React.FC = () => {
                   placeholder="例如：美食、旅行、音乐"
                   value={newTagNameZh}
                   onChange={(e) => {
+                    if (forceTagNameEqEn) return; // locked — readonly
                     const value = e.target.value;
                     setNewTagNameZh(value);
                     scheduleTranslate(value, 'zh');
                   }}
-                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  readOnly={forceTagNameEqEn}
+                  className={`w-full px-4 py-3 bg-zinc-950 border rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none transition-colors ${
+                    forceTagNameEqEn
+                      ? 'border-indigo-500/40 cursor-not-allowed opacity-80'
+                      : 'border-zinc-800 focus:border-indigo-500'
+                  }`}
                   onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
                 />
               </div>
@@ -1028,7 +1104,10 @@ export const TagsSettings: React.FC = () => {
             </div>
             <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-end gap-3">
               <button
-                onClick={() => setShowCreateForm(false)}
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setForceTagNameEqEn(false);
+                }}
                 className="px-5 py-2.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors font-medium text-sm"
               >
                 {t('common.cancel')}
@@ -1098,6 +1177,31 @@ export const TagsSettings: React.FC = () => {
                     />
                   ))}
                 </div>
+              </div>
+              {/* Group selector — pick which group the tag belongs to.
+                  Sibling to the drag-to-group flow in the sidebar; users
+                  who don't want to drag (touchpad / accessibility) can
+                  reassign here instead. */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-zinc-300">
+                  {t('settings.tags.group', 'Group')}
+                </label>
+                <select
+                  value={editTagGroupId ?? ''}
+                  onChange={(e) =>
+                    setEditTagGroupId(e.target.value === '' ? null : e.target.value)
+                  }
+                  className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors"
+                >
+                  <option value="">
+                    {t('settings.tags.uncategorized', 'Uncategorized')}
+                  </option>
+                  {visibleGroups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               {/* Preview */}
               <div className="pt-2">
