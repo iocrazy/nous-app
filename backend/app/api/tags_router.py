@@ -322,6 +322,7 @@ async def update_tag(
         tag_id=tag_id,
         user_id=user_id,
         name=tag_update.name,
+        name_zh=tag_update.name_zh,
         color=tag_update.color,
         icon=tag_update.icon,
         enabled=tag_update.enabled,

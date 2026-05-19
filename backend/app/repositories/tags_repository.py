@@ -102,16 +102,37 @@ class TagsRepository:
     ) -> Optional[dict]:
         """Get a tag by name or name_zh (checks system tags first, then user tags).
 
-        For system/time tags, matches both 'name' (English) and 'name_zh' (Chinese).
-        This prevents duplicate tags when Chinese names are passed for existing English system tags.
+        Matching rules:
+        - English name (``name``): case-INsensitive. Prevents accidental
+          duplicates like ``Tag`` / ``tag`` / ``TAG`` from coexisting,
+          which was a real risk before this guard (the UNIQUE(name, …)
+          DB constraint is case-sensitive at the bytes level).
+        - Chinese alias (``name_zh``): exact match. Chinese characters
+          don't have case, so ILIKE adds no value and would just expand
+          surface area.
+
+        For system/time tags, matches both English and Chinese forms so a
+        Chinese alias for a built-in English tag (e.g. "电影" for "Cinema")
+        still collides.
         """
         table = await self._get_table()
 
+        # PostgREST's ``ilike`` wants ``*`` as the wildcard. We're doing
+        # an exact (case-insensitive) match, no wildcards — but we still
+        # need to escape any literal ``%`` / ``_`` / ``*`` in the user
+        # input so a tag named e.g. ``50%_off`` doesn't act as a pattern.
+        ilike_name = (
+            name.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+            .replace("*", "\\*")
+        )
+
         try:
-            # Check system tags — match by English name OR Chinese alias
+            # Check system tags — case-insensitive English OR exact ZH.
             result = (
                 await table.select("*")
-                .or_(f"name.eq.{name},name_zh.eq.{name}")
+                .or_(f"name.ilike.{ilike_name},name_zh.eq.{name}")
                 .eq("type", "system")
                 .limit(1)
                 .execute()
@@ -119,10 +140,10 @@ class TagsRepository:
             if result and result.data and len(result.data) > 0:
                 return result.data[0]
 
-            # Check time tags — match by English name OR Chinese alias
+            # Check time tags — same shape.
             result = (
                 await table.select("*")
-                .or_(f"name.eq.{name},name_zh.eq.{name}")
+                .or_(f"name.ilike.{ilike_name},name_zh.eq.{name}")
                 .eq("type", "time")
                 .limit(1)
                 .execute()
@@ -130,11 +151,11 @@ class TagsRepository:
             if result and result.data and len(result.data) > 0:
                 return result.data[0]
 
-            # Check user tags (by exact name only)
+            # Check user tags — case-insensitive English name.
             if user_id:
                 result = (
                     await table.select("*")
-                    .eq("name", name)
+                    .ilike("name", ilike_name)
                     .eq("user_id", user_id)
                     .limit(1)
                     .execute()
