@@ -78,15 +78,17 @@ export const TagsSettings: React.FC = () => {
   // Edit state
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
   const [editTagName, setEditTagName] = useState('');
+  const [editTagNameZh, setEditTagNameZh] = useState('');
   const [editTagColor, setEditTagColor] = useState('');
   // Edit-dialog group selector (null = uncategorized).
   const [editTagGroupId, setEditTagGroupId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // "= EN" lock for the create-tag dialog: when on, ZH field mirrors EN
-  // verbatim and auto-translate is suppressed. Click the chip again to
-  // unlock (restores auto-translate; doesn't clear the field).
+  // "= EN" lock state — independent slots for create vs edit dialog so
+  // toggling one doesn't bleed into the other. When ON: ZH mirrors EN
+  // verbatim and auto-translate is suppressed.
   const [forceTagNameEqEn, setForceTagNameEqEn] = useState(false);
+  const [forceEditTagNameEqEn, setForceEditTagNameEqEn] = useState(false);
 
   // Delete confirmation
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
@@ -290,25 +292,39 @@ export const TagsSettings: React.FC = () => {
     e?.stopPropagation();
     setEditingTag(tag);
     setEditTagName(tag.name);
+    setEditTagNameZh(tag.name_zh || '');
     setEditTagColor(tag.color || TAG_COLORS[5].value);
     setEditTagGroupId((tag as any).group_id ?? null);
+    // Auto-detect "EN locked" — if the stored ZH literally equals EN,
+    // open the dialog with the lock already on so the user sees the
+    // truth and can toggle off if they want a real translation.
+    setForceEditTagNameEqEn(
+      !!tag.name_zh && tag.name_zh === tag.name,
+    );
   };
 
   const handleSaveEdit = async () => {
     if (!editingTag || !editTagName.trim()) return;
     setIsSaving(true);
     try {
-      // group_id is sent only when it actually changed — sending `null`
-      // explicitly is the correct "move to Uncategorized" signal.
+      // Only send fields the user actually changed. Empty-string for
+      // name_zh is the "clear it" signal; backend repo accepts that
+      // because the None-filter happens at the boundary, not on ''.
       const originalGroupId = (editingTag as any).group_id ?? null;
+      const originalNameZh = editingTag.name_zh || '';
+      const trimmedZh = editTagNameZh.trim();
       const updates: {
         name: string;
         color: string;
+        name_zh?: string;
         group_id?: string | null;
       } = {
         name: editTagName.trim(),
         color: editTagColor,
       };
+      if (trimmedZh !== originalNameZh) {
+        updates.name_zh = trimmedZh;
+      }
       if (editTagGroupId !== originalGroupId) {
         updates.group_id = editTagGroupId;
       }
@@ -325,8 +341,10 @@ export const TagsSettings: React.FC = () => {
   const handleCancelEdit = () => {
     setEditingTag(null);
     setEditTagName('');
+    setEditTagNameZh('');
     setEditTagColor('');
     setEditTagGroupId(null);
+    setForceEditTagNameEqEn(false);
   };
 
   // Handle delete tag
@@ -1147,14 +1165,80 @@ export const TagsSettings: React.FC = () => {
             <div className="p-6 space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-zinc-300">
-                  {t('settings.tags.tagName')}
+                  {t('settings.tags.tagName')} (English)
                 </label>
                 <input
                   type="text"
                   value={editTagName}
-                  onChange={(e) => setEditTagName(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setEditTagName(value);
+                    if (forceEditTagNameEqEn) {
+                      setEditTagNameZh(value);
+                    }
+                  }}
                   className="w-full px-4 py-3 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   autoFocus
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-zinc-300">
+                    {t('settings.tags.tagName')} (中文)
+                    <span className="text-zinc-500 text-xs ml-2">Optional</span>
+                  </label>
+                  {/* "= EN" — toggle. ON: ZH locked to EN value. OFF:
+                      free editing. Auto-detect on open: if stored ZH
+                      literally equals EN, opens in locked state. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (forceEditTagNameEqEn) {
+                        setForceEditTagNameEqEn(false);
+                        return;
+                      }
+                      const src = editTagName.trim();
+                      if (!src) return;
+                      setEditTagNameZh(src);
+                      setForceEditTagNameEqEn(true);
+                    }}
+                    disabled={!editTagName.trim() && !forceEditTagNameEqEn}
+                    aria-pressed={forceEditTagNameEqEn}
+                    title={
+                      forceEditTagNameEqEn
+                        ? t(
+                            'settings.tags.eqEnLocked',
+                            'Chinese locked to English — click to unlock',
+                          )
+                        : t(
+                            'settings.tags.sameAsEnglish',
+                            'Use the same value as English (skip translation)',
+                          )
+                    }
+                    className={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      forceEditTagNameEqEn
+                        ? 'border-indigo-500 bg-indigo-500/15 text-indigo-300'
+                        : 'border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+                    }`}
+                  >
+                    = EN
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  placeholder="例如：美食、旅行、音乐"
+                  value={editTagNameZh}
+                  onChange={(e) => {
+                    if (forceEditTagNameEqEn) return; // locked
+                    setEditTagNameZh(e.target.value);
+                  }}
+                  readOnly={forceEditTagNameEqEn}
+                  className={`w-full px-4 py-3 bg-zinc-950 border rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none transition-colors ${
+                    forceEditTagNameEqEn
+                      ? 'border-indigo-500/40 cursor-not-allowed opacity-80'
+                      : 'border-zinc-800 focus:border-indigo-500'
+                  }`}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
                 />
               </div>
@@ -1208,13 +1292,24 @@ export const TagsSettings: React.FC = () => {
                 <label className="text-sm font-medium text-zinc-300 block mb-2">
                   {t('settings.tags.preview')}
                 </label>
-                <span
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium"
-                  style={getTagStyle(editTagColor)}
-                >
-                  <TagIcon size={12} />
-                  {editTagName || t('settings.tags.tagNamePlaceholder')}
-                </span>
+                <div className="flex gap-2 flex-wrap">
+                  <span
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium"
+                    style={getTagStyle(editTagColor)}
+                  >
+                    <TagIcon size={12} />
+                    {editTagName || t('settings.tags.tagNamePlaceholder')}
+                  </span>
+                  {editTagNameZh && editTagNameZh !== editTagName && (
+                    <span
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium"
+                      style={getTagStyle(editTagColor)}
+                    >
+                      <TagIcon size={12} />
+                      {editTagNameZh}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-between">

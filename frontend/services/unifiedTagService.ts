@@ -82,6 +82,7 @@ export async function deleteTag(tagId: string): Promise<void> {
 
 export interface TagUpdate {
   name?: string;
+  name_zh?: string; // empty string clears
   color?: string;
   icon?: string;
   enabled?: boolean;

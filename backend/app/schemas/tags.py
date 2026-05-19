@@ -39,6 +39,11 @@ class TagUpdate(BaseModel):
     name: Optional[str] = Field(
         None, min_length=1, max_length=50, description="Tag name"
     )
+    name_zh: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Chinese alias. Empty string clears it.",
+    )
     color: Optional[str] = Field(None, description="Hex color code")
     icon: Optional[str] = Field(None, description="Emoji or icon identifier")
     enabled: Optional[bool] = Field(None, description="Whether visible in frontend API")
