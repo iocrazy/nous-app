@@ -45,6 +45,31 @@ type SubTab = 'dashboard' | 'overview' | 'files' | 'skills' | 'runs' | 'versions
 const RUNS_PAGE_SIZE = 25;
 const RUNS_POLL_INTERVAL_MS = 10_000;
 
+/**
+ * Lift a useful message out of an error. Backend errors come back as
+ * Error.message with the shape `"403: {\"success\":false,\"error\":\"...
+ * \",\"code\":\"http_403\",...}"` (from aiLibraryService). Showing that
+ * raw JSON in a toast is hostile; lift the ``error`` / ``detail`` field
+ * if we can parse it, otherwise fall back to the plain message.
+ */
+function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  // Common shape: "<status>: <json>" — strip status prefix, parse json.
+  const match = raw.match(/^\d{3}:\s*(\{.*\})\s*$/s);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      const lifted = parsed.error || parsed.detail || parsed.message;
+      if (typeof lifted === 'string' && lifted.length > 0) {
+        return lifted;
+      }
+    } catch {
+      // fall through to raw
+    }
+  }
+  return raw;
+}
+
 interface AgentEditorProps {
   slug: string;
   /**
@@ -58,7 +83,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   const { t } = useTranslation();
   const { userProfile, aiSettings } = useAuth();
   const { addToast } = useToast();
-  const isAdmin = userProfile.role === 'admin';
+  // Admin escape removed (2026-05-19 QA): backend rejects PATCH on system
+  // presets for everyone including admins, so admin-only UI affordances
+  // were a foot-gun — admin would click 保存更改 and hit a 403 with raw
+  // JSON error replacing the editor. Phase 1 spec is read-only for ALL
+  // users; UI now matches.
+  // ``userProfile.role === 'admin'`` is still useful elsewhere (Workforce,
+  // approval queue) — keeping the deconstruct above so callers don't break.
+  void userProfile;
   const modelGroups = useMemo(() => getAvailableModels(aiSettings), [aiSettings]);
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
   const [sub, setSub] = useState<SubTab>('dashboard');
@@ -90,7 +122,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       .catch((err) => {
         if (cancelled) return;
         console.error('[AgentEditor] getAgent failed:', err);
-        setError(err instanceof Error ? err.message : String(err));
+        setError(friendlyError(err));
       });
 
     return () => {
@@ -118,10 +150,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       .catch((err) => {
         if (cancelled) return;
         console.error('[AgentEditor] listSkills failed:', err);
-        addToast(
-          `Failed to load skills: ${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        addToast(`Failed to load skills: ${friendlyError(err)}`, 'error');
       })
       .finally(() => {
         if (!cancelled) setSkillsLoading(false);
@@ -144,8 +173,9 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   }
 
   const isPreset = agent.is_system_preset;
-  // Preset agents are read-only unless the caller is an admin.
-  const readOnly = isPreset && !isAdmin;
+  // Preset agents are read-only for everyone in Phase 1 — backend
+  // returns 403 on PATCH including for admin. See header comment.
+  const readOnly = isPreset;
 
   // Skills dirty check — structural compare of the ordered id array.
   const skillsDirty =
@@ -154,7 +184,9 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   const save = async (): Promise<void> => {
     if (readOnly) return;
     setSaving(true);
-    setError(null);
+    // Don't touch ``error`` here — a save failure is transient and must
+    // not replace the editor surface (the user needs to see the form to
+    // recover). Reserve ``setError`` for the load path only.
     try {
       // Build the PATCH payload immutably from the overview/files draft, and
       // attach ``skill_ids`` only when the Skills tab has pending changes so
@@ -172,9 +204,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       addToast(message, 'success');
     } catch (err) {
       console.error('[AgentEditor] updateAgent failed:', err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      addToast(`Failed to save agent: ${msg}`, 'error');
+      addToast(`Failed to save agent: ${friendlyError(err)}`, 'error');
     } finally {
       setSaving(false);
     }
@@ -201,8 +231,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       );
     } catch (err) {
       console.error('[AgentEditor] resumeAgent failed:', err);
-      const msg = err instanceof Error ? err.message : String(err);
-      addToast(`Failed to resume agent: ${msg}`, 'error');
+      addToast(`Failed to resume agent: ${friendlyError(err)}`, 'error');
     } finally {
       setResuming(false);
     }
@@ -984,7 +1013,7 @@ const RunsSection: React.FC<{ slug: string }> = ({ slug }) => {
         setError(null);
       } catch (err) {
         console.error('[RunsSection] listAgentRuns failed:', err);
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = friendlyError(err);
         setError(msg);
         // Only surface a toast on explicit user-triggered fetches — polling
         // errors stay silent so a brief network blip doesn't spam the UI.
@@ -1043,8 +1072,7 @@ const RunsSection: React.FC<{ slug: string }> = ({ slug }) => {
       await fetchPage(offset, 'poll');
     } catch (err) {
       console.error('[RunsSection] cancelRun failed:', err);
-      const msg = err instanceof Error ? err.message : String(err);
-      addToast(`Failed to cancel run: ${msg}`, 'error');
+      addToast(`Failed to cancel run: ${friendlyError(err)}`, 'error');
     }
   };
 
@@ -1274,7 +1302,7 @@ const RunDetailModal: React.FC<{
       .catch((err) => {
         if (cancelled) return;
         console.error('[RunDetailModal] getRun failed:', err);
-        setError(err instanceof Error ? err.message : String(err));
+        setError(friendlyError(err));
       });
     return () => {
       cancelled = true;
