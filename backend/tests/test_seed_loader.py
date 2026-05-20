@@ -366,7 +366,9 @@ def test_extract_description_from_identity_returns_none_when_unparseable() -> No
 
     assert _extract_description_from_identity(None) is None
     assert _extract_description_from_identity("") is None
-    assert _extract_description_from_identity("just a sentence with no separator") is None
+    assert (
+        _extract_description_from_identity("just a sentence with no separator") is None
+    )
 
 
 # ─── _format_error ────────────────────────────────────────────────────
