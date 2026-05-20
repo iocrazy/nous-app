@@ -417,7 +417,9 @@ export function AgentDashboardTab({
                 <StatusBadge status={task.lifecycle_status} />
                 <span className="flex-1 truncate text-zinc-300" title={task.title ?? ''}>
                   {task.title || (
-                    <span className="italic text-zinc-500">untitled task</span>
+                    <span className="italic text-zinc-500">
+                      {t('aiLibrary.agents.untitledTask')}
+                    </span>
                   )}
                 </span>
                 <span className="text-[11px] text-zinc-500">

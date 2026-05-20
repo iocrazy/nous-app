@@ -170,15 +170,21 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                       {isExpanded && kind === 'agent' && (
                         <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-zinc-500 bg-zinc-950/50 rounded p-2">
                           <div>
-                            <div className="text-zinc-600">model</div>
+                            <div className="text-zinc-600">
+                              {t('aiLibrary.agents.modelLabel', 'Model')}
+                            </div>
                             <div className="text-zinc-300">{v.model ?? '—'}</div>
                           </div>
                           <div>
-                            <div className="text-zinc-600">temperature</div>
+                            <div className="text-zinc-600">
+                              {t('aiLibrary.agents.temperatureLabel', 'Temperature')}
+                            </div>
                             <div className="text-zinc-300">{v.temperature ?? '—'}</div>
                           </div>
                           <div>
-                            <div className="text-zinc-600">max_tokens</div>
+                            <div className="text-zinc-600">
+                              {t('aiLibrary.agents.maxTokensLabel', 'Max tokens')}
+                            </div>
                             <div className="text-zinc-300">{v.max_tokens ?? '—'}</div>
                           </div>
                         </div>
