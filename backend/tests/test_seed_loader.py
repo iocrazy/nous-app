@@ -328,6 +328,49 @@ async def test_load_skill_subfiles_preserves_user_files(tmp_path: Path) -> None:
     skill_repo.delete_file.assert_not_awaited()
 
 
+# ─── _extract_description_from_identity ────────────────────────────────
+
+
+def test_extract_description_from_identity_em_dash() -> None:
+    """Standard ``I am the MediaHub X AI — <description>.`` shape."""
+    from app.services.ai.runner.seed_loader import _extract_description_from_identity
+
+    body = (
+        "I am the MediaHub Visual Analyze AI — a multimodal vision analyst.\n"
+        "Second line shouldn't leak into the description."
+    )
+    assert _extract_description_from_identity(body) == "a multimodal vision analyst"
+
+
+def test_extract_description_from_identity_strips_trailing_period() -> None:
+    from app.services.ai.runner.seed_loader import _extract_description_from_identity
+
+    assert (
+        _extract_description_from_identity("foo — a compact summarizer.")
+        == "a compact summarizer"
+    )
+
+
+def test_extract_description_from_identity_falls_back_to_ascii_hyphen() -> None:
+    from app.services.ai.runner.seed_loader import _extract_description_from_identity
+
+    assert (
+        _extract_description_from_identity("foo - plain ascii dash variant")
+        == "plain ascii dash variant"
+    )
+
+
+def test_extract_description_from_identity_returns_none_when_unparseable() -> None:
+    """No separator → None (we'd rather show blank than dump the whole opener)."""
+    from app.services.ai.runner.seed_loader import _extract_description_from_identity
+
+    assert _extract_description_from_identity(None) is None
+    assert _extract_description_from_identity("") is None
+    assert (
+        _extract_description_from_identity("just a sentence with no separator") is None
+    )
+
+
 # ─── _format_error ────────────────────────────────────────────────────
 
 
