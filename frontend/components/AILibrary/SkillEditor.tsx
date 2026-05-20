@@ -54,6 +54,13 @@ interface SkillEditorProps {
   slug: string;
   onBack: () => void;
   onSkillForked?: (newSlug: string) => void;
+  /**
+   * Called after a successful delete. Parent must refresh its skill list
+   * AND clear the selected slug — ``onBack`` alone only clears the URL
+   * slug, leaving the deleted skill as a stale row in the left rail that
+   * 404s when clicked.
+   */
+  onSkillDeleted?: () => void;
   /** URL-driven active file. ``''`` or null = SKILL.md. */
   filePath?: string | null;
   /** V6 split-pane hides the in-editor Back button. */
@@ -119,6 +126,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   slug,
   onBack,
   onSkillForked,
+  onSkillDeleted,
   filePath = null,
   hideBack = false,
 }) => {
@@ -317,7 +325,10 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
         }),
         'success',
       );
-      onBack();
+      // Prefer onSkillDeleted (refreshes the rail) over onBack (URL-only),
+      // so the just-deleted skill doesn't linger as a clickable stale row.
+      if (onSkillDeleted) onSkillDeleted();
+      else onBack();
     } catch (err) {
       console.error('[SkillEditor] deleteSkill failed:', err);
       const msg = err instanceof Error ? err.message : String(err);

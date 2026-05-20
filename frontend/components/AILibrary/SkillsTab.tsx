@@ -76,6 +76,11 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
     onSlugChange?.(newSlug);
   };
 
+  const handleSkillDeleted = async () => {
+    await loadSkills();
+    onSlugChange?.('');
+  };
+
   const handleFileCreated = async (slug: string, path: string) => {
     setNewFileSkillSlug(null);
     await loadSkills();
@@ -168,6 +173,7 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
             hideBack
             onBack={() => onSlugChange?.('')}
             onSkillForked={handleSkillForked}
+            onSkillDeleted={handleSkillDeleted}
           />
         )}
       </div>
