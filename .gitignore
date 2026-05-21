@@ -299,3 +299,6 @@ toolkit/
 .gstack/
 *.png
 .idea/
+
+# Local AI Library QA screenshots (not source)
+.ai-library-qa/

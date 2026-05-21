@@ -207,18 +207,18 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
             onClick={onBack}
             className="mb-3 text-sm text-zinc-400 hover:text-zinc-100"
           >
-            ← Back
+            ← {t('aiLibrary.skills.back')}
           </button>
         )}
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-          Failed to load skill: {error}
+          {t('aiLibrary.skills.loadErrorPrefix')}: {error}
         </div>
       </div>
     );
   }
 
   if (!skill) {
-    return <div className="p-6 text-sm text-zinc-500">Loading...</div>;
+    return <div className="p-6 text-sm text-zinc-500">{t('common.loading')}</div>;
   }
 
   const isPreset =
@@ -422,7 +422,11 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
             />
             <MetaLabel
               label={t('aiLibrary.skills.metaMode', 'Mode')}
-              value={editable ? 'Editable' : 'Read only'}
+              value={
+                editable
+                  ? t('aiLibrary.skills.metaModeEditable')
+                  : t('aiLibrary.skills.metaModeReadOnly')
+              }
             />
           </div>
           <div className="flex flex-wrap items-start gap-x-3 gap-y-1">

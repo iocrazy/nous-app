@@ -41,7 +41,7 @@ export const TokenBillingDashboard: React.FC = () => {
       setData(resp);
     } catch (err) {
       console.error('[TokenBillingDashboard] load failed:', err);
-      addToast(t('billing.loadFailed'), 'error');
+      addToast(t('tokenUsage.loadFailed'), 'error');
     } finally {
       setLoading(false);
     }
@@ -65,7 +65,7 @@ export const TokenBillingDashboard: React.FC = () => {
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <Coins className="w-4 h-4 text-amber-400" />
-          <h2 className="text-sm font-semibold text-zinc-200">{t('billing.title')}</h2>
+          <h2 className="text-sm font-semibold text-zinc-200">{t('tokenUsage.title')}</h2>
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -75,7 +75,7 @@ export const TokenBillingDashboard: React.FC = () => {
           >
             {WINDOW_OPTIONS.map((d) => (
               <option key={d} value={d}>
-                {t('billing.lastNDays', { count: d })}
+                {t('tokenUsage.lastNDays', { count: d })}
               </option>
             ))}
           </select>
@@ -83,7 +83,7 @@ export const TokenBillingDashboard: React.FC = () => {
             type="button"
             onClick={reload}
             className="p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-            title={t('billing.refresh')}
+            title={t('tokenUsage.refresh')}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -94,7 +94,7 @@ export const TokenBillingDashboard: React.FC = () => {
       <div className="grid grid-cols-3 gap-3 px-4 py-4">
         <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3">
           <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-            {t('billing.statTokens')}
+            {t('tokenUsage.statTokens')}
           </div>
           <div className="text-2xl font-bold mt-1 text-zinc-100">
             {overall ? _fmtNumber(overall.total_tokens) : '—'}
@@ -102,7 +102,7 @@ export const TokenBillingDashboard: React.FC = () => {
         </div>
         <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3">
           <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-            {t('billing.statPoints')}
+            {t('tokenUsage.statPoints')}
           </div>
           <div className="text-2xl font-bold mt-1 text-amber-300">
             {overall ? _fmtPoints(overall.cost_points) : '—'}
@@ -110,7 +110,7 @@ export const TokenBillingDashboard: React.FC = () => {
         </div>
         <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3">
           <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-            {t('billing.statRuns')}
+            {t('tokenUsage.statRuns')}
           </div>
           <div className="text-2xl font-bold mt-1 text-blue-300">
             {overall ? _fmtNumber(overall.run_count) : '—'}
@@ -122,20 +122,20 @@ export const TokenBillingDashboard: React.FC = () => {
       <div className="px-4 pb-4">
         <div className="flex items-center gap-2 mb-2 text-xs text-zinc-400">
           <BarChart3 className="w-3 h-3" />
-          {t('billing.byModel')}
+          {t('tokenUsage.byModel')}
         </div>
         {byModel.length === 0 ? (
           <div className="text-xs text-zinc-500 py-3 text-center bg-zinc-900/30 rounded">
-            {loading ? t('billing.loading') : t('billing.noUsage')}
+            {loading ? t('tokenUsage.loading') : t('tokenUsage.noUsage')}
           </div>
         ) : (
           <table className="w-full text-xs">
             <thead>
               <tr className="text-zinc-500 text-left">
-                <th className="font-medium pb-1">{t('billing.colModel')}</th>
-                <th className="font-medium pb-1 text-right">{t('billing.colRuns')}</th>
-                <th className="font-medium pb-1 text-right">{t('billing.colTokens')}</th>
-                <th className="font-medium pb-1 text-right">{t('billing.colCost')}</th>
+                <th className="font-medium pb-1">{t('tokenUsage.colModel')}</th>
+                <th className="font-medium pb-1 text-right">{t('tokenUsage.colRuns')}</th>
+                <th className="font-medium pb-1 text-right">{t('tokenUsage.colTokens')}</th>
+                <th className="font-medium pb-1 text-right">{t('tokenUsage.colCost')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
@@ -159,7 +159,7 @@ export const TokenBillingDashboard: React.FC = () => {
         <div className="px-4 pb-4">
           <div className="flex items-center gap-2 mb-2 text-xs text-zinc-400">
             <Calendar className="w-3 h-3" />
-            {t('billing.byDay')}
+            {t('tokenUsage.byDay')}
           </div>
           <div className="flex items-end gap-1 h-16 bg-zinc-900/30 rounded p-2">
             {byDay.map((d) => {

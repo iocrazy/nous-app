@@ -150,7 +150,10 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       .catch((err) => {
         if (cancelled) return;
         console.error('[AgentEditor] listSkills failed:', err);
-        addToast(`Failed to load skills: ${friendlyError(err)}`, 'error');
+        addToast(
+          t('aiLibrary.agents.loadSkillsError', { error: friendlyError(err) }),
+          'error',
+        );
       })
       .finally(() => {
         if (!cancelled) setSkillsLoading(false);
@@ -158,18 +161,18 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     return () => {
       cancelled = true;
     };
-  }, [sub, allSkills, addToast]);
+  }, [sub, allSkills, addToast, t]);
 
   if (error) {
     return (
       <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-        Failed to load agent: {error}
+        {t('aiLibrary.agents.loadErrorPrefix')}: {error}
       </div>
     );
   }
 
   if (!agent) {
-    return <div className="text-sm text-zinc-500">Loading...</div>;
+    return <div className="text-sm text-zinc-500">{t('common.loading')}</div>;
   }
 
   const isPreset = agent.is_system_preset;
@@ -239,7 +242,10 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       addToast(message, 'success');
     } catch (err) {
       console.error('[AgentEditor] updateAgent failed:', err);
-      addToast(`Failed to save agent: ${friendlyError(err)}`, 'error');
+      addToast(
+        t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
+        'error',
+      );
     } finally {
       setSaving(false);
     }
@@ -266,7 +272,10 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       );
     } catch (err) {
       console.error('[AgentEditor] resumeAgent failed:', err);
-      addToast(`Failed to resume agent: ${friendlyError(err)}`, 'error');
+      addToast(
+        t('aiLibrary.agents.resumeError', { error: friendlyError(err) }),
+        'error',
+      );
     } finally {
       setResuming(false);
     }
@@ -361,7 +370,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
               disabled={saving}
               className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 px-4 py-2 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
             >
-              {saving ? 'Saving...' : t('aiLibrary.agents.saveChanges')}
+              {saving ? t('common.saving') : t('aiLibrary.agents.saveChanges')}
             </button>
           )}
         </div>
@@ -409,7 +418,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                 : 'border-transparent text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            {k[0].toUpperCase() + k.slice(1)}
+            {t(`aiLibrary.agents.tab.${k}`)}
           </button>
         ))}
       </nav>
@@ -501,6 +510,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                 'aiLibrary.agents.modelProviderNotEnabled',
                 'provider not enabled',
               ),
+              noModelsLabel: t('aiLibrary.agents.noModelsAvailable'),
             })}
           </div>
 
@@ -763,8 +773,10 @@ function renderModelSelect(params: {
   disabled: boolean;
   onChange: (v: string) => void;
   providerNotEnabledLabel: string;
+  noModelsLabel: string;
 }): React.ReactElement {
-  const { value, groups, disabled, onChange, providerNotEnabledLabel } = params;
+  const { value, groups, disabled, onChange, providerNotEnabledLabel, noModelsLabel } =
+    params;
   const knownModels = new Set(groups.flatMap((g) => g.models));
   const showOrphan = value !== '' && !knownModels.has(value);
 
@@ -782,7 +794,7 @@ function renderModelSelect(params: {
           </option>
         )}
         {groups.length === 0 && !showOrphan && (
-          <option value="">No models available — enable a provider</option>
+          <option value="">{noModelsLabel}</option>
         )}
         {groups.map((group) => (
           <optgroup key={group.providerKey} label={group.providerName}>
@@ -850,7 +862,7 @@ const SkillsSection: React.FC<{
   }, [allSkills, localSkillIds]);
 
   if (skillsLoading && allSkills === null) {
-    return <p className="text-sm text-zinc-500">Loading skills...</p>;
+    return <p className="text-sm text-zinc-500">{t('aiLibrary.agents.loadingSkills')}</p>;
   }
 
   return (
@@ -1098,14 +1110,17 @@ const RunsSection: React.FC<{ slug: string }> = ({ slug }) => {
         // Only surface a toast on explicit user-triggered fetches — polling
         // errors stay silent so a brief network blip doesn't spam the UI.
         if (mode === 'initial') {
-          addToast(`Failed to load runs: ${msg}`, 'error');
+          addToast(
+            t('aiLibrary.agents.runs.loadRunsError', { error: msg }),
+            'error',
+          );
         }
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [slug, addToast],
+    [slug, addToast, t],
   );
 
   // Initial load + reload when slug or offset changes.
@@ -1152,7 +1167,10 @@ const RunsSection: React.FC<{ slug: string }> = ({ slug }) => {
       await fetchPage(offset, 'poll');
     } catch (err) {
       console.error('[RunsSection] cancelRun failed:', err);
-      addToast(`Failed to cancel run: ${friendlyError(err)}`, 'error');
+      addToast(
+        t('aiLibrary.agents.runs.cancelRunError', { error: friendlyError(err) }),
+        'error',
+      );
     }
   };
 
