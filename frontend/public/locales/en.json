@@ -113,6 +113,7 @@
     "unlimited": "Unlimited"
   },
   "common": {
+    "confirm": "Confirm",
     "cancel": "Cancel",
     "close": "Close",
     "create": "Create",
@@ -162,6 +163,8 @@
     "searchResultsCountSingular": "Found 1 matching item"
   },
   "search": {
+    "aiPlaceholder": "AI search... ↵",
+    "placeholder": "Search...",
     "scopeTooltip": "Search scope",
     "scopeHeader": "Search Scope",
     "scope": {
@@ -190,6 +193,12 @@
     "waveLiquid": "Wave Liquid",
     "waveLiquidDesc": "Rising wave animation",
     "tags": {
+      "deleteConfirm": "Delete this tag?",
+      "doubleClickToRename": "Double-click to rename",
+      "eqEnLocked": "Chinese locked to English — click to unlock and restore auto-translate",
+      "group": "Group",
+      "sameAsEnglish": "Use the same value as English (skip translation)",
+      "uncategorized": "Uncategorized",
       "title": "Tags Management",
       "subtitle": "Organize your content with custom tags",
       "searchPlaceholder": "Search tags...",
@@ -320,6 +329,9 @@
     "noResults": "No results"
   },
   "resources": {
+    "compareVersions": "Compare Versions",
+    "details": "Details",
+    "viewDetails": "View Details",
     "title": "Resources",
     "allResources": "All Resources",
     "files": "Files",
@@ -770,7 +782,18 @@
     "assignee": "Assignee",
     "overdue": "Overdue"
   },
+  "workforce": {
+    "title": "Workforce",
+    "subtitle": "Persistent agents — current state, queue depth, and recent activity.",
+    "loading": "Loading…",
+    "empty": "No persistent agents yet. Mark an agent as persistent in its settings to schedule recurring runs here.",
+    "queuedItems": "{{count}} queued"
+  },
   "shares": {
+    "status": {
+      "active": "Active",
+      "expired": "Expired"
+    },
     "title": "Share",
     "createShare": "Create Share",
     "shareType": "Share Type",
@@ -876,6 +899,7 @@
     }
   },
   "projects": {
+    "title": "All Projects",
     "sidebar": {
       "projectList": "Projects",
       "starredProjects": "Starred",
@@ -1257,6 +1281,10 @@
     "searchSkills": "Search skills..."
   },
   "chat": {
+    "newSession": "New session",
+    "placeholder": "Type a message...",
+    "placeholderNoAgent": "Select an agent to start",
+    "placeholderNoSession": "Create a session first",
     "newConversation": "New conversation",
     "untitled": "Untitled",
     "typeMessage": "Type a message...",
