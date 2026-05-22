@@ -47,27 +47,28 @@ _BATCH_SIZE = 100  # don't dispatch more than this per tick
 async def fire_due_schedules_step() -> Dict[str, int]:
     """Scan user_schedules for due rows; dispatch each; advance
     next_fire_at via croniter. Returns counters for telemetry."""
-    from app.db.supabase_client import get_async_supabase_admin
+    # Direct PG (asyncpg) — supabase-py's PostgREST/httpx path leaked a
+    # CLOSE_WAIT connection per call (Issue #199 Bug C / 2026-05-22 incident).
+    from app.db.pg_pool import get_pool
 
-    sb = await get_async_supabase_admin()
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
 
     # Pull due rows. enabled=true + next_fire_at <= now.
     try:
-        result = await (
-            sb.table("user_schedules")
-            .select("*")
-            .eq("enabled", True)
-            .lte("next_fire_at", now_iso)
-            .order("next_fire_at")
-            .limit(_BATCH_SIZE)
-            .execute()
-        )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            records = await conn.fetch(
+                "SELECT * FROM public.user_schedules "
+                "WHERE enabled = true AND next_fire_at <= $1 "
+                "ORDER BY next_fire_at LIMIT $2",
+                now,
+                _BATCH_SIZE,
+            )
+        rows = [dict(r) for r in records]
     except Exception as exc:
         logger.opt(exception=True).warning(f"[scheduled_master] fetch failed: {exc}")
         return {"due": 0, "fired": 0, "errors": 1}
 
-    rows = result.data or []
     if not rows:
         return {"due": 0, "fired": 0, "errors": 0}
 
@@ -75,7 +76,7 @@ async def fire_due_schedules_step() -> Dict[str, int]:
     errors = 0
     for row in rows:
         try:
-            await _dispatch_one(sb, row)
+            await _dispatch_one(row)
             fired += 1
         except Exception as exc:
             errors += 1
@@ -83,24 +84,21 @@ async def fire_due_schedules_step() -> Dict[str, int]:
                 f"[scheduled_master] dispatch row {row.get('id')} failed: {exc}"
             )
             try:
-                await (
-                    sb.table("user_schedules")
-                    .update(
-                        {
-                            "fail_count": (row.get("fail_count") or 0) + 1,
-                            "last_error": str(exc)[:500],
-                        }
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE public.user_schedules SET fail_count = $1, "
+                        "last_error = $2 WHERE id = $3",
+                        (row.get("fail_count") or 0) + 1,
+                        str(exc)[:500],
+                        row["id"],
                     )
-                    .eq("id", row["id"])
-                    .execute()
-                )
             except Exception:
                 pass
 
     return {"due": len(rows), "fired": fired, "errors": errors}
 
 
-async def _dispatch_one(sb: Any, row: Dict[str, Any]) -> None:
+async def _dispatch_one(row: Dict[str, Any]) -> None:
     """Dispatch a single due row + advance its next_fire_at."""
     task_type = row.get("task_type") or ""
     payload = row.get("payload") or {}
@@ -119,19 +117,19 @@ async def _dispatch_one(sb: Any, row: Dict[str, Any]) -> None:
     # task_type dispatchers are themselves idempotent (PR #154 ensures
     # DBOS workflow_id dedup) and double-firing means at most one
     # extra task that the dispatcher will short-circuit.
-    await (
-        sb.table("user_schedules")
-        .update(
-            {
-                "last_fired_at": datetime.now(timezone.utc).isoformat(),
-                "next_fire_at": next_at.isoformat(),
-                "fire_count": (row.get("fire_count") or 0) + 1,
-                "last_error": None,
-            }
+    from app.db.pg_pool import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE public.user_schedules SET last_fired_at = $1, "
+            "next_fire_at = $2, fire_count = $3, last_error = NULL "
+            "WHERE id = $4",
+            datetime.now(timezone.utc),
+            next_at,
+            (row.get("fire_count") or 0) + 1,
+            sched_id,
         )
-        .eq("id", sched_id)
-        .execute()
-    )
 
     # Dispatch via the task_type → workflow registry. For now we route
     # through start_workflow_routed so the existing routing table

@@ -53,21 +53,12 @@ SCANNER_LOCK_ID = 0xA8050001
 async def liveness_scan_step() -> dict[str, Any]:
     """One pass over running agent_runs. Returns counts per transition
     so the operator dashboard / logs can see scanner activity."""
-    from app.db.supabase_client import get_async_supabase_admin
-
-    sb = await get_async_supabase_admin()
-
-    # Try the advisory lock; bail if another instance is scanning.
-    lock_resp = (
-        await sb.rpc("pg_try_advisory_lock", {"key": SCANNER_LOCK_ID}).execute()
-        if False
-        else None
-    )  # supabase client doesn't expose advisory_lock
-    # Fallback: use a SQL RPC wrapper. If you don't have one yet, the
-    # scanner runs without a lock — at-most-once write per row is
-    # naturally enforced by the WHERE liveness_state = <expected> guard
-    # below, which is idempotent under concurrent runs.
-    _ = lock_resp
+    # Counts via the asyncpg pool (direct PG, no httpx) — supabase-py's
+    # PostgREST/Kong path leaked a CLOSE_WAIT connection per call (known
+    # httpcore bug; Issue #199 Bug C / 2026-05-22 incident). At-most-once
+    # write per row is enforced by the WHERE liveness_state = <expected>
+    # CAS guard below, so no advisory lock is needed for correctness.
+    from app.db.pg_pool import get_pool
 
     now = datetime.now(timezone.utc)
     counts: dict[str, int] = {
@@ -81,17 +72,15 @@ async def liveness_scan_step() -> dict[str, Any]:
 
     # Pull the candidate set in one trip (cap at 200 — in practice
     # mediahub doesn't have hundreds of running agent_runs at once).
-    result = (
-        await sb.table("agent_runs")
-        .select(
-            "id,status,liveness_state,heartbeat_at,last_useful_action_at,"
-            "liveness_changed_at,continuation_attempt,output_silence_bytes"
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        records = await conn.fetch(
+            "SELECT id, status, liveness_state, heartbeat_at, "
+            "last_useful_action_at, liveness_changed_at, continuation_attempt, "
+            "output_silence_bytes FROM public.agent_runs "
+            "WHERE status = 'running' LIMIT 200"
         )
-        .eq("status", "running")
-        .limit(200)
-        .execute()
-    )
-    rows = result.data or []
+    rows = [dict(r) for r in records]
     counts["scanned"] = len(rows)
 
     for row in rows:
@@ -108,32 +97,32 @@ async def liveness_scan_step() -> dict[str, Any]:
 
         # Heartbeat-dead overrides everything (process gone).
         if hb_age > HEARTBEAT_DEAD_SECONDS and cur_state != "dead":
-            await _mark_dead(sb, run_id, cur_state, reason="heartbeat_lost")
+            await _mark_dead(run_id, cur_state, reason="heartbeat_lost")
             counts["heartbeat_dead"] += 1
             continue
 
         if cur_state == "running":
             if useful_age > T1_SECONDS:
-                await _transition(sb, run_id, "running", "silent")
+                await _transition(run_id, "running", "silent")
                 counts["running_to_silent"] += 1
             else:
                 counts["noop"] += 1
         elif cur_state == "silent":
             if state_age > T2_SECONDS:
-                await _transition(sb, run_id, "silent", "stuck")
+                await _transition(run_id, "silent", "stuck")
                 counts["silent_to_stuck"] += 1
             elif useful_age <= T1_SECONDS:
                 # Recovered — agent reported new useful action recently
-                await _transition(sb, run_id, "silent", "running")
+                await _transition(run_id, "silent", "running")
             else:
                 counts["noop"] += 1
         elif cur_state == "stuck":
             if state_age > T3_SECONDS or attempts >= MAX_CONTINUATIONS:
-                await _mark_dead(sb, run_id, "stuck", reason="liveness_dead")
+                await _mark_dead(run_id, "stuck", reason="liveness_dead")
                 counts["stuck_to_dead"] += 1
             elif useful_age <= T1_SECONDS:
                 # Continuation worked — recovered
-                await _transition(sb, run_id, "stuck", "running")
+                await _transition(run_id, "stuck", "running")
             else:
                 counts["noop"] += 1
         else:  # dead / cancelled — scanner doesn't touch
@@ -156,44 +145,47 @@ def _parse_ts(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-async def _transition(sb, run_id: str, expected: str, target: str) -> None:
+async def _transition(run_id: Any, expected: str, target: str) -> None:
     """CAS update — only writes if liveness_state is still `expected`.
     Idempotent under concurrent scanners."""
+    from app.db.pg_pool import get_pool
+
     try:
-        await (
-            sb.table("agent_runs")
-            .update({"liveness_state": target})
-            .eq("id", run_id)
-            .eq("liveness_state", expected)
-            .execute()
-        )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE public.agent_runs SET liveness_state = $1 "
+                "WHERE id = $2 AND liveness_state = $3",
+                target,
+                run_id,
+                expected,
+            )
     except Exception as exc:
         logger.warning(
             f"[liveness-scanner] transition {run_id} {expected}->{target} failed: {exc}"
         )
 
 
-async def _mark_dead(sb, run_id: str, expected_state: str, *, reason: str) -> None:
+async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
     """Mark a run dead + flip status='failed' with the liveness reason.
     The bridge trigger from migration 206 picks this up and emits a
     chat row into any associated issue thread."""
+    from app.db.pg_pool import get_pool
+
     try:
-        await (
-            sb.table("agent_runs")
-            .update(
-                {
-                    "liveness_state": "dead",
-                    "status": "failed",
-                    "ended_at": datetime.now(timezone.utc).isoformat(),
-                    "error_code": reason,
-                    "error_message": f"Marked dead by liveness scanner: {reason}",
-                }
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE public.agent_runs SET liveness_state = 'dead', "
+                "status = 'failed', ended_at = $1, error_code = $2, "
+                "error_message = $3 "
+                "WHERE id = $4 AND liveness_state = $5 AND status = 'running'",
+                datetime.now(timezone.utc),
+                reason,
+                f"Marked dead by liveness scanner: {reason}",
+                run_id,
+                expected_state,
             )
-            .eq("id", run_id)
-            .eq("liveness_state", expected_state)
-            .eq("status", "running")
-            .execute()
-        )
     except Exception as exc:
         logger.warning(f"[liveness-scanner] mark dead {run_id} failed: {exc}")
 
@@ -218,41 +210,25 @@ async def liveness_scan_scheduled(
 
 async def reconcile_stranded_runs() -> dict[str, int]:
     """One-shot startup sweep. Safe to call at any time; idempotent."""
-    from app.db.supabase_client import get_async_supabase_admin
+    from app.db.pg_pool import get_pool
 
-    sb = await get_async_supabase_admin()
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=HEARTBEAT_DEAD_SECONDS)
-    cutoff_iso = cutoff.isoformat()
 
-    result = (
-        await sb.table("agent_runs")
-        .select("id")
-        .eq("status", "running")
-        .lt("heartbeat_at", cutoff_iso)
-        .limit(1000)
-        .execute()
-    )
-    rows = result.data or []
-    if not rows:
-        return {"reconciled": 0}
-
-    ids = [r["id"] for r in rows]
-    update_resp = (
-        await sb.table("agent_runs")
-        .update(
-            {
-                "liveness_state": "dead",
-                "status": "failed",
-                "ended_at": datetime.now(timezone.utc).isoformat(),
-                "error_code": "stranded_on_restart",
-                "error_message": "Backend restarted while this run was in flight; no heartbeat for >2 minutes.",
-            }
+    # Single UPDATE ... RETURNING (direct PG): mark every stranded run dead
+    # and count what we touched. Replaces the supabase-py select-then-update
+    # (httpx CLOSE_WAIT leak, Issue #199 Bug C).
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        updated = await conn.fetch(
+            "UPDATE public.agent_runs SET liveness_state = 'dead', "
+            "status = 'failed', ended_at = $1, error_code = 'stranded_on_restart', "
+            "error_message = $2 "
+            "WHERE status = 'running' AND heartbeat_at < $3 RETURNING id",
+            datetime.now(timezone.utc),
+            "Backend restarted while this run was in flight; no heartbeat for >2 minutes.",
+            cutoff,
         )
-        .in_("id", ids)
-        .eq("status", "running")
-        .execute()
-    )
-    n = len(update_resp.data or [])
+    n = len(updated)
     if n > 0:
         logger.warning(
             f"[liveness-reconcile] marked {n} stranded run(s) dead on startup"

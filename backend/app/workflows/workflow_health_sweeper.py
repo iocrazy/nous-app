@@ -32,7 +32,7 @@ full control.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from dbos import DBOS
@@ -56,22 +56,20 @@ async def classify_and_act_step() -> Dict[str, int]:
     contributed to the parse-failure / slow-workflow symptoms reported
     after #176 deployed.
     """
-    from app.db import get_async_supabase_admin
-
-    sb = await get_async_supabase_admin()
+    # Direct PG (asyncpg) — supabase-py's PostgREST/httpx path leaked a
+    # CLOSE_WAIT connection per call (Issue #199 Bug C / 2026-05-22 incident).
+    from app.db.pg_pool import get_pool
 
     # Fetch active rows with the columns the classifier needs.
-    active = await (
-        sb.table("task_tracking")
-        .select(
-            "dbos_workflow_id, task_type, phase, started_at, "
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        records = await conn.fetch(
+            "SELECT dbos_workflow_id, task_type, phase, started_at, "
             "heartbeat_at, progress, updated_at, max_duration_minutes, "
-            "do_not_auto_cancel, health_status, user_id, title"
+            "do_not_auto_cancel, health_status, user_id, title "
+            "FROM public.task_tracking WHERE phase IN ('queued', 'in_progress')"
         )
-        .in_("phase", ["queued", "in_progress"])
-        .execute()
-    )
-    rows = active.data or []
+    rows = [dict(r) for r in records]
     if not rows:
         return _zero_counters()
 
@@ -81,21 +79,21 @@ async def classify_and_act_step() -> Dict[str, int]:
     # bounded by active workflows (typically <100).
     counters = _zero_counters()
     for row in rows:
-        classification = await _classify_one(sb, row)
+        classification = await _classify_one(row)
         counters[classification.lower()] = counters.get(classification.lower(), 0) + 1
 
         # Persist the classification so the UI can surface it.
-        await _persist_classification(sb, row, classification)
+        await _persist_classification(row, classification)
 
         # Take action only on the auto-action states.
         if classification == "LOST":
-            await _mark_lost(sb, row)
+            await _mark_lost(row)
             counters["lost_marked"] += 1
         elif classification == "ORPHAN_PENDING" and not row.get("do_not_auto_cancel"):
-            await _cancel_orphan(sb, row)
+            await _cancel_orphan(row)
             counters["auto_cancelled"] += 1
         elif classification == "USER_TIMEOUT" and not row.get("do_not_auto_cancel"):
-            await _mark_timed_out(sb, row)
+            await _mark_timed_out(row)
             counters["auto_cancelled"] += 1
     return counters
 
@@ -114,7 +112,7 @@ def _zero_counters() -> Dict[str, int]:
     }
 
 
-async def _classify_one(sb: Any, row: Dict[str, Any]) -> str:
+async def _classify_one(row: Dict[str, Any]) -> str:
     """Call the SQL classifier with the row's fields. PostgREST RPC route
     not used because of name conflicts with internal pg_catalog (see
     reference_postgrest_rpc.md in mediahub memory). Direct SQL instead.
@@ -139,23 +137,23 @@ _POLICY_CACHE: Dict[str, Dict[str, int]] = {}
 _POLICY_CACHE_AT: float = 0.0
 
 
-async def _refresh_policy(sb: Any) -> Dict[str, Dict[str, int]]:
+async def _refresh_policy() -> Dict[str, Dict[str, int]]:
     global _POLICY_CACHE, _POLICY_CACHE_AT
     import time
+
+    from app.db.pg_pool import get_pool
 
     now = time.time()
     if _POLICY_CACHE and (now - _POLICY_CACHE_AT) < 120:
         return _POLICY_CACHE
-    rows = await (
-        sb.table("workflow_timeout_policy")
-        .select(
-            "task_type, expected_duration_seconds, hard_ceiling_seconds, "
-            "heartbeat_stale_seconds"
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        policy_rows = await conn.fetch(
+            "SELECT task_type, expected_duration_seconds, hard_ceiling_seconds, "
+            "heartbeat_stale_seconds FROM public.workflow_timeout_policy"
         )
-        .execute()
-    )
     cache: Dict[str, Dict[str, int]] = {}
-    for r in rows.data or []:
+    for r in policy_rows:
         cache[r["task_type"]] = {
             "expected": r["expected_duration_seconds"],
             "hard": r["hard_ceiling_seconds"],
@@ -225,20 +223,22 @@ def _classify_in_python(row: Dict[str, Any]) -> str:
     return "SLOW"
 
 
-async def _persist_classification(
-    sb: Any, row: Dict[str, Any], classification: str
-) -> None:
+async def _persist_classification(row: Dict[str, Any], classification: str) -> None:
     """Write the new classification to task_tracking.health_status. Skip
     the write when nothing changed to avoid Realtime fanout noise."""
     if row.get("health_status") == classification:
         return
+    from app.db.pg_pool import get_pool
+
     try:
-        await (
-            sb.table("task_tracking")
-            .update({"health_status": classification})
-            .eq("dbos_workflow_id", row["dbos_workflow_id"])
-            .execute()
-        )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE public.task_tracking SET health_status = $1 "
+                "WHERE dbos_workflow_id = $2",
+                classification,
+                row["dbos_workflow_id"],
+            )
     except Exception as exc:
         logger.opt(exception=True).debug(
             f"[workflow_health] persist failed for "
@@ -246,24 +246,22 @@ async def _persist_classification(
         )
 
 
-async def _mark_lost(sb: Any, row: Dict[str, Any]) -> None:
+async def _mark_lost(row: Dict[str, Any]) -> None:
     """Mark a LOST row's phase=lost / status=failed so the UI shows it
     correctly. The row stays around — operator can inspect."""
+    from app.db.pg_pool import get_pool
+
     try:
-        await (
-            sb.table("task_tracking")
-            .update(
-                {
-                    "phase": "lost",
-                    "status": "failed",
-                    "error_code": "worker_lost",
-                    "error_msg": "Worker heartbeat went stale; presumed dead.",
-                    "completed_at": datetime.now().isoformat(),
-                }
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE public.task_tracking SET phase = 'lost', "
+                "status = 'failed', error_code = 'worker_lost', "
+                "error_msg = 'Worker heartbeat went stale; presumed dead.', "
+                "completed_at = $1 WHERE dbos_workflow_id = $2",
+                datetime.now(timezone.utc),
+                row["dbos_workflow_id"],
             )
-            .eq("dbos_workflow_id", row["dbos_workflow_id"])
-            .execute()
-        )
         logger.warning(
             f"[workflow_health] marked LOST: workflow_id={row['dbos_workflow_id']} "
             f"task_type={row.get('task_type')} title={row.get('title')!r}"
@@ -274,25 +272,23 @@ async def _mark_lost(sb: Any, row: Dict[str, Any]) -> None:
         )
 
 
-async def _cancel_orphan(sb: Any, row: Dict[str, Any]) -> None:
+async def _cancel_orphan(row: Dict[str, Any]) -> None:
     """Cancel an ORPHAN_PENDING row (DBOS executor never picked it up).
     Safe because the workflow body never executed — no partial state."""
+    from app.db.pg_pool import get_pool
+
     try:
-        await (
-            sb.table("task_tracking")
-            .update(
-                {
-                    "phase": "cancelled",
-                    "status": "cancelled",
-                    "error_code": "executor_orphan",
-                    "error_msg": "Workflow stuck PENDING beyond hard ceiling × 3; "
-                    "DBOS executor never picked it up.",
-                    "completed_at": datetime.now().isoformat(),
-                }
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE public.task_tracking SET phase = 'cancelled', "
+                "status = 'cancelled', error_code = 'executor_orphan', "
+                "error_msg = 'Workflow stuck PENDING beyond hard ceiling x 3; "
+                "DBOS executor never picked it up.', "
+                "completed_at = $1 WHERE dbos_workflow_id = $2",
+                datetime.now(timezone.utc),
+                row["dbos_workflow_id"],
             )
-            .eq("dbos_workflow_id", row["dbos_workflow_id"])
-            .execute()
-        )
         logger.warning(
             f"[workflow_health] cancelled ORPHAN: workflow_id={row['dbos_workflow_id']} "
             f"task_type={row.get('task_type')}"
@@ -303,27 +299,26 @@ async def _cancel_orphan(sb: Any, row: Dict[str, Any]) -> None:
         )
 
 
-async def _mark_timed_out(sb: Any, row: Dict[str, Any]) -> None:
+async def _mark_timed_out(row: Dict[str, Any]) -> None:
     """Mark a USER_TIMEOUT row as timed_out. User opted in via
     max_duration_minutes; this is consensual auto-cancel."""
+    from app.db.pg_pool import get_pool
+
+    error_msg = (
+        f"Exceeded user-set max_duration_minutes={row.get('max_duration_minutes')}."
+    )
     try:
-        await (
-            sb.table("task_tracking")
-            .update(
-                {
-                    "phase": "timed_out",
-                    "status": "failed",
-                    "error_code": "user_timeout",
-                    "error_msg": (
-                        f"Exceeded user-set max_duration_minutes="
-                        f"{row.get('max_duration_minutes')}."
-                    ),
-                    "completed_at": datetime.now().isoformat(),
-                }
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE public.task_tracking SET phase = 'timed_out', "
+                "status = 'failed', error_code = 'user_timeout', "
+                "error_msg = $1, completed_at = $2 "
+                "WHERE dbos_workflow_id = $3",
+                error_msg,
+                datetime.now(timezone.utc),
+                row["dbos_workflow_id"],
             )
-            .eq("dbos_workflow_id", row["dbos_workflow_id"])
-            .execute()
-        )
         logger.warning(
             f"[workflow_health] timed out: workflow_id={row['dbos_workflow_id']} "
             f"max_min={row.get('max_duration_minutes')}"
@@ -351,10 +346,7 @@ async def workflow_health_sweeper_workflow(
     scheduled_commitment_sweeper.py header for the gory details and
     the durable fix landed in #188. Hot-fix follow-up to #176.
     """
-    from app.db import get_async_supabase_admin
-
-    sb = await get_async_supabase_admin()
-    await _refresh_policy(sb)
+    await _refresh_policy()
 
     counters = await classify_and_act_step()
     if (
