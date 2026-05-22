@@ -108,24 +108,47 @@ async def get_queue_status() -> dict:
         return _queue_cache["data"]
 
     try:
-        from app.db import get_async_supabase_admin
+        # Count via the asyncpg pool (direct PG, no HTTP) — NOT supabase-py.
+        # This runs every ~30s from collect_system_status_step; over Kong/
+        # PostgREST (httpx) each call leaked a CLOSE_WAIT connection (known
+        # httpcore bug — see Issue #199 Bug C / 2026-05-22 incident), which
+        # exhausted the ephemeral port range. asyncpg pools cleanly. Falls
+        # back to supabase-py only when Supavisor isn't configured (dev).
+        from app.db import pg_pool
 
-        client = await get_async_supabase_admin()
-        active_resp = (
-            await client.table("task_tracking")
-            .select("dbos_workflow_id", head=True, count="exact")
-            .eq("phase", "processing")
-            .execute()
-        )
-        pending_resp = (
-            await client.table("task_tracking")
-            .select("dbos_workflow_id", head=True, count="exact")
-            .eq("phase", "queued")
-            .execute()
-        )
+        if pg_pool.is_configured():
+            pool = await pg_pool.get_pool()
+            async with pool.acquire() as conn:
+                active = await conn.fetchval(
+                    "SELECT count(*) FROM public.task_tracking WHERE phase = 'processing'"
+                )
+                pending = await conn.fetchval(
+                    "SELECT count(*) FROM public.task_tracking WHERE phase = 'queued'"
+                )
+            active_count, pending_count = int(active or 0), int(pending or 0)
+        else:
+            from app.db import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            active_resp = (
+                await client.table("task_tracking")
+                .select("dbos_workflow_id", head=True, count="exact")
+                .eq("phase", "processing")
+                .execute()
+            )
+            pending_resp = (
+                await client.table("task_tracking")
+                .select("dbos_workflow_id", head=True, count="exact")
+                .eq("phase", "queued")
+                .execute()
+            )
+            active_count, pending_count = (
+                int(active_resp.count or 0),
+                int(pending_resp.count or 0),
+            )
         result = {
-            "active": int(active_resp.count or 0),
-            "pending": int(pending_resp.count or 0),
+            "active": active_count,
+            "pending": pending_count,
             "scheduled": 0,
             "status": "online",
         }
