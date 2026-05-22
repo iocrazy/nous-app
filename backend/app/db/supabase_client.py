@@ -41,6 +41,7 @@ import asyncio
 import weakref
 from typing import MutableMapping
 
+import httpx
 from loguru import logger
 from supabase import AsyncClientOptions
 from supabase._async.client import AsyncClient
@@ -48,14 +49,41 @@ from supabase._async.client import create_client as create_async_client
 
 from app.core.config import settings
 
+# Bounded, self-recycling httpx pool for every per-loop Supabase client.
+#
+# 2026-05-22 incident: Supabase/Kong closes idle keep-alive connections
+# faster than httpcore reaps them, so the server-closed sockets pile up in
+# CLOSE_WAIT and grow unbounded — the gateway exhausted the ~28k ephemeral
+# port range (EADDRNOTAVAIL on every new Supabase REST call → "Engine
+# Offline"). Two settings fix it at the source:
+#   * keepalive_expiry shorter than Kong's idle timeout → httpx closes idle
+#     connections itself (clean client-side FIN → auto-reaped via TIME_WAIT)
+#     *before* Kong does, so they never become CLOSE_WAIT.
+#   * bounded max_connections → the pool can never run away again.
+_HTTPX_LIMITS = httpx.Limits(
+    max_connections=50,
+    max_keepalive_connections=10,
+    keepalive_expiry=15.0,
+)
+_HTTPX_TIMEOUT = httpx.Timeout(120.0)
+
 
 def _get_client_options() -> AsyncClientOptions:
-    """Get Supabase async client options."""
-    headers = {}
+    """Supabase async client options with a bounded, self-recycling httpx
+    pool injected (see ``_HTTPX_LIMITS`` — fixes the CLOSE_WAIT leak).
+
+    A fresh ``httpx.AsyncClient`` is created per call so each per-loop
+    Supabase client owns a pool bound to the loop that will use it.
+    """
+    # httpx.AsyncClient construction does not require a running loop; it
+    # binds lazily on first request (which happens on the caller's loop).
+    httpx_client = httpx.AsyncClient(limits=_HTTPX_LIMITS, timeout=_HTTPX_TIMEOUT)
     if settings.SUPABASE_TENANT_ID:
-        headers["X-Tenant-ID"] = settings.SUPABASE_TENANT_ID
-        logger.debug(f"Using tenant ID: {settings.SUPABASE_TENANT_ID}")
-    return AsyncClientOptions(headers=headers) if headers else AsyncClientOptions()
+        return AsyncClientOptions(
+            headers={"X-Tenant-ID": settings.SUPABASE_TENANT_ID},
+            httpx_client=httpx_client,
+        )
+    return AsyncClientOptions(httpx_client=httpx_client)
 
 
 class AsyncSupabaseClient:
