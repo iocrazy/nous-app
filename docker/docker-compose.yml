@@ -83,7 +83,15 @@ services:
       # "is this container alive" we want a millisecond answer that
       # doesn't fail when DBOS is recovering — autoheal would otherwise
       # restart the gateway every time a worker degrades.
-      test: ["CMD-SHELL", "curl -fs http://localhost:8080/api/v1/healthz || curl -fs http://localhost:8080/health"]
+      #
+      # Ephemeral-port-exhaustion guard (2026-05-22 incident): a Supabase
+      # connection leak filled the ~28k ephemeral range; the loopback probe
+      # only failed at TOTAL exhaustion, by which point the daemon was too
+      # degraded for autoheal's restart to succeed. Fail the healthcheck
+      # while there is still headroom (>24k open conns) so autoheal recycles
+      # the container *before* it wedges. Normal operation sits in the low
+      # hundreds, so this only trips on a runaway leak.
+      test: ["CMD-SHELL", "c=$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | wc -l); test ${c:-0} -lt 24000 && { curl -fs http://localhost:8080/api/v1/healthz || curl -fs http://localhost:8080/health; }"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -162,7 +170,10 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:8080/api/v1/healthz"]
+      # Same ephemeral-port-exhaustion guard as the gateway (see its
+      # healthcheck comment): fail while there's headroom so autoheal can
+      # recycle before the daemon degrades.
+      test: ["CMD-SHELL", "c=$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | wc -l); test ${c:-0} -lt 24000 && curl -fs http://localhost:8080/api/v1/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
