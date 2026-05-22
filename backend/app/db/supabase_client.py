@@ -49,21 +49,29 @@ from supabase._async.client import create_client as create_async_client
 
 from app.core.config import settings
 
-# Bounded, self-recycling httpx pool for every per-loop Supabase client.
+# httpx pool for every per-loop Supabase client.
 #
-# 2026-05-22 incident: Supabase/Kong closes idle keep-alive connections
-# faster than httpcore reaps them, so the server-closed sockets pile up in
-# CLOSE_WAIT and grow unbounded — the gateway exhausted the ~28k ephemeral
-# port range (EADDRNOTAVAIL on every new Supabase REST call → "Engine
-# Offline"). Two settings fix it at the source:
-#   * keepalive_expiry shorter than Kong's idle timeout → httpx closes idle
-#     connections itself (clean client-side FIN → auto-reaped via TIME_WAIT)
-#     *before* Kong does, so they never become CLOSE_WAIT.
-#   * bounded max_connections → the pool can never run away again.
+# 2026-05-22 incident: Supabase/Kong closes idle keep-alive connections but
+# httpcore does not reap the server-closed sockets (known httpcore bug —
+# encode/httpcore #110/#116, encode/httpx #1360; unfixed on latest
+# 0.28.1/1.0.9). They pile up in CLOSE_WAIT and grow unbounded until the
+# gateway exhausts the ~28k ephemeral port range (EADDRNOTAVAIL → "Engine
+# Offline"). An earlier attempt (max_keepalive_connections=10,
+# keepalive_expiry=15) did NOT help — even a small idle pool gets
+# server-closed and leaked, verified by live /proc/net/tcp forensics.
+#
+# Fix: **disable keep-alive entirely** (max_keepalive_connections=0). With
+# no idle connections retained, httpx closes each connection itself right
+# after the response (clean client-side FIN → TIME_WAIT, auto-reaped) — the
+# server never gets an idle connection to close, so CLOSE_WAIT can't form.
+# Costs a fresh TCP connect per request (fine for an internal service-role
+# client); the alternative is exhausting the port range every ~2 days.
+# This is the global backstop behind the asyncpg migration (Issue #199);
+# it covers EVERY supabase-py caller, not just the hot paths migrated so far.
 _HTTPX_LIMITS = httpx.Limits(
     max_connections=50,
-    max_keepalive_connections=10,
-    keepalive_expiry=15.0,
+    max_keepalive_connections=0,
+    keepalive_expiry=0.0,
 )
 _HTTPX_TIMEOUT = httpx.Timeout(120.0)
 
