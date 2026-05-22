@@ -28,11 +28,12 @@ their routing rows in a follow-up migration if/when needed.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
+
+from app.tasks.utils import run_async
 
 _GRID_COLS = 4
 _GRID_NODE_WIDTH = 320
@@ -86,7 +87,7 @@ def generate_image_step(
             aspect_ratio=aspect_ratio,
         )
 
-    return asyncio.run(_do())
+    return run_async(_do())
 
 
 @DBOS.workflow()
@@ -130,7 +131,7 @@ def generate_image_batch_step(requests: list[dict[str, Any]]) -> list[dict[str, 
         svc = StoryboardAIService()
         return await svc.generate_image_batch(requests=requests)
 
-    return asyncio.run(_do())
+    return run_async(_do())
 
 
 @DBOS.workflow()
@@ -187,7 +188,7 @@ def generate_video_step(
             motion_intensity=motion_intensity,
         )
 
-    return asyncio.run(_do())
+    return run_async(_do())
 
 
 @DBOS.workflow()
@@ -227,7 +228,7 @@ def split_script_step(script_text: str, style_guide: str) -> list[dict[str, Any]
         svc = StoryboardAIService()
         return await svc.split_script(script_text=script_text, style_guide=style_guide)
 
-    return asyncio.run(_do())
+    return run_async(_do())
 
 
 @DBOS.step()
@@ -273,7 +274,7 @@ def persist_split_scenes_step(
                 created_nodes.append(node_id)
         return created_nodes
 
-    return asyncio.run(_do())
+    return run_async(_do())
 
 
 @DBOS.workflow()
@@ -307,7 +308,7 @@ def analyze_video_step(video_path: str) -> list[dict[str, Any]]:
         svc = StoryboardAIService()
         return await svc.analyze_video(video_path=video_path)
 
-    return asyncio.run(_do())
+    return run_async(_do())
 
 
 @DBOS.step()
@@ -351,7 +352,7 @@ def persist_video_scenes_step(
                 created_nodes.append(node_id)
         return created_nodes
 
-    return asyncio.run(_do())
+    return run_async(_do())
 
 
 @DBOS.workflow()
@@ -392,7 +393,7 @@ def export_storyboard_step(
             return await svc.export_zip(project_id=project_id)
         return await svc.export_png(project_id=project_id, options=options)
 
-    return asyncio.run(_do())
+    return run_async(_do())
 
 
 @DBOS.workflow()

@@ -13,7 +13,6 @@ DB at midnight together.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +20,8 @@ from typing import Any
 
 from dbos import DBOS
 from loguru import logger
+
+from app.tasks.utils import run_async
 
 
 @DBOS.step()
@@ -92,7 +93,7 @@ def cleanup_old_task_tracking_step() -> dict[str, Any]:
         )
         return len(result.data) if result.data else 0
 
-    deleted = asyncio.run(_do())
+    deleted = run_async(_do())
     return {"status": "success", "deleted": deleted}
 
 
@@ -105,7 +106,7 @@ def cleanup_trashed_resources_step() -> dict[str, Any]:
         svc = ResourcesService()
         return await svc.cleanup_expired_trash(older_than_days=15)
 
-    cleaned = asyncio.run(_do())
+    cleaned = run_async(_do())
     return {"status": "success", "cleaned": cleaned}
 
 
