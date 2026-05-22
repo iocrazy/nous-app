@@ -113,6 +113,7 @@
     "unlimited": "无限制"
   },
   "common": {
+    "confirm": "确认",
     "cancel": "取消",
     "close": "关闭",
     "create": "创建",
@@ -162,6 +163,8 @@
     "searchResultsCountSingular": "搜索到 1 条结果"
   },
   "search": {
+    "aiPlaceholder": "AI 搜索... ↵",
+    "placeholder": "搜索...",
     "scopeTooltip": "搜索范围",
     "scopeHeader": "搜索范围",
     "scope": {
@@ -190,6 +193,12 @@
     "waveLiquid": "波浪液体",
     "waveLiquidDesc": "上升波浪动画",
     "tags": {
+      "deleteConfirm": "删除此标签？",
+      "doubleClickToRename": "双击重命名",
+      "eqEnLocked": "中文已锁定为英文 — 点击解锁并恢复自动翻译",
+      "group": "分组",
+      "sameAsEnglish": "与英文使用相同值（跳过翻译）",
+      "uncategorized": "未分类",
       "title": "标签管理",
       "subtitle": "使用自定义标签组织您的内容",
       "searchPlaceholder": "搜索标签...",
@@ -320,6 +329,9 @@
     "noResults": "无结果"
   },
   "resources": {
+    "compareVersions": "对比版本",
+    "details": "详情",
+    "viewDetails": "查看详情",
     "title": "资源库",
     "allResources": "全部资源",
     "files": "文件",
@@ -770,7 +782,18 @@
     "assignee": "负责人",
     "overdue": "已逾期"
   },
+  "workforce": {
+    "title": "工作团队",
+    "subtitle": "常驻 Agent — 当前状态、队列深度和近期活动。",
+    "loading": "加载中…",
+    "empty": "暂无常驻 Agent。在 Agent 设置中将其标记为常驻，即可在此安排周期性运行。",
+    "queuedItems": "{{count}} 个排队中"
+  },
   "shares": {
+    "status": {
+      "active": "生效中",
+      "expired": "已过期"
+    },
     "title": "分享",
     "createShare": "创建分享",
     "shareType": "分享类型",
@@ -876,6 +899,7 @@
     }
   },
   "projects": {
+    "title": "全部项目",
     "sidebar": {
       "projectList": "项目列表",
       "starredProjects": "星标项目",
@@ -1257,6 +1281,10 @@
     "searchSkills": "搜索技能..."
   },
   "chat": {
+    "newSession": "新会话",
+    "placeholder": "输入消息...",
+    "placeholderNoAgent": "请先选择一个 Agent",
+    "placeholderNoSession": "请先创建会话",
     "newConversation": "新对话",
     "untitled": "未命名",
     "typeMessage": "输入消息...",
