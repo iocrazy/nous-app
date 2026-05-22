@@ -41,6 +41,7 @@ async def collect_system_status_step() -> dict[str, Any]:
     """
     from app.services.infra.system_monitor_service import (
         get_active_tasks,
+        get_connection_stats,
         get_network_status,
         get_queue_status,
         get_storage_status,
@@ -48,14 +49,29 @@ async def collect_system_status_step() -> dict[str, Any]:
     )
     from app.services.system_status_redis import set_snapshot
 
+    conns = get_connection_stats()
     snapshot = {
         "queue": await get_queue_status(),
         "storage": get_storage_status(),
         "network": get_network_status(),
         "workers": await get_worker_stats(),
         "active_tasks": await get_active_tasks(),
+        "connections": conns,
     }
     await set_snapshot(snapshot)
+    # Surface a runaway open-connection count (leak signature) in
+    # application_logs so the error funnel / alerts catch it well before
+    # ephemeral-port exhaustion wedges the gateway (2026-05-22 incident).
+    if conns["status"] == "critical":
+        logger.error(
+            f"backend open connections critical: {conns['open_conns']} "
+            f"({conns['percent']}% of ephemeral range) — likely connection leak"
+        )
+    elif conns["status"] == "warning":
+        logger.warning(
+            f"backend open connections elevated: {conns['open_conns']} "
+            f"({conns['percent']}% of ephemeral range)"
+        )
     return {"status": "success"}
 
 
