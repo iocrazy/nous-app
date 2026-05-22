@@ -216,6 +216,52 @@ def get_network_status() -> dict:
         return {"speed": "0 B/s", "status": "error"}
 
 
+# Ephemeral source ports are a finite pool; a runaway open-connection count
+# is the signature of a connection leak. 2026-05-22 incident: the per-loop
+# Supabase client leak filled the ~28k ephemeral range -> EADDRNOTAVAIL on
+# every new Supabase REST call -> Engine showed "Offline". Surfacing this as
+# a metric + log lets ops catch a leak long before it exhausts the range.
+_CONN_WARN = 5000
+_CONN_CRITICAL_PCT = 0.85
+
+
+def get_connection_stats() -> dict:
+    """Count this process's open TCP connections vs the ephemeral port range.
+
+    status: ``ok`` / ``warning`` (>5k open) / ``critical`` (>=85% of the
+    ephemeral range). Pure /proc read; safe to call every tick.
+    """
+    try:
+        count = 0
+        for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+            try:
+                with open(path) as fh:
+                    count += max(0, sum(1 for _ in fh) - 1)  # minus header row
+            except FileNotFoundError:
+                continue
+        try:
+            lo, hi = open("/proc/sys/net/ipv4/ip_local_port_range").read().split()
+            ephemeral = int(hi) - int(lo) + 1
+        except Exception:  # noqa: BLE001
+            ephemeral = 28231  # default 32768-60999
+        pct = round(count / ephemeral * 100, 1) if ephemeral else 0.0
+        if count >= ephemeral * _CONN_CRITICAL_PCT:
+            status = "critical"
+        elif count >= _CONN_WARN:
+            status = "warning"
+        else:
+            status = "ok"
+        return {
+            "open_conns": count,
+            "ephemeral_range": ephemeral,
+            "percent": pct,
+            "status": status,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"get_connection_stats failed: {e}")
+        return {"open_conns": 0, "ephemeral_range": 0, "percent": 0.0, "status": "error"}
+
+
 async def get_worker_stats() -> list[dict]:
     """Return DBOS worker pool info. PR-D7: replaces Celery worker
     inspection. DBOS workers are in-process; we report a single
