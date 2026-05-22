@@ -10,7 +10,6 @@ from __future__ import annotations
 import builtins
 import io
 
-import pytest
 
 from app.services.infra import system_monitor_service as sms
 

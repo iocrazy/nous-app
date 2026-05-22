@@ -259,7 +259,12 @@ def get_connection_stats() -> dict:
         }
     except Exception as e:  # noqa: BLE001
         logger.warning(f"get_connection_stats failed: {e}")
-        return {"open_conns": 0, "ephemeral_range": 0, "percent": 0.0, "status": "error"}
+        return {
+            "open_conns": 0,
+            "ephemeral_range": 0,
+            "percent": 0.0,
+            "status": "error",
+        }
 
 
 async def get_worker_stats() -> list[dict]:
