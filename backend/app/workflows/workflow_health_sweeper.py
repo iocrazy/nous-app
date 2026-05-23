@@ -58,16 +58,27 @@ async def classify_and_act_step() -> Dict[str, int]:
     """
     # Direct PG (asyncpg) — supabase-py's PostgREST/httpx path leaked a
     # CLOSE_WAIT connection per call (Issue #199 Bug C / 2026-05-22 incident).
-    from app.db.pg_pool import get_pool
+    from app.db import pg_pool
+
+    # Skip gracefully when Supavisor isn't configured (dev/CI) instead of
+    # crash-looping every 2 min on get_pool()'s RuntimeError.
+    if not pg_pool.is_configured():
+        return _zero_counters()
 
     # Fetch active rows with the columns the classifier needs.
-    pool = await get_pool()
+    #
+    # Active phase is 'processing', NOT 'in_progress': the DBOS lifecycle
+    # trigger maps RUNNING -> 'processing' (migration 209/219), confirmed
+    # against prod task_tracking. The old 'in_progress' literal never matched,
+    # so the sweeper silently skipped every running workflow (no LOST /
+    # USER_TIMEOUT detection for in-flight work). Mirrors get_queue_status.
+    pool = await pg_pool.get_pool()
     async with pool.acquire() as conn:
         records = await conn.fetch(
             "SELECT dbos_workflow_id, task_type, phase, started_at, "
             "heartbeat_at, progress, updated_at, max_duration_minutes, "
             "do_not_auto_cancel, health_status, user_id, title "
-            "FROM public.task_tracking WHERE phase IN ('queued', 'in_progress')"
+            "FROM public.task_tracking WHERE phase IN ('queued', 'processing')"
         )
     rows = [dict(r) for r in records]
     if not rows:
@@ -221,6 +232,15 @@ def _classify_in_python(row: Dict[str, Any]) -> str:
     if progress_age > policy["expected"] / 2:
         return "STALLED"
     return "SLOW"
+
+
+# NOTE on the writers below: _mark_lost / _cancel_orphan / _mark_timed_out
+# set task_tracking.phase + status directly, which is normally reserved for
+# the mirror_dbos_lifecycle_to_tracking trigger ("phase/status by trigger
+# only", CLAUDE.md). This is a DELIBERATE exception: these reconciliation
+# paths handle workflows whose DBOS executor is dead/lost/orphaned, so the
+# trigger will never fire for them — the sweeper is the writer of last
+# resort. Do not "fix" this back to trigger-only.
 
 
 async def _persist_classification(row: Dict[str, Any], classification: str) -> None:
