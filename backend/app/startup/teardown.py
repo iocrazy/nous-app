@@ -62,3 +62,13 @@ async def shutdown_all(app: FastAPI) -> None:
         logger.info("Asyncpg pool closed (Supavisor)")
     except Exception as e:
         logger.warning(f"Failed to close asyncpg pool: {e}")
+
+    # Dispose the SQLAlchemy async engine (Issue #199 target layer, over
+    # asyncpg). No-op when not yet created / Supavisor not configured.
+    try:
+        from app.db.engine import dispose_engine
+
+        await dispose_engine()
+        logger.info("SQLAlchemy async engine disposed (Supavisor)")
+    except Exception as e:
+        logger.warning(f"Failed to dispose SQLAlchemy engine: {e}")
