@@ -108,23 +108,36 @@ async def get_queue_status() -> dict:
         return _queue_cache["data"]
 
     try:
-        # Count via the asyncpg pool (direct PG, no HTTP) — NOT supabase-py.
-        # This runs every ~30s from collect_system_status_step; over Kong/
-        # PostgREST (httpx) each call leaked a CLOSE_WAIT connection (known
-        # httpcore bug — see Issue #199 Bug C / 2026-05-22 incident), which
-        # exhausted the ephemeral port range. asyncpg pools cleanly. Falls
-        # back to supabase-py only when Supavisor isn't configured (dev).
-        from app.db import pg_pool
+        # Count via SQLAlchemy Core over asyncpg (direct PG, no HTTP) — NOT
+        # supabase-py. This runs every ~30s from collect_system_status_step;
+        # over Kong/PostgREST (httpx) each call leaked a CLOSE_WAIT connection
+        # (known httpcore bug — Issue #199 Bug C / 2026-05-22 incident),
+        # exhausting the ephemeral port range. The SQLAlchemy async engine
+        # (Issue #199 target) pools cleanly. Falls back to supabase-py only
+        # when Supavisor isn't configured (dev).
+        from app.db import engine as db_engine
 
-        if pg_pool.is_configured():
-            pool = await pg_pool.get_pool()
-            async with pool.acquire() as conn:
-                active = await conn.fetchval(
-                    "SELECT count(*) FROM public.task_tracking WHERE phase = 'processing'"
-                )
-                pending = await conn.fetchval(
-                    "SELECT count(*) FROM public.task_tracking WHERE phase = 'queued'"
-                )
+        if db_engine.is_configured():
+            from sqlalchemy import text
+
+            eng = db_engine.get_engine()
+            async with eng.connect() as conn:
+                active = (
+                    await conn.execute(
+                        text(
+                            "SELECT count(*) FROM public.task_tracking "
+                            "WHERE phase = 'processing'"
+                        )
+                    )
+                ).scalar()
+                pending = (
+                    await conn.execute(
+                        text(
+                            "SELECT count(*) FROM public.task_tracking "
+                            "WHERE phase = 'queued'"
+                        )
+                    )
+                ).scalar()
             active_count, pending_count = int(active or 0), int(pending or 0)
         else:
             from app.db import get_async_supabase_admin
