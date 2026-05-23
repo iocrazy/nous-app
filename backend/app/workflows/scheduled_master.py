@@ -49,13 +49,18 @@ async def fire_due_schedules_step() -> Dict[str, int]:
     next_fire_at via croniter. Returns counters for telemetry."""
     # Direct PG (asyncpg) — supabase-py's PostgREST/httpx path leaked a
     # CLOSE_WAIT connection per call (Issue #199 Bug C / 2026-05-22 incident).
-    from app.db.pg_pool import get_pool
+    from app.db import pg_pool
+
+    # Skip gracefully when Supavisor isn't configured (dev/CI) instead of
+    # logging a warning + errors:1 every minute on get_pool()'s RuntimeError.
+    if not pg_pool.is_configured():
+        return {"due": 0, "fired": 0, "errors": 0}
 
     now = datetime.now(timezone.utc)
 
     # Pull due rows. enabled=true + next_fire_at <= now.
     try:
-        pool = await get_pool()
+        pool = await pg_pool.get_pool()
         async with pool.acquire() as conn:
             records = await conn.fetch(
                 "SELECT * FROM public.user_schedules "

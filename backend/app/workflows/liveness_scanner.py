@@ -58,7 +58,7 @@ async def liveness_scan_step() -> dict[str, Any]:
     # httpcore bug; Issue #199 Bug C / 2026-05-22 incident). At-most-once
     # write per row is enforced by the WHERE liveness_state = <expected>
     # CAS guard below, so no advisory lock is needed for correctness.
-    from app.db.pg_pool import get_pool
+    from app.db import pg_pool
 
     now = datetime.now(timezone.utc)
     counts: dict[str, int] = {
@@ -70,9 +70,14 @@ async def liveness_scan_step() -> dict[str, Any]:
         "noop": 0,
     }
 
+    # Skip gracefully when Supavisor isn't configured (dev/CI) instead of
+    # crash-looping every 30s on get_pool()'s RuntimeError.
+    if not pg_pool.is_configured():
+        return counts
+
     # Pull the candidate set in one trip (cap at 200 — in practice
     # mediahub doesn't have hundreds of running agent_runs at once).
-    pool = await get_pool()
+    pool = await pg_pool.get_pool()
     async with pool.acquire() as conn:
         records = await conn.fetch(
             "SELECT id, status, liveness_state, heartbeat_at, "
