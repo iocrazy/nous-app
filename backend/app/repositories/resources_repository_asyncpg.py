@@ -1039,7 +1039,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
         ``::bigint[]`` is the only safe binding."""
         try:
             async with self.transaction() as conn:
-                folder_ids_rows = await conn.fetch(
+                folder_ids_rows = await self._conn_fetch_all(
+                    conn,
                     "WITH RECURSIVE subtree AS ("
                     "  SELECT id FROM folders "
                     "    WHERE id = $1 AND is_trashed = true "
@@ -1054,7 +1055,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 if not all_ids:
                     return {"restored_folders": 0, "restored_resources": 0}
 
-                restored_resources_rows = await conn.fetch(
+                restored_resources_rows = await self._conn_fetch_all(
+                    conn,
                     "UPDATE resources SET is_trashed = false, "
                     "       trashed_at = NULL "
                     "WHERE is_trashed = true "
@@ -1064,7 +1066,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                     "  ) RETURNING id",
                     all_ids,
                 )
-                restored_folders_rows = await conn.fetch(
+                restored_folders_rows = await self._conn_fetch_all(
+                    conn,
                     "UPDATE folders SET is_trashed = false, "
                     "       trashed_at = NULL "
                     "WHERE id = ANY($1::bigint[]) RETURNING id",
@@ -1097,7 +1100,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 # Includes the root regardless of its trashed state
                 # (legacy behaviour: trash_folder_cascade always
                 # processes the root).
-                folder_ids_rows = await conn.fetch(
+                folder_ids_rows = await self._conn_fetch_all(
+                    conn,
                     "WITH RECURSIVE subtree AS ("
                     "  SELECT id FROM folders WHERE id = $1 "
                     "  UNION ALL "
@@ -1114,7 +1118,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                 # Trash resources currently in any of these folders.
                 # Snapshot last_* fields from resource_items so a
                 # later restore can put them back where they were.
-                trashed_resources_rows = await conn.fetch(
+                trashed_resources_rows = await self._conn_fetch_all(
+                    conn,
                     "UPDATE resources r SET "
                     "  is_trashed = true, "
                     "  trashed_at = now(), "
@@ -1128,7 +1133,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
                     "  AND r.is_trashed = false RETURNING r.id",
                     all_ids,
                 )
-                trashed_folders_rows = await conn.fetch(
+                trashed_folders_rows = await self._conn_fetch_all(
+                    conn,
                     "UPDATE folders SET "
                     "  is_trashed = true, trashed_at = now() "
                     "WHERE id = ANY($1::bigint[]) RETURNING id",
