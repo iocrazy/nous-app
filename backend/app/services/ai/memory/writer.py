@@ -19,6 +19,7 @@ doesn't lose the rest of the batch.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -53,9 +54,6 @@ class MemoryWriter:
     assistant_extractor: AssistantMemoryExtractor
     embedding_service: (
         Any  # exposes async generate_embedding(text) -> list[float] | None
-    )
-    supabase_client: (
-        Any  # async client, exposes table('agent_memories').insert().execute()
     )
     # Wave F (F3): optional. If set, must be `async (prompt: str) -> str`.
     contradiction_classifier: Optional[Any] = None
@@ -95,19 +93,20 @@ class MemoryWriter:
                 from app.services.ai.memory.threading import assign_thread_for
 
                 async def _fetch_recent(aid, uid, sid, limit):
-                    sb = self.supabase_client
-                    result = await (
-                        sb.table("agent_memories")
-                        .select("created_at, thread_id")
-                        .eq("agent_id", str(aid))
-                        .eq("user_id", str(uid))
-                        .eq("session_id", str(sid))
-                        .eq("status", "active")
-                        .order("created_at", desc=True)
-                        .limit(limit)
-                        .execute()
+                    from app.db import engine as db_engine
+
+                    return await db_engine.fetch_all(
+                        "SELECT created_at, thread_id FROM public.agent_memories "
+                        "WHERE agent_id = :aid AND user_id = :uid "
+                        "AND session_id = :sid AND status = 'active' "
+                        "ORDER BY created_at DESC LIMIT :lim",
+                        {
+                            "aid": str(aid),
+                            "uid": str(uid),
+                            "sid": str(sid),
+                            "lim": limit,
+                        },
                     )
-                    return result.data or []
 
                 thread_id = await assign_thread_for(
                     agent_id=str(agent_id),
@@ -137,17 +136,36 @@ class MemoryWriter:
         if not rows:
             return 0
 
-        try:
-            insert_result = (
-                await self.supabase_client.table("agent_memories")
-                .insert(rows)
-                .execute()
+        from app.db import engine as db_engine
+
+        inserted_rows: list[dict] = []
+        for row in rows:
+            cols = list(row.keys())
+            placeholders = []
+            params: dict[str, Any] = {}
+            for c in cols:
+                if c == "embedding":
+                    params[c] = "[" + ",".join(repr(x) for x in row[c]) + "]"
+                    placeholders.append("CAST(:embedding AS vector)")
+                elif c == "metadata_json":
+                    params[c] = json.dumps(row[c])
+                    placeholders.append("CAST(:metadata_json AS jsonb)")
+                else:
+                    params[c] = row[c]
+                    placeholders.append(f":{c}")
+            sql = (
+                "INSERT INTO public.agent_memories (" + ", ".join(cols) + ") "
+                "VALUES (" + ", ".join(placeholders) + ") RETURNING *"
             )
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "[memory.writer] batch insert failed; dropped %d candidate fact(s)",
-                len(rows),
-            )
+            try:
+                got = await db_engine.execute_returning_one(sql, params)
+                if got:
+                    inserted_rows.append(got)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "[memory.writer] insert failed; dropped 1 candidate fact"
+                )
+        if not inserted_rows:
             return 0
 
         # Wave F (F3): post-insert contradiction check. Best-effort —
@@ -156,7 +174,6 @@ class MemoryWriter:
         # consolidation sweeper will eventually merge them).
         if self.contradiction_classifier is not None:
             try:
-                inserted_rows = list(insert_result.data or [])
                 await self._supersede_contradicting(
                     inserted_rows,
                     agent_id=agent_id,
@@ -168,7 +185,7 @@ class MemoryWriter:
                     "[memory.writer] contradiction post-pass failed (non-fatal)"
                 )
 
-        return len(rows)
+        return len(inserted_rows)
 
     async def _supersede_contradicting(
         self,
@@ -189,7 +206,7 @@ class MemoryWriter:
         for new_row in inserted_rows:
             new_id = new_row.get("id")
             new_summary = new_row.get("summary") or ""
-            new_embedding = new_row.get("embedding")
+            new_embedding = _parse_embedding(new_row.get("embedding"))
             if not (new_id and new_summary and new_embedding):
                 continue
 
@@ -220,18 +237,15 @@ class MemoryWriter:
                     decisions.append(d)
 
             target_ids = select_supersede_targets(decisions)
+
+            from app.db import engine as db_engine
+
             for old_id in target_ids:
                 try:
-                    await (
-                        self.supabase_client.table("agent_memories")
-                        .update(
-                            {
-                                "status": "superseded",
-                                "superseded_by": str(new_id),
-                            }
-                        )
-                        .eq("id", old_id)
-                        .execute()
+                    await db_engine.execute(
+                        "UPDATE public.agent_memories SET status = 'superseded', "
+                        "superseded_by = :new WHERE id = :old",
+                        {"new": str(new_id), "old": str(old_id)},
                     )
                     from app.agent_framework._metrics_helper import inc_metric
 
@@ -261,25 +275,27 @@ class MemoryWriter:
         could route through a pgvector RPC, but this keeps the contradiction
         path self-contained without a new SQL function.
         """
+        from app.db import engine as db_engine
+
         try:
-            result = (
-                await self.supabase_client.table("agent_memories")
-                .select("id, summary, embedding")
-                .eq("agent_id", str(agent_id))
-                .eq("user_id", str(user_id))
-                .eq("scope", scope.value)
-                .eq("status", "active")
-                .neq("id", str(exclude_id))
-                .limit(50)
-                .execute()
+            rows = await db_engine.fetch_all(
+                "SELECT id, summary, CAST(embedding AS text) AS embedding "
+                "FROM public.agent_memories "
+                "WHERE agent_id = :aid AND user_id = :uid AND scope = :scope "
+                "AND status = 'active' AND id <> :exclude LIMIT 50",
+                {
+                    "aid": str(agent_id),
+                    "uid": str(user_id),
+                    "scope": scope.value,
+                    "exclude": str(exclude_id),
+                },
             )
         except Exception:
             return []
 
-        rows = result.data or []
         scored: list[tuple[float, dict]] = []
         for row in rows:
-            emb = row.get("embedding")
+            emb = _parse_embedding(row.get("embedding"))
             if not emb:
                 continue
             sim = _cosine(embedding, emb)
@@ -335,6 +351,18 @@ class MemoryWriter:
         except Exception:  # noqa: BLE001
             logger.exception("[memory.writer] embedding call failed; skipping fact")
             return None
+
+
+def _parse_embedding(raw: Any) -> list[float] | None:
+    """pgvector comes back from the engine as the text literal "[0.1,...]"
+    (we SELECT CAST(embedding AS text)). That literal is valid JSON."""
+    if not raw:
+        return None
+    try:
+        seq = json.loads(raw) if isinstance(raw, str) else raw
+        return [float(x) for x in seq]
+    except (ValueError, TypeError):
+        return None
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
