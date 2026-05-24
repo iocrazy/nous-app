@@ -24,6 +24,9 @@ class _Result:
     def scalar(self):
         return self._scalar
 
+    def first(self):
+        return self._rows[0] if self._rows else None
+
 
 class _Conn:
     def __init__(self, result: _Result):
@@ -78,3 +81,14 @@ async def test_execute_returning_val_returns_scalar(monkeypatch):
         "INSERT INTO t (x) VALUES (:x) RETURNING id", {"x": 1}
     )
     assert got == "new-id"
+
+
+async def test_execute_returning_one_returns_row_dict(monkeypatch):
+    # INSERT ... RETURNING * must run on begin() (commit) and return the row.
+    monkeypatch.setattr(
+        db_engine, "get_engine", lambda: _Engine(_Result(rows=[{"id": "new-id"}]))
+    )
+    row = await db_engine.execute_returning_one(
+        "INSERT INTO t (x) VALUES (:x) RETURNING *", {"x": 1}
+    )
+    assert row == {"id": "new-id"}
