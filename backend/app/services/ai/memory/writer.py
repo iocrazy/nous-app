@@ -26,6 +26,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.services.ai.memory import MemoryScope
+from app.services.ai.memory.embedding_utils import parse_embedding_text
 from app.services.ai.memory.extractor import (
     AssistantMemoryExtractor,
     ExtractedFact,
@@ -212,7 +213,7 @@ class MemoryWriter:
         for new_row in inserted_rows:
             new_id = new_row.get("id")
             new_summary = new_row.get("summary") or ""
-            new_embedding = _parse_embedding(new_row.get("embedding"))
+            new_embedding = parse_embedding_text(new_row.get("embedding"))
             if not (new_id and new_summary and new_embedding):
                 continue
 
@@ -301,7 +302,7 @@ class MemoryWriter:
 
         scored: list[tuple[float, dict]] = []
         for row in rows:
-            emb = _parse_embedding(row.get("embedding"))
+            emb = parse_embedding_text(row.get("embedding"))
             if not emb:
                 continue
             sim = _cosine(embedding, emb)
@@ -357,18 +358,6 @@ class MemoryWriter:
         except Exception:  # noqa: BLE001
             logger.exception("[memory.writer] embedding call failed; skipping fact")
             return None
-
-
-def _parse_embedding(raw: Any) -> list[float] | None:
-    """pgvector comes back from the engine as the text literal "[0.1,...]"
-    (we SELECT CAST(embedding AS text)). That literal is valid JSON."""
-    if not raw:
-        return None
-    try:
-        seq = json.loads(raw) if isinstance(raw, str) else raw
-        return [float(x) for x in seq]
-    except (ValueError, TypeError):
-        return None
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

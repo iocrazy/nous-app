@@ -128,6 +128,10 @@ async def persist_summary(
     payload_tp = json.dumps(topics or [])
     rid = int(resource_id)  # resources.id is bigint; asyncpg needs int, not str
 
+    # Uses raw engine.begin() (not the db_engine.execute helper) on purpose:
+    # the three writes must land in ONE transaction. The helpers open a
+    # separate committed transaction per call — do NOT "simplify" this into
+    # three db_engine.execute() calls or you lose atomicity.
     eng = db_engine.get_engine()
     async with eng.begin() as conn:
         await conn.execute(

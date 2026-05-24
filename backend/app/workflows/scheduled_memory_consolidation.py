@@ -30,6 +30,7 @@ from app.services.ai.memory.consolidation import (
     consolidate_cluster,
     mergeable_clusters,
 )
+from app.services.ai.memory.embedding_utils import parse_embedding_text
 
 logger = logging.getLogger(__name__)
 
@@ -101,21 +102,6 @@ async def _list_namespaces(*, limit: int) -> list[tuple[str, str, str]]:
     return list(seen)
 
 
-def _parse_embedding(raw: Any) -> tuple[float, ...] | None:
-    """pgvector comes back from the engine as the text literal
-    ``[0.1,0.2,...]`` (we SELECT ``CAST(embedding AS text)`` to avoid
-    registering an asyncpg vector codec on the shared hot-path engine).
-    That literal is valid JSON, so json.loads parses it. Tolerates an
-    already-decoded list too."""
-    if not raw:
-        return None
-    try:
-        seq = json.loads(raw) if isinstance(raw, str) else raw
-        return tuple(float(x) for x in seq)
-    except (ValueError, TypeError):
-        return None
-
-
 async def _load_candidates(
     *, agent_id: str, user_id: str, scope: str, limit: int
 ) -> list[MemoryCandidate]:
@@ -134,14 +120,14 @@ async def _load_candidates(
         return []
     out: list[MemoryCandidate] = []
     for row in rows:
-        emb = _parse_embedding(row.get("embedding"))
-        if not emb or not row.get("summary"):
+        parsed = parse_embedding_text(row.get("embedding"))
+        if not parsed or not row.get("summary"):
             continue
         out.append(
             MemoryCandidate(
                 id=str(row["id"]),
                 summary=str(row["summary"]),
-                embedding=emb,
+                embedding=tuple(parsed),  # MemoryCandidate.embedding is a tuple
             )
         )
     return out

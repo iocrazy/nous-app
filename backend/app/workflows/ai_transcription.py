@@ -5,7 +5,8 @@ Strategy: thin wrapper around existing WhisperService so we don't reimplement
 the whisper provider chain / segment serialization. The DBOS layer adds:
     - workflow_id-keyed memoization (rerun returns cached result)
     - per-step retry policy on the network call
-    - service_role bypass for cross-table writes
+    - cross-table writes via the SQLAlchemy engine (privileged Supavisor
+      connection; no SET ROLE needed)
 
 This module does NOT duplicate WhisperService.transcribe_and_save; it calls
 into it. The whole port reduces to "wrap the async service call in a DBOS
