@@ -18,46 +18,30 @@ import json
 import os
 from typing import Any
 
-import psycopg
 from dbos import DBOS
 from loguru import logger
 
 
-def _dsn() -> str:
-    url = os.environ.get("DBOS_DATABASE_URL")
-    if not url:
-        raise RuntimeError("DBOS_DATABASE_URL not configured")
-    return url + ("&" if "?" in url else "?") + "sslmode=disable"
-
-
 @DBOS.step()
-def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
-    """Resolve the audio file path + the user's whisper provider config.
+async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
+    """Resolve the audio file path + the user's whisper provider config."""
+    from app.db import engine as db_engine
 
-    Mirrors the path-resolution logic in transcribe_audio_task: prefers an
-    extracted MP3 next to the download_path, falls back to deriving from the
-    video file. Returns minimal inputs for the actual transcribe step.
-    """
-    with psycopg.connect(_dsn(), row_factory=psycopg.rows.dict_row) as conn:
-        conn.execute("SET ROLE service_role")
-        cur = conn.execute(
-            """SELECT pm.id, pm.download_path, pm.extract_audio_path,
-                      pm.platform_id, r.id AS resource_id
-               FROM public.parsed_media pm
-               JOIN public.resources r ON r.media_id = pm.id
-               WHERE pm.id = %s
-               LIMIT 1""",
-            (parsed_media_id,),
-        )
-        media_row = cur.fetchone()
-        if not media_row:
-            raise RuntimeError(f"no parsed_media for id={parsed_media_id}")
+    media_row = await db_engine.fetch_one(
+        "SELECT pm.id, pm.download_path, pm.extract_audio_path, pm.platform_id, "
+        "r.id AS resource_id "
+        "FROM public.parsed_media pm "
+        "JOIN public.resources r ON r.media_id = pm.id "
+        "WHERE pm.id = :pid LIMIT 1",
+        {"pid": parsed_media_id},
+    )
+    if not media_row:
+        raise RuntimeError(f"no parsed_media for id={parsed_media_id}")
 
-        cur = conn.execute(
-            "SELECT settings_json FROM public.user_settings WHERE user_id = %s",
-            (user_id,),
-        )
-        settings_row = cur.fetchone()
+    settings_row = await db_engine.fetch_one(
+        "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
+        {"uid": user_id},
+    )
 
     audio_path = media_row.get("extract_audio_path") or media_row.get("download_path")
     if not audio_path:
@@ -215,13 +199,12 @@ async def _run_volcengine_asr(
     # passes provider_config without user_id; we need to recover it from the
     # signed-token chain). The simplest path: read the resource's creator_id.
     # Avoids threading user_id through every step signature.
-    with psycopg.connect(_dsn(), row_factory=psycopg.rows.dict_row) as conn:
-        conn.execute("SET ROLE service_role")
-        cur = conn.execute(
-            "SELECT creator_id FROM public.resources WHERE id = %s",
-            (resource_id,),
-        )
-        row = cur.fetchone()
+    from app.db import engine as db_engine
+
+    row = await db_engine.fetch_one(
+        "SELECT creator_id FROM public.resources WHERE id = :rid",
+        {"rid": int(resource_id)},
+    )
     if not row:
         raise RuntimeError(f"resource {resource_id} not found for volcengine asr")
     user_id = str(row["creator_id"])
@@ -285,15 +268,15 @@ async def _run_volcengine_asr(
 
 
 @DBOS.step()
-def mark_transcript_completed(parsed_media_id: int) -> None:
+async def mark_transcript_completed(parsed_media_id: int) -> None:
     """Flip resources.transcript_status='completed' for downstream consumers."""
-    with psycopg.connect(_dsn()) as conn:
-        conn.execute("SET ROLE service_role")
-        conn.execute(
-            "UPDATE public.resources SET transcript_status = 'completed' WHERE media_id = %s",
-            (parsed_media_id,),
-        )
-        conn.commit()
+    from app.db import engine as db_engine
+
+    await db_engine.execute(
+        "UPDATE public.resources SET transcript_status = 'completed' "
+        "WHERE media_id = :pid",
+        {"pid": parsed_media_id},
+    )
 
 
 @DBOS.workflow()
@@ -310,7 +293,7 @@ async def ai_transcription_workflow(
     from app.workflows._failure_handler import record_workflow_failure
 
     try:
-        inputs = load_transcribe_inputs(parsed_media_id, user_id)
+        inputs = await load_transcribe_inputs(parsed_media_id, user_id)
         # Cheap on-disk assertion (one stat call). The chain dispatcher
         # only fires us after extract_audio_workflow succeeds, and the
         # manual trigger gate checks extract_audio_path/music_download_path
@@ -324,7 +307,7 @@ async def ai_transcription_workflow(
             language=inputs["language"],
             task_assignment=inputs.get("task_assignment", ""),
         )
-        mark_transcript_completed(parsed_media_id)
+        await mark_transcript_completed(parsed_media_id)
         # Chain ai_summary AFTER transcript completes (was concurrent in
         # download_helpers.chain_transcript_summary_for_tags pre-this-fix —
         # ai_summary fired alongside transcript and failed with "no

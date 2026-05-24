@@ -13,56 +13,35 @@ IDENTITY/SOUL/AGENT prompt + AgentRunner + RunRecorder so:
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Optional
 
-import psycopg
 from dbos import DBOS
 
 
-def _dsn() -> str:
-    url = os.environ.get("DBOS_DATABASE_URL")
-    if not url:
-        raise RuntimeError("DBOS_DATABASE_URL not configured")
-    return url + ("&" if "?" in url else "?") + "sslmode=disable"
-
-
 @DBOS.step()
-def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
-    """Load transcript + user's preferred provider config (key/base_url
-    snapshot for the agent's resolved model) + media title for prompt
-    context. SummarizeService picks the right adapter from the
-    provider_key + provider_config we hand it."""
-    with psycopg.connect(_dsn(), row_factory=psycopg.rows.dict_row) as conn:
-        conn.execute("SET ROLE service_role")
-        cur = conn.execute(
-            """
-            SELECT rt.full_text AS transcript,
-                   pm.id        AS pm_id,
-                   pm.title     AS title,
-                   r.id         AS resource_id
-            FROM public.parsed_media pm
-            JOIN public.resources r ON r.media_id = pm.id
-            JOIN public.resource_transcripts rt ON rt.resource_id = r.id
-            WHERE pm.id = %s
-              AND rt.full_text IS NOT NULL
-              AND r.creator_id = %s::uuid
-            LIMIT 1
-            """,
-            (parsed_media_id, user_id),
-        )
-        row = cur.fetchone()
-        if not row:
-            raise RuntimeError(
-                f"no transcript for parsed_media={parsed_media_id} " f"user={user_id}"
-            )
+async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
+    """Load transcript + user's preferred provider config + media title."""
+    from app.db import engine as db_engine
 
-        cur = conn.execute(
-            "SELECT settings_json FROM public.user_settings WHERE user_id = %s",
-            (user_id,),
+    row = await db_engine.fetch_one(
+        "SELECT rt.full_text AS transcript, pm.id AS pm_id, pm.title AS title, "
+        "r.id AS resource_id "
+        "FROM public.parsed_media pm "
+        "JOIN public.resources r ON r.media_id = pm.id "
+        "JOIN public.resource_transcripts rt ON rt.resource_id = r.id "
+        "WHERE pm.id = :pid AND rt.full_text IS NOT NULL "
+        "AND r.creator_id = :uid LIMIT 1",
+        {"pid": parsed_media_id, "uid": user_id},
+    )
+    if not row:
+        raise RuntimeError(
+            f"no transcript for parsed_media={parsed_media_id} user={user_id}"
         )
-        settings_row = cur.fetchone()
 
+    settings_row = await db_engine.fetch_one(
+        "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
+        {"uid": user_id},
+    )
     if not settings_row:
         raise RuntimeError(f"no user_settings for {user_id}")
     settings = settings_row["settings_json"]
@@ -71,8 +50,6 @@ def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     ai_settings = settings.get("ai_settings", {})
     providers = ai_settings.get("ai_providers", {}) or {}
 
-    # Pick first enabled provider — SummarizeService will derive the
-    # adapter from the agent's resolved model + this BYO config.
     chosen_key: Optional[str] = None
     chosen_cfg: dict[str, Any] = {}
     for key in ("doubao", "qwen", "openai", "deepseek"):
@@ -133,7 +110,7 @@ async def run_summarize_agent(
 
 
 @DBOS.step()
-def persist_summary(
+async def persist_summary(
     parsed_media_id: int,
     *,
     resource_id: str,
@@ -141,51 +118,51 @@ def persist_summary(
     key_points: list[str],
     topics: list[str],
 ) -> dict[str, Any]:
-    """Persist the structured summary in 3 places:
-    1. resource_summaries (canonical: summary_text + JSONB key_points
-       + JSONB topics) — what the API returns
-    2. parsed_media.ai_rewrite_text (legacy compat for older UI bits
-       that still read this column directly)
-    3. resources.summary_status='completed' (drives MediaCard's AI
-       Intent badge color)
-    """
+    """Persist summary to resource_summaries + parsed_media.ai_rewrite_text +
+    resources.summary_status, atomically (one transaction)."""
+    from sqlalchemy import text
+
+    from app.db import engine as db_engine
+
     payload_kp = json.dumps(key_points or [])
     payload_tp = json.dumps(topics or [])
+    rid = int(resource_id)  # resources.id is bigint; asyncpg needs int, not str
 
-    with psycopg.connect(_dsn()) as conn:
-        conn.execute("SET ROLE service_role")
-        # 1. resource_summaries (upsert by resource_id)
-        conn.execute(
-            """
-            INSERT INTO public.resource_summaries
-              (resource_id, summary_type, summary_text, key_points, topics)
-            VALUES (%s, %s, %s, %s::jsonb, %s::jsonb)
-            ON CONFLICT (resource_id) DO UPDATE SET
-              summary_text = EXCLUDED.summary_text,
-              key_points   = EXCLUDED.key_points,
-              topics       = EXCLUDED.topics,
-              summary_type = EXCLUDED.summary_type
-            """,
-            (resource_id, "agent", summary, payload_kp, payload_tp),
+    eng = db_engine.get_engine()
+    async with eng.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO public.resource_summaries "
+                "(resource_id, summary_type, summary_text, key_points, topics) "
+                "VALUES (:rid, :stype, :stext, CAST(:kp AS jsonb), CAST(:tp AS jsonb)) "
+                "ON CONFLICT (resource_id) DO UPDATE SET "
+                "summary_text = EXCLUDED.summary_text, "
+                "key_points = EXCLUDED.key_points, "
+                "topics = EXCLUDED.topics, "
+                "summary_type = EXCLUDED.summary_type"
+            ),
+            {
+                "rid": rid,
+                "stype": "agent",
+                "stext": summary,
+                "kp": payload_kp,
+                "tp": payload_tp,
+            },
         )
-
-        # 2. parsed_media.ai_rewrite_text (legacy)
-        conn.execute(
-            """UPDATE public.parsed_media
-               SET ai_rewrite_text = %s,
-                   ai_generated_at = now()
-               WHERE id = %s""",
-            (summary, parsed_media_id),
+        await conn.execute(
+            text(
+                "UPDATE public.parsed_media SET ai_rewrite_text = :txt, "
+                "ai_generated_at = now() WHERE id = :pid"
+            ),
+            {"txt": summary, "pid": parsed_media_id},
         )
-
-        # 3. resources.summary_status (UI badge)
-        conn.execute(
-            """UPDATE public.resources
-               SET summary_status = 'completed'
-               WHERE id = %s""",
-            (resource_id,),
+        await conn.execute(
+            text(
+                "UPDATE public.resources SET summary_status = 'completed' "
+                "WHERE id = :rid"
+            ),
+            {"rid": rid},
         )
-        conn.commit()
 
     return {
         "parsed_media_id": parsed_media_id,
@@ -214,7 +191,7 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
     from app.workflows._failure_handler import record_workflow_failure
 
     try:
-        inputs = load_summary_inputs(parsed_media_id, user_id)
+        inputs = await load_summary_inputs(parsed_media_id, user_id)
         agent_out = await run_summarize_agent(
             transcript=inputs["transcript"],
             title=inputs.get("title", ""),
@@ -223,7 +200,7 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
             provider_key=inputs.get("provider_key", ""),
             provider_config=inputs.get("provider_config", {}),
         )
-        return persist_summary(
+        return await persist_summary(
             parsed_media_id,
             resource_id=inputs["resource_id"],
             summary=agent_out["summary"],
