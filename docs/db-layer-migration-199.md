@@ -66,12 +66,12 @@ params (NOT asyncpg `$1`).
 | `workflows/liveness_scanner.py` | every-30s agent_runs liveness state machine (running→silent→stuck→dead) + startup `reconcile_stranded_runs` | pg_pool → engine helpers (#332). `_transition`/`_mark_dead` = `execute()`; scan = `fetch_all`; reconcile = `execute` rowcount. |
 | `startup/teardown.py` | shutdown drains | added `dispose_engine()` alongside `close_pool()`. |
 
-### 4b. Pending sweepers — same pattern, next PR(s) (PR #2)
-| File | Functionality | Current | Plan |
-|------|---------------|---------|------|
-| `workflows/agent_runs_sweeper.py` | every-1min agent_runs housekeeping | pg_pool | → engine helpers |
-| `workflows/scheduled_master.py` | every-1min user_schedules dispatcher (`fire_due_schedules_step` + `_dispatch_one`) | pg_pool | → engine helpers |
-| `workflows/workflow_health_sweeper.py` | every-2min task_tracking health classify + LOST/timeout/orphan actions (`classify_and_act_step`, `_refresh_policy`, `_persist_classification`, `_mark_lost`, `_cancel_orphan`, `_mark_timed_out`) | pg_pool | → engine helpers. (phase bug already fixed #331; phase-discipline exception documented) |
+### 4b. Sweepers — MIGRATED to engine (PR #2, #333)
+| File | Functionality | Was | Now |
+|------|---------------|-----|-----|
+| `workflows/scheduled_master.py` | every-1min user_schedules dispatcher (`fire_due_schedules_step` + `_dispatch_one`) | pg_pool | ✅ engine helpers |
+| `workflows/workflow_health_sweeper.py` | every-2min task_tracking health classify + LOST/timeout/orphan actions (fetch + `_refresh_policy` + 4 write helpers) | pg_pool | ✅ engine helpers (phase bug fixed #331; phase-discipline exception documented) |
+| `workflows/agent_runs_sweeper.py` | monthly budget recompute → pause/unpause agents (`recompute_monthly_budgets_step`) | **supabase-py** (not pg_pool — earlier note was wrong) | ✅ engine helpers (the `monthly_usage_by_agent` repo call still goes through repository_base/pg_pool until §4c) |
 
 ### 4c. Repository layer — separate tested PR (HIGH blast radius)
 | File | Functionality | Notes |

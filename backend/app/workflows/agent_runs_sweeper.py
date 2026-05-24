@@ -60,10 +60,12 @@ async def mark_heartbeat_lost_step() -> int:
 async def recompute_monthly_budgets_step() -> int:
     """Sum this month's spend per agent, flip paused_reason='budget' on
     overrun. Returns count of agents whose paused_reason transitioned."""
-    from app.db.supabase_client import get_async_supabase_admin
+    from app.db import engine as db_engine
     from app.repositories.agent_runs_repository import get_agent_runs_repository
 
-    client = await get_async_supabase_admin()
+    if not db_engine.is_configured():
+        return 0
+
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -84,15 +86,14 @@ async def recompute_monthly_budgets_step() -> int:
     if not totals:
         return 0
 
-    agents_result = (
-        await client.table("ai_agents")
-        .select("id,monthly_token_budget,monthly_cost_cents_budget,paused_reason")
-        .in_("id", list(totals.keys()))
-        .execute()
+    agents = await db_engine.fetch_all(
+        "SELECT id, monthly_token_budget, monthly_cost_cents_budget, paused_reason "
+        "FROM public.ai_agents WHERE id = ANY(:ids)",
+        {"ids": list(totals.keys())},
     )
 
     transitions = 0
-    for agent in agents_result.data or []:
+    for agent in agents:
         aid = agent["id"]
         t = totals.get(aid, {"tokens": 0, "cost_cents": 0.0})
         token_budget = agent.get("monthly_token_budget")
@@ -106,11 +107,10 @@ async def recompute_monthly_budgets_step() -> int:
         if should_pause and paused_reason != "budget":
             # Don't clobber a manual pause.
             if paused_reason is None:
-                await (
-                    client.table("ai_agents")
-                    .update({"paused_reason": "budget"})
-                    .eq("id", aid)
-                    .execute()
+                await db_engine.execute(
+                    "UPDATE public.ai_agents SET paused_reason = 'budget' "
+                    "WHERE id = :id",
+                    {"id": aid},
                 )
                 transitions += 1
                 logger.info(
@@ -118,11 +118,9 @@ async def recompute_monthly_budgets_step() -> int:
                     f"(tokens={t['tokens']}, cost={t['cost_cents']})"
                 )
         elif not should_pause and paused_reason == "budget":
-            await (
-                client.table("ai_agents")
-                .update({"paused_reason": None})
-                .eq("id", aid)
-                .execute()
+            await db_engine.execute(
+                "UPDATE public.ai_agents SET paused_reason = NULL WHERE id = :id",
+                {"id": aid},
             )
             transitions += 1
             logger.info(f"[sweeper] agent {aid} unpaused (budget cleared)")
