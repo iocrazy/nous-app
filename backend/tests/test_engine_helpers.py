@@ -92,3 +92,12 @@ async def test_execute_returning_one_returns_row_dict(monkeypatch):
         "INSERT INTO t (x) VALUES (:x) RETURNING *", {"x": 1}
     )
     assert row == {"id": "new-id"}
+
+
+async def test_execute_returning_one_returns_none_when_no_row(monkeypatch):
+    # e.g. INSERT ... ON CONFLICT DO NOTHING that matched → empty RETURNING.
+    monkeypatch.setattr(db_engine, "get_engine", lambda: _Engine(_Result(rows=[])))
+    row = await db_engine.execute_returning_one(
+        "INSERT INTO t (x) VALUES (:x) ON CONFLICT DO NOTHING RETURNING *", {"x": 1}
+    )
+    assert row is None
