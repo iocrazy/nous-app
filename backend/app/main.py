@@ -332,9 +332,11 @@ try:
         if cached:
             del _media_path_cache[cache_key]
 
-        from app.db.supabase_client import get_async_supabase_admin
-
-        supabase = await get_async_supabase_admin()
+        # Direct PG via the SQLAlchemy engine (Issue #199) — replaces the
+        # supabase-py path whose maybe_single().execute() returned None (→
+        # "'NoneType' object has no attribute 'data'") when the per-loop
+        # client was in a bad state. The engine has no per-loop client.
+        from app.db import engine as db_engine
 
         # Determine which column to query based on file_type. Cover /
         # thumbnail are shared assets — they live on parsed_media only.
@@ -347,18 +349,16 @@ try:
         # 1. resources table — only meaningful for per-user file lookups.
         if file_type == "file":
             try:
-                res = (
-                    await supabase.table("resources")
-                    .select("id,creator_id,file_path")
-                    .eq("id", media_id)
-                    .maybe_single()
-                    .execute()
+                row = await db_engine.fetch_one(
+                    "SELECT id, creator_id, file_path FROM public.resources "
+                    "WHERE id = :id",
+                    {"id": int(media_id)},
                 )
-                if res.data and res.data.get("file_path"):
-                    result = res.data["file_path"]
-                    creator_id = res.data.get("creator_id")
-                    resource_id = res.data["id"]
-                    team_ids = await _fetch_team_ids(supabase, resource_id)
+                if row and row.get("file_path"):
+                    result = row["file_path"]
+                    creator_id = row.get("creator_id")
+                    resource_id = row["id"]
+                    team_ids = await _fetch_team_ids(resource_id)
                     entry = _MediaCacheEntry(result, creator_id, team_ids, _time.time())
                     _media_path_cache[cache_key] = entry
                     return entry.file_path, entry.creator_id, entry.team_ids
@@ -367,15 +367,13 @@ try:
 
         # 2. Try parsed_media table (no ownership info — legacy)
         try:
-            res = (
-                await supabase.table("parsed_media")
-                .select(media_col)
-                .eq("id", media_id)
-                .maybe_single()
-                .execute()
+            # media_col is one of two hardcoded column names (not user input).
+            row = await db_engine.fetch_one(
+                f"SELECT {media_col} FROM public.parsed_media WHERE id = :id",
+                {"id": int(media_id)},
             )
-            if res.data and res.data.get(media_col):
-                result = res.data[media_col]
+            if row and row.get(media_col):
+                result = row[media_col]
                 entry = _MediaCacheEntry(result, None, (), _time.time())
                 _media_path_cache[cache_key] = entry
                 return entry.file_path, entry.creator_id, entry.team_ids
@@ -384,22 +382,17 @@ try:
 
         raise HTTPException(status_code=404, detail="Media not found")
 
-    async def _fetch_team_ids(supabase, resource_id: str) -> tuple[str, ...]:
-        """Fetch team scope IDs for a resource from resource_items."""
+    async def _fetch_team_ids(resource_id) -> tuple[str, ...]:
+        """Fetch team scope IDs for a resource from resource_items (engine)."""
+        from app.db import engine as db_engine
+
         try:
-            items_res = (
-                await supabase.table("resource_items")
-                .select("scope_id")
-                .eq("resource_id", resource_id)
-                .eq("scope_type", "team")
-                .execute()
+            rows = await db_engine.fetch_all(
+                "SELECT scope_id FROM public.resource_items "
+                "WHERE resource_id = :rid AND scope_type = 'team'",
+                {"rid": resource_id},
             )
-            if items_res.data:
-                return tuple(
-                    str(item["scope_id"])
-                    for item in items_res.data
-                    if item.get("scope_id")
-                )
+            return tuple(str(r["scope_id"]) for r in rows if r.get("scope_id"))
         except Exception as e:
             logger.warning(f"Team scope lookup failed for resource {resource_id}: {e}")
         return ()
