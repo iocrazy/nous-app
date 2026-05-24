@@ -104,15 +104,12 @@ async def health_check_step() -> dict[str, Any]:
         checks["redis"] = f"error: {str(e)[:50]}"
 
     try:
-        # Lightweight DB liveness probe. Avoid MediaRepository.get_statistics()
-        # — its signature requires user_id, so the bare call always raised
-        # TypeError "missing 1 required positional argument". A one-row
-        # SELECT against system_settings via the admin client gives us the
-        # same RTT signal without user-scoping.
-        from app.db.supabase_client import get_async_supabase_admin
+        # Lightweight DB liveness probe via the SQLAlchemy engine (direct PG,
+        # no httpx). A one-row SELECT against system_settings gives the RTT
+        # signal without user-scoping.
+        from app.db import engine as db_engine
 
-        client = await get_async_supabase_admin()
-        await client.table("system_settings").select("key").limit(1).execute()
+        await db_engine.fetch_val("SELECT key FROM public.system_settings LIMIT 1")
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = f"error: {str(e)[:50]}"

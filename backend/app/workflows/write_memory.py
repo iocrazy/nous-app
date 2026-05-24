@@ -25,18 +25,13 @@ _RECENT_TURNS_PER_CHANNEL = 10
 @DBOS.step()
 async def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
     """Pull last N user + N assistant messages from ai_messages."""
-    from app.db import get_async_supabase_admin
+    from app.db import engine as db_engine
 
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("ai_messages")
-        .select("role, content")
-        .eq("session_id", session_id)
-        .order("created_at", desc=True)
-        .limit(_RECENT_TURNS_PER_CHANNEL * 4)
-        .execute()
+    rows = await db_engine.fetch_all(
+        "SELECT role, content FROM public.ai_messages WHERE session_id = :sid "
+        "ORDER BY created_at DESC LIMIT :lim",
+        {"sid": session_id, "lim": _RECENT_TURNS_PER_CHANNEL * 4},
     )
-    rows = result.data or []
     user_msgs: list[str] = []
     asst_msgs: list[str] = []
     for row in rows:

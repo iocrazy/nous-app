@@ -95,65 +95,52 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     """Two passes: (1) flip queued task_tracking rows >1h old to failed,
     (2) flip resources.{ai_*}_status from pending to failed when no live
     matching unified_task exists."""
-    from app.db.supabase_client import get_async_supabase_admin
+    # Direct PG via the SQLAlchemy engine (no httpx). tz-aware UTC so
+    # timestamptz comparisons don't fall back to the connection's local TZ.
+    from app.db import engine as db_engine
 
-    supabase = await get_async_supabase_admin()
-    # Use timezone-aware UTC so the ISO string carries +00:00 and
-    # PostgreSQL doesn't fall back to interpreting it in the
-    # connection's local TZ. Naive `datetime.now()` was reaping
-    # 25-second-old DBOS workflows because Mac local time +8h
-    # made cutoff far in the future of any UTC timestamptz row.
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    now_iso = datetime.now(timezone.utc).isoformat()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    now_dt = datetime.now(timezone.utc)
 
-    # Sprint 2: status='lost' (was 'failed') — orphan tasks are a
-    # system issue (DBOS crash / never claimed), not a business
-    # failure. Lets operators distinguish in dashboards.
-    result = (
-        await supabase.table("task_tracking")
-        .update(
-            {
-                "status": "lost",
-                "phase": "lost",
-                "error_msg": (
-                    "Worker never claimed this task within 1h — "
-                    "DBOS workflow may have crashed or never "
-                    "executed. Use Retry to re-queue."
-                ),
-                "error_code": "WORKER_LOST",
-                "updated_at": now_iso,
-            }
-        )
-        .eq("status", "pending")
-        .eq("phase", "queued")
-        .is_("started_at", "null")
-        .lt("created_at", cutoff)
-        .execute()
+    # status/phase 'lost' on orphaned tasks: a deliberate "writer of last
+    # resort" exception to the trigger-owns-phase rule — the DBOS lifecycle
+    # trigger never fires for tasks the worker never claimed.
+    tasks_reaped = await db_engine.execute(
+        "UPDATE public.task_tracking SET status = 'lost', phase = 'lost', "
+        "error_msg = :msg, error_code = 'WORKER_LOST', updated_at = :now "
+        "WHERE status = 'pending' AND phase = 'queued' "
+        "AND started_at IS NULL AND created_at < :cutoff",
+        {
+            "msg": (
+                "Worker never claimed this task within 1h — DBOS workflow "
+                "may have crashed or never executed. Use Retry to re-queue."
+            ),
+            "now": now_dt,
+            "cutoff": cutoff,
+        },
     )
-    tasks_reaped = len(result.data) if result.data else 0
 
     resources_reaped = 0
     for field in ("transcript_status", "summary_status", "visual_analysis_status"):
+        # field is one of three hardcoded column names (not user input).
+        # The engine runs raw SQL directly — no exec_sql RPC wrapper needed.
         sql = f"""
         WITH live AS (
           SELECT DISTINCT resource_id::text AS rid
-          FROM task_tracking
+          FROM public.task_tracking
           WHERE status IN ('pending','processing','running')
             AND task_type IN ('ai_extract','ai_transcription','ai_summary','ai_pipeline','ai_visual_analysis')
             AND resource_id IS NOT NULL
         )
-        UPDATE resources
+        UPDATE public.resources
            SET {field} = 'failed'
          WHERE {field} = 'pending'
            AND updated_at < NOW() - INTERVAL '1 hour'
            AND id::text NOT IN (SELECT rid FROM live)
-         RETURNING id
         """
         try:
-            r = await supabase.rpc("exec_sql", {"sql": sql}).execute()
-            resources_reaped += len(r.data) if r and r.data else 0
+            resources_reaped += await db_engine.execute(sql)
         except Exception:
-            # exec_sql RPC absent — skip silently (matches legacy behaviour).
             break
 
     return {
@@ -178,35 +165,34 @@ async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
     from app.services.infra.unified_task_manager import get_task_manager
 
     mgr = get_task_manager()
-    client = await mgr._get_client()
-    # Pull a generous window — 2h covers the longest configured
-    # ceiling (ai_visual_analysis = 60min) plus headroom; per-row
-    # filtering by task_type ceiling happens below.
-    broad_cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    from app.db import engine as db_engine
 
-    stale = await (
-        client.table("task_tracking")
-        .select("dbos_workflow_id, dedup_key, task_type, started_at")
-        .eq("phase", "processing")
-        .lt("started_at", broad_cutoff)
-        .execute()
+    # Pull a generous window — 2h covers the longest configured ceiling
+    # (ai_visual_analysis = 60min) plus headroom; per-row filtering by
+    # task_type ceiling happens below. tz-aware datetimes (not isoformat
+    # strings) so the engine binds them as timestamptz.
+    broad_cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    stale = await db_engine.fetch_all(
+        "SELECT dbos_workflow_id, dedup_key, task_type, started_at "
+        "FROM public.task_tracking WHERE phase = 'processing' "
+        "AND started_at < :cutoff",
+        {"cutoff": broad_cutoff},
     )
 
-    # Also catch tasks past their per-type ceiling but inside the
-    # broad cutoff. Two-window query: broad + narrow per type.
-    narrow_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-    narrow = await (
-        client.table("task_tracking")
-        .select("dbos_workflow_id, dedup_key, task_type, started_at")
-        .eq("phase", "processing")
-        .lt("started_at", narrow_cutoff)
-        .execute()
+    # Also catch tasks past their per-type ceiling but inside the broad
+    # cutoff. Two-window query: broad + narrow per type.
+    narrow_cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    narrow = await db_engine.fetch_all(
+        "SELECT dbos_workflow_id, dedup_key, task_type, started_at "
+        "FROM public.task_tracking WHERE phase = 'processing' "
+        "AND started_at < :cutoff",
+        {"cutoff": narrow_cutoff},
     )
 
     # Dedup the union by dbos_workflow_id
     seen: set[str] = set()
     candidates: list[dict[str, Any]] = []
-    for row in (stale.data or []) + (narrow.data or []):
+    for row in stale + narrow:
         wid = row.get("dbos_workflow_id")
         if wid and wid not in seen:
             seen.add(wid)
@@ -217,13 +203,18 @@ async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
     for task in candidates:
         tid = task.get("dbos_workflow_id")
         task_type = task.get("task_type") or ""
-        started_at_str = task.get("started_at")
+        # The engine returns started_at as a tz-aware datetime; tolerate a
+        # raw ISO string too in case a row was written by the REST path.
+        started_at_val = task.get("started_at")
         elapsed = 0.0
-        if started_at_str:
+        if started_at_val:
             try:
-                started_dt = datetime.fromisoformat(
-                    started_at_str.replace("Z", "+00:00")
-                )
+                if isinstance(started_at_val, str):
+                    started_dt = datetime.fromisoformat(
+                        started_at_val.replace("Z", "+00:00")
+                    )
+                else:
+                    started_dt = started_at_val
                 elapsed = (now_utc - started_dt).total_seconds()
             except (ValueError, TypeError):
                 elapsed = 0.0
