@@ -77,21 +77,19 @@ def cleanup_temp_files_step() -> dict[str, Any]:
 @DBOS.step()
 def cleanup_old_task_tracking_step() -> dict[str, Any]:
     """Drop task_tracking rows in terminal state older than 7 days."""
-    from app.db.supabase_client import get_async_supabase_admin
 
     async def _do() -> int:
-        supabase = await get_async_supabase_admin()
+        from app.db import engine as db_engine
+
         # See scheduled_recovery.reap_stuck_pending_tasks_step for why
         # this MUST be timezone-aware UTC, not naive local time.
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        result = (
-            await supabase.table("task_tracking")
-            .delete()
-            .in_("status", ["completed", "failed", "cancelled"])
-            .lt("updated_at", cutoff)
-            .execute()
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        return await db_engine.execute(
+            "DELETE FROM public.task_tracking "
+            "WHERE status IN ('completed', 'failed', 'cancelled') "
+            "AND updated_at < :cutoff",
+            {"cutoff": cutoff},
         )
-        return len(result.data) if result.data else 0
 
     deleted = run_async(_do())
     return {"status": "success", "deleted": deleted}

@@ -16,6 +16,7 @@ LLM budget on a single user's pile of duplicates.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -73,22 +74,20 @@ async def _cheap_summarizer(memories: list[str]) -> str:
         return ""
 
 
-async def _list_namespaces(sb, *, limit: int) -> list[tuple[str, str, str]]:
+async def _list_namespaces(*, limit: int) -> list[tuple[str, str, str]]:
     """Distinct (agent_id, user_id, scope) tuples that have active rows.
     Best-effort — empty list on failure."""
+    from app.db import engine as db_engine
+
     try:
-        result = (
-            await sb.table("agent_memories")
-            .select("agent_id, user_id, scope")
-            .eq("status", "active")
-            .is_("superseded_by", "null")
-            .limit(limit * 20)  # pad — distinct happens in Python
-            .execute()
+        rows = await db_engine.fetch_all(
+            "SELECT agent_id, user_id, scope FROM public.agent_memories "
+            "WHERE status = 'active' AND superseded_by IS NULL LIMIT :lim",
+            {"lim": limit * 20},  # pad — distinct happens in Python
         )
     except Exception:
         return []
     seen: set[tuple[str, str, str]] = set()
-    rows = result.data or []
     for row in rows:
         key = (
             str(row.get("agent_id") or ""),
@@ -102,34 +101,47 @@ async def _list_namespaces(sb, *, limit: int) -> list[tuple[str, str, str]]:
     return list(seen)
 
 
+def _parse_embedding(raw: Any) -> tuple[float, ...] | None:
+    """pgvector comes back from the engine as the text literal
+    ``[0.1,0.2,...]`` (we SELECT ``CAST(embedding AS text)`` to avoid
+    registering an asyncpg vector codec on the shared hot-path engine).
+    That literal is valid JSON, so json.loads parses it. Tolerates an
+    already-decoded list too."""
+    if not raw:
+        return None
+    try:
+        seq = json.loads(raw) if isinstance(raw, str) else raw
+        return tuple(float(x) for x in seq)
+    except (ValueError, TypeError):
+        return None
+
+
 async def _load_candidates(
-    sb, *, agent_id: str, user_id: str, scope: str, limit: int
+    *, agent_id: str, user_id: str, scope: str, limit: int
 ) -> list[MemoryCandidate]:
     """Pull active leaves for one namespace."""
+    from app.db import engine as db_engine
+
     try:
-        result = (
-            await sb.table("agent_memories")
-            .select("id, summary, embedding")
-            .eq("agent_id", agent_id)
-            .eq("user_id", user_id)
-            .eq("scope", scope)
-            .eq("status", "active")
-            .is_("superseded_by", "null")
-            .limit(limit)
-            .execute()
+        rows = await db_engine.fetch_all(
+            "SELECT id, summary, CAST(embedding AS text) AS embedding "
+            "FROM public.agent_memories "
+            "WHERE agent_id = :aid AND user_id = :uid AND scope = :scope "
+            "AND status = 'active' AND superseded_by IS NULL LIMIT :lim",
+            {"aid": agent_id, "uid": user_id, "scope": scope, "lim": limit},
         )
     except Exception:
         return []
     out: list[MemoryCandidate] = []
-    for row in result.data or []:
-        emb = row.get("embedding")
+    for row in rows:
+        emb = _parse_embedding(row.get("embedding"))
         if not emb or not row.get("summary"):
             continue
         out.append(
             MemoryCandidate(
                 id=str(row["id"]),
                 summary=str(row["summary"]),
-                embedding=tuple(float(x) for x in emb),
+                embedding=emb,
             )
         )
     return out
@@ -144,10 +156,7 @@ async def consolidate_namespaces_step(
     max_clusters: int = MAX_CLUSTERS_PER_NAMESPACE,
 ) -> dict[str, Any]:
     """One sweep pass. Returns counts for telemetry."""
-    from app.db import get_async_supabase_admin
-
-    sb = await get_async_supabase_admin()
-    namespaces = await _list_namespaces(sb, limit=max_namespaces)
+    namespaces = await _list_namespaces(limit=max_namespaces)
     if not namespaces:
         return {"namespaces": 0, "clusters_merged": 0, "rows_superseded": 0}
 
@@ -157,7 +166,7 @@ async def consolidate_namespaces_step(
 
     for agent_id, user_id, scope in namespaces:
         candidates = await _load_candidates(
-            sb, agent_id=agent_id, user_id=user_id, scope=scope, limit=max_leaves
+            agent_id=agent_id, user_id=user_id, scope=scope, limit=max_leaves
         )
         if len(candidates) < 2:
             continue
@@ -173,7 +182,6 @@ async def consolidate_namespaces_step(
             if decision is None:
                 continue
             super_id = await _write_super_and_supersede(
-                sb,
                 cluster=cluster,
                 decision=decision,
                 agent_id=agent_id,
@@ -196,7 +204,6 @@ async def consolidate_namespaces_step(
 
 
 async def _write_super_and_supersede(
-    sb,
     *,
     cluster: Cluster,
     decision,
@@ -206,6 +213,8 @@ async def _write_super_and_supersede(
 ) -> str:
     """Insert the super-memory + UPDATE members superseded_by=super.id.
     Returns the new super-memory id, or empty string on failure."""
+    from app.db import engine as db_engine
+
     # Average member embeddings as the super's embedding (cheap proxy)
     embeddings = [list(m.embedding) for m in cluster.members]
     if not embeddings:
@@ -213,56 +222,52 @@ async def _write_super_and_supersede(
     dim = len(embeddings[0])
     avg = [sum(e[i] for e in embeddings) / len(embeddings) for i in range(dim)]
 
+    consolidation_level = (
+        max(
+            (m.summary.count("[merged-level=") for m in cluster.members),
+            default=0,
+        )
+        + 1
+    )
+
     try:
-        insert_result = (
-            await sb.table("agent_memories")
-            .insert(
-                {
-                    "agent_id": agent_id,
-                    "user_id": user_id,
-                    "scope": scope,
-                    "summary": decision.new_summary,
-                    "when_to_use": decision.new_summary[:200],  # short proxy
-                    "embedding": avg,
-                    "extracted_from": "active_call",
-                    "consolidation_level": (
-                        max(
-                            (
-                                m.summary.count("[merged-level=")
-                                for m in cluster.members
-                            ),
-                            default=0,
-                        )
-                        + 1
-                    ),
-                    "metadata_json": {
-                        "consolidated_from": [m.id for m in cluster.members],
-                    },
-                }
-            )
-            .execute()
+        # Bind the vector as its text literal + CAST(... AS vector) so the
+        # shared engine needs no asyncpg pgvector codec; jsonb likewise via
+        # CAST(... AS jsonb) on a json.dumps string.
+        super_id_raw = await db_engine.execute_returning_val(
+            "INSERT INTO public.agent_memories "
+            "(agent_id, user_id, scope, summary, when_to_use, embedding, "
+            "extracted_from, consolidation_level, metadata_json) VALUES "
+            "(:agent_id, :user_id, :scope, :summary, :when_to_use, "
+            "CAST(:embedding AS vector), 'active_call', :level, "
+            "CAST(:metadata AS jsonb)) RETURNING id",
+            {
+                "agent_id": agent_id,
+                "user_id": user_id,
+                "scope": scope,
+                "summary": decision.new_summary,
+                "when_to_use": decision.new_summary[:200],  # short proxy
+                "embedding": "[" + ",".join(repr(x) for x in avg) + "]",
+                "level": consolidation_level,
+                "metadata": json.dumps(
+                    {"consolidated_from": [m.id for m in cluster.members]}
+                ),
+            },
         )
     except Exception:
         logger.exception("[memory.consolidation] super insert failed")
         return ""
 
-    rows = insert_result.data or []
-    super_id = str(rows[0]["id"]) if rows else ""
+    super_id = str(super_id_raw) if super_id_raw else ""
     if not super_id:
         return ""
 
     for old_id in decision.cluster_member_ids:
         try:
-            await (
-                sb.table("agent_memories")
-                .update(
-                    {
-                        "status": "superseded",
-                        "superseded_by": super_id,
-                    }
-                )
-                .eq("id", old_id)
-                .execute()
+            await db_engine.execute(
+                "UPDATE public.agent_memories SET status = 'superseded', "
+                "superseded_by = :super WHERE id = :old",
+                {"super": super_id, "old": old_id},
             )
         except Exception:
             logger.exception(

@@ -136,9 +136,25 @@ async def execute(sql: str, params: Optional[dict] = None) -> int:
         return result.rowcount
 
 
+async def execute_returning_val(sql: str, params: Optional[dict] = None) -> Any:
+    """INSERT / UPDATE ... RETURNING <col> inside an auto-committing
+    transaction → the first scalar of the RETURNING row, or None.
+
+    Use this (not ``fetch_val``) when the statement writes: ``fetch_val``
+    runs on ``engine.connect()`` and never commits, so an
+    ``INSERT ... RETURNING`` there would roll back on connection close.
+    """
+    from sqlalchemy import text
+
+    eng = get_engine()
+    async with eng.begin() as conn:
+        return (await conn.execute(text(sql), params or {})).scalar()
+
+
 __all__ = [
     "dispose_engine",
     "execute",
+    "execute_returning_val",
     "fetch_all",
     "fetch_one",
     "fetch_val",

@@ -66,3 +66,15 @@ async def test_execute_returns_rowcount(monkeypatch):
     monkeypatch.setattr(db_engine, "get_engine", lambda: _Engine(_Result(rowcount=3)))
     n = await db_engine.execute("UPDATE t SET x = :x WHERE id = :id", {"x": 1, "id": 9})
     assert n == 3
+
+
+async def test_execute_returning_val_returns_scalar(monkeypatch):
+    # INSERT ... RETURNING id must run on begin() (commit) and surface the
+    # scalar — fetch_val would run on connect() and roll the write back.
+    monkeypatch.setattr(
+        db_engine, "get_engine", lambda: _Engine(_Result(scalar="new-id"))
+    )
+    got = await db_engine.execute_returning_val(
+        "INSERT INTO t (x) VALUES (:x) RETURNING id", {"x": 1}
+    )
+    assert got == "new-id"

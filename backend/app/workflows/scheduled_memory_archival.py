@@ -45,27 +45,24 @@ async def archive_decayed_memories_step(
     batch_limit: int = SWEEP_BATCH_LIMIT,
 ) -> dict[str, Any]:
     """One sweep pass. Returns counts for telemetry."""
-    from app.db import get_async_supabase_admin
+    from app.db import engine as db_engine
 
-    sb = await get_async_supabase_admin()
     now = datetime.now(timezone.utc)
 
     try:
-        # Pull candidate batch — partial index makes this cheap
-        result = await (
-            sb.table("agent_memories")
-            .select("id, created_at, last_recalled_at, reinforcement_count")
-            .eq("status", "active")
-            .order("last_recalled_at", desc=False, nullsfirst=True)
-            .order("created_at", desc=False)
-            .limit(batch_limit)
-            .execute()
+        # Pull candidate batch — partial index makes this cheap. Direct PG
+        # via the SQLAlchemy engine (no httpx); embedding column untouched.
+        rows = await db_engine.fetch_all(
+            "SELECT id, created_at, last_recalled_at, reinforcement_count "
+            "FROM public.agent_memories WHERE status = 'active' "
+            "ORDER BY last_recalled_at ASC NULLS FIRST, created_at ASC "
+            "LIMIT :lim",
+            {"lim": batch_limit},
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("[memory.archival] candidate fetch failed: %s", exc)
         return {"checked": 0, "archived": 0, "errors": 1}
 
-    rows = result.data or []
     archive_ids: list[str] = []
     for row in rows:
         try:
@@ -80,7 +77,7 @@ async def archive_decayed_memories_step(
                 half_life_days=half_life_days,
                 threshold=archive_threshold,
             ):
-                archive_ids.append(row["id"])
+                archive_ids.append(str(row["id"]))
         except (KeyError, ValueError, TypeError):
             continue  # one bad row shouldn't sink the batch
 
@@ -90,16 +87,10 @@ async def archive_decayed_memories_step(
     archived = 0
     for mem_id in archive_ids:
         try:
-            await (
-                sb.table("agent_memories")
-                .update(
-                    {
-                        "status": "archived",
-                        "archived_at": now.isoformat(),
-                    }
-                )
-                .eq("id", mem_id)
-                .execute()
+            await db_engine.execute(
+                "UPDATE public.agent_memories "
+                "SET status = 'archived', archived_at = :now WHERE id = :id",
+                {"now": now, "id": mem_id},
             )
             archived += 1
         except Exception:  # noqa: BLE001 — single-row failure shouldn't stop sweep
