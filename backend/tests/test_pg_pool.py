@@ -159,20 +159,21 @@ async def test_update_by_id_uses_id_column_param():
     assert captured_args[0] == ("new", "abc")
 
 
-async def test_delete_by_id_returns_bool_from_status_tag():
-    """asyncpg returns 'DELETE N' as the status string. The helper
-    must parse N to a bool (truthy iff anything got deleted) so
-    callers can `if await repo.delete_by_id(x):` cleanly."""
+async def test_delete_by_id_returns_bool_from_rowcount():
+    """After the SQLAlchemy-engine migration, execute() returns the int
+    affected-row count (not the asyncpg 'DELETE N' status tag). delete_by_id
+    must return truthy iff a row was deleted so callers can
+    `if await repo.delete_by_id(x):` cleanly."""
     from app.db.repository_base import AsyncpgRepository
 
     class FooRepo(AsyncpgRepository):
         TABLE = "foos"
 
     async def fake_execute_one(self, sql, *args):
-        return "DELETE 1"
+        return 1
 
     async def fake_execute_zero(self, sql, *args):
-        return "DELETE 0"
+        return 0
 
     repo = FooRepo()
     with patch.object(AsyncpgRepository, "execute", fake_execute_one):

@@ -1,45 +1,62 @@
-"""asyncpg-backed repository base — supabase-py replacement contract.
+"""Repository base — SQLAlchemy Core over asyncpg (Issue #199).
 
-Goal: give individual repository files a familiar, ergonomic API so
-the migration from ``await client.table("foo").select("*").eq("id", x).execute()``
-style chaining to raw SQL is mechanical and reviewable.
+Gives repository files a familiar, ergonomic API so migrating from
+``await client.table("foo").select("*").eq("id", x).execute()`` chaining
+to raw SQL is mechanical and reviewable.
 
-Pattern (per repo):
+Pattern (per repo) — note the SQL still uses asyncpg-style ``$1`` params;
+the base converts them to SQLAlchemy ``:p1`` bind params transparently:
 
     class FooRepository(AsyncpgRepository):
         TABLE = "foos"
 
         async def get_by_id(self, id: str) -> dict | None:
-            return await self.fetch_one(
-                "SELECT * FROM foos WHERE id = $1", id
-            )
+            return await self.fetch_one("SELECT * FROM foos WHERE id = $1", id)
 
 The base class handles:
-  - Pool acquisition (one connection per call, returned to pool)
-  - Row → dict conversion (asyncpg.Record → plain dict)
+  - The SQLAlchemy async engine (one shared pool; no httpx → no CLOSE_WAIT
+    leak — see the 2026-05-22 incident / docs/db-layer-migration-199.md)
+  - ``$N`` → ``:pN`` bind-param conversion (incl. ``$1::bigint[]`` casts)
+  - Row → dict conversion
   - Common shapes: insert / update_by_id / fetch_one / fetch_all
-  - Transactions via ``async with self.transaction():``
+  - Transactions via ``async with self.transaction() as conn:`` (conn is a
+    SQLAlchemy AsyncConnection — use ``conn.execute(text(...))``)
 
 Intentionally NOT included (use raw SQL directly):
-  - Query builder DSL (would re-create supabase-py's chaining trap)
-  - Soft delete / pagination helpers (vary too much by table)
-  - ORM-style relationship loading (yagni for our flat schemas)
+  - Query builder DSL, soft-delete/pagination helpers, ORM relationships.
 """
 
 from __future__ import annotations
 
+import re
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional
 
-import asyncpg
+from app.db import engine as db_engine
 
-from app.db.pg_pool import get_pool
+# $1, $2, ... (asyncpg positional) → :p1, :p2, ... (SQLAlchemy named).
+_DOLLAR_PARAM = re.compile(r"\$(\d+)")
+# A cast immediately after a bind param (":p1::bigint[]") makes SQLAlchemy's
+# text() mis-tokenize the param name; a space (":p1 ::bigint[]") fixes it.
+# Only touch param-adjacent "::", never "::" inside literals.
+_PARAM_CAST = re.compile(r"(:p\d+)::")
+
+
+def _to_named(sql: str, args: tuple) -> tuple[str, dict]:
+    """Convert asyncpg ``$N`` positional SQL + args to SQLAlchemy named SQL
+    + a params dict. ``$1`` → ``:p1`` bound to ``args[0]``."""
+    if not args:
+        return sql, {}
+    named = _DOLLAR_PARAM.sub(r":p\1", sql)
+    named = _PARAM_CAST.sub(r"\1 ::", named)
+    params = {f"p{i + 1}": a for i, a in enumerate(args)}
+    return named, params
 
 
 class AsyncpgRepository:
-    """Thin asyncpg wrapper. Subclass + set ``TABLE`` to use the
-    convenience methods, or call ``fetch_one`` / ``fetch_all`` /
-    ``execute`` with raw SQL directly."""
+    """Thin SQLAlchemy-over-asyncpg wrapper. Subclass + set ``TABLE`` to use
+    the convenience methods, or call ``fetch_one`` / ``fetch_all`` /
+    ``execute`` with raw ``$N`` SQL directly."""
 
     TABLE: str = ""
 
@@ -47,17 +64,9 @@ class AsyncpgRepository:
 
     @staticmethod
     def _bigint(v: Any) -> Any:
-        """Coerce digit-only strings to int for BIGINT bindings.
-
-        Snowflake IDs travel as strings through FastAPI path params
-        and the supabase-py-shaped legacy callers. asyncpg's int8
-        codec is strict and raises ``DataError: 'str' object cannot
-        be interpreted`` for str input. Wrap any user-supplied
-        BIGINT id in this helper before binding.
-
-        Verified empirically: ``WHERE bigint_col = $1`` with
-        str input fails; with int input works. UUID and text
-        columns are unaffected (their codecs accept str)."""
+        """Coerce digit-only strings to int for BIGINT bindings. Snowflake
+        IDs travel as strings through FastAPI path params; the PG int8 codec
+        is strict. UUID/text columns are unaffected (str passes through)."""
         if isinstance(v, str):
             try:
                 return int(v)
@@ -67,71 +76,69 @@ class AsyncpgRepository:
 
     @staticmethod
     def _bigint_list(vs: Any) -> list:
-        """Coerce a list of str ids to ints. For ``WHERE col = ANY($1)``
-        bindings against bigint arrays."""
+        """Coerce a list of str ids to ints. For ``= ANY($1)`` bindings."""
         return [AsyncpgRepository._bigint(v) for v in (vs or [])]
 
     # ── Low-level access ────────────────────────────────────────────
 
     @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[asyncpg.Connection]:
-        """Borrow a connection from the pool for a multi-statement
-        sequence. Always returned to the pool when the block exits.
-
-        Use ``transaction()`` instead when you need atomicity."""
-        pool = await get_pool()
-        async with pool.acquire() as conn:
+    async def acquire(self) -> AsyncIterator[Any]:
+        """Borrow a SQLAlchemy AsyncConnection for a multi-statement
+        sequence (no surrounding transaction). Use ``transaction()`` for
+        atomicity. The yielded conn uses ``await conn.execute(text(...))``."""
+        eng = db_engine.get_engine()
+        async with eng.connect() as conn:
             yield conn
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[asyncpg.Connection]:
-        """Wrap multiple statements in a single PG transaction.
-
-        async with repo.transaction() as conn:
-            await conn.execute("INSERT INTO ...")
-            await conn.execute("UPDATE ...")
-            # auto-commit on clean exit; auto-rollback on raise
-        """
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                yield conn
+    async def transaction(self) -> AsyncIterator[Any]:
+        """Wrap multiple statements in a single PG transaction (auto-commit
+        on clean exit, auto-rollback on raise). Yields a SQLAlchemy
+        AsyncConnection — use ``await conn.execute(text(...))``."""
+        eng = db_engine.get_engine()
+        async with eng.begin() as conn:
+            yield conn
 
     async def fetch_one(self, sql: str, *args: Any) -> Optional[dict]:
         """SELECT one row → plain dict, or None when no row."""
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(sql, *args)
-        return dict(row) if row else None
+        named, params = _to_named(sql, args)
+        return await db_engine.fetch_one(named, params)
 
     async def fetch_all(self, sql: str, *args: Any) -> list[dict]:
         """SELECT many rows → list of plain dicts."""
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql, *args)
-        return [dict(r) for r in rows]
+        named, params = _to_named(sql, args)
+        return await db_engine.fetch_all(named, params)
 
     async def fetch_value(self, sql: str, *args: Any) -> Any:
-        """SELECT one column from one row. Useful for COUNT / EXISTS /
-        scalar lookups."""
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            return await conn.fetchval(sql, *args)
+        """SELECT one column from one row (COUNT / EXISTS / scalar)."""
+        named, params = _to_named(sql, args)
+        return await db_engine.fetch_val(named, params)
 
-    async def execute(self, sql: str, *args: Any) -> str:
-        """INSERT / UPDATE / DELETE returning the asyncpg status tag
-        ("INSERT 0 1", "UPDATE 3", etc.). For INSERT ... RETURNING use
-        fetch_one with a RETURNING clause instead."""
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            return await conn.execute(sql, *args)
+    async def execute(self, sql: str, *args: Any) -> int:
+        """INSERT / UPDATE / DELETE → affected row count (auto-committed).
+        For INSERT ... RETURNING use fetch_one with a RETURNING clause.
+
+        NOTE: returns an int rowcount (SQLAlchemy), NOT the asyncpg status
+        tag string the previous raw-asyncpg base returned."""
+        named, params = _to_named(sql, args)
+        return await db_engine.execute(named, params)
+
+    @staticmethod
+    async def _conn_fetch_all(conn: Any, sql: str, *args: Any) -> list[dict]:
+        """Run a ``$N`` query on an EXISTING connection (inside an
+        ``acquire()`` / ``transaction()`` block) → list of plain dicts.
+        Handles ``$N`` → ``:pN`` conversion. Works for SELECT and
+        ``UPDATE/DELETE ... RETURNING`` (both return rows)."""
+        from sqlalchemy import text
+
+        named, params = _to_named(sql, args)
+        result = await conn.execute(text(named), params)
+        return [dict(r) for r in result.mappings().all()]
 
     # ── Convenience helpers (require self.TABLE set) ────────────────
 
     async def insert(self, **fields: Any) -> dict:
-        """INSERT a row and return the inserted record. Mirrors what
-        supabase-py's ``client.table(t).insert(row).execute().data[0]``
-        used to give callers."""
+        """INSERT a row and return the inserted record."""
         if not self.TABLE:
             raise RuntimeError(
                 f"{type(self).__name__}.TABLE must be set to use insert()"
@@ -153,11 +160,8 @@ class AsyncpgRepository:
     async def update_by_id(
         self, row_id: Any, *, id_column: str = "id", **fields: Any
     ) -> Optional[dict]:
-        """UPDATE one row and return its post-update record. Returns
-        None when no row matched (mirrors get_by_id semantics).
-
-        ``id_column`` is parameterized for tables with non-``id`` PKs
-        (e.g. ``parsed_media`` keys on ``platform_id``)."""
+        """UPDATE one row and return its post-update record, or None when no
+        row matched."""
         if not self.TABLE:
             raise RuntimeError(
                 f"{type(self).__name__}.TABLE must be set to use update_by_id()"
@@ -182,19 +186,14 @@ class AsyncpgRepository:
         return await self.fetch_one(sql, row_id)
 
     async def delete_by_id(self, row_id: Any, *, id_column: str = "id") -> bool:
-        """DELETE one row by primary key. Returns True iff a row was
-        deleted (matches PostgREST ``.delete().eq()`` truthiness)."""
+        """DELETE one row by primary key. Returns True iff a row was deleted."""
         if not self.TABLE:
             raise RuntimeError(
                 f"{type(self).__name__}.TABLE must be set to use delete_by_id()"
             )
         sql = f'DELETE FROM "{self.TABLE}" WHERE "{id_column}" = $1'
-        status = await self.execute(sql, row_id)
-        # asyncpg returns "DELETE N" — read the count off the tag
-        try:
-            return int(status.split()[1]) > 0
-        except (IndexError, ValueError):
-            return False
+        rowcount = await self.execute(sql, row_id)
+        return rowcount > 0
 
 
 __all__ = ["AsyncpgRepository"]

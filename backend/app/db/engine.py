@@ -105,6 +105,17 @@ async def fetch_all(sql: str, params: Optional[dict] = None) -> list[dict]:
         return [dict(r) for r in result.mappings().all()]
 
 
+async def fetch_one(sql: str, params: Optional[dict] = None) -> Optional[dict]:
+    """SELECT → first row as a plain dict, or None."""
+    from sqlalchemy import text
+
+    eng = get_engine()
+    async with eng.connect() as conn:
+        result = await conn.execute(text(sql), params or {})
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
 async def fetch_val(sql: str, params: Optional[dict] = None) -> Any:
     """SELECT one scalar (first column of first row), or None."""
     from sqlalchemy import text
@@ -129,6 +140,7 @@ __all__ = [
     "dispose_engine",
     "execute",
     "fetch_all",
+    "fetch_one",
     "fetch_val",
     "get_engine",
     "is_configured",
