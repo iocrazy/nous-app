@@ -42,10 +42,12 @@ async def mark_extract_audio_status_step(platform_id: str, status: str) -> None:
     """Write parsed_media.extract_audio_status. Best-effort — a transient
     PostgREST hiccup here is cosmetic (the icon lags), it must not fail
     the workflow."""
-    from app.repositories.media_repository import MediaRepository
+    from app.repositories.media_repository import get_media_repository
 
     try:
-        await MediaRepository().update(platform_id, {"extract_audio_status": status})
+        await get_media_repository().update(
+            platform_id, {"extract_audio_status": status}
+        )
     except Exception as e:
         logger.warning(
             f"[extract_audio] status write '{status}' failed for "

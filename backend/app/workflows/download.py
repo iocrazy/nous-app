@@ -62,7 +62,7 @@ async def check_global_cache_step(
     import os
 
     from app.core.config import settings
-    from app.repositories.media_repository import MediaRepository
+    from app.repositories.media_repository import get_media_repository
 
     def _file_present(rel_or_abs_path: str | None) -> bool:
         if not rel_or_abs_path:
@@ -77,7 +77,7 @@ async def check_global_cache_step(
         except OSError:
             return False
 
-    media_repo = MediaRepository()
+    media_repo = get_media_repository()
     global_media = await media_repo.get_by_platform_id(platform_id)
     if not global_media:
         return {"cache_hit": False}
@@ -185,15 +185,15 @@ async def finalize_post_download_step(
 
     Mirrors the legacy task's post-download bookkeeping verbatim
     except the task_tracking lifecycle calls (DBOS owns those now)."""
-    from app.repositories.media_repository import MediaRepository
-    from app.repositories.resources_repository import ResourcesRepository
+    from app.repositories.media_repository import get_media_repository
+    from app.repositories.resources_repository import get_resources_repository
 
-    media_repo = MediaRepository()
+    media_repo = get_media_repository()
     fresh_download_path: Optional[str] = None
     actual_size = 0
 
     if resource_id:
-        res_repo = ResourcesRepository()
+        res_repo = get_resources_repository()
 
         fresh_media = await media_repo.get_by_platform_id(platform_id)
         if fresh_media:
@@ -635,10 +635,10 @@ async def download_workflow(
     except Exception as e:
         # Mark parsed_media as failed before bailing — same fallback
         # the legacy task did inside its except branch.
-        from app.repositories.media_repository import MediaRepository
+        from app.repositories.media_repository import get_media_repository
 
         try:
-            repo = MediaRepository()
+            repo = get_media_repository()
             fail_updates: dict[str, str] = {}
             if download_video:
                 if int(media_type) in (2, 68):
@@ -691,10 +691,10 @@ async def download_workflow(
     # downloads (media_type 2/68) also write their status into
     # results["video"], so this single check covers both.
     if download_video and results.get("video") != "completed":
-        from app.repositories.media_repository import MediaRepository
+        from app.repositories.media_repository import get_media_repository
 
         try:
-            repo = MediaRepository()
+            repo = get_media_repository()
             fail_updates: dict[str, str] = {}
             if int(media_type) in (2, 68):
                 fail_updates["image_download_status"] = "failed"

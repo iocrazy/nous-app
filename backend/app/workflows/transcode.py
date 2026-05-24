@@ -36,9 +36,9 @@ from loguru import logger
 async def resolve_resource_title_step(resource_id: str, version_id: str) -> str:
     """Cheap lookup for log/audit messages. Falls back to first 8 chars
     of version_id when filename isn't available."""
-    from app.repositories.resources_repository import ResourcesRepository
+    from app.repositories.resources_repository import get_resources_repository
 
-    repo = ResourcesRepository()
+    repo = get_resources_repository()
     try:
         resource = await repo.get_resource_by_id(resource_id)
         if resource and resource.get("filename"):
@@ -117,7 +117,7 @@ async def log_transcode_outcome_step(
     Logs. Real failures still write user_logs + flip
     resources_versions.transcode_status='failed' so the UI surfaces a
     Retry button. Best-effort — never raises."""
-    from app.repositories.resources_repository import ResourcesRepository
+    from app.repositories.resources_repository import get_resources_repository
     from app.repositories.user_logs_repository import log_user_action
 
     status = outcome.get("status")
@@ -152,7 +152,7 @@ async def log_transcode_outcome_step(
 
     # failed
     try:
-        repo = ResourcesRepository()
+        repo = get_resources_repository()
         await repo.update_version(version_id, {"transcode_status": "failed"})
     except Exception as e:
         logger.warning(f"[transcode] update_version on failure: {e}")
