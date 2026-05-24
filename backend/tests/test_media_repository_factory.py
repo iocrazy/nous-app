@@ -48,7 +48,7 @@ def test_factory_returns_asyncpg_when_flag_on_and_pool_configured():
 
     with (
         patch("app.core.config.settings.USE_ASYNCPG_MEDIA", True),
-        patch("app.db.pg_pool.is_configured", return_value=True),
+        patch("app.db.engine.is_configured", return_value=True),
     ):
         repo = get_media_repository()
     assert isinstance(repo, MediaRepositoryAsyncpg)
@@ -60,7 +60,7 @@ def test_factory_falls_back_when_flag_on_but_pool_missing():
 
     with (
         patch("app.core.config.settings.USE_ASYNCPG_MEDIA", True),
-        patch("app.db.pg_pool.is_configured", return_value=False),
+        patch("app.db.engine.is_configured", return_value=False),
     ):
         repo = get_media_repository()
     assert type(repo).__name__ == "MediaRepository"

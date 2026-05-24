@@ -663,7 +663,7 @@ def get_media_repository():
     from app.core.config import settings
 
     if settings.USE_ASYNCPG_MEDIA:
-        from app.db.pg_pool import is_configured
+        from app.db.engine import is_configured
 
         if is_configured():
             from app.repositories.media_repository_asyncpg import (

@@ -1,13 +1,14 @@
-"""Phase 1 foundation tests — pg_pool + AsyncpgRepository contract.
+"""engine.is_configured() gate + AsyncpgRepository contract tests.
 
 These don't require a live Supavisor. The point is:
-  - is_configured() reflects env state
-  - get_pool() raises cleanly when not configured
+  - engine.is_configured() reflects env state (the repo factories read it
+    to choose the asyncpg variant vs the supabase-py legacy path)
   - AsyncpgRepository SQL builders match the expected shape
-  - close_pool() is idempotent
 
-Live integration tests against a real Supavisor are deferred to Phase 2
-(pilot repo) where the pattern is exercised end-to-end on one table.
+(Formerly test_pg_pool.py — the raw-asyncpg pg_pool module was retired in
+favour of the SQLAlchemy engine, so the pg_pool lifecycle tests are gone.)
+Live integration tests against a real Supavisor live in
+tests/integration/test_asyncpg_repos.py.
 """
 
 from __future__ import annotations
@@ -16,64 +17,28 @@ from unittest.mock import patch
 
 import pytest
 
-# ─── pg_pool ───────────────────────────────────────────────────────────
+# ─── engine.is_configured gate ─────────────────────────────────────────
 
 
-def test_is_configured_false_when_url_blank(monkeypatch):
-    """Empty SUPAVISOR_DATABASE_URL = feature disabled. Repository
-    code reads is_configured() to decide whether to take the asyncpg
-    fast path or fall back to supabase-py during migration."""
-    from app.db import pg_pool
+def test_is_configured_false_when_url_blank():
+    """Empty SUPAVISOR_DATABASE_URL = asyncpg disabled. Repo factories
+    read is_configured() to fall back to supabase-py."""
+    from app.db import engine
 
-    with patch.object(pg_pool.settings, "SUPAVISOR_DATABASE_URL", ""):
-        assert pg_pool.is_configured() is False
+    with patch.object(engine.settings, "SUPAVISOR_DATABASE_URL", ""):
+        assert engine.is_configured() is False
 
 
-def test_is_configured_true_when_url_set(monkeypatch):
-    """Any non-empty DSN flips the feature on. We trust the env to
-    contain a valid PG DSN — pool creation handles invalid input."""
-    from app.db import pg_pool
+def test_is_configured_true_when_url_set():
+    """Any non-empty DSN flips the asyncpg path on."""
+    from app.db import engine
 
     with patch.object(
-        pg_pool.settings,
+        engine.settings,
         "SUPAVISOR_DATABASE_URL",
         "postgresql://u:p@localhost:6543/postgres",
     ):
-        assert pg_pool.is_configured() is True
-
-
-async def test_get_pool_raises_when_not_configured(monkeypatch):
-    """Calling get_pool() with an unset DSN must raise RuntimeError so
-    the caller (repository) can fall back to supabase-py instead of
-    hanging or silently using a wrong default."""
-    from app.db import pg_pool
-
-    with patch.object(pg_pool.settings, "SUPAVISOR_DATABASE_URL", ""):
-        # Force the singleton back to None so previous tests don't
-        # leak a real pool into this one.
-        pg_pool._pool = None
-        with pytest.raises(RuntimeError, match="not configured"):
-            await pg_pool.get_pool()
-
-
-async def test_close_pool_is_idempotent_when_no_pool():
-    """Lifespan shutdown calls close_pool() unconditionally. It must
-    not raise when there's nothing to close — typical case in dev /
-    test environments where SUPAVISOR_DATABASE_URL is unset."""
-    from app.db import pg_pool
-
-    pg_pool._pool = None
-    await pg_pool.close_pool()  # must not raise
-
-
-async def test_health_check_false_when_not_configured(monkeypatch):
-    """Liveness probe returns False (not raise) on unconfigured —
-    monitoring / startup hooks check the bool, no try/except needed."""
-    from app.db import pg_pool
-
-    with patch.object(pg_pool.settings, "SUPAVISOR_DATABASE_URL", ""):
-        pg_pool._pool = None
-        assert await pg_pool.health_check() is False
+        assert engine.is_configured() is True
 
 
 # ─── AsyncpgRepository contract ────────────────────────────────────────
