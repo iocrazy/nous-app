@@ -685,21 +685,27 @@ class TranscodeService:
 
     @staticmethod
     def _get_db_setting(key: str) -> Optional[str]:
-        """Read a single value from system_settings table (sync-safe for Celery)."""
+        """Read a single value from system_settings (sync-safe for Celery/DBOS).
+
+        Direct PG via the SQLAlchemy engine (Issue #199). The old supabase-py
+        path made TWO separate run_async() calls — the first created the
+        per-loop supabase client, run_async's drain closed it, the second
+        reused the now-closed client → "Cannot send a request, as the client
+        has been closed". The engine has no per-loop client to close, so a
+        single run_async is clean.
+        """
         try:
-            from app.db import get_async_supabase_admin
+            from app.db import engine as db_engine
             from app.tasks.utils import run_async
 
-            supabase = run_async(get_async_supabase_admin())
-            result = run_async(
-                supabase.table("system_settings")
-                .select("value")
-                .eq("key", key)
-                .maybe_single()
-                .execute()
+            if not db_engine.is_configured():
+                return None
+            return run_async(
+                db_engine.fetch_val(
+                    "SELECT value FROM public.system_settings WHERE key = :k",
+                    {"k": key},
+                )
             )
-            if result.data:
-                return result.data.get("value")
         except Exception as e:
             logger.warning(f"[Transcode] Failed to read system_settings.{key}: {e}")
         return None
