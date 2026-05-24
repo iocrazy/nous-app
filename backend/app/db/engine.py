@@ -19,7 +19,7 @@ migration window both may coexist, then ``pg_pool`` is retired.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -88,4 +88,48 @@ async def dispose_engine() -> None:
         _engine = None
 
 
-__all__ = ["dispose_engine", "get_engine", "is_configured"]
+# ── Query convenience helpers (SQLAlchemy Core, :name params) ──────────
+# Use named (:name) bind params, NOT asyncpg's $1 positional. Reads run on
+# engine.connect() (no txn); writes on engine.begin() (auto-commit). These
+# centralize the connect/begin + row→dict + rowcount handling so callers
+# don't re-implement it. repository_base will delegate here once migrated.
+
+
+async def fetch_all(sql: str, params: Optional[dict] = None) -> list[dict]:
+    """SELECT → list of plain dicts."""
+    from sqlalchemy import text
+
+    eng = get_engine()
+    async with eng.connect() as conn:
+        result = await conn.execute(text(sql), params or {})
+        return [dict(r) for r in result.mappings().all()]
+
+
+async def fetch_val(sql: str, params: Optional[dict] = None) -> Any:
+    """SELECT one scalar (first column of first row), or None."""
+    from sqlalchemy import text
+
+    eng = get_engine()
+    async with eng.connect() as conn:
+        return (await conn.execute(text(sql), params or {})).scalar()
+
+
+async def execute(sql: str, params: Optional[dict] = None) -> int:
+    """INSERT / UPDATE / DELETE inside an auto-committing transaction.
+    Returns the affected row count."""
+    from sqlalchemy import text
+
+    eng = get_engine()
+    async with eng.begin() as conn:
+        result = await conn.execute(text(sql), params or {})
+        return result.rowcount
+
+
+__all__ = [
+    "dispose_engine",
+    "execute",
+    "fetch_all",
+    "fetch_val",
+    "get_engine",
+    "is_configured",
+]
