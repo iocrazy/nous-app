@@ -53,18 +53,9 @@ async def shutdown_all(app: FastAPI) -> None:
     except Exception as e:
         logger.warning(f"Failed to close async Redis: {e}")
 
-    # Drain asyncpg pool to Supavisor (Phase 1 of supabase-py → asyncpg
-    # migration). No-op when SUPAVISOR_DATABASE_URL is not configured.
-    try:
-        from app.db.pg_pool import close_pool
-
-        await close_pool()
-        logger.info("Asyncpg pool closed (Supavisor)")
-    except Exception as e:
-        logger.warning(f"Failed to close asyncpg pool: {e}")
-
     # Dispose the SQLAlchemy async engine (Issue #199 target layer, over
-    # asyncpg). No-op when not yet created / Supavisor not configured.
+    # asyncpg → Supavisor). This is the sole asyncpg connection layer now
+    # that pg_pool is retired. No-op when not created / Supavisor unset.
     try:
         from app.db.engine import dispose_engine
 

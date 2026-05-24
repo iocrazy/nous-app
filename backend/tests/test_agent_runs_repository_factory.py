@@ -57,7 +57,7 @@ def test_factory_returns_asyncpg_when_flag_on_and_pool_configured():
             "app.repositories.agent_runs_repository.settings.USE_ASYNCPG_AGENT_RUNS",
             True,
         ),
-        patch("app.db.pg_pool.is_configured", return_value=True),
+        patch("app.db.engine.is_configured", return_value=True),
     ):
         repo = get_agent_runs_repository()
     assert isinstance(repo, AgentRunsRepositoryAsyncpg)
@@ -77,7 +77,7 @@ def test_factory_falls_back_when_flag_on_but_pool_missing():
             "app.repositories.agent_runs_repository.settings.USE_ASYNCPG_AGENT_RUNS",
             True,
         ),
-        patch("app.db.pg_pool.is_configured", return_value=False),
+        patch("app.db.engine.is_configured", return_value=False),
     ):
         repo = get_agent_runs_repository()
     assert type(repo).__name__ == "AgentRunsRepository"

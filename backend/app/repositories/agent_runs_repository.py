@@ -236,7 +236,7 @@ def get_agent_runs_repository() -> (
     """Return the active AgentRunsRepository implementation.
 
     Routing:
-      - ``settings.USE_ASYNCPG_AGENT_RUNS=True`` AND pg_pool configured
+      - ``settings.USE_ASYNCPG_AGENT_RUNS=True`` AND Supavisor configured
         → asyncpg + Supavisor implementation
       - else → legacy supabase-py implementation (this file)
 
@@ -245,7 +245,7 @@ def get_agent_runs_repository() -> (
     way regardless of backend.
     """
     if settings.USE_ASYNCPG_AGENT_RUNS:
-        from app.db.pg_pool import is_configured
+        from app.db.engine import is_configured
 
         if is_configured():
             from app.repositories.agent_runs_repository_asyncpg import (

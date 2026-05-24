@@ -37,7 +37,6 @@ from __future__ import annotations
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import AsyncIterator
 from unittest.mock import patch
 
@@ -64,18 +63,19 @@ def integration_db_url() -> str:
 
 @pytest.fixture
 async def patched_pool(integration_db_url):
-    """Point pg_pool at the test DSN for the duration of the test.
-    Closes the pool after to avoid leaking connections to the next
-    test or to non-integration tests in the same session."""
-    from app.db import pg_pool
+    """Point the SQLAlchemy engine at the test DSN for the test (the
+    asyncpg repos run on app.db.engine now that pg_pool is retired).
+    Disposes the engine after so connections don't leak into the next
+    test or non-integration tests in the same session."""
+    from app.db import engine as db_engine
 
-    # Reset module state + override DSN
-    pg_pool._pool = None
-    with patch.object(pg_pool.settings, "SUPAVISOR_DATABASE_URL", integration_db_url):
+    # Reset the singleton + override DSN so get_engine() rebuilds against
+    # the test database.
+    db_engine._engine = None
+    with patch.object(db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url):
         yield
-    # Cleanup pool after each test
-    await pg_pool.close_pool()
-    pg_pool._pool = None
+    await db_engine.dispose_engine()
+    db_engine._engine = None
 
 
 @pytest.fixture

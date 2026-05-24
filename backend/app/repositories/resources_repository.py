@@ -1463,7 +1463,7 @@ def get_resources_repository():
     from app.core.config import settings
 
     if settings.USE_ASYNCPG_RESOURCES:
-        from app.db.pg_pool import is_configured
+        from app.db.engine import is_configured
 
         if is_configured():
             from app.repositories.resources_repository_asyncpg import (

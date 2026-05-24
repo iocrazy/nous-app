@@ -13,8 +13,8 @@ raw asyncpg pool already documents):
   * ``statement_cache_size=0`` on the asyncpg driver — disable client-side
     prepared-statement caching for the same reason.
 
-This is the SQLAlchemy-layered successor to ``pg_pool.py``; during the
-migration window both may coexist, then ``pg_pool`` is retired.
+This is the SQLAlchemy-layered successor to the retired raw-asyncpg
+``pg_pool.py`` — the sole asyncpg connection layer in the backend.
 """
 
 from __future__ import annotations
@@ -32,7 +32,8 @@ _engine: Optional[AsyncEngine] = None
 
 def is_configured() -> bool:
     """True when the Supavisor DSN is set. Callers fall back to the legacy
-    path (pg_pool / supabase-py) during the migration window otherwise."""
+    supabase-py path otherwise (and the repo factories use this to pick the
+    asyncpg variant)."""
     return bool(settings.SUPAVISOR_DATABASE_URL)
 
 

@@ -21,9 +21,9 @@ Originally written as ``def + asyncio.run(_do())`` because supabase-py
 worked fine across short-lived event loops — every call recreated its
 httpx client. asyncpg's pool is the opposite: it BINDS to the loop
 where it was first awaited. Each ``asyncio.run()`` opens a new loop,
-runs the coroutine, and closes the loop — but the global ``_pool``
-cache in ``app.db.pg_pool`` still points at the (now-dead) first-loop
-pool. Second tick onwards crashes with ``Event loop is closed`` and
+runs the coroutine, and closes the loop — but a cached asyncpg
+connection still points at the (now-dead) first-loop pool. Second
+tick onwards crashes with ``Event loop is closed`` and
 ``cannot perform operation: another operation is in progress``.
 
 DBOS supports ``async def`` workflows + steps natively. Awaiting from
