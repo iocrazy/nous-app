@@ -1,144 +1,109 @@
 """execute_issue parent workflow — design doc Protocol 2.
 
-Lifecycle:
-    issue (status=todo, dbos_workflow_id=NULL)
-        ↓
-    atomic_checkout (set execution_locked_at + dbos_workflow_id)
-        ↓
-    set_status('in_progress')
-        ↓
-    [agent / leaf workflow runs] ← driven by issue.assignee_*_id + payload
-        ↓
-    on success: set_status('done' or 'in_review' depending on auto_complete)
-    on failure: set_status('blocked', record error)
-        ↓
-    clear_lock (regardless of outcome)
+Lifecycle: issue(todo) → atomic_checkout → set_status(in_progress) →
+[agent/leaf runs] → set_status(done|in_review|blocked) → clear_lock.
+
+DB access goes through the SQLAlchemy engine (app.db.engine) over asyncpg
+→ Supavisor — same privileged connection the other migrated workflows use,
+so the legacy `SET ROLE service_role` from the raw-psycopg version is gone.
+Steps + workflow are async because the engine helpers are async.
 """
 
 from __future__ import annotations
 
-# Helper steps use psycopg directly because supabase-py async client is not
-# safe to call from within a DBOS step (it spins its own event loop). For
-# production we'll switch to the supabase-py admin client wrapped via
-# `asyncio.to_thread`. Keeping it minimal here.
-import os
+import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import psycopg
-import psycopg.rows
 from dbos import DBOS
 from loguru import logger
 
 
-def _dsn() -> str:
-    url = os.environ.get("DBOS_DATABASE_URL")
-    if not url:
-        raise RuntimeError("DBOS_DATABASE_URL not configured")
-    return url + ("&" if "?" in url else "?") + "sslmode=disable"
+@DBOS.step()
+async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
+    """Atomically claim an issue. False if someone else already holds the lock."""
+    from app.db import engine as db_engine
+
+    locked = await db_engine.execute(
+        "UPDATE public.issues SET execution_locked_at = now(), "
+        "dbos_workflow_id = :wid "
+        "WHERE id = :id AND execution_locked_at IS NULL",
+        {"wid": dbos_workflow_id, "id": issue_id},
+    )
+    return locked > 0
 
 
 @DBOS.step()
-def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
-    """Atomically claim an issue for execution. Returns False if someone else
-    already has it (execution_locked_at IS NOT NULL).
-    """
-    with psycopg.connect(_dsn()) as conn:
-        conn.execute("SET ROLE service_role")
-        cur = conn.execute(
-            """UPDATE public.issues
-               SET execution_locked_at = now(),
-                   dbos_workflow_id   = %s
-               WHERE id = %s
-                 AND execution_locked_at IS NULL
-               RETURNING id""",
-            (dbos_workflow_id, issue_id),
-        )
-        locked = cur.fetchone() is not None
-        conn.commit()
-    return locked
-
-
-@DBOS.step()
-def set_status(
+async def set_status(
     issue_id: int,
     status: str,
     *,
     error_code: Optional[str] = None,
     error_message: Optional[str] = None,
 ) -> None:
-    """Transition issue.status with side-effect timestamps per design Protocol 5."""
-    now_iso = datetime.now(timezone.utc).isoformat()
-    patch_cols = ["status = %s"]
-    args: list[Any] = [status]
+    """Transition issue.status with side-effect timestamps (design Protocol 5)."""
+    from app.db import engine as db_engine
 
+    now_dt = datetime.now(timezone.utc)
+    cols = ["status = :status"]
+    params: dict[str, Any] = {"status": status}
     if status == "in_progress":
-        patch_cols.append("started_at = %s")
-        args.append(now_iso)
+        cols.append("started_at = :ts")
+        params["ts"] = now_dt
     elif status == "done":
-        patch_cols.append("completed_at = %s")
-        args.append(now_iso)
+        cols.append("completed_at = :ts")
+        params["ts"] = now_dt
     elif status == "cancelled":
-        patch_cols.append("cancelled_at = %s")
-        args.append(now_iso)
-
+        cols.append("cancelled_at = :ts")
+        params["ts"] = now_dt
     if error_code or error_message:
-        # execution_state stores transient error context; cleared on rerun.
-        patch_cols.append("execution_state = %s::jsonb")
-        import json
-
-        args.append(
-            json.dumps({"error_code": error_code, "error_message": error_message})
+        cols.append("execution_state = CAST(:state AS jsonb)")
+        params["state"] = json.dumps(
+            {"error_code": error_code, "error_message": error_message}
         )
-
-    args.append(issue_id)
-    sql = f"UPDATE public.issues SET {', '.join(patch_cols)} WHERE id = %s"
-
-    with psycopg.connect(_dsn()) as conn:
-        conn.execute("SET ROLE service_role")
-        conn.execute(sql, args)
-        conn.commit()
+    params["id"] = issue_id
+    await db_engine.execute(
+        f"UPDATE public.issues SET {', '.join(cols)} WHERE id = :id", params
+    )
 
 
 @DBOS.step()
-def clear_lock(issue_id: int) -> None:
-    """Release execution lock so the issue can be re-tried later if needed."""
-    with psycopg.connect(_dsn()) as conn:
-        conn.execute("SET ROLE service_role")
-        conn.execute(
-            "UPDATE public.issues SET execution_locked_at = NULL WHERE id = %s",
-            (issue_id,),
-        )
-        conn.commit()
+async def clear_lock(issue_id: int) -> None:
+    """Release the execution lock so the issue can be retried later."""
+    from app.db import engine as db_engine
+
+    await db_engine.execute(
+        "UPDATE public.issues SET execution_locked_at = NULL WHERE id = :id",
+        {"id": issue_id},
+    )
 
 
 @DBOS.step()
-def create_agent_run_for_issue(
+async def create_agent_run_for_issue(
     issue_id: int, agent_id: str, user_id: str, dbos_workflow_id: str
 ) -> Optional[str]:
-    """A8.7: when an issue has assignee_agent_id, create an agent_runs
-    row with issue_id linked. The DB triggers (mig 208) emit a chat
-    row immediately, and the bridge updates it on terminal status.
-
-    Returns the new run id, or None if the insert failed (we don't
-    block the workflow on it — the user-visible chat already shows the
-    issue moved to in_progress)."""
+    """Create an agent_runs row linked to the issue. Returns run id or None
+    (never blocks the workflow on it)."""
     import uuid
 
+    from app.db import engine as db_engine
+
     run_id = str(uuid.uuid4())
-    now_utc = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
     try:
-        with psycopg.connect(_dsn()) as conn:
-            conn.execute("SET ROLE service_role")
-            conn.execute(
-                """INSERT INTO public.agent_runs (
-                       id, agent_id, user_id, issue_id, status, trigger,
-                       started_at, heartbeat_at, last_useful_action_at
-                   ) VALUES (%s, %s, %s, %s, 'running', 'issue_dispatch',
-                             %s, %s, %s)""",
-                (run_id, agent_id, user_id, issue_id, now_utc, now_utc, now_utc),
-            )
-            conn.commit()
+        await db_engine.execute(
+            "INSERT INTO public.agent_runs (id, agent_id, user_id, issue_id, "
+            "status, trigger, started_at, heartbeat_at, last_useful_action_at) "
+            "VALUES (:id, :agent_id, :user_id, :issue_id, 'running', "
+            "'issue_dispatch', :now, :now, :now)",
+            {
+                "id": run_id,
+                "agent_id": agent_id,
+                "user_id": user_id,
+                "issue_id": issue_id,
+                "now": now_dt,
+            },
+        )
         logger.info(
             f"[execute_issue] created agent_run {run_id} for issue {issue_id} "
             f"(agent={agent_id}, dbos_wf={dbos_workflow_id})"
@@ -152,15 +117,18 @@ def create_agent_run_for_issue(
 
 
 @DBOS.step()
-def load_issue(issue_id: int) -> dict[str, Any]:
-    """Read issue row as plain dict (so it serializes through DBOS step memo)."""
-    with psycopg.connect(_dsn(), row_factory=psycopg.rows.dict_row) as conn:
-        conn.execute("SET ROLE service_role")
-        cur = conn.execute("SELECT * FROM public.issues WHERE id = %s", (issue_id,))
-        row = cur.fetchone()
+async def load_issue(issue_id: int) -> dict[str, Any]:
+    """Read issue row as a plain dict (serializes through DBOS step memo).
+
+    The engine returns datetime/UUID as objects (normalized to str below) and
+    jsonb as a string; no current consumer reads a jsonb column off this dict."""
+    from app.db import engine as db_engine
+
+    row = await db_engine.fetch_one(
+        "SELECT * FROM public.issues WHERE id = :id", {"id": issue_id}
+    )
     if not row:
         raise RuntimeError(f"issue id={issue_id} not found")
-    # Normalize non-JSON-serializable types (UUID/datetime → str)
     out: dict[str, Any] = {}
     for k, v in row.items():
         if hasattr(v, "isoformat"):
@@ -173,61 +141,37 @@ def load_issue(issue_id: int) -> dict[str, Any]:
 
 
 @DBOS.workflow()
-def execute_issue(issue_id: int) -> dict[str, Any]:
-    """Parent workflow — owns the issue lifecycle. Child workflows (per
-    assignee_agent_id / origin_kind) run inside via DBOS.start_workflow.
-    """
-    # Load to validate existence + cache row in DBOS step output. The
-    # current scaffold doesn't yet branch on the loaded payload — D5
-    # will use it to pick the right child workflow per origin_kind /
-    # assignee. Keep the call so a future edit doesn't have to thread
-    # the step in from scratch.
-    load_issue(issue_id)
+async def execute_issue(issue_id: int) -> dict[str, Any]:
+    """Parent workflow — owns the issue lifecycle."""
+    await load_issue(issue_id)
 
-    workflow_id = DBOS.workflow_id  # the running workflow's id
-    locked = atomic_checkout(issue_id, workflow_id)
+    workflow_id = DBOS.workflow_id
+    locked = await atomic_checkout(issue_id, workflow_id)
     if not locked:
         logger.info(f"[execute_issue] issue {issue_id} already locked, skipping")
         return {"skipped": True, "issue_id": issue_id, "reason": "already_locked"}
 
-    set_status(issue_id, "in_progress")
+    await set_status(issue_id, "in_progress")
 
     try:
-        # A8.7: if the issue has assignee_agent_id, register the dispatch
-        # as an agent_runs row with issue_id linked. Triggers (mig 208)
-        # emit a chat row "Agent picking up…" immediately. The actual
-        # agent execution stack lives outside this workflow — it
-        # eventually flips status to completed/failed and the bridge
-        # trigger updates the same chat row in place. Until that runtime
-        # is wired up, the chat row stays at "running" and the
-        # liveness scanner will eventually mark it dead via the 5-minute
-        # stuck threshold (which is the correct visible behaviour).
-        issue_row = load_issue(issue_id)
+        issue_row = await load_issue(issue_id)
         agent_id = issue_row.get("assignee_agent_id")
         user_id = issue_row.get("created_by_user_id") or issue_row.get(
             "assignee_user_id"
         )
         agent_run_id: Optional[str] = None
         if agent_id and user_id:
-            agent_run_id = create_agent_run_for_issue(
+            agent_run_id = await create_agent_run_for_issue(
                 issue_id, agent_id, user_id, workflow_id
             )
 
-        result: dict[str, Any] = {
-            "issue_id": issue_id,
-            "agent_run_id": agent_run_id,
-        }
-
-        # If we registered an agent_run, leave the issue in 'in_progress'
-        # — it's the agent runtime's job (or the simulate-finish helper)
-        # to decide done / in_review. If no agent assigned, fall through
-        # to 'done' (no-op path).
+        result: dict[str, Any] = {"issue_id": issue_id, "agent_run_id": agent_run_id}
         if agent_run_id is None:
-            set_status(issue_id, "done")
+            await set_status(issue_id, "done")
         return result
 
     except Exception as exc:  # noqa: BLE001
-        set_status(
+        await set_status(
             issue_id,
             "blocked",
             error_code="execute_issue_failed",
@@ -235,4 +179,4 @@ def execute_issue(issue_id: int) -> dict[str, Any]:
         )
         raise
     finally:
-        clear_lock(issue_id)
+        await clear_lock(issue_id)

@@ -152,9 +152,25 @@ async def execute_returning_val(sql: str, params: Optional[dict] = None) -> Any:
         return (await conn.execute(text(sql), params or {})).scalar()
 
 
+async def execute_returning_one(
+    sql: str, params: Optional[dict] = None
+) -> Optional[dict]:
+    """INSERT / UPDATE ... RETURNING * inside an auto-committing transaction →
+    the first RETURNING row as a plain dict, or None. Use for writes that need
+    the inserted row back (fetch_one would run on connect() and never commit)."""
+    from sqlalchemy import text
+
+    eng = get_engine()
+    async with eng.begin() as conn:
+        result = await conn.execute(text(sql), params or {})
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
 __all__ = [
     "dispose_engine",
     "execute",
+    "execute_returning_one",
     "execute_returning_val",
     "fetch_all",
     "fetch_one",

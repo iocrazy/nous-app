@@ -34,11 +34,11 @@ async def retry_failed_downloads_step() -> dict[str, Any]:
     PR-D7 phase 2: dispatch goes through start_workflow_routed so the
     routing table picks DBOS / celery / shadow per task_type."""
     from app.core.enums import DownloadStatus
-    from app.repositories.media_repository import MediaRepository
+    from app.repositories.media_repository import get_media_repository
     from app.services.infra.dbos_orchestrator import start_workflow_routed
     from app.workflows.download import download_workflow
 
-    repo = MediaRepository()
+    repo = get_media_repository()
     failed = await repo.get_pending_downloads(status=DownloadStatus.FAILED, limit=50)
     if not failed:
         return {
