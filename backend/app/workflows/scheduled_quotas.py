@@ -15,7 +15,7 @@ schedule off in D3d.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from dbos import DBOS
@@ -25,28 +25,22 @@ from loguru import logger
 @DBOS.step()
 async def reset_monthly_quotas_step() -> dict[str, Any]:
     """Zero member_quotas.points_used_this_month + advance reset_at."""
-    from app.db.supabase_client import get_async_supabase_admin
+    from app.db import engine as db_engine
 
-    supabase = await get_async_supabase_admin()
-    now = datetime.now()
+    # tz-aware UTC so the timestamptz columns aren't bound in the
+    # connection's local TZ (asyncpg binds datetimes as timestamptz).
+    now = datetime.now(timezone.utc)
     if now.month == 12:
-        next_reset = datetime(now.year + 1, 1, 1)
+        next_reset = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
     else:
-        next_reset = datetime(now.year, now.month + 1, 1)
+        next_reset = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
 
-    response = (
-        await supabase.table("member_quotas")
-        .update(
-            {
-                "points_used_this_month": 0,
-                "reset_at": next_reset.isoformat(),
-                "updated_at": now.isoformat(),
-            }
-        )
-        .gte("points_used_this_month", 0)  # match all rows
-        .execute()
+    count = await db_engine.execute(
+        "UPDATE public.member_quotas SET points_used_this_month = 0, "
+        "reset_at = :reset_at, updated_at = :now "
+        "WHERE points_used_this_month >= 0",  # match all rows
+        {"reset_at": next_reset, "now": now},
     )
-    count = len(response.data) if response.data else 0
     return {"status": "success", "count": count}
 
 
@@ -54,44 +48,40 @@ async def reset_monthly_quotas_step() -> dict[str, Any]:
 async def grant_daily_free_points_step() -> dict[str, Any]:
     """Credit DAILY_FREE_POINTS to each personal team's balance.
     Idempotent: skips if a daily_point_gifts row exists for (user_id,
-    today). The maybe_single() / None guard preserves the legacy fix
-    for the supabase-py quirk that crashed this task 6x/week."""
+    today), enforced by the UNIQUE(user_id, gift_date) constraint. Until
+    migration 223 fixed daily_point_gifts.team_id (uuid → bigint), the
+    tracking insert failed daily, so the guard never fired and free points
+    were granted every day with no reclaim."""
     from app.core.config import settings
-    from app.db.supabase_client import get_async_supabase_admin
+    from app.db import engine as db_engine
     from app.services.billing.points_service import PointsService
 
     amount = settings.DAILY_FREE_POINTS
     if amount <= 0:
         return {"status": "skipped", "reason": "DAILY_FREE_POINTS <= 0"}
 
-    supabase = await get_async_supabase_admin()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).date()  # DATE column → bind a date object
 
-    teams_resp = (
-        await supabase.table("teams")
-        .select("id, owner_id")
-        .eq("is_personal", True)
-        .execute()
+    personal_teams = await db_engine.fetch_all(
+        "SELECT id, owner_id FROM public.teams WHERE is_personal = true"
     )
-    personal_teams = teams_resp.data or []
 
     points_svc = PointsService()
     granted = 0
     skipped = 0
 
     for team in personal_teams:
-        user_id = team["owner_id"]
+        # owner_id is a uuid (auth.users); team id is a bigint snowflake.
+        # str() the uuid so asyncpg's uuid binding + add_points stay happy.
+        user_id = str(team["owner_id"])
         team_id = team["id"]
 
-        existing = (
-            await supabase.table("daily_point_gifts")
-            .select("id")
-            .eq("user_id", user_id)
-            .eq("gift_date", today)
-            .maybe_single()
-            .execute()
+        existing = await db_engine.fetch_one(
+            "SELECT id FROM public.daily_point_gifts "
+            "WHERE user_id = :uid AND gift_date = :d",
+            {"uid": user_id, "d": today},
         )
-        if existing is not None and existing.data:
+        if existing:
             skipped += 1
             continue
 
@@ -104,15 +94,12 @@ async def grant_daily_free_points_step() -> dict[str, Any]:
         )
 
         if result.get("success"):
-            await supabase.table("daily_point_gifts").insert(
-                {
-                    "user_id": user_id,
-                    "team_id": team_id,
-                    "gift_date": today,
-                    "amount_granted": amount,
-                    "status": "granted",
-                }
-            ).execute()
+            await db_engine.execute(
+                "INSERT INTO public.daily_point_gifts "
+                "(user_id, team_id, gift_date, amount_granted, status) "
+                "VALUES (:uid, :tid, :d, :amt, 'granted')",
+                {"uid": user_id, "tid": team_id, "d": today, "amt": amount},
+            )
             granted += 1
 
     return {"status": "success", "granted": granted, "skipped": skipped}
@@ -122,20 +109,17 @@ async def grant_daily_free_points_step() -> dict[str, Any]:
 async def reclaim_daily_free_points_step() -> dict[str, Any]:
     """For each of yesterday's granted gifts, sum point_transactions of
     type='consume' since granted_at, reclaim the unused portion."""
-    from app.db.supabase_client import get_async_supabase_admin
+    from app.db import engine as db_engine
     from app.services.billing.points_service import PointsService
 
-    supabase = await get_async_supabase_admin()
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
 
-    gifts_resp = (
-        await supabase.table("daily_point_gifts")
-        .select("*")
-        .eq("gift_date", yesterday)
-        .eq("status", "granted")
-        .execute()
+    gifts = await db_engine.fetch_all(
+        "SELECT id, user_id, team_id, amount_granted, granted_at "
+        "FROM public.daily_point_gifts "
+        "WHERE gift_date = :d AND status = 'granted'",
+        {"d": yesterday},
     )
-    gifts = gifts_resp.data or []
     if not gifts:
         return {"status": "success", "reclaimed_count": 0, "total_reclaimed": 0}
 
@@ -144,21 +128,18 @@ async def reclaim_daily_free_points_step() -> dict[str, Any]:
     total_reclaimed = 0
 
     for gift in gifts:
-        user_id = gift["user_id"]
-        team_id = gift["team_id"]
+        user_id = str(gift["user_id"])  # uuid → str for asyncpg + add_points
+        team_id = gift["team_id"]  # bigint
         amount_granted = gift["amount_granted"]
-        granted_at = gift["granted_at"]
+        granted_at = gift["granted_at"]  # tz-aware datetime
 
-        txns_resp = (
-            await supabase.table("point_transactions")
-            .select("amount")
-            .eq("user_id", user_id)
-            .eq("team_id", team_id)
-            .eq("type", "consume")
-            .gte("created_at", granted_at)
-            .execute()
+        txns = await db_engine.fetch_all(
+            "SELECT amount FROM public.point_transactions "
+            "WHERE user_id = :uid AND team_id = :tid AND type = 'consume' "
+            "AND created_at >= :since",
+            {"uid": user_id, "tid": team_id, "since": granted_at},
         )
-        consumed = sum(abs(t["amount"]) for t in (txns_resp.data or []))
+        consumed = sum(abs(t["amount"]) for t in txns)
 
         used = min(amount_granted, consumed)
         reclaim_amount = amount_granted - used
@@ -173,18 +154,16 @@ async def reclaim_daily_free_points_step() -> dict[str, Any]:
             )
             actual_reclaimed = result.get("reclaimed", 0)
 
-        await (
-            supabase.table("daily_point_gifts")
-            .update(
-                {
-                    "status": "reclaimed",
-                    "amount_consumed": used,
-                    "amount_reclaimed": actual_reclaimed,
-                    "reclaimed_at": datetime.now().isoformat(),
-                }
-            )
-            .eq("id", gift["id"])
-            .execute()
+        await db_engine.execute(
+            "UPDATE public.daily_point_gifts SET status = 'reclaimed', "
+            "amount_consumed = :consumed, amount_reclaimed = :reclaimed, "
+            "reclaimed_at = :now WHERE id = :gid",
+            {
+                "consumed": used,
+                "reclaimed": actual_reclaimed,
+                "now": datetime.now(timezone.utc),
+                "gid": gift["id"],
+            },
         )
 
         reclaimed_count += 1
