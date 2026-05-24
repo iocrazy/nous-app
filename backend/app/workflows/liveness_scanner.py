@@ -58,7 +58,7 @@ async def liveness_scan_step() -> dict[str, Any]:
     # httpcore bug; Issue #199 Bug C / 2026-05-22 incident). At-most-once
     # write per row is enforced by the WHERE liveness_state = <expected>
     # CAS guard below, so no advisory lock is needed for correctness.
-    from app.db import pg_pool
+    from app.db import engine as db_engine
 
     now = datetime.now(timezone.utc)
     counts: dict[str, int] = {
@@ -71,21 +71,18 @@ async def liveness_scan_step() -> dict[str, Any]:
     }
 
     # Skip gracefully when Supavisor isn't configured (dev/CI) instead of
-    # crash-looping every 30s on get_pool()'s RuntimeError.
-    if not pg_pool.is_configured():
+    # crash-looping every 30s on the engine's RuntimeError.
+    if not db_engine.is_configured():
         return counts
 
     # Pull the candidate set in one trip (cap at 200 — in practice
     # mediahub doesn't have hundreds of running agent_runs at once).
-    pool = await pg_pool.get_pool()
-    async with pool.acquire() as conn:
-        records = await conn.fetch(
-            "SELECT id, status, liveness_state, heartbeat_at, "
-            "last_useful_action_at, liveness_changed_at, continuation_attempt, "
-            "output_silence_bytes FROM public.agent_runs "
-            "WHERE status = 'running' LIMIT 200"
-        )
-    rows = [dict(r) for r in records]
+    rows = await db_engine.fetch_all(
+        "SELECT id, status, liveness_state, heartbeat_at, "
+        "last_useful_action_at, liveness_changed_at, continuation_attempt, "
+        "output_silence_bytes FROM public.agent_runs "
+        "WHERE status = 'running' LIMIT 200"
+    )
     counts["scanned"] = len(rows)
 
     for row in rows:
@@ -153,18 +150,14 @@ def _parse_ts(value: Optional[str]) -> Optional[datetime]:
 async def _transition(run_id: Any, expected: str, target: str) -> None:
     """CAS update — only writes if liveness_state is still `expected`.
     Idempotent under concurrent scanners."""
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
 
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE public.agent_runs SET liveness_state = $1 "
-                "WHERE id = $2 AND liveness_state = $3",
-                target,
-                run_id,
-                expected,
-            )
+        await db_engine.execute(
+            "UPDATE public.agent_runs SET liveness_state = :target "
+            "WHERE id = :id AND liveness_state = :expected",
+            {"target": target, "id": run_id, "expected": expected},
+        )
     except Exception as exc:
         logger.warning(
             f"[liveness-scanner] transition {run_id} {expected}->{target} failed: {exc}"
@@ -175,22 +168,22 @@ async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
     """Mark a run dead + flip status='failed' with the liveness reason.
     The bridge trigger from migration 206 picks this up and emits a
     chat row into any associated issue thread."""
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
 
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE public.agent_runs SET liveness_state = 'dead', "
-                "status = 'failed', ended_at = $1, error_code = $2, "
-                "error_message = $3 "
-                "WHERE id = $4 AND liveness_state = $5 AND status = 'running'",
-                datetime.now(timezone.utc),
-                reason,
-                f"Marked dead by liveness scanner: {reason}",
-                run_id,
-                expected_state,
-            )
+        await db_engine.execute(
+            "UPDATE public.agent_runs SET liveness_state = 'dead', "
+            "status = 'failed', ended_at = :ended, error_code = :reason, "
+            "error_message = :msg "
+            "WHERE id = :id AND liveness_state = :expected AND status = 'running'",
+            {
+                "ended": datetime.now(timezone.utc),
+                "reason": reason,
+                "msg": f"Marked dead by liveness scanner: {reason}",
+                "id": run_id,
+                "expected": expected_state,
+            },
+        )
     except Exception as exc:
         logger.warning(f"[liveness-scanner] mark dead {run_id} failed: {exc}")
 
@@ -215,25 +208,27 @@ async def liveness_scan_scheduled(
 
 async def reconcile_stranded_runs() -> dict[str, int]:
     """One-shot startup sweep. Safe to call at any time; idempotent."""
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
+
+    if not db_engine.is_configured():
+        return {"reconciled": 0}
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=HEARTBEAT_DEAD_SECONDS)
 
-    # Single UPDATE ... RETURNING (direct PG): mark every stranded run dead
-    # and count what we touched. Replaces the supabase-py select-then-update
-    # (httpx CLOSE_WAIT leak, Issue #199 Bug C).
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        updated = await conn.fetch(
-            "UPDATE public.agent_runs SET liveness_state = 'dead', "
-            "status = 'failed', ended_at = $1, error_code = 'stranded_on_restart', "
-            "error_message = $2 "
-            "WHERE status = 'running' AND heartbeat_at < $3 RETURNING id",
-            datetime.now(timezone.utc),
-            "Backend restarted while this run was in flight; no heartbeat for >2 minutes.",
-            cutoff,
-        )
-    n = len(updated)
+    # Single UPDATE (direct PG via SQLAlchemy): mark every stranded run dead;
+    # rowcount = how many we touched. Replaces the supabase-py
+    # select-then-update (httpx CLOSE_WAIT leak, Issue #199 Bug C).
+    n = await db_engine.execute(
+        "UPDATE public.agent_runs SET liveness_state = 'dead', "
+        "status = 'failed', ended_at = :ended, error_code = 'stranded_on_restart', "
+        "error_message = :msg "
+        "WHERE status = 'running' AND heartbeat_at < :cutoff",
+        {
+            "ended": datetime.now(timezone.utc),
+            "msg": "Backend restarted while this run was in flight; no heartbeat for >2 minutes.",
+            "cutoff": cutoff,
+        },
+    )
     if n > 0:
         logger.warning(
             f"[liveness-reconcile] marked {n} stranded run(s) dead on startup"
