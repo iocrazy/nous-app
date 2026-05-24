@@ -153,9 +153,15 @@ class MemoryWriter:
                 else:
                     params[c] = row[c]
                     placeholders.append(f":{c}")
+            # RETURNING only what the contradiction post-pass consumes, and
+            # CAST the vector to text (asyncpg has no pgvector codec on the
+            # shared engine — same pattern as scheduled_memory_consolidation).
+            # Avoids shipping the 1536-dim embedding back as an undecodable
+            # type on every memory insert.
             sql = (
                 "INSERT INTO public.agent_memories (" + ", ".join(cols) + ") "
-                "VALUES (" + ", ".join(placeholders) + ") RETURNING *"
+                "VALUES (" + ", ".join(placeholders) + ") "
+                "RETURNING id, summary, CAST(embedding AS text) AS embedding"
             )
             try:
                 got = await db_engine.execute_returning_one(sql, params)
