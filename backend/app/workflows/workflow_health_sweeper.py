@@ -56,13 +56,13 @@ async def classify_and_act_step() -> Dict[str, int]:
     contributed to the parse-failure / slow-workflow symptoms reported
     after #176 deployed.
     """
-    # Direct PG (asyncpg) — supabase-py's PostgREST/httpx path leaked a
-    # CLOSE_WAIT connection per call (Issue #199 Bug C / 2026-05-22 incident).
-    from app.db import pg_pool
+    # Direct PG via SQLAlchemy engine (no httpx) — supabase-py's PostgREST
+    # path leaked a CLOSE_WAIT connection per call (Issue #199 Bug C).
+    from app.db import engine as db_engine
 
     # Skip gracefully when Supavisor isn't configured (dev/CI) instead of
-    # crash-looping every 2 min on get_pool()'s RuntimeError.
-    if not pg_pool.is_configured():
+    # crash-looping every 2 min on the engine's RuntimeError.
+    if not db_engine.is_configured():
         return _zero_counters()
 
     # Fetch active rows with the columns the classifier needs.
@@ -72,15 +72,12 @@ async def classify_and_act_step() -> Dict[str, int]:
     # against prod task_tracking. The old 'in_progress' literal never matched,
     # so the sweeper silently skipped every running workflow (no LOST /
     # USER_TIMEOUT detection for in-flight work). Mirrors get_queue_status.
-    pool = await pg_pool.get_pool()
-    async with pool.acquire() as conn:
-        records = await conn.fetch(
-            "SELECT dbos_workflow_id, task_type, phase, started_at, "
-            "heartbeat_at, progress, updated_at, max_duration_minutes, "
-            "do_not_auto_cancel, health_status, user_id, title "
-            "FROM public.task_tracking WHERE phase IN ('queued', 'processing')"
-        )
-    rows = [dict(r) for r in records]
+    rows = await db_engine.fetch_all(
+        "SELECT dbos_workflow_id, task_type, phase, started_at, "
+        "heartbeat_at, progress, updated_at, max_duration_minutes, "
+        "do_not_auto_cancel, health_status, user_id, title "
+        "FROM public.task_tracking WHERE phase IN ('queued', 'processing')"
+    )
     if not rows:
         return _zero_counters()
 
@@ -152,17 +149,17 @@ async def _refresh_policy() -> Dict[str, Dict[str, int]]:
     global _POLICY_CACHE, _POLICY_CACHE_AT
     import time
 
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
 
     now = time.time()
     if _POLICY_CACHE and (now - _POLICY_CACHE_AT) < 120:
         return _POLICY_CACHE
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        policy_rows = await conn.fetch(
-            "SELECT task_type, expected_duration_seconds, hard_ceiling_seconds, "
-            "heartbeat_stale_seconds FROM public.workflow_timeout_policy"
-        )
+    if not db_engine.is_configured():
+        return _POLICY_CACHE
+    policy_rows = await db_engine.fetch_all(
+        "SELECT task_type, expected_duration_seconds, hard_ceiling_seconds, "
+        "heartbeat_stale_seconds FROM public.workflow_timeout_policy"
+    )
     cache: Dict[str, Dict[str, int]] = {}
     for r in policy_rows:
         cache[r["task_type"]] = {
@@ -248,17 +245,14 @@ async def _persist_classification(row: Dict[str, Any], classification: str) -> N
     the write when nothing changed to avoid Realtime fanout noise."""
     if row.get("health_status") == classification:
         return
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
 
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE public.task_tracking SET health_status = $1 "
-                "WHERE dbos_workflow_id = $2",
-                classification,
-                row["dbos_workflow_id"],
-            )
+        await db_engine.execute(
+            "UPDATE public.task_tracking SET health_status = :cls "
+            "WHERE dbos_workflow_id = :wid",
+            {"cls": classification, "wid": row["dbos_workflow_id"]},
+        )
     except Exception as exc:
         logger.opt(exception=True).debug(
             f"[workflow_health] persist failed for "
@@ -269,19 +263,16 @@ async def _persist_classification(row: Dict[str, Any], classification: str) -> N
 async def _mark_lost(row: Dict[str, Any]) -> None:
     """Mark a LOST row's phase=lost / status=failed so the UI shows it
     correctly. The row stays around — operator can inspect."""
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
 
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE public.task_tracking SET phase = 'lost', "
-                "status = 'failed', error_code = 'worker_lost', "
-                "error_msg = 'Worker heartbeat went stale; presumed dead.', "
-                "completed_at = $1 WHERE dbos_workflow_id = $2",
-                datetime.now(timezone.utc),
-                row["dbos_workflow_id"],
-            )
+        await db_engine.execute(
+            "UPDATE public.task_tracking SET phase = 'lost', "
+            "status = 'failed', error_code = 'worker_lost', "
+            "error_msg = 'Worker heartbeat went stale; presumed dead.', "
+            "completed_at = :done WHERE dbos_workflow_id = :wid",
+            {"done": datetime.now(timezone.utc), "wid": row["dbos_workflow_id"]},
+        )
         logger.warning(
             f"[workflow_health] marked LOST: workflow_id={row['dbos_workflow_id']} "
             f"task_type={row.get('task_type')} title={row.get('title')!r}"
@@ -295,20 +286,17 @@ async def _mark_lost(row: Dict[str, Any]) -> None:
 async def _cancel_orphan(row: Dict[str, Any]) -> None:
     """Cancel an ORPHAN_PENDING row (DBOS executor never picked it up).
     Safe because the workflow body never executed — no partial state."""
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
 
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE public.task_tracking SET phase = 'cancelled', "
-                "status = 'cancelled', error_code = 'executor_orphan', "
-                "error_msg = 'Workflow stuck PENDING beyond hard ceiling x 3; "
-                "DBOS executor never picked it up.', "
-                "completed_at = $1 WHERE dbos_workflow_id = $2",
-                datetime.now(timezone.utc),
-                row["dbos_workflow_id"],
-            )
+        await db_engine.execute(
+            "UPDATE public.task_tracking SET phase = 'cancelled', "
+            "status = 'cancelled', error_code = 'executor_orphan', "
+            "error_msg = 'Workflow stuck PENDING beyond hard ceiling x 3; "
+            "DBOS executor never picked it up.', "
+            "completed_at = :done WHERE dbos_workflow_id = :wid",
+            {"done": datetime.now(timezone.utc), "wid": row["dbos_workflow_id"]},
+        )
         logger.warning(
             f"[workflow_health] cancelled ORPHAN: workflow_id={row['dbos_workflow_id']} "
             f"task_type={row.get('task_type')}"
@@ -322,23 +310,23 @@ async def _cancel_orphan(row: Dict[str, Any]) -> None:
 async def _mark_timed_out(row: Dict[str, Any]) -> None:
     """Mark a USER_TIMEOUT row as timed_out. User opted in via
     max_duration_minutes; this is consensual auto-cancel."""
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
 
     error_msg = (
         f"Exceeded user-set max_duration_minutes={row.get('max_duration_minutes')}."
     )
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE public.task_tracking SET phase = 'timed_out', "
-                "status = 'failed', error_code = 'user_timeout', "
-                "error_msg = $1, completed_at = $2 "
-                "WHERE dbos_workflow_id = $3",
-                error_msg,
-                datetime.now(timezone.utc),
-                row["dbos_workflow_id"],
-            )
+        await db_engine.execute(
+            "UPDATE public.task_tracking SET phase = 'timed_out', "
+            "status = 'failed', error_code = 'user_timeout', "
+            "error_msg = :msg, completed_at = :done "
+            "WHERE dbos_workflow_id = :wid",
+            {
+                "msg": error_msg,
+                "done": datetime.now(timezone.utc),
+                "wid": row["dbos_workflow_id"],
+            },
+        )
         logger.warning(
             f"[workflow_health] timed out: workflow_id={row['dbos_workflow_id']} "
             f"max_min={row.get('max_duration_minutes')}"

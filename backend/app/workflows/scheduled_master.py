@@ -47,29 +47,25 @@ _BATCH_SIZE = 100  # don't dispatch more than this per tick
 async def fire_due_schedules_step() -> Dict[str, int]:
     """Scan user_schedules for due rows; dispatch each; advance
     next_fire_at via croniter. Returns counters for telemetry."""
-    # Direct PG (asyncpg) — supabase-py's PostgREST/httpx path leaked a
-    # CLOSE_WAIT connection per call (Issue #199 Bug C / 2026-05-22 incident).
-    from app.db import pg_pool
+    # Direct PG via SQLAlchemy engine (no httpx) — supabase-py's PostgREST
+    # path leaked a CLOSE_WAIT connection per call (Issue #199 Bug C).
+    from app.db import engine as db_engine
 
     # Skip gracefully when Supavisor isn't configured (dev/CI) instead of
-    # logging a warning + errors:1 every minute on get_pool()'s RuntimeError.
-    if not pg_pool.is_configured():
+    # logging a warning + errors:1 every minute on the engine's RuntimeError.
+    if not db_engine.is_configured():
         return {"due": 0, "fired": 0, "errors": 0}
 
     now = datetime.now(timezone.utc)
 
     # Pull due rows. enabled=true + next_fire_at <= now.
     try:
-        pool = await pg_pool.get_pool()
-        async with pool.acquire() as conn:
-            records = await conn.fetch(
-                "SELECT * FROM public.user_schedules "
-                "WHERE enabled = true AND next_fire_at <= $1 "
-                "ORDER BY next_fire_at LIMIT $2",
-                now,
-                _BATCH_SIZE,
-            )
-        rows = [dict(r) for r in records]
+        rows = await db_engine.fetch_all(
+            "SELECT * FROM public.user_schedules "
+            "WHERE enabled = true AND next_fire_at <= :now "
+            "ORDER BY next_fire_at LIMIT :limit",
+            {"now": now, "limit": _BATCH_SIZE},
+        )
     except Exception as exc:
         logger.opt(exception=True).warning(f"[scheduled_master] fetch failed: {exc}")
         return {"due": 0, "fired": 0, "errors": 1}
@@ -89,14 +85,15 @@ async def fire_due_schedules_step() -> Dict[str, int]:
                 f"[scheduled_master] dispatch row {row.get('id')} failed: {exc}"
             )
             try:
-                async with pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE public.user_schedules SET fail_count = $1, "
-                        "last_error = $2 WHERE id = $3",
-                        (row.get("fail_count") or 0) + 1,
-                        str(exc)[:500],
-                        row["id"],
-                    )
+                await db_engine.execute(
+                    "UPDATE public.user_schedules SET fail_count = :fc, "
+                    "last_error = :err WHERE id = :id",
+                    {
+                        "fc": (row.get("fail_count") or 0) + 1,
+                        "err": str(exc)[:500],
+                        "id": row["id"],
+                    },
+                )
             except Exception:
                 pass
 
@@ -122,19 +119,19 @@ async def _dispatch_one(row: Dict[str, Any]) -> None:
     # task_type dispatchers are themselves idempotent (PR #154 ensures
     # DBOS workflow_id dedup) and double-firing means at most one
     # extra task that the dispatcher will short-circuit.
-    from app.db.pg_pool import get_pool
+    from app.db import engine as db_engine
 
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE public.user_schedules SET last_fired_at = $1, "
-            "next_fire_at = $2, fire_count = $3, last_error = NULL "
-            "WHERE id = $4",
-            datetime.now(timezone.utc),
-            next_at,
-            (row.get("fire_count") or 0) + 1,
-            sched_id,
-        )
+    await db_engine.execute(
+        "UPDATE public.user_schedules SET last_fired_at = :fired, "
+        "next_fire_at = :next, fire_count = :fc, last_error = NULL "
+        "WHERE id = :id",
+        {
+            "fired": datetime.now(timezone.utc),
+            "next": next_at,
+            "fc": (row.get("fire_count") or 0) + 1,
+            "id": sched_id,
+        },
+    )
 
     # Dispatch via the task_type → workflow registry. For now we route
     # through start_workflow_routed so the existing routing table
