@@ -6,6 +6,7 @@ so memory, compaction, sub-agents, delegation, budget, fallback, and BYO-key
 adapter resolution all apply. The agent's reply is persisted as an ai_message
 by the turn flow; the issue chat surface reads ai_messages (Task 5).
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
