@@ -327,10 +327,52 @@ class AILibraryChatService:
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
 
+        Guards: 404 if session not found or not owned, 400 if session
+        has no agent_slug. Then delegates to ``run_session_turn`` which
+        owns the full turn execution.
+
         Phase M (M4): when ``plan_mode='prompt_user'`` or 'dry_run', the
         prompt composer prepends the PLAN_PROMPT instructing the LLM to
         emit a structured plan instead of executing. The chat response
         is the plan markdown; user replies approve/reject in next turn.
+        """
+        session = await self.get_session(session_id, user_id=user_id)
+        if not session.get("agent_slug"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="session has no agent_slug bound — cannot chat",
+            )
+        return await self.run_session_turn(
+            session_id,
+            user_id=user_id,
+            content=content,
+            trigger="chat",
+            plan_mode=plan_mode,
+            chunk_callback=chunk_callback,
+            attachments=attachments,
+        )
+
+    async def run_session_turn(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        content: str,
+        trigger: str = "chat",
+        plan_mode: Optional[str] = None,
+        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        attachments: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        """Execute a single turn against a session.
+
+        Self-contained: loads the session, runs the full agent turn
+        (history load, user-message persist, compose, RunRecorder,
+        assistant-message persist, counter bump, fire-and-forget
+        memory/commitment harvest), and returns the result dict.
+
+        ``trigger`` is forwarded to ``RunRecorder`` so issue execution
+        (trigger="issue") produces distinct rows in agent_runs while
+        reusing the exact same turn logic as interactive chat.
 
         Flow:
           1. Load session (404 if not owner)
@@ -341,7 +383,8 @@ class AILibraryChatService:
              cost, budget guard, cancel polling, skill tool-calls all live
           6. Persist the assistant message
           7. Bump session counters
-          8. Return {message, usage, run_id}
+          8. Return {user_message, assistant_message, usage, run_id,
+                     tool_calls, attachment_failures, approval_request_id}
 
         The RunRecorder.agent_id links the agent_runs row back to the
         agent that produced this turn; the session_id field ties
@@ -625,7 +668,7 @@ class AILibraryChatService:
             async with RunRecorder(
                 agent_id=composed.agent_id,
                 user_id=user_id,
-                trigger="chat",
+                trigger=trigger,
                 session_id=session_id,
                 team_id=session.get("team_id"),
                 project_id=session.get("project_id"),
