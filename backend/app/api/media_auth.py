@@ -90,6 +90,9 @@ def _verify_token(value: str) -> Optional[_ParsedToken]:
     sync — no denylist check here (that is async, added in Task 2)."""
     if not value:
         return None
+    # `.` is the field delimiter. Safe because user_ids are Supabase UUIDs
+    # (hyphens only, no dots) — revisit this parser if the user_id format
+    # ever changes (e.g. emails / custom ids).
     parts = value.split(".")
     if len(parts) == 4:
         user_id, issued_str, expires_str, sig = parts

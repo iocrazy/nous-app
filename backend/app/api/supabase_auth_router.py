@@ -354,10 +354,11 @@ async def update_user(request: UpdateUserRequest, authorization: str = Header(..
             )
 
         # Revoke media tokens when the user changes their password (#275).
-        # Best-effort: failure must not break the update response.
+        # Best-effort: failure must not break the update response. (We already
+        # raised above if the update failed, so success is implied here.)
         # NOTE: reset_password (forgot-password by email) is NOT hooked here —
         # it has no authenticated session at that point; tracked as a follow-up.
-        if request.password and result.get("success"):
+        if request.password:
             try:
                 user = await auth_service.get_user(token)
                 uid = user.get("id") if user else None

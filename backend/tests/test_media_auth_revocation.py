@@ -88,3 +88,14 @@ async def test_denylist_redis_error_does_not_blanket_reject(secrets, monkeypatch
     now = int(time.time())
     tok = m._sign_token("u1", now, now + 100)
     assert await m.validate_media_cookie(tok) == "u1"
+
+
+@pytest.mark.asyncio
+async def test_corrupt_cutoff_value_does_not_reject(secrets, monkeypatch):
+    # A non-integer denylist value (corrupt) must not be treated as a cutoff —
+    # an otherwise-valid token is accepted (cutoff = None path).
+    r = _fake_redis(get_value=b"not-a-number")
+    monkeypatch.setattr(m, "_get_redis", AsyncMock(return_value=r))
+    now = int(time.time())
+    tok = m._sign_token("u1", now, now + 100)
+    assert await m.validate_media_cookie(tok) == "u1"
