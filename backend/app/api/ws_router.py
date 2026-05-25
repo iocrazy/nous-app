@@ -8,12 +8,14 @@ and pushes progress messages to the connected client.
 """
 
 import json
+from typing import Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from app.core.deps import verify_jwt
 from app.core.redis import get_async_redis
+from app.repositories.issue_repository import issue_repository
 
 router = APIRouter()
 
@@ -112,3 +114,79 @@ async def ws_task_progress(
         await pubsub.unsubscribe(channel)
         await pubsub.aclose()
         logger.info(f"[WS] Client disconnected: user={user_id[:8]}...")
+
+
+async def _resolve_issue_ws_user(
+    issue_id: int, ticket: Optional[str], token: Optional[str]
+) -> Optional[str]:
+    """Authenticate (ticket preferred, token legacy) AND check the user can
+    see the issue (creator or assignee). Returns user_id or None."""
+    user_id: Optional[str] = None
+    if ticket:
+        from app.api.ws_ticket_router import consume_ticket
+
+        user_id = await consume_ticket(ticket)
+    elif token:
+        logger.warning(
+            "[WS issue] DEPRECATED ?token= auth — JWT leaked to access logs. "
+            "Client should use ?ticket=."
+        )
+        user_id = await _authenticate_ws(token)
+    if not user_id:
+        return None
+    row = await issue_repository.get_by_id(issue_id)
+    if not row:
+        return None
+    if user_id in (row.get("created_by_user_id"), row.get("assignee_user_id")):
+        return user_id
+    return None
+
+
+@router.websocket("/ws/issue/{issue_id}")
+async def ws_issue_chat(
+    websocket: WebSocket,
+    issue_id: int,
+    ticket: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+):
+    """Stream issue-chat events (chunk / message / status) from Redis
+    channel issue:{issue_id} to the browser. Mirrors ws_task_progress."""
+    user_id = await _resolve_issue_ws_user(issue_id, ticket, token)
+    if not user_id:
+        await websocket.close(code=4001, reason="Authentication/visibility failed")
+        return
+    await websocket.accept()
+    logger.info(f"[WS issue] Client connected: user={user_id[:8]}... issue={issue_id}")
+
+    redis = await get_async_redis()
+    pubsub = redis.pubsub()
+    channel = f"issue:{issue_id}"
+
+    try:
+        await pubsub.subscribe(channel)
+        logger.debug(f"[WS issue] Subscribed to {channel}")
+
+        async for message in pubsub.listen():
+            if message["type"] != "message":
+                continue
+            try:
+                data = message["data"]
+                if isinstance(data, bytes):
+                    data = data.decode("utf-8")
+                await websocket.send_json(json.loads(data))
+            except WebSocketDisconnect:
+                break
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[WS issue] send error: {e}")
+                break
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[WS issue] connection error: {e}")
+    finally:
+        await pubsub.unsubscribe(channel)
+        await pubsub.aclose()
+        logger.info(
+            f"[WS issue] Client disconnected: user={user_id[:8]}... issue={issue_id}"
+        )

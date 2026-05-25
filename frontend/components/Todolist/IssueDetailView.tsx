@@ -4,9 +4,12 @@
  * Fetches messages on mount, subscribes to Realtime issue_messages
  * inserts so new comments / status changes / agent runs stream in
  * without manual refresh.
+ *
+ * Agent replies now stream token-by-token over the /ws/issue/{id}
+ * WebSocket (replaces polling from commit 3453a990).
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ChevronLeft, MoreHorizontal, AlignLeft, Paperclip, FileText, Plus,
@@ -21,6 +24,7 @@ import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox } from './IssueReplyBox';
 import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
 import { dispatchIssue } from '../../services/issuesService';
+import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
 
@@ -44,8 +48,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
+  const [isAgentWorking, setIsAgentWorking] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
   const { addToast } = useToast();
 
+  // Stable ref so the WS event handler always reads the latest messages
+  // without needing to re-open the socket.
+  const messagesRef = useRef<IssueMessage[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // ── Initial + post-action fetch ─────────────────────────────────────────
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -61,10 +73,56 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // Realtime: handle both INSERT (new comment / new agent_run dispatch)
-  // and UPDATE (agent_run lifecycle progresses — placeholder body
-  // becomes the real summary; liveness pill flips colour). REPLICA
-  // IDENTITY FULL on issue_messages (set in mig 205) means the UPDATE
+  // ── WebSocket: open on mount / issue.id change, close on unmount ────────
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let cancelled = false;
+
+    openIssueChatSocket(issue.id, (event) => {
+      if (event.type === 'chunk') {
+        setStreamingText((prev) => prev + event.delta);
+      } else if (event.type === 'message') {
+        // Push the finalized message (dedupe by id).
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === event.message.id)) return prev;
+          return [...prev, event.message];
+        });
+        setStreamingText('');
+        setIsAgentWorking(false);
+      } else if (event.type === 'status') {
+        if (event.phase === 'running') {
+          setIsAgentWorking(true);
+          setStreamingText('');
+        } else if (event.phase === 'done') {
+          setIsAgentWorking(false);
+          setStreamingText('');
+        }
+      }
+    })
+      .then((socket) => {
+        if (cancelled) {
+          socket.close();
+          return;
+        }
+        ws = socket;
+        ws.onclose = () => {
+          setStreamingText('');
+          setIsAgentWorking(false);
+        };
+      })
+      .catch((err) => {
+        // Ticket acquisition failure — not fatal; initial refresh() still shows messages.
+        console.debug('[IssueDetailView/WS] socket open failed:', err);
+      });
+
+    return () => {
+      cancelled = true;
+      ws?.close();
+    };
+  }, [issue.id]);
+
+  // ── Realtime: INSERT + UPDATE on issue_messages ──────────────────────────
+  // REPLICA IDENTITY FULL on issue_messages (mig 205) means the UPDATE
   // payload includes the full row, not just changed columns.
   useEffect(() => {
     const supa = getSupabaseClient();
@@ -242,7 +300,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               )}
               {loading && messages.length === 0
                 ? <div className="text-[14px] text-zinc-500 italic px-4 py-12 text-center">Loading messages…</div>
-                : <IssueChatThread messages={messages} agentsById={agentsById} selfUserId={selfUserId} />}
+                : <IssueChatThread messages={messages} agentsById={agentsById} selfUserId={selfUserId} streamingText={streamingText} />}
+              {isAgentWorking && (
+                <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-zinc-400">
+                  <span
+                    className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"
+                    style={{ boxShadow: '0 0 6px 1px rgba(16,185,129,0.45)' }}
+                  />
+                  <span className="text-zinc-400">Agent is working…</span>
+                </div>
+              )}
             </>
           )}
           {tab === 'activity' && (
@@ -254,11 +321,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
         </div>
       </div>
 
-      <IssueReplyBox
-        agents={agents}
-        defaultAgentId={issue.assignee?.id ?? null}
-        onSubmit={handleReply}
-      />
+      {/* Constrain the composer to the same column width as the conversation. */}
+      <div className="w-full max-w-3xl mx-auto">
+        <IssueReplyBox
+          agents={agents}
+          defaultAgentId={issue.assignee?.id ?? null}
+          onSubmit={handleReply}
+        />
+      </div>
     </div>
   );
 };

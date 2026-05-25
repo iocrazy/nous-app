@@ -43,6 +43,12 @@ interface IssueChatThreadProps {
   agentsById: Record<string, AgentRef>;
   /** Display label for the current authenticated user (so own comments show "You"). */
   selfUserId?: string;
+  /**
+   * Live token-by-token text accumulating from the active agent turn.
+   * When non-empty a transient streaming bubble is rendered at the bottom.
+   * Cleared (set to '') by the parent when the `message` event arrives.
+   */
+  streamingText?: string;
 }
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-zinc-600', size = 22 }) => (
@@ -185,8 +191,33 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
   );
 };
 
-export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId }) => {
-  if (messages.length === 0) {
+/** Blinking text cursor shown while the agent is streaming. */
+const StreamingCursor: React.FC = () => (
+  <span
+    className="inline-block w-[2px] h-[1em] bg-zinc-300 ml-0.5 align-middle animate-pulse"
+    aria-hidden="true"
+  />
+);
+
+/** Transient assistant bubble rendered while tokens are arriving. */
+const StreamingBubble: React.FC<{ text: string }> = ({ text }) => (
+  <div className="my-3">
+    <div className="flex items-center gap-2 mb-1.5">
+      <AgentAvatar initials="AI" color="bg-indigo-600" />
+      <span className="text-xs font-medium text-zinc-200">Agent</span>
+      <span className="text-[12px] text-zinc-500 italic">streaming…</span>
+    </div>
+    <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/50 p-3 text-[14px] text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+      {text}
+      <StreamingCursor />
+    </div>
+  </div>
+);
+
+export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId, streamingText }) => {
+  const hasStreaming = typeof streamingText === 'string' && streamingText.length > 0;
+
+  if (messages.length === 0 && !hasStreaming) {
     return (
       <div className="text-sm text-zinc-500 italic px-4 py-12 text-center">
         No activity yet. Reply below to start the conversation or dispatch the issue to an agent.
@@ -200,6 +231,7 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
         if (m.kind === 'agent_run')     return <AgentRunEvent key={m.id} msg={m} agentsById={agentsById} />;
         return <CommentEvent key={m.id} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
       })}
+      {hasStreaming && <StreamingBubble text={streamingText as string} />}
     </div>
   );
 };
