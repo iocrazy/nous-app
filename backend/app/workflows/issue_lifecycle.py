@@ -22,6 +22,11 @@ from loguru import logger
 from app.services.ai.chat.ai_library_chat_service import (  # noqa: F401
     AILibraryChatService,
 )
+from app.services.issues.issue_chat_stream import (  # noqa: F401
+    publish_chunk,
+    publish_message,
+    publish_status,
+)
 
 
 def _engine():
@@ -119,18 +124,24 @@ async def ensure_issue_session_step(issue_id: int) -> str:
 # no step retry: run_session_turn is non-idempotent (appends user msg + charges);
 # it has its own internal LLM fallback chain.
 async def run_issue_reply_step(
-    *, session_id: str, user_id: str, reply_text: str
+    *, issue_id: int, session_id: str, user_id: str, reply_text: str
 ) -> Optional[str]:
-    """Run one reply turn on the issue's session via the full chat runtime."""
+    """Run one reply turn, streaming token deltas + the final message to Redis."""
     from uuid import UUID
+
+    async def _cb(delta: str) -> None:
+        await publish_chunk(issue_id, delta)
 
     result = await AILibraryChatService().run_session_turn(
         UUID(session_id),
         user_id=UUID(user_id),
         content=reply_text,
         trigger="issue_reply",
+        chunk_callback=_cb,
     )
-    return (result.get("assistant_message") or {}).get("content") or ""
+    assistant = result.get("assistant_message") or {}
+    await publish_message(issue_id, assistant, session_user_id=None)
+    return assistant.get("content") or ""
 
 
 # Spec-1b: bounded wait for the per-issue turn lock. Replies are human-paced,
@@ -171,7 +182,12 @@ async def _run_reply_turns(
         return {"issue_id": issue_id, "deferred": True}
 
     try:
-        await run_turn(session_id=session_id, user_id=user_id, reply_text=reply_text)
+        await run_turn(
+            issue_id=issue_id,
+            session_id=session_id,
+            user_id=user_id,
+            reply_text=reply_text,
+        )
         return {"issue_id": issue_id, "executed": True}
     finally:
         await release(issue_id)
@@ -184,16 +200,20 @@ async def respond_to_issue_reply(
     """Spec-1b: run one agent turn in response to a human reply on an issue.
     Serialized per issue via the turn lock; does NOT change issue status."""
     session_id = await ensure_issue_session_step(issue_id)
-    return await _run_reply_turns(
-        issue_id,
-        user_id,
-        reply_text,
-        session_id=session_id,
-        acquire=acquire_turn_lock,
-        run_turn=run_issue_reply_step,
-        release=clear_lock,
-        sleep=DBOS.sleep_async,
-    )
+    await publish_status(issue_id, "running")
+    try:
+        return await _run_reply_turns(
+            issue_id,
+            user_id,
+            reply_text,
+            session_id=session_id,
+            acquire=acquire_turn_lock,
+            run_turn=run_issue_reply_step,
+            release=clear_lock,
+            sleep=DBOS.sleep_async,
+        )
+    finally:
+        await publish_status(issue_id, "done")
 
 
 @DBOS.step()

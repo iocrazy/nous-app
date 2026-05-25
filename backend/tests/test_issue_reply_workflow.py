@@ -8,16 +8,80 @@ import pytest
 
 
 @pytest.mark.asyncio
+async def test_run_issue_reply_step_passes_chunk_callback_and_publishes(monkeypatch):
+    from app.workflows import issue_lifecycle as m
+
+    captured = {}
+
+    async def fake_run_session_turn(
+        session_id, *, user_id, content, trigger, chunk_callback=None, **kw
+    ):
+        captured["has_cb"] = chunk_callback is not None
+        if chunk_callback:
+            await chunk_callback("hel")
+            await chunk_callback("lo")
+        return {
+            "assistant_message": {
+                "id": "m1",
+                "role": "assistant",
+                "content": "hello",
+                "agent_id": "a1",
+                "metadata_json": {},
+                "created_at": "2026-05-25T00:00:00+00:00",
+            }
+        }
+
+    fake_chat = type(
+        "C", (), {"run_session_turn": staticmethod(fake_run_session_turn)}
+    )()
+    monkeypatch.setattr(m, "AILibraryChatService", lambda: fake_chat)
+
+    chunks, messages = [], []
+    monkeypatch.setattr(
+        m, "publish_chunk", AsyncMock(side_effect=lambda iid, d: chunks.append(d))
+    )
+    monkeypatch.setattr(
+        m,
+        "publish_message",
+        AsyncMock(side_effect=lambda iid, row, **k: messages.append(row)),
+    )
+
+    out = await m.run_issue_reply_step.__wrapped__(
+        issue_id=7,
+        session_id="11111111-1111-1111-1111-111111111111",
+        user_id="22222222-2222-2222-2222-222222222222",
+        reply_text="hi",
+    )
+    assert out == "hello"
+    assert captured["has_cb"] is True
+    assert chunks == ["hel", "lo"]
+    assert messages and messages[0]["content"] == "hello"
+
+
+@pytest.mark.asyncio
 async def test_run_issue_reply_step_calls_run_session_turn(monkeypatch):
     from app.workflows import issue_lifecycle as m
 
     fake_chat = AsyncMock()
     fake_chat.run_session_turn = AsyncMock(
-        return_value={"assistant_message": {"content": "ok"}, "run_id": "r1"}
+        return_value={
+            "assistant_message": {
+                "id": "m1",
+                "role": "assistant",
+                "content": "ok",
+                "agent_id": None,
+                "metadata_json": {},
+                "created_at": "2026-05-25T00:00:00+00:00",
+            },
+            "run_id": "r1",
+        }
     )
     monkeypatch.setattr(m, "AILibraryChatService", lambda: fake_chat)
+    monkeypatch.setattr(m, "publish_chunk", AsyncMock())
+    monkeypatch.setattr(m, "publish_message", AsyncMock())
 
     out = await m.run_issue_reply_step.__wrapped__(
+        issue_id=1,
         session_id="11111111-1111-1111-1111-111111111111",
         user_id="22222222-2222-2222-2222-222222222222",
         reply_text="please continue",

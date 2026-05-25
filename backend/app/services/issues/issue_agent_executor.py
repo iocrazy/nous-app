@@ -14,6 +14,11 @@ from typing import Any, Optional
 from loguru import logger
 
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+from app.services.issues.issue_chat_stream import (  # noqa: F401
+    publish_chunk,
+    publish_message,
+    publish_status,
+)
 from app.services.issues.issue_session import get_or_create_issue_session
 
 
@@ -32,6 +37,9 @@ async def run_issue_agent(
 ) -> Optional[str]:
     """Run the assigned agent on the issue via the chat runtime.
 
+    Streams token deltas + publishes the final message to Redis channel
+    ``issue:{id}`` while the turn is in flight.
+
     Returns the agent's text output (also persisted as an ai_message by
     run_session_turn).
 
@@ -43,19 +51,30 @@ async def run_issue_agent(
     """
     _ = agent_id  # session already binds the agent; kept for caller compat
 
-    session_id = await get_or_create_issue_session(int(issue["id"]))
+    iid = int(issue["id"])
+    session_id = await get_or_create_issue_session(iid)
     if not session_id:
         raise RuntimeError(f"issue {issue['id']} has no assignable agent session")
 
-    result = await AILibraryChatService().run_session_turn(
-        session_id,
-        user_id=user_id,
-        content=_build_user_message(issue),
-        trigger="issue_dispatch",
-    )
-    content = (result.get("assistant_message") or {}).get("content") or ""
-    logger.info(
-        f"[issue_agent] issue={issue['id']} session={session_id} "
-        f"produced {len(content)} chars"
-    )
-    return content
+    async def _cb(delta: str) -> None:
+        await publish_chunk(iid, delta)
+
+    await publish_status(iid, "running")
+    try:
+        result = await AILibraryChatService().run_session_turn(
+            session_id,
+            user_id=user_id,
+            content=_build_user_message(issue),
+            trigger="issue_dispatch",
+            chunk_callback=_cb,
+        )
+        assistant = result.get("assistant_message") or {}
+        await publish_message(iid, assistant, session_user_id=None)
+        content = assistant.get("content") or ""
+        logger.info(
+            f"[issue_agent] issue={iid} session={session_id} "
+            f"produced {len(content)} chars"
+        )
+        return content
+    finally:
+        await publish_status(iid, "done")
