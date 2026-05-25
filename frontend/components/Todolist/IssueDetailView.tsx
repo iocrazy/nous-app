@@ -105,13 +105,15 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
   const handleReply = async (body: string, agentId: string | null) => {
     try {
-      const resp = await postIssueMessage(issue.id, { body, agent_id: agentId ?? undefined });
-      setMessages((prev) => {
-        const next = [...prev];
-        if (!next.some((m) => m.id === resp.comment.id)) next.push(resp.comment);
-        if (resp.agent_run && !next.some((m) => m.id === resp.agent_run!.id)) next.push(resp.agent_run);
-        return next;
-      });
+      await postIssueMessage(issue.id, { body, agent_id: agentId ?? undefined });
+      // Spec-1b: for issues with an assigned agent the backend writes to
+      // ai_messages (not issue_messages) and returns an optimistic comment
+      // whose id does NOT match the real ai_messages row.  Appending the
+      // optimistic row would leave a phantom entry that never reconciles.
+      // Refetching via GET replaces the list with the canonical thread
+      // (human reply + any already-completed agent reply) and naturally
+      // discards the optimistic id.
+      await refresh();
       addToast(agentId ? 'Reply posted; agent dispatched' : 'Comment posted', 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Send failed', 'error');

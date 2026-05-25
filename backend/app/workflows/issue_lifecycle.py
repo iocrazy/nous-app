@@ -18,6 +18,17 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
+# noqa: F401 — module-level handle for run_issue_reply_step + tests
+from app.services.ai.chat.ai_library_chat_service import (  # noqa: F401
+    AILibraryChatService,
+)
+
+
+def _engine():
+    from app.db import engine as db_engine
+
+    return db_engine
+
 
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
@@ -75,6 +86,113 @@ async def clear_lock(issue_id: int) -> None:
     await db_engine.execute(
         "UPDATE public.issues SET execution_locked_at = NULL WHERE id = :id",
         {"id": issue_id},
+    )
+
+
+@DBOS.step()
+async def acquire_turn_lock(issue_id: int) -> bool:
+    """Claim the per-issue turn lock for a reply turn. Reuses
+    issues.execution_locked_at (shared with execute_issue dispatch) but does
+    NOT touch dbos_workflow_id — the dispatch-status UI subscribes to that.
+    Returns True if acquired, False if a turn is already in flight."""
+    locked = await _engine().execute(
+        "UPDATE public.issues SET execution_locked_at = now() "
+        "WHERE id = :id AND execution_locked_at IS NULL",
+        {"id": issue_id},
+    )
+    return locked > 0
+
+
+@DBOS.step()
+async def ensure_issue_session_step(issue_id: int) -> str:
+    """Get-or-create the issue's ai_session; raise if the issue has no
+    assignable agent (nothing to respond with)."""
+    from app.services.issues.issue_session import get_or_create_issue_session
+
+    session_id = await get_or_create_issue_session(issue_id)
+    if not session_id:
+        raise RuntimeError(f"issue {issue_id} has no assignable agent session")
+    return session_id
+
+
+@DBOS.step()
+# no step retry: run_session_turn is non-idempotent (appends user msg + charges);
+# it has its own internal LLM fallback chain.
+async def run_issue_reply_step(
+    *, session_id: str, user_id: str, reply_text: str
+) -> Optional[str]:
+    """Run one reply turn on the issue's session via the full chat runtime."""
+    from uuid import UUID
+
+    result = await AILibraryChatService().run_session_turn(
+        UUID(session_id),
+        user_id=UUID(user_id),
+        content=reply_text,
+        trigger="issue_reply",
+    )
+    return (result.get("assistant_message") or {}).get("content") or ""
+
+
+# Spec-1b: bounded wait for the per-issue turn lock. Replies are human-paced,
+# so a turn almost always frees the lock within seconds; the cap only bounds
+# the pathological "reply lands during a multi-minute turn" case.
+REPLY_LOCK_MAX_ATTEMPTS = 60
+REPLY_LOCK_WAIT_SECONDS = 10
+
+
+async def _run_reply_turns(
+    issue_id: int,
+    user_id: str,
+    reply_text: str,
+    *,
+    session_id: str,
+    acquire,
+    run_turn,
+    release,
+    sleep,
+    max_attempts: int = REPLY_LOCK_MAX_ATTEMPTS,
+    wait_seconds: int = REPLY_LOCK_WAIT_SECONDS,
+) -> dict[str, Any]:
+    """Acquire the per-issue turn lock (waiting if a turn is in flight), run
+    exactly one reply turn, then release. No status change (Spec-1b)."""
+    acquired = False
+    for _ in range(max_attempts):
+        if await acquire(issue_id):
+            acquired = True
+            break
+        await sleep(wait_seconds)
+
+    if not acquired:
+        logger.warning(
+            f"[issue_reply] issue {issue_id}: turn lock busy for ~10min"
+            f" ({max_attempts} attempts); reply NOT processed — user must"
+            " re-send. (Coalescing is the planned fix.)"
+        )
+        return {"issue_id": issue_id, "deferred": True}
+
+    try:
+        await run_turn(session_id=session_id, user_id=user_id, reply_text=reply_text)
+        return {"issue_id": issue_id, "executed": True}
+    finally:
+        await release(issue_id)
+
+
+@DBOS.workflow()
+async def respond_to_issue_reply(
+    issue_id: int, user_id: str, reply_text: str
+) -> dict[str, Any]:
+    """Spec-1b: run one agent turn in response to a human reply on an issue.
+    Serialized per issue via the turn lock; does NOT change issue status."""
+    session_id = await ensure_issue_session_step(issue_id)
+    return await _run_reply_turns(
+        issue_id,
+        user_id,
+        reply_text,
+        session_id=session_id,
+        acquire=acquire_turn_lock,
+        run_turn=run_issue_reply_step,
+        release=clear_lock,
+        sleep=DBOS.sleep_async,
     )
 
 

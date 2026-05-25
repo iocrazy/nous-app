@@ -17,7 +17,10 @@ from app.workflows.ai_transcription import ai_transcription_workflow  # noqa: F4
 from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
 from app.workflows.download import download_workflow  # noqa: F401
 from app.workflows.extract_audio import extract_audio_workflow  # noqa: F401
-from app.workflows.issue_lifecycle import execute_issue  # noqa: F401
+from app.workflows.issue_lifecycle import (  # noqa: F401
+    execute_issue,
+    respond_to_issue_reply,
+)
 
 # A8.5: paperclip-style liveness scanner for agent_runs.
 from app.workflows.liveness_scanner import (  # noqa: F401
@@ -82,6 +85,7 @@ from app.workflows.write_memory import write_memory_workflow  # noqa: F401
 
 __all__ = [
     "execute_issue",
+    "respond_to_issue_reply",
     "ai_summary_workflow",
     "ai_transcription_workflow",
     "thumbnail_workflow",
