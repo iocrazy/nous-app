@@ -176,11 +176,9 @@ async def _run_volcengine_asr(
     Ported verbatim from master's app.tasks.ai_tasks.transcribe_audio_task
     (the volcengine branch). The DBOS port had previously dropped this.
     """
-    import hashlib
-    import hmac as hmac_mod
     import time as time_mod
 
-    from app.api.media_auth import _get_secret
+    from app.api.media_auth import _sign_token
     from app.core.config import settings
     from app.services.ai.transcribe.volcengine_asr_service import (
         RESOURCE_V1,
@@ -210,13 +208,10 @@ async def _run_volcengine_asr(
         raise RuntimeError(f"resource {resource_id} not found for volcengine asr")
     user_id = str(row["creator_id"])
 
-    # Build signed media URL (HMAC, 1h TTL — same scheme as <video src>).
-    expires_at = int(time_mod.time()) + 3600
-    payload = f"{user_id}.{expires_at}"
-    sig = hmac_mod.new(
-        _get_secret().encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()[:32]
-    media_token = f"{payload}.{sig}"
+    # Build signed media URL (4-part HMAC, 1h TTL — same scheme as <video src>).
+    now = int(time_mod.time())
+    expires_at = now + 3600
+    media_token = _sign_token(user_id, now, expires_at)
 
     media_public_url = getattr(
         settings, "MEDIA_PUBLIC_URL", "https://mediahubserver.heygo.cn:88"

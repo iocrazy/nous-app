@@ -172,29 +172,6 @@ async def validate_media_cookie(cookie_value: str) -> Optional[str]:
     return parsed.user_id
 
 
-# ---------------------------------------------------------------------------
-# Legacy shims — kept for callers that have not been updated yet.
-# ---------------------------------------------------------------------------
-
-
-def _get_secret() -> str:
-    """DEPRECATED: use _signing_secret() or _verify_secrets().
-
-    Kept as a shim for app.workflows.ai_transcription which builds its own
-    3-part HMAC token for Volcengine ASR.  Returns the signing secret so that
-    the generated URL can still be validated by _verify_token."""
-    return _signing_secret()
-
-
-def _sign_cookie(user_id: str, expires_at: int) -> str:
-    """DEPRECATED: use _sign_token().
-
-    Thin shim — produces a legacy 3-part token using the current signing
-    secret so callers that haven't been updated continue to work."""
-    payload = f"{user_id}.{expires_at}"
-    return f"{payload}.{_hmac(_signing_secret(), payload)}"
-
-
 @router.post("/media-session")
 async def create_media_session(
     request: Request,
@@ -246,7 +223,11 @@ async def create_media_session(
 
 @router.delete("/media-session")
 async def delete_media_session(request: Request):
-    """Clear the media session cookie on logout."""
+    """Clear the media session cookie AND revoke the user's media tokens (#275)."""
+    cookie_value = request.cookies.get(COOKIE_NAME, "")
+    parsed = _verify_token(cookie_value)
+    if parsed:
+        await revoke_media_tokens(parsed.user_id)
     response = JSONResponse(content={"success": True})
     response.delete_cookie(
         key=COOKIE_NAME,

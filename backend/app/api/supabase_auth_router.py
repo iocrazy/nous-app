@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, EmailStr
 
+from app.api.media_auth import revoke_media_tokens
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
@@ -264,6 +265,7 @@ async def sign_out(
             message="User logged out",
             status="success",
         )
+        background_tasks.add_task(revoke_media_tokens, user_id)
 
     return result
 
@@ -350,6 +352,19 @@ async def update_user(request: UpdateUserRequest, authorization: str = Header(..
             raise HTTPException(
                 status_code=400, detail=result.get("message", "更新失败")
             )
+
+        # Revoke media tokens when the user changes their password (#275).
+        # Best-effort: failure must not break the update response.
+        # NOTE: reset_password (forgot-password by email) is NOT hooked here —
+        # it has no authenticated session at that point; tracked as a follow-up.
+        if request.password and result.get("success"):
+            try:
+                user = await auth_service.get_user(token)
+                uid = user.get("id") if user else None
+                if uid:
+                    await revoke_media_tokens(uid)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"media revoke after password change failed: {e}")
 
         return result
 
