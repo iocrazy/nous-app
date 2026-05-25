@@ -11,11 +11,18 @@ trigger trg_issue_status_change_message — no explicit endpoint needed.
 RLS at the DB layer enforces visibility cascades through `issues`. The
 service-role admin client bypasses RLS, so this router re-checks
 visibility in Python via the same pattern as issues_router.
+
+Spec-1a (Task 5): GET /{issue_id}/messages has a dual read path.
+  - Session path: when issues.ai_session_id is set, read ai_messages for that
+    session and map each row to IssueMessage shape so the frontend needs no
+    change.
+  - Legacy path: when ai_session_id is NULL, fall back to the issue_messages
+    table unchanged (covers issues predating the ai_session wiring).
 """
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
@@ -54,12 +61,136 @@ async def _assert_issue_visible(issue_id: int, auth) -> dict:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
 
 
+def _map_ai_message_to_issue_message(
+    row: dict[str, Any],
+    *,
+    issue_id: int,
+    session_user_id: Optional[UUID],
+) -> IssueMessage:
+    """Map a single ai_messages row to the IssueMessage UI shape.
+
+    Mapping rules (Spec-1a Task 5):
+      role='user'      → kind='comment',       author_user_id=session's user
+      role='assistant' → kind='agent_run',     author_agent_id=ai_message.agent_id,
+                                               agent_run_id=metadata_json.run_id
+      role='system'    → kind='system_status', from_status / to_status from
+                                               metadata_json when kind=='status'
+    """
+    role: str = row.get("role", "")
+    meta: dict[str, Any] = row.get("metadata_json") or {}
+    raw_agent_id = row.get("agent_id")
+
+    if role == "user":
+        kind = IssueMessageKind.COMMENT
+        author_user_id: Optional[UUID] = session_user_id
+        author_agent_id: Optional[UUID] = None
+        agent_run_id: Optional[UUID] = None
+        from_status: Optional[str] = None
+        to_status: Optional[str] = None
+    elif role == "assistant":
+        kind = IssueMessageKind.AGENT_RUN
+        author_user_id = None
+        author_agent_id = UUID(str(raw_agent_id)) if raw_agent_id else None
+        raw_run_id = meta.get("run_id")
+        agent_run_id = UUID(str(raw_run_id)) if raw_run_id else None
+        from_status = None
+        to_status = None
+    else:
+        # role='system' — treat as system_status; extract from/to if present
+        kind = IssueMessageKind.SYSTEM_STATUS
+        author_user_id = None
+        author_agent_id = None
+        agent_run_id = None
+        if meta.get("kind") == "status":
+            from_status = meta.get("from") or None
+            to_status = meta.get("to") or None
+        else:
+            from_status = None
+            to_status = None
+
+    return IssueMessage(
+        id=UUID(str(row["id"])),
+        issue_id=issue_id,
+        kind=kind,
+        author_user_id=author_user_id,
+        author_agent_id=author_agent_id,
+        body=row.get("content"),
+        meta=meta,
+        agent_run_id=agent_run_id,
+        from_status=from_status,
+        to_status=to_status,
+        created_at=row["created_at"],
+    )
+
+
 @router.get("/{issue_id}/messages", response_model=IssueMessageList)
 async def list_issue_messages(issue_id: int, auth: AuthDep) -> IssueMessageList:
-    """Fetch the chat thread for an issue, oldest first."""
-    await _assert_issue_visible(issue_id, auth)
+    """Fetch the chat thread for an issue, oldest first.
+
+    Dual-path (Spec-1a Task 5):
+    - Session path: when the issue has ai_session_id set, reads ai_messages for
+      that session and maps each row to IssueMessage shape.
+    - Legacy path: when ai_session_id is None, reads issue_messages directly
+      (unchanged behaviour for issues predating the ai_session wiring).
+    """
+    issue_row = await _assert_issue_visible(issue_id, auth)
+    ai_session_id: Optional[str] = issue_row.get("ai_session_id")
 
     sb = await get_async_supabase_admin()
+
+    # ── Session path ──────────────────────────────────────────────────────
+    if ai_session_id:
+        # Fetch the session's user_id once (needed for user-role message mapping).
+        try:
+            session_resp = (
+                await sb.table("ai_sessions")
+                .select("id,user_id")
+                .eq("id", ai_session_id)
+                .maybe_single()
+                .execute()
+            )
+        except Exception as exc:
+            logger.exception(
+                f"fetch ai_session failed (issue_id={issue_id}, "
+                f"session_id={ai_session_id}): {exc}"
+            )
+            raise HTTPException(500, "failed to fetch session")
+
+        session_row = session_resp.data if session_resp else None
+        session_user_id: Optional[UUID] = None
+        if session_row and session_row.get("user_id"):
+            try:
+                session_user_id = UUID(str(session_row["user_id"]))
+            except (ValueError, AttributeError):
+                pass
+
+        # Read ai_messages for this session, oldest first.
+        try:
+            msgs_resp = (
+                await sb.table("ai_messages")
+                .select("*")
+                .eq("session_id", ai_session_id)
+                .order("created_at", desc=False)
+                .execute()
+            )
+        except Exception as exc:
+            logger.exception(
+                f"fetch ai_messages failed (issue_id={issue_id}, "
+                f"session_id={ai_session_id}): {exc}"
+            )
+            raise HTTPException(500, "failed to list messages")
+
+        rows = msgs_resp.data or []
+        messages = [
+            _map_ai_message_to_issue_message(
+                r, issue_id=issue_id, session_user_id=session_user_id
+            )
+            for r in rows
+        ]
+        return IssueMessageList(messages=messages, total=len(messages))
+
+    # ── Legacy path (no ai_session) ───────────────────────────────────────
+    # Unchanged: read issue_messages table so old issues render correctly.
     try:
         result = (
             await sb.table("issue_messages")
