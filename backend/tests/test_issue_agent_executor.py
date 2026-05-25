@@ -29,7 +29,8 @@ async def test_run_issue_agent_builds_prompt_and_records_output(monkeypatch):
     runner.run_turn = AsyncMock(
         return_value={"content": "Here is the 200-word essay...", "tool_calls": []}
     )
-    monkeypatch.setattr(m, "_build_runner", lambda composed_, settings_: runner)
+    monkeypatch.setattr(m, "_build_runner", lambda *a, **k: runner)
+    monkeypatch.setattr(m, "_load_user_providers", AsyncMock(return_value={}))
 
     rec = MagicMock()
     rec.__aenter__ = AsyncMock(return_value=rec)
@@ -74,3 +75,40 @@ async def test_run_issue_agent_raises_when_agent_missing(monkeypatch):
             agent_id=str(uuid4()),
             user_id=str(uuid4()),
         )
+
+
+async def test_load_user_providers_extracts_ai_providers(monkeypatch):
+    from app.services.issues import issue_agent_executor as m
+
+    async def fake_fetch_one(sql, params=None):
+        return {
+            "settings_json": {
+                "ai_settings": {"ai_providers": {"doubao": {"api_key": "k"}}}
+            }
+        }
+
+    with patch("app.db.engine.fetch_one", fake_fetch_one):
+        providers = await m._load_user_providers(str(uuid4()))
+    assert providers == {"doubao": {"api_key": "k"}}
+
+
+async def test_load_user_providers_handles_str_json_and_missing(monkeypatch):
+    import json
+
+    from app.services.issues import issue_agent_executor as m
+
+    # settings_json as a JSON string (asyncpg returns jsonb as str)
+    async def fake_str(sql, params=None):
+        return {
+            "settings_json": json.dumps({"ai_settings": {"ai_providers": {"qwen": {}}}})
+        }
+
+    with patch("app.db.engine.fetch_one", fake_str):
+        assert await m._load_user_providers(str(uuid4())) == {"qwen": {}}
+
+    # no user_settings row → {}
+    async def fake_none(sql, params=None):
+        return None
+
+    with patch("app.db.engine.fetch_one", fake_none):
+        assert await m._load_user_providers(str(uuid4())) == {}
