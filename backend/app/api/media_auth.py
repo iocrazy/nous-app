@@ -19,6 +19,7 @@ Future: ?share_token= and ?review_token= query params bypass cookie auth.
 import hashlib
 import hmac
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -37,37 +38,76 @@ MEDIA_TOKEN_MAX_AGE = (
     4 * 3600
 )  # 4 hours (refreshed on every Supabase TOKEN_REFRESHED event)
 
+_warned_fallback = False
 
-def _get_secret() -> str:
-    """Use SUPABASE_SERVICE_ROLE_KEY as HMAC secret (always available)."""
-    secret = settings.SUPABASE_SERVICE_ROLE_KEY
+
+def _signing_secret() -> str:
+    """Secret used to SIGN new tokens: MEDIA_TOKEN_SECRET if set, else the
+    service-role key (with a one-time warning — #276)."""
+    global _warned_fallback
+    secret = settings.MEDIA_TOKEN_SECRET or settings.SUPABASE_SERVICE_ROLE_KEY
+    if not settings.MEDIA_TOKEN_SECRET and not _warned_fallback:
+        logger.warning(
+            "MEDIA_TOKEN_SECRET not set — falling back to SUPABASE_SERVICE_ROLE_KEY "
+            "for media-token signing. Set MEDIA_TOKEN_SECRET to decouple (#276)."
+        )
+        _warned_fallback = True
     if not secret:
-        raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY not configured")
+        raise RuntimeError("No media-token secret configured")
     return secret
 
 
-def _sign_cookie(user_id: str, expires_at: int) -> str:
-    """Create a signed cookie value: user_id.expires_at.signature"""
-    payload = f"{user_id}.{expires_at}"
-    sig = hmac.new(
-        _get_secret().encode(),
-        payload.encode(),
-        hashlib.sha256,
-    ).hexdigest()[:32]
-    return f"{payload}.{sig}"
+def _verify_secrets() -> list[str]:
+    """Secrets to TRY when verifying (dual-secret grace): the dedicated secret
+    AND the legacy service-role key, deduped, non-empty."""
+    out: list[str] = []
+    for s in (settings.MEDIA_TOKEN_SECRET, settings.SUPABASE_SERVICE_ROLE_KEY):
+        if s and s not in out:
+            out.append(s)
+    return out
 
 
-def validate_media_cookie(cookie_value: str) -> Optional[str]:
-    """Validate cookie and return user_id if valid, None otherwise."""
-    if not cookie_value:
+def _hmac(secret: str, payload: str) -> str:
+    return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _sign_token(user_id: str, issued_at: int, expires_at: int) -> str:
+    """New 4-part token: user_id.issued_at.expires_at.sig (#275 adds issued_at)."""
+    payload = f"{user_id}.{issued_at}.{expires_at}"
+    return f"{payload}.{_hmac(_signing_secret(), payload)}"
+
+
+@dataclass(frozen=True)
+class _ParsedToken:
+    user_id: str
+    issued_at: Optional[int]  # None for legacy 3-part tokens
+    expires_at: int
+
+
+def _verify_token(value: str) -> Optional[_ParsedToken]:
+    """Verify signature + expiry for BOTH new (4-part) and legacy (3-part)
+    tokens, trying each grace secret. Returns parsed token or None. Pure /
+    sync — no denylist check here (that is async, added in Task 2)."""
+    if not value:
         return None
-    parts = cookie_value.split(".")
-    if len(parts) != 3:
+    # `.` is the field delimiter. Safe because user_ids are Supabase UUIDs
+    # (hyphens only, no dots) — revisit this parser if the user_id format
+    # ever changes (e.g. emails / custom ids).
+    parts = value.split(".")
+    if len(parts) == 4:
+        user_id, issued_str, expires_str, sig = parts
+        payload = f"{user_id}.{issued_str}.{expires_str}"
+        try:
+            issued_at: Optional[int] = int(issued_str)
+        except ValueError:
+            return None
+    elif len(parts) == 3:  # legacy grace
+        user_id, expires_str, sig = parts
+        payload = f"{user_id}.{expires_str}"
+        issued_at = None
+    else:
         return None
 
-    user_id, expires_str, sig = parts
-
-    # Check expiry
     try:
         expires_at = int(expires_str)
     except ValueError:
@@ -75,18 +115,64 @@ def validate_media_cookie(cookie_value: str) -> Optional[str]:
     if time.time() > expires_at:
         return None
 
-    # Verify signature
-    expected_payload = f"{user_id}.{expires_str}"
-    expected_sig = hmac.new(
-        _get_secret().encode(),
-        expected_payload.encode(),
-        hashlib.sha256,
-    ).hexdigest()[:32]
+    for secret in _verify_secrets():
+        if hmac.compare_digest(sig, _hmac(secret, payload)):
+            return _ParsedToken(
+                user_id=user_id, issued_at=issued_at, expires_at=expires_at
+            )
+    return None
 
-    if not hmac.compare_digest(sig, expected_sig):
+
+async def _get_redis():
+    from app.core.redis import get_async_redis
+
+    return await get_async_redis()
+
+
+def _revoke_key(user_id: str) -> str:
+    return f"revoke:media:{user_id}"
+
+
+async def revoke_media_tokens(user_id: str) -> None:
+    """Revoke all media tokens for a user issued at-or-before now (#275).
+
+    Best-effort: a Redis failure is logged, not raised (logout must not 500)."""
+    if not user_id:
+        return
+    try:
+        r = await _get_redis()
+        await r.set(_revoke_key(user_id), str(int(time.time())), ex=COOKIE_MAX_AGE)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"revoke_media_tokens failed for {user_id}: {e}")
+
+
+async def validate_media_cookie(cookie_value: str) -> Optional[str]:
+    """Verify (sig + expiry) then check the revocation denylist (#275)."""
+    parsed = _verify_token(cookie_value)
+    if parsed is None:
         return None
 
-    return user_id
+    # Denylist check. Fail-open on Redis error (token already proven authentic).
+    try:
+        r = await _get_redis()
+        raw = await r.get(_revoke_key(parsed.user_id))
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"media denylist check failed (fail-open) for {parsed.user_id}: {e}"
+        )
+        return parsed.user_id
+
+    if raw is not None:
+        try:
+            cutoff = int(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+        except (ValueError, AttributeError):
+            cutoff = None
+        if cutoff is not None:
+            if parsed.issued_at is None:
+                return None  # legacy token can't prove it post-dates the cutoff
+            if parsed.issued_at <= cutoff:
+                return None
+    return parsed.user_id
 
 
 @router.post("/media-session")
@@ -112,8 +198,9 @@ async def create_media_session(
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid user")
 
-        expires_at = int(time.time()) + COOKIE_MAX_AGE
-        cookie_value = _sign_cookie(user_id, expires_at)
+        now = int(time.time())
+        expires_at = now + COOKIE_MAX_AGE
+        cookie_value = _sign_token(user_id, now, expires_at)
 
         response = JSONResponse(content={"success": True})
 
@@ -139,7 +226,11 @@ async def create_media_session(
 
 @router.delete("/media-session")
 async def delete_media_session(request: Request):
-    """Clear the media session cookie on logout."""
+    """Clear the media session cookie AND revoke the user's media tokens (#275)."""
+    cookie_value = request.cookies.get(COOKIE_NAME, "")
+    parsed = _verify_token(cookie_value)
+    if parsed:
+        await revoke_media_tokens(parsed.user_id)
     response = JSONResponse(content={"success": True})
     response.delete_cookie(
         key=COOKIE_NAME,
@@ -173,8 +264,9 @@ async def create_media_token(
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid user")
 
-        expires_at = int(time.time()) + MEDIA_TOKEN_MAX_AGE
-        media_token = _sign_cookie(user_id, expires_at)
+        now = int(time.time())
+        expires_at = now + MEDIA_TOKEN_MAX_AGE
+        media_token = _sign_token(user_id, now, expires_at)
 
         return {"token": media_token, "expires_at": expires_at}
 
