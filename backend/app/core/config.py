@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = Field(
         default="", description="Supabase 服务角色密钥"
     )
+    MEDIA_TOKEN_SECRET: str = Field(
+        default="",
+        description="dedicated HMAC key for media tokens (#276); falls back to SUPABASE_SERVICE_ROLE_KEY when empty",
+    )
     SUPABASE_TENANT_ID: str = Field(
         default="", description="Supabase 多租户 ID (自托管)"
     )

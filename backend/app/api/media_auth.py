@@ -19,6 +19,7 @@ Future: ?share_token= and ?review_token= query params bypass cookie auth.
 import hashlib
 import hmac
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -37,37 +38,73 @@ MEDIA_TOKEN_MAX_AGE = (
     4 * 3600
 )  # 4 hours (refreshed on every Supabase TOKEN_REFRESHED event)
 
+_warned_fallback = False
 
-def _get_secret() -> str:
-    """Use SUPABASE_SERVICE_ROLE_KEY as HMAC secret (always available)."""
-    secret = settings.SUPABASE_SERVICE_ROLE_KEY
+
+def _signing_secret() -> str:
+    """Secret used to SIGN new tokens: MEDIA_TOKEN_SECRET if set, else the
+    service-role key (with a one-time warning — #276)."""
+    global _warned_fallback
+    secret = settings.MEDIA_TOKEN_SECRET or settings.SUPABASE_SERVICE_ROLE_KEY
+    if not settings.MEDIA_TOKEN_SECRET and not _warned_fallback:
+        logger.warning(
+            "MEDIA_TOKEN_SECRET not set — falling back to SUPABASE_SERVICE_ROLE_KEY "
+            "for media-token signing. Set MEDIA_TOKEN_SECRET to decouple (#276)."
+        )
+        _warned_fallback = True
     if not secret:
-        raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY not configured")
+        raise RuntimeError("No media-token secret configured")
     return secret
 
 
-def _sign_cookie(user_id: str, expires_at: int) -> str:
-    """Create a signed cookie value: user_id.expires_at.signature"""
-    payload = f"{user_id}.{expires_at}"
-    sig = hmac.new(
-        _get_secret().encode(),
-        payload.encode(),
-        hashlib.sha256,
-    ).hexdigest()[:32]
-    return f"{payload}.{sig}"
+def _verify_secrets() -> list[str]:
+    """Secrets to TRY when verifying (dual-secret grace): the dedicated secret
+    AND the legacy service-role key, deduped, non-empty."""
+    out: list[str] = []
+    for s in (settings.MEDIA_TOKEN_SECRET, settings.SUPABASE_SERVICE_ROLE_KEY):
+        if s and s not in out:
+            out.append(s)
+    return out
 
 
-def validate_media_cookie(cookie_value: str) -> Optional[str]:
-    """Validate cookie and return user_id if valid, None otherwise."""
-    if not cookie_value:
+def _hmac(secret: str, payload: str) -> str:
+    return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _sign_token(user_id: str, issued_at: int, expires_at: int) -> str:
+    """New 4-part token: user_id.issued_at.expires_at.sig (#275 adds issued_at)."""
+    payload = f"{user_id}.{issued_at}.{expires_at}"
+    return f"{payload}.{_hmac(_signing_secret(), payload)}"
+
+
+@dataclass(frozen=True)
+class _ParsedToken:
+    user_id: str
+    issued_at: Optional[int]  # None for legacy 3-part tokens
+    expires_at: int
+
+
+def _verify_token(value: str) -> Optional[_ParsedToken]:
+    """Verify signature + expiry for BOTH new (4-part) and legacy (3-part)
+    tokens, trying each grace secret. Returns parsed token or None. Pure /
+    sync — no denylist check here (that is async, added in Task 2)."""
+    if not value:
         return None
-    parts = cookie_value.split(".")
-    if len(parts) != 3:
+    parts = value.split(".")
+    if len(parts) == 4:
+        user_id, issued_str, expires_str, sig = parts
+        payload = f"{user_id}.{issued_str}.{expires_str}"
+        try:
+            issued_at: Optional[int] = int(issued_str)
+        except ValueError:
+            return None
+    elif len(parts) == 3:  # legacy grace
+        user_id, expires_str, sig = parts
+        payload = f"{user_id}.{expires_str}"
+        issued_at = None
+    else:
         return None
 
-    user_id, expires_str, sig = parts
-
-    # Check expiry
     try:
         expires_at = int(expires_str)
     except ValueError:
@@ -75,18 +112,44 @@ def validate_media_cookie(cookie_value: str) -> Optional[str]:
     if time.time() > expires_at:
         return None
 
-    # Verify signature
-    expected_payload = f"{user_id}.{expires_str}"
-    expected_sig = hmac.new(
-        _get_secret().encode(),
-        expected_payload.encode(),
-        hashlib.sha256,
-    ).hexdigest()[:32]
+    for secret in _verify_secrets():
+        if hmac.compare_digest(sig, _hmac(secret, payload)):
+            return _ParsedToken(
+                user_id=user_id, issued_at=issued_at, expires_at=expires_at
+            )
+    return None
 
-    if not hmac.compare_digest(sig, expected_sig):
-        return None
 
-    return user_id
+def validate_media_cookie(cookie_value: str) -> Optional[str]:
+    """Validate cookie and return user_id if valid, None otherwise.
+
+    Thin sync delegate — Task 2 will replace this with an async version
+    that also checks the Redis denylist (#275)."""
+    parsed = _verify_token(cookie_value)
+    return parsed.user_id if parsed else None
+
+
+# ---------------------------------------------------------------------------
+# Legacy shims — kept for callers that have not been updated yet.
+# ---------------------------------------------------------------------------
+
+
+def _get_secret() -> str:
+    """DEPRECATED: use _signing_secret() or _verify_secrets().
+
+    Kept as a shim for app.workflows.ai_transcription which builds its own
+    3-part HMAC token for Volcengine ASR.  Returns the signing secret so that
+    the generated URL can still be validated by _verify_token."""
+    return _signing_secret()
+
+
+def _sign_cookie(user_id: str, expires_at: int) -> str:
+    """DEPRECATED: use _sign_token().
+
+    Thin shim — produces a legacy 3-part token using the current signing
+    secret so callers that haven't been updated continue to work."""
+    payload = f"{user_id}.{expires_at}"
+    return f"{payload}.{_hmac(_signing_secret(), payload)}"
 
 
 @router.post("/media-session")
@@ -112,8 +175,9 @@ async def create_media_session(
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid user")
 
-        expires_at = int(time.time()) + COOKIE_MAX_AGE
-        cookie_value = _sign_cookie(user_id, expires_at)
+        now = int(time.time())
+        expires_at = now + COOKIE_MAX_AGE
+        cookie_value = _sign_token(user_id, now, expires_at)
 
         response = JSONResponse(content={"success": True})
 
@@ -173,8 +237,9 @@ async def create_media_token(
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid user")
 
-        expires_at = int(time.time()) + MEDIA_TOKEN_MAX_AGE
-        media_token = _sign_cookie(user_id, expires_at)
+        now = int(time.time())
+        expires_at = now + MEDIA_TOKEN_MAX_AGE
+        media_token = _sign_token(user_id, now, expires_at)
 
         return {"token": media_token, "expires_at": expires_at}
 
