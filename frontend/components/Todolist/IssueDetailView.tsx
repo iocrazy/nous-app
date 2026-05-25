@@ -10,7 +10,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ChevronLeft, MoreHorizontal, AlignLeft, Paperclip, FileText, Plus,
-  MessageSquare, Activity, Link2,
+  MessageSquare, Activity, Link2, Bot,
 } from 'lucide-react';
 import type { UiIssue, AgentRef } from './types';
 import type { IssueMessage } from '../../services/issueMessageService';
@@ -20,6 +20,7 @@ import { IssueActivityTab } from './IssueActivityTab';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox } from './IssueReplyBox';
 import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
+import { dispatchIssue } from '../../services/issuesService';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
 
@@ -30,16 +31,19 @@ interface IssueDetailViewProps {
   selfUserId?: string;
   /** Opens the New Issue dialog in "sub-issue" mode (parent_id pre-set). */
   onCreateSubIssue: (parentId: number) => void;
+  /** Called after a successful dispatch so the parent can re-fetch the issue row. */
+  onIssueDispatched?: () => void;
 }
 
 type DetailTab = 'chat' | 'activity' | 'related';
 
-export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue }) => {
+export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue, onIssueDispatched }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const [tab, setTab] = useState<DetailTab>('chat');
   const [messages, setMessages] = useState<IssueMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dispatching, setDispatching] = useState(false);
   const { addToast } = useToast();
 
   const refresh = useCallback(async () => {
@@ -115,6 +119,22 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     }
   };
 
+  const handleDispatch = async () => {
+    if (!issue?.id) return;
+    setDispatching(true);
+    try {
+      await dispatchIssue(issue.id);
+      await refresh();
+      onIssueDispatched?.();
+      addToast('Agent dispatched', 'success');
+    } catch (e) {
+      console.error('[IssueDetailView] dispatch failed', e);
+      addToast(e instanceof Error ? e.message : 'Dispatch failed', 'error');
+    } finally {
+      setDispatching(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950 border-t border-zinc-800/80">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/80 text-[13px] text-zinc-500">
@@ -176,6 +196,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             >
               <FileText size={13} /> New document
             </button>
+            {issue.assignee && ['backlog', 'todo'].includes(issue.status) && (
+              <button
+                onClick={handleDispatch}
+                disabled={dispatching}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-indigo-700/60 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={`Dispatch to ${issue.assignee.name}`}
+              >
+                <Bot size={13} /> {dispatching ? 'Dispatching…' : 'Dispatch to Agent'}
+              </button>
+            )}
           </div>
 
           <div className="flex items-center border-b border-zinc-800/80 mt-6">
