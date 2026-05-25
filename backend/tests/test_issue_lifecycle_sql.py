@@ -18,7 +18,7 @@ async def test_atomic_checkout_updates_with_lock_guard():
         captured["params"] = params
         return 1
 
-    with patch("app.db.engine.execute", fake_execute):
+    with patch("app.db.engine.execute_as_service_role", fake_execute):
         locked = await il.atomic_checkout(42, "wf-1")
 
     assert locked is True
@@ -33,7 +33,7 @@ async def test_atomic_checkout_returns_false_when_no_row():
     async def fake_execute(sql, params=None):
         return 0
 
-    with patch("app.db.engine.execute", fake_execute):
+    with patch("app.db.engine.execute_as_service_role", fake_execute):
         assert await il.atomic_checkout(42, "wf-1") is False
 
 
@@ -47,7 +47,7 @@ async def test_set_status_in_progress_sets_started_at():
         captured["params"] = params
         return 1
 
-    with patch("app.db.engine.execute", fake_execute):
+    with patch("app.db.engine.execute_as_service_role", fake_execute):
         await il.set_status(7, "in_progress")
 
     assert "status = :status" in captured["sql"]
@@ -66,7 +66,7 @@ async def test_set_status_blocked_writes_jsonb_error_state():
         captured["params"] = params
         return 1
 
-    with patch("app.db.engine.execute", fake_execute):
+    with patch("app.db.engine.execute_as_service_role", fake_execute):
         await il.set_status(7, "blocked", error_code="x", error_message="boom")
 
     assert "execution_state = CAST(:state AS jsonb)" in captured["sql"]
@@ -94,7 +94,7 @@ async def test_set_status_done_sets_completed_at():
         captured["params"] = params
         return 1
 
-    with patch("app.db.engine.execute", fake_execute):
+    with patch("app.db.engine.execute_as_service_role", fake_execute):
         await il.set_status(7, "done")
 
     assert "completed_at = :ts" in captured["sql"]
@@ -111,7 +111,7 @@ async def test_set_status_cancelled_sets_cancelled_at():
         captured["params"] = params
         return 1
 
-    with patch("app.db.engine.execute", fake_execute):
+    with patch("app.db.engine.execute_as_service_role", fake_execute):
         await il.set_status(7, "cancelled")
 
     assert "cancelled_at = :ts" in captured["sql"]
@@ -128,7 +128,7 @@ async def test_clear_lock_nullifies_execution_lock():
         captured["params"] = params
         return 1
 
-    with patch("app.db.engine.execute", fake_execute):
+    with patch("app.db.engine.execute_as_service_role", fake_execute):
         await il.clear_lock(5)
 
     assert "execution_locked_at = NULL" in captured["sql"]

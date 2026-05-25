@@ -35,7 +35,8 @@ async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
     """Atomically claim an issue. False if someone else already holds the lock."""
     from app.db import engine as db_engine
 
-    locked = await db_engine.execute(
+    # execution fields are service_role-only (issues_update_allowlist, mig 170)
+    locked = await db_engine.execute_as_service_role(
         "UPDATE public.issues SET execution_locked_at = now(), "
         "dbos_workflow_id = :wid "
         "WHERE id = :id AND execution_locked_at IS NULL",
@@ -73,7 +74,8 @@ async def set_status(
             {"error_code": error_code, "error_message": error_message}
         )
     params["id"] = issue_id
-    await db_engine.execute(
+    # may write execution_state (service_role-only via issues_update_allowlist)
+    await db_engine.execute_as_service_role(
         f"UPDATE public.issues SET {', '.join(cols)} WHERE id = :id", params
     )
 
@@ -83,7 +85,7 @@ async def clear_lock(issue_id: int) -> None:
     """Release the execution lock so the issue can be retried later."""
     from app.db import engine as db_engine
 
-    await db_engine.execute(
+    await db_engine.execute_as_service_role(
         "UPDATE public.issues SET execution_locked_at = NULL WHERE id = :id",
         {"id": issue_id},
     )
@@ -95,7 +97,8 @@ async def acquire_turn_lock(issue_id: int) -> bool:
     issues.execution_locked_at (shared with execute_issue dispatch) but does
     NOT touch dbos_workflow_id — the dispatch-status UI subscribes to that.
     Returns True if acquired, False if a turn is already in flight."""
-    locked = await _engine().execute(
+    # execution_locked_at is service_role-only (issues_update_allowlist, mig 170)
+    locked = await _engine().execute_as_service_role(
         "UPDATE public.issues SET execution_locked_at = now() "
         "WHERE id = :id AND execution_locked_at IS NULL",
         {"id": issue_id},

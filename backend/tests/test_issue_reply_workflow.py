@@ -34,12 +34,13 @@ async def test_acquire_turn_lock_true_when_free(monkeypatch):
     from app.workflows import issue_lifecycle as m
 
     fake_engine = AsyncMock()
-    fake_engine.execute = AsyncMock(return_value=1)  # 1 row updated → acquired
+    # execution_locked_at is service_role-only (issues_update_allowlist, mig 170)
+    fake_engine.execute_as_service_role = AsyncMock(return_value=1)  # acquired
     monkeypatch.setattr(m, "_engine", lambda: fake_engine, raising=False)
 
     got = await m.acquire_turn_lock.__wrapped__(99)
     assert got is True
-    sql = fake_engine.execute.call_args.args[0]
+    sql = fake_engine.execute_as_service_role.call_args.args[0]
     assert "execution_locked_at = now()" in sql
     assert "dbos_workflow_id" not in sql  # decision #2: do not touch wf id
 
@@ -49,7 +50,7 @@ async def test_acquire_turn_lock_false_when_held(monkeypatch):
     from app.workflows import issue_lifecycle as m
 
     fake_engine = AsyncMock()
-    fake_engine.execute = AsyncMock(return_value=0)  # 0 rows → already locked
+    fake_engine.execute_as_service_role = AsyncMock(return_value=0)  # already locked
     monkeypatch.setattr(m, "_engine", lambda: fake_engine, raising=False)
 
     assert await m.acquire_turn_lock.__wrapped__(99) is False
