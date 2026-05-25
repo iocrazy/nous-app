@@ -79,44 +79,6 @@ async def clear_lock(issue_id: int) -> None:
 
 
 @DBOS.step()
-async def create_agent_run_for_issue(
-    issue_id: int, agent_id: str, user_id: str, dbos_workflow_id: str
-) -> Optional[str]:
-    """Create an agent_runs row linked to the issue. Returns run id or None
-    (never blocks the workflow on it)."""
-    import uuid
-
-    from app.db import engine as db_engine
-
-    run_id = str(uuid.uuid4())
-    now_dt = datetime.now(timezone.utc)
-    try:
-        await db_engine.execute(
-            "INSERT INTO public.agent_runs (id, agent_id, user_id, issue_id, "
-            "status, trigger, started_at, heartbeat_at, last_useful_action_at) "
-            "VALUES (:id, :agent_id, :user_id, :issue_id, 'running', "
-            "'issue_dispatch', :now, :now, :now)",
-            {
-                "id": run_id,
-                "agent_id": agent_id,
-                "user_id": user_id,
-                "issue_id": issue_id,
-                "now": now_dt,
-            },
-        )
-        logger.info(
-            f"[execute_issue] created agent_run {run_id} for issue {issue_id} "
-            f"(agent={agent_id}, dbos_wf={dbos_workflow_id})"
-        )
-        return run_id
-    except Exception as exc:
-        logger.warning(
-            f"[execute_issue] agent_run insert failed for issue {issue_id}: {exc}"
-        )
-        return None
-
-
-@DBOS.step()
 async def load_issue(issue_id: int) -> dict[str, Any]:
     """Read issue row as a plain dict (serializes through DBOS step memo).
 
@@ -140,6 +102,18 @@ async def load_issue(issue_id: int) -> dict[str, Any]:
     return out
 
 
+@DBOS.step(retries_allowed=True, max_attempts=2)
+async def run_issue_agent_step(
+    issue: dict[str, Any], agent_id: str, user_id: str
+) -> Optional[str]:
+    """Run the assigned agent on the issue. The RunRecorder (issue_id-linked)
+    + mig-208 triggers write the result into the issue chat; we just return the
+    text. Retryable: each attempt is a fresh agent_runs row + LLM call."""
+    from app.services.issues.issue_agent_executor import run_issue_agent
+
+    return await run_issue_agent(issue=issue, agent_id=agent_id, user_id=user_id)
+
+
 @DBOS.workflow()
 async def execute_issue(issue_id: int) -> dict[str, Any]:
     """Parent workflow — owns the issue lifecycle."""
@@ -159,16 +133,15 @@ async def execute_issue(issue_id: int) -> dict[str, Any]:
         user_id = issue_row.get("created_by_user_id") or issue_row.get(
             "assignee_user_id"
         )
-        agent_run_id: Optional[str] = None
         if agent_id and user_id:
-            agent_run_id = await create_agent_run_for_issue(
-                issue_id, agent_id, user_id, workflow_id
-            )
-
-        result: dict[str, Any] = {"issue_id": issue_id, "agent_run_id": agent_run_id}
-        if agent_run_id is None:
-            await set_status(issue_id, "done")
-        return result
+            await run_issue_agent_step(issue_row, agent_id, user_id)
+            # Agent output is already in the chat (mig-208 bridge). Move to
+            # in_review so a human confirms — agents don't self-close yet.
+            await set_status(issue_id, "in_review")
+            return {"issue_id": issue_id, "executed": True}
+        # No agent assigned → nothing to run; close it out.
+        await set_status(issue_id, "done")
+        return {"issue_id": issue_id, "executed": False}
 
     except Exception as exc:  # noqa: BLE001
         await set_status(
