@@ -287,13 +287,13 @@ try:
         user_id = None
 
         if token:
-            user_id = validate_media_cookie(token)
+            user_id = await validate_media_cookie(token)
         if not user_id and review_token:
             pass  # TODO: validate review token
         if not user_id:
             cookie_value = request.cookies.get(COOKIE_NAME, "")
             if cookie_value:
-                user_id = validate_media_cookie(cookie_value)
+                user_id = await validate_media_cookie(cookie_value)
 
         if not user_id and not share_token:
             raise HTTPException(status_code=401, detail="Authentication required")

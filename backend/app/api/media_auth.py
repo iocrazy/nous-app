@@ -120,13 +120,56 @@ def _verify_token(value: str) -> Optional[_ParsedToken]:
     return None
 
 
-def validate_media_cookie(cookie_value: str) -> Optional[str]:
-    """Validate cookie and return user_id if valid, None otherwise.
+async def _get_redis():
+    from app.core.redis import get_async_redis
 
-    Thin sync delegate — Task 2 will replace this with an async version
-    that also checks the Redis denylist (#275)."""
+    return await get_async_redis()
+
+
+def _revoke_key(user_id: str) -> str:
+    return f"revoke:media:{user_id}"
+
+
+async def revoke_media_tokens(user_id: str) -> None:
+    """Revoke all media tokens for a user issued at-or-before now (#275).
+
+    Best-effort: a Redis failure is logged, not raised (logout must not 500)."""
+    if not user_id:
+        return
+    try:
+        r = await _get_redis()
+        await r.set(_revoke_key(user_id), str(int(time.time())), ex=COOKIE_MAX_AGE)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"revoke_media_tokens failed for {user_id}: {e}")
+
+
+async def validate_media_cookie(cookie_value: str) -> Optional[str]:
+    """Verify (sig + expiry) then check the revocation denylist (#275)."""
     parsed = _verify_token(cookie_value)
-    return parsed.user_id if parsed else None
+    if parsed is None:
+        return None
+
+    # Denylist check. Fail-open on Redis error (token already proven authentic).
+    try:
+        r = await _get_redis()
+        raw = await r.get(_revoke_key(parsed.user_id))
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"media denylist check failed (fail-open) for {parsed.user_id}: {e}"
+        )
+        return parsed.user_id
+
+    if raw is not None:
+        try:
+            cutoff = int(raw.decode() if isinstance(raw, (bytes, bytearray)) else raw)
+        except (ValueError, AttributeError):
+            cutoff = None
+        if cutoff is not None:
+            if parsed.issued_at is None:
+                return None  # legacy token can't prove it post-dates the cutoff
+            if parsed.issued_at <= cutoff:
+                return None
+    return parsed.user_id
 
 
 # ---------------------------------------------------------------------------

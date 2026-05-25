@@ -105,7 +105,7 @@ async def serve_slide_file(
     from app.api.media_auth import validate_media_cookie
 
     if not auth and token:
-        if not validate_media_cookie(token):
+        if not await validate_media_cookie(token):
             raise HTTPException(status_code=401, detail="Invalid token")
     elif not auth:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -149,7 +149,7 @@ async def serve_audio_file(
     from app.api.media_auth import validate_media_cookie
 
     if not auth and token:
-        if not validate_media_cookie(token):
+        if not await validate_media_cookie(token):
             raise HTTPException(status_code=401, detail="Invalid token")
     elif not auth:
         raise HTTPException(status_code=401, detail="Authentication required")
