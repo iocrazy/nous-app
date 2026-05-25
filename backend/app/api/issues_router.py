@@ -186,11 +186,17 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
             detail="DBOS not enabled — issue dispatch unavailable",
         )
 
+    import uuid as _uuid
+
     from dbos import DBOS, SetWorkflowID
 
     from app.workflows.issue_lifecycle import execute_issue
 
-    workflow_id = f"issue-{issue_id}"
+    # Unique per dispatch so an issue can be re-dispatched after a prior run
+    # finished or errored — a fixed `issue-{id}` id would dedup in DBOS → the
+    # re-dispatch becomes a silent no-op. The atomic_checkout CAS lock
+    # (execution_locked_at) still prevents concurrent double-runs.
+    workflow_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
     try:
         with SetWorkflowID(workflow_id):
             DBOS.start_workflow(execute_issue, issue_id)

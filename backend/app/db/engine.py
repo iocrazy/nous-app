@@ -137,6 +137,30 @@ async def execute(sql: str, params: Optional[dict] = None) -> int:
         return result.rowcount
 
 
+async def execute_as_service_role(sql: str, params: Optional[dict] = None) -> int:
+    """Like ``execute`` but runs the statement with ``current_user =
+    service_role`` (``SET LOCAL ROLE service_role`` inside the txn).
+
+    Required for writes guarded by column-allowlist triggers that only
+    service_role may perform — e.g. ``public.issues`` execution fields
+    (``execution_locked_at`` / ``dbos_workflow_id`` / ``execution_state``),
+    enforced by the ``issues_update_allowlist`` trigger (migration 170).
+    Restores the ``SET ROLE service_role`` behavior the raw-psycopg DBOS path
+    had before the SQLAlchemy-engine migration (#340) dropped it. The engine
+    connects as ``postgres``, which is a member of ``service_role``, so the
+    SET LOCAL succeeds; it is transaction-scoped and auto-resets on commit.
+    """
+    from sqlalchemy import text
+
+    eng = get_engine()
+    async with eng.begin() as conn:
+        # SET LOCAL ROLE takes a role identifier, not a bound parameter; the
+        # value is a fixed literal (no user input), so there is no injection.
+        await conn.execute(text("SET LOCAL ROLE service_role"))
+        result = await conn.execute(text(sql), params or {})
+        return result.rowcount
+
+
 async def execute_returning_val(sql: str, params: Optional[dict] = None) -> Any:
     """INSERT / UPDATE ... RETURNING <col> inside an auto-committing
     transaction → the first scalar of the RETURNING row, or None.
