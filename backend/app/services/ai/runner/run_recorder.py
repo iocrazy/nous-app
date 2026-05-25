@@ -79,6 +79,7 @@ class RunRecorder:
     session_id: Optional[UUID] = None
     team_id: Optional[int] = None
     project_id: Optional[int] = None
+    issue_id: Optional[int] = None  # links this run to an issue via mig-208 triggers
     model: Optional[str] = None
     provider: Optional[str] = None
     input_summary: Optional[str] = None
@@ -330,6 +331,8 @@ class RunRecorder:
         }
         # Drop None values so DB defaults (e.g., now()) apply.
         payload = {k: v for k, v in payload.items() if v is not None}
+        if self.issue_id is not None:
+            payload["issue_id"] = self.issue_id
         result = await client.table("agent_runs").insert(payload).execute()
         if result.data:
             self.run_id = UUID(str(result.data[0]["id"]))
