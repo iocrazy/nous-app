@@ -18,6 +18,17 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
+# noqa: F401 — module-level handle for run_issue_reply_step + tests
+from app.services.ai.chat.ai_library_chat_service import (  # noqa: F401
+    AILibraryChatService,
+)
+
+
+def _engine():
+    from app.db import engine as db_engine
+
+    return db_engine
+
 
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
@@ -76,6 +87,48 @@ async def clear_lock(issue_id: int) -> None:
         "UPDATE public.issues SET execution_locked_at = NULL WHERE id = :id",
         {"id": issue_id},
     )
+
+
+@DBOS.step()
+async def acquire_turn_lock(issue_id: int) -> bool:
+    """Claim the per-issue turn lock for a reply turn. Reuses
+    issues.execution_locked_at (shared with execute_issue dispatch) but does
+    NOT touch dbos_workflow_id — the dispatch-status UI subscribes to that.
+    Returns True if acquired, False if a turn is already in flight."""
+    locked = await _engine().execute(
+        "UPDATE public.issues SET execution_locked_at = now() "
+        "WHERE id = :id AND execution_locked_at IS NULL",
+        {"id": issue_id},
+    )
+    return locked > 0
+
+
+@DBOS.step()
+async def ensure_issue_session_step(issue_id: int) -> str:
+    """Get-or-create the issue's ai_session; raise if the issue has no
+    assignable agent (nothing to respond with)."""
+    from app.services.issues.issue_session import get_or_create_issue_session
+
+    session_id = await get_or_create_issue_session(issue_id)
+    if not session_id:
+        raise RuntimeError(f"issue {issue_id} has no assignable agent session")
+    return session_id
+
+
+@DBOS.step(retries_allowed=True, max_attempts=2)
+async def run_issue_reply_step(
+    *, session_id: str, user_id: str, reply_text: str
+) -> Optional[str]:
+    """Run one reply turn on the issue's session via the full chat runtime."""
+    from uuid import UUID
+
+    result = await AILibraryChatService().run_session_turn(
+        UUID(session_id),
+        user_id=UUID(user_id),
+        content=reply_text,
+        trigger="issue_reply",
+    )
+    return (result.get("assistant_message") or {}).get("content") or ""
 
 
 @DBOS.step()
