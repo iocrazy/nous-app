@@ -95,6 +95,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           setStreamingText('');
         } else if (event.phase === 'done') {
           setIsAgentWorking(false);
+          setStreamingText('');
         }
       }
     })
@@ -104,6 +105,10 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           return;
         }
         ws = socket;
+        ws.onclose = () => {
+          setStreamingText('');
+          setIsAgentWorking(false);
+        };
       })
       .catch((err) => {
         // Ticket acquisition failure — not fatal; initial refresh() still shows messages.

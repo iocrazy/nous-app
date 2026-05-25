@@ -39,6 +39,12 @@ async def publish_status(issue_id: int, phase: str) -> None:
 async def publish_message(
     issue_id: int, ai_message_row: dict[str, Any], *, session_user_id: Optional[UUID]
 ) -> None:
+    if not ai_message_row or not ai_message_row.get("id"):
+        logger.warning(
+            f"[issue_chat_stream] skip publish_message — empty assistant row (issue={issue_id})"
+        )
+        return
+
     from app.services.issues.issue_message_mapper import (
         map_ai_message_to_issue_message,
     )

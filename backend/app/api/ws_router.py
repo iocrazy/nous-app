@@ -127,6 +127,10 @@ async def _resolve_issue_ws_user(
 
         user_id = await consume_ticket(ticket)
     elif token:
+        logger.warning(
+            "[WS issue] DEPRECATED ?token= auth — JWT leaked to access logs. "
+            "Client should use ?ticket=."
+        )
         user_id = await _authenticate_ws(token)
     if not user_id:
         return None

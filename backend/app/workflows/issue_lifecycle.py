@@ -240,13 +240,15 @@ async def load_issue(issue_id: int) -> dict[str, Any]:
     return out
 
 
-@DBOS.step(retries_allowed=True, max_attempts=2)
+@DBOS.step()
 async def run_issue_agent_step(
     issue: dict[str, Any], agent_id: str, user_id: str
 ) -> Optional[str]:
     """Run the assigned agent on the issue. The RunRecorder (issue_id-linked)
     + mig-208 triggers write the result into the issue chat; we just return the
-    text. Retryable: each attempt is a fresh agent_runs row + LLM call."""
+    text. No retry: run_issue_agent calls run_session_turn which is non-idempotent
+    (appends user msg + charges) and streams per-token chunks — a retry would
+    re-emit the whole stream (double bubble) and re-charge the user."""
     from app.services.issues.issue_agent_executor import run_issue_agent
 
     return await run_issue_agent(issue=issue, agent_id=agent_id, user_id=user_id)
