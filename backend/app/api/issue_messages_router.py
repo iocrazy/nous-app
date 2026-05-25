@@ -22,9 +22,12 @@ Spec-1a (Task 5): GET /{issue_id}/messages has a dual read path.
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from dbos import DBOS, SetWorkflowID
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
@@ -38,6 +41,8 @@ from app.schemas.issue_message import (
     IssueMessagePost,
     IssueMessagePostResponse,
 )
+from app.services.issues.issue_session import get_or_create_issue_session
+from app.workflows.issue_lifecycle import respond_to_issue_reply
 
 router = APIRouter(prefix="/issues", tags=["Issue Messages"])
 
@@ -218,15 +223,61 @@ async def list_issue_messages(issue_id: int, auth: AuthDep) -> IssueMessageList:
 async def post_issue_message(
     issue_id: int, payload: IssueMessagePost, auth: AuthDep
 ) -> IssueMessagePostResponse:
-    """Post a comment on an issue. If `agent_id` is set, also record an
-    agent_run placeholder in the same thread (the actual run is dispatched
-    via the existing /api/v1/issues/{id}/dispatch path or the workforce
-    runtime — A8.4 wires the dispatch trigger end-to-end)."""
-    await _assert_issue_visible(issue_id, auth)
+    """Post a human comment on an issue.
 
+    Session path (Spec-1b): when the issue has an assigned agent, the comment
+    is treated as a reply that drives another agent turn on the issue's
+    ai_session (respond_to_issue_reply workflow). The human message + the
+    agent reply are persisted as ai_messages by run_session_turn and surface
+    through GET /messages (Spec-1a). The returned comment is a synthesized
+    optimistic row; the canonical thread comes from GET.
+
+    Legacy path: issues with no assigned agent keep the issue_messages insert.
+    """
+    issue_row = await _assert_issue_visible(issue_id, auth)
+    assignee_agent_id = issue_row.get("assignee_agent_id")
+
+    # ── Session path (Spec-1b) ────────────────────────────────────────────
+    if assignee_agent_id:
+        session_id = await get_or_create_issue_session(issue_id)
+        if not session_id:
+            raise HTTPException(500, "issue has an agent but no resolvable session")
+
+        # The turn runs as the issue OWNER (BYO-key/adapter context), mirroring
+        # get_or_create_issue_session; the replying human's identity is not
+        # separately threaded (single-owner-issue assumption).
+        owner_id = issue_row.get("created_by_user_id") or issue_row.get(
+            "assignee_user_id"
+        )
+        if not owner_id:
+            raise HTTPException(500, "issue has no owner to run the turn as")
+
+        wf_id = f"issue-reply-{issue_id}-{uuid.uuid4()}"
+        try:
+            with SetWorkflowID(wf_id):
+                DBOS.start_workflow(
+                    respond_to_issue_reply, issue_id, str(owner_id), payload.body
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                f"dispatch respond_to_issue_reply failed (issue_id={issue_id}): {exc}"
+            )
+            raise HTTPException(500, "failed to dispatch reply turn")
+
+        # Optimistic comment for immediate render; GET (ai_messages) is canonical.
+        comment = IssueMessage(
+            id=uuid.uuid4(),
+            issue_id=issue_id,
+            kind=IssueMessageKind.COMMENT,
+            author_user_id=auth.user_id,
+            body=payload.body,
+            meta={"optimistic": True},
+            created_at=datetime.now(timezone.utc),
+        )
+        return IssueMessagePostResponse(comment=comment, agent_run=None)
+
+    # ── Legacy path (no assigned agent) ───────────────────────────────────
     sb = await get_async_supabase_admin()
-
-    # 1. Insert the user's comment.
     comment_row = {
         "issue_id": issue_id,
         "kind": IssueMessageKind.COMMENT.value,
@@ -244,60 +295,7 @@ async def post_issue_message(
         raise HTTPException(500, "comment insert returned no row")
 
     comment = IssueMessage.model_validate(comment_resp.data[0])
-
-    # 2. If agent_id provided, dispatch a real agent_run. mig 208's
-    #    INSERT trigger emits the "Agent picking up…" chat row, the
-    #    terminal trigger updates it with the summary on completion,
-    #    and the liveness scanner updates the pill color while running.
-    #
-    #    NOTE: the agent_run row is created in 'running' state with the
-    #    issue linkage. The actual execution stack (workforce /
-    #    AgentRunner / DBOS) is responsible for filling in
-    #    output_summary / cost / tokens / status='completed' when the
-    #    run finishes. Until that wiring lands, runs sit in 'running'
-    #    forever — the liveness scanner will eventually mark them dead
-    #    via the 5-minute stuck threshold, which is the correct
-    #    visible behaviour.
-    agent_run: Optional[IssueMessage] = None
-    if payload.agent_id is not None:
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).isoformat()
-        run_payload = {
-            "agent_id": str(payload.agent_id),
-            "user_id": str(auth.user_id),
-            "issue_id": issue_id,
-            "status": "running",
-            "trigger": "issue_reply",
-            "started_at": now,
-            "heartbeat_at": now,
-            "last_useful_action_at": now,
-            "input_summary": payload.body[:500],
-        }
-        try:
-            await sb.table("agent_runs").insert(run_payload).execute()
-        except Exception as exc:
-            logger.exception(f"agent_run insert failed (issue_id={issue_id}): {exc}")
-            # Don't fail the whole request — comment is already posted.
-
-        # The dispatch trigger emitted the chat row; fetch it so the
-        # frontend can show it immediately without waiting for Realtime.
-        try:
-            chat_resp = (
-                await sb.table("issue_messages")
-                .select("*")
-                .eq("issue_id", issue_id)
-                .eq("kind", IssueMessageKind.AGENT_RUN.value)
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if chat_resp.data:
-                agent_run = IssueMessage.model_validate(chat_resp.data[0])
-        except Exception as exc:
-            logger.exception(f"fetch agent_run chat row after dispatch failed: {exc}")
-
-    return IssueMessagePostResponse(comment=comment, agent_run=agent_run)
+    return IssueMessagePostResponse(comment=comment, agent_run=None)
 
 
 @router.post("/{issue_id}/agent-runs/{run_id}/simulate-complete")
