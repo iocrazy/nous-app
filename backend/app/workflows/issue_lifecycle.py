@@ -131,6 +131,68 @@ async def run_issue_reply_step(
     return (result.get("assistant_message") or {}).get("content") or ""
 
 
+# Spec-1b: bounded wait for the per-issue turn lock. Replies are human-paced,
+# so a turn almost always frees the lock within seconds; the cap only bounds
+# the pathological "reply lands during a multi-minute turn" case.
+REPLY_LOCK_MAX_ATTEMPTS = 20
+REPLY_LOCK_WAIT_SECONDS = 6
+
+
+async def _run_reply_turns(
+    issue_id: int,
+    user_id: str,
+    reply_text: str,
+    *,
+    session_id: str,
+    acquire,
+    run_turn,
+    release,
+    sleep,
+    max_attempts: int = REPLY_LOCK_MAX_ATTEMPTS,
+    wait_seconds: int = REPLY_LOCK_WAIT_SECONDS,
+) -> dict[str, Any]:
+    """Acquire the per-issue turn lock (waiting if a turn is in flight), run
+    exactly one reply turn, then release. No status change (Spec-1b)."""
+    acquired = False
+    for _ in range(max_attempts):
+        if await acquire(issue_id):
+            acquired = True
+            break
+        await sleep(wait_seconds)
+
+    if not acquired:
+        logger.warning(
+            f"[issue_reply] issue {issue_id}: turn lock busy after "
+            f"{max_attempts} attempts; deferring reply (text durable in input)"
+        )
+        return {"issue_id": issue_id, "deferred": True}
+
+    try:
+        await run_turn(session_id=session_id, user_id=user_id, reply_text=reply_text)
+        return {"issue_id": issue_id, "executed": True}
+    finally:
+        await release(issue_id)
+
+
+@DBOS.workflow()
+async def respond_to_issue_reply(
+    issue_id: int, user_id: str, reply_text: str
+) -> dict[str, Any]:
+    """Spec-1b: run one agent turn in response to a human reply on an issue.
+    Serialized per issue via the turn lock; does NOT change issue status."""
+    session_id = await ensure_issue_session_step(issue_id)
+    return await _run_reply_turns(
+        issue_id,
+        user_id,
+        reply_text,
+        session_id=session_id,
+        acquire=acquire_turn_lock,
+        run_turn=run_issue_reply_step,
+        release=clear_lock,
+        sleep=DBOS.sleep,
+    )
+
+
 @DBOS.step()
 async def load_issue(issue_id: int) -> dict[str, Any]:
     """Read issue row as a plain dict (serializes through DBOS step memo).
