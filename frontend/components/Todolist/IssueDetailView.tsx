@@ -4,6 +4,9 @@
  * Fetches messages on mount, subscribes to Realtime issue_messages
  * inserts so new comments / status changes / agent runs stream in
  * without manual refresh.
+ *
+ * Agent replies now stream token-by-token over the /ws/issue/{id}
+ * WebSocket (replaces polling from commit 3453a990).
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -21,12 +24,9 @@ import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox } from './IssueReplyBox';
 import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
 import { dispatchIssue } from '../../services/issuesService';
+import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
-
-// ── Polling constants ──────────────────────────────────────────────────────
-const POLL_INTERVAL_MS = 2500;
-const POLL_HARD_CAP_MS = 3 * 60 * 1000; // 3 minutes
 
 interface IssueDetailViewProps {
   issue: UiIssue;
@@ -48,34 +48,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
-  // isPolling: true while the active-polling window is open (after dispatch/reply,
-  // or on mount when issue is already in_progress).
-  const [isPolling, setIsPolling] = useState(false);
+  const [isAgentWorking, setIsAgentWorking] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
   const { addToast } = useToast();
 
-  // Refs used inside the polling interval closure so they're always current
-  // without needing to restart the interval.
+  // Stable ref so the WS event handler always reads the latest messages
+  // without needing to re-open the socket.
   const messagesRef = useRef<IssueMessage[]>([]);
-  const issueStatusRef = useRef(issue.status);
-  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollingCapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Keep refs in sync with state/props.
   useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => { issueStatusRef.current = issue.status; }, [issue.status]);
 
-  const stopPolling = useCallback(() => {
-    if (pollingIntervalRef.current !== null) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-    }
-    if (pollingCapRef.current !== null) {
-      clearTimeout(pollingCapRef.current);
-      pollingCapRef.current = null;
-    }
-    setIsPolling(false);
-  }, []);
-
+  // ── Initial + post-action fetch ─────────────────────────────────────────
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -91,75 +73,51 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // ── Active polling window ───────────────────────────────────────────────
-  // Start polling: sample every POLL_INTERVAL_MS, stop when an agent/assistant
-  // message has arrived AND the issue is no longer in_progress, or after the
-  // hard cap elapses.
-  const startPolling = useCallback(() => {
-    // Never run two overlapping intervals.
-    if (pollingIntervalRef.current !== null) return;
-
-    setIsPolling(true);
-
-    // Snapshot the message count at the time polling starts so we can detect
-    // whether a NEW agent/assistant message has arrived.
-    const baseCount = messagesRef.current.filter(
-      (m) => m.kind === 'agent_run' || (m.kind === 'comment' && m.author_agent_id),
-    ).length;
-
-    pollingIntervalRef.current = setInterval(() => {
-      void (async () => {
-        try {
-          const list = await listIssueMessages(issue.id);
-          setMessages(list.messages);
-          messagesRef.current = list.messages;
-
-          // Stop condition: a new agent/assistant message has arrived AND
-          // the issue is no longer actively running.
-          const newCount = list.messages.filter(
-            (m) => m.kind === 'agent_run' || (m.kind === 'comment' && m.author_agent_id),
-          ).length;
-          const hasNewAgentMsg = newCount > baseCount;
-          const isStillRunning = issueStatusRef.current === 'in_progress';
-
-          if (hasNewAgentMsg && !isStillRunning) {
-            stopPolling();
-          }
-        } catch {
-          // silently continue; don't stop polling on transient network errors
-        }
-      })();
-    }, POLL_INTERVAL_MS);
-
-    // Hard cap: always stop after 3 minutes regardless of state.
-    pollingCapRef.current = setTimeout(() => {
-      stopPolling();
-    }, POLL_HARD_CAP_MS);
-  }, [issue.id, stopPolling]);
-
-  // On mount: if issue is already in_progress (dispatched elsewhere), start polling.
-  // Also re-run when issue.status flips to in_progress from another prop update.
+  // ── WebSocket: open on mount / issue.id change, close on unmount ────────
   useEffect(() => {
-    if (issue.status === 'in_progress') {
-      startPolling();
-    }
-    // If status leaves in_progress and we have new agent messages, stop polling.
-    if (issue.status !== 'in_progress' && pollingIntervalRef.current !== null) {
-      const hasAgentMsg = messagesRef.current.some(
-        (m) => m.kind === 'agent_run' || (m.kind === 'comment' && m.author_agent_id),
-      );
-      if (hasAgentMsg) stopPolling();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [issue.status]);
+    let ws: WebSocket | null = null;
+    let cancelled = false;
 
-  // Clean up on unmount.
-  useEffect(() => () => { stopPolling(); }, [stopPolling]);
+    openIssueChatSocket(issue.id, (event) => {
+      if (event.type === 'chunk') {
+        setStreamingText((prev) => prev + event.delta);
+      } else if (event.type === 'message') {
+        // Push the finalized message (dedupe by id).
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === event.message.id)) return prev;
+          return [...prev, event.message];
+        });
+        setStreamingText('');
+        setIsAgentWorking(false);
+      } else if (event.type === 'status') {
+        if (event.phase === 'running') {
+          setIsAgentWorking(true);
+          setStreamingText('');
+        } else if (event.phase === 'done') {
+          setIsAgentWorking(false);
+        }
+      }
+    })
+      .then((socket) => {
+        if (cancelled) {
+          socket.close();
+          return;
+        }
+        ws = socket;
+      })
+      .catch((err) => {
+        // Ticket acquisition failure — not fatal; initial refresh() still shows messages.
+        console.debug('[IssueDetailView/WS] socket open failed:', err);
+      });
 
-  // Realtime: handle both INSERT (new comment / new agent_run dispatch)
-  // and UPDATE (agent_run lifecycle progresses — placeholder body
-  // becomes the real summary; liveness pill flips colour). REPLICA
-  // IDENTITY FULL on issue_messages (set in mig 205) means the UPDATE
+    return () => {
+      cancelled = true;
+      ws?.close();
+    };
+  }, [issue.id]);
+
+  // ── Realtime: INSERT + UPDATE on issue_messages ──────────────────────────
+  // REPLICA IDENTITY FULL on issue_messages (mig 205) means the UPDATE
   // payload includes the full row, not just changed columns.
   useEffect(() => {
     const supa = getSupabaseClient();
@@ -210,10 +168,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       // discards the optimistic id.
       await refresh();
       addToast(agentId ? 'Reply posted; agent dispatched' : 'Comment posted', 'success');
-      // A reply with an agent triggers a new agent turn (ai_messages, not
-      // issue_messages), so Realtime won't catch it. Start the polling window
-      // so the user sees the reply when it lands without a manual refresh.
-      if (agentId) startPolling();
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Send failed', 'error');
       throw err; // signal failure to keep textarea content
@@ -228,9 +182,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       await refresh();
       onIssueDispatched?.();
       addToast('Agent dispatched', 'success');
-      // Dispatch kicks off an agent turn; start polling so the agent reply
-      // surfaces automatically (ai_messages are not caught by Realtime).
-      startPolling();
     } catch (e) {
       console.error('[IssueDetailView] dispatch failed', e);
       addToast(e instanceof Error ? e.message : 'Dispatch failed', 'error');
@@ -238,10 +189,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       setDispatching(false);
     }
   };
-
-  // isAgentWorking: true while issue is in_progress OR the active-polling
-  // window is running after a dispatch / reply.
-  const isAgentWorking = issue.status === 'in_progress' || isPolling;
 
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950 border-t border-zinc-800/80">
@@ -348,7 +295,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               )}
               {loading && messages.length === 0
                 ? <div className="text-[14px] text-zinc-500 italic px-4 py-12 text-center">Loading messages…</div>
-                : <IssueChatThread messages={messages} agentsById={agentsById} selfUserId={selfUserId} />}
+                : <IssueChatThread messages={messages} agentsById={agentsById} selfUserId={selfUserId} streamingText={streamingText} />}
               {isAgentWorking && (
                 <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-zinc-400">
                   <span
