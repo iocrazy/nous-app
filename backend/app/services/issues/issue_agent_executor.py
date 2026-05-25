@@ -24,11 +24,40 @@ from app.services.ai.runner.run_recorder import RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService
 
 
-def _build_runner(composed: Any, settings: Any) -> AgentRunner:
-    """Build an adapter + AgentRunner for the composed agent (platform keys)."""
-    from app.services.ai.adapters.factory import get_adapter
+async def _load_user_providers(user_id: str) -> dict[str, Any]:
+    """Load the user's BYO AI provider config (ai_settings.ai_providers) from
+    user_settings. Returns {} when absent — get_adapter_for_user then falls
+    back to platform keys per provider."""
+    import json
 
-    adapter = get_adapter(composed.model, settings)
+    from app.db import engine as db_engine
+
+    row = await db_engine.fetch_one(
+        "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
+        {"uid": user_id},
+    )
+    if not row:
+        return {}
+    settings_json = row.get("settings_json")
+    if isinstance(settings_json, str):
+        try:
+            settings_json = json.loads(settings_json)
+        except (ValueError, TypeError):
+            return {}
+    ai_settings = (settings_json or {}).get("ai_settings", {}) or {}
+    return ai_settings.get("ai_providers", {}) or {}
+
+
+def _build_runner(
+    composed: Any, settings: Any, user_providers: dict[str, Any]
+) -> AgentRunner:
+    """Adapter + AgentRunner for the composed agent. Uses the user's BYO
+    provider config — get_adapter_for_user derives the provider from the model
+    and falls back to platform keys per provider when the user hasn't set one.
+    (Plain get_adapter/platform-only would fail for BYO-only deployments.)"""
+    from app.services.ai.adapters.factory import get_adapter_for_user
+
+    adapter = get_adapter_for_user(composed.model, user_providers, settings)
     return AgentRunner(adapter=adapter, skill_tool=SkillToolService(SkillRepository()))
 
 
@@ -67,7 +96,8 @@ async def run_issue_agent(
         )
     )
 
-    runner = _build_runner(composed, settings)
+    user_providers = await _load_user_providers(user_id)
+    runner = _build_runner(composed, settings, user_providers)
     user_messages = [{"role": "user", "content": _build_user_message(issue)}]
 
     async with RunRecorder(
