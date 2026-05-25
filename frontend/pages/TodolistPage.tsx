@@ -246,6 +246,13 @@ export function TodolistPage() {
             setNewIssueParentId(parentId);
             setNewIssueOpen(true);
           }}
+          onIssueDispatched={() => {
+            if (identifier) {
+              getIssueByIdentifier(identifier).then((raw) => {
+                setSelectedIssue(toUiIssue(raw, agentsById));
+              }).catch(() => { /* ignore — Realtime will sync eventually */ });
+            }
+          }}
         />
         {newIssueOpen && (
           <NewIssueDialog

@@ -135,39 +135,26 @@ async def test_clear_lock_nullifies_execution_lock():
     assert captured["params"] == {"id": 5}
 
 
-async def test_create_agent_run_for_issue_inserts_fields():
+async def test_run_issue_agent_step_invokes_executor(monkeypatch):
     import app.workflows.issue_lifecycle as il
 
-    captured = {}
+    ran = {}
 
-    async def fake_execute(sql, params=None):
-        captured["sql"] = sql
-        captured["params"] = params
-        return 1
+    async def fake_run_issue_agent(*, issue, agent_id, user_id):
+        ran["issue_id"] = issue["id"]
+        ran["agent_id"] = agent_id
+        ran["user_id"] = user_id
+        return "essay output"
 
-    with patch("app.db.engine.execute", fake_execute):
-        run_id = await il.create_agent_run_for_issue(
-            7, "agent-uuid", "user-uuid", "wf-1"
-        )
-
-    assert "INSERT INTO public.agent_runs" in captured["sql"]
-    assert "'running'" in captured["sql"] and "'issue_dispatch'" in captured["sql"]
-    assert captured["params"]["issue_id"] == 7
-    assert captured["params"]["agent_id"] == "agent-uuid"
-    assert captured["params"]["user_id"] == "user-uuid"
-    assert run_id is not None
-
-
-async def test_create_agent_run_returns_none_on_db_error():
-    import app.workflows.issue_lifecycle as il
-
-    async def fake_execute(sql, params=None):
-        raise RuntimeError("boom")
-
-    # Insert failure must NOT block the workflow — returns None.
-    with patch("app.db.engine.execute", fake_execute):
-        run_id = await il.create_agent_run_for_issue(7, "a", "u", "wf-1")
-    assert run_id is None
+    monkeypatch.setattr(
+        "app.services.issues.issue_agent_executor.run_issue_agent",
+        fake_run_issue_agent,
+    )
+    out = await il.run_issue_agent_step(
+        {"id": 409, "title": "t", "description": "d"}, "agent-uuid", "user-uuid"
+    )
+    assert ran == {"issue_id": 409, "agent_id": "agent-uuid", "user_id": "user-uuid"}
+    assert out == "essay output"
 
 
 async def test_load_issue_normalizes_datetime_and_uuid():
