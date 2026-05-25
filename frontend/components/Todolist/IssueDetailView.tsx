@@ -254,11 +254,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
         </div>
       </div>
 
-      <IssueReplyBox
-        agents={agents}
-        defaultAgentId={issue.assignee?.id ?? null}
-        onSubmit={handleReply}
-      />
+      {/* Constrain the composer to the same column width as the conversation. */}
+      <div className="w-full max-w-3xl mx-auto">
+        <IssueReplyBox
+          agents={agents}
+          defaultAgentId={issue.assignee?.id ?? null}
+          onSubmit={handleReply}
+        />
+      </div>
     </div>
   );
 };
