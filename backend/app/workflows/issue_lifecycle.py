@@ -115,7 +115,9 @@ async def ensure_issue_session_step(issue_id: int) -> str:
     return session_id
 
 
-@DBOS.step(retries_allowed=True, max_attempts=2)
+@DBOS.step()
+# no step retry: run_session_turn is non-idempotent (appends user msg + charges);
+# it has its own internal LLM fallback chain.
 async def run_issue_reply_step(
     *, session_id: str, user_id: str, reply_text: str
 ) -> Optional[str]:
@@ -134,8 +136,8 @@ async def run_issue_reply_step(
 # Spec-1b: bounded wait for the per-issue turn lock. Replies are human-paced,
 # so a turn almost always frees the lock within seconds; the cap only bounds
 # the pathological "reply lands during a multi-minute turn" case.
-REPLY_LOCK_MAX_ATTEMPTS = 20
-REPLY_LOCK_WAIT_SECONDS = 6
+REPLY_LOCK_MAX_ATTEMPTS = 60
+REPLY_LOCK_WAIT_SECONDS = 10
 
 
 async def _run_reply_turns(
@@ -162,8 +164,9 @@ async def _run_reply_turns(
 
     if not acquired:
         logger.warning(
-            f"[issue_reply] issue {issue_id}: turn lock busy after "
-            f"{max_attempts} attempts; deferring reply (text durable in input)"
+            f"[issue_reply] issue {issue_id}: turn lock busy for ~10min"
+            f" ({max_attempts} attempts); reply NOT processed — user must"
+            " re-send. (Coalescing is the planned fix.)"
         )
         return {"issue_id": issue_id, "deferred": True}
 
@@ -189,7 +192,7 @@ async def respond_to_issue_reply(
         acquire=acquire_turn_lock,
         run_turn=run_issue_reply_step,
         release=clear_lock,
-        sleep=DBOS.sleep,
+        sleep=DBOS.sleep_async,
     )
 
 
