@@ -127,13 +127,30 @@ async def ensure_issue_session_step(issue_id: int) -> str:
 # no step retry: run_session_turn is non-idempotent (appends user msg + charges);
 # it has its own internal LLM fallback chain.
 async def run_issue_reply_step(
-    *, issue_id: int, session_id: str, user_id: str, reply_text: str
+    *,
+    issue_id: int,
+    session_id: str,
+    user_id: str,
+    reply_text: str,
+    attachments: Optional[list[dict]] = None,
 ) -> Optional[str]:
-    """Run one reply turn, streaming token deltas + the final message to Redis."""
+    """Run one reply turn, streaming token deltas + the final message to Redis.
+
+    ``attachments`` is a list of serialised AttachmentRequest dicts (from the
+    router's model_dump() call). They are deserialised back to AttachmentRequest
+    objects here before being passed to run_session_turn, which follows the same
+    resolve_attachments path used by the chat router (sub-plan 1, G2).
+    """
     from uuid import UUID
+
+    from app.schemas.ai_library_chat import AttachmentRequest
 
     async def _cb(delta: str) -> None:
         await publish_chunk(issue_id, delta)
+
+    attachment_objects = (
+        [AttachmentRequest(**a) for a in attachments] if attachments else None
+    )
 
     result = await AILibraryChatService().run_session_turn(
         UUID(session_id),
@@ -141,6 +158,7 @@ async def run_issue_reply_step(
         content=reply_text,
         trigger="issue_reply",
         chunk_callback=_cb,
+        attachments=attachment_objects,
     )
     assistant = result.get("assistant_message") or {}
     await publish_message(issue_id, assistant, session_user_id=None)
@@ -166,6 +184,7 @@ async def _run_reply_turns(
     sleep,
     max_attempts: int = REPLY_LOCK_MAX_ATTEMPTS,
     wait_seconds: int = REPLY_LOCK_WAIT_SECONDS,
+    attachments: Optional[list[dict]] = None,
 ) -> dict[str, Any]:
     """Acquire the per-issue turn lock (waiting if a turn is in flight), run
     exactly one reply turn, then release. No status change (Spec-1b)."""
@@ -190,6 +209,7 @@ async def _run_reply_turns(
             session_id=session_id,
             user_id=user_id,
             reply_text=reply_text,
+            attachments=attachments,
         )
         return {"issue_id": issue_id, "executed": True}
     finally:
@@ -198,10 +218,18 @@ async def _run_reply_turns(
 
 @DBOS.workflow()
 async def respond_to_issue_reply(
-    issue_id: int, user_id: str, reply_text: str
+    issue_id: int,
+    user_id: str,
+    reply_text: str,
+    attachments: Optional[list[dict]] = None,
 ) -> dict[str, Any]:
     """Spec-1b: run one agent turn in response to a human reply on an issue.
-    Serialized per issue via the turn lock; does NOT change issue status."""
+    Serialized per issue via the turn lock; does NOT change issue status.
+
+    ``attachments`` (added in sub-plan 3, Task 5) is a list of serialised
+    AttachmentRequest dicts forwarded to run_session_turn so the agent turn
+    can process images/PDFs pasted or dragged into the reply box.
+    """
     session_id = await ensure_issue_session_step(issue_id)
     await publish_status(issue_id, "running")
     try:
@@ -214,6 +242,7 @@ async def respond_to_issue_reply(
             run_turn=run_issue_reply_step,
             release=clear_lock,
             sleep=DBOS.sleep_async,
+            attachments=attachments,
         )
     finally:
         await publish_status(issue_id, "done")

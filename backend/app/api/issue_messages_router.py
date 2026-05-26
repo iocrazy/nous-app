@@ -191,11 +191,20 @@ async def post_issue_message(
         if not owner_id:
             raise HTTPException(500, "issue has no owner to run the turn as")
 
+        attachments_payload = (
+            [a.model_dump() for a in payload.attachments]
+            if payload.attachments
+            else None
+        )
         wf_id = f"issue-reply-{issue_id}-{uuid.uuid4()}"
         try:
             with SetWorkflowID(wf_id):
                 DBOS.start_workflow(
-                    respond_to_issue_reply, issue_id, str(owner_id), payload.body
+                    respond_to_issue_reply,
+                    issue_id,
+                    str(owner_id),
+                    payload.body,
+                    attachments_payload,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
