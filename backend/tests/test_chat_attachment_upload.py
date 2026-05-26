@@ -285,6 +285,44 @@ async def test_upload_rejects_oversize_via_content_length(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_upload_rejects_oversize_via_body_when_content_length_absent(monkeypatch):
+    """When Content-Length is absent/lying, the streamed body cap still fires
+    (413) and the file is never persisted."""
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(router_module, "_CHAT_ATTACHMENT_MAX_BYTES", 8)
+    # Valid PNG header (passes magic-byte gate) but larger than the patched
+    # 8-byte cap, with NO content-length so the pre-check is skipped.
+    payload = b"\x89PNG\r\n\x1a\n" + b"x" * 50
+    upload = _FakeUpload("big.png", payload, content_type="image/png")
+    req = _make_request(upload=upload)  # no content_length
+    fake_save = _patch_save(monkeypatch, return_value={})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router_module.upload_chat_attachment(_auth(), req)
+    assert exc_info.value.status_code == 413
+    fake_save.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upload_rejects_empty_file(monkeypatch):
+    """A 0-byte upload (allowed extension, no bytes) is rejected with 400
+    before persistence — it never reaches the magic-byte gate."""
+    from fastapi import HTTPException
+
+    upload = _FakeUpload("empty.png", b"", content_type="image/png")
+    req = _make_request(upload=upload)
+    fake_save = _patch_save(monkeypatch, return_value={})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await router_module.upload_chat_attachment(_auth(), req)
+    assert exc_info.value.status_code == 400
+    fake_save.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_upload_missing_file_field_returns_400(monkeypatch):
     from fastapi import HTTPException
 

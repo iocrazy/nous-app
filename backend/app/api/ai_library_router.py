@@ -2090,11 +2090,12 @@ async def delete_mcp_server(server_id: UUID, auth: AuthDep) -> None:
 # ─── B: Chat attachment upload (temp storage for one-off chat use) ────
 
 
-from pathlib import Path as _Path
-
 # Per-attachment hard cap. Bounds how much we buffer in memory while
 # validating an upload before it is persisted as a temp resource on the
-# shared library (via save_chat_temp_upload).
+# shared library (via save_chat_temp_upload). Buffering a validated upload
+# costs ~50MB transient memory per request (acceptable: capped + single
+# worker); the old code streamed to /tmp but /tmp is not shared with the
+# worker container, which is exactly what this change fixes.
 _CHAT_ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 
 _ALLOWED_EXTS = {
@@ -2191,7 +2192,7 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
         raise HTTPException(status_code=400, detail="missing 'file' field")
 
     filename = upload.filename or "upload"
-    ext = _Path(filename).suffix.lower()
+    ext = Path(filename).suffix.lower()
     if ext not in _ALLOWED_EXTS:
         raise HTTPException(
             status_code=415,
@@ -2234,10 +2235,19 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
                     detail=f"file exceeds {_CHAT_ATTACHMENT_MAX_BYTES} bytes",
                 )
     finally:
+        # Best-effort release of the multipart field's underlying buffer.
+        # The bytes are already buffered above, so a close error here is
+        # irrelevant to the upload's success.
         try:
             await upload.close()
         except Exception:
             pass
+
+    # An empty body never reaches the magic-byte gate (the read loop exits
+    # immediately), so guard it explicitly — an empty file is not a valid
+    # image/video/pdf attachment.
+    if not buf:
+        raise HTTPException(status_code=400, detail="uploaded file is empty")
 
     mime_guess = upload.content_type if hasattr(upload, "content_type") else None
 
