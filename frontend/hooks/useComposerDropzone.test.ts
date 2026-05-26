@@ -107,4 +107,16 @@ describe('useComposerDropzone', () => {
     });
     expect(onFiles).not.toHaveBeenCalled();
   });
+
+  it('resets isDragActive when disabled flips to true mid-drag', () => {
+    const { result, rerender } = renderHook(
+      ({ disabled }: { disabled: boolean }) =>
+        useComposerDropzone({ onFiles: vi.fn(), disabled }),
+      { initialProps: { disabled: false } },
+    );
+    act(() => result.current.rootProps.onDragEnter(_dragEvent('dragenter')));
+    expect(result.current.isDragActive).toBe(true);
+    rerender({ disabled: true });
+    expect(result.current.isDragActive).toBe(false);
+  });
 });

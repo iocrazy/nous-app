@@ -77,13 +77,18 @@ describe('IssueReplyBox', () => {
     });
   });
 
-  it('shows the "Drop files to attach" overlay on drag enter', () => {
+  it('shows the drop-files overlay on drag enter', () => {
     const { container } = render(
       <IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />,
     );
     const wrapper = container.firstElementChild! as HTMLElement;
     fireEvent.dragEnter(wrapper);
-    expect(screen.getByText(/Drop files to attach/i)).toBeInTheDocument();
+    // Accept either the resolved English string OR the raw i18n key (no
+    // i18next instance is initialized in unit tests, so useTranslation
+    // returns the key verbatim).
+    expect(
+      screen.getByText(/Drop files to attach|chat\.attachments\.dropToUpload/i),
+    ).toBeInTheDocument();
   });
 
   it('clears chips after a successful send', async () => {

@@ -1316,7 +1316,8 @@
       "remove": "Remove",
       "tooLarge": "{{name}} is too large ({{size}} > 50MB)",
       "tooMany": "Too many files ({{count}} > {{max}})",
-      "uploadFailed": "Upload \"{{name}}\" failed: {{message}}"
+      "uploadFailed": "Upload \"{{name}}\" failed: {{message}}",
+      "dropToUpload": "Drop files to attach"
     },
     "followups": {
       "title": "Followups",

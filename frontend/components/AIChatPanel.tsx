@@ -122,11 +122,13 @@ export function AIChatPanel({
 
   // Paste + drag-drop upload hooks — all three funnel files into handleFiles
   // which reuses the same validation/upload pipeline as the picker button.
-  const composerDisabled = sending || !activeSessionId || !selectedAgentSlug;
-  const { handleFiles } = useChatAttachmentUpload({
+  const { handleFiles, uploading } = useChatAttachmentUpload({
     attachments: stagedAttachments,
     onChange: setStagedAttachments,
   });
+  // Block send while any pasted/dropped file is still uploading — otherwise
+  // hitting Enter mid-upload silently drops the in-flight chips.
+  const composerDisabled = sending || !activeSessionId || !selectedAgentSlug || uploading;
   const { rootProps: dropzoneRootProps, isDragActive } = useComposerDropzone({
     onFiles: handleFiles,
     disabled: composerDisabled,
@@ -542,7 +544,7 @@ export function AIChatPanel({
             wrapper (the div with the dropzone handlers) not on this overlay. */}
         {isDragActive && (
           <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none bg-blue-500/10 border-2 border-dashed border-blue-400 rounded-lg">
-            <span className="text-sm font-medium text-blue-200">Drop files to attach</span>
+            <span className="text-sm font-medium text-blue-200">{t('chat.attachments.dropToUpload')}</span>
           </div>
         )}
       </div>

@@ -9,6 +9,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Send, ChevronDown } from 'lucide-react';
 import type { AgentRef } from './types';
 import { ChatAttachmentPicker } from '../ChatAttachmentPicker';
@@ -27,6 +28,7 @@ interface IssueReplyBoxProps {
 }
 
 export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAgentId, onSubmit, disabled }) => {
+  const { t } = useTranslation();
   const [body, setBody] = useState('');
   const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -36,26 +38,30 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
   const selectedAgent = agents.find((a) => a.id === agentId) ?? null;
 
   // Upload pipeline — shared with ChatAttachmentPicker
-  const { handleFiles } = useChatAttachmentUpload({
+  const { handleFiles, uploading } = useChatAttachmentUpload({
     attachments: stagedAttachments,
     onChange: setStagedAttachments,
   });
 
+  // Block send while any pasted/dropped file is still uploading — otherwise
+  // hitting Cmd+Enter mid-upload silently drops the in-flight chips.
+  const inputBlocked = disabled || submitting || uploading;
+
   // Drag-and-drop handler for the wrapper div
   const { rootProps, isDragActive } = useComposerDropzone({
     onFiles: handleFiles,
-    disabled: disabled || submitting,
+    disabled: inputBlocked,
   });
 
   // Paste-from-clipboard handler for the textarea
   const { onPaste } = useComposerPaste({
     onFiles: handleFiles,
-    disabled: disabled || submitting,
+    disabled: inputBlocked,
   });
 
   const submit = async () => {
     const trimmed = body.trim();
-    if (!trimmed || submitting) return;
+    if (!trimmed || submitting || uploading) return;
     setSubmitting(true);
     try {
       await onSubmit(trimmed, agentId, stagedAttachments);
@@ -78,7 +84,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
         <ChatAttachmentPicker
           attachments={stagedAttachments}
           onChange={setStagedAttachments}
-          disabled={disabled || submitting}
+          disabled={inputBlocked}
         />
       </div>
 
@@ -88,7 +94,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
         onPaste={onPaste}
         placeholder="Reply"
         rows={3}
-        disabled={disabled || submitting}
+        disabled={inputBlocked}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             e.preventDefault();
@@ -149,7 +155,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
         <button
           aria-label="send"
           onClick={submit}
-          disabled={!body.trim() || disabled || submitting}
+          disabled={!body.trim() || inputBlocked}
           className="inline-flex items-center gap-1 px-3 py-1 text-[12px] rounded bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Send size={11} /> {submitting ? 'Sending…' : 'Send'}
@@ -159,7 +165,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
       {/* Drag-active overlay */}
       {isDragActive && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none bg-blue-500/10 border-2 border-dashed border-blue-400 rounded-lg">
-          <span className="text-sm font-medium text-blue-200">Drop files to attach</span>
+          <span className="text-sm font-medium text-blue-200">{t('chat.attachments.dropToUpload')}</span>
         </div>
       )}
     </div>

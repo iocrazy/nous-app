@@ -10,7 +10,7 @@
  * `preventDefault()` even when disabled to avoid that, and skip the
  * `onFiles` callback in disabled mode.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 
 interface UseComposerDropzoneOpts {
@@ -64,11 +64,13 @@ export function useComposerDropzone(
     (e: DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (disabled) return;
+      // Always advance the counter on leave — if we skipped it when disabled,
+      // a flip from enabled→disabled mid-drag would leave the counter stuck
+      // above 0 and the overlay would never clear.
       counter.current = Math.max(0, counter.current - 1);
       if (counter.current === 0) setIsDragActive(false);
     },
-    [disabled],
+    [],
   );
 
   const onDrop = useCallback(
@@ -85,6 +87,17 @@ export function useComposerDropzone(
     },
     [disabled, onFiles],
   );
+
+  // If `disabled` flips true mid-drag (e.g. an upload starts and the parent
+  // wants to block further drops), clear the overlay immediately. Without
+  // this the user sees a "Drop files to attach" overlay that no longer
+  // accepts drops.
+  useEffect(() => {
+    if (disabled) {
+      counter.current = 0;
+      setIsDragActive(false);
+    }
+  }, [disabled]);
 
   return {
     rootProps: { onDragEnter, onDragOver, onDragLeave, onDrop },

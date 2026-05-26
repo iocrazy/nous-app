@@ -1316,7 +1316,8 @@
       "remove": "移除",
       "tooLarge": "{{name}} 过大（{{size}} > 50MB）",
       "tooMany": "文件过多（{{count}} > {{max}}）",
-      "uploadFailed": "上传 \"{{name}}\" 失败：{{message}}"
+      "uploadFailed": "上传 \"{{name}}\" 失败：{{message}}",
+      "dropToUpload": "拖放文件以附加"
     },
     "followups": {
       "title": "Followups",
