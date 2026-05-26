@@ -33,6 +33,13 @@ async def test_get_ttl_default_when_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_ttl_default_when_key_missing(monkeypatch):
+    """Row exists but chat_temp_ttl_days key absent → default."""
+    monkeypatch.setattr(m, "_fetch_settings_json", AsyncMock(return_value={}))
+    assert await m.get_chat_temp_ttl_days("personal", "u1") == m.DEFAULT_TTL_DAYS
+
+
+@pytest.mark.asyncio
 async def test_get_ttl_never_when_negative(monkeypatch):
     """-1 means 'never expire' → return None so sweeper skips."""
     monkeypatch.setattr(
@@ -60,9 +67,32 @@ async def test_set_ttl_invalid_value_raises():
         await m.set_chat_temp_ttl_days("personal", "u1", -2)
 
 
-def test_invalid_scope_type_raises():
+@pytest.mark.asyncio
+async def test_invalid_scope_type_raises():
     """Any function entering with wrong scope must reject — picked one path."""
-    import asyncio
-
     with pytest.raises(ValueError):
-        asyncio.run(m.get_chat_temp_ttl_days("project", "x"))
+        await m.get_chat_temp_ttl_days("project", "x")
+
+
+def test_upsert_sql_bind_params_are_correct():
+    """Guard against SQLAlchemy bind-param corruption (e.g. ::cast eating the colon)."""
+    from sqlalchemy import text
+
+    # Re-create what _upsert_settings_key builds, for both branches.
+    personal_sql = (
+        "INSERT INTO public.user_settings (user_id, settings_json) "
+        "VALUES (:scope_id, jsonb_build_object(:key, to_jsonb(CAST(:value AS int)))) "
+        "ON CONFLICT (user_id) DO UPDATE SET "
+        "settings_json = COALESCE(public.user_settings.settings_json, '{}'::jsonb) "
+        "|| jsonb_build_object(:key, to_jsonb(CAST(:value AS int))), "
+        "updated_at = NOW()"
+    )
+    team_sql = (
+        "UPDATE public.teams SET settings_json = "
+        "COALESCE(settings_json, '{}'::jsonb) "
+        "|| jsonb_build_object(:key, to_jsonb(CAST(:value AS int))) "
+        "WHERE id = :scope_id"
+    )
+    for sql in (personal_sql, team_sql):
+        bp = set(text(sql)._bindparams.keys())
+        assert bp == {"scope_id", "key", "value"}, f"unexpected bind params: {bp}"

@@ -99,12 +99,16 @@ async def _upsert_settings_key(
 
     if scope_type == "personal":
         # user_settings has UNIQUE(user_id) and may not have a row yet — upsert.
+        # NOTE: use CAST(:value AS int), NOT :value::int — SQLAlchemy's text()
+        # bind-param parser treats ``::`` as a Postgres cast and eats one ``:``
+        # from the param name, so ``:value::int`` registers as bind ``valu``
+        # and the params dict no longer matches → CompileError at execute time.
         sql = (
             "INSERT INTO public.user_settings (user_id, settings_json) "
-            "VALUES (:scope_id, jsonb_build_object(:key, to_jsonb(:value::int))) "
+            "VALUES (:scope_id, jsonb_build_object(:key, to_jsonb(CAST(:value AS int)))) "
             "ON CONFLICT (user_id) DO UPDATE SET "
             "settings_json = COALESCE(public.user_settings.settings_json, '{}'::jsonb) "
-            "|| jsonb_build_object(:key, to_jsonb(:value::int)), "
+            "|| jsonb_build_object(:key, to_jsonb(CAST(:value AS int))), "
             "updated_at = NOW()"
         )
     else:
@@ -112,7 +116,7 @@ async def _upsert_settings_key(
         sql = (
             "UPDATE public.teams SET settings_json = "
             "COALESCE(settings_json, '{}'::jsonb) "
-            "|| jsonb_build_object(:key, to_jsonb(:value::int)) "
+            "|| jsonb_build_object(:key, to_jsonb(CAST(:value AS int))) "
             "WHERE id = :scope_id"
         )
     await db_engine.execute(sql, {"scope_id": scope_id, "key": key, "value": value})
