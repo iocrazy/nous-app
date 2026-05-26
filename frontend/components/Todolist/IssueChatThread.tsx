@@ -176,17 +176,29 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
   const initials = displayName.slice(0, 2).toUpperCase();
   const color = agent?.avatar_color ?? (isSelf ? 'bg-indigo-500' : 'bg-zinc-600');
   return (
-    <div className="my-3">
-      <div className="flex items-center gap-2 mb-1.5">
-        <AgentAvatar initials={initials} color={color} />
-        <span className="text-xs font-medium text-zinc-200">{displayName}</span>
-        <span className="text-[12px] text-zinc-500">commented · {relativeTime(msg.created_at)}</span>
-      </div>
-      {msg.body && (
-        <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/30 p-3 text-[14px] text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">
-          {msg.body}
+    <div
+      data-testid="comment-row"
+      className={`flex my-2 ${isSelf ? 'justify-end' : 'justify-start'}`}
+    >
+      <div
+        data-testid="comment-bubble"
+        className={`max-w-[80%] rounded-lg px-3 py-2 ${
+          isSelf
+            ? 'bg-blue-600/15 border border-blue-700/40 text-zinc-100'
+            : 'bg-zinc-800 border border-zinc-700 text-zinc-200'
+        }`}
+      >
+        <div className="flex items-center gap-2 mb-1.5">
+          <AgentAvatar initials={initials} color={color} />
+          <span className="text-xs font-medium">{displayName}</span>
+          <span className="text-[12px] text-zinc-500">commented · {relativeTime(msg.created_at)}</span>
         </div>
-      )}
+        {msg.body && (
+          <div className="rounded text-[14px] leading-relaxed whitespace-pre-wrap break-words">
+            {msg.body}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
