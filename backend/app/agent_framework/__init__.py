@@ -158,9 +158,6 @@ from app.agent_framework.multimodal import (
     build_user_message as build_multimodal_user_message,
 )
 from app.agent_framework.multimodal import flatten_to_text as flatten_multimodal_to_text
-from app.agent_framework.multimodal import (
-    sniff_supports_vision,
-)
 from app.agent_framework.output_budget import (
     OutputBudget,
     derive_output_budget,
