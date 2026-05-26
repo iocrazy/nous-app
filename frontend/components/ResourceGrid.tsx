@@ -39,6 +39,9 @@ import type { ChipId } from './resources/filter/types';
 import type { UseFilterBarConfigReturn } from '../hooks/useFilterBarConfig';
 import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
 import { ResourceFetchUrlModal } from './ResourceFetchUrlModal';
+import { TempResourceActions } from './TempResourceActions';
+import { ttlBadgeText } from '../utils/tempTtl';
+import { tempTtlService } from '../services/tempTtlService';
 
 // ─── Skeleton components ────────────────────────────────
 
@@ -248,7 +251,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   const { t } = useTranslation();
   const ctx = useResourcesContext();
   const {
-    scopeType, selectedFolderId, selectedLibraryId, selectedSmartFolderId,
+    scopeType, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId,
     isResourcesView, isRecycleView, isSharedView,
     loading, viewMode, setViewMode, sortBy, setSortBy,
     searchQuery, folderChain, folderPreviews,
@@ -263,10 +266,27 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     handleTrashResource: handleTrash,
     handleRestoreResource: handleRestore,
     handlePermanentDelete,
+    reloadResources,
   } = ctx;
 
   // Mobile detection (matches Tailwind md: breakpoint at 768px)
   const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  // ─── Temp folder: TTL badge + Save actions ────────────
+  const inTempFolder = selectedFolder?.name === 'temp';
+  const [scopeTtl, setScopeTtl] = useState<number | null>(null);
+  useEffect(() => {
+    if (!inTempFolder || !scopeType || !scopeId) return;
+    let cancelled = false;
+    tempTtlService.getChatTempTtl(scopeType, scopeId).then((r) => {
+      if (cancelled) return;
+      setScopeTtl(r.ttl_days === -1 ? null : r.ttl_days);
+    }).catch((err) => {
+      console.warn('[ChatTtl] fetch failed:', err);
+      /* badge falls back to '' on error */
+    });
+    return () => { cancelled = true; };
+  }, [inTempFolder, scopeType, scopeId]);
 
   // Filter bar visibility — search-row toggle remembers the choice in
   // localStorage. Hidden in shared / recycle views where filters don't
@@ -943,7 +963,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   )}
                   {viewMode === 'grid' ? (
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
-                      {sortedItems.map((item) => (
+                      {sortedItems.map((item) => {
+                        const badge = inTempFolder ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                        return (
                         <div key={item.id} {...getItemTouchHandlers('file', item)}>
                         <ResourceCard
                           item={item}
@@ -977,12 +999,30 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           compositeId={`item:${item.id}`}
                           isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                         />
+                        {inTempFolder && (
+                          <div className="flex items-center gap-2 px-2 py-1.5 bg-zinc-900/60 rounded-b-xl border-t border-zinc-800/50">
+                            {badge && (
+                              <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
+                                {badge}
+                              </span>
+                            )}
+                            <TempResourceActions
+                              resourceId={item.resource_id}
+                              scopeType={scopeType}
+                              scopeId={scopeId}
+                              onDone={reloadResources}
+                            />
+                          </div>
+                        )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="space-y-1.5">
-                      {sortedItems.map((item) => (
+                      {sortedItems.map((item) => {
+                        const badge = inTempFolder ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                        return (
                         <div key={item.id} {...getItemTouchHandlers('file', item)}>
                         <ResourceCard
                           item={item}
@@ -1016,8 +1056,24 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           compositeId={`item:${item.id}`}
                           isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                         />
+                        {inTempFolder && (
+                          <div className="flex items-center gap-2 px-4 py-1.5 border-t border-zinc-800/50">
+                            {badge && (
+                              <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
+                                {badge}
+                              </span>
+                            )}
+                            <TempResourceActions
+                              resourceId={item.resource_id}
+                              scopeType={scopeType}
+                              scopeId={scopeId}
+                              onDone={reloadResources}
+                            />
+                          </div>
+                        )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

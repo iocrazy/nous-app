@@ -14,6 +14,7 @@ import { ApiDocsPanel } from './ApiDocsPanel';
 import { CookiesSettings } from './CookiesSettings';
 import * as apiKeyService from '../services/apiKeyService';
 import { useConfirm } from './ConfirmDialog';
+import { ChatTempTtlPanel } from './ChatTempTtlPanel';
 
 interface SettingsViewProps {
   settings: UserSettings;
@@ -23,6 +24,10 @@ interface SettingsViewProps {
   onSaveAISettings?: (settings: AISettingsType) => void;
   /** When true, hides the outer wrapper/header for embedding in a modal */
   embedded?: boolean;
+  /** Current user's UUID — used for the personal TTL panel */
+  currentUserId?: string | null;
+  /** Teams the user belongs to — used to render per-team TTL panels */
+  userTeams?: Array<{ id: string; name: string }>;
 }
 
 // Default scopes (will be overwritten by backend scopes if available)
@@ -44,7 +49,7 @@ const DEFAULT_SCOPES = [
   'system:read',
 ];
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings, embedded = false }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings, embedded = false, currentUserId, userTeams = [] }) => {
   const confirmDialog = useConfirm();
   const [localSettings, setLocalSettings] = useState<UserSettings>(settings);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
@@ -448,6 +453,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                  </label>
               </div>
            </div>
+
+           {/* Chat Attachment TTL */}
+           {currentUserId && (
+             <div className="px-6 pb-2 border-t border-zinc-800">
+               <div className="pt-4">
+                 <h3 className="text-base font-semibold text-zinc-200 mb-2">Chat attachment TTL</h3>
+                 <ChatTempTtlPanel scopeType="personal" scopeId={currentUserId} label="Personal" />
+                 {userTeams.map((t) => (
+                   <ChatTempTtlPanel key={t.id} scopeType="team" scopeId={t.id} label={t.name} />
+                 ))}
+               </div>
+             </div>
+           )}
 
            {/* Actions Footer */}
            <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-end">

@@ -55,6 +55,7 @@ from app.api.task_manager_router import router as task_manager_router
 from app.api.task_router import router as task_router
 from app.api.teams_router import router as teams_router
 from app.api.temp_token_router import router as temp_token_router
+from app.api.temp_ttl_router import router as temp_ttl_router
 from app.api.user_settings_router import router as settings_router
 from app.api.video_collections_router import router as video_collections_router
 from app.api.workforce_router import router as workforce_router
@@ -116,6 +117,8 @@ api_router.include_router(router=resources_router, tags=["Resources"])
 api_router.include_router(router=shares_router, tags=["Shares"])
 
 api_router.include_router(router=libraries_router, tags=["Libraries"])
+
+api_router.include_router(router=temp_ttl_router, tags=["Library"])
 
 api_router.include_router(router=reviews_router, tags=["Reviews"])
 

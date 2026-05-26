@@ -1442,6 +1442,71 @@ class ResourcesRepository:
 
         return [item for item in items if matches_tags(item.get("resource_id", ""))]
 
+    # ------------------------------------------------------------------ #
+    # Temp-folder sweeper helpers
+    # ------------------------------------------------------------------ #
+
+    async def list_resources_in_folder(
+        self, folder_id: str, *, include_trashed: bool = False
+    ) -> list[dict]:
+        """Return resources whose resource_items row references this folder.
+
+        ``folder_id`` lives on ``resource_items``, not ``resources``, so we
+        join via the PostgREST embed syntax.  The result is flattened to
+        ``{"id": resource_id, "created_at": resources.created_at}`` so the
+        temp sweeper can compute expiry without knowing the schema detail.
+        """
+        try:
+            client = await self._get_client()
+            result = await (
+                client.table("resource_items")
+                .select(
+                    "resource_id, resource:resources!inner(id, created_at, is_trashed)"
+                )
+                .eq("folder_id", folder_id)
+                .execute()
+            )
+            rows = result.data or []
+            out = []
+            for row in rows:
+                res = row.get("resource") or {}
+                if not include_trashed and res.get("is_trashed"):
+                    continue
+                out.append(
+                    {
+                        "id": row["resource_id"],
+                        "created_at": res.get("created_at"),
+                    }
+                )
+            return out
+        except Exception as e:
+            logger.error(f"Failed to list resources in folder {folder_id}: {e}")
+            raise
+
+    async def soft_delete_resource(self, resource_id: str) -> None:
+        """Mark a resource as trashed without removing the file on disk.
+
+        File cleanup is handled by the existing trash-purge pipeline
+        (``cleanup_trashed_resources_workflow``), not by this method.
+        """
+        try:
+            client = await self._get_client()
+            await (
+                client.table(self.TABLE_RESOURCES)
+                .update(
+                    {
+                        "is_trashed": True,
+                        "trashed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                .eq("id", resource_id)
+                .execute()
+            )
+            logger.info(f"[temp_sweeper] soft-deleted resource {resource_id}")
+        except Exception as e:
+            logger.error(f"Failed to soft-delete resource {resource_id}: {e}")
+            raise
+
 
 # ─── asyncpg + Supavisor migration factory ─────────────────────────────
 #
