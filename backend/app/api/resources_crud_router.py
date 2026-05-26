@@ -590,48 +590,21 @@ async def serve_preview_sprite(resource_id: str):
 
 @router.patch("/{resource_id}")
 async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep):
-    """Update resource metadata. Use DELETE endpoint for trashing.
-
-    ``folder_id`` may be set to move the resource between folders (used by the
-    Promote action on chat temp resources). The destination folder must belong
-    to the same scope as the resource; ``folder_id=None`` clears the folder
-    (move to scope root).
-    """
+    """Update resource metadata. Use DELETE endpoint for trashing."""
     try:
         repo = ResourcesRepository()
         resource = await repo.get_resource_by_id(resource_id)
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
-        # Detect folder_id presence BEFORE exclude_none drops nulls, because
-        # ``folder_id=None`` is meaningful (clear the folder).
-        sent_folder_change = "folder_id" in data.model_fields_set
         update_data = data.model_dump(exclude_none=True)
-        if sent_folder_change and "folder_id" not in update_data:
-            # User sent folder_id=null explicitly → preserve as clear-to-root.
-            update_data["folder_id"] = None
 
         # Prevent direct is_trashed manipulation via PATCH.
         # Trash must go through DELETE (resource_item removal).
         update_data.pop("is_trashed", None)
         update_data.pop("trashed_at", None)
 
-        # Validate folder move stays in the same scope.
-        if sent_folder_change and update_data.get("folder_id") is not None:
-            target = await repo.get_folder_by_id(update_data["folder_id"])
-            if not target:
-                raise HTTPException(
-                    status_code=404, detail="Destination folder not found"
-                )
-            if target.get("scope_type") != resource.get("scope_type") or str(
-                target.get("scope_id")
-            ) != str(resource.get("scope_id")):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Destination folder is in a different scope",
-                )
-
-        if not update_data and not sent_folder_change:
+        if not update_data:
             return {"success": True, "data": resource}
 
         result = await repo.update_resource(resource_id, update_data)
