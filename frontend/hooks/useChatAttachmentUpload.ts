@@ -91,7 +91,7 @@ export function useChatAttachmentUpload(opts: UseChatAttachmentUploadOpts): {
         setUploading(false);
       }
     },
-    [attachments, onChange, addToast],
+    [attachments, onChange, addToast, translateError],
   );
 
   return { handleFiles, uploading };

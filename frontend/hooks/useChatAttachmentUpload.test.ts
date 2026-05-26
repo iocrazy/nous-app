@@ -2,12 +2,16 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useChatAttachmentUpload } from './useChatAttachmentUpload';
 import { aiLibraryService } from '../services/aiLibraryService';
+import * as pickerHelpers from '../components/ChatAttachmentPicker.helpers';
 
 vi.mock('../services/aiLibraryService', () => ({
   aiLibraryService: { uploadChatAttachment: vi.fn() },
 }));
+
+// Hoisted addToast spy so tests can assert what reached the toast layer.
+const addToastSpy = vi.fn();
 vi.mock('../components/Toast', () => ({
-  useToast: () => ({ addToast: vi.fn() }),
+  useToast: () => ({ addToast: addToastSpy }),
 }));
 
 function _file(name: string, type: string, content = 'data'): File {
@@ -23,6 +27,7 @@ function _fileList(files: File[]): File[] {
 describe('useChatAttachmentUpload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    addToastSpy.mockClear();
   });
 
   it('uploads each file via aiLibraryService and appends to attachments', async () => {
@@ -111,5 +116,33 @@ describe('useChatAttachmentUpload', () => {
     expect(next).toHaveLength(2);
     expect(next[0].url).toBe('old.png');
     expect(next[1].url).toBe('new.png');
+  });
+
+  it('routes validateFileBatch errors through translateError before toast', async () => {
+    // Force validateFileBatch to return a synthetic i18n key so we can
+    // assert routing without relying on real validation rules.
+    const validateSpy = vi
+      .spyOn(pickerHelpers, 'validateFileBatch')
+      .mockReturnValue('chat.attachments.fakeError');
+
+    const translateError = vi.fn((k: string) => `TRANSLATED:${k}`);
+    const onChange = vi.fn();
+
+    const { result } = renderHook(() =>
+      useChatAttachmentUpload({ attachments: [], onChange, translateError }),
+    );
+
+    await act(async () => {
+      await result.current.handleFiles(_fileList([_file('hax.exe', 'application/octet-stream')]));
+    });
+
+    expect(validateSpy).toHaveBeenCalled();
+    expect(translateError).toHaveBeenCalledWith('chat.attachments.fakeError');
+    expect(addToastSpy).toHaveBeenCalledWith('TRANSLATED:chat.attachments.fakeError', 'error');
+    // Validation failure short-circuits — no upload, no onChange.
+    expect(aiLibraryService.uploadChatAttachment).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+
+    validateSpy.mockRestore();
   });
 });
