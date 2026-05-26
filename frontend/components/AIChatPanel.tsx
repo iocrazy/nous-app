@@ -34,6 +34,9 @@ import { CommitmentsPanel } from './CommitmentsPanel';
 import { ChatAttachmentPicker, type StagedAttachment } from './ChatAttachmentPicker';
 import { EmptyState } from './chat/EmptyState';
 import { useToast } from './Toast';
+import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
+import { useComposerDropzone } from '../hooks/useComposerDropzone';
+import { useComposerPaste } from '../hooks/useComposerPaste';
 
 export interface AIChatPanelProps {
   /** String form of the project's BIGINT id, for display + session tagging. */
@@ -116,6 +119,24 @@ export function AIChatPanel({
 
   // B: staged attachments (uploaded but not yet sent). Cleared on send.
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
+
+  // Paste + drag-drop upload hooks — all three funnel files into handleFiles
+  // which reuses the same validation/upload pipeline as the picker button.
+  const { handleFiles, uploading } = useChatAttachmentUpload({
+    attachments: stagedAttachments,
+    onChange: setStagedAttachments,
+  });
+  // Block send while any pasted/dropped file is still uploading — otherwise
+  // hitting Enter mid-upload silently drops the in-flight chips.
+  const composerDisabled = sending || !activeSessionId || !selectedAgentSlug || uploading;
+  const { rootProps: dropzoneRootProps, isDragActive } = useComposerDropzone({
+    onFiles: handleFiles,
+    disabled: composerDisabled,
+  });
+  const { onPaste: composerOnPaste } = useComposerPaste({
+    onFiles: handleFiles,
+    disabled: composerDisabled,
+  });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -443,75 +464,89 @@ export function AIChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* B: Attachment chip strip — only render when staged or actively
-          uploading. The picker button itself lives next to ChatInput. */}
-      {activeSessionId && selectedAgentSlug && stagedAttachments.length > 0 && (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 bg-zinc-900/30">
-          <ChatAttachmentPicker
-            attachments={stagedAttachments}
-            onChange={setStagedAttachments}
-            disabled={sending}
-          />
-        </div>
-      )}
-
-      {/* O3: PlanMode toggle bar */}
-      {activeSessionId && selectedAgentSlug && (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 text-xs text-zinc-400 bg-zinc-900/50">
-          <span className="font-medium text-zinc-500">{t('chat.planMode.label')}</span>
-          {(['auto', 'prompt_user', 'dry_run'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => handlePlanModeChange(m)}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                planMode === m
-                  ? 'bg-blue-600 text-white'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
-              }`}
-              title={
-                m === 'auto'
-                  ? t('chat.planMode.auto_tooltip')
-                  : m === 'prompt_user'
-                    ? t('chat.planMode.promptUser_tooltip')
-                    : t('chat.planMode.dryRun_tooltip')
-              }
-            >
-              {m === 'auto' ? t('chat.planMode.execute') : m === 'prompt_user' ? t('chat.planMode.planFirst') : t('chat.planMode.dryRun')}
-            </button>
-          ))}
-          {planMode !== 'auto' && (
-            <span className="ml-auto text-amber-400 text-[10px] uppercase tracking-wide">
-              ⚠ {planMode === 'dry_run' ? t('chat.planMode.warning_dryRun') : t('chat.planMode.warning_planning')}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Chat input + B: attachment picker (when no staged chips above) */}
-      <div className="flex items-end gap-1 bg-zinc-900 border-t border-zinc-700/50">
-        {activeSessionId && selectedAgentSlug && stagedAttachments.length === 0 && (
-          <div className="pl-2 pb-2">
+      {/* Composer area: chip strip + plan mode bar + chat input.
+          Wrapped in a single relative div so the drag-drop overlay can
+          cover the whole composer region. */}
+      <div {...dropzoneRootProps} className="relative">
+        {/* B: Attachment chip strip — only render when staged or actively
+            uploading. The picker button itself lives next to ChatInput. */}
+        {activeSessionId && selectedAgentSlug && stagedAttachments.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 bg-zinc-900/30">
             <ChatAttachmentPicker
-              attachments={[]}
+              attachments={stagedAttachments}
               onChange={setStagedAttachments}
               disabled={sending}
             />
           </div>
         )}
-        <div className="flex-1 min-w-0">
-          <ChatInput
-            onSend={handleSend}
-            disabled={sending || !activeSessionId || !selectedAgentSlug}
-            placeholder={
-              !selectedAgentSlug
-                ? t('chat.placeholderNoAgent', 'Select an agent to start')
-                : !activeSessionId
-                  ? t('chat.placeholderNoSession', 'Create a session first')
-                  : t('chat.placeholder', 'Type a message...')
-            }
-          />
+
+        {/* O3: PlanMode toggle bar */}
+        {activeSessionId && selectedAgentSlug && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 text-xs text-zinc-400 bg-zinc-900/50">
+            <span className="font-medium text-zinc-500">{t('chat.planMode.label')}</span>
+            {(['auto', 'prompt_user', 'dry_run'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => handlePlanModeChange(m)}
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  planMode === m
+                    ? 'bg-blue-600 text-white'
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                }`}
+                title={
+                  m === 'auto'
+                    ? t('chat.planMode.auto_tooltip')
+                    : m === 'prompt_user'
+                      ? t('chat.planMode.promptUser_tooltip')
+                      : t('chat.planMode.dryRun_tooltip')
+                }
+              >
+                {m === 'auto' ? t('chat.planMode.execute') : m === 'prompt_user' ? t('chat.planMode.planFirst') : t('chat.planMode.dryRun')}
+              </button>
+            ))}
+            {planMode !== 'auto' && (
+              <span className="ml-auto text-amber-400 text-[10px] uppercase tracking-wide">
+                ⚠ {planMode === 'dry_run' ? t('chat.planMode.warning_dryRun') : t('chat.planMode.warning_planning')}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Chat input + B: attachment picker (when no staged chips above) */}
+        <div className="flex items-end gap-1 bg-zinc-900 border-t border-zinc-700/50">
+          {activeSessionId && selectedAgentSlug && stagedAttachments.length === 0 && (
+            <div className="pl-2 pb-2">
+              <ChatAttachmentPicker
+                attachments={[]}
+                onChange={setStagedAttachments}
+                disabled={sending}
+              />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <ChatInput
+              onSend={handleSend}
+              onPaste={composerOnPaste}
+              disabled={sending || !activeSessionId || !selectedAgentSlug}
+              placeholder={
+                !selectedAgentSlug
+                  ? t('chat.placeholderNoAgent', 'Select an agent to start')
+                  : !activeSessionId
+                    ? t('chat.placeholderNoSession', 'Create a session first')
+                    : t('chat.placeholder', 'Type a message...')
+              }
+            />
+          </div>
         </div>
+
+        {/* Drag-active overlay — pointer-events-none so drop fires on the
+            wrapper (the div with the dropzone handlers) not on this overlay. */}
+        {isDragActive && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none bg-blue-500/10 border-2 border-dashed border-blue-400 rounded-lg">
+            <span className="text-sm font-medium text-blue-200">{t('chat.attachments.dropToUpload')}</span>
+          </div>
+        )}
       </div>
     </div>
   );

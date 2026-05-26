@@ -9,17 +9,14 @@
  * chip drops it from the staged list (no server-side cleanup — the TTL
  * sweeper handles that).
  */
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Paperclip, X, Image as ImageIcon, Film, FileText, Loader2 } from 'lucide-react';
-import { aiLibraryService } from '../services/aiLibraryService';
-import { useToast } from './Toast';
 import {
   ACCEPT_ATTR,
-  MAX_FILES_AT_ONCE,
   formatBytes as _formatBytes,
-  validateFileBatch,
 } from './ChatAttachmentPicker.helpers';
+import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
 
 export interface StagedAttachment {
   kind: 'image' | 'video' | 'pdf';
@@ -43,24 +40,21 @@ function _kindIcon(kind: StagedAttachment['kind']): React.ReactNode {
   return <FileText className="w-3 h-3" />;
 }
 
-async function _readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('FileReader failed'));
-    reader.readAsDataURL(file);
-  });
-}
-
 export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
   attachments,
   onChange,
   disabled = false,
 }) => {
   const { t } = useTranslation();
-  const { addToast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+
+  // Delegate all upload logic to the shared hook; pass t() so validation
+  // error keys are translated (preserves prior i18n behaviour).
+  const { handleFiles: _handleFiles, uploading } = useChatAttachmentUpload({
+    attachments,
+    onChange,
+    translateError: t,
+  });
 
   const handlePick = useCallback(() => {
     inputRef.current?.click();
@@ -68,49 +62,11 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
 
   const handleFiles = useCallback(
     async (fileList: FileList | null) => {
-      if (!fileList || fileList.length === 0) return;
-      const files = Array.from(fileList).slice(0, MAX_FILES_AT_ONCE);
-
-      // Pre-validate sizes
-      const err = validateFileBatch(files);
-      if (err) {
-        addToast(t(err), 'error');
-        return;
-      }
-
-      setUploading(true);
-      try {
-        const next = [...attachments];
-        for (const file of files) {
-          try {
-            const uploaded = await aiLibraryService.uploadChatAttachment(file);
-            const staged: StagedAttachment = {
-              kind: uploaded.kind,
-              url: uploaded.url,
-              filename: uploaded.filename,
-              size_bytes: uploaded.size_bytes,
-              mime: uploaded.mime,
-            };
-            // Best-effort image preview (don't block on it)
-            if (uploaded.kind === 'image') {
-              try {
-                staged.preview_data_url = await _readAsDataUrl(file);
-              } catch { /* ignore — preview is cosmetic */ }
-            }
-            next.push(staged);
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            addToast(`Upload "${file.name}" failed: ${msg}`, 'error');
-          }
-        }
-        onChange(next);
-      } finally {
-        setUploading(false);
-        // Reset the input so re-picking the same file fires onChange
-        if (inputRef.current) inputRef.current.value = '';
-      }
+      await _handleFiles(fileList);
+      // Reset the input so re-picking the same file fires onChange
+      if (inputRef.current) inputRef.current.value = '';
     },
-    [attachments, onChange, addToast],
+    [_handleFiles],
   );
 
   const removeAt = useCallback(

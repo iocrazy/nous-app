@@ -7,6 +7,8 @@ export interface ChatInputProps {
   onAttach?: () => void;
   disabled?: boolean;
   placeholder?: string;
+  /** Forwarded to the textarea — used by the parent composer's paste-handler hook. */
+  onPaste?: React.ClipboardEventHandler<HTMLTextAreaElement>;
 }
 
 const MAX_ROWS = 5;
@@ -17,6 +19,7 @@ export function ChatInput({
   onAttach,
   disabled = false,
   placeholder,
+  onPaste,
 }: ChatInputProps): React.ReactElement {
   const { t } = useTranslation();
   const resolvedPlaceholder = placeholder ?? t('chat.typeMessage');
@@ -77,6 +80,7 @@ export function ChatInput({
         placeholder={resolvedPlaceholder}
         onInput={adjustHeight}
         onKeyDown={handleKeyDown}
+        onPaste={onPaste}
         className="
           flex-1 resize-none rounded-lg px-3 py-2
           bg-zinc-800 border border-zinc-700

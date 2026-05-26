@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
+
+from app.schemas.ai_library_chat import AttachmentRequest
 
 
 class IssueMessageKind(str, Enum):
@@ -47,6 +49,10 @@ class IssueMessagePost(BaseModel):
 
     body: str = Field(min_length=1, max_length=50000)
     agent_id: Optional[UUID] = None
+    # Optional attachments forwarded to the agent turn (sub-plan 3, Task 5).
+    # Serialised as model_dump() dicts before entering the DBOS workflow so
+    # they stay JSON-serialisable across the workflow boundary.
+    attachments: Optional[List[AttachmentRequest]] = None
 
     @model_validator(mode="after")
     def _strip_body(self) -> "IssueMessagePost":

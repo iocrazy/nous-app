@@ -1,50 +1,100 @@
 /**
  * Paperclip-style reply composer at the bottom of an issue detail
  * (A8.3 wired to real agents via aiLibraryService).
+ *
+ * Task 6 additions: attachment picker (ChatAttachmentPicker) + paste
+ * (useComposerPaste) + drag-and-drop (useComposerDropzone) + third
+ * arg in onSubmit callback so the parent can forward attachments to the
+ * backend.
  */
 
 import React, { useState } from 'react';
-import { Paperclip, Send, ChevronDown } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Send, ChevronDown } from 'lucide-react';
 import type { AgentRef } from './types';
+import { ChatAttachmentPicker } from '../ChatAttachmentPicker';
+import type { StagedAttachment } from '../ChatAttachmentPicker';
+import { useChatAttachmentUpload } from '../../hooks/useChatAttachmentUpload';
+import { useComposerDropzone } from '../../hooks/useComposerDropzone';
+import { useComposerPaste } from '../../hooks/useComposerPaste';
 
 interface IssueReplyBoxProps {
   agents: AgentRef[];
   defaultAgentId?: string | null;
-  /** Parent owns submission, returns rejection on error so we can stay in textarea. */
-  onSubmit: (body: string, agentId: string | null) => Promise<void>;
+  /** Parent owns submission, returns rejection on error so we can stay in textarea.
+   *  Third arg carries staged attachments (may be empty). */
+  onSubmit: (body: string, agentId: string | null, attachments: StagedAttachment[]) => Promise<void>;
   disabled?: boolean;
 }
 
 export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAgentId, onSubmit, disabled }) => {
+  const { t } = useTranslation();
   const [body, setBody] = useState('');
   const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
 
   const selectedAgent = agents.find((a) => a.id === agentId) ?? null;
 
+  // Upload pipeline — shared with ChatAttachmentPicker
+  const { handleFiles, uploading } = useChatAttachmentUpload({
+    attachments: stagedAttachments,
+    onChange: setStagedAttachments,
+  });
+
+  // Block send while any pasted/dropped file is still uploading — otherwise
+  // hitting Cmd+Enter mid-upload silently drops the in-flight chips.
+  const inputBlocked = disabled || submitting || uploading;
+
+  // Drag-and-drop handler for the wrapper div
+  const { rootProps, isDragActive } = useComposerDropzone({
+    onFiles: handleFiles,
+    disabled: inputBlocked,
+  });
+
+  // Paste-from-clipboard handler for the textarea
+  const { onPaste } = useComposerPaste({
+    onFiles: handleFiles,
+    disabled: inputBlocked,
+  });
+
   const submit = async () => {
     const trimmed = body.trim();
-    if (!trimmed || submitting) return;
+    if (!trimmed || submitting || uploading) return;
     setSubmitting(true);
     try {
-      await onSubmit(trimmed, agentId);
+      await onSubmit(trimmed, agentId, stagedAttachments);
       setBody('');
+      setStagedAttachments([]);
     } catch {
-      // parent toasts; keep body so user can retry
+      // parent toasts; keep body AND chips so user can retry
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="border border-zinc-800 rounded-lg bg-zinc-900/50 mx-4 mb-4">
+    <div
+      {...rootProps}
+      className="relative border border-zinc-800 rounded-lg bg-zinc-900/50 mx-4 mb-4"
+    >
+      {/* Attachment chip strip */}
+      <div className="px-3 pt-2">
+        <ChatAttachmentPicker
+          attachments={stagedAttachments}
+          onChange={setStagedAttachments}
+          disabled={inputBlocked}
+        />
+      </div>
+
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
+        onPaste={onPaste}
         placeholder="Reply"
         rows={3}
-        disabled={disabled || submitting}
+        disabled={inputBlocked}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             e.preventDefault();
@@ -54,14 +104,6 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
         className="w-full bg-transparent px-3 py-2 text-[14px] text-zinc-200 placeholder-zinc-600 focus:outline-none resize-none disabled:opacity-50"
       />
       <div className="flex items-center gap-2 px-2 pb-2 border-t border-zinc-800/80 pt-2">
-        <button
-          type="button"
-          className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded"
-          title="Attach (not wired)"
-          disabled
-        >
-          <Paperclip size={13} />
-        </button>
         <span className="text-[12px] text-zinc-600 ml-1">⌘↩ to send</span>
         <div className="relative ml-auto">
           <button
@@ -111,13 +153,21 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
           )}
         </div>
         <button
+          aria-label="send"
           onClick={submit}
-          disabled={!body.trim() || disabled || submitting}
+          disabled={!body.trim() || inputBlocked}
           className="inline-flex items-center gap-1 px-3 py-1 text-[12px] rounded bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Send size={11} /> {submitting ? 'Sending…' : 'Send'}
         </button>
       </div>
+
+      {/* Drag-active overlay */}
+      {isDragActive && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none bg-blue-500/10 border-2 border-dashed border-blue-400 rounded-lg">
+          <span className="text-sm font-medium text-blue-200">{t('chat.attachments.dropToUpload')}</span>
+        </div>
+      )}
     </div>
   );
 };
