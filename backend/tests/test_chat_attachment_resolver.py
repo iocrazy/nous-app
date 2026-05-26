@@ -329,3 +329,87 @@ async def test_video_path_inside_base_passes_guard(monkeypatch, tmp_path):
         req = AttachmentRequest(kind="video", url=str(legit))
         await resolver.resolve_attachments([req])
         m.assert_awaited_once()  # guard let it through
+
+
+# ─── shared-library (DOWNLOAD_PATH) relative-path resolution ──────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_image_relative_path_inlined_as_data_url(monkeypatch, tmp_path):
+    """An image url that is a path relative to the shared library is read
+    off disk and inlined as a base64 data URL (so the worker can serve it
+    without a public URL)."""
+    import base64
+
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
+    content = b"\x89PNG\r\n\x1a\nFAKE-IMAGE-BYTES"
+    img = tmp_path / "personal" / "u1" / "temp" / "x.png"
+    img.parent.mkdir(parents=True)
+    img.write_bytes(content)
+
+    req = AttachmentRequest(
+        kind="image", url="personal/u1/temp/x.png", mime="image/png"
+    )
+    result = await resolver.resolve_attachments([req])
+
+    assert len(result.attachments) == 1
+    a = result.attachments[0]
+    assert a.kind == AttachmentKind.IMAGE
+    assert not a.url  # not a pass-through url
+    expected = "data:image/png;base64," + base64.b64encode(content).decode("ascii")
+    assert a.data_url == expected
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_image_relative_path_outside_base_is_failure(monkeypatch, tmp_path):
+    """A non-public image url that escapes the base is rejected (failure),
+    not read."""
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
+    req = AttachmentRequest(kind="image", url="/etc/passwd")
+    result = await resolver.resolve_attachments([req])
+    assert result.attachments == []
+    assert len(result.failures) == 1
+    assert result.failures[0].kind == "image"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_image_relative_path_missing_file_is_failure(monkeypatch, tmp_path):
+    """A relative image url under the base but with no file present is a
+    failure (not a crash)."""
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
+    req = AttachmentRequest(kind="image", url="personal/u1/temp/missing.png")
+    result = await resolver.resolve_attachments([req])
+    assert result.attachments == []
+    assert len(result.failures) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_video_relative_path_resolved_under_base(monkeypatch, tmp_path):
+    """A video url relative to the shared library is resolved to its
+    absolute path before being handed to the extractor."""
+    from pathlib import Path as _P
+
+    from app.services.media.render.video_frame_extractor import FrameExtractionResult
+
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
+    clip = tmp_path / "team" / "9" / "temp" / "clip.mp4"
+    clip.parent.mkdir(parents=True)
+    clip.write_bytes(b"fake")
+
+    fake_result = FrameExtractionResult(
+        attachments=[], duration_seconds=1.0, sampled_at_seconds=[]
+    )
+    with patch(
+        "app.services.media.render.video_frame_extractor.extract_frames",
+        AsyncMock(return_value=fake_result),
+    ) as m:
+        req = AttachmentRequest(kind="video", url="team/9/temp/clip.mp4")
+        await resolver.resolve_attachments([req])
+
+    m.assert_awaited_once()
+    called_with = _P(m.call_args.args[0]).resolve()
+    assert called_with == clip.resolve()
