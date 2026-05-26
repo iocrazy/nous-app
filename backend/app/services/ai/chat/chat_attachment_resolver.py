@@ -2,7 +2,8 @@
 Attachment[] suitable for build_user_message().
 
 Routes by kind:
-  - image  → pass-through (Q1 layer handles it)
+  - image  → data_url / public URL pass-through, OR read off the shared
+             library and inline as a base64 data URL
   - video  → Q2 extract_frames (returns N VIDEO_THUMBNAIL attachments)
   - pdf    → Q3 render_pdf (returns N PDF_PAGE attachments)
 
@@ -11,13 +12,13 @@ logged + skipped. The chat turn proceeds with the remaining ones.
 A small failure summary is returned alongside so the chat service
 can surface "I couldn't read 1 of your 3 attachments" if desired.
 
-C1 SECURITY: video/pdf attachments pass req.url to ffmpeg/pdfium as
-filesystem paths. Without validation a malicious caller could probe
-arbitrary files (/etc/passwd, /proc/self/environ, secret files in
-project mounts). resolve_attachments enforces that any url-as-path
-lives strictly under CHAT_ATTACHMENT_BASE_DIR and contains no '..'
-traversal. Image attachments are url/data_url only — those go to the
-LLM which fetches them itself, so the constraint doesn't apply.
+C1 SECURITY: image/video/pdf attachments whose ``url`` is a filesystem
+path (i.e. not a public http(s)/data: URL) are resolved under
+CHAT_ATTACHMENT_BASE_DIR. ``..`` traversal, absolute paths outside the
+base, and symlinks pointing outside the base are all rejected — without
+the guard a malicious caller could probe arbitrary files (/etc/passwd,
+/proc/self/environ, project secrets). Pass-through url/data_url images
+skip the guard since the bytes are model-supplied / publicly fetchable.
 """
 
 from __future__ import annotations
@@ -41,6 +42,12 @@ from app.schemas.ai_library_chat import AttachmentRequest
 MAX_VIDEO_FRAMES_PER_ATTACHMENT = 6
 MAX_PDF_PAGES_PER_ATTACHMENT = 8
 MAX_ATTACHMENTS_PER_TURN = 8
+
+# Per-image cap for inlining as base64 data URL. The upload endpoint
+# allows 50MB, but inlining 8×50MB into one turn would peak the worker
+# at ~1.5GB; 10MB per image is generous for vision models (most accept
+# ≤20MB base64 per image) and keeps the worst-case bounded.
+MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024
 
 # C1: chat-upload attachments are stored as temp resources on the shared
 # library volume (settings.DOWNLOAD_PATH), which BOTH the gateway and the
@@ -88,7 +95,15 @@ def _resolve_under_base(ref: str, base: Path) -> Optional[Path]:
 def _file_to_data_url(path: Path, mime: Optional[str]) -> str:
     """Read a file off the shared library and inline it as a base64 data
     URL so the model — and the worker container, which has no public URL
-    for the file — can consume it directly."""
+    for the file — can consume it directly. Refuses files larger than
+    ``MAX_INLINE_IMAGE_BYTES`` so a single turn cannot blow up the
+    worker's memory."""
+    size = path.stat().st_size
+    if size > MAX_INLINE_IMAGE_BYTES:
+        raise ValueError(
+            f"image too large to inline ({size} bytes > "
+            f"{MAX_INLINE_IMAGE_BYTES}); use a public URL instead"
+        )
     raw = path.read_bytes()
     b64 = base64.b64encode(raw).decode("ascii")
     resolved_mime = mime or mimetypes.guess_type(str(path))[0] or "image/png"
@@ -170,7 +185,7 @@ async def _resolve_one(req: AttachmentRequest) -> List[Attachment]:
     kind = (req.kind or "").strip().lower()
 
     if kind == "image":
-        return _resolve_image(req)
+        return await _resolve_image(req)
 
     if kind == "video":
         if not req.url:
@@ -218,7 +233,7 @@ async def _resolve_one(req: AttachmentRequest) -> List[Attachment]:
     raise ValueError(f"unsupported attachment kind: {kind!r}")
 
 
-def _resolve_image(req: AttachmentRequest) -> List[Attachment]:
+async def _resolve_image(req: AttachmentRequest) -> List[Attachment]:
     """Resolve an image attachment for the model.
 
     - inline ``data_url`` → pass through as-is.
@@ -253,10 +268,17 @@ def _resolve_image(req: AttachmentRequest) -> List[Attachment]:
         raise ValueError(
             f"image path outside chat attachment base dir or missing: {req.url!r}"
         )
+    # File-read + base64 encode happens on a worker thread to avoid
+    # blocking the event loop on a large NAS read.
+    data_url = await asyncio.to_thread(_file_to_data_url, abs_path, req.mime)
+    logger.debug(
+        f"[chat_attachment_resolver] inlined image {req.url!r} "
+        f"({abs_path.stat().st_size} bytes) as data URL"
+    )
     return [
         Attachment(
             kind=AttachmentKind.IMAGE,
-            data_url=_file_to_data_url(abs_path, req.mime),
+            data_url=data_url,
             mime=req.mime,
             alt_text=req.alt_text,
         )

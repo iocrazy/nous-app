@@ -413,3 +413,22 @@ async def test_video_relative_path_resolved_under_base(monkeypatch, tmp_path):
     m.assert_awaited_once()
     called_with = _P(m.call_args.args[0]).resolve()
     assert called_with == clip.resolve()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_image_too_large_to_inline_is_failure(monkeypatch, tmp_path):
+    """An image whose file exceeds MAX_INLINE_IMAGE_BYTES is rejected as a
+    failure (not inlined) — otherwise the worker would peak its memory on
+    an 8×50MB turn."""
+    monkeypatch.setattr(resolver, "CHAT_ATTACHMENT_BASE_DIR", tmp_path)
+    monkeypatch.setattr(resolver, "MAX_INLINE_IMAGE_BYTES", 8)
+    img = tmp_path / "big.png"
+    img.write_bytes(b"x" * 100)
+
+    req = AttachmentRequest(kind="image", url="big.png", mime="image/png")
+    result = await resolver.resolve_attachments([req])
+
+    assert result.attachments == []
+    assert len(result.failures) == 1
+    assert "too large" in result.failures[0].reason.lower()
