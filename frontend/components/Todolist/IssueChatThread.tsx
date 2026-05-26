@@ -16,6 +16,7 @@ import { STATUS_LABEL, STATUS_COLOR, IssueStatusIcon } from './IssueStatusIcon';
 import type { IssueStatus } from '../../services/issuesService';
 import { relativeTime } from '../../utils/taskDisplay';
 import { useToast } from '../Toast';
+import { useElapsedSeconds } from '../../hooks/useElapsedSeconds';
 
 const LIVENESS_VISUAL: Record<AgentLivenessState, { dot: string; label: string; tooltip: string }> = {
   running:   { dot: 'bg-emerald-500', label: 'running',   tooltip: 'Agent is making progress' },
@@ -110,6 +111,10 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
   const metaStatus = msg.meta?.status as string | undefined;
   const errorCode = msg.meta?.error_code as string | undefined;
   const isRunning = metaStatus === 'running';
+  // Live tick for in-flight runs. Falls back to msg.created_at as the
+  // timestamp origin because started_at is not yet surfaced on IssueMessage
+  // (agent_runs.started_at exists in DB but isn't in the REST response).
+  const elapsedLive = useElapsedSeconds(msg.created_at, { enabled: isRunning });
   const { addToast } = useToast();
   const [simulating, setSimulating] = useState(false);
 
@@ -130,9 +135,11 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
       <div className="flex items-center gap-2 mb-1.5">
         <AgentAvatar initials={initials} color={agent?.avatar_color} />
         <span className="text-xs font-medium text-zinc-200">{agent?.name ?? 'Agent'}</span>
-        {msg.duration_seconds != null && (
+        {isRunning ? (
+          <span className="text-[12px] text-zinc-500">working for {formatDuration(elapsedLive)}</span>
+        ) : msg.duration_seconds != null ? (
           <span className="text-[12px] text-zinc-500">worked for {formatDuration(msg.duration_seconds)}</span>
-        )}
+        ) : null}
         {liveness && <LivenessPill state={liveness} />}
         {metaStatus && metaStatus !== 'completed' && (
           <span className="text-[12px] text-zinc-500 italic">({metaStatus})</span>
