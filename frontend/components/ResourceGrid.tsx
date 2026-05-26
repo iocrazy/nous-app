@@ -281,7 +281,10 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     tempTtlService.getChatTempTtl(scopeType, scopeId).then((r) => {
       if (cancelled) return;
       setScopeTtl(r.ttl_days === -1 ? null : r.ttl_days);
-    }).catch(() => { /* badge falls back to '' on error */ });
+    }).catch((err) => {
+      console.warn('[ChatTtl] fetch failed:', err);
+      /* badge falls back to '' on error */
+    });
     return () => { cancelled = true; };
   }, [inTempFolder, scopeType, scopeId]);
 

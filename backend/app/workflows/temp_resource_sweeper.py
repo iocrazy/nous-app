@@ -144,17 +144,32 @@ async def sweep_temp_resources() -> dict:
     }
 
 
+@DBOS.step()
+async def _sweep_all_scopes_step() -> dict:
+    """Wraps ``sweep_temp_resources`` as a DBOS step so the scheduled
+    workflow checkpoints between sweep runs.
+
+    Codebase pattern — every other scheduled workflow (e.g.
+    ``agent_runs_sweeper_workflow``, ``cleanup_temp_files_workflow``,
+    ``cleanup_trashed_resources_workflow``, ``workflow_health_sweeper_workflow``)
+    delegates to a ``@DBOS.step()`` decorated function so a mid-sweep
+    worker crash doesn't replay the work from scratch.
+    """
+    return await sweep_temp_resources()
+
+
 @DBOS.scheduled("0 4 * * *")  # Daily 04:00 UTC
 @DBOS.workflow()
 async def temp_resource_sweeper_scheduled(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    """Scheduled entry-point.  Delegates to ``sweep_temp_resources``."""
-    result = await sweep_temp_resources()
+    """Scheduled entry-point.  Delegates to ``_sweep_all_scopes_step``."""
+    result = await _sweep_all_scopes_step()
     logger.info(f"[temp_sweeper] scheduled run complete: {result}")
 
 
 __all__ = [
     "sweep_temp_resources",
+    "_sweep_all_scopes_step",
     "temp_resource_sweeper_scheduled",
 ]

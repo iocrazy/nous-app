@@ -31,6 +31,7 @@ async def test_get_temp_ttl_returns_minus_one_for_never(monkeypatch):
 @pytest.mark.asyncio
 async def test_put_temp_ttl_writes(monkeypatch):
     monkeypatch.setattr(r, "verify_scope_access", AsyncMock())
+    monkeypatch.setattr(r, "_verify_team_owner", AsyncMock())  # noop pass
     set_mock = AsyncMock()
     monkeypatch.setattr(r, "set_chat_temp_ttl_days", set_mock)
     out = await r.put_temp_ttl(
@@ -39,6 +40,27 @@ async def test_put_temp_ttl_writes(monkeypatch):
     )
     assert out == {"ttl_days": 7}
     set_mock.assert_awaited_once_with("team", "42", 7)
+
+
+@pytest.mark.asyncio
+async def test_put_team_ttl_rejects_non_owner(monkeypatch):
+    """Non-owner team members cannot change the team chat TTL."""
+    monkeypatch.setattr(r, "verify_scope_access", AsyncMock())
+
+    async def _not_owner(*a, **kw):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the team owner can change team chat TTL",
+        )
+
+    monkeypatch.setattr(r, "_verify_team_owner", _not_owner)
+    monkeypatch.setattr(r, "set_chat_temp_ttl_days", AsyncMock())
+    with pytest.raises(HTTPException) as e:
+        await r.put_temp_ttl(
+            auth=_Auth(),
+            payload=r.TempTtlUpdate(scope_type="team", scope_id="42", ttl_days=7),
+        )
+    assert e.value.status_code == 403
 
 
 @pytest.mark.asyncio
