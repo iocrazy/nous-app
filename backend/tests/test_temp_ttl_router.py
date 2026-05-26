@@ -1,9 +1,10 @@
+import importlib
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
-from app.api import temp_ttl_router as r
+r = importlib.import_module("app.api.temp_ttl_router")
 
 
 class _Auth:
