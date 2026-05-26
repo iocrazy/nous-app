@@ -2090,18 +2090,11 @@ async def delete_mcp_server(server_id: UUID, auth: AuthDep) -> None:
 # ─── B: Chat attachment upload (temp storage for one-off chat use) ────
 
 
-import time as _time
-import uuid as _uuid
 from pathlib import Path as _Path
 
-# Per-user temp storage. Files older than 24h are reaped on each upload
-# (cheap O(N) sweep — fine for small N, replace with a cron later if it
-# grows). Each file becomes server-readable via the path returned, which
-# the chat attachment resolver consumes directly.
-_CHAT_ATTACHMENTS_BASE = _Path("/tmp/mediahub_chat_attachments")
-_CHAT_ATTACHMENT_TTL_SECONDS = 24 * 3600
-
-# Per-attachment hard cap (keeps a single upload from filling /tmp)
+# Per-attachment hard cap. Bounds how much we buffer in memory while
+# validating an upload before it is persisted as a temp resource on the
+# shared library (via save_chat_temp_upload).
 _CHAT_ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 
 _ALLOWED_EXTS = {
@@ -2165,47 +2158,28 @@ def _check_magic_bytes(ext: str, head: bytes) -> bool:
     return False
 
 
-def _user_attachment_dir(user_id: UUID) -> _Path:
-    d = _CHAT_ATTACHMENTS_BASE / str(user_id)
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _reap_old_attachments(user_dir: _Path) -> None:
-    """Best-effort sweep — drop files older than TTL."""
-    cutoff = _time.time() - _CHAT_ATTACHMENT_TTL_SECONDS
-    try:
-        for p in user_dir.iterdir():
-            try:
-                if p.is_file() and p.stat().st_mtime < cutoff:
-                    p.unlink(missing_ok=True)
-            except Exception:
-                pass
-    except Exception as exc:
-        logger.debug(f"[chat_attachments] reap failed: {exc}")
-
-
 @router.post(
     "/chat-attachments/upload",
-    summary="Upload a one-off chat attachment (image/video/pdf, 24h TTL)",
+    summary="Upload a one-off chat attachment (image/video/pdf) as a temp resource",
 )
 async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, Any]:
-    """Multipart upload for chat attachments.
+    """Multipart upload for chat/issue attachments.
 
-    Returns: { kind, url, size_bytes, mime, filename }
-      - kind: image | video | pdf (inferred from content-type / extension)
-      - url:  server-local filesystem path. The chat attachment resolver
-              reads this path directly when building multimodal content.
-      - 24h TTL — files older than that are reaped lazily on next upload.
+    The validated bytes are persisted as a temp resource on the shared
+    library (``${DOWNLOAD_PATH}/.../temp/``) via ``save_chat_temp_upload``
+    instead of gateway-local ``/tmp``. Both the gateway (regular chat
+    turns) and the worker (issue turns) mount that volume, so the chat
+    attachment resolver can read the file from either container.
 
-    Single-container assumption (H1): the returned ``url`` is a path
-    on THIS container's filesystem. The resolver later reads it from
-    the same container during the chat turn. If the deployment scales
-    to multiple backend replicas WITHOUT a shared volume, uploads on
-    replica A become unreadable from replica B. Today's docker-compose
-    is single-replica so this is fine; multi-replica deploys must
-    either (a) share a volume mounted at CHAT_ATTACHMENT_BASE_DIR or
-    (b) move to Supabase Storage with a signed URL.
+    Returns: ``{ kind, resource_id, file_path, url, size_bytes, mime, filename }``
+      - ``kind``: image | video | pdf (inferred from content-type / extension)
+      - ``resource_id``: the persisted temp resource id (promotable later)
+      - ``file_path``: path relative to ``DOWNLOAD_PATH`` (worker-readable)
+      - ``url``: back-compat alias of ``file_path``
+
+    Scope: an optional ``session_id`` (form field or query param) routes
+    the temp resource into the session's team scope; otherwise it lands
+    in the caller's personal scope.
     """
     user_id = _coerce_user_uuid(auth.user_id)
 
@@ -2226,7 +2200,7 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
         )
 
     # Reject oversize before reading the body fully (defensive — also
-    # check after read in case content-length was lying).
+    # enforced again below in case content-length was lying).
     cl = request.headers.get("content-length")
     if cl and int(cl) > _CHAT_ATTACHMENT_MAX_BYTES * 1.1:
         raise HTTPException(
@@ -2234,60 +2208,63 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
             detail=f"file too large; max {_CHAT_ATTACHMENT_MAX_BYTES} bytes",
         )
 
-    user_dir = _user_attachment_dir(user_id)
-    _reap_old_attachments(user_dir)
-
-    # Save with random filename (ext preserved for downstream tools)
-    new_id = _uuid.uuid4().hex
-    out_path = user_dir / f"{new_id}{ext}"
+    # Buffer the validated bytes in memory (capped at 50MB). The first
+    # chunk is checked against magic bytes (C2) — extension alone is not a
+    # trust boundary. We buffer (rather than stream to /tmp) so the bytes
+    # can be handed to save_chat_temp_upload for persistence on the shared
+    # library, which both the gateway and worker containers can read.
+    buf = bytearray()
     try:
-        # Stream copy so we don't load the whole file into memory at once.
-        # First chunk is also checked against magic bytes (C2) — extension
-        # alone is not a trust boundary.
-        with out_path.open("wb") as f:
-            chunk_total = 0
-            magic_checked = False
-            while True:
-                chunk = await upload.read(64 * 1024)
-                if not chunk:
-                    break
-                if not magic_checked:
-                    if not _check_magic_bytes(ext, chunk[:32]):
-                        out_path.unlink(missing_ok=True)
-                        raise HTTPException(
-                            status_code=415,
-                            detail=f"file content does not match {ext} format",
-                        )
-                    magic_checked = True
-                chunk_total += len(chunk)
-                if chunk_total > _CHAT_ATTACHMENT_MAX_BYTES:
-                    out_path.unlink(missing_ok=True)
+        magic_checked = False
+        while True:
+            chunk = await upload.read(64 * 1024)
+            if not chunk:
+                break
+            if not magic_checked:
+                if not _check_magic_bytes(ext, chunk[:32]):
                     raise HTTPException(
-                        status_code=413,
-                        detail=f"file exceeds {_CHAT_ATTACHMENT_MAX_BYTES} bytes",
+                        status_code=415,
+                        detail=f"file content does not match {ext} format",
                     )
-                f.write(chunk)
-        size_bytes = out_path.stat().st_size
+                magic_checked = True
+            buf.extend(chunk)
+            if len(buf) > _CHAT_ATTACHMENT_MAX_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"file exceeds {_CHAT_ATTACHMENT_MAX_BYTES} bytes",
+                )
     finally:
         try:
             await upload.close()
         except Exception:
             pass
 
-    # Map extension → kind
-    if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
-        kind = "image"
-    elif ext in {".mp4", ".mov", ".webm", ".mkv", ".avi"}:
-        kind = "video"
-    else:
-        kind = "pdf"
-
     mime_guess = upload.content_type if hasattr(upload, "content_type") else None
 
+    # Scope: prefer a session_id from the multipart form, fall back to a
+    # query param. A non-string form value (e.g. a stray file field) is
+    # ignored. None → personal scope (resolved in save_chat_temp_upload).
+    session_raw = form.get("session_id")
+    session_id = session_raw if isinstance(session_raw, str) else None
+    if session_id is None:
+        session_id = request.query_params.get("session_id")
+
+    from app.services.library.chat_upload import save_chat_temp_upload
+
+    result = await save_chat_temp_upload(
+        user_id=str(user_id),
+        session_id=session_id,
+        file_bytes=bytes(buf),
+        filename=filename,
+        mime=mime_guess or "",
+    )
+
     return {
-        "kind": kind,
-        "url": str(out_path),
-        "size_bytes": size_bytes,
+        "kind": result["kind"],
+        "resource_id": result["resource_id"],
+        "file_path": result["file_path"],  # relative to DOWNLOAD_PATH (worker-readable)
+        "url": result["file_path"],  # back-compat alias
+        "size_bytes": result["size_bytes"],
         "mime": mime_guess,
         "filename": filename,
     }
