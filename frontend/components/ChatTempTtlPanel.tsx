@@ -11,6 +11,8 @@ import { tempTtlService, ScopeType } from '../services/tempTtlService';
 interface Props {
   scopeType: ScopeType;
   scopeId: string;
+  /** Optional display label (e.g., team name or "Personal"). Falls back to scopeType. */
+  label?: string;
 }
 
 const OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
@@ -21,7 +23,7 @@ const OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: -1, label: 'Never' },
 ];
 
-export function ChatTempTtlPanel({ scopeType, scopeId }: Props) {
+export function ChatTempTtlPanel({ scopeType, scopeId, label }: Props) {
   const [ttl, setTtl] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,11 +64,10 @@ export function ChatTempTtlPanel({ scopeType, scopeId }: Props) {
         htmlFor={`ttl-${scopeType}-${scopeId}`}
         className="text-sm font-medium text-gray-700 dark:text-gray-200"
       >
-        Chat attachment TTL ({scopeType})
+        {label ? `Chat attachment TTL — ${label}` : `Chat attachment TTL (${scopeType})`}
       </label>
       <select
         id={`ttl-${scopeType}-${scopeId}`}
-        aria-label={`Chat attachment TTL (${scopeType})`}
         className="rounded border px-2 py-1 text-sm dark:bg-gray-800 dark:border-gray-600"
         value={ttl === null ? '' : String(ttl)}
         disabled={ttl === null || saving}

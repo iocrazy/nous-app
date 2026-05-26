@@ -459,9 +459,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
              <div className="px-6 pb-2 border-t border-zinc-800">
                <div className="pt-4">
                  <h3 className="text-base font-semibold text-zinc-200 mb-2">Chat attachment TTL</h3>
-                 <ChatTempTtlPanel scopeType="personal" scopeId={currentUserId} />
+                 <ChatTempTtlPanel scopeType="personal" scopeId={currentUserId} label="Personal" />
                  {userTeams.map((t) => (
-                   <ChatTempTtlPanel key={t.id} scopeType="team" scopeId={t.id} />
+                   <ChatTempTtlPanel key={t.id} scopeType="team" scopeId={t.id} label={t.name} />
                  ))}
                </div>
              </div>

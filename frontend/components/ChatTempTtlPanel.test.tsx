@@ -60,4 +60,10 @@ describe('ChatTempTtlPanel', () => {
       expect(screen.getByText(/boom/i)).toBeInTheDocument();
     });
   });
+
+  it('shows the optional label text in the visible label', async () => {
+    (tempTtlService.getChatTempTtl as ReturnType<typeof vi.fn>).mockResolvedValue({ ttl_days: 30 });
+    render(<ChatTempTtlPanel scopeType="team" scopeId="42" label="Acme Corp" />);
+    expect(await screen.findByText(/Acme Corp/i)).toBeInTheDocument();
+  });
 });
