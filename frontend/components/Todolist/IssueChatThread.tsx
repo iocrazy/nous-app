@@ -73,25 +73,26 @@ const SystemStatusEvent: React.FC<{ msg: IssueMessage; selfUserId?: string }> = 
   const isSelf = msg.author_user_id && msg.author_user_id === selfUserId;
   const author = isSelf ? 'You' : msg.author_user_id ? `User ${msg.author_user_id.slice(0, 6)}` : 'System';
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 my-1 text-[12px] text-zinc-500">
-      <span className="font-medium text-zinc-400">{author}</span>
-      <span>updated this task · {relativeTime(msg.created_at)}</span>
-      <span className="ml-auto inline-flex items-center gap-1.5">
-        <span className="text-zinc-500">STATUS</span>
-        {from && (
-          <span className={`${STATUS_COLOR[from]} inline-flex items-center gap-1`}>
-            <IssueStatusIcon status={from} size={10} />
-            {STATUS_LABEL[from].toLowerCase()}
-          </span>
-        )}
-        <span className="text-zinc-600">→</span>
-        {to && (
-          <span className={`${STATUS_COLOR[to]} inline-flex items-center gap-1`}>
-            <IssueStatusIcon status={to} size={10} />
-            {STATUS_LABEL[to].toLowerCase()}
-          </span>
-        )}
-      </span>
+    <div
+      data-testid="system-status-row"
+      className="text-center text-[11px] text-zinc-500 italic my-2"
+    >
+      <span className="text-zinc-400 not-italic font-medium">{author}</span>
+      {' '}updated this task —{' '}
+      <span className="not-italic">STATUS</span>{' '}
+      {from && (
+        <span className={`${STATUS_COLOR[from]} not-italic font-medium inline-flex items-center gap-0.5`}>
+          <IssueStatusIcon status={from} size={10} />
+          {STATUS_LABEL[from].toLowerCase()}
+        </span>
+      )}
+      {' '}<span className="text-zinc-600 not-italic">→</span>{' '}
+      {to && (
+        <span className={`${STATUS_COLOR[to]} not-italic font-medium inline-flex items-center gap-0.5`}>
+          <IssueStatusIcon status={to} size={10} />
+          {STATUS_LABEL[to].toLowerCase()}
+        </span>
+      )}
     </div>
   );
 };

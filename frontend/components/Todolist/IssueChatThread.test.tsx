@@ -30,6 +30,31 @@ function _comment(opts: { author_user_id: string | null; content: string; id?: s
 
 const _agents: Record<string, AgentRef> = {};
 
+describe('IssueChatThread — SystemStatusEvent rendering', () => {
+  it('renders SystemStatusEvent as centered italic gray row', () => {
+    const msg = {
+      id: 'm-sys',
+      issue_id: 1,
+      kind: 'system_status',
+      author_user_id: 'u1',
+      from_status: 'todo',
+      to_status: 'in_progress',
+      meta: { from_status: 'todo', to_status: 'in_progress' },
+      created_at: '2026-05-26T12:00:00Z',
+    };
+    const { container } = render(
+      <IssueChatThread messages={[msg as never]} agentsById={{}} selfUserId="u1" />,
+    );
+    const row = container.querySelector('[data-testid="system-status-row"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.textContent).toMatch(/STATUS/);
+    expect(row.textContent).toMatch(/todo/);
+    expect(row.textContent).toMatch(/in.progress/);
+    expect(row.className).toMatch(/italic/);
+    expect(row.className).toMatch(/text-center/);
+  });
+});
+
 describe('IssueChatThread — CommentEvent alignment', () => {
   it('right-aligns self comment with blue-tinted bubble', () => {
     const msg = _comment({ author_user_id: 'u1', content: 'hello' });
