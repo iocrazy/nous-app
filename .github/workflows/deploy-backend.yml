@@ -238,6 +238,41 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           exit 1
 
+      - name: Ensure worker container is running (Watchtower restart-race guard)
+        # Watchtower recreates backend + worker (they share mediahub-backend:latest)
+        # on deploy but intermittently leaves mediahub-app-worker Exited
+        # (143 SIGTERM / 128 context-canceled) and does NOT restart it
+        # (restart=unless-stopped honors the explicit stop; autoheal only
+        # handles unhealthy, not exited). The worker runs ALL DBOS workflows
+        # (execute_issue / respond_to_issue_reply / sweepers), so a dead worker
+        # = issue dispatch + agent turns silently broken while the gateway still
+        # reports healthy. Hit manually on #348 and #349. Runs AFTER verify-deploy
+        # (Watchtower has finished its recreate pass by then) and idempotently
+        # starts the worker. See memory bug_worker_down_after_deploy.
+        if: github.ref == 'refs/heads/master'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.NAS_HOST }}
+          port: ${{ secrets.NAS_PORT }}
+          username: ${{ secrets.NAS_USER }}
+          key: ${{ secrets.NAS_SSH_KEY }}
+          script: |
+            DOCKER=/usr/local/bin/docker
+            for i in 1 2 3 4 5 6; do
+              # idempotent: no-op if already running, starts it if Exited
+              sudo $DOCKER start mediahub-app-worker >/dev/null 2>&1 || true
+              STATUS=$(sudo $DOCKER inspect -f '{{.State.Status}}' mediahub-app-worker 2>/dev/null || echo missing)
+              echo "mediahub-app-worker status: $STATUS (check $i/6)"
+              [ "$STATUS" = "running" ] && break
+              sleep 10
+            done
+            FINAL=$(sudo $DOCKER inspect -f '{{.State.Status}}' mediahub-app-worker 2>/dev/null || echo missing)
+            if [ "$FINAL" != "running" ]; then
+              echo "::error::mediahub-app-worker not running after deploy (status=$FINAL)"
+              exit 1
+            fi
+            echo "✅ mediahub-app-worker running"
+
       - name: Summary
         run: |
           echo "### ✅ Image pushed to ACR" >> $GITHUB_STEP_SUMMARY
