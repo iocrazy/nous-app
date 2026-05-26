@@ -511,12 +511,18 @@ export const aiLibraryService = {
   },
 
   /**
-   * B: upload a one-off chat attachment. 24h TTL on the server.
-   * Returns { kind, url, size_bytes, mime, filename } — pass the kind+url
-   * straight into ChatRequest.attachments.
+   * B: upload a one-off chat attachment. The file is persisted as a
+   * temp resource on the shared library (readable by both the gateway and
+   * the worker container that runs issue turns). Returns the resource
+   * handle (`resource_id`), its relative `file_path` under DOWNLOAD_PATH,
+   * and `url` (a back-compat alias of `file_path`) — pass `kind` + `url`
+   * straight into ChatRequest.attachments. Use `resource_id` to promote a
+   * temp upload into a long-lived resource later.
    */
   async uploadChatAttachment(file: File): Promise<{
     kind: 'image' | 'video' | 'pdf';
+    resource_id: string;
+    file_path: string;
     url: string;
     size_bytes: number;
     mime: string | null;

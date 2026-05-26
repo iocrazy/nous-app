@@ -93,8 +93,12 @@ class AttachmentRequest(BaseModel):
 
     url: Optional[str] = Field(
         default=None,
-        description="Public/signed URL the model can fetch. For video/pdf, "
-        "must be a server-local path the chat service can read.",
+        description="Either a public http(s) URL the model can fetch, or a "
+        "path relative to the shared library (DOWNLOAD_PATH) — typically the "
+        "`file_path` returned by /chat-attachments/upload. The chat service "
+        "resolves the relative path under DOWNLOAD_PATH (mounted by both the "
+        "gateway and worker containers) for video/pdf extraction and image "
+        "inlining.",
     )
 
     data_url: Optional[str] = Field(
