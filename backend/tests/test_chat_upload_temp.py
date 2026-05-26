@@ -25,3 +25,12 @@ async def test_resolve_scope_personal_when_no_team(monkeypatch):
         "personal",
         "u1",
     )
+
+
+@pytest.mark.asyncio
+async def test_resolve_scope_personal_when_session_has_no_team(monkeypatch):
+    monkeypatch.setattr(m, "_get_session_team_id", AsyncMock(return_value=None))
+    assert await m.resolve_chat_scope(session_id="s1", user_id="u1") == (
+        "personal",
+        "u1",
+    )
