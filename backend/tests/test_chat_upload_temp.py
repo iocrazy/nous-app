@@ -204,9 +204,10 @@ async def test_ensure_temp_folder_create_path_sets_created_by(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ensure_temp_folder_raises_when_create_returns_no_id(monkeypatch):
-    """create_folder returning {} (e.g. RLS-blocked insert) must fail fast."""
+    """create_folder returning {} AND no temp folder on re-fetch (real RLS
+    denial / silent failure, not a concurrent winner) must fail fast."""
     fake_repo = MagicMock()
-    fake_repo.get_folders = AsyncMock(return_value=[])
+    fake_repo.get_folders = AsyncMock(return_value=[])  # initial + re-fetch both empty
     fake_repo.create_folder = AsyncMock(return_value={})
     monkeypatch.setattr(
         "app.repositories.resources_repository.ResourcesRepository",
@@ -215,6 +216,32 @@ async def test_ensure_temp_folder_raises_when_create_returns_no_id(monkeypatch):
 
     with pytest.raises(RuntimeError, match="create_folder returned no id"):
         await m._ensure_temp_folder("personal", "u1", "u1")
+    # Confirm we did look twice before giving up.
+    assert fake_repo.get_folders.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_ensure_temp_folder_reuses_concurrently_created_folder(monkeypatch):
+    """If create_folder returns {} because a concurrent caller already
+    created the temp folder, re-fetch and reuse it (don't raise)."""
+    fake_repo = MagicMock()
+    fake_repo.get_folders = AsyncMock(
+        side_effect=[
+            [{"id": "other-1", "name": "inbox"}],  # initial — no temp yet
+            [{"id": "concurrent-temp", "name": m.TEMP_FOLDER_NAME}],  # race winner
+        ]
+    )
+    fake_repo.create_folder = AsyncMock(return_value={})  # our insert lost
+    monkeypatch.setattr(
+        "app.repositories.resources_repository.ResourcesRepository",
+        lambda: fake_repo,
+    )
+
+    folder_id = await m._ensure_temp_folder("team", "42", "user-abc")
+
+    assert folder_id == "concurrent-temp"
+    fake_repo.create_folder.assert_awaited_once()
+    assert fake_repo.get_folders.await_count == 2
 
 
 # ------------------------------------------------------------------ #

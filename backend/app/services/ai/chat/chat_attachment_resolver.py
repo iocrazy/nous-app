@@ -92,12 +92,13 @@ def _resolve_under_base(ref: str, base: Path) -> Optional[Path]:
     return candidate
 
 
-def _file_to_data_url(path: Path, mime: Optional[str]) -> str:
+def _file_to_data_url(path: Path, mime: Optional[str]) -> tuple[str, int]:
     """Read a file off the shared library and inline it as a base64 data
     URL so the model — and the worker container, which has no public URL
     for the file — can consume it directly. Refuses files larger than
     ``MAX_INLINE_IMAGE_BYTES`` so a single turn cannot blow up the
-    worker's memory."""
+    worker's memory. Returns ``(data_url, size_bytes)`` so the caller can
+    log the size without an extra ``stat()`` call on the event loop."""
     size = path.stat().st_size
     if size > MAX_INLINE_IMAGE_BYTES:
         raise ValueError(
@@ -107,7 +108,7 @@ def _file_to_data_url(path: Path, mime: Optional[str]) -> str:
     raw = path.read_bytes()
     b64 = base64.b64encode(raw).decode("ascii")
     resolved_mime = mime or mimetypes.guess_type(str(path))[0] or "image/png"
-    return f"data:{resolved_mime};base64,{b64}"
+    return f"data:{resolved_mime};base64,{b64}", size
 
 
 @dataclass(frozen=True)
@@ -269,11 +270,14 @@ async def _resolve_image(req: AttachmentRequest) -> List[Attachment]:
             f"image path outside chat attachment base dir or missing: {req.url!r}"
         )
     # File-read + base64 encode happens on a worker thread to avoid
-    # blocking the event loop on a large NAS read.
-    data_url = await asyncio.to_thread(_file_to_data_url, abs_path, req.mime)
+    # blocking the event loop on a large NAS read. The helper returns the
+    # size too so we don't have to stat() again on the event loop.
+    data_url, size_bytes = await asyncio.to_thread(
+        _file_to_data_url, abs_path, req.mime
+    )
     logger.debug(
         f"[chat_attachment_resolver] inlined image {req.url!r} "
-        f"({abs_path.stat().st_size} bytes) as data URL"
+        f"({size_bytes} bytes) as data URL"
     )
     return [
         Attachment(

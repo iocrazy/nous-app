@@ -162,10 +162,19 @@ async def _ensure_temp_folder(scope_type: str, scope_id: str, user_id: str) -> s
             # parent_id, icon, color intentionally omitted → DB defaults (NULL)
         }
     )
-    # create_folder returns {} when result.data is empty (e.g. RLS blocks the
-    # insert without raising). Fail fast with a clear message instead of a
-    # downstream KeyError on created["id"].
+    # create_folder returns {} when result.data is empty, which can mean
+    # either (a) RLS blocked the insert OR (b) a concurrent caller created
+    # the temp folder a moment ago and our INSERT lost the race. Disambiguate
+    # by re-listing folders one more time before declaring failure.
     if "id" not in created:
+        folders = await repo.get_folders(scope_type, scope_id)
+        for folder in folders:
+            if folder.get("name") == TEMP_FOLDER_NAME:
+                logger.info(
+                    f"[chat_upload] temp folder created concurrently for scope "
+                    f"{scope_type}/{scope_id}; reusing {folder['id']!r}"
+                )
+                return str(folder["id"])
         raise RuntimeError(
             f"[chat_upload] create_folder returned no id for scope "
             f"{scope_type}/{scope_id}"
