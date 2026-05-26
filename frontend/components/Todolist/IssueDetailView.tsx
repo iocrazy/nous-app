@@ -16,6 +16,7 @@ import {
   MessageSquare, Activity, Link2, Bot,
 } from 'lucide-react';
 import type { UiIssue, AgentRef } from './types';
+import type { StagedAttachment } from '../ChatAttachmentPicker';
 import type { IssueMessage } from '../../services/issueMessageService';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { IssueChatThread } from './IssueChatThread';
@@ -161,9 +162,12 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     return () => { void supa.removeChannel(channel); };
   }, [issue.id]);
 
-  const handleReply = async (body: string, agentId: string | null) => {
+  const handleReply = async (body: string, agentId: string | null, attachments: StagedAttachment[] = []) => {
     try {
-      await postIssueMessage(issue.id, { body, agent_id: agentId ?? undefined });
+      const attachmentPayload = attachments.length > 0
+        ? attachments.map((a) => ({ kind: a.kind, url: a.url, mime: a.mime ?? undefined }))
+        : undefined;
+      await postIssueMessage(issue.id, { body, agent_id: agentId ?? undefined, attachments: attachmentPayload });
       // Spec-1b: for issues with an assigned agent the backend writes to
       // ai_messages (not issue_messages) and returns an optimistic comment
       // whose id does NOT match the real ai_messages row.  Appending the

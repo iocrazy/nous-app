@@ -39,9 +39,16 @@ export interface IssueMessageList {
   total: number;
 }
 
+export interface IssueMessageAttachment {
+  kind: 'image' | 'video' | 'pdf';
+  url: string;
+  mime?: string | null;
+}
+
 export interface IssueMessagePostPayload {
   body: string;
   agent_id?: string | null;
+  attachments?: IssueMessageAttachment[];
 }
 
 export interface IssueMessagePostResponse {
