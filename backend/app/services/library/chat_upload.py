@@ -123,12 +123,16 @@ def _kind_for_mime(mime: str, filename: str) -> str:
     return "pdf"
 
 
-async def _ensure_temp_folder(scope_type: str, scope_id: str) -> str:
+async def _ensure_temp_folder(scope_type: str, scope_id: str, user_id: str) -> str:
     """Get-or-create the reserved ``temp`` folder for *scope_type*/*scope_id*.
 
     Lists existing (non-trashed) folders for the scope and returns the id of
     the one named ``TEMP_FOLDER_NAME``.  Creates it via
     ``ResourcesRepository.create_folder`` if it does not exist yet.
+
+    *user_id* is required because the ``folders`` table has
+    ``created_by UUID NOT NULL`` (migration 044) with no default — the create
+    path fails with a NOT NULL violation without it.
 
     Returns the folder id as a string.
     """
@@ -142,13 +146,15 @@ async def _ensure_temp_folder(scope_type: str, scope_id: str) -> str:
         if folder.get("name") == TEMP_FOLDER_NAME:
             return str(folder["id"])
 
-    # Folder does not exist yet — create it.  Only the mandatory columns are
-    # supplied; optional fields (icon, color, parent_id) default to NULL.
+    # Folder does not exist yet — create it.  ``created_by`` is mandatory
+    # (NOT NULL, no DB default); optional fields (icon, color, parent_id)
+    # are omitted and default to NULL.
     created = await repo.create_folder(
         {
             "name": TEMP_FOLDER_NAME,
             "scope_type": scope_type,
             "scope_id": scope_id,
+            "created_by": str(user_id),
             # parent_id, icon, color intentionally omitted → DB defaults (NULL)
         }
     )
@@ -192,7 +198,7 @@ async def save_chat_temp_upload(
     scope_type, scope_id = await resolve_chat_scope(
         session_id=session_id, user_id=user_id
     )
-    folder_id = await _ensure_temp_folder(scope_type, scope_id)
+    folder_id = await _ensure_temp_folder(scope_type, scope_id, user_id)
 
     # Wrap the raw bytes in a FastAPI UploadFile so upload_resource can stream
     # it to disk via the shared stream_upload_to_disk utility.  UploadFile

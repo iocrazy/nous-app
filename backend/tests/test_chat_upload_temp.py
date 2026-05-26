@@ -91,7 +91,8 @@ async def test_save_temp_upload_routes_to_resources_temp_folder(monkeypatch):
     monkeypatch.setattr(m, "_resources_service", lambda: fake_svc)
 
     # Stub _ensure_temp_folder
-    monkeypatch.setattr(m, "_ensure_temp_folder", AsyncMock(return_value="folder-temp"))
+    fake_ensure = AsyncMock(return_value="folder-temp")
+    monkeypatch.setattr(m, "_ensure_temp_folder", fake_ensure)
 
     out = await m.save_chat_temp_upload(
         user_id="u1",
@@ -107,6 +108,9 @@ async def test_save_temp_upload_routes_to_resources_temp_folder(monkeypatch):
     assert out["mime"] == "image/png"
     assert out["filename"] == "x.png"
     assert out["size_bytes"] == len(b"\x89PNG\r\n\x1a\n")
+
+    # _ensure_temp_folder must receive user_id so it can set created_by
+    assert fake_ensure.call_args.args == ("personal", "u1", "u1")
 
     # Verify upload_resource was called with the right keyword args
     kwargs = fake_svc.upload_resource.call_args.kwargs
@@ -146,3 +150,53 @@ async def test_save_temp_upload_team_scope(monkeypatch):
     assert kwargs["scope_type"] == "team"
     assert kwargs["scope_id"] == "99"
     assert kwargs["folder_id"] == "folder-team-temp"
+
+
+# ------------------------------------------------------------------ #
+# Task 2 — _ensure_temp_folder (real get/create logic)
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_ensure_temp_folder_get_path_returns_existing(monkeypatch):
+    """When a folder named 'temp' already exists, return its id; never create."""
+    fake_repo = MagicMock()
+    fake_repo.get_folders = AsyncMock(
+        return_value=[
+            {"id": "other-1", "name": "inbox"},
+            {"id": "temp-77", "name": m.TEMP_FOLDER_NAME},
+        ]
+    )
+    fake_repo.create_folder = AsyncMock()
+    monkeypatch.setattr(
+        "app.repositories.resources_repository.ResourcesRepository",
+        lambda: fake_repo,
+    )
+
+    folder_id = await m._ensure_temp_folder("personal", "u1", "u1")
+
+    assert folder_id == "temp-77"
+    fake_repo.get_folders.assert_awaited_once_with("personal", "u1")
+    fake_repo.create_folder.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_temp_folder_create_path_sets_created_by(monkeypatch):
+    """When no 'temp' folder exists, create one with created_by set."""
+    fake_repo = MagicMock()
+    fake_repo.get_folders = AsyncMock(return_value=[{"id": "other-1", "name": "inbox"}])
+    fake_repo.create_folder = AsyncMock(return_value={"id": "new-temp-9"})
+    monkeypatch.setattr(
+        "app.repositories.resources_repository.ResourcesRepository",
+        lambda: fake_repo,
+    )
+
+    folder_id = await m._ensure_temp_folder("team", "42", "user-abc")
+
+    assert folder_id == "new-temp-9"
+    fake_repo.create_folder.assert_awaited_once()
+    data = fake_repo.create_folder.call_args.args[0]
+    assert data["name"] == m.TEMP_FOLDER_NAME
+    assert data["scope_type"] == "team"
+    assert data["scope_id"] == "42"
+    assert data["created_by"] == "user-abc"
