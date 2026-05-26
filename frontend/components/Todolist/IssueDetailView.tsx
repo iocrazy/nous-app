@@ -176,7 +176,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       // (human reply + any already-completed agent reply) and naturally
       // discards the optimistic id.
       await refresh();
-      addToast(agentId ? 'Reply posted; agent dispatched' : 'Comment posted', 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Send failed', 'error');
       throw err; // signal failure to keep textarea content
