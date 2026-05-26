@@ -1,6 +1,7 @@
 // Global Vitest setup. Stub browser globals that jsdom doesn't cover
 // so services under test don't accidentally talk to the real network.
 
+import '@testing-library/jest-dom';
 import { afterEach, vi } from 'vitest';
 
 // Storage polyfill — vitest 4.1.x + jsdom 29.x gives us an empty `{}`
