@@ -35,6 +35,9 @@ class ResourceUpdate(BaseModel):
     image_download_status: Optional[str] = Field(
         None, description="User image download status"
     )
+    # folder_id=null → move to scope root (used by the "Save" Promote action).
+    # Non-null → move into that folder. The router validates same-scope.
+    folder_id: Optional[str] = Field(None)
 
 
 class ResourceMoveRequest(BaseModel):
