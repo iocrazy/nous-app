@@ -68,6 +68,11 @@ from app.workflows.storyboard import (  # noqa: F401
     storyboard_video_analysis_workflow,
     storyboard_video_workflow,
 )
+from app.workflows.temp_resource_sweeper import (  # noqa: F401
+    sweep_temp_resources,
+    sweep_temp_resources_workflow,
+    temp_resource_sweeper_scheduled,
+)
 from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
 from app.workflows.transcode import transcode_workflow  # noqa: F401
 from app.workflows.workflow_health_sweeper import (  # noqa: F401
@@ -124,4 +129,7 @@ __all__ = [
     "outbox_dispatch_workflow",
     "inbox_dispatch_workflow",
     "workflow_health_sweeper_workflow",
+    "sweep_temp_resources",
+    "sweep_temp_resources_workflow",
+    "temp_resource_sweeper_scheduled",
 ]
