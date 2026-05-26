@@ -274,7 +274,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
   // ─── Temp folder: TTL badge + Save actions ────────────
   const inTempFolder = selectedFolder?.name === 'temp';
-  const [scopeTtl, setScopeTtl] = React.useState<number | null>(null);
+  const [scopeTtl, setScopeTtl] = useState<number | null>(null);
   useEffect(() => {
     if (!inTempFolder || !scopeType || !scopeId) return;
     let cancelled = false;
@@ -960,7 +960,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   )}
                   {viewMode === 'grid' ? (
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
-                      {sortedItems.map((item) => (
+                      {sortedItems.map((item) => {
+                        const badge = inTempFolder ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                        return (
                         <div key={item.id} {...getItemTouchHandlers('file', item)}>
                         <ResourceCard
                           item={item}
@@ -996,9 +998,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                         />
                         {inTempFolder && (
                           <div className="flex items-center gap-2 px-2 py-1.5 bg-zinc-900/60 rounded-b-xl border-t border-zinc-800/50">
-                            {ttlBadgeText(item.created_at, scopeTtl) && (
+                            {badge && (
                               <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
-                                {ttlBadgeText(item.created_at, scopeTtl)}
+                                {badge}
                               </span>
                             )}
                             <TempResourceActions
@@ -1010,11 +1012,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           </div>
                         )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="space-y-1.5">
-                      {sortedItems.map((item) => (
+                      {sortedItems.map((item) => {
+                        const badge = inTempFolder ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                        return (
                         <div key={item.id} {...getItemTouchHandlers('file', item)}>
                         <ResourceCard
                           item={item}
@@ -1050,9 +1055,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                         />
                         {inTempFolder && (
                           <div className="flex items-center gap-2 px-4 py-1.5 border-t border-zinc-800/50">
-                            {ttlBadgeText(item.created_at, scopeTtl) && (
+                            {badge && (
                               <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
-                                {ttlBadgeText(item.created_at, scopeTtl)}
+                                {badge}
                               </span>
                             )}
                             <TempResourceActions
@@ -1064,7 +1069,8 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           </div>
                         )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

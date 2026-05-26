@@ -24,6 +24,11 @@ describe('ttlBadgeText', () => {
     expect(ttlBadgeText('2026-03-25T00:00:00Z', 30)).toBe('expired');
   });
 
+  it('returns "expires today" when remaining ≤ 1 day', () => {
+    // Created ~22h ago, 1-day TTL → ~2h remaining → expires today.
+    expect(ttlBadgeText('2026-05-25T14:00:00Z', 1)).toBe('expires today');
+  });
+
   it('returns empty string for unparseable createdAt', () => {
     expect(ttlBadgeText('not a date', 30)).toBe('');
   });
