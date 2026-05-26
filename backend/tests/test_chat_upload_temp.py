@@ -200,3 +200,63 @@ async def test_ensure_temp_folder_create_path_sets_created_by(monkeypatch):
     assert data["scope_type"] == "team"
     assert data["scope_id"] == "42"
     assert data["created_by"] == "user-abc"
+
+
+@pytest.mark.asyncio
+async def test_ensure_temp_folder_raises_when_create_returns_no_id(monkeypatch):
+    """create_folder returning {} (e.g. RLS-blocked insert) must fail fast."""
+    fake_repo = MagicMock()
+    fake_repo.get_folders = AsyncMock(return_value=[])
+    fake_repo.create_folder = AsyncMock(return_value={})
+    monkeypatch.setattr(
+        "app.repositories.resources_repository.ResourcesRepository",
+        lambda: fake_repo,
+    )
+
+    with pytest.raises(RuntimeError, match="create_folder returned no id"):
+        await m._ensure_temp_folder("personal", "u1", "u1")
+
+
+# ------------------------------------------------------------------ #
+# Task 2 — save_chat_temp_upload fail-fast + error propagation
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_save_temp_upload_raises_on_incomplete_resource(monkeypatch):
+    """upload_resource returning {} (no id/file_path) must fail fast."""
+    monkeypatch.setattr(m, "_get_session_team_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(m, "_ensure_temp_folder", AsyncMock(return_value="folder-temp"))
+
+    fake_svc = MagicMock()
+    fake_svc.upload_resource = AsyncMock(return_value={})
+    monkeypatch.setattr(m, "_resources_service", lambda: fake_svc)
+
+    with pytest.raises(RuntimeError, match="incomplete resource dict"):
+        await m.save_chat_temp_upload(
+            user_id="u1",
+            session_id=None,
+            file_bytes=b"\x89PNG\r\n\x1a\n",
+            filename="x.png",
+            mime="image/png",
+        )
+
+
+@pytest.mark.asyncio
+async def test_save_temp_upload_propagates_upload_resource_error(monkeypatch):
+    """Errors from upload_resource are re-raised, not swallowed."""
+    monkeypatch.setattr(m, "_get_session_team_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(m, "_ensure_temp_folder", AsyncMock(return_value="folder-temp"))
+
+    fake_svc = MagicMock()
+    fake_svc.upload_resource = AsyncMock(side_effect=RuntimeError("disk full"))
+    monkeypatch.setattr(m, "_resources_service", lambda: fake_svc)
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        await m.save_chat_temp_upload(
+            user_id="u1",
+            session_id=None,
+            file_bytes=b"\x89PNG\r\n\x1a\n",
+            filename="x.png",
+            mime="image/png",
+        )

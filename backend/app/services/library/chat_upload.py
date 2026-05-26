@@ -107,7 +107,7 @@ def _kind_for_mime(mime: str, filename: str) -> str:
         return "image"
     if mime_lower.startswith("video/"):
         return "video"
-    if mime_lower in ("application/pdf",):
+    if mime_lower == "application/pdf":
         return "pdf"
 
     # Extension-based fallback for ambiguous MIME values like
@@ -141,6 +141,10 @@ async def _ensure_temp_folder(scope_type: str, scope_id: str, user_id: str) -> s
     )
 
     repo = ResourcesRepository()
+    # NOTE: ResourcesRepository.get_folders swallows DB errors and returns []
+    # (existing repo pattern). An empty list may therefore mask a DB failure
+    # rather than meaning "no temp folder yet" — in that case we fall through
+    # to create_folder, whose guard below surfaces a clear error.
     folders = await repo.get_folders(scope_type, scope_id)
     for folder in folders:
         if folder.get("name") == TEMP_FOLDER_NAME:
@@ -158,6 +162,14 @@ async def _ensure_temp_folder(scope_type: str, scope_id: str, user_id: str) -> s
             # parent_id, icon, color intentionally omitted → DB defaults (NULL)
         }
     )
+    # create_folder returns {} when result.data is empty (e.g. RLS blocks the
+    # insert without raising). Fail fast with a clear message instead of a
+    # downstream KeyError on created["id"].
+    if "id" not in created:
+        raise RuntimeError(
+            f"[chat_upload] create_folder returned no id for scope "
+            f"{scope_type}/{scope_id}"
+        )
     folder_id = str(created["id"])
     logger.info(
         f"[chat_upload] created temp folder {folder_id!r} "
@@ -195,6 +207,7 @@ async def save_chat_temp_upload(
     Raises propagated exceptions from ``ResourcesService`` or
     ``ResourcesRepository`` so the caller can decide how to handle failures.
     """
+    size_bytes = len(file_bytes)
     scope_type, scope_id = await resolve_chat_scope(
         session_id=session_id, user_id=user_id
     )
@@ -205,23 +218,35 @@ async def save_chat_temp_upload(
     # accepts a BinaryIO; its .read() is an async coroutine backed by anyio.
     upload_file = UploadFile(
         file=io.BytesIO(file_bytes),
-        size=len(file_bytes),
+        size=size_bytes,
         filename=filename,
         headers=Headers({"content-type": mime}),
     )
 
     svc = _resources_service()
-    resource = await svc.upload_resource(
-        user_id=str(user_id),
-        file=upload_file,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        folder_id=folder_id,
-    )
+    try:
+        resource = await svc.upload_resource(
+            user_id=str(user_id),
+            file=upload_file,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            folder_id=folder_id,
+        )
+    finally:
+        # Release the underlying BytesIO regardless of success/failure.
+        await upload_file.close()
+
+    # upload_resource returns {} when its repo insert yields no data. Fail fast
+    # with the actual payload instead of a downstream KeyError.
+    if "id" not in resource or "file_path" not in resource:
+        raise RuntimeError(
+            f"[chat_upload] upload_resource returned incomplete resource dict: "
+            f"{resource!r}"
+        )
 
     logger.info(
-        f"[chat_upload] saved temp resource {resource.get('id')!r} "
-        f"({len(file_bytes)} bytes) in scope {scope_type}/{scope_id}"
+        f"[chat_upload] saved temp resource {resource['id']!r} "
+        f"({size_bytes} bytes) in scope {scope_type}/{scope_id}"
     )
 
     return {
@@ -230,5 +255,5 @@ async def save_chat_temp_upload(
         "kind": _kind_for_mime(mime, filename),
         "mime": mime,
         "filename": filename,
-        "size_bytes": len(file_bytes),
+        "size_bytes": size_bytes,
     }
