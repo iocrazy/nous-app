@@ -36,31 +36,29 @@ async def _fetch_scopes_with_temp(scope_type: str) -> list[dict]:
 
     Uses the SQLAlchemy engine (``db_engine.fetch_all``) so it works
     even when the Supabase-py client isn't available in background jobs.
+
+    Both scope types alias the result column as ``scope_id`` so callers
+    can read it uniformly — adding a third scope type later only needs
+    to follow the same convention.
     """
     from app.db import engine as db_engine
 
-    if scope_type == "personal":
-        sql = (
-            "SELECT DISTINCT scope_id::text AS user_id FROM public.folders "
-            "WHERE scope_type = 'personal' AND name = :name AND is_trashed = false"
-        )
-    else:
-        sql = (
-            "SELECT DISTINCT scope_id::text AS id FROM public.folders "
-            "WHERE scope_type = 'team' AND name = :name AND is_trashed = false"
-        )
-    rows = await db_engine.fetch_all(sql, {"name": TEMP_FOLDER_NAME})
+    sql = (
+        "SELECT DISTINCT scope_id::text AS scope_id FROM public.folders "
+        "WHERE scope_type = :scope_type AND name = :name AND is_trashed = false"
+    )
+    rows = await db_engine.fetch_all(
+        sql, {"scope_type": scope_type, "name": TEMP_FOLDER_NAME}
+    )
     return rows or []
 
 
 async def _iter_scopes() -> AsyncIterator[Tuple[str, str]]:
     """Yield ``(scope_type, scope_id)`` pairs for all scopes with a temp folder."""
-    personal = await _fetch_scopes_with_temp("personal")
-    for row in personal:
-        yield ("personal", str(row["user_id"]))
-    team = await _fetch_scopes_with_temp("team")
-    for row in team:
-        yield ("team", str(row["id"]))
+    for scope_type in ("personal", "team"):
+        rows = await _fetch_scopes_with_temp(scope_type)
+        for row in rows:
+            yield (scope_type, str(row["scope_id"]))
 
 
 def _is_expired(created_at_str: str, ttl_days: int, now: datetime) -> bool:
@@ -115,8 +113,8 @@ async def sweep_temp_resources() -> dict:
     """Sweep every scope's temp folder for expired resources.
 
     Plain async function (not decorated) so tests can call it directly
-    without a live DBOS singleton. The DBOS-decorated entry-point
-    (``sweep_temp_resources_workflow``) delegates here.
+    without a live DBOS singleton. ``temp_resource_sweeper_scheduled``
+    delegates here from the daily cron.
 
     Errors in individual scopes are logged and skipped so one bad scope
     never prevents the rest from being swept.
@@ -146,12 +144,6 @@ async def sweep_temp_resources() -> dict:
     }
 
 
-@DBOS.workflow()
-async def sweep_temp_resources_workflow() -> dict:
-    """DBOS workflow wrapper.  Delegates to ``sweep_temp_resources``."""
-    return await sweep_temp_resources()
-
-
 @DBOS.scheduled("0 4 * * *")  # Daily 04:00 UTC
 @DBOS.workflow()
 async def temp_resource_sweeper_scheduled(
@@ -164,6 +156,5 @@ async def temp_resource_sweeper_scheduled(
 
 __all__ = [
     "sweep_temp_resources",
-    "sweep_temp_resources_workflow",
     "temp_resource_sweeper_scheduled",
 ]

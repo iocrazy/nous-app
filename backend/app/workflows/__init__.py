@@ -70,7 +70,6 @@ from app.workflows.storyboard import (  # noqa: F401
 )
 from app.workflows.temp_resource_sweeper import (  # noqa: F401
     sweep_temp_resources,
-    sweep_temp_resources_workflow,
     temp_resource_sweeper_scheduled,
 )
 from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
@@ -130,6 +129,5 @@ __all__ = [
     "inbox_dispatch_workflow",
     "workflow_health_sweeper_workflow",
     "sweep_temp_resources",
-    "sweep_temp_resources_workflow",
     "temp_resource_sweeper_scheduled",
 ]

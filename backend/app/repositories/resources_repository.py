@@ -1493,7 +1493,12 @@ class ResourcesRepository:
             client = await self._get_client()
             await (
                 client.table(self.TABLE_RESOURCES)
-                .update({"is_trashed": True, "trashed_at": "NOW()"})
+                .update(
+                    {
+                        "is_trashed": True,
+                        "trashed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
                 .eq("id", resource_id)
                 .execute()
             )

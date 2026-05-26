@@ -71,11 +71,15 @@ async def test_sweep_scope_no_temp_folder_skips(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_iter_scopes_yields_all_personal_and_team(monkeypatch):
-    """The sweeper iterates every user with a temp folder + every team."""
+    """The sweeper iterates every user with a temp folder + every team.
+
+    Both scope queries alias the result column as ``scope_id`` so the
+    iterator reads it uniformly.
+    """
     fake_fetch = AsyncMock(
         side_effect=[
-            [{"user_id": "u1"}, {"user_id": "u2"}],
-            [{"id": "42"}, {"id": "99"}],
+            [{"scope_id": "u1"}, {"scope_id": "u2"}],
+            [{"scope_id": "42"}, {"scope_id": "99"}],
         ]
     )
     monkeypatch.setattr(m, "_fetch_scopes_with_temp", fake_fetch)
