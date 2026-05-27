@@ -12,18 +12,7 @@ from typing import Any
 
 from loguru import logger
 
-
-def _kind_from_mime(mime: str | None) -> str:
-    m = (mime or "").lower()
-    if m.startswith("video/"):
-        return "video"
-    if m.startswith("image/"):
-        return "image"
-    if m.startswith("audio/"):
-        return "audio"
-    if m == "application/pdf":
-        return "pdf"
-    return "doc"
+from app.services.ai._mime_kind import kind_from_mime
 
 
 async def _fetch_accessible_meta(
@@ -40,9 +29,11 @@ async def _fetch_accessible_meta(
         SELECT r.id::text AS id, r.filename AS name,
                r.mime_type AS mime, r.file_size AS size,
                r.description AS brief, r.updated_at,
-               ri.scope_type, ri.scope_id::text AS scope_id
+               ri.scope_type, ri.scope_id::text AS scope_id,
+               t.name AS team_name
           FROM public.resources r
           JOIN public.resource_items ri ON ri.resource_id = r.id
+          LEFT JOIN public.teams t ON ri.scope_type = 'team' AND t.id = ri.scope_id
          WHERE r.id::text = ANY(:ids)
            AND r.is_trashed = false
            AND ri.is_trashed = false
@@ -57,12 +48,12 @@ async def _fetch_accessible_meta(
         row["id"]: {
             "id": row["id"],
             "name": row["name"],
-            "kind": _kind_from_mime(row.get("mime")),
+            "kind": kind_from_mime(row.get("mime")),
             "mime": row.get("mime"),
             "size": row.get("size"),
             "scope": (
                 "personal" if row["scope_type"] == "personal"
-                else f"team:{row['scope_id']}"
+                else f"team:{row.get('team_name') or row['scope_id']}"
             ),
             "updated_at": row["updated_at"],
             "brief": row.get("brief"),

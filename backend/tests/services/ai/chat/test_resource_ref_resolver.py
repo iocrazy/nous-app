@@ -53,3 +53,45 @@ async def test_skips_non_resource_ref_kinds():
     refs, warnings = await resolve_resource_refs(attachments, user_id="u")
     assert refs == []
     assert warnings == []
+
+
+@pytest.mark.asyncio
+async def test_team_scope_renders_team_name():
+    """scope should be 'team:<name>' when team_name is present in the row."""
+    attachments = [
+        {"kind": "resource_ref", "resource_id": "42", "name": "deck.pdf",
+         "mime": "application/pdf", "scope": {"type": "team", "id": "7"}},
+    ]
+    with patch(
+        "app.services.ai.chat.resource_ref_resolver._fetch_accessible_meta",
+        return_value={"42": {"id": "42", "name": "deck.pdf", "kind": "pdf",
+                             "mime": "application/pdf", "size": 2048,
+                             "scope": "team:alpha", "updated_at": "2026-05-25T00:00:00Z",
+                             "brief": None}},
+    ):
+        refs, warnings = await resolve_resource_refs(attachments, user_id="u")
+
+    assert warnings == []
+    assert len(refs) == 1
+    assert refs[0]["scope"] == "team:alpha"
+
+
+@pytest.mark.asyncio
+async def test_team_scope_falls_back_to_scope_id_when_name_missing():
+    """scope should fall back to 'team:<scope_id>' when team_name is None."""
+    attachments = [
+        {"kind": "resource_ref", "resource_id": "43", "name": "notes.md",
+         "mime": "text/markdown", "scope": {"type": "team", "id": "9"}},
+    ]
+    with patch(
+        "app.services.ai.chat.resource_ref_resolver._fetch_accessible_meta",
+        return_value={"43": {"id": "43", "name": "notes.md", "kind": "doc",
+                             "mime": "text/markdown", "size": 512,
+                             "scope": "team:9", "updated_at": "2026-05-25T00:00:00Z",
+                             "brief": None}},
+    ):
+        refs, warnings = await resolve_resource_refs(attachments, user_id="u")
+
+    assert warnings == []
+    assert len(refs) == 1
+    assert refs[0]["scope"] == "team:9"

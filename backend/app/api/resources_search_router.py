@@ -12,21 +12,9 @@ from fastapi import APIRouter, Query
 
 from app.core.deps import AuthDep
 from app.repositories.resources_repository import ResourcesRepository
+from app.services.ai._mime_kind import kind_from_mime
 
 router = APIRouter(prefix="/resources", tags=["resources"])
-
-
-def _kind_from_mime(mime: str | None) -> str:
-    m = (mime or "").lower()
-    if m.startswith("video/"):
-        return "video"
-    if m.startswith("image/"):
-        return "image"
-    if m.startswith("audio/"):
-        return "audio"
-    if m == "application/pdf":
-        return "pdf"
-    return "doc"
 
 
 @router.get("/search")
@@ -63,7 +51,7 @@ async def search_resources(
         "pdf": 0,
     }
     for row in rows:
-        kind = _kind_from_mime(row.get("mime"))
+        kind = kind_from_mime(row.get("mime"))
         counts[kind] += 1
         counts["all"] += 1
         results.append(

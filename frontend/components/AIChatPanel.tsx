@@ -145,6 +145,26 @@ export function AIChatPanel({
     setMentionPickerOpen(true);
   }, []);
 
+  // Item 1: close picker on Escape or click-outside
+  useEffect(() => {
+    if (!mentionPickerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMentionPickerOpen(false);
+    };
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-testid="resource-picker"]')) {
+        setMentionPickerOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [mentionPickerOpen]);
+
   const handleMentionSelect = useCallback(
     (item: ResourceSearchResult) => {
       if (chatEditorRef.current) {
