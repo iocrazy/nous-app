@@ -598,13 +598,15 @@ class AILibraryChatService:
                 from app.services.ai.chat.chat_attachment_resolver import (
                     resolve_attachments,
                 )
+                from app.services.ai.model_capabilities import model_supports_vision
 
                 resolved = await resolve_attachments(attachments)
                 attachment_failures = list(resolved.failures)
+                supports_vision = await model_supports_vision(composed.model)
                 new_user_msg = build_user_message(
                     content,
                     resolved.attachments,
-                    target_model=composed.model,
+                    supports_vision=supports_vision,
                 )
                 if attachment_failures:
                     logger.info(

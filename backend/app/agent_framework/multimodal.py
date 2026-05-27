@@ -21,9 +21,13 @@ the attachment.
 
 Pure layer:
   - Attachment dataclass (kind + url/data_url + mime + alt_text)
-  - build_user_message(text, attachments) → multi-part dict
+  - build_user_message(text, attachments, *, supports_vision) → multi-part dict
   - flatten_to_text(message) → str (degrade for text-only adapters)
-  - sniff_supports_vision(model) → bool (cheap heuristic)
+
+Vision capability detection lives in
+``app.services.ai.model_capabilities.model_supports_vision`` (async,
+DB-backed). Callers are responsible for resolving it before calling
+``build_user_message``.
 """
 
 from __future__ import annotations
@@ -73,49 +77,28 @@ class Attachment:
         return self.url or self.data_url
 
 
-# Models known to support image input. Conservative heuristic — when
-# in doubt, flatten_to_text degrades the input (UX still works).
-_VISION_MODEL_PREFIXES = (
-    "gpt-4o",
-    "gpt-4-vision",
-    "gpt-4-turbo",
-    "claude-3",
-    "claude-sonnet-4",
-    "claude-opus-4",
-    "qwen-vl",
-    "qwen2-vl",
-    "qwen2.5-vl",
-    "gemini-",
-    "doubao-vision",
-)
-
-
-def sniff_supports_vision(model: str) -> bool:
-    if not model:
-        return False
-    m = model.lower()
-    return any(m.startswith(p) for p in _VISION_MODEL_PREFIXES)
-
-
 def build_user_message(
     text: str,
     attachments: list[Attachment] | None = None,
     *,
-    target_model: str = "",
+    supports_vision: bool = False,
 ) -> dict[str, Any]:
     """Construct the user-message dict.
 
-    If no attachments OR the model isn't vision-capable, returns plain
+    If no attachments OR ``supports_vision=False``, returns plain
     {"role": "user", "content": "<text + flattened captions>"} so a
     text-only adapter accepts it.
 
     Otherwise returns the OpenAI multi-part shape with image_url parts.
+
+    The caller is responsible for resolving the model's vision capability
+    (see ``app.services.ai.model_capabilities.model_supports_vision``).
     """
     atts = list(attachments or [])
     if not atts:
         return {"role": "user", "content": text or ""}
 
-    if not sniff_supports_vision(target_model):
+    if not supports_vision:
         # Degrade: inline image references as text placeholders so the
         # model at least knows attachments exist
         return {
@@ -211,5 +194,4 @@ __all__ = [
     "flatten_attachments_to_text",
     "flatten_to_text",
     "looks_like_data_url",
-    "sniff_supports_vision",
 ]
