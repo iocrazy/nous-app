@@ -7,12 +7,26 @@ from app.services.ai.prompts.prompt_composer import render_available_resources
 
 def test_renders_block_for_each_ref():
     refs = [
-        {"id": "1", "name": "story.md", "kind": "doc", "mime": "text/markdown",
-         "size": 2438, "scope": "personal", "updated_at": "2026-05-24T10:00:00Z",
-         "brief": None},
-        {"id": "2", "name": "pitch.mp4", "kind": "video", "mime": "video/mp4",
-         "size": 18_000_000, "scope": "team:alpha",
-         "updated_at": "2026-05-20T10:00:00Z", "brief": "Storyboard pitch"},
+        {
+            "id": "1",
+            "name": "story.md",
+            "kind": "doc",
+            "mime": "text/markdown",
+            "size": 2438,
+            "scope": "personal",
+            "updated_at": "2026-05-24T10:00:00Z",
+            "brief": None,
+        },
+        {
+            "id": "2",
+            "name": "pitch.mp4",
+            "kind": "video",
+            "mime": "video/mp4",
+            "size": 18_000_000,
+            "scope": "team:alpha",
+            "updated_at": "2026-05-20T10:00:00Z",
+            "brief": "Storyboard pitch",
+        },
     ]
     block = render_available_resources(refs)
     assert "<available_resources>" in block

@@ -100,9 +100,14 @@ async def _fetch_dispatch(
             text = v.get("transcript")
             if not text:
                 return {"error": "transcript not available; resource not yet processed"}
-            return {"content": text, "meta": {"name": row["name"], "mode": "transcript"}}
+            return {
+                "content": text,
+                "meta": {"name": row["name"], "mode": "transcript"},
+            }
         if m == "frames":
-            return {"error": "mode='frames' not yet implemented in v1; use summary or transcript"}
+            return {
+                "error": "mode='frames' not yet implemented in v1; use summary or transcript"
+            }
         return {"error": f"unknown mode {m!r} for video/audio resource"}
 
     # PDF / doc — read file content from disk via the resource path
@@ -140,12 +145,13 @@ async def _fetch_dispatch(
         if len(raw) > cap:
             return {
                 "content": (
-                    raw[:cap]
-                    + f"\n[... truncated, {len(raw) - cap} bytes remaining]"
+                    raw[:cap] + f"\n[... truncated, {len(raw) - cap} bytes remaining]"
                 ),
                 "meta": {
-                    "name": row["name"], "mode": "full",
-                    "bytes": len(raw), "truncated": True,
+                    "name": row["name"],
+                    "mode": "full",
+                    "bytes": len(raw),
+                    "truncated": True,
                 },
             }
         return {
@@ -184,7 +190,10 @@ async def resource_fetch(
 
     try:
         result = await _fetch_dispatch(
-            resource_id=rid, mode=mode, args=args, user_id=user_id,
+            resource_id=rid,
+            mode=mode,
+            args=args,
+            user_id=user_id,
         )
     except PermissionError as exc:
         logger.info(f"[resource_fetch] permission denied: {exc!r}")

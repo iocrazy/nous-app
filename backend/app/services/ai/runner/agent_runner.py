@@ -742,7 +742,9 @@ class AgentRunner:
                             logger.warning(
                                 f"[AgentRunner] ResourceFetch handler raised: {rf_exc!r}"
                             )
-                            result = {"error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"}
+                            result = {
+                                "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
+                            }
                 elif is_mcp:
                     # Q5: route to outbound MCP server. Tool errors
                     # (server returned isError=true) come back as a

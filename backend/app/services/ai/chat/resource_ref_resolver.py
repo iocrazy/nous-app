@@ -52,7 +52,8 @@ async def _fetch_accessible_meta(
             "mime": row.get("mime"),
             "size": row.get("size"),
             "scope": (
-                "personal" if row["scope_type"] == "personal"
+                "personal"
+                if row["scope_type"] == "personal"
                 else f"team:{row.get('team_name') or row['scope_id']}"
             ),
             "updated_at": row["updated_at"],
@@ -84,15 +85,19 @@ async def resolve_resource_refs(
         if not rid or rid in seen:
             continue
         seen.add(rid)
-        snapshots.append({
-            "resource_id": rid,
-            "name": att.get("name") or rid,
-        })
+        snapshots.append(
+            {
+                "resource_id": rid,
+                "name": att.get("name") or rid,
+            }
+        )
 
     if not snapshots:
         return [], []
 
-    accessible = await _fetch_accessible_meta(user_id, [s["resource_id"] for s in snapshots])
+    accessible = await _fetch_accessible_meta(
+        user_id, [s["resource_id"] for s in snapshots]
+    )
 
     refs: list[dict] = []
     warnings: list[str] = []

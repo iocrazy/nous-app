@@ -98,7 +98,9 @@ def _make_fake_runner(captured: dict) -> Any:
 
     runner = MagicMock()
     runner.run_turn = fake_run_turn
-    runner.resource_fetch_handler = None  # will be set by the wiring, cleared by finally
+    runner.resource_fetch_handler = (
+        None  # will be set by the wiring, cleared by finally
+    )
     return runner
 
 
@@ -147,9 +149,13 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
     svc = AILibraryChatService()
 
     with (
-        patch.object(svc, "get_session", new=AsyncMock(return_value=_make_fake_session())),
+        patch.object(
+            svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
+        ),
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
-        patch.object(svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)),
+        patch.object(
+            svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
+        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
             new=AsyncMock(return_value=fake_supabase),
@@ -190,9 +196,14 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
         # Wire agent_repo mock
         mock_agent_repo_inst = AsyncMock()
         mock_agent_repo_inst.get_by_slug.return_value = {
-            "id": str(uuid4()), "slug": AGENT_SLUG,
-            "model": "qwen-max", "temperature": 0.7, "max_tokens": 4096,
-            "identity_md": "", "soul_md": "", "agent_md": "",
+            "id": str(uuid4()),
+            "slug": AGENT_SLUG,
+            "model": "qwen-max",
+            "temperature": 0.7,
+            "max_tokens": 4096,
+            "identity_md": "",
+            "soul_md": "",
+            "agent_md": "",
         }
         mock_agent_repo_cls.return_value = mock_agent_repo_inst
 
@@ -251,8 +262,7 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
     final_composed = captured.get("composed")
     assert final_composed is not None
     tool_names = [
-        t.get("function", {}).get("name")
-        for t in (final_composed.tools or [])
+        t.get("function", {}).get("name") for t in (final_composed.tools or [])
     ]
     assert "ResourceFetch" in tool_names
 
@@ -275,9 +285,13 @@ async def test_ref_warnings_prepended_to_user_message():
     svc = AILibraryChatService()
 
     with (
-        patch.object(svc, "get_session", new=AsyncMock(return_value=_make_fake_session())),
+        patch.object(
+            svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
+        ),
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
-        patch.object(svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)),
+        patch.object(
+            svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
+        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
             new=AsyncMock(return_value=fake_supabase),
@@ -286,18 +300,29 @@ async def test_ref_warnings_prepended_to_user_message():
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
             new=AsyncMock(return_value=stack),
         ),
-        patch("app.services.ai.chat.ai_library_chat_service.AgentRepository") as mock_agent_repo_cls,
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.AgentRepository"
+        ) as mock_agent_repo_cls,
         patch("app.services.ai.chat.ai_library_chat_service.SkillRepository"),
-        patch("app.services.ai.chat.ai_library_chat_service.PromptComposer") as mock_composer_cls,
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.PromptComposer"
+        ) as mock_composer_cls,
         patch(
             "app.services.ai.chat.ai_library_chat_service.resolve_resource_refs",
-            new=AsyncMock(return_value=([], ["Skipped: ghost.md (deleted or no longer accessible)"])),
+            new=AsyncMock(
+                return_value=(
+                    [],
+                    ["Skipped: ghost.md (deleted or no longer accessible)"],
+                )
+            ),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.render_available_resources",
             return_value="",
         ),
-        patch("app.services.ai.chat.ai_library_chat_service.RunRecorder") as mock_recorder_cls,
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.RunRecorder"
+        ) as mock_recorder_cls,
         patch(
             "app.services.ai.chat.ai_library_chat_service.provider_key_for_model",
             side_effect=ValueError("no provider"),
@@ -305,9 +330,14 @@ async def test_ref_warnings_prepended_to_user_message():
     ):
         mock_agent_repo_inst = AsyncMock()
         mock_agent_repo_inst.get_by_slug.return_value = {
-            "id": str(uuid4()), "slug": AGENT_SLUG,
-            "model": "qwen-max", "temperature": 0.7, "max_tokens": 4096,
-            "identity_md": "", "soul_md": "", "agent_md": "",
+            "id": str(uuid4()),
+            "slug": AGENT_SLUG,
+            "model": "qwen-max",
+            "temperature": 0.7,
+            "max_tokens": 4096,
+            "identity_md": "",
+            "soul_md": "",
+            "agent_md": "",
         }
         mock_agent_repo_cls.return_value = mock_agent_repo_inst
 
@@ -366,9 +396,13 @@ async def test_binary_attachments_still_use_existing_resolver():
     svc = AILibraryChatService()
 
     with (
-        patch.object(svc, "get_session", new=AsyncMock(return_value=_make_fake_session())),
+        patch.object(
+            svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
+        ),
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
-        patch.object(svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)),
+        patch.object(
+            svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
+        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
             new=AsyncMock(return_value=fake_supabase),
@@ -377,9 +411,13 @@ async def test_binary_attachments_still_use_existing_resolver():
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
             new=AsyncMock(return_value=stack),
         ),
-        patch("app.services.ai.chat.ai_library_chat_service.AgentRepository") as mock_agent_repo_cls,
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.AgentRepository"
+        ) as mock_agent_repo_cls,
         patch("app.services.ai.chat.ai_library_chat_service.SkillRepository"),
-        patch("app.services.ai.chat.ai_library_chat_service.PromptComposer") as mock_composer_cls,
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.PromptComposer"
+        ) as mock_composer_cls,
         patch(
             "app.services.ai.chat.ai_library_chat_service.resolve_resource_refs",
             new=AsyncMock(return_value=([], [])),
@@ -388,7 +426,9 @@ async def test_binary_attachments_still_use_existing_resolver():
             "app.services.ai.chat.ai_library_chat_service.render_available_resources",
             return_value="",
         ),
-        patch("app.services.ai.chat.ai_library_chat_service.RunRecorder") as mock_recorder_cls,
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.RunRecorder"
+        ) as mock_recorder_cls,
         patch(
             "app.services.ai.chat.ai_library_chat_service.provider_key_for_model",
             side_effect=ValueError("no provider"),
@@ -403,9 +443,14 @@ async def test_binary_attachments_still_use_existing_resolver():
     ):
         mock_agent_repo_inst = AsyncMock()
         mock_agent_repo_inst.get_by_slug.return_value = {
-            "id": str(uuid4()), "slug": AGENT_SLUG,
-            "model": "qwen-max", "temperature": 0.7, "max_tokens": 4096,
-            "identity_md": "", "soul_md": "", "agent_md": "",
+            "id": str(uuid4()),
+            "slug": AGENT_SLUG,
+            "model": "qwen-max",
+            "temperature": 0.7,
+            "max_tokens": 4096,
+            "identity_md": "",
+            "soul_md": "",
+            "agent_md": "",
         }
         mock_agent_repo_cls.return_value = mock_agent_repo_inst
 
@@ -507,9 +552,13 @@ async def test_split_loop_handles_pydantic_attachment_request():
     svc = AILibraryChatService()
 
     with (
-        patch.object(svc, "get_session", new=AsyncMock(return_value=_make_fake_session())),
+        patch.object(
+            svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
+        ),
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
-        patch.object(svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)),
+        patch.object(
+            svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
+        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_async_supabase_admin",
             new=AsyncMock(return_value=fake_supabase),
@@ -543,9 +592,14 @@ async def test_split_loop_handles_pydantic_attachment_request():
     ):
         mock_agent_repo_inst = AsyncMock()
         mock_agent_repo_inst.get_by_slug.return_value = {
-            "id": str(uuid4()), "slug": AGENT_SLUG,
-            "model": "qwen-max", "temperature": 0.7, "max_tokens": 4096,
-            "identity_md": "", "soul_md": "", "agent_md": "",
+            "id": str(uuid4()),
+            "slug": AGENT_SLUG,
+            "model": "qwen-max",
+            "temperature": 0.7,
+            "max_tokens": 4096,
+            "identity_md": "",
+            "soul_md": "",
+            "agent_md": "",
         }
         mock_agent_repo_cls.return_value = mock_agent_repo_inst
 
@@ -577,13 +631,13 @@ async def test_split_loop_handles_pydantic_attachment_request():
     passed_atts = resolver_call.args[0]
     assert len(passed_atts) == 1
     # After normalization, it must be a dict — not a Pydantic object
-    assert isinstance(passed_atts[0], dict), (
-        "split loop must normalize Pydantic AttachmentRequest to dict before passing to resolver"
-    )
+    assert isinstance(
+        passed_atts[0], dict
+    ), "split loop must normalize Pydantic AttachmentRequest to dict before passing to resolver"
     assert passed_atts[0]["kind"] == "resource_ref"
     assert passed_atts[0]["resource_id"] == "resource-pydantic-1"
 
     # runner.resource_fetch_handler must be cleared after the turn (cleanup fix)
-    assert runner.resource_fetch_handler is None, (
-        "resource_fetch_handler must be cleared in finally block after turn completes"
-    )
+    assert (
+        runner.resource_fetch_handler is None
+    ), "resource_fetch_handler must be cleared in finally block after turn completes"

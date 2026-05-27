@@ -601,7 +601,7 @@ class AILibraryChatService:
         # of whether attachments arrived as Pydantic AttachmentRequest objects
         # (HTTP path) or plain dicts (test path).
         _att_dicts: list[dict] = []
-        for _att in (attachments or []):
+        for _att in attachments or []:
             if hasattr(_att, "model_dump"):
                 _att_dicts.append(_att.model_dump())
             elif isinstance(_att, dict):

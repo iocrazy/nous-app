@@ -14,6 +14,7 @@ completed steps memoized (not re-executed) and the in-flight step retried.
 Run from backend/ dir:
     uv run python scripts/poc7_crash_recovery.py
 """
+
 from __future__ import annotations
 
 import json
@@ -103,7 +104,12 @@ def mode_run_recover() -> int:
         if status != last_status:
             print(f"[child-recover] status={status}")
             last_status = status
-        if status in ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
+        if status in (
+            "SUCCESS",
+            "ERROR",
+            "CANCELLED",
+            "MAX_RECOVERY_ATTEMPTS_EXCEEDED",
+        ):
             break
         time.sleep(1)
     else:
@@ -156,7 +162,9 @@ def mode_orchestrate() -> int:
     print("=== Phase 4: verify log ===")
     records = [json.loads(l) for l in LOG_FILE.read_text().strip().splitlines()]
     step1_count = sum(1 for r in records if r["step"] == 1)
-    step2_enter = sum(1 for r in records if r["step"] == 2 and r.get("phase") == "enter")
+    step2_enter = sum(
+        1 for r in records if r["step"] == 2 and r.get("phase") == "enter"
+    )
     step2_exit = sum(1 for r in records if r["step"] == 2 and r.get("phase") == "exit")
     step3_count = sum(1 for r in records if r["step"] == 3)
 
