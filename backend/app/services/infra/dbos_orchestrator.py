@@ -167,13 +167,20 @@ def _pre_launch_sweep_stale_scheduled() -> None:
         The PR #151 workflow_health_sweeper handles those with the
         do_not_auto_cancel safeguard the user requested.
 
-    Cutoff: 30 minutes. Anything older is presumed dead — newer ticks
+    Cutoff: 3 minutes. Anything older is presumed dead — newer ticks
     have already replaced it functionally.
 
     Sync function on purpose so launch_dbos can call it before
     DBOS.launch (which is also sync).
     """
-    cutoff_minutes = int(os.environ.get("DBOS_STALE_SCHED_CUTOFF_MINUTES", "30"))
+    # 3 min default: any sched-* workflow whose last update is older than
+    # 3 minutes is presumed dead — the next cron tick has already fired
+    # and a 3-minute-old PENDING/ENQUEUED row can only be a leftover
+    # from a previous worker crash. 30-min default (pre-2026-05-27) let
+    # cancelled scheduled workflows survive across container restarts and
+    # be re-enqueued by DBOS recovery, blocking the event loop. Override
+    # with DBOS_STALE_SCHED_CUTOFF_MINUTES env var if needed.
+    cutoff_minutes = int(os.environ.get("DBOS_STALE_SCHED_CUTOFF_MINUTES", "3"))
     db_url = os.environ.get("DBOS_DATABASE_URL", "")
     if not db_url:
         return
@@ -201,6 +208,20 @@ def _pre_launch_sweep_stale_scheduled() -> None:
                     (cutoff_minutes,),
                 )
                 cancelled = cur.fetchall()
+                # Also evict matching queue rows. Without this, DBOS recovery
+                # still pulls them on launch — worker begins executing,
+                # step 1 reads CANCELLED status, raises DBOSWorkflowCancelledError.
+                # The resulting stack-trace storm is what actually blocks the
+                # event loop (root-cause finding 2026-05-27).
+                cur.execute(
+                    """
+                    DELETE FROM dbos._dbos_internal_queue
+                    WHERE workflow_uuid LIKE 'sched-%%'
+                      AND created_at_epoch_ms / 1000.0
+                          < EXTRACT(EPOCH FROM now() - make_interval(mins => %s));
+                    """,
+                    (cutoff_minutes,),
+                )
                 conn.commit()
         if cancelled:
             logger.warning(
