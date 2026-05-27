@@ -77,13 +77,23 @@ def test_env_override_respected(monkeypatch):
     assert conn.cur.calls[0][1] == (7,)
 
 
-def test_sweep_also_clears_internal_queue(monkeypatch):
-    """Sweep must DELETE matching rows from dbos._dbos_internal_queue."""
+def test_sweep_issues_only_the_update(monkeypatch):
+    """Sweep must issue exactly the UPDATE — no DELETE against the
+    non-existent dbos._dbos_internal_queue table. Earlier code added
+    a DELETE that crashed with UndefinedTable on prod (DBOS 2.x has
+    no such table — `_dbos_internal_queue` is a queue name, stored
+    in dbos.workflow_status.queue_name). The crash rolled back the
+    UPDATE in the same transaction, so the whole sweep silently
+    failed. Hotfix 2026-05-27."""
     monkeypatch.setenv("DBOS_DATABASE_URL", "postgresql://stub/none")
     monkeypatch.setenv("DBOS_STALE_SCHED_CUTOFF_MINUTES", "5")
     conn = _FakeConn()
     with patch("psycopg.connect", return_value=conn):
         dbos_orchestrator._pre_launch_sweep_stale_scheduled()
-    joined = " ".join(sql for sql, _ in conn.cur.calls)
-    assert "UPDATE dbos.workflow_status" in joined
-    assert "DELETE FROM dbos._dbos_internal_queue" in joined
+    assert len(conn.cur.calls) == 1, (
+        f"expected exactly 1 SQL stmt (UPDATE), got {len(conn.cur.calls)}: "
+        f"{[c[0][:60] for c in conn.cur.calls]}"
+    )
+    sql = conn.cur.calls[0][0]
+    assert "UPDATE dbos.workflow_status" in sql
+    assert "DELETE" not in sql.upper()
