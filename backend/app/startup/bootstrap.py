@@ -114,7 +114,11 @@ async def _bg_liveness_reconcile() -> None:
     user can retry.
     """
     try:
-        from app.workflows.liveness_scanner import reconcile_stranded_runs
+        # Import via app.services.liveness.reconcile so we do NOT pull
+        # app.workflows.liveness_scanner (which fires a 30s
+        # @DBOS.scheduled decorator at import time). bootstrap runs on
+        # every role including gateway — see 2026-05-27 fix.
+        from app.services.liveness.reconcile import reconcile_stranded_runs
 
         await reconcile_stranded_runs()
     except Exception as exc:
