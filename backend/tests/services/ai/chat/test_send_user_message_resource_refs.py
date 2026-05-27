@@ -226,7 +226,7 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
         with patch("app.main.app", MagicMock(state=MagicMock(context_engines=None))):
             pass  # the try/except inside already handles import error
 
-        result = await svc.run_session_turn(
+        _ = await svc.run_session_turn(
             SESSION_ID,
             user_id=USER_ID,
             content="please read spec.md",
@@ -617,7 +617,7 @@ async def test_split_loop_handles_pydantic_attachment_request():
         mock_recorder_cls.return_value = recorder_instance
 
         # Pass a real Pydantic AttachmentRequest object — this is the HTTP path
-        result = await svc.run_session_turn(
+        _ = await svc.run_session_turn(
             SESSION_ID,
             user_id=USER_ID,
             content="please read pydantic-test.md",
