@@ -208,6 +208,20 @@ def _pre_launch_sweep_stale_scheduled() -> None:
                     (cutoff_minutes,),
                 )
                 cancelled = cur.fetchall()
+                # Also evict matching queue rows. Without this, DBOS recovery
+                # still pulls them on launch — worker begins executing,
+                # step 1 reads CANCELLED status, raises DBOSWorkflowCancelledError.
+                # The resulting stack-trace storm is what actually blocks the
+                # event loop (root-cause finding 2026-05-27).
+                cur.execute(
+                    """
+                    DELETE FROM dbos._dbos_internal_queue
+                    WHERE workflow_uuid LIKE 'sched-%%'
+                      AND created_at_epoch_ms / 1000.0
+                          < EXTRACT(EPOCH FROM now() - make_interval(mins => %s));
+                    """,
+                    (cutoff_minutes,),
+                )
                 conn.commit()
         if cancelled:
             logger.warning(
