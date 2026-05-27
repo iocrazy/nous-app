@@ -19,6 +19,44 @@ def test_default_cutoff_is_three_minutes(monkeypatch):
         assert conn_mock.call_count == 0
 
 
+def test_default_cutoff_without_env_var(monkeypatch):
+    """When DBOS_STALE_SCHED_CUTOFF_MINUTES is unset, the SQL uses 3 (default)."""
+    monkeypatch.delenv("DBOS_STALE_SCHED_CUTOFF_MINUTES", raising=False)
+    monkeypatch.setenv("DBOS_DATABASE_URL", "postgresql://stub/none")
+    captured: dict[str, object] = {}
+
+    class _FakeCur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def execute(self, sql, params):
+            captured["params"] = params
+
+        def fetchall(self):
+            return []
+
+    class _FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def cursor(self):
+            return _FakeCur()
+
+        def commit(self):
+            pass
+
+    with patch("psycopg.connect", return_value=_FakeConn()):
+        dbos_orchestrator._pre_launch_sweep_stale_scheduled()
+
+    assert captured["params"] == (3,)
+
+
 def test_env_override_respected(monkeypatch):
     """DBOS_STALE_SCHED_CUTOFF_MINUTES env var overrides default."""
     monkeypatch.setenv("DBOS_STALE_SCHED_CUTOFF_MINUTES", "7")

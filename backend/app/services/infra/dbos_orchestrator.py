@@ -167,7 +167,7 @@ def _pre_launch_sweep_stale_scheduled() -> None:
         The PR #151 workflow_health_sweeper handles those with the
         do_not_auto_cancel safeguard the user requested.
 
-    Cutoff: 30 minutes. Anything older is presumed dead — newer ticks
+    Cutoff: 3 minutes. Anything older is presumed dead — newer ticks
     have already replaced it functionally.
 
     Sync function on purpose so launch_dbos can call it before
