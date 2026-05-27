@@ -1,3 +1,5 @@
+import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from app.startup.agent_framework_init import (
     install_agent_primitives,
     install_bounds_heartbeat,
 )
+from app.startup import healthz_lite as _healthz_lite
 from app.startup.bootstrap import install_background_bootstrap
 from app.startup.dbos_init import (
     init_dbos,
@@ -48,6 +51,13 @@ async def lifespan(app: FastAPI):
     Behaviour matches the original monolithic block one-for-one.
     """
     # ── Startup ──────────────────────────────────────────────────
+    # P2 (2026-05-27): start healthz_lite FIRST so docker has an honest
+    # liveness signal even if any later startup hook blocks. Bound to
+    # port 8090 (override via HEALTHZ_LITE_PORT env). Runs on its own
+    # daemon thread, independent of the FastAPI event loop.
+    _hl_port = int(os.environ.get("HEALTHZ_LITE_PORT", "8090"))
+    app.state.healthz_lite_server = _healthz_lite.start(port=_hl_port)
+
     await load_persisted_transcode_settings()
     install_background_bootstrap(app)
 
@@ -69,6 +79,14 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ─────────────────────────────────────────────────
     await shutdown_all(app)
+    try:
+        # HTTPServer.shutdown() blocks up to ~500ms waiting on serve_forever's
+        # poll loop — dispatch to executor so it doesn't stall the asyncio loop.
+        await asyncio.get_event_loop().run_in_executor(
+            None, _healthz_lite.stop, app.state.healthz_lite_server
+        )
+    except Exception as _hl_exc:
+        logger.warning(f"[healthz-lite] stop failed: {_hl_exc!r}")
     logger.info(f"{settings.APP_NAME}关闭成功")
 
 
