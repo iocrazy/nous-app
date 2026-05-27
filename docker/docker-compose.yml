@@ -78,29 +78,22 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      # PR-D8 Phase 1: use the cheap liveness probe (no DB / DBOS deps).
-      # Deep probe still available at /api/v1/health/deep for ops; for
-      # "is this container alive" we want a millisecond answer that
-      # doesn't fail when DBOS is recovering — autoheal would otherwise
-      # restart the gateway every time a worker degrades.
-      #
-      # Ephemeral-port-exhaustion guard (2026-05-22 incident): a Supabase
-      # connection leak filled the ~28k ephemeral range; the loopback probe
-      # only failed at TOTAL exhaustion, by which point the daemon was too
-      # degraded for autoheal's restart to succeed. Fail the healthcheck
-      # while there is still headroom (>24k open conns) so autoheal recycles
-      # the container *before* it wedges. Normal operation sits in the low
-      # hundreds, so this only trips on a runaway leak.
-      test: ["CMD-SHELL", "c=$$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | wc -l); test $${c:-0} -lt 24000 && { curl -fs http://localhost:8080/api/v1/healthz || curl -fs http://localhost:8080/health; }"]
+      # P2 (2026-05-27): probe port 8090 (healthz_lite) on its own
+      # daemon thread, decoupled from the main FastAPI event loop. When
+      # the loop blocks, this probe still answers — diagnostic and
+      # restart decisions are now independent of "did the app event
+      # loop hang?". 24000-TCP guard removed: real cause was an
+      # asyncio-blocking startup hook, not connection exhaustion
+      # (root-cause 2026-05-27).
+      test: ["CMD-SHELL", "curl -fs http://localhost:8090/healthz/lite || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      # DBOS first-launch creates 11 tables in the dbos schema (DBOS
-      # v2.19.0 migrations). On a cold prod DB this takes ~90s; a 60s
-      # start_period let autoheal kill the container before init
-      # finished. 300s gives comfortable headroom; subsequent restarts
-      # find the schema already present and complete in <30s.
-      start_period: 300s
+      # 60s is plenty: healthz_lite is on a daemon thread that binds
+      # port 8090 within milliseconds of process start, before init_dbos
+      # or any other hook runs. The DBOS-schema-init rationale that
+      # justified 300s on the old /api/v1/healthz probe no longer applies.
+      start_period: 60s
 
   # ── PR-D8 Phase 1: DBOS worker pool (separate process) ──
   # Consumes the agent_workforce queue. No HTTP port published; only
@@ -147,6 +140,7 @@ services:
     # No published port — worker only serves probes internally.
     expose:
       - "8080"
+      - "8090"  # healthz_lite (in-container probe target)
     volumes:
       - ${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads
       - ./.env:/app/.env
@@ -170,12 +164,16 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      # Same ephemeral-port-exhaustion guard as the gateway (see its
-      # healthcheck comment): fail while there's headroom so autoheal can
-      # recycle before the daemon degrades.
-      test: ["CMD-SHELL", "c=$$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | wc -l); test $${c:-0} -lt 24000 && curl -fs http://localhost:8080/api/v1/healthz"]
+      # P2 (2026-05-27): probe port 8090 (healthz_lite) on its own
+      # daemon thread, decoupled from the main FastAPI event loop. When
+      # the loop blocks, this probe still answers — diagnostic and
+      # restart decisions are now independent of "did the app event
+      # loop hang?". 24000-TCP guard removed: real cause was an
+      # asyncio-blocking startup hook, not connection exhaustion
+      # (root-cause 2026-05-27).
+      test: ["CMD-SHELL", "curl -fs http://localhost:8090/healthz/lite || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
       start_period: 60s
 
