@@ -22,11 +22,11 @@ from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.utils import Utils
 from app.middleware.request_logging import RequestLoggingMiddleware
+from app.startup import healthz_lite as _healthz_lite
 from app.startup.agent_framework_init import (
     install_agent_primitives,
     install_bounds_heartbeat,
 )
-from app.startup import healthz_lite as _healthz_lite
 from app.startup.bootstrap import install_background_bootstrap
 from app.startup.dbos_init import (
     init_dbos,
