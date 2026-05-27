@@ -31,17 +31,30 @@ skips silently (the holder's pass already updated state).
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
 
+# Re-export the startup reconcile helper from its canonical home so any
+# existing caller of `from app.workflows.liveness_scanner import
+# reconcile_stranded_runs` keeps working. New callers should import
+# directly from app.services.liveness.reconcile to avoid pulling this
+# module's @DBOS.scheduled decorator onto their process (gateway
+# leak fix, 2026-05-27).
+from app.services.liveness.reconcile import (  # noqa: F401
+    HEARTBEAT_DEAD_SECONDS,
+    reconcile_stranded_runs,
+)
+
 # Threshold defaults (paperclip-aligned). Override with env vars.
+# HEARTBEAT_DEAD_SECONDS is owned by app.services.liveness.reconcile
+# (re-exported above) so the reconcile helper and the scheduled
+# handler stay in lockstep.
 T1_SECONDS = int(os.environ.get("LIVENESS_T1_SECONDS", "60"))  # running → silent
 T2_SECONDS = int(os.environ.get("LIVENESS_T2_SECONDS", "180"))  # silent  → stuck
 T3_SECONDS = int(os.environ.get("LIVENESS_T3_SECONDS", "300"))  # stuck   → dead
-HEARTBEAT_DEAD_SECONDS = int(os.environ.get("LIVENESS_HEARTBEAT_DEAD_SECONDS", "120"))
 MAX_CONTINUATIONS = int(os.environ.get("LIVENESS_MAX_CONTINUATIONS", "2"))
 
 # Postgres advisory lock id — picked once, never collide with another
@@ -199,41 +212,13 @@ async def liveness_scan_scheduled(
 
 # ─────────────────────────────────────────────────────────────────
 # Startup reconciliation: paperclip-style "fix stranded runs."
-# Called from app lifespan startup. Scans for agent_runs.status='running'
-# with heartbeat_at older than HEARTBEAT_DEAD_SECONDS — these are
-# leftovers from a backend crash. Mark them dead so the chat reflects
-# reality and DBOS retry can claim them.
+# The implementation moved to app.services.liveness.reconcile so that
+# the gateway process (and any other importer that just needs the
+# reconcile helper) can pull it WITHOUT triggering this file's
+# @DBOS.scheduled decorator above. The helper is still re-exported
+# at the top of this module for back-compat. See the 2026-05-27
+# gateway-leak fix for the why.
 # ─────────────────────────────────────────────────────────────────
-
-
-async def reconcile_stranded_runs() -> dict[str, int]:
-    """One-shot startup sweep. Safe to call at any time; idempotent."""
-    from app.db import engine as db_engine
-
-    if not db_engine.is_configured():
-        return {"reconciled": 0}
-
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=HEARTBEAT_DEAD_SECONDS)
-
-    # Single UPDATE (direct PG via SQLAlchemy): mark every stranded run dead;
-    # rowcount = how many we touched. Replaces the supabase-py
-    # select-then-update (httpx CLOSE_WAIT leak, Issue #199 Bug C).
-    n = await db_engine.execute(
-        "UPDATE public.agent_runs SET liveness_state = 'dead', "
-        "status = 'failed', ended_at = :ended, error_code = 'stranded_on_restart', "
-        "error_message = :msg "
-        "WHERE status = 'running' AND heartbeat_at < :cutoff",
-        {
-            "ended": datetime.now(timezone.utc),
-            "msg": "Backend restarted while this run was in flight; no heartbeat for >2 minutes.",
-            "cutoff": cutoff,
-        },
-    )
-    if n > 0:
-        logger.warning(
-            f"[liveness-reconcile] marked {n} stranded run(s) dead on startup"
-        )
-    return {"reconciled": n}
 
 
 __all__ = [
