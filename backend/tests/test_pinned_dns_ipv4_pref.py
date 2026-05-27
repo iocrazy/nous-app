@@ -12,7 +12,6 @@ list so IPv4 comes first.
 
 from __future__ import annotations
 
-
 import pytest
 
 from app.boundary.pinned_dns import PinnedDNSResolver
