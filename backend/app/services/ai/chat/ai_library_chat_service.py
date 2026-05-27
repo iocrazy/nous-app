@@ -28,7 +28,12 @@ from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
-from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
+from app.services.ai.chat.resource_ref_resolver import resolve_resource_refs
+from app.services.ai.prompts.prompt_composer import (
+    ComposerInput,
+    PromptComposer,
+    render_available_resources,
+)
 from app.services.ai.runner.agent_runner import (  # noqa: F401  patched in tests
     AgentRunner,
 )
@@ -587,12 +592,114 @@ class AILibraryChatService:
                 continue
             user_messages.append({"role": role, "content": msg.get("content") or ""})
 
-        # G2: resolve attachments → multimodal Attachment[] → vision-aware
+        # S4 Task 6: split attachments by kind before resolution.
+        # resource_ref attachments → resource_ref_resolver (metadata only,
+        # content loaded lazily via ResourceFetch tool during the turn).
+        # All other kinds → existing G2 binary attachment path (image/pdf/audio).
+        ref_atts: list = []
+        binary_atts: list = []
+        for _att in (attachments or []):
+            if _att.get("kind") == "resource_ref":
+                ref_atts.append(_att)
+            else:
+                binary_atts.append(_att)
+
+        # Resource-ref path: resolve metadata, extend system message, register tool.
+        resource_refs: list = []
+        ref_warnings: list = []
+        try:
+            resource_refs, ref_warnings = await resolve_resource_refs(
+                ref_atts, user_id=str(user_id)
+            )
+        except Exception as rr_exc:
+            logger.warning(
+                f"[chat] resource_ref resolution failed (non-fatal): {rr_exc}"
+            )
+
+        if resource_refs:
+            resources_block = render_available_resources(resource_refs)
+            if resources_block:
+                composed = composed.model_copy(
+                    update={
+                        "system_message": (
+                            composed.system_message + "\n\n" + resources_block
+                        )
+                    }
+                )
+            # Build ResourceFetch tool spec and register a closure on the runner.
+            resource_fetch_spec = {
+                "type": "function",
+                "function": {
+                    "name": "ResourceFetch",
+                    "description": (
+                        "Load content for a resource listed in "
+                        "<available_resources>. Call with the resource id "
+                        "and an optional mode."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "resource_id": {
+                                "type": "string",
+                                "description": "id attribute from <available_resources>.",
+                            },
+                            "mode": {
+                                "type": "string",
+                                "description": (
+                                    "How to read the resource. Defaults vary "
+                                    "by kind — see system message for details."
+                                ),
+                            },
+                            "args": {
+                                "type": "object",
+                                "description": "Optional extra args (e.g. {page: 2} for PDF).",
+                            },
+                        },
+                        "required": ["resource_id"],
+                    },
+                },
+            }
+            composed = composed.model_copy(
+                update={"tools": list(composed.tools or []) + [resource_fetch_spec]}
+            )
+            # Bind the closure to the runner so the tool dispatch layer can call it.
+            _available_refs: set = {r["id"] for r in resource_refs}
+            _request_cache: Dict[str, Any] = {}
+            _bound_user_id: str = str(user_id)
+
+            async def _resource_fetch_handler(args: dict) -> dict:
+                from app.services.ai.tools.resource_fetch_tool import resource_fetch
+
+                return await resource_fetch(
+                    resource_id=str(args.get("resource_id", "")),
+                    mode=args.get("mode"),
+                    args=args.get("args"),
+                    user_id=_bound_user_id,
+                    available_refs=_available_refs,
+                    request_cache=_request_cache,
+                )
+
+            runner.resource_fetch_handler = _resource_fetch_handler
+            logger.info(
+                f"[chat] resource_ref: {len(resource_refs)} ref(s) wired; "
+                f"ResourceFetch tool registered"
+            )
+
+        # Prepend ref warnings to the user content so the agent sees them.
+        effective_content = content
+        if ref_warnings:
+            warning_lines = "\n".join(f"⚠️ {w}" for w in ref_warnings)
+            effective_content = warning_lines + "\n\n" + content
+            logger.info(
+                f"[chat] resource_ref: {len(ref_warnings)} warning(s) prepended"
+            )
+
+        # G2: resolve binary attachments → multimodal Attachment[] → vision-aware
         # user message. Failures degrade gracefully (text-only message
         # with placeholder describing what was skipped).
         new_user_msg: Dict[str, Any]
         attachment_failures: list = []
-        if attachments:
+        if binary_atts:
             try:
                 from app.agent_framework.multimodal import build_user_message
                 from app.services.ai.chat.chat_attachment_resolver import (
@@ -600,27 +707,27 @@ class AILibraryChatService:
                 )
                 from app.services.ai.model_capabilities import model_supports_vision
 
-                resolved = await resolve_attachments(attachments)
+                resolved = await resolve_attachments(binary_atts)
                 attachment_failures = list(resolved.failures)
                 supports_vision = await model_supports_vision(composed.model)
                 new_user_msg = build_user_message(
-                    content,
+                    effective_content,
                     resolved.attachments,
                     supports_vision=supports_vision,
                 )
                 if attachment_failures:
                     logger.info(
                         f"[chat] G2 attachment failures: "
-                        f"{len(attachment_failures)} of {len(attachments)} "
+                        f"{len(attachment_failures)} of {len(binary_atts)} "
                         f"could not be resolved"
                     )
             except Exception as att_exc:
                 logger.warning(
                     f"[chat] attachment resolution failed (text-only fallback): {att_exc}"
                 )
-                new_user_msg = {"role": "user", "content": content}
+                new_user_msg = {"role": "user", "content": effective_content}
         else:
-            new_user_msg = {"role": "user", "content": content}
+            new_user_msg = {"role": "user", "content": effective_content}
         user_messages.append(new_user_msg)
 
         # Wave G (G5): per-message size cap. Defends against the
