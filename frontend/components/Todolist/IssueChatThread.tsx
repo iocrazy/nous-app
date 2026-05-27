@@ -16,6 +16,7 @@ import { STATUS_LABEL, STATUS_COLOR, IssueStatusIcon } from './IssueStatusIcon';
 import type { IssueStatus } from '../../services/issuesService';
 import { relativeTime } from '../../utils/taskDisplay';
 import { useToast } from '../Toast';
+import { useElapsedSeconds } from '../../hooks/useElapsedSeconds';
 
 const LIVENESS_VISUAL: Record<AgentLivenessState, { dot: string; label: string; tooltip: string }> = {
   running:   { dot: 'bg-emerald-500', label: 'running',   tooltip: 'Agent is making progress' },
@@ -73,25 +74,26 @@ const SystemStatusEvent: React.FC<{ msg: IssueMessage; selfUserId?: string }> = 
   const isSelf = msg.author_user_id && msg.author_user_id === selfUserId;
   const author = isSelf ? 'You' : msg.author_user_id ? `User ${msg.author_user_id.slice(0, 6)}` : 'System';
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 my-1 text-[12px] text-zinc-500">
-      <span className="font-medium text-zinc-400">{author}</span>
-      <span>updated this task · {relativeTime(msg.created_at)}</span>
-      <span className="ml-auto inline-flex items-center gap-1.5">
-        <span className="text-zinc-500">STATUS</span>
-        {from && (
-          <span className={`${STATUS_COLOR[from]} inline-flex items-center gap-1`}>
-            <IssueStatusIcon status={from} size={10} />
-            {STATUS_LABEL[from].toLowerCase()}
-          </span>
-        )}
-        <span className="text-zinc-600">→</span>
-        {to && (
-          <span className={`${STATUS_COLOR[to]} inline-flex items-center gap-1`}>
-            <IssueStatusIcon status={to} size={10} />
-            {STATUS_LABEL[to].toLowerCase()}
-          </span>
-        )}
-      </span>
+    <div
+      data-testid="system-status-row"
+      className="text-center text-[11px] text-zinc-500 italic my-2"
+    >
+      <span className="text-zinc-400 not-italic font-medium">{author}</span>
+      {' '}updated this task —{' '}
+      <span className="not-italic">STATUS</span>{' '}
+      {from && (
+        <span className={`${STATUS_COLOR[from]} not-italic font-medium inline-flex items-center gap-0.5`}>
+          <IssueStatusIcon status={from} size={10} />
+          {STATUS_LABEL[from].toLowerCase()}
+        </span>
+      )}
+      {' '}<span className="text-zinc-600 not-italic">→</span>{' '}
+      {to && (
+        <span className={`${STATUS_COLOR[to]} not-italic font-medium inline-flex items-center gap-0.5`}>
+          <IssueStatusIcon status={to} size={10} />
+          {STATUS_LABEL[to].toLowerCase()}
+        </span>
+      )}
     </div>
   );
 };
@@ -109,6 +111,10 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
   const metaStatus = msg.meta?.status as string | undefined;
   const errorCode = msg.meta?.error_code as string | undefined;
   const isRunning = metaStatus === 'running';
+  // Live tick for in-flight runs. Falls back to msg.created_at as the
+  // timestamp origin because started_at is not yet surfaced on IssueMessage
+  // (agent_runs.started_at exists in DB but isn't in the REST response).
+  const elapsedLive = useElapsedSeconds(msg.created_at, { enabled: isRunning });
   const { addToast } = useToast();
   const [simulating, setSimulating] = useState(false);
 
@@ -129,9 +135,11 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
       <div className="flex items-center gap-2 mb-1.5">
         <AgentAvatar initials={initials} color={agent?.avatar_color} />
         <span className="text-xs font-medium text-zinc-200">{agent?.name ?? 'Agent'}</span>
-        {msg.duration_seconds != null && (
+        {isRunning ? (
+          <span className="text-[12px] text-zinc-500">working for {formatDuration(elapsedLive)}</span>
+        ) : msg.duration_seconds != null ? (
           <span className="text-[12px] text-zinc-500">worked for {formatDuration(msg.duration_seconds)}</span>
-        )}
+        ) : null}
         {liveness && <LivenessPill state={liveness} />}
         {metaStatus && metaStatus !== 'completed' && (
           <span className="text-[12px] text-zinc-500 italic">({metaStatus})</span>
@@ -176,17 +184,29 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
   const initials = displayName.slice(0, 2).toUpperCase();
   const color = agent?.avatar_color ?? (isSelf ? 'bg-indigo-500' : 'bg-zinc-600');
   return (
-    <div className="my-3">
-      <div className="flex items-center gap-2 mb-1.5">
-        <AgentAvatar initials={initials} color={color} />
-        <span className="text-xs font-medium text-zinc-200">{displayName}</span>
-        <span className="text-[12px] text-zinc-500">commented · {relativeTime(msg.created_at)}</span>
-      </div>
-      {msg.body && (
-        <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/30 p-3 text-[14px] text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">
-          {msg.body}
+    <div
+      data-testid="comment-row"
+      className={`flex my-2 ${isSelf ? 'justify-end' : 'justify-start'}`}
+    >
+      <div
+        data-testid="comment-bubble"
+        className={`max-w-[80%] rounded-lg px-3 py-2 ${
+          isSelf
+            ? 'bg-blue-600/15 border border-blue-700/40 text-zinc-100'
+            : 'bg-zinc-800 border border-zinc-700 text-zinc-200'
+        }`}
+      >
+        <div className="flex items-center gap-2 mb-1.5">
+          <AgentAvatar initials={initials} color={color} />
+          <span className="text-xs font-medium">{displayName}</span>
+          <span className="text-[12px] text-zinc-500">commented · {relativeTime(msg.created_at)}</span>
         </div>
-      )}
+        {msg.body && (
+          <div className="rounded text-[14px] leading-relaxed whitespace-pre-wrap break-words">
+            {msg.body}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
