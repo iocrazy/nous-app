@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Pencil,
   Loader2,
+  Clock,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useResourcesContext } from '../contexts/ResourcesContext';
@@ -67,6 +68,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
     isRecycleView,
     isSharedView,
     isDownloadsView,
+    isTempView,
     resPath,
     navigate,
     myResourcesCount,
@@ -272,6 +274,14 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               </button>
             </div>
 
+            {/* Temp — peer item next to My Uploads */}
+            <button
+              onClick={() => navigate(resPath('/resources/temp'))}
+              className={sidebarItemClass(isTempView)}
+            >
+              <Clock size={15} className="shrink-0 opacity-70" />
+              <span className="flex-1 truncate">{t('resources.temp')}</span>
+            </button>
 
           </>
         )}

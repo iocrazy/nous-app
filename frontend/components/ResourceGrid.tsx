@@ -252,7 +252,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   const ctx = useResourcesContext();
   const {
     scopeType, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId,
-    isResourcesView, isRecycleView, isSharedView,
+    isResourcesView, isRecycleView, isSharedView, isTempView,
     loading, viewMode, setViewMode, sortBy, setSortBy,
     searchQuery, folderChain, folderPreviews,
     selectedResource, setSelectedResource,
@@ -271,6 +271,13 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
   // Mobile detection (matches Tailwind md: breakpoint at 768px)
   const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  // ─── Hide 'temp' from the top-level My Uploads FOLDERS grid ───────
+  // Only filter at the root level (no folder selected) — navigating INTO
+  // the temp folder explicitly must still work via the sidebar "Temp" item.
+  const visibleFolders = isResourcesView && !selectedFolderId && !selectedSmartFolderId && !selectedLibraryId
+    ? filteredFolders.filter((f) => f.name !== 'temp')
+    : filteredFolders;
 
   // ─── Temp folder: TTL badge + Save actions ────────────
   const inTempFolder = selectedFolder?.name === 'temp';
@@ -677,7 +684,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
           </button>
           <span className="text-xs text-zinc-500">
             {t('resources.multiSelectCount', {
-              total: filteredFolders.length + sortedItems.length,
+              total: visibleFolders.length + sortedItems.length,
               selected: selectedIds.size,
             })}
           </span>
@@ -782,7 +789,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         {!isSharedView && (
           loading ? (
             viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
-          ) : (filteredFolders.length > 0 || sortedItems.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) ? (
+          ) : (visibleFolders.length > 0 || sortedItems.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) ? (
             <div className="space-y-5">
               {/* Trashed folders in recycle bin */}
               {isRecycleView && recycleSubFolders.length > 0 && (
@@ -821,14 +828,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               )}
 
               {/* Folders section */}
-              {filteredFolders.length > 0 && (
+              {visibleFolders.length > 0 && (
                 <div>
                   {sortedItems.length > 0 && (
                     <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
                   {viewMode === 'grid' ? (
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
-                      {filteredFolders.map((folder) => {
+                      {visibleFolders.map((folder) => {
                         const folderNavigate = () => {
                           if (selectedLibraryId) {
                             navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
@@ -883,7 +890,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-1.5">
-                      {filteredFolders.map((folder) => {
+                      {visibleFolders.map((folder) => {
                         const folderNavigate = () => {
                           if (selectedLibraryId) {
                             navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
@@ -943,7 +950,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               {/* Files section */}
               {sortedItems.length > 0 && (
                 <div>
-                  {(filteredFolders.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) && (
+                  {(visibleFolders.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) && (
                     <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
                   )}
                   {viewMode === 'list' && (
@@ -1086,6 +1093,11 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 <>
                   <Trash2 size={48} className="text-zinc-700 mb-4" />
                   <p className="text-zinc-500 text-sm">{t('resources.recycleBinEmpty')}</p>
+                </>
+              ) : isTempView ? (
+                <>
+                  <Clock size={48} className="text-zinc-700 mb-4" />
+                  <p className="text-zinc-500 text-sm">{t('resources.tempEmpty')}</p>
                 </>
               ) : (
                 <>

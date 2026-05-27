@@ -619,7 +619,9 @@
     },
     "getInfo": "查看信息",
     "trashFolderFailed": "移动文件夹到回收站失败",
-    "trashFolderConfirm": "此文件夹包含 {{contents}}，所有内容将移至回收站。是否继续？"
+    "trashFolderConfirm": "此文件夹包含 {{contents}}，所有内容将移至回收站。是否继续？",
+    "temp": "临时",
+    "tempEmpty": "暂无聊天上传 — 在聊天框粘贴/拖入的文件会先落到这里，24h 内未处理会被自动清理"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

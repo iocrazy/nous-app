@@ -45,9 +45,10 @@ export const ResourcesViewInner: React.FC = () => {
   const {
     scopeType, scopeId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId,
     resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, canUpload,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, canUpload,
     resources, setResources, folders, childFolders, folderPreviews,
     trashedResources, trashedFolders, downloadedResources,
+    tempResources,
     libraries, setLibraries, smartFolders, setSmartFolders,
     resourceTagNamesMap, allTags, loading, setLoading, folderChain,
     recycleFolderId, setRecycleFolderId, recycleFolderItems,
@@ -418,6 +419,30 @@ export const ResourcesViewInner: React.FC = () => {
     },
   }), [trashedFolderPreviews, loadFolders, loadChildFolders, setSelectedFolder]);
 
+  // ─── Temp view: sorted resources (no folders) ────────
+  const tempSortedItems = useMemo(() => {
+    const items = [...tempResources];
+    switch (sortBy) {
+      case 'newest': return items.sort((a, b) => new Date(b.resource?.created_at ?? b.created_at).getTime() - new Date(a.resource?.created_at ?? a.created_at).getTime());
+      case 'oldest': return items.sort((a, b) => new Date(a.resource?.created_at ?? a.created_at).getTime() - new Date(b.resource?.created_at ?? b.created_at).getTime());
+      case 'name-az': return items.sort((a, b) => (a.resource?.filename ?? '').localeCompare(b.resource?.filename ?? ''));
+      case 'name-za': return items.sort((a, b) => (b.resource?.filename ?? '').localeCompare(a.resource?.filename ?? ''));
+      case 'largest': return items.sort((a, b) => (b.resource?.file_size_bytes ?? 0) - (a.resource?.file_size_bytes ?? 0));
+      case 'smallest': return items.sort((a, b) => (a.resource?.file_size_bytes ?? 0) - (b.resource?.file_size_bytes ?? 0));
+      default: return items;
+    }
+  }, [tempResources, sortBy]);
+
+  const tempAllSelectableIds = useMemo(
+    () => tempSortedItems.map((i) => `item:${i.id}`),
+    [tempSortedItems],
+  );
+
+  const tempBreadcrumbSegments = useMemo(
+    () => [{ label: t('resources.temp'), href: resPath('/resources/temp') }],
+    [t, resPath],
+  );
+
   // ─── ResourceGrid props ───────────────────────────────
   const gridProps = useMemo(() => ({
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
@@ -471,6 +496,18 @@ export const ResourcesViewInner: React.FC = () => {
     handleTouchDragMove, handleTouchDragEnd,
   ]);
 
+  // Temp view props — same shape as gridProps but with no folders, temp
+  // resources as items, and a custom breadcrumb.
+  const tempGridProps = useMemo(() => ({
+    ...gridProps,
+    breadcrumbSegments: tempBreadcrumbSegments,
+    filteredFolders: [] as import('../types').Folder[],
+    sortedItems: tempSortedItems,
+    allSelectableIds: tempAllSelectableIds,
+    // disable upload drag-drop in temp view — uploads go via chat only
+    canUploadDrop: false,
+  }), [gridProps, tempBreadcrumbSegments, tempSortedItems, tempAllSelectableIds]);
+
   // ─── Render ───────────────────────────────────────────
 
   return (
@@ -478,6 +515,8 @@ export const ResourcesViewInner: React.FC = () => {
       <ResourcesShell sidebarProps={sidebarProps} infoPanelProps={infoPanelProps}>
         {isDownloadsView ? (
           <DownloadsView />
+        ) : isTempView ? (
+          <ResourceGrid {...tempGridProps} />
         ) : (
           <>
             {canUpload && (
