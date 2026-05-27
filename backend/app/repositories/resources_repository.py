@@ -1443,6 +1443,81 @@ class ResourcesRepository:
         return [item for item in items if matches_tags(item.get("resource_id", ""))]
 
     # ------------------------------------------------------------------ #
+    # @-reference picker
+    # ------------------------------------------------------------------ #
+
+    async def list_accessible_for_user(
+        self,
+        *,
+        user_id: str,
+        q: str = "",
+        kinds: list[str] | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> list[dict]:
+        """Resources the user can read: own personal + team-shared.
+
+        Returns list of dicts with keys: id, name, mime, size, updated_at,
+        scope_type, scope_id. Used by the @-reference picker.
+
+        Args:
+            user_id: caller's auth id; used for both personal-owned and
+                team-membership filtering.
+            q: substring to ILIKE-match against ``filename`` (empty = no filter).
+            kinds: optional list of canonical kinds — ``video``/``image``/
+                ``doc``/``audio``/``pdf``. Unknown values are silently ignored
+                (treated as wildcard), matching the picker UX intent.
+            limit: page size; capped at 50 (min 1).
+            cursor: reserved for Phase 2 pagination — currently unused.
+        """
+        # Inline import: matches the pattern used elsewhere in this repo for
+        # deferred-load services that would otherwise cause circular imports
+        # when ResourcesRepository is constructed during module init.
+        from app.db import engine as db_engine
+
+        capped_limit = min(max(int(limit), 1), 50)
+        kinds_list = list(kinds or [])
+
+        sql_parts = [
+            "SELECT r.id::text, r.filename AS name, ",
+            "       r.mime_type AS mime, r.file_size AS size, ",
+            "       r.updated_at, ri.scope_type, ri.scope_id::text ",
+            "FROM public.resources r ",
+            "JOIN public.resource_items ri ON ri.resource_id = r.id ",
+            "WHERE r.is_trashed = false AND ri.is_trashed = false ",
+            "  AND ( (ri.scope_type = 'personal' AND ri.scope_id::text = :user_id) ",
+            "        OR (ri.scope_type = 'team' AND ri.scope_id IN ( ",
+            "             SELECT team_id FROM public.team_members WHERE user_id = :user_id ",
+            "        )) ) ",
+        ]
+        params: dict = {"user_id": user_id, "limit": capped_limit}
+
+        if q:
+            sql_parts.append("AND r.filename ILIKE :q_like ")
+            params["q_like"] = f"%{q}%"
+
+        if kinds_list:
+            sql_parts.append("AND r.mime_type ~ :kinds_re ")
+            params["kinds"] = kinds_list
+            regex_segments = []
+            for k in kinds_list:
+                if k == "video":
+                    regex_segments.append("^video/")
+                elif k == "image":
+                    regex_segments.append("^image/")
+                elif k == "audio":
+                    regex_segments.append("^audio/")
+                elif k == "pdf":
+                    regex_segments.append("^application/pdf$")
+                elif k == "doc":
+                    regex_segments.append("^(text/|application/json)")
+            params["kinds_re"] = "|".join(regex_segments) if regex_segments else "."
+
+        sql_parts.append("ORDER BY r.updated_at DESC LIMIT :limit")
+        rows = await db_engine.fetch_all("".join(sql_parts), params)
+        return rows or []
+
+    # ------------------------------------------------------------------ #
     # Temp-folder sweeper helpers
     # ------------------------------------------------------------------ #
 
