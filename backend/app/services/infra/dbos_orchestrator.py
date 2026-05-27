@@ -208,20 +208,17 @@ def _pre_launch_sweep_stale_scheduled() -> None:
                     (cutoff_minutes,),
                 )
                 cancelled = cur.fetchall()
-                # Also evict matching queue rows. Without this, DBOS recovery
-                # still pulls them on launch — worker begins executing,
-                # step 1 reads CANCELLED status, raises DBOSWorkflowCancelledError.
-                # The resulting stack-trace storm is what actually blocks the
-                # event loop (root-cause finding 2026-05-27).
-                cur.execute(
-                    """
-                    DELETE FROM dbos._dbos_internal_queue
-                    WHERE workflow_uuid LIKE 'sched-%%'
-                      AND created_at_epoch_ms / 1000.0
-                          < EXTRACT(EPOCH FROM now() - make_interval(mins => %s));
-                    """,
-                    (cutoff_minutes,),
-                )
+                # NOTE (2026-05-27 hotfix): the earlier version of this
+                # sweep also issued `DELETE FROM dbos._dbos_internal_queue`
+                # to evict stranded queue rows. That table does NOT exist
+                # in DBOS 2.x — `_dbos_internal_queue` is a queue *name*
+                # (string value in `dbos.workflow_status.queue_name`),
+                # not a separate table. The DELETE raised UndefinedTable,
+                # rolled back the whole transaction including the UPDATE
+                # above, leaving the sweep ineffective and the cancel-
+                # storm intact. The UPDATE alone is sufficient: DBOS
+                # recovery skips rows with status='CANCELLED', so once
+                # they're marked here, they won't be re-enqueued.
                 conn.commit()
         if cancelled:
             logger.warning(
