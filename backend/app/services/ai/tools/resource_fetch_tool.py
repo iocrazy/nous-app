@@ -61,8 +61,9 @@ async def _fetch_dispatch(
     # Image
     if mime.startswith("image/"):
         try:
-            from app.api.media_auth import _sign_token as _sign
             import time
+
+            from app.api.media_auth import _sign_token as _sign
 
             now = int(time.time())
             expires_at = now + 4 * 3600
