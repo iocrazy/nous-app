@@ -8,6 +8,7 @@ without standing up the full FastAPI app. Run from backend/ with:
 Prints PASS/FAIL per check + final summary. Returns non-zero exit code
 if any check failed (so CI / make targets can gate on it).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -48,28 +49,17 @@ async def main() -> int:
     from app.boundary import URLBlockedError, validate_url_async
 
     cases = [
-        ("NAS Supabase literal",
-         "http://192.168.50.9:9080/admin"),
-        ("Decimal IPv4 bypass (==127.0.0.1)",
-         "http://2130706433/admin"),
-        ("Octal IPv4 bypass (0177.0.0.1==127.0.0.1)",
-         "http://0177.0.0.1/admin"),
-        ("Hex IPv4 bypass (==127.0.0.1)",
-         "http://0x7f000001/admin"),
-        ("mDNS suffix .localhost",
-         "http://printer.localhost/api"),
-        (".internal suffix",
-         "http://api.internal/admin"),
-        ("AWS IMDS",
-         "http://169.254.169.254/latest/meta-data/"),
-        ("GCP metadata.google.internal",
-         "http://metadata.google.internal/"),
-        ("IPv6 loopback",
-         "http://[::1]/"),
-        ("file:// scheme",
-         "file:///etc/passwd"),
-        ("javascript: scheme",
-         "javascript:alert(1)"),
+        ("NAS Supabase literal", "http://192.168.50.9:9080/admin"),
+        ("Decimal IPv4 bypass (==127.0.0.1)", "http://2130706433/admin"),
+        ("Octal IPv4 bypass (0177.0.0.1==127.0.0.1)", "http://0177.0.0.1/admin"),
+        ("Hex IPv4 bypass (==127.0.0.1)", "http://0x7f000001/admin"),
+        ("mDNS suffix .localhost", "http://printer.localhost/api"),
+        (".internal suffix", "http://api.internal/admin"),
+        ("AWS IMDS", "http://169.254.169.254/latest/meta-data/"),
+        ("GCP metadata.google.internal", "http://metadata.google.internal/"),
+        ("IPv6 loopback", "http://[::1]/"),
+        ("file:// scheme", "file:///etc/passwd"),
+        ("javascript: scheme", "javascript:alert(1)"),
     ]
     for label, url in cases:
         try:
@@ -78,8 +68,7 @@ async def main() -> int:
         except URLBlockedError:
             report(f"L1 reject: {label}", True)
         except Exception as e:
-            report(f"L1 reject: {label}", False,
-                   f"unexpected {type(e).__name__}: {e}")
+            report(f"L1 reject: {label}", False, f"unexpected {type(e).__name__}: {e}")
 
     # ------------------------------------------------------------------
     # Layer 3 in-process — SafeAsyncClient redirect-to-private
@@ -90,13 +79,19 @@ async def main() -> int:
     async with safe_async_client() as client:
         try:
             await client.get("http://192.168.50.9:9080/admin")
-            report("L3 in-process: NAS Supabase initial-URL block",
-                   False, "PASSED THROUGH (bug!)")
+            report(
+                "L3 in-process: NAS Supabase initial-URL block",
+                False,
+                "PASSED THROUGH (bug!)",
+            )
         except URLBlockedError:
             report("L3 in-process: NAS Supabase initial-URL block", True)
         except Exception as e:
-            report("L3 in-process: NAS Supabase initial-URL block",
-                   False, f"unexpected {type(e).__name__}: {e}")
+            report(
+                "L3 in-process: NAS Supabase initial-URL block",
+                False,
+                f"unexpected {type(e).__name__}: {e}",
+            )
 
     # ------------------------------------------------------------------
     # Layer 3 cross-process — SsrfProxy real server
@@ -109,10 +104,10 @@ async def main() -> int:
     try:
         # Smoke 1: CONNECT to literal private IP
         async def send_connect(target: str) -> int:
-            reader, writer = await asyncio.open_connection(
-                "127.0.0.1", proxy.port
+            reader, writer = await asyncio.open_connection("127.0.0.1", proxy.port)
+            writer.write(
+                f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n".encode()
             )
-            writer.write(f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n".encode())
             await writer.drain()
             response = await asyncio.wait_for(reader.read(4096), timeout=2.0)
             writer.close()
@@ -135,9 +130,7 @@ async def main() -> int:
 
         # Smoke 2: HTTP GET via proxy (absolute-form) to private IP
         async def send_http_get(absolute_url: str) -> int:
-            reader, writer = await asyncio.open_connection(
-                "127.0.0.1", proxy.port
-            )
+            reader, writer = await asyncio.open_connection("127.0.0.1", proxy.port)
             writer.write(
                 (
                     f"GET {absolute_url} HTTP/1.1\r\n"

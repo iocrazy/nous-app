@@ -470,3 +470,48 @@ class PromptComposer:
             h.update(mid.encode())
             h.update(b"|")
         return h.hexdigest()
+
+
+def render_available_resources(refs: list[dict] | None) -> str:
+    """Render the ``<available_resources>`` block for resource_ref refs.
+
+    Returns empty string when there are no refs so the system message
+    cache key stays stable for turns without any @-mention.
+    """
+    if not refs:
+        return ""
+
+    def _fmt_size(n: int | None) -> str:
+        if not n:
+            return ""
+        if n < 1024:
+            return f"{n}B"
+        if n < 1024 * 1024:
+            return f"{n // 1024}KB"
+        return f"{n // (1024 * 1024)}MB"
+
+    lines = ["<available_resources>"]
+    for r in refs:
+        attrs = [
+            f'id="{r["id"]}"',
+            f'kind="{r["kind"]}"',
+            f'mime="{r.get("mime") or ""}"',
+            f'scope="{r.get("scope") or ""}"',
+            f'size="{_fmt_size(r.get("size"))}"',
+            f'updated="{r.get("updated_at") or ""}"',
+            f'name="{r["name"]}"',
+        ]
+        if r.get("brief"):
+            brief = r["brief"].replace('"', "'")
+            attrs.append(f'brief="{brief}"')
+        lines.append(f"  <resource {' '.join(attrs)} />")
+    lines.append("</available_resources>")
+    lines.append("")
+    lines.append("Use the ResourceFetch tool to load any of these on demand:")
+    lines.append("  ResourceFetch(resource_id, mode?, args?)")
+    lines.append("  - mode for video: summary (default) | transcript | frames")
+    lines.append("  - mode for doc: excerpt (default) | full")
+    lines.append("  - mode for pdf: excerpt (default) | page (args.page)")
+    lines.append("  - mode for image: omit (returns image part)")
+    lines.append("  - mode for audio: transcript (default)")
+    return "\n".join(lines)

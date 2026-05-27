@@ -1333,6 +1333,16 @@
       "trigger_time": "Scheduled",
       "trigger_event": "Event",
       "trigger_next_session": "Next session"
+    },
+    "mentionPicker": {
+      "all": "All",
+      "video": "Video",
+      "image": "Image",
+      "doc": "Doc",
+      "audio": "Audio",
+      "pdf": "PDF",
+      "noResults": "No resources match \"{{q}}\"",
+      "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel"
     }
   },
   "mcp": {

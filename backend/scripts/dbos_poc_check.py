@@ -3,6 +3,7 @@
 Run: uv run python scripts/dbos_poc_check.py
 Pass criteria: every item prints PASS. Any FAIL -> stop and decide fallback.
 """
+
 from __future__ import annotations
 
 import os
@@ -26,7 +27,9 @@ def main() -> int:
     try:
         import dbos as dbos_module
 
-        print(f"PASS dbos {dbos_module.__version__ if hasattr(dbos_module, '__version__') else 'unknown'}")
+        print(
+            f"PASS dbos {dbos_module.__version__ if hasattr(dbos_module, '__version__') else 'unknown'}"
+        )
     except Exception as e:  # noqa: BLE001
         print(f"FAIL import: {e!r}")
         fails.append("#1 import")
@@ -64,11 +67,15 @@ def main() -> int:
 
         section("PoC #5: launch did not require superuser")
         with psycopg.connect(DB_URL) as conn:
-            cur = conn.execute("SELECT current_user, session_user, rolsuper FROM pg_roles WHERE rolname=current_user;")
+            cur = conn.execute(
+                "SELECT current_user, session_user, rolsuper FROM pg_roles WHERE rolname=current_user;"
+            )
             row = cur.fetchone()
             print(f"current_user={row[0]} session_user={row[1]} rolsuper={row[2]}")
             if row and row[2] is True:
-                print("WARN connected as superuser — re-run with non-superuser to validate NAS scenario")
+                print(
+                    "WARN connected as superuser — re-run with non-superuser to validate NAS scenario"
+                )
                 fails.append("#5 ran as superuser (re-run with restricted role)")
             else:
                 print("PASS DBOS launched without superuser")
@@ -133,7 +140,9 @@ def main() -> int:
         if not missing:
             print(f"PASS extensions installed: {names}")
         else:
-            print(f"FAIL extensions missing/uninstalled: {missing} (available rows={names})")
+            print(
+                f"FAIL extensions missing/uninstalled: {missing} (available rows={names})"
+            )
             fails.append("#3 extensions")
 
     section("Summary")

@@ -29,9 +29,12 @@ async def migrate_storage_sizes():
     base_path = settings.DOWNLOAD_PATH
 
     # 获取所有有 download_path 但没有 storage_size 的视频
-    result = await client.table("parsed_media").select(
-        "id, platform_id, download_path, storage_size"
-    ).not_.is_("download_path", "null").execute()
+    result = (
+        await client.table("parsed_media")
+        .select("id, platform_id, download_path, storage_size")
+        .not_.is_("download_path", "null")
+        .execute()
+    )
 
     videos = result.data
     logger.info(f"找到 {len(videos)} 个已下载的视频")
@@ -63,9 +66,9 @@ async def migrate_storage_sizes():
 
             # 更新数据库
             try:
-                await client.table("parsed_media").update({
-                    "storage_size": file_size
-                }).eq("id", video_id).execute()
+                await client.table("parsed_media").update(
+                    {"storage_size": file_size}
+                ).eq("id", video_id).execute()
 
                 updated += 1
                 logger.debug(f"更新 {platform_id}: {file_size / 1024 / 1024:.2f} MB")
@@ -75,13 +78,15 @@ async def migrate_storage_sizes():
             not_found += 1
             logger.warning(f"文件不存在: {full_path}")
 
-    logger.info(f"""
+    logger.info(
+        f"""
 迁移完成:
   - 更新: {updated}
   - 跳过(已有大小): {skipped}
   - 文件不存在: {not_found}
   - 总计: {len(videos)}
-""")
+"""
+    )
 
 
 if __name__ == "__main__":

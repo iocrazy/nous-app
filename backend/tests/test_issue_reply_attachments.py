@@ -52,6 +52,9 @@ def test_issue_message_post_attachments_serializable_as_dicts():
         attachments=[AttachmentRequest(kind="image", url="x.png", mime="image/png")],
     )
     raw = [a.model_dump() for a in p.attachments]
+    # S4 PR #361 added optional resource_id/name/scope fields to
+    # AttachmentRequest for the @-reference path. They default to None
+    # when an image-kind attachment is built.
     assert raw == [
         {
             "kind": "image",
@@ -59,5 +62,8 @@ def test_issue_message_post_attachments_serializable_as_dicts():
             "data_url": None,
             "alt_text": None,
             "mime": "image/png",
+            "resource_id": None,
+            "name": None,
+            "scope": None,
         }
     ]

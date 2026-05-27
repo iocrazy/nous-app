@@ -652,13 +652,22 @@ export const aiLibraryService = {
     content: string,
     options: {
       plan_mode?: 'auto' | 'prompt_user' | 'dry_run';
-      attachments?: Array<{
-        kind: 'image' | 'video' | 'pdf';
-        url?: string;
-        data_url?: string;
-        mime?: string;
-        alt_text?: string;
-      }>;
+      attachments?: Array<
+        | {
+            kind: 'image' | 'video' | 'pdf';
+            url?: string;
+            data_url?: string;
+            mime?: string;
+            alt_text?: string;
+          }
+        | {
+            kind: 'resource_ref';
+            resource_id: string;
+            url?: string;
+            mime?: string;
+            alt_text?: string;
+          }
+      >;
     } = {},
   ): Promise<ChatResponse> {
     const body: Record<string, unknown> = { content };

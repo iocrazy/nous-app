@@ -15,17 +15,20 @@ from fastapi import APIRouter
 
 from app.api.resources_crud_router import router as crud_router
 from app.api.resources_folders_router import router as folders_router
+from app.api.resources_search_router import router as search_router
 from app.api.resources_upload_router import router as upload_router
 from app.api.resources_versions_router import router as versions_router
 
 # Main router — prefix is set on each sub-router (/resources)
 router = APIRouter()
 
-# IMPORTANT: folders_router must be registered BEFORE crud_router.
+# IMPORTANT: static-path routers must be registered BEFORE crud_router.
 # crud_router owns GET /resources/{resource_id} (a catch-all path param),
-# which would otherwise match /resources/smart-folders, /resources/folders,
-# etc. and return 404 because "smart-folders" is not a real resource id.
-# FastAPI matches routes in registration order, so static paths must win.
+# which would otherwise match /resources/search, /resources/smart-folders,
+# /resources/folders, etc. and return 404 because "search" is not a real
+# resource id. FastAPI matches routes in registration order, so static
+# paths must win.
+router.include_router(search_router)
 router.include_router(upload_router)
 router.include_router(folders_router)
 router.include_router(versions_router)

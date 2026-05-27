@@ -57,7 +57,9 @@ _DEFAULT_COMPACTOR = ContextCompactor()
 # (forward-compat with future caller-provided tools).
 # Q5: MCP-routed tools are matched by ``"." in name`` separately — they
 # don't need to be listed here.
-SUPPORTED_TOOLS: frozenset[str] = frozenset({"Skill", "Delegate"})
+# S4-T6: ResourceFetch is a per-request caller-provided tool; its handler
+# is injected onto runner.resource_fetch_handler before each turn.
+SUPPORTED_TOOLS: frozenset[str] = frozenset({"Skill", "Delegate", "ResourceFetch"})
 
 
 def _is_mcp_tool_name(name: str, mcp_registry) -> bool:
@@ -132,6 +134,11 @@ class AgentRunner:
         # names are sanitized — no '.' allowed — so the prefix split is
         # unambiguous (e.g. 'notion.create_page' → server 'notion').
         self.mcp_registry = mcp_registry
+        # S4-T6: per-request ResourceFetch handler. Injected by
+        # ai_library_chat_service when the turn includes resource_ref
+        # attachments. None means no @-referenced resources for this turn —
+        # calls to ResourceFetch return a clear error instead of crashing.
+        self.resource_fetch_handler: Optional[Any] = None
 
     async def stream_turn(
         self,
@@ -362,6 +369,26 @@ class AgentRunner:
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
                     result = await self.skill_tool.execute(args)
+                elif tool_name == "ResourceFetch":
+                    # S4-T6: per-request handler injected by the chat service.
+                    if self.resource_fetch_handler is None:
+                        result = {
+                            "error": (
+                                "ResourceFetch is not available for this turn. "
+                                "Include @resource references in your message "
+                                "to make resources accessible."
+                            )
+                        }
+                    else:
+                        try:
+                            result = await self.resource_fetch_handler(args)
+                        except Exception as rf_exc:
+                            logger.warning(
+                                f"[AgentRunner] ResourceFetch handler raised: {rf_exc!r}"
+                            )
+                            result = {
+                                "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
+                            }
                 elif is_mcp:
                     # G3: route to outbound MCP server. Mirrors run_turn
                     # error handling — transport errors → tool result
@@ -697,6 +724,27 @@ class AgentRunner:
                         and not result.get("error")
                     ):
                         tool_cache.put(cache_key, result)
+                elif tool_name == "ResourceFetch":
+                    # S4-T6: route to per-request handler injected by the chat
+                    # service. None means no @-referenced resources for this turn.
+                    if self.resource_fetch_handler is None:
+                        result = {
+                            "error": (
+                                "ResourceFetch is not available for this turn. "
+                                "Include @resource references in your message "
+                                "to make resources accessible."
+                            )
+                        }
+                    else:
+                        try:
+                            result = await self.resource_fetch_handler(args)
+                        except Exception as rf_exc:
+                            logger.warning(
+                                f"[AgentRunner] ResourceFetch handler raised: {rf_exc!r}"
+                            )
+                            result = {
+                                "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
+                            }
                 elif is_mcp:
                     # Q5: route to outbound MCP server. Tool errors
                     # (server returned isError=true) come back as a
