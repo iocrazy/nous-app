@@ -17,6 +17,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, X } from 'lucide-react';
+import type { Editor } from '@tiptap/core';
 
 import { aiLibraryService } from '../services/aiLibraryService';
 import type {
@@ -24,6 +25,8 @@ import type {
   ChatMessage,
   ChatSession,
   ChatToolCall,
+  ResourceRefAttachment,
+  ResourceSearchResult,
 } from '../types';
 import { AgentSelector } from './AgentSelector';
 import { SessionList, type SessionItem } from './SessionList';
@@ -32,11 +35,13 @@ import { TypingIndicator } from './chat/TypingIndicator';
 import { ChatInput } from './chat/ChatInput';
 import { CommitmentsPanel } from './CommitmentsPanel';
 import { ChatAttachmentPicker, type StagedAttachment } from './ChatAttachmentPicker';
+import { ResourcePickerSuggestion } from './chat/ResourcePickerSuggestion';
 import { EmptyState } from './chat/EmptyState';
 import { useToast } from './Toast';
 import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
 import { useComposerDropzone } from '../hooks/useComposerDropzone';
 import { useComposerPaste } from '../hooks/useComposerPaste';
+import { useResourceSearch } from '../hooks/useResourceSearch';
 
 export interface AIChatPanelProps {
   /** String form of the project's BIGINT id, for display + session tagging. */
@@ -119,6 +124,39 @@ export function AIChatPanel({
 
   // B: staged attachments (uploaded but not yet sent). Cleared on send.
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
+
+  // --- Resource @-mention picker state ---
+  // Editor ref so we can call insertResourceRef when user picks an item.
+  const chatEditorRef = useRef<Editor | null>(null);
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionActiveKind, setMentionActiveKind] = useState<
+    '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf'
+  >('');
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  const { data: mentionSearchData, loading: mentionLoading } = useResourceSearch(
+    mentionQuery,
+    mentionActiveKind,
+  );
+
+  const handleMentionRequest = useCallback((query: string) => {
+    setMentionQuery(query);
+    setMentionActiveIndex(0);
+    setMentionPickerOpen(true);
+  }, []);
+
+  const handleMentionSelect = useCallback(
+    (item: ResourceSearchResult) => {
+      if (chatEditorRef.current) {
+        (chatEditorRef.current.commands as unknown as {
+          insertResourceRef: (item: ResourceSearchResult) => boolean;
+        }).insertResourceRef(item);
+      }
+      setMentionPickerOpen(false);
+      setMentionQuery('');
+    },
+    [],
+  );
 
   // Paste + drag-drop upload hooks — all three funnel files into handleFiles
   // which reuses the same validation/upload pipeline as the picker button.
@@ -278,7 +316,7 @@ export function AIChatPanel({
   );
 
   const handleSend = useCallback(
-    async (text: string) => {
+    async (text: string, refAttachments: ResourceRefAttachment[] = []) => {
       if (!activeSessionId || sending) return;
       setSending(true);
 
@@ -296,17 +334,27 @@ export function AIChatPanel({
       try {
         // O3: pass plan_mode only when non-default. Backend swaps in
         // plan-prompt instructions for prompt_user / dry_run.
-        // B: send staged attachments alongside (kind+url). Clear on
-        // success — failed sends keep them so the user can retry.
+        // B: send staged attachments + resource_ref attachments alongside.
+        // Clear staged on success — failed sends keep them so user can retry.
         const opts: Parameters<typeof aiLibraryService.sendChatMessage>[2] = {};
         if (planMode !== 'auto') opts.plan_mode = planMode;
-        if (stagedAttachments.length > 0) {
-          opts.attachments = stagedAttachments.map((a) => ({
+        const allAttachments = [
+          ...stagedAttachments.map((a) => ({
             kind: a.kind,
             url: a.url,
             mime: a.mime ?? undefined,
             alt_text: a.filename,
-          }));
+          })),
+          ...refAttachments.map((r) => ({
+            kind: r.kind,
+            url: '',            // resource_ref resolves by id, not URL
+            resource_id: r.resource_id,
+            mime: r.mime,
+            alt_text: r.name,
+          })),
+        ];
+        if (allAttachments.length > 0) {
+          opts.attachments = allAttachments;
         }
         await aiLibraryService.sendChatMessage(activeSessionId, text, opts);
         setStagedAttachments([]);
@@ -339,7 +387,7 @@ export function AIChatPanel({
 
   const handleSuggest = useCallback(
     (suggestion: string) => {
-      void handleSend(suggestion);
+      void handleSend(suggestion, []);
     },
     [handleSend],
   );
@@ -513,6 +561,22 @@ export function AIChatPanel({
           </div>
         )}
 
+        {/* @-mention resource picker — absolutely-positioned overlay above the composer */}
+        {mentionPickerOpen && (
+          <div className="absolute bottom-full left-0 right-0 z-20 flex justify-start px-2 pb-1">
+            <ResourcePickerSuggestion
+              items={mentionSearchData.results}
+              query={mentionQuery}
+              loading={mentionLoading}
+              counts={mentionSearchData.counts}
+              activeKind={mentionActiveKind}
+              onKindChange={setMentionActiveKind}
+              onSelect={handleMentionSelect}
+              activeIndex={mentionActiveIndex}
+            />
+          </div>
+        )}
+
         {/* Chat input + B: attachment picker (when no staged chips above) */}
         <div className="flex items-end gap-1 bg-zinc-900 border-t border-zinc-700/50">
           {activeSessionId && selectedAgentSlug && stagedAttachments.length === 0 && (
@@ -536,6 +600,8 @@ export function AIChatPanel({
                     ? t('chat.placeholderNoSession', 'Create a session first')
                     : t('chat.placeholder', 'Type a message...')
               }
+              onMentionRequest={handleMentionRequest}
+              editorRef={chatEditorRef}
             />
           </div>
         </div>
