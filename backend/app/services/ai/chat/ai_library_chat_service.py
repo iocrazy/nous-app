@@ -596,9 +596,21 @@ class AILibraryChatService:
         # resource_ref attachments → resource_ref_resolver (metadata only,
         # content loaded lazily via ResourceFetch tool during the turn).
         # All other kinds → existing G2 binary attachment path (image/pdf/audio).
+
+        # Normalize to dicts so downstream split / resolver code works regardless
+        # of whether attachments arrived as Pydantic AttachmentRequest objects
+        # (HTTP path) or plain dicts (test path).
+        _att_dicts: list[dict] = []
+        for _att in (attachments or []):
+            if hasattr(_att, "model_dump"):
+                _att_dicts.append(_att.model_dump())
+            elif isinstance(_att, dict):
+                _att_dicts.append(_att)
+            # silently drop anything else — same behavior as before
+
         ref_atts: list = []
         binary_atts: list = []
-        for _att in (attachments or []):
+        for _att in _att_dicts:
             if _att.get("kind") == "resource_ref":
                 ref_atts.append(_att)
             else:
@@ -786,40 +798,47 @@ class AILibraryChatService:
                 input_summary=content,
                 metadata={"full_input": content},
             ) as recorder:
-                if chunk_callback is None:
-                    # Buffered path — unchanged
-                    result = await runner.run_turn(
-                        composed,
-                        user_messages=user_messages,
-                        recorder=recorder,
-                    )
-                    assistant_content = result.get("content") or ""
-                    tool_calls_trace = result.get("tool_calls") or []
-                else:
-                    # Streaming path: accumulate chunks + forward to caller
-                    accumulated: list[str] = []
-                    tool_calls_trace = []
-                    async for chunk in runner.stream_turn(
-                        composed,
-                        user_messages=user_messages,
-                        recorder=recorder,
-                        auto_recorder=False,  # we already own the context
-                    ):
-                        if chunk.delta_text:
-                            accumulated.append(chunk.delta_text)
-                            try:
-                                await chunk_callback(chunk.delta_text)
-                            except Exception as cb_exc:
-                                # Callback failure must not kill the turn
-                                logger.warning(
-                                    f"[chat] chunk_callback raised: {cb_exc}"
-                                )
-                        if chunk.tool_call_delta:
-                            # Surface tool-call-start hints to UI; the
-                            # synthetic "→ Running X..." text comes
-                            # through delta_text on the next chunk
-                            pass
-                    assistant_content = "".join(accumulated)
+                try:
+                    if chunk_callback is None:
+                        # Buffered path — unchanged
+                        result = await runner.run_turn(
+                            composed,
+                            user_messages=user_messages,
+                            recorder=recorder,
+                        )
+                        assistant_content = result.get("content") or ""
+                        tool_calls_trace = result.get("tool_calls") or []
+                    else:
+                        # Streaming path: accumulate chunks + forward to caller
+                        accumulated: list[str] = []
+                        tool_calls_trace = []
+                        async for chunk in runner.stream_turn(
+                            composed,
+                            user_messages=user_messages,
+                            recorder=recorder,
+                            auto_recorder=False,  # we already own the context
+                        ):
+                            if chunk.delta_text:
+                                accumulated.append(chunk.delta_text)
+                                try:
+                                    await chunk_callback(chunk.delta_text)
+                                except Exception as cb_exc:
+                                    # Callback failure must not kill the turn
+                                    logger.warning(
+                                        f"[chat] chunk_callback raised: {cb_exc}"
+                                    )
+                            if chunk.tool_call_delta:
+                                # Surface tool-call-start hints to UI; the
+                                # synthetic "→ Running X..." text comes
+                                # through delta_text on the next chunk
+                                pass
+                        assistant_content = "".join(accumulated)
+                finally:
+                    # Clear per-turn @-ref state so a subsequent turn on the
+                    # same runner instance doesn't inherit stale refs or cache.
+                    if resource_refs:
+                        runner.resource_fetch_handler = None
+                        _request_cache.clear()
 
                 run_id = recorder.run_id
                 # Pull usage off the recorder — that's the single source

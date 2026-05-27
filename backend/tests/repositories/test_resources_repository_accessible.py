@@ -29,8 +29,9 @@ async def test_accepts_q_and_kinds_and_limit(monkeypatch):
     assert "ilike" in captured["sql"].lower()
     assert captured["params"]["user_id"] == "user-1"
     assert "story" in captured["params"].get("q_like", "")
-    assert "video" in captured["params"]["kinds"]
-    assert "image" in captured["params"]["kinds"]
+    # kinds_re is the actual SQL parameter used (kinds was a dead/orphan key, removed in S4 fix)
+    assert "^video/" in captured["params"]["kinds_re"]
+    assert "^image/" in captured["params"]["kinds_re"]
     assert captured["params"]["limit"] == 20
 
 

@@ -110,6 +110,20 @@ class AttachmentRequest(BaseModel):
     alt_text: Optional[str] = Field(default=None)
     mime: Optional[str] = Field(default=None)
 
+    # S4: @-reference resource fields
+    resource_id: Optional[str] = Field(
+        default=None,
+        description="Resource UUID/Snowflake for kind='resource_ref'.",
+    )
+    name: Optional[str] = Field(
+        default=None,
+        description="Display name snapshot used by the ref resolver.",
+    )
+    scope: Optional[dict] = Field(
+        default=None,
+        description="Frontend scope hint only — backend re-checks access.",
+    )
+
 
 class ChatRequest(BaseModel):
     """POST /sessions/:id/chat body. Only the user's new message; history

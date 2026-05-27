@@ -1498,7 +1498,6 @@ class ResourcesRepository:
 
         if kinds_list:
             sql_parts.append("AND r.mime_type ~ :kinds_re ")
-            params["kinds"] = kinds_list
             regex_segments = []
             for k in kinds_list:
                 if k == "video":
