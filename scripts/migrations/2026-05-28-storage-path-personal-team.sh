@@ -1,11 +1,19 @@
 #!/bin/bash
 # scripts/migrations/2026-05-28-storage-path-personal-team.sh
-# One-shot: move files from teams/{user_uuid}/ to teams/{personal_team_snowflake}/
-# on the NAS, and update the DB file_path values to match.
+# Spec 1 PR-D — storage path migration (file-system half).
+#
+# Moves NAS storage directories from teams/{user_uuid}/ to
+# teams/{personal_team_snowflake}/.
+#
+# The DB half lives in supabase/migrations/235_storage_path_remap.sql and
+# is applied by CI on PR merge. Operator runs this script during a
+# maintenance window, then immediately merges the PR so CI follows within
+# ~1 minute. During that window file_path in DB and on disk disagree for
+# the affected user.
 #
 # Pre-conditions:
-#   - Spec 1 PR-A + PR-C have shipped (every personal user has a personal team
-#     snowflake, and resource_items.scope_id is the team snowflake string).
+#   - Spec 1 PR-A + PR-C have shipped (every personal user has a personal
+#     team snowflake; scope_id already remapped).
 #   - Operator has snapshotted NAS storage (Synology snapshot recommended).
 #
 # Usage (on NAS, as the heygo user):
@@ -13,7 +21,7 @@
 #   bash scripts/migrations/2026-05-28-storage-path-personal-team.sh APPLY
 #
 # DRY_RUN prints the moves that would happen without performing them.
-# APPLY performs the moves AND runs the companion SQL UPDATE.
+# APPLY performs the moves; does NOT touch the DB (PR-merge does that).
 #
 # Idempotent: skips users whose source dir doesn't exist or whose
 # destination dir already exists.
@@ -23,7 +31,6 @@ set -euo pipefail
 MODE="${1:-DRY_RUN}"
 STORAGE_ROOT="${STORAGE_ROOT:-/volume2/sources/MediaHub.library}"
 DB_CONTAINER="${DB_CONTAINER:-mediahub-sb-prod-db}"
-SQL_FILE="$(dirname "$0")/2026-05-28-storage-path-personal-team.sql"
 
 if [ "$MODE" != "DRY_RUN" ] && [ "$MODE" != "APPLY" ]; then
     echo "ERROR: mode must be DRY_RUN or APPLY (got $MODE)" >&2
@@ -31,15 +38,13 @@ if [ "$MODE" != "DRY_RUN" ] && [ "$MODE" != "APPLY" ]; then
 fi
 
 echo "═══════════════════════════════════════════════════════════════════"
-echo " Spec 1 PR-D — storage path migration"
+echo " Spec 1 PR-D — storage path migration (file-system half)"
 echo " Mode:         $MODE"
 echo " Storage root: $STORAGE_ROOT"
-echo " DB container: $DB_CONTAINER"
-echo " SQL file:     $SQL_FILE"
+echo " DB container: $DB_CONTAINER  (read-only — used only for mapping query)"
 echo "═══════════════════════════════════════════════════════════════════"
 echo
 
-# Sanity: storage root + container exist
 if [ ! -d "$STORAGE_ROOT/teams" ]; then
     echo "ERROR: $STORAGE_ROOT/teams does not exist" >&2
     exit 2
@@ -48,12 +53,8 @@ if ! sudo /usr/local/bin/docker inspect "$DB_CONTAINER" >/dev/null 2>&1; then
     echo "ERROR: container $DB_CONTAINER not found" >&2
     exit 3
 fi
-if [ ! -f "$SQL_FILE" ]; then
-    echo "ERROR: SQL file not found at $SQL_FILE" >&2
-    exit 4
-fi
 
-# Pull (user_uuid → personal_team_snowflake) mapping from DB
+# Pull (user_uuid → personal_team_snowflake) mapping from DB (READ ONLY)
 mapping_file=$(mktemp)
 trap "rm -f $mapping_file" EXIT
 
@@ -69,7 +70,6 @@ mapping_count=$(wc -l < "$mapping_file" | tr -d ' ')
 echo "  $mapping_count personal teams found"
 echo
 
-# Iterate mappings, plan moves
 move_count=0
 skip_count_no_src=0
 skip_count_dst_exists=0
@@ -102,28 +102,23 @@ done < "$mapping_file"
 echo
 echo "═══════════════════════════════════════════════════════════════════"
 echo " File-system summary:"
-echo "   moves attempted:        $move_count"
+echo "   moves performed:        $move_count"
 echo "   skipped (no src dir):   $skip_count_no_src"
 echo "   skipped (dst exists):   $skip_count_dst_exists"
 echo "═══════════════════════════════════════════════════════════════════"
 echo
 
 if [ "$MODE" = "APPLY" ]; then
-    echo "▶ Applying companion SQL UPDATE..."
-    sudo /usr/local/bin/docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres < "$SQL_FILE"
+    echo "✓ File-system rename complete."
     echo
-    echo "▶ Verification: counting resources.file_path entries still embedding a UUID..."
-    sudo /usr/local/bin/docker exec "$DB_CONTAINER" psql -U postgres -d postgres -c "
-        SELECT
-          (SELECT COUNT(*) FROM public.resources
-            WHERE file_path ~ 'teams/[0-9a-f]{8}-[0-9a-f]{4}') AS resources_uuid_remaining,
-          (SELECT COUNT(*) FROM public.resource_versions
-            WHERE file_path ~ 'teams/[0-9a-f]{8}-[0-9a-f]{4}') AS versions_uuid_remaining
-        ;
-    "
+    echo "Next step: merge PR #365 immediately so CI applies"
+    echo "  supabase/migrations/235_storage_path_remap.sql"
+    echo "to bring DB.file_path in sync with disk."
     echo
-    echo "✓ APPLY complete."
+    echo "Until then, the $move_count user(s) above have file_path columns"
+    echo "still pointing at the old user_uuid prefix — affected resources"
+    echo "will 404 until the migration applies (typically <1 min after merge)."
 else
-    echo "(dry-run only — no file moves or DB updates performed)"
+    echo "(dry-run only — no file moves performed)"
     echo "Re-run with APPLY to execute."
 fi
