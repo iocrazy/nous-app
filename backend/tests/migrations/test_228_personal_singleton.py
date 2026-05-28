@@ -84,9 +84,9 @@ async def _insert_personal_team() -> int:
         "LIMIT 1",
         {"owner": _OWNER_ID},
     )
-    assert row is not None, (
-        "Expected a personal team auto-created by handle_new_user for _OWNER_ID"
-    )
+    assert (
+        row is not None
+    ), "Expected a personal team auto-created by handle_new_user for _OWNER_ID"
     return row["id"]
 
 
@@ -118,9 +118,7 @@ async def test_personal_team_rejects_second_member():
         "SELECT COUNT(*)::int FROM public.team_members WHERE team_id = :tid",
         {"tid": team_id},
     )
-    assert first_count == 1, (
-        f"Expected 1 auto-added owner member, got {first_count}"
-    )
+    assert first_count == 1, f"Expected 1 auto-added owner member, got {first_count}"
 
     # Now attempt to add a second member — the mig-228 trigger must raise.
     with pytest.raises((DBAPIError, Exception)) as exc_info:
@@ -130,18 +128,18 @@ async def test_personal_team_rejects_second_member():
             {"tid": team_id, "uid": _OTHER_ID},
         )
 
-    assert "cannot have more than one member" in str(exc_info.value), (
-        f"Expected singleton error, got: {exc_info.value}"
-    )
+    assert "cannot have more than one member" in str(
+        exc_info.value
+    ), f"Expected singleton error, got: {exc_info.value}"
 
     # Confirm no second row was added.
     final_count = await db_engine.fetch_val(
         "SELECT COUNT(*)::int FROM public.team_members WHERE team_id = :tid",
         {"tid": team_id},
     )
-    assert final_count == 1, (
-        f"Expected still 1 member after rejected INSERT, got {final_count}"
-    )
+    assert (
+        final_count == 1
+    ), f"Expected still 1 member after rejected INSERT, got {final_count}"
 
 
 @pytest.mark.asyncio
@@ -167,6 +165,6 @@ async def test_collaborative_team_allows_multiple_members():
         "SELECT COUNT(*)::int FROM public.team_members WHERE team_id = :tid",
         {"tid": team_id},
     )
-    assert final_count == 2, (
-        f"Expected 2 members in collaborative team, got {final_count}"
-    )
+    assert (
+        final_count == 2
+    ), f"Expected 2 members in collaborative team, got {final_count}"

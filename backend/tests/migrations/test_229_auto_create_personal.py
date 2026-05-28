@@ -70,9 +70,9 @@ async def test_personal_team_auto_created_on_auth_user_insert():
         "SELECT user_id::text AS u FROM public.team_members WHERE team_id = :tid",
         {"tid": team["id"]},
     )
-    assert any(m["u"] == _USER_ID for m in members), (
-        "owner should be auto-added as a team member"
-    )
+    assert any(
+        m["u"] == _USER_ID for m in members
+    ), "owner should be auto-added as a team member"
 
 
 @pytest.mark.asyncio
@@ -129,6 +129,6 @@ async def test_no_collaborative_team_created_for_new_user():
         "WHERE owner_id = CAST(:uid AS uuid) AND kind = 'collaborative'",
         {"uid": _USER_ID},
     )
-    assert collab_count == 0, (
-        f"handle_new_user must not auto-create collaborative teams, got {collab_count}"
-    )
+    assert (
+        collab_count == 0
+    ), f"handle_new_user must not auto-create collaborative teams, got {collab_count}"
