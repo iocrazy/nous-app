@@ -5,11 +5,14 @@ Design notes
 * The engine connects as the ``postgres`` role which bypasses RLS but still
   honours FK constraints.  We therefore use two auth.users UUIDs that we
   insert (and clean up) as part of the fixture.
-* Inserting into auth.users triggers ``handle_new_user`` which auto-creates
-  a collaborative workspace team + user_profile row.  We clean those up via
-  cascade (DELETE teams WHERE owner_id = ... cascades to team_members).
-* We then insert an *additional* personal team directly (bypassing
-  handle_new_user) to exercise the trigger under test.
+* Inserting into auth.users triggers ``handle_new_user`` which (after mig 229)
+  auto-creates a kind='personal' workspace team + user_profile row.  We clean
+  those up via cascade (DELETE teams WHERE owner_id = ... cascades to
+  team_members).
+* ``_insert_personal_team()`` now fetches the auto-created personal team
+  (inserted by handle_new_user on auth.users INSERT above) rather than
+  inserting a second one — the uq_teams_owner_personal unique partial index
+  (mig 227) would reject a duplicate personal team for the same owner.
 * The ``teams_add_owner_trigger`` (add_owner_as_member) fires on team INSERT
   and automatically adds the owner as the first team_member.  The mig-228
   trigger must allow that first INSERT and block a subsequent one.
@@ -68,14 +71,22 @@ async def _seed_and_teardown():
 
 
 async def _insert_personal_team() -> int:
-    """Insert a kind='personal' team owned by _OWNER_ID; return the new id."""
+    """Return the id of the kind='personal' team auto-created for _OWNER_ID.
+
+    After mig 229, handle_new_user() creates a kind='personal' team when an
+    auth.users row is inserted.  The uq_teams_owner_personal unique partial
+    index (mig 227) rejects a second personal team for the same owner, so we
+    SELECT the already-existing one instead of INSERTing a duplicate.
+    """
     row = await db_engine.execute_returning_one(
-        "INSERT INTO public.teams (name, owner_id, invite_code, kind) "
-        "VALUES ('Test Personal Team', :owner, generate_invite_code(), 'personal') "
-        "RETURNING id",
+        "SELECT id FROM public.teams "
+        "WHERE owner_id = CAST(:owner AS uuid) AND kind = 'personal' "
+        "LIMIT 1",
         {"owner": _OWNER_ID},
     )
-    assert row is not None, "Team INSERT returned no row"
+    assert row is not None, (
+        "Expected a personal team auto-created by handle_new_user for _OWNER_ID"
+    )
     return row["id"]
 
 
