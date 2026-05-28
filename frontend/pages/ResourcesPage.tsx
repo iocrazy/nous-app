@@ -1,10 +1,8 @@
 import { useParams } from 'react-router-dom';
 import { ResourcesView } from '../components/ResourcesView';
-import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 
 export function ResourcesPage() {
-  const { currentUserId } = useAuth();
   const { teamId: urlTeamId } = useParams();
   const { personalTeamId } = useTeamContext();
 
@@ -12,10 +10,13 @@ export function ResourcesPage() {
   const effectiveTeamId = urlTeamId || personalTeamId;
   const isPersonal = !effectiveTeamId || effectiveTeamId === personalTeamId;
 
+  // After Spec 1 PR-C, scope_id on resource_items/folders/tags/smart_collections
+  // is the personal-team snowflake (not the user UUID). Pass personalTeamId
+  // for personal mode so the listing query joins correctly.
   return (
     <ResourcesView
       scopeType={isPersonal ? 'personal' : 'team'}
-      scopeId={isPersonal ? (currentUserId || '') : (effectiveTeamId || '')}
+      scopeId={isPersonal ? (personalTeamId || '') : (effectiveTeamId || '')}
     />
   );
 }
