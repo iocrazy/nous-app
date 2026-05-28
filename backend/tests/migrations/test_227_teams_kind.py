@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from app.db import engine as db_engine
+
+# Mark these as integration tests — they need a live PG with migrations
+# 227-230 applied. CI's pytest run skips them via the env-var guard below
+# (CI doesn't set SUPAVISOR_DATABASE_URL).
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.asyncio,
+    pytest.mark.skipif(
+        not os.environ.get("SUPAVISOR_DATABASE_URL")
+        and not os.environ.get("INTEGRATION_DATABASE_URL"),
+        reason="integration DB URL not set",
+    ),
+]
 
 
 @pytest.mark.asyncio
