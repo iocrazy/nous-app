@@ -1,14 +1,16 @@
-"""Scheduled cleanup workflows — port of three GC jobs from
-`tasks.scheduled_tasks`.
+"""Scheduled cleanup workflows.
 
 Each is a thin @DBOS.scheduled wrapper that delegates to the existing
 service code:
-  - cleanup_temp_files       (daily 00:00) — FS sweep of .tmp/.part files
-  - cleanup_old_task_tracking (daily 02:00) — drop terminal rows >7d old
-  - cleanup_trashed_resources (daily 01:00) — soft-delete sweep >15d old
+  - cleanup_temp_files            (daily 00:00) — FS sweep of .tmp/.part files
+  - cleanup_old_task_tracking     (daily 02:00) — drop terminal rows >7d old
+  - cleanup_trashed_resources     (daily 01:00) — soft-delete sweep >15d old
+  - cleanup_orphan_storage        (weekly Sun 03:00) — sweep upload dirs
+    whose resource_id no longer exists in DB (catches CASCADE deletes,
+    direct DELETEs, and upload aborts that bypass the trash flow)
 
-Cron offsets (00/01/02) spread the daily IO so they don't all hit the
-DB at midnight together.
+Cron offsets (00/01/02 daily, 03 weekly) spread IO so workflows don't
+all hit DB at midnight together.
 """
 
 from __future__ import annotations
@@ -136,3 +138,139 @@ def cleanup_old_task_tracking_workflow(
     result = cleanup_old_task_tracking_step()
     if result.get("deleted"):
         logger.info(f"[cleanup_old_task_tracking] {result}")
+
+
+# Minimum age before an orphan upload dir is eligible for deletion.
+# Buffer against in-progress uploads whose DB row has not yet been written.
+ORPHAN_STORAGE_MIN_AGE_DAYS = 7
+
+
+def _sweep_orphan_upload_dirs(
+    base: Path,
+    valid_resource_ids: set[int],
+    min_age_seconds: float,
+) -> dict[str, int]:
+    """Walk `{base}/teams/*/uploads/*/` and rmtree dirs whose name is a
+    numeric resource_id not present in `valid_resource_ids`.
+
+    Pure-FS helper; takes the DB-id set as a parameter so it can be
+    unit-tested with a fake filesystem and no DB.
+    """
+    import shutil
+    import time
+
+    deleted_dirs = 0
+    deleted_bytes = 0
+    skipped_too_young = 0
+    skipped_unparseable = 0
+
+    teams_root = base / "teams"
+    if not teams_root.is_dir():
+        return {
+            "deleted_dirs": 0,
+            "deleted_bytes": 0,
+            "skipped_too_young": 0,
+            "skipped_unparseable": 0,
+        }
+
+    cutoff_mtime = time.time() - min_age_seconds
+
+    for scope_dir in teams_root.iterdir():
+        uploads_dir = scope_dir / "uploads"
+        if not uploads_dir.is_dir():
+            continue
+        for rid_dir in uploads_dir.iterdir():
+            if not rid_dir.is_dir():
+                continue
+            name = rid_dir.name
+            if not name.isdigit():
+                skipped_unparseable += 1
+                continue
+            try:
+                rid = int(name)
+            except ValueError:
+                skipped_unparseable += 1
+                continue
+            if rid in valid_resource_ids:
+                continue
+            try:
+                mtime = rid_dir.stat().st_mtime
+            except OSError as e:
+                logger.warning(f"[orphan_storage] stat failed {rid_dir}: {e}")
+                continue
+            if mtime > cutoff_mtime:
+                skipped_too_young += 1
+                continue
+            try:
+                size = sum(f.stat().st_size for f in rid_dir.rglob("*") if f.is_file())
+            except OSError:
+                size = 0
+            try:
+                shutil.rmtree(rid_dir)
+            except Exception as e:
+                logger.warning(f"[orphan_storage] rmtree failed {rid_dir}: {e}")
+                continue
+            deleted_dirs += 1
+            deleted_bytes += size
+            logger.info(
+                f"[orphan_storage] removed teams/{scope_dir.name}/uploads/{name} "
+                f"({size} bytes)"
+            )
+
+    return {
+        "deleted_dirs": deleted_dirs,
+        "deleted_bytes": deleted_bytes,
+        "skipped_too_young": skipped_too_young,
+        "skipped_unparseable": skipped_unparseable,
+    }
+
+
+@DBOS.step()
+def cleanup_orphan_storage_step() -> dict[str, Any]:
+    """Remove `teams/{scope}/uploads/{resource_id}/` directories whose
+    resource_id is not referenced by `public.resources.id`.
+
+    Catches orphans the trash-flow GC misses:
+      - auth.users CASCADE that nukes resources rows directly
+      - manual DELETE FROM resources (legacy ops, tests)
+      - upload paths that wrote files but never inserted a row
+
+    Files younger than ORPHAN_STORAGE_MIN_AGE_DAYS are skipped so an
+    in-flight upload whose DB insert hasn't landed yet survives.
+    """
+    from app.core.utils import Utils
+
+    try:
+        base = Path(Utils.get_download_base_path()).resolve()
+    except ValueError:
+        return {"status": "skipped", "reason": "download path not configured"}
+    if not base.exists():
+        return {"status": "skipped", "reason": "download dir missing"}
+
+    async def _load_resource_ids() -> set[int]:
+        from app.db import engine as db_engine
+
+        rows = await db_engine.fetch_all("SELECT id FROM public.resources")
+        return {row["id"] for row in rows if row.get("id") is not None}
+
+    valid_ids = run_async(_load_resource_ids())
+    min_age_seconds = ORPHAN_STORAGE_MIN_AGE_DAYS * 86400.0
+
+    counts = _sweep_orphan_upload_dirs(base, valid_ids, min_age_seconds)
+    return {
+        "status": "success",
+        "deleted_dirs": counts["deleted_dirs"],
+        "bytes_freed_mb": round(counts["deleted_bytes"] / (1024 * 1024), 2),
+        "skipped_too_young": counts["skipped_too_young"],
+        "skipped_unparseable": counts["skipped_unparseable"],
+    }
+
+
+@DBOS.scheduled("0 3 * * 0")  # weekly Sunday 03:00 UTC
+@DBOS.workflow()
+def cleanup_orphan_storage_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
+    result = cleanup_orphan_storage_step()
+    if result.get("deleted_dirs") or result.get("skipped_too_young"):
+        logger.info(f"[cleanup_orphan_storage] {result}")
