@@ -4,6 +4,7 @@ The helper is the pure-FS half of `cleanup_orphan_storage_step`. We pass
 in the DB-id set explicitly, so the test can run with a tmp tree and
 no DB.
 """
+
 from __future__ import annotations
 
 import os

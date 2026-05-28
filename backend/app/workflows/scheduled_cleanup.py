@@ -202,9 +202,7 @@ def _sweep_orphan_upload_dirs(
                 skipped_too_young += 1
                 continue
             try:
-                size = sum(
-                    f.stat().st_size for f in rid_dir.rglob("*") if f.is_file()
-                )
+                size = sum(f.stat().st_size for f in rid_dir.rglob("*") if f.is_file())
             except OSError:
                 size = 0
             try:
