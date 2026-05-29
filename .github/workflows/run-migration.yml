@@ -46,7 +46,16 @@ jobs:
             files="$file"
           else
             echo "Mode: push to master (auto-detect new migrations)"
-            files=$(git diff --name-only --diff-filter=A HEAD~1 HEAD -- 'supabase/migrations/*.sql' | sort)
+            # Exclude *_rollback.sql — those are reverse migrations that
+            # only ever run manually via workflow_dispatch. Auto-applying
+            # both a forward and its rollback in the same push undoes the
+            # change (see PR #368 / mig 236, where the rollback dropped
+            # the freshly-installed teams_sync_is_personal_trg trigger).
+            files=$(
+              git diff --name-only --diff-filter=A HEAD~1 HEAD -- 'supabase/migrations/*.sql' \
+                | grep -Ev '_rollback\.sql$' \
+                | sort
+            )
             if [ -z "$files" ]; then
               echo "No new migration files added in this push. Exiting clean."
               echo "skip=true" >> "$GITHUB_OUTPUT"
