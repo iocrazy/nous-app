@@ -42,7 +42,6 @@ export interface DuplicateAlertState {
 }
 
 interface UseResourceUploadOptions {
-  scopeType: 'personal' | 'team';
   scopeId: string;
   selectedFolderId: string | null | undefined;
   selectedLibraryId: string | null | undefined;
@@ -55,7 +54,6 @@ interface UseResourceUploadOptions {
 // ─── Hook ─────────────────────────────────────────────
 
 export function useResourceUpload({
-  scopeType,
   scopeId,
   selectedFolderId,
   selectedLibraryId,
@@ -172,7 +170,6 @@ export function useResourceUpload({
           if (action === 'use-existing') {
             await linkExistingResource(
               String(dupResult.existing.id),
-              scopeType,
               scopeId,
               selectedFolderId,
               selectedLibraryId,
@@ -194,7 +191,6 @@ export function useResourceUpload({
 
         await uploadResource(
           file,
-          scopeType,
           scopeId,
           selectedFolderId,
           (progress) => {
@@ -243,7 +239,7 @@ export function useResourceUpload({
 
     upload.setIsUploading(false);
     upload.setOverallProgress(0);
-  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, uploading, t, upload, addToast, reloadResources]);
+  }, [scopeId, selectedFolderId, selectedLibraryId, uploading, t, upload, addToast, reloadResources]);
 
   // ─── Drag & drop handlers ──────────────────────────
 

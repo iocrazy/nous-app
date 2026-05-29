@@ -36,7 +36,7 @@ interface UseResourcesDisplayOptions {
   debouncedSearch: string;
   resourceTagNamesMap: Record<string, string>;
   aiSearchMatchedMediaIds: Set<string> | null;
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   selectedFolderId: string | null | undefined;
   selectedLibraryId: string | null | undefined;
   selectedSmartFolderId: string | null | undefined;
@@ -67,7 +67,7 @@ export function useResourcesDisplay({
   debouncedSearch,
   resourceTagNamesMap,
   aiSearchMatchedMediaIds,
-  scopeType,
+  isPersonal,
   selectedFolderId,
   selectedLibraryId,
   selectedSmartFolderId,
@@ -224,7 +224,7 @@ export function useResourcesDisplay({
       const sf = smartFolders.find((s) => String(s.id) === selectedSmartFolderId);
       return [{ label: t('resources.smartFolders'), onClick: () => {} }, { label: sf?.name ?? '' }];
     }
-    if (scopeType === 'team' && selectedLibraryId) {
+    if (!isPersonal && selectedLibraryId) {
       const lib = libraries.find((l) => String(l.id) === selectedLibraryId);
       const libName = lib?.name ?? t('resources.allFiles');
       const segs: BreadcrumbSegment[] = [{ label: libName, onClick: selectedFolderId ? () => navigate(resPath(`/resources/library/${selectedLibraryId}`)) : undefined }];
@@ -242,7 +242,7 @@ export function useResourcesDisplay({
       });
     }
     return segs;
-  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, scopeType, selectedLibraryId, selectedFolderId, libraries, folderChain, t, navigate, resPath, recycleFolderId, trashedFolders, setRecycleFolderId]);
+  }, [isSharedView, isRecycleView, isDownloadsView, selectedSmartFolderId, smartFolders, isPersonal, selectedLibraryId, selectedFolderId, libraries, folderChain, t, navigate, resPath, recycleFolderId, trashedFolders, setRecycleFolderId]);
 
   const sortOptions: { value: SortBy; label: string }[] = [
     { value: 'newest', label: t('resources.sortNewest') },

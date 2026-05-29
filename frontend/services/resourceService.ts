@@ -8,20 +8,19 @@ import { buildMediaUrl } from '../utils/mediaUrl';
 // ─── Folders ────────────────────────────────────────────
 
 export async function fetchFolders(
-  scopeType: 'personal' | 'team',
   scopeId: string,
+  isPersonal: boolean,
   libraryId?: string | null
 ): Promise<Folder[]> {
   let query = supabase
     .from('folders')
     .select('*')
-    .eq('scope_type', scopeType)
     .eq('scope_id', scopeId)
     .eq('is_trashed', false);
 
   if (libraryId) {
     query = query.eq('library_id', libraryId);
-  } else if (scopeType === 'team') {
+  } else if (!isPersonal) {
     // Team mode without library: show nothing (libraries are the entry point)
     query = query.is('library_id', null);
   }
@@ -35,15 +34,19 @@ export async function fetchFolders(
 export async function createFolder(folder: {
   name: string;
   parent_id?: string | null;
-  scope_type: 'personal' | 'team';
   scope_id: string;
+  isPersonal: boolean;
 }): Promise<Folder> {
   const claims = (await supabase.auth.getClaims()).data.claims;
   if (!claims) throw new Error('Not authenticated');
 
+  const { isPersonal, ...rest } = folder;
   const { data, error } = await supabase
     .from('folders')
-    .insert({ ...folder, created_by: claims.sub })
+    // PR-E: scope_type is still NOT NULL until Phase 4, and this is a
+    // direct PostgREST insert (no backend derivation), so populate the
+    // column inline from isPersonal. Drop once Phase 4 makes it nullable.
+    .insert({ ...rest, scope_type: isPersonal ? 'personal' : 'team', created_by: claims.sub })
     .select()
     .single();
 
@@ -115,13 +118,11 @@ export async function fetchFolderContents(
 }
 
 export async function fetchTrashedFolders(
-  scopeType: 'personal' | 'team',
   scopeId: string,
 ): Promise<Folder[]> {
   const { data, error } = await supabase
     .from('folders')
     .select('*')
-    .eq('scope_type', scopeType)
     .eq('scope_id', scopeId)
     .eq('is_trashed', true)
     .order('created_at', { ascending: false });
@@ -155,15 +156,14 @@ export function buildFolderTree(folders: Folder[]): Folder[] {
 // ─── Child Folders (direct children of a parent) ────────
 
 export async function fetchChildFolders(
-  scopeType: 'personal' | 'team',
   scopeId: string,
+  isPersonal: boolean,
   parentId: string | null,
   libraryId?: string | null
 ): Promise<Folder[]> {
   let query = supabase
     .from('folders')
     .select('*')
-    .eq('scope_type', scopeType)
     .eq('scope_id', scopeId)
     .eq('is_trashed', false);
 
@@ -175,7 +175,7 @@ export async function fetchChildFolders(
 
   if (libraryId) {
     query = query.eq('library_id', libraryId);
-  } else if (scopeType === 'team') {
+  } else if (!isPersonal) {
     query = query.is('library_id', null);
   }
 
@@ -188,7 +188,9 @@ export async function fetchChildFolders(
 
 export async function fetchResourceContext(
   resourceId: string
-): Promise<{ folder_id: string | null; scope_type: string; scope_id: string; library_id: string | null } | null> {
+): Promise<{ folder_id: string | null; scope_id: string; library_id: string | null; isPersonal: boolean } | null> {
+  // PR-E: scope_type is read internally only to derive the personal/team
+  // discriminator; it is not exposed. (Column still exists until Phase 4.)
   const { data, error } = await supabase
     .from('resource_items')
     .select('folder_id, scope_type, scope_id, library_id')
@@ -197,7 +199,12 @@ export async function fetchResourceContext(
     .single();
 
   if (error) return null;
-  return data;
+  return {
+    folder_id: data.folder_id,
+    scope_id: data.scope_id,
+    library_id: data.library_id,
+    isPersonal: data.scope_type === 'personal',
+  };
 }
 
 // ─── Resources ──────────────────────────────────────────
@@ -229,7 +236,8 @@ export async function fetchResourceContext(
  *   (migration 143) so a single indexed ``.in()`` does the work.
  */
 export interface FetchResourcesParams {
-  scopeType: 'personal' | 'team';
+  /** Personal scope when true, team scope when false. Replaces scope_type. */
+  isPersonal: boolean;
   scopeId: string;
   folderId?: string | null;
   libraryId?: string | null;
@@ -386,7 +394,7 @@ async function resolveTagIntersection(
 }
 
 export async function fetchResources(
-  scopeTypeOrParams: 'personal' | 'team' | FetchResourcesParams,
+  isPersonalOrParams: boolean | FetchResourcesParams,
   scopeId?: string,
   folderId?: string | null,
   libraryId?: string | null,
@@ -394,10 +402,10 @@ export async function fetchResources(
   // Backwards-compatible overload: existing callers still pass positional
   // arguments. New callers should pass a FetchResourcesParams object.
   const params: FetchResourcesParams =
-    typeof scopeTypeOrParams === 'object'
-      ? scopeTypeOrParams
+    typeof isPersonalOrParams === 'object'
+      ? isPersonalOrParams
       : {
-          scopeType: scopeTypeOrParams,
+          isPersonal: isPersonalOrParams,
           scopeId: scopeId as string,
           folderId,
           libraryId,
@@ -429,7 +437,6 @@ export async function fetchResources(
   let query = supabase
     .from('resource_items')
     .select(selectExpr)
-    .eq('scope_type', params.scopeType)
     .eq('scope_id', params.scopeId)
     .eq('resources.is_trashed', false)
     .neq('resource.source_type', 'web');
@@ -442,7 +449,7 @@ export async function fetchResources(
 
   if (params.libraryId) {
     query = query.eq('library_id', params.libraryId);
-  } else if (params.scopeType === 'team') {
+  } else if (!params.isPersonal) {
     query = query.is('library_id', null);
   }
 
@@ -562,7 +569,7 @@ export async function fetchResources(
 }
 
 export async function fetchResourceCount(
-  scopeType: 'personal' | 'team',
+  isPersonal: boolean,
   scopeId: string
 ): Promise<number> {
   // Count rows in `resources` (not the resource_items junction) so a resource
@@ -580,15 +587,14 @@ export async function fetchResourceCount(
     .eq('is_trashed', false)
     .neq('source_type', 'web');
 
-  // scope_type=personal is implicit (creator_id already filters to current
+  // Personal scope is implicit (creator_id already filters to current
   // user). For team scope, resources need to be explicitly linked to the
   // team via resource_items — fall back to the old junction query in that
   // case since resources themselves don't carry a team_id column.
-  if (scopeType === 'team') {
+  if (!isPersonal) {
     const { data: items } = await supabase
       .from('resource_items')
       .select('resource_id')
-      .eq('scope_type', 'team')
       .eq('scope_id', scopeId);
     const ids = (items ?? []).map((r) => r.resource_id);
     if (ids.length === 0) return 0;
@@ -624,7 +630,6 @@ export async function checkDuplicate(
 
 export async function linkExistingResource(
   resourceId: string,
-  scopeType: 'personal' | 'team',
   scopeId: string,
   folderId?: string | null,
   libraryId?: string | null,
@@ -632,7 +637,6 @@ export async function linkExistingResource(
   const apiUrl = getApiUrl();
   const params = new URLSearchParams({
     resource_id: resourceId,
-    scope_type: scopeType,
     scope_id: scopeId,
   });
   if (folderId) params.set('folder_id', folderId);
@@ -651,7 +655,6 @@ export async function linkExistingResource(
 
 export async function uploadResource(
   file: File,
-  scopeType: 'personal' | 'team',
   scopeId: string,
   folderId?: string | null,
   onProgress?: (progress: number) => void,
@@ -669,7 +672,6 @@ export async function uploadResource(
   });
 
   const params = new URLSearchParams({
-    scope_type: scopeType,
     scope_id: scopeId,
   });
   if (folderId) params.set('folder_id', folderId);
@@ -713,13 +715,11 @@ export async function uploadResource(
 
 export async function trashResource(
   resourceId: string,
-  scopeType: 'personal' | 'team',
   scopeId: string,
   folderId?: string | null,
 ): Promise<void> {
   const apiUrl = getApiUrl();
   const params = new URLSearchParams({
-    scope_type: scopeType,
     scope_id: scopeId,
   });
   if (folderId) params.set('folder_id', folderId);
@@ -761,21 +761,23 @@ export async function permanentDeleteFolder(folderId: string): Promise<void> {
 // ─── Trashed resources ───────────────────────────────────
 
 export async function fetchTrashedResources(
-  scopeType: 'personal' | 'team',
+  isPersonal: boolean,
   scopeId: string
 ): Promise<ResourceItem[]> {
   // Query resources where is_trashed=true.
   // For personal scope: filter by creator_id (most reliable, works even if last_scope is null).
-  // For team scope: filter by last_scope fields.
+  // For team scope: filter by last_scope fields. (resources.last_scope_type
+  // is the restore-location snapshot and survives PR-E — it is NOT one of
+  // the dropped scope_type columns.)
   let query = supabase
     .from('resources')
     .select('*')
     .eq('is_trashed', true);
 
-  if (scopeType === 'personal') {
+  if (isPersonal) {
     query = query.eq('creator_id', scopeId);
   } else {
-    query = query.eq('last_scope_type', scopeType).eq('last_scope_id', scopeId);
+    query = query.eq('last_scope_type', 'team').eq('last_scope_id', scopeId);
   }
 
   const { data, error } = await query.order('trashed_at', { ascending: false });
@@ -786,7 +788,6 @@ export async function fetchTrashedResources(
   return (data || []).map((resource): ResourceItem => ({
     id: resource.id,
     resource_id: resource.id,
-    scope_type: scopeType,
     scope_id: scopeId,
     folder_id: resource.last_folder_id ?? null,
     library_id: resource.last_library_id ?? null,
@@ -972,13 +973,11 @@ export async function removeResourceTag(resourceId: string, tagId: string) {
 // ─── Downloaded Resources (from Parser) ─────────────
 
 export async function fetchDownloadedResources(
-  scopeType: 'personal' | 'team',
   scopeId: string,
 ): Promise<ResourceItem[]> {
   const { data, error } = await supabase
     .from('resource_items')
     .select('*, resource:resources!inner(*)')
-    .eq('scope_type', scopeType)
     .eq('scope_id', scopeId)
     .eq('resource.source_type', 'web')
     .order('created_at', { ascending: false });
@@ -987,7 +986,7 @@ export async function fetchDownloadedResources(
 }
 
 export async function fetchDownloadedResourceCount(
-  scopeType: 'personal' | 'team',
+  isPersonal: boolean,
   scopeId: string,
 ): Promise<number> {
   // Count `resources` (not the resource_items junction) to match the
@@ -1005,11 +1004,10 @@ export async function fetchDownloadedResourceCount(
     .eq('source_type', 'web')
     .eq('is_trashed', false);
 
-  if (scopeType === 'team') {
+  if (!isPersonal) {
     const { data: items } = await supabase
       .from('resource_items')
       .select('resource_id')
-      .eq('scope_type', 'team')
       .eq('scope_id', scopeId);
     const ids = (items ?? []).map((r) => r.resource_id);
     if (ids.length === 0) return 0;
@@ -1036,11 +1034,10 @@ export interface SmartFolderRules {
 }
 
 export async function fetchSmartFolders(
-  scopeType: 'personal' | 'team',
   scopeId: string
 ): Promise<SmartCollection[]> {
   const apiUrl = getApiUrl();
-  const params = new URLSearchParams({ scope_type: scopeType, scope_id: scopeId });
+  const params = new URLSearchParams({ scope_id: scopeId });
   const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders?${params}`, {
     headers: await getAuthHeaders(),
   });
@@ -1051,7 +1048,6 @@ export async function fetchSmartFolders(
 
 export async function createSmartFolder(
   name: string,
-  scopeType: 'personal' | 'team',
   scopeId: string,
   rules: SmartFolderRules,
 ): Promise<SmartCollection> {
@@ -1059,7 +1055,7 @@ export async function createSmartFolder(
   const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders`, {
     method: 'POST',
     headers: await getAuthHeaders(),
-    body: JSON.stringify({ name, scope_type: scopeType, scope_id: scopeId, rules }),
+    body: JSON.stringify({ name, scope_id: scopeId, rules }),
   });
   if (!response.ok) throw new Error('Failed to create smart folder');
   const json = await response.json();
@@ -1092,11 +1088,10 @@ export async function deleteSmartFolder(folderId: string): Promise<void> {
 
 export async function fetchSmartFolderResults(
   folderId: string,
-  scopeType: 'personal' | 'team',
   scopeId: string,
 ): Promise<ResourceItem[]> {
   const apiUrl = getApiUrl();
-  const params = new URLSearchParams({ scope_type: scopeType, scope_id: scopeId });
+  const params = new URLSearchParams({ scope_id: scopeId });
   const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders/${folderId}/results?${params}`, {
     headers: await getAuthHeaders(),
   });
@@ -1109,14 +1104,12 @@ export async function fetchSmartFolderResults(
  * Query resources matching a smart folder's rules (client-side fallback).
  */
 export async function fetchSmartFolderResources(
-  scopeType: 'personal' | 'team',
   scopeId: string,
   rules: { match: string; conditions: Array<{ field: string; operator: string; value: string }> }
 ): Promise<ResourceItem[]> {
   let query = supabase
     .from('resource_items')
     .select('*, resource:resources!inner(*)')
-    .eq('scope_type', scopeType)
     .eq('scope_id', scopeId)
     .eq('resources.is_trashed', false);
 
@@ -1189,8 +1182,8 @@ export async function moveResourceItems(
 // 复制文件（创建新 resource_item 指向同一个 resource）
 export async function copyResourceItem(
   resourceId: string,
-  targetScopeType: 'personal' | 'team',
   targetScopeId: string,
+  targetIsPersonal: boolean,
   targetFolderId: string | null,
   targetLibraryId?: string | null
 ): Promise<ResourceItem> {
@@ -1198,9 +1191,11 @@ export async function copyResourceItem(
   if (!claims) throw new Error('Not authenticated');
   const { data, error } = await supabase
     .from('resource_items')
+    // PR-E: scope_type still NOT NULL until Phase 4; this is a direct
+    // PostgREST insert, so populate it inline from the discriminator.
     .insert({
       resource_id: resourceId,
-      scope_type: targetScopeType,
+      scope_type: targetIsPersonal ? 'personal' : 'team',
       scope_id: targetScopeId,
       folder_id: targetFolderId,
       library_id: targetLibraryId || null,
@@ -1287,12 +1282,10 @@ export async function getFolderPreview(
 // - Team scope: only unlinks from the team library, keeps the resource in personal library.
 export async function trashResourceByMediaId(
   mediaId: string,
-  scopeType?: 'personal' | 'team',
   scopeId?: string,
 ): Promise<void> {
   const apiUrl = getApiUrl();
   const params = new URLSearchParams();
-  if (scopeType) params.set('scope_type', scopeType);
   if (scopeId) params.set('scope_id', scopeId);
   const query = params.toString() ? `?${params}` : '';
   const response = await fetch(
@@ -1313,12 +1306,10 @@ export async function trashResourceByMediaId(
 // - Team scope: only unlinks from the team library, keeps the resource in personal library.
 export async function trashResourceByPlatformId(
   platformId: string,
-  scopeType?: 'personal' | 'team',
   scopeId?: string,
 ): Promise<void> {
   const apiUrl = getApiUrl();
   const params = new URLSearchParams();
-  if (scopeType) params.set('scope_type', scopeType);
   if (scopeId) params.set('scope_id', scopeId);
   const query = params.toString() ? `?${params}` : '';
   const response = await fetch(
@@ -1339,11 +1330,10 @@ export async function trashResourceByPlatformId(
 // The DB orphan-GC trigger auto-trashes the resource if no references remain.
 export async function unlinkResourceByPlatformId(
   platformId: string,
-  scopeType: 'personal' | 'team' = 'personal',
   scopeId?: string,
 ): Promise<void> {
   const apiUrl = getApiUrl();
-  const params = new URLSearchParams({ scope_type: scopeType });
+  const params = new URLSearchParams();
   if (scopeId) params.set('scope_id', scopeId);
   const response = await fetch(
     `${apiUrl}/api/v1/resources/by-platform-id/${platformId}?${params}`,
@@ -1361,7 +1351,6 @@ export async function unlinkResourceByPlatformId(
 // 批量删除
 export async function trashResources(
   resourceIds: string[],
-  scopeType: 'personal' | 'team',
   scopeId: string,
   folderId?: string | null,
 ): Promise<void> {
@@ -1369,7 +1358,6 @@ export async function trashResources(
   const headers = await getAuthHeaders();
   await Promise.all(resourceIds.map(async (id) => {
     const params = new URLSearchParams({
-      scope_type: scopeType,
       scope_id: scopeId,
     });
     if (folderId) params.set('folder_id', folderId);

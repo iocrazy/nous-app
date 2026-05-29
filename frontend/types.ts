@@ -275,7 +275,6 @@ export interface Folder {
   name: string;
   parent_id: string | null;
   library_id: string | null;
-  scope_type: 'personal' | 'team';
   scope_id: string;
   created_by: string;
   sort_order: number;
@@ -348,7 +347,6 @@ export interface Resource {
 export interface ResourceItem {
   id: string;
   resource_id: string;
-  scope_type: 'personal' | 'team';
   scope_id: string;
   folder_id: string | null;
   library_id: string | null;

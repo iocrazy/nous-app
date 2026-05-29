@@ -15,7 +15,7 @@ export function ResourcesPage() {
   // for personal mode so the listing query joins correctly.
   return (
     <ResourcesView
-      scopeType={isPersonal ? 'personal' : 'team'}
+      isPersonal={isPersonal}
       scopeId={isPersonal ? (personalTeamId || '') : (effectiveTeamId || '')}
     />
   );

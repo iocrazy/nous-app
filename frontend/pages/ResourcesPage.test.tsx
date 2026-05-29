@@ -29,7 +29,7 @@ describe('ResourcesPage scope wiring', () => {
 
     expect(ResourcesView).toHaveBeenCalledWith(
       expect.objectContaining({
-        scopeType: 'personal',
+        isPersonal: true,
         scopeId: '310812366953241',
       }),
       undefined
@@ -47,7 +47,7 @@ describe('ResourcesPage scope wiring', () => {
 
     expect(ResourcesView).toHaveBeenCalledWith(
       expect.objectContaining({
-        scopeType: 'team',
+        isPersonal: false,
         scopeId: '999000111',
       }),
       undefined

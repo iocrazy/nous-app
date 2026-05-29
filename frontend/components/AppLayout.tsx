@@ -123,9 +123,8 @@ function AppLayoutInner() {
   // personalTeamId in this branch) rather than currentUserId.
   useEffect(() => {
     if (!isResourcesMenuOpen || !selectedTeamId) return;
-    const scopeType = selectedTeamId === personalTeamId ? 'personal' : 'team';
     fetchLibraries(selectedTeamId).then(setMobileLibraries).catch(() => setMobileLibraries([]));
-    fetchSmartFolders(scopeType, selectedTeamId).then(setMobileSmartFolders).catch(() => setMobileSmartFolders([]));
+    fetchSmartFolders(selectedTeamId).then(setMobileSmartFolders).catch(() => setMobileSmartFolders([]));
   }, [isResourcesMenuOpen, selectedTeamId, personalTeamId]);
 
   // Sidebar collapse state with localStorage persistence
