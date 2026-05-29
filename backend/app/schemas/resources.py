@@ -43,8 +43,11 @@ class ResourceMoveRequest(BaseModel):
     folder_id: Optional[str] = Field(
         None, description="Target folder ID, null for root"
     )
-    scope_type: str = Field(..., pattern="^(personal|team)$")
-    scope_id: str = Field(..., description="User ID or team ID")
+    # PR-E Phase 3: scope_type dropped. scope_id (a globally-unique teams.id
+    # snowflake) alone locates the scope; the value is derived from team.kind
+    # where an INSERT still needs it. Pydantic ignores any leftover field a
+    # stale client sends.
+    scope_id: str = Field(..., description="Team ID (teams.id snowflake)")
 
 
 # ─── Folders ──────────────────────────────────────────────
@@ -55,8 +58,8 @@ class FolderCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=200)
     parent_id: Optional[str] = None
-    scope_type: str = Field(..., pattern="^(personal|team)$")
-    scope_id: str = Field(..., description="User ID or team ID")
+    # PR-E Phase 3: scope_type dropped; derived from team.kind on INSERT.
+    scope_id: str = Field(..., description="Team ID (teams.id snowflake)")
     icon: Optional[str] = Field(None, max_length=50)
     color: Optional[str] = Field(None, max_length=20)
 
@@ -116,8 +119,8 @@ class SmartFolderCreate(BaseModel):
     """Request body for creating a smart folder."""
 
     name: str = Field(..., min_length=1, max_length=200)
-    scope_type: str = Field(..., pattern="^(personal|team)$")
-    scope_id: str = Field(..., description="User ID or team ID")
+    # PR-E Phase 3: scope_type dropped; derived from team.kind on INSERT.
+    scope_id: str = Field(..., description="Team ID (teams.id snowflake)")
     rules: SmartFolderRules
     icon: Optional[str] = Field(None, max_length=50)
     color: Optional[str] = Field(None, max_length=20)

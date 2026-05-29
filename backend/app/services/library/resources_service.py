@@ -53,6 +53,24 @@ async def _resolve_personal_team_id(user_id: str) -> str:
     return row["id"]
 
 
+async def _scope_type_for(scope_id: str) -> str:
+    """Derive the legacy ``scope_type`` literal from a team's ``kind``.
+
+    PR-E Phase 1: the frontend is being weaned off sending ``scope_type``.
+    The ``resource_items`` / ``folders`` columns are still ``NOT NULL CHECK
+    IN ('personal','team')`` until Phase 4, so every INSERT must supply a
+    value. We derive it from the target team's ``kind`` (the single source
+    of truth post PR-C) rather than trusting a client-supplied hint.
+    """
+    from app.db import engine as db_engine
+
+    row = await db_engine.fetch_one(
+        "SELECT kind FROM public.teams WHERE id::text = :sid",
+        {"sid": str(scope_id)},
+    )
+    return "personal" if (row and row["kind"] == "personal") else "team"
+
+
 class ResourcesService:
     """Resource library business logic"""
 
@@ -67,8 +85,8 @@ class ResourcesService:
         self,
         user_id: str,
         file,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: Optional[str] = None,
         library_id: Optional[str] = None,
     ) -> dict:
@@ -161,10 +179,11 @@ class ResourcesService:
         }
         await self.repo.create_version(version_data)
 
-        # Create resource_item for scope
+        # Create resource_item for scope. PR-E Phase 1: derive scope_type
+        # from team.kind when the caller no longer supplies it.
         item_data = {
             "resource_id": resource_id,
-            "scope_type": scope_type,
+            "scope_type": scope_type or await _scope_type_for(scope_id),
             "scope_id": scope_id,
             "folder_id": folder_id,
             "library_id": library_id,
@@ -380,14 +399,15 @@ class ResourcesService:
         if existing:
             # Zero-copy: just add a resource_item reference
             target_scope_id = scope_id or await _resolve_personal_team_id(user_id)
+            effective_scope_type = scope_type or await _scope_type_for(target_scope_id)
             item = await self.repo.get_resource_item(
-                existing["id"], scope_type, target_scope_id
+                existing["id"], effective_scope_type, target_scope_id
             )
             if not item:
                 await self.repo.create_resource_item(
                     {
                         "resource_id": existing["id"],
-                        "scope_type": scope_type,
+                        "scope_type": effective_scope_type,
                         "scope_id": target_scope_id,
                         "added_by": user_id,
                     }
@@ -432,7 +452,7 @@ class ResourcesService:
         await self.repo.create_resource_item(
             {
                 "resource_id": resource["id"],
-                "scope_type": scope_type,
+                "scope_type": scope_type or await _scope_type_for(target_scope_id),
                 "scope_id": target_scope_id,
                 "added_by": user_id,
             }
@@ -448,15 +468,22 @@ class ResourcesService:
         self,
         resource_id: str,
         user_id: str,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: str | None = None,
     ) -> bool:
         """
         Remove a resource from a specific folder by deleting the resource_item.
         Saves last location on the resource for restore.
         The DB trigger auto-trashes the resource if this was the last reference.
+
+        PR-E Phase 1: ``scope_type`` is derived from ``scope_id`` when the
+        caller no longer supplies it, so the ``last_scope_type`` snapshot
+        stays accurate for restore.
         """
+        if scope_type is None:
+            scope_type = await _scope_type_for(scope_id)
+
         if folder_id is not None:
             item = await self.repo.get_resource_item_in_folder(
                 resource_id, scope_type, scope_id, folder_id
@@ -752,10 +779,12 @@ class ResourcesService:
         self,
         resource_id: str,
         user_id: str,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: Optional[str] = None,
     ) -> dict:
+        # PR-E Phase 1: scope_type no longer filters the lookup (scope_id is
+        # globally unique); accepted for compatibility but unused here.
         item = await self.repo.get_resource_item(resource_id, scope_type, scope_id)
         if not item:
             raise ValueError("Resource not found in this scope")

@@ -22,22 +22,19 @@ from app.db.supabase_client import get_async_supabase_admin
 
 async def verify_scope_access(
     auth: AuthContext = Depends(get_auth),
-    scope_type: str = Query(...),
     scope_id: str = Query(...),
 ) -> None:
-    """Guard for `?scope_type=&scope_id=` write targets (resources library).
+    """Guard for `?scope_id=` write targets (resources library).
 
-    After Spec 1 PR-C, ``scope_id`` is always a ``teams.id`` snowflake
-    regardless of ``scope_type`` — personal scopes resolve to the user's
-    auto-created single-member personal team. So authorization collapses
-    to a single check: the caller must be a member of the team.
+    After Spec 1 PR-C, ``scope_id`` is always a ``teams.id`` snowflake —
+    personal scopes resolve to the user's auto-created single-member
+    personal team. Authorization collapses to a single check: the caller
+    must be a member of the team.
+
+    PR-E Phase 3: the vestigial ``scope_type`` query param has been
+    dropped entirely. FastAPI ignores any leftover ``scope_type=`` a stale
+    client still sends, so this is backward-compatible.
     """
-    if scope_type not in ("personal", "team"):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid scope_type: {scope_type!r} (expected 'personal' or 'team')",
-        )
-
     client = await get_async_supabase_admin()
     result = (
         await client.table("team_members")
