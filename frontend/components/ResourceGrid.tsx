@@ -251,7 +251,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   const { t } = useTranslation();
   const ctx = useResourcesContext();
   const {
-    scopeType, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId,
+    isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId,
     isResourcesView, isRecycleView, isSharedView,
     loading, viewMode, setViewMode, sortBy, setSortBy,
     searchQuery, folderChain, folderPreviews,
@@ -268,6 +268,11 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     handlePermanentDelete,
     reloadResources,
   } = ctx;
+
+  // PR-E: temp_ttl service + child panels still speak the legacy
+  // 'personal' | 'team' scope_type (UUID-keyed user_settings exception).
+  // Derive it locally from the isPersonal discriminator.
+  const scopeType: 'personal' | 'team' = isPersonal ? 'personal' : 'team';
 
   // Mobile detection (matches Tailwind md: breakpoint at 768px)
   const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;

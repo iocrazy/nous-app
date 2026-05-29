@@ -55,7 +55,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
 }) => {
   const { t } = useTranslation();
   const {
-    scopeType,
+    isPersonal,
     sidebarView,
     selectedFolderId,
     selectedSmartFolderId,
@@ -147,7 +147,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
 
         {/* ── Main section: Team Libraries / Personal Resources ── */}
-        {scopeType === 'team' ? (
+        {!isPersonal ? (
           <>
             {/* ── Library — collapsible parent item ── */}
             <div className="flex items-center justify-between pr-1">

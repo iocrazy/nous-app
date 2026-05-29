@@ -19,13 +19,13 @@ import { ResourcesViewInner } from './ResourcesViewInner';
 export { validateFile } from '../hooks/useResourceUpload';
 
 interface ResourcesViewProps {
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   scopeId: string;
 }
 
-export const ResourcesView: React.FC<ResourcesViewProps> = ({ scopeType, scopeId }) => {
+export const ResourcesView: React.FC<ResourcesViewProps> = ({ isPersonal, scopeId }) => {
   return (
-    <ResourcesProvider scopeType={scopeType} scopeId={scopeId}>
+    <ResourcesProvider isPersonal={isPersonal} scopeId={scopeId}>
       <ResourcesViewInner />
     </ResourcesProvider>
   );

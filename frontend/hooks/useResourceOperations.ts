@@ -26,7 +26,7 @@ import { useFileKeyboard } from './useFileKeyboard';
 import type { Folder, ResourceItem, SmartCollection } from '../types';
 
 interface UseResourceOperationsOptions {
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   scopeId: string;
   selectedFolderId: string | null | undefined;
   selectedLibraryId: string | null | undefined;
@@ -49,7 +49,7 @@ interface UseResourceOperationsOptions {
 }
 
 export function useResourceOperations({
-  scopeType,
+  isPersonal,
   scopeId,
   selectedFolderId,
   selectedLibraryId,
@@ -159,7 +159,7 @@ export function useResourceOperations({
       } else if (folderPickerMode === 'copy') {
         for (const item of operationTargetItems) {
           if (item.resource?.id) {
-            await copyResourceItem(String(item.resource.id), scopeType, scopeId, targetFolderId, targetLibraryId);
+            await copyResourceItem(String(item.resource.id), scopeId, isPersonal, targetFolderId, targetLibraryId);
           }
         }
         addToast(t('resources.copySuccess', { count: operationTargetItems.length }), 'success');
@@ -168,33 +168,33 @@ export function useResourceOperations({
     setFolderPickerMode(null);
     setOperationTargetItems([]);
     setOperationTargetFolders([]);
-  }, [folderPickerMode, operationTargetItems, operationTargetFolders, scopeType, scopeId, loadFolders, loadChildFolders, reloadResources, addToast, t]);
+  }, [folderPickerMode, operationTargetItems, operationTargetFolders, isPersonal, scopeId, loadFolders, loadChildFolders, reloadResources, addToast, t]);
 
   // ─── Smart Folder CRUD ─────────────────────────────
 
   const handleCreateSmartFolder = useCallback(async (name: string, rules: SmartFolderRules) => {
-    await createSmartFolder(name, scopeType, scopeId, rules);
-    const updated = await fetchSmartFolders(scopeType, scopeId);
+    await createSmartFolder(name, scopeId, rules);
+    const updated = await fetchSmartFolders(scopeId);
     setSmartFolders(updated);
     setShowSmartFolderEditor(false);
     const newest = updated[updated.length - 1];
     if (newest) navigate(resPath(`/resources/smart/${newest.id}`));
-  }, [scopeType, scopeId, navigate, resPath, setSmartFolders]);
+  }, [scopeId, navigate, resPath, setSmartFolders]);
 
   const handleEditSmartFolder = useCallback(async (name: string, rules: SmartFolderRules) => {
     if (!editingSmartFolder) return;
     await updateSmartFolder(String(editingSmartFolder.id), { name, rules });
-    const updated = await fetchSmartFolders(scopeType, scopeId);
+    const updated = await fetchSmartFolders(scopeId);
     setSmartFolders(updated);
     setEditingSmartFolder(null);
-  }, [editingSmartFolder, scopeType, scopeId, setSmartFolders]);
+  }, [editingSmartFolder, scopeId, setSmartFolders]);
 
   const handleDeleteSmartFolder = useCallback(async (sf: SmartCollection) => {
     if (!confirm(t('smartFolder.confirmDelete'))) return;
     await deleteSmartFolder(String(sf.id));
-    const updated = await fetchSmartFolders(scopeType, scopeId);
+    const updated = await fetchSmartFolders(scopeId);
     setSmartFolders(updated);
-  }, [scopeType, scopeId, setSmartFolders, t]);
+  }, [scopeId, setSmartFolders, t]);
 
   // ─── Keyboard shortcuts ────────────────────────────
 
@@ -208,13 +208,13 @@ export function useResourceOperations({
         .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
         .map((i) => String(i.resource!.id));
       if (resourceIds.length > 0) {
-        trashResources(resourceIds, scopeType, scopeId, selectedFolderId).then(async () => {
+        trashResources(resourceIds, scopeId, selectedFolderId).then(async () => {
           await reloadResources();
           setSelectedIds(new Set());
           addToast(t('resources.trashedNotification', { name: `${resourceIds.length} items` }), 'success');
         }).catch((err) => { console.error('Failed to trash resources:', err); });
       }
-    }, [sortedItems, selectedIds, scopeType, scopeId, selectedFolderId, reloadResources, addToast, t, setSelectedIds]),
+    }, [sortedItems, selectedIds, scopeId, selectedFolderId, reloadResources, addToast, t, setSelectedIds]),
     onRename: useCallback((compositeId: string) => {
       if (compositeId.startsWith('folder:')) {
         const fId = compositeId.replace('folder:', '');
@@ -263,7 +263,7 @@ export function useResourceOperations({
         if (clipboardMode === 'copy') {
           for (const item of clipboardItems) {
             if (item.resource?.id) {
-              await copyResourceItem(String(item.resource.id), scopeType, scopeId, selectedFolderId, selectedLibraryId);
+              await copyResourceItem(String(item.resource.id), scopeId, isPersonal, selectedFolderId, selectedLibraryId);
             }
           }
           addToast(t('resources.copySuccess', { count: clipboardItems.length }), 'success');
@@ -279,7 +279,7 @@ export function useResourceOperations({
         }
         await reloadResources();
       } catch { /* ignore */ }
-    }, [clipboardItems, clipboardMode, scopeType, scopeId, selectedFolderId, selectedLibraryId, reloadResources, addToast, t]),
+    }, [clipboardItems, clipboardMode, isPersonal, scopeId, selectedFolderId, selectedLibraryId, reloadResources, addToast, t]),
   });
 
   return {

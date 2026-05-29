@@ -363,7 +363,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         const ctx = await fetchResourceContext(resourceId);
         if (!ctx || cancelled) return;
         const items = await fetchResources(
-          ctx.scope_type as 'personal' | 'team',
+          ctx.isPersonal,
           ctx.scope_id,
           ctx.folder_id,
           ctx.library_id,

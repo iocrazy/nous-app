@@ -29,7 +29,7 @@ interface ContextMenuState {
 
 interface UseContextMenuItemsOptions {
   contextMenu: ContextMenuState | null;
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   scopeId: string;
   selectedFolderId: string | null | undefined;
   selectedLibraryId: string | null | undefined;
@@ -69,7 +69,7 @@ interface UseContextMenuItemsOptions {
 
 export function useContextMenuItems({
   contextMenu,
-  scopeType,
+  isPersonal,
   scopeId,
   selectedFolderId,
   selectedLibraryId,
@@ -194,7 +194,7 @@ export function useContextMenuItems({
         onClick: async () => {
           try {
             for (const item of ops.operationTargetItems) {
-              if (item.resource?.id) await copyResourceItem(String(item.resource.id), scopeType, scopeId, selectedFolderId, selectedLibraryId);
+              if (item.resource?.id) await copyResourceItem(String(item.resource.id), scopeId, isPersonal, selectedFolderId, selectedLibraryId);
             }
             await reloadResources();
             ops.setOperationTargetItems([]);
@@ -203,5 +203,5 @@ export function useContextMenuItems({
       });
     }
     return emptyItems;
-  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, scopeType, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, versionInputRef]);
+  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, isPersonal, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, versionInputRef]);
 }

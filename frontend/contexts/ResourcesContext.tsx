@@ -47,14 +47,14 @@ export type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | '
  *  accidentally override scope / folder / library. */
 export type ResourcesFilterParams = Omit<
   FetchResourcesParams,
-  'scopeType' | 'scopeId' | 'folderId' | 'libraryId'
+  'isPersonal' | 'scopeId' | 'folderId' | 'libraryId'
 >;
 
 const EMPTY_FILTER_PARAMS: ResourcesFilterParams = {};
 
 export interface ResourcesContextType {
   // ── Scope / URL-derived state ──
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   scopeId: string;
   teamId: string | undefined;
   sidebarView: SidebarView;
@@ -185,13 +185,13 @@ const ResourcesContext = createContext<ResourcesContextType | null>(null);
 // ─── Provider ──────────────────────────────────────────
 
 interface ResourcesProviderProps {
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   scopeId: string;
   children: React.ReactNode;
 }
 
 export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
-  scopeType,
+  isPersonal,
   scopeId,
   children,
 }) => {
@@ -290,9 +290,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const permObjectType = selectedLibraryId ? 'library' : selectedFolderId ? 'folder' : null;
   const permObjectId = selectedLibraryId ?? selectedFolderId ?? null;
   const { canDo } = usePermission(
-    scopeType === 'team' ? permObjectType : null,
-    scopeType === 'team' ? permObjectId : null,
-    scopeType === 'team' ? (teamId ?? null) : null,
+    !isPersonal ? permObjectType : null,
+    !isPersonal ? permObjectId : null,
+    !isPersonal ? (teamId ?? null) : null,
   );
 
   const canUpload = isResourcesView && canDo('upload');
@@ -312,13 +312,13 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // ── Load folders on scope change ──
   const loadFolders = useCallback(async () => {
     try {
-      const allFolders = await fetchFolders(scopeType, scopeId, selectedLibraryId);
+      const allFolders = await fetchFolders(scopeId, isPersonal, selectedLibraryId);
       setFolders(allFolders);
     } catch (err) {
       console.error('Failed to load folders:', err);
       setFolders([]);
     }
-  }, [scopeType, scopeId, selectedLibraryId]);
+  }, [isPersonal, scopeId, selectedLibraryId]);
 
   const loadChildFolders = useCallback(async () => {
     if (!isResourcesView) {
@@ -326,13 +326,13 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       return;
     }
     try {
-      const children = await fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId);
+      const children = await fetchChildFolders(scopeId, isPersonal, selectedFolderId, selectedLibraryId);
       setChildFolders(children);
     } catch (err) {
       console.error('[ResourcesContext] loadChildFolders failed:', err);
       setChildFolders([]);
     }
-  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId, isResourcesView]);
+  }, [isPersonal, scopeId, selectedFolderId, selectedLibraryId, isResourcesView]);
 
   /**
    * Re-fetch the current resource list honouring the active filter
@@ -343,7 +343,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const reloadResources = useCallback(async () => {
     try {
       const items = await fetchResources({
-        scopeType,
+        isPersonal,
         scopeId,
         folderId: selectedFolderId,
         libraryId: selectedLibraryId,
@@ -353,7 +353,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     } catch (err) {
       console.error('[ResourcesContext] reloadResources failed:', err);
     }
-  }, [scopeType, scopeId, selectedFolderId, selectedLibraryId]);
+  }, [isPersonal, scopeId, selectedFolderId, selectedLibraryId]);
 
   // Keep a stable handle on reloadResources so the realtime subscription
   // below doesn't tear down + re-subscribe on every scope/filter change.
@@ -431,8 +431,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setSmartFolders([]);
     loadFolders();
     fetchTags().then(setAllTags).catch(() => {});
-    fetchSmartFolders(scopeType, scopeId).then(setSmartFolders).catch(() => setSmartFolders([]));
-    if (scopeType === 'team') {
+    fetchSmartFolders(scopeId).then(setSmartFolders).catch(() => setSmartFolders([]));
+    if (!isPersonal) {
       fetchLibraries(scopeId).then((libs) => {
         setLibraries(libs);
         if (libs.length > 0 && !urlLibraryId && !section) {
@@ -442,7 +442,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     } else {
       setLibraries([]);
     }
-  }, [loadFolders, scopeType, scopeId]);
+  }, [loadFolders, isPersonal, scopeId]);
 
   // Sidebar counts — refetch on scope change and on explicit refresh.
   // Kept in its own effect so count queries don't block the primary list load.
@@ -451,11 +451,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setMyResourcesCount(null);
     setDownloadsCount(null);
     Promise.all([
-      fetchResourceCount(scopeType, scopeId).catch((err) => {
+      fetchResourceCount(isPersonal, scopeId).catch((err) => {
         console.error('Failed to load resource count:', err);
         return 0;
       }),
-      fetchDownloadedResourceCount(scopeType, scopeId).catch((err) => {
+      fetchDownloadedResourceCount(isPersonal, scopeId).catch((err) => {
         console.error('Failed to load download count:', err);
         return 0;
       }),
@@ -467,7 +467,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [scopeType, scopeId, countsRefreshTick]);
+  }, [isPersonal, scopeId, countsRefreshTick]);
 
   // Load folder previews when child folders change
   useEffect(() => {
@@ -555,15 +555,15 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       try {
         const [items, flds] = await Promise.all([
           selectedSmartFolderId
-            ? fetchSmartFolderResults(selectedSmartFolderId, scopeType, scopeId)
+            ? fetchSmartFolderResults(selectedSmartFolderId, scopeId)
             : fetchResources({
-                scopeType,
+                isPersonal,
                 scopeId,
                 folderId: selectedFolderId,
                 libraryId: selectedLibraryId,
                 ...filterParams,
               }),
-          fetchChildFolders(scopeType, scopeId, selectedFolderId, selectedLibraryId),
+          fetchChildFolders(scopeId, isPersonal, selectedFolderId, selectedLibraryId),
         ]);
         if (!cancelled) {
           setResources(items);
@@ -585,7 +585,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     // filterParamsKey is a JSON fingerprint of filterParams — using it
     // directly in the dep array would trigger on every object re-create.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeType, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView, filterParamsKey]);
+  }, [isPersonal, scopeId, selectedFolderId, selectedSmartFolderId, selectedLibraryId, sidebarView, filterParamsKey]);
 
   // Bulk load tag names for search
   useEffect(() => {
@@ -643,8 +643,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const loadTrashedResources = useCallback(async () => {
     try {
       const [items, flds] = await Promise.all([
-        fetchTrashedResources(scopeType, scopeId),
-        fetchTrashedFolders(scopeType, scopeId),
+        fetchTrashedResources(isPersonal, scopeId),
+        fetchTrashedFolders(scopeId),
       ]);
       setTrashedResources(items);
       setTrashedFolders(flds);
@@ -653,7 +653,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       setTrashedResources([]);
       setTrashedFolders([]);
     }
-  }, [scopeType, scopeId]);
+  }, [isPersonal, scopeId]);
 
   useEffect(() => {
     if (sidebarView !== 'recycle') return;
@@ -661,8 +661,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setRecycleFolderId(null);
     setLoading(true);
     Promise.all([
-      fetchTrashedResources(scopeType, scopeId),
-      fetchTrashedFolders(scopeType, scopeId),
+      fetchTrashedResources(isPersonal, scopeId),
+      fetchTrashedFolders(scopeId),
     ])
       .then(([items, flds]) => {
         if (!cancelled) {
@@ -680,7 +680,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [sidebarView, scopeType, scopeId]);
+  }, [sidebarView, isPersonal, scopeId]);
 
   // Load resource_items inside a trashed folder
   useEffect(() => {
@@ -700,13 +700,13 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // Load downloaded resources
   const loadDownloadedResources = useCallback(async () => {
     try {
-      const items = await fetchDownloadedResources(scopeType, scopeId);
+      const items = await fetchDownloadedResources(scopeId);
       setDownloadedResources(items);
     } catch (err) {
       console.error('Failed to load downloaded resources:', err);
       setDownloadedResources([]);
     }
-  }, [scopeType, scopeId]);
+  }, [scopeId]);
 
   useEffect(() => {
     if (sidebarView === 'downloads') {
@@ -767,14 +767,14 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     try {
       const rid = String(resourceId);
       const item = resources.find((r) => String(r.resource?.id) === rid);
-      await trashResource(rid, scopeType, scopeId, selectedFolderId);
+      await trashResource(rid, scopeId, selectedFolderId);
       setResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
       if (String(selectedResource?.resource?.id) === rid) setSelectedResource(null);
       const filename = item?.resource?.filename || '';
       addToast(t('resources.trashedNotification', { name: filename }), 'success');
       refreshSidebarCounts();
     } catch (err) { console.error('Failed to trash resource:', err); }
-  }, [selectedResource, scopeType, scopeId, selectedFolderId, resources, addToast, t, refreshSidebarCounts]);
+  }, [selectedResource, scopeId, selectedFolderId, resources, addToast, t, refreshSidebarCounts]);
 
   const handleRestoreResource = useCallback(async (resourceId: string) => {
     try {
@@ -879,7 +879,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // ── Context value ──
 
   const value: ResourcesContextType = useMemo(() => ({
-    scopeType,
+    isPersonal,
     scopeId,
     teamId,
     sidebarView,
@@ -976,7 +976,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
     transcodingResourceIds,
   }), [
-    scopeType, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
+    isPersonal, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
     isResourcesView, isRecycleView, isSharedView, isDownloadsView, canUpload,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
     libraries, smartFolders, allTags, myResourcesCount, downloadsCount, refreshSidebarCounts,

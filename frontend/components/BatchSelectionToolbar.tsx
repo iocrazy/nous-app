@@ -23,7 +23,7 @@ interface BatchSelectionToolbarProps {
   sortedItems: ResourceItem[];
   recycleSubFolders: Folder[];
   childFolders: Folder[];
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   scopeId: string;
   selectedFolderId: string | null | undefined;
   selectedLibraryId: string | null | undefined;
@@ -49,7 +49,6 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
   sortedItems,
   recycleSubFolders,
   childFolders,
-  scopeType,
   scopeId,
   selectedFolderId,
   selectedLibraryId,
@@ -146,7 +145,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
                   .filter((i) => selectedIds.has(`item:${i.id}`) && i.resource?.id)
                   .map((i) => String(i.resource!.id));
                 if (resourceIds.length > 0) {
-                  await trashResources(resourceIds, scopeType, scopeId, selectedFolderId);
+                  await trashResources(resourceIds, scopeId, selectedFolderId);
                 }
                 const folderIds = childFolders
                   .filter((f) => selectedIds.has(`folder:${f.id}`))
