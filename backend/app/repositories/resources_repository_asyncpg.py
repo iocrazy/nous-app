@@ -748,19 +748,28 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     # version_number column is monotonic per resource_id; reads almost
     # always sort DESC to get the latest first.
 
+    # resource_versions BIGINT columns that snowflake ids travel into as
+    # strings from FastAPI / Pydantic. asyncpg refuses to cast str → int8
+    # so coerce at the boundary or every download.finalize backfill 500s.
+    _VERSION_BIGINT_COLS = ("resource_id", "file_size_bytes")
+
     async def create_version(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            cols = list(data.keys())
+            coerced = {
+                k: (self._bigint(v) if k in self._VERSION_BIGINT_COLS else v)
+                for k, v in data.items()
+            }
+            cols = list(coerced.keys())
             placeholders = ", ".join(f"${i + 1}" for i in range(len(cols)))
             col_list = ", ".join(f'"{c}"' for c in cols)
             sql = (
                 f'INSERT INTO "resource_versions" ({col_list}) '
                 f"VALUES ({placeholders}) RETURNING *"
             )
-            row = await self.fetch_one(sql, *data.values())
+            row = await self.fetch_one(sql, *coerced.values())
             logger.info(
-                f"Created version {data.get('version_number')} "
-                f"for resource {data.get('resource_id')}"
+                f"Created version {coerced.get('version_number')} "
+                f"for resource {coerced.get('resource_id')}"
             )
             return row or {}
         except Exception as e:
