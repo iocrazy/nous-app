@@ -1485,10 +1485,11 @@ class ResourcesRepository:
             "FROM public.resources r ",
             "JOIN public.resource_items ri ON ri.resource_id = r.id ",
             "WHERE r.is_trashed = false AND ri.is_trashed = false ",
-            "  AND ( (ri.scope_type = 'personal' AND ri.scope_id::text = :user_id) ",
-            "        OR (ri.scope_type = 'team' AND ri.scope_id IN ( ",
-            "             SELECT team_id FROM public.team_members WHERE user_id = :user_id ",
-            "        )) ) ",
+            # After Spec 1 PR-C, ri.scope_id is always a teams.id snowflake;
+            # personal scope is a single-member team containing the user.
+            "  AND ri.scope_id::text IN ( ",
+            "        SELECT team_id::text FROM public.team_members WHERE user_id = :user_id ",
+            "      ) ",
         ]
         params: dict = {"user_id": user_id, "limit": capped_limit}
 

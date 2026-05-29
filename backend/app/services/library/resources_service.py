@@ -32,6 +32,27 @@ from app.core.file_utils import (
 from app.repositories.resources_repository import ResourcesRepository
 
 
+async def _resolve_personal_team_id(user_id: str) -> str:
+    """Return the snowflake of the user's personal team.
+
+    After Spec 1 PR-C, ``resource_items.scope_id`` is always a
+    ``teams.id`` snowflake. Legacy call sites that defaulted to
+    ``scope_id or user_id`` (UUID) need this translation when scope_id
+    is omitted.
+    """
+    from app.db import engine as db_engine
+
+    row = await db_engine.fetch_one(
+        "SELECT id::text AS id FROM public.teams "
+        "WHERE owner_id::text = :uid AND kind = 'personal' "
+        "LIMIT 1",
+        {"uid": user_id},
+    )
+    if not row:
+        raise ValueError(f"No personal team found for user {user_id}")
+    return row["id"]
+
+
 class ResourcesService:
     """Resource library business logic"""
 
@@ -358,7 +379,7 @@ class ResourcesService:
 
         if existing:
             # Zero-copy: just add a resource_item reference
-            target_scope_id = scope_id or user_id
+            target_scope_id = scope_id or await _resolve_personal_team_id(user_id)
             item = await self.repo.get_resource_item(
                 existing["id"], scope_type, target_scope_id
             )
@@ -407,7 +428,7 @@ class ResourcesService:
         resource = await self.repo.create_resource(resource_data)
 
         # Create resource_item for user's personal scope
-        target_scope_id = scope_id or user_id
+        target_scope_id = scope_id or await _resolve_personal_team_id(user_id)
         await self.repo.create_resource_item(
             {
                 "resource_id": resource["id"],

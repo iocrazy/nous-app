@@ -248,25 +248,27 @@ async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
     """
     scope_type = folder.get("scope_type")
     scope_id = folder.get("scope_id")
-    if scope_type == "personal":
-        if str(scope_id) != str(auth.user_id):
-            raise HTTPException(status_code=403, detail="You do not own this folder")
-        return
-    if scope_type == "team":
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("team_members")
-            .select("team_id")
-            .eq("team_id", str(scope_id))
-            .eq("user_id", str(auth.user_id))
-            .limit(1)
-            .execute()
+    if scope_type not in ("personal", "team"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid scope_type: {scope_type!r}",
         )
-        if not result.data:
-            raise HTTPException(
-                status_code=403,
-                detail="You are not a member of this folder's team",
-            )
+    # After Spec 1 PR-C, scope_id is always a teams.id snowflake regardless
+    # of scope_type, so authorization collapses to one team_members check.
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("team_members")
+        .select("team_id")
+        .eq("team_id", str(scope_id))
+        .eq("user_id", str(auth.user_id))
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a member of this folder's scope",
+        )
         return
     raise HTTPException(
         status_code=500,
