@@ -11,6 +11,7 @@ handling after Spec 1 PR-C.
 Both delegate to ``app.db.engine.fetch_one``, so the tests patch that
 to keep them DB-free.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
