@@ -50,8 +50,8 @@ _ALLOWED_SOCIAL_COMBINE = {"and", "or"}
 @router.get("")
 async def list_resources(
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
     folder_id: Optional[str] = Query(None),
     tag_ids: Optional[List[str]] = Query(
@@ -281,8 +281,8 @@ async def list_resources(
 @router.get("/trash")
 async def list_trashed_resources(
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """List trashed resources in a scope."""
@@ -298,8 +298,8 @@ async def list_trashed_resources(
 @router.get("/trash/folders")
 async def list_trashed_folders(
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """List trashed folders in a scope."""
@@ -620,14 +620,17 @@ async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep)
 async def trash_resource_by_platform_id(
     platform_id: str,
     auth: AuthDep,
-    scope_type: str = Query("personal", pattern="^(personal|team)$"),
     scope_id: Optional[str] = Query(None),
+    scope_type: Optional[str] = Query(None),
 ):
-    """Move a resource to trash or unlink from team.
+    """Move a resource to trash or unlink from a team scope.
 
-    - Personal scope: sets is_trashed=true on the resource (global trash).
-    - Team scope: removes the resource_item link from the team only,
-      leaving the resource intact in the creator's personal library.
+    - No scope_id: sets is_trashed=true on the resource (global trash).
+    - scope_id present: removes the resource_item link from that scope
+      only, leaving the resource intact in the creator's personal library.
+
+    PR-E Phase 1: routing keys off ``scope_id`` presence rather than
+    ``scope_type`` (which is now vestigial).
     """
     try:
         svc = ResourcesService()
@@ -637,13 +640,13 @@ async def trash_resource_by_platform_id(
 
         resource_id = str(resource["id"])
 
-        if scope_type == "team" and scope_id:
-            # Team context: try to unlink from team first
+        if scope_id:
+            # Scoped context: try to unlink from that scope first
             try:
                 await svc.remove_from_library(
                     resource_id=resource_id,
                     user_id=auth.user_id,
-                    scope_type="team",
+                    scope_type=scope_type,
                     scope_id=scope_id,
                 )
                 return {
@@ -673,13 +676,16 @@ async def trash_resource_by_platform_id(
 async def trash_resource_by_media_id(
     media_id: str,
     auth: AuthDep,
-    scope_type: str = Query("personal", pattern="^(personal|team)$"),
     scope_id: Optional[str] = Query(None),
+    scope_type: Optional[str] = Query(None),
 ):
-    """Move a resource to trash or unlink from team, looked up by parsed_media.id.
+    """Move a resource to trash or unlink from a scope, by parsed_media.id.
 
-    - Personal scope: sets is_trashed=true on the resource (global trash).
-    - Team scope: removes the resource_item link from the team only.
+    - No scope_id: sets is_trashed=true on the resource (global trash).
+    - scope_id present: removes the resource_item link from that scope only.
+
+    PR-E Phase 1: routing keys off ``scope_id`` presence rather than
+    ``scope_type`` (which is now vestigial).
     """
     try:
         svc = ResourcesService()
@@ -689,12 +695,12 @@ async def trash_resource_by_media_id(
 
         resource_id = str(resource["id"])
 
-        if scope_type == "team" and scope_id:
+        if scope_id:
             try:
                 await svc.remove_from_library(
                     resource_id=resource_id,
                     user_id=auth.user_id,
-                    scope_type="team",
+                    scope_type=scope_type,
                     scope_id=scope_id,
                 )
                 return {
@@ -722,13 +728,16 @@ async def trash_resource_by_media_id(
 async def unlink_resource_by_platform_id(
     platform_id: str,
     auth: AuthDep,
-    scope_type: str = Query("personal", pattern="^(personal|team)$"),
     scope_id: Optional[str] = Query(None),
+    scope_type: Optional[str] = Query(None),
 ):
     """Remove a downloaded video from the user's library by platform_id.
 
     1. If a resource_item exists in the given scope → unlink it.
     2. Otherwise → delete the videos record (legacy / orphan case).
+
+    PR-E Phase 1: ``scope_type`` is vestigial; the scope is identified by
+    ``scope_id`` (defaults to the caller's personal team).
     """
     try:
         svc = ResourcesService()
@@ -775,8 +784,8 @@ async def unlink_resource_by_platform_id(
 async def delete_resource(
     resource_id: str,
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
     folder_id: Optional[str] = Query(None),
 ):

@@ -7,6 +7,7 @@ Regular folder and smart folder CRUD operations.
 """
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -21,7 +22,7 @@ from app.schemas.resources import (
     SmartFolderCreate,
     SmartFolderUpdate,
 )
-from app.services.library.resources_service import ResourcesService
+from app.services.library.resources_service import ResourcesService, _scope_type_for
 
 router = APIRouter(prefix="/resources")
 
@@ -39,7 +40,7 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
         folder = await repo.create_smart_folder(
             {
                 "name": data.name,
-                "scope_type": data.scope_type,
+                "scope_type": data.scope_type or await _scope_type_for(data.scope_id),
                 "scope_id": data.scope_id,
                 "created_by": auth.user_id,
                 "is_smart": True,
@@ -57,8 +58,8 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
 @router.get("/smart-folders")
 async def list_smart_folders(
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """List smart folders in a scope."""
@@ -120,8 +121,8 @@ async def delete_smart_folder(folder_id: str, auth: AuthDep):
 async def smart_folder_results(
     folder_id: str,
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """Execute smart folder rules and return matching resources."""
@@ -156,8 +157,8 @@ async def smart_folder_results(
 @router.get("/folders/list")
 async def list_folders(
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """List folders in a scope."""
@@ -179,7 +180,7 @@ async def create_folder(data: FolderCreate, auth: AuthDep):
             {
                 "name": data.name,
                 "parent_id": data.parent_id,
-                "scope_type": data.scope_type,
+                "scope_type": data.scope_type or await _scope_type_for(data.scope_id),
                 "scope_id": data.scope_id,
                 "created_by": auth.user_id,
                 "icon": data.icon,
@@ -245,16 +246,12 @@ async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
     CRITICAL cascading endpoints (DELETE + cascade trash) — per the
     2026-05-18 #299 review, those cascade-destructive holes cannot be
     deferred even by 24h to the SECURITY-001 follow-up PR.
+
+    After Spec 1 PR-C, ``scope_id`` is always a ``teams.id`` snowflake
+    regardless of ``scope_type``, so authorization collapses to one
+    team_members check. PR-E Phase 1: ``scope_type`` is no longer read.
     """
-    scope_type = folder.get("scope_type")
     scope_id = folder.get("scope_id")
-    if scope_type not in ("personal", "team"):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid scope_type: {scope_type!r}",
-        )
-    # After Spec 1 PR-C, scope_id is always a teams.id snowflake regardless
-    # of scope_type, so authorization collapses to one team_members check.
     client = await get_async_supabase_admin()
     result = (
         await client.table("team_members")
@@ -269,11 +266,6 @@ async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
             status_code=403,
             detail="You are not a member of this folder's scope",
         )
-        return
-    raise HTTPException(
-        status_code=500,
-        detail=f"Folder has invalid scope_type: {scope_type!r}",
-    )
 
 
 @router.post("/folders/{folder_id}/trash")

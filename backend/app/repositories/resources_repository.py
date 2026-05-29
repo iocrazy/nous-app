@@ -307,18 +307,22 @@ class ResourcesRepository:
     async def find_resource_item(
         self,
         resource_id: str,
-        scope_type: str,
+        scope_type: Optional[str],
         scope_id: str,
         folder_id: str | None = None,
     ) -> dict | None:
-        """Find a resource_item by resource_id + scope + folder."""
+        """Find a resource_item by resource_id + scope + folder.
+
+        PR-E Phase 1: ``scope_type`` is accepted but unused — ``scope_id``
+        is a globally-unique ``teams.id`` snowflake, so it alone scopes
+        the row. The parameter remains for call-site compatibility.
+        """
         try:
             client = await self._get_client()
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*")
                 .eq("resource_id", resource_id)
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
             )
             if folder_id:
@@ -350,8 +354,8 @@ class ResourcesRepository:
 
     async def get_resource_items(
         self,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: Optional[str] = None,
         include_trashed: bool = False,
         tag_ids: Optional[List[str]] = None,
@@ -451,7 +455,6 @@ class ResourcesRepository:
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*, resource:resources!inner(*)")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
             )
             if folder_id:
@@ -596,15 +599,15 @@ class ResourcesRepository:
             return []
 
     async def get_resource_item(
-        self, resource_id: str, scope_type: str, scope_id: str
+        self, resource_id: str, scope_type: Optional[str], scope_id: str
     ) -> Optional[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             client = await self._get_client()
             result = (
                 await client.table(self.TABLE_ITEMS)
                 .select("*")
                 .eq("resource_id", resource_id)
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .limit(1)
                 .execute()
@@ -615,16 +618,22 @@ class ResourcesRepository:
             return None
 
     async def get_resource_item_in_folder(
-        self, resource_id: str, scope_type: str, scope_id: str, folder_id: str | None
+        self,
+        resource_id: str,
+        scope_type: Optional[str],
+        scope_id: str,
+        folder_id: str | None,
     ) -> Optional[Dict[str, Any]]:
-        """Get a specific resource_item by resource_id + scope + folder_id."""
+        """Get a specific resource_item by resource_id + scope + folder_id.
+
+        PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
+        """
         try:
             client = await self._get_client()
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*")
                 .eq("resource_id", resource_id)
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
             )
             if folder_id:
@@ -720,14 +729,14 @@ class ResourcesRepository:
             return []
 
     async def get_trashed_resources(
-        self, scope_type: str, scope_id: str
+        self, scope_type: Optional[str], scope_id: str
     ) -> List[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             client = await self._get_client()
             result = (
                 await client.table(self.TABLE_ITEMS)
                 .select("*, resource:resources!inner(*)")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .eq("resource.is_trashed", True)
                 .order("created_at", desc=True)
@@ -885,15 +894,17 @@ class ResourcesRepository:
             raise
 
     async def get_trashed_folders(
-        self, scope_type: str, scope_id: str
+        self, scope_type: Optional[str], scope_id: str
     ) -> List[Dict[str, Any]]:
-        """Get all trashed folders. Frontend handles root-level filtering."""
+        """Get all trashed folders. Frontend handles root-level filtering.
+
+        PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
+        """
         try:
             client = await self._get_client()
             result = await (
                 client.table(self.TABLE_FOLDERS)
                 .select("*")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .eq("is_trashed", True)
                 .order("trashed_at", desc=True)
@@ -974,14 +985,14 @@ class ResourcesRepository:
             raise
 
     async def get_folders(
-        self, scope_type: str, scope_id: str, include_trashed: bool = False
+        self, scope_type: Optional[str], scope_id: str, include_trashed: bool = False
     ) -> List[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             client = await self._get_client()
             query = (
                 client.table(self.TABLE_FOLDERS)
                 .select("*")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
             )
             if not include_trashed:
@@ -1208,15 +1219,17 @@ class ResourcesRepository:
     # ------------------------------------------------------------------ #
 
     async def get_smart_folders(
-        self, scope_type: str, scope_id: str
+        self, scope_type: Optional[str], scope_id: str
     ) -> List[Dict[str, Any]]:
-        """Get all smart folders for a scope."""
+        """Get all smart folders for a scope.
+
+        PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
+        """
         try:
             client = await self._get_client()
             result = (
                 await client.table(self.TABLE_FOLDERS)
                 .select("*")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .eq("is_smart", True)
                 .eq("is_trashed", False)
@@ -1240,7 +1253,7 @@ class ResourcesRepository:
             raise
 
     async def execute_smart_rules(
-        self, scope_type: str, scope_id: str, rules: Dict[str, Any]
+        self, scope_type: Optional[str], scope_id: str, rules: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
         Execute smart folder rules against resource_items + resources.
@@ -1266,7 +1279,6 @@ class ResourcesRepository:
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*, resource:resources!inner(*)")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .eq("resource.is_trashed", False)
             )
@@ -1303,7 +1315,6 @@ class ResourcesRepository:
                 all_query = (
                     client.table(self.TABLE_ITEMS)
                     .select("*, resource:resources!inner(*)")
-                    .eq("scope_type", scope_type)
                     .eq("scope_id", scope_id)
                     .eq("resource.is_trashed", False)
                     .order("created_at", desc=True)

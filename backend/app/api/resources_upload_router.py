@@ -15,7 +15,7 @@ from app.core.deps import AuthDep
 from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.library.permission_service import PermissionService
-from app.services.library.resources_service import ResourcesService
+from app.services.library.resources_service import ResourcesService, _scope_type_for
 from app.services.media.render.thumbnail_service import ThumbnailService
 
 router = APIRouter(prefix="/resources")
@@ -80,8 +80,8 @@ async def check_duplicate(
 async def link_existing_resource(
     auth: AuthDep,
     resource_id: str = Query(...),
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     folder_id: Optional[str] = Query(None),
     library_id: Optional[str] = Query(None),
 ):
@@ -92,15 +92,18 @@ async def link_existing_resource(
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
+        # PR-E Phase 1: derive scope_type from team.kind when absent.
+        effective_scope_type = scope_type or await _scope_type_for(scope_id)
+
         existing_item = await repo.find_resource_item(
-            resource_id, scope_type, scope_id, folder_id
+            resource_id, effective_scope_type, scope_id, folder_id
         )
         if existing_item:
             return {"success": True, "data": resource, "already_linked": True}
 
         item_data = {
             "resource_id": resource_id,
-            "scope_type": scope_type,
+            "scope_type": effective_scope_type,
             "scope_id": scope_id,
             "folder_id": folder_id,
             "library_id": library_id,
@@ -123,8 +126,8 @@ async def link_existing_resource(
 @router.post("/upload")
 async def upload_resource(
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
+    scope_type: Optional[str] = Query(None),
     folder_id: Optional[str] = Query(None),
     library_id: Optional[str] = Query(None),
     file: UploadFile = File(...),

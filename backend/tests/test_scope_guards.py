@@ -105,11 +105,18 @@ async def test_scope_team_non_member_403(patch_admin):
     assert ei.value.status_code == 403
 
 
-async def test_scope_invalid_type_422(patch_admin):
-    patch_admin({})
+async def test_scope_absent_type_still_checks_membership(patch_admin):
+    # PR-E Phase 1: scope_type is vestigial. A caller who omits it (None)
+    # is still authorized purely on scope_id / team_members — no 422.
+    patch_admin({"team_members": [{"team_id": "pt-u1"}]})
+    await verify_scope_access(auth=_auth("u1"), scope_type=None, scope_id="pt-u1")
+
+
+async def test_scope_absent_type_non_member_403(patch_admin):
+    patch_admin({"team_members": []})
     with pytest.raises(HTTPException) as ei:
-        await verify_scope_access(auth=_auth("u1"), scope_type="bogus", scope_id="x")
-    assert ei.value.status_code == 422
+        await verify_scope_access(auth=_auth("u1"), scope_type=None, scope_id="x")
+    assert ei.value.status_code == 403
 
 
 # ─── verify_project_write_access ──────────────────────────────────────
