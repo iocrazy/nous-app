@@ -53,7 +53,9 @@ async def get_temp_ttl(
     scope_id: str = Query(..., min_length=1),
 ) -> dict:
     """Read the current chat temp TTL for a scope. Returns ``-1`` for 'never'."""
-    await verify_scope_access(auth, scope_type, scope_id)
+    # PR-E Phase 3: verify_scope_access keys off scope_id only. temp_ttl keeps
+    # scope_type for its own UUID-keyed user_settings routing (KEEP exception).
+    await verify_scope_access(auth, scope_id)
     days = await get_chat_temp_ttl_days(scope_type, scope_id)
     return {"ttl_days": -1 if days is None else days}
 
@@ -65,7 +67,10 @@ async def put_temp_ttl(auth: AuthDep, payload: TempTtlUpdate) -> dict:
     Team scopes require the caller to be the team owner — TTL drives
     deletion of other members' temp files.
     """
-    await verify_scope_access(auth, payload.scope_type, payload.scope_id)
+    # PR-E Phase 3: verify_scope_access no longer takes scope_type; it keys
+    # purely off scope_id. temp_ttl still uses payload.scope_type below for
+    # its own (UUID-keyed user_settings) routing — that is the KEEP exception.
+    await verify_scope_access(auth, payload.scope_id)
     if payload.scope_type == "team":
         await _verify_team_owner(auth, payload.scope_id)
     if payload.ttl_days != -1 and payload.ttl_days <= 0:

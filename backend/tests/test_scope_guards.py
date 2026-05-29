@@ -75,47 +75,19 @@ def _auth(user_id: str = "user-1") -> AuthContext:
 # ─── verify_scope_access ──────────────────────────────────────────────
 
 
-async def test_scope_personal_own_passes(patch_admin):
-    # After Spec 1 PR-C, personal scope_id is the user's personal-team
-    # snowflake, not their UUID. Authorization checks team_members.
+async def test_scope_member_passes(patch_admin):
+    # After Spec 1 PR-C, scope_id is always a teams.id snowflake (personal
+    # scopes resolve to the user's personal-team snowflake). PR-E Phase 3
+    # dropped the scope_type param entirely — authorization is purely a
+    # team_members check on scope_id.
     patch_admin({"team_members": [{"team_id": "pt-u1"}]})
-    await verify_scope_access(auth=_auth("u1"), scope_type="personal", scope_id="pt-u1")
+    await verify_scope_access(auth=_auth("u1"), scope_id="pt-u1")
 
 
-async def test_scope_personal_non_member_403(patch_admin):
-    # Caller is not in this personal team's team_members — 403 even
-    # though scope_type='personal'.
+async def test_scope_non_member_403(patch_admin):
     patch_admin({"team_members": []})
     with pytest.raises(HTTPException) as ei:
-        await verify_scope_access(
-            auth=_auth("u1"), scope_type="personal", scope_id="pt-other"
-        )
-    assert ei.value.status_code == 403
-
-
-async def test_scope_team_member_passes(patch_admin):
-    patch_admin({"team_members": [{"team_id": "t1"}]})
-    await verify_scope_access(auth=_auth("u1"), scope_type="team", scope_id="t1")
-
-
-async def test_scope_team_non_member_403(patch_admin):
-    patch_admin({"team_members": []})
-    with pytest.raises(HTTPException) as ei:
-        await verify_scope_access(auth=_auth("u1"), scope_type="team", scope_id="t1")
-    assert ei.value.status_code == 403
-
-
-async def test_scope_absent_type_still_checks_membership(patch_admin):
-    # PR-E Phase 1: scope_type is vestigial. A caller who omits it (None)
-    # is still authorized purely on scope_id / team_members — no 422.
-    patch_admin({"team_members": [{"team_id": "pt-u1"}]})
-    await verify_scope_access(auth=_auth("u1"), scope_type=None, scope_id="pt-u1")
-
-
-async def test_scope_absent_type_non_member_403(patch_admin):
-    patch_admin({"team_members": []})
-    with pytest.raises(HTTPException) as ei:
-        await verify_scope_access(auth=_auth("u1"), scope_type=None, scope_id="x")
+        await verify_scope_access(auth=_auth("u1"), scope_id="pt-other")
     assert ei.value.status_code == 403
 
 

@@ -7,7 +7,6 @@ Regular folder and smart folder CRUD operations.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -40,7 +39,7 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
         folder = await repo.create_smart_folder(
             {
                 "name": data.name,
-                "scope_type": data.scope_type or await _scope_type_for(data.scope_id),
+                "scope_type": await _scope_type_for(data.scope_id),
                 "scope_id": data.scope_id,
                 "created_by": auth.user_id,
                 "is_smart": True,
@@ -59,13 +58,12 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
 async def list_smart_folders(
     auth: AuthDep,
     scope_id: str = Query(...),
-    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """List smart folders in a scope."""
     try:
         repo = ResourcesRepository()
-        folders = await repo.get_smart_folders(scope_type, scope_id)
+        folders = await repo.get_smart_folders(None, scope_id)
         return {"success": True, "data": folders}
     except Exception as e:
         logger.error(f"Failed to list smart folders: {e}")
@@ -122,7 +120,6 @@ async def smart_folder_results(
     folder_id: str,
     auth: AuthDep,
     scope_id: str = Query(...),
-    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """Execute smart folder rules and return matching resources."""
@@ -138,7 +135,7 @@ async def smart_folder_results(
         if not rules or not rules.get("conditions"):
             return {"success": True, "data": []}
 
-        items = await repo.execute_smart_rules(scope_type, scope_id, rules)
+        items = await repo.execute_smart_rules(None, scope_id, rules)
         return {"success": True, "data": items}
     except HTTPException:
         raise
@@ -158,13 +155,12 @@ async def smart_folder_results(
 async def list_folders(
     auth: AuthDep,
     scope_id: str = Query(...),
-    scope_type: Optional[str] = Query(None),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """List folders in a scope."""
     try:
         repo = ResourcesRepository()
-        folders = await repo.get_folders(scope_type, scope_id)
+        folders = await repo.get_folders(None, scope_id)
         return {"success": True, "data": folders}
     except Exception as e:
         logger.error(f"Failed to list folders: {e}")
@@ -180,7 +176,7 @@ async def create_folder(data: FolderCreate, auth: AuthDep):
             {
                 "name": data.name,
                 "parent_id": data.parent_id,
-                "scope_type": data.scope_type or await _scope_type_for(data.scope_id),
+                "scope_type": await _scope_type_for(data.scope_id),
                 "scope_id": data.scope_id,
                 "created_by": auth.user_id,
                 "icon": data.icon,

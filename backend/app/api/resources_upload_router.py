@@ -81,7 +81,6 @@ async def link_existing_resource(
     auth: AuthDep,
     resource_id: str = Query(...),
     scope_id: str = Query(...),
-    scope_type: Optional[str] = Query(None),
     folder_id: Optional[str] = Query(None),
     library_id: Optional[str] = Query(None),
 ):
@@ -92,8 +91,9 @@ async def link_existing_resource(
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
-        # PR-E Phase 1: derive scope_type from team.kind when absent.
-        effective_scope_type = scope_type or await _scope_type_for(scope_id)
+        # PR-E: the folders/resource_items.scope_type column is still
+        # NOT NULL until Phase 4, so derive it from team.kind for the INSERT.
+        effective_scope_type = await _scope_type_for(scope_id)
 
         existing_item = await repo.find_resource_item(
             resource_id, effective_scope_type, scope_id, folder_id
@@ -127,7 +127,6 @@ async def link_existing_resource(
 async def upload_resource(
     auth: AuthDep,
     scope_id: str = Query(...),
-    scope_type: Optional[str] = Query(None),
     folder_id: Optional[str] = Query(None),
     library_id: Optional[str] = Query(None),
     file: UploadFile = File(...),
@@ -165,7 +164,6 @@ async def upload_resource(
         result = await svc.upload_resource(
             user_id=auth.user_id,
             file=file,
-            scope_type=scope_type,
             scope_id=scope_id,
             folder_id=folder_id,
             library_id=library_id,

@@ -14,8 +14,6 @@ Each guard returns None on success and raises HTTPException on failure.
 Routes consume them as: `_guard: None = Depends(verify_scope_access)`.
 """
 
-from typing import Optional
-
 from fastapi import Depends, HTTPException, Query
 
 from app.core.deps import AuthContext, get_auth
@@ -24,19 +22,18 @@ from app.db.supabase_client import get_async_supabase_admin
 
 async def verify_scope_access(
     auth: AuthContext = Depends(get_auth),
-    scope_type: Optional[str] = Query(None),
     scope_id: str = Query(...),
 ) -> None:
     """Guard for `?scope_id=` write targets (resources library).
 
-    After Spec 1 PR-C, ``scope_id`` is always a ``teams.id`` snowflake
-    regardless of ``scope_type`` — personal scopes resolve to the user's
-    auto-created single-member personal team. So authorization collapses
-    to a single check: the caller must be a member of the team.
+    After Spec 1 PR-C, ``scope_id`` is always a ``teams.id`` snowflake —
+    personal scopes resolve to the user's auto-created single-member
+    personal team. Authorization collapses to a single check: the caller
+    must be a member of the team.
 
-    PR-E Phase 1: ``scope_type`` is now vestigial (accepted but ignored).
-    Authorization keys solely off ``scope_id``; the value is no longer
-    validated.
+    PR-E Phase 3: the vestigial ``scope_type`` query param has been
+    dropped entirely. FastAPI ignores any leftover ``scope_type=`` a stale
+    client still sends, so this is backward-compatible.
     """
     client = await get_async_supabase_admin()
     result = (
