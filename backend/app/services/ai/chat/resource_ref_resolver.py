@@ -37,10 +37,12 @@ async def _fetch_accessible_meta(
          WHERE r.id::text = ANY(:ids)
            AND r.is_trashed = false
            AND ri.is_trashed = false
-           AND ( (ri.scope_type = 'personal' AND ri.scope_id::text = :uid)
-                 OR (ri.scope_type = 'team' AND ri.scope_id IN (
-                       SELECT team_id FROM public.team_members WHERE user_id = :uid
-                 )) )
+           -- After Spec 1 PR-C: ri.scope_id is always a teams.id snowflake.
+           -- scope_type is preserved as a display hint only (see scope label
+           -- assembly below).
+           AND ri.scope_id::text IN (
+                 SELECT team_id::text FROM public.team_members WHERE user_id = :uid
+               )
         """,
         {"ids": resource_ids, "uid": user_id},
     )

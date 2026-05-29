@@ -736,7 +736,11 @@ async def unlink_resource_by_platform_id(
 
         if resource:
             # Try to find & remove the resource_item in the requested scope
-            target_scope_id = scope_id or auth.user_id
+            from app.services.library.resources_service import (
+                _resolve_personal_team_id,
+            )
+
+            target_scope_id = scope_id or await _resolve_personal_team_id(auth.user_id)
             item = await svc.repo.get_resource_item(
                 str(resource["id"]),
                 scope_type,

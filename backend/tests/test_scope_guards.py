@@ -76,15 +76,19 @@ def _auth(user_id: str = "user-1") -> AuthContext:
 
 
 async def test_scope_personal_own_passes(patch_admin):
-    patch_admin({})
-    await verify_scope_access(auth=_auth("u1"), scope_type="personal", scope_id="u1")
+    # After Spec 1 PR-C, personal scope_id is the user's personal-team
+    # snowflake, not their UUID. Authorization checks team_members.
+    patch_admin({"team_members": [{"team_id": "pt-u1"}]})
+    await verify_scope_access(auth=_auth("u1"), scope_type="personal", scope_id="pt-u1")
 
 
-async def test_scope_personal_other_user_403(patch_admin):
-    patch_admin({})
+async def test_scope_personal_non_member_403(patch_admin):
+    # Caller is not in this personal team's team_members — 403 even
+    # though scope_type='personal'.
+    patch_admin({"team_members": []})
     with pytest.raises(HTTPException) as ei:
         await verify_scope_access(
-            auth=_auth("u1"), scope_type="personal", scope_id="u2"
+            auth=_auth("u1"), scope_type="personal", scope_id="pt-other"
         )
     assert ei.value.status_code == 403
 
