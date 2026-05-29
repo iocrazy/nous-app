@@ -991,9 +991,7 @@ class ResourcesRepository:
         try:
             client = await self._get_client()
             query = (
-                client.table(self.TABLE_FOLDERS)
-                .select("*")
-                .eq("scope_id", scope_id)
+                client.table(self.TABLE_FOLDERS).select("*").eq("scope_id", scope_id)
             )
             if not include_trashed:
                 query = query.eq("is_trashed", False)
