@@ -15,7 +15,6 @@ Tests focus on the three branches:
 
 from __future__ import annotations
 
-
 import pytest
 
 from app.api.supabase_auth_router import _ensure_personal_team_bootstrap
