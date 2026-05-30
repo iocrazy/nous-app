@@ -45,9 +45,13 @@ async def _resolve_personal_user_id(scope_id: str) -> Optional[str]:
 
     if not scope_id or not str(scope_id).isdigit():
         return scope_id
+    # Compare via id::text = :id (text param), NOT id = CAST(:id AS bigint):
+    # under asyncpg, `CAST($1 AS bigint)` makes PG infer $1 as bigint, so
+    # binding a str raises DataError ('str' object cannot be encoded). The
+    # ::text form keeps $1 a text param. (feedback_asyncpg_bigint_str_strict)
     row = await db_engine.fetch_one(
         "SELECT owner_id::text AS uid FROM public.teams "
-        "WHERE id = CAST(:id AS bigint) AND kind = 'personal'",
+        "WHERE id::text = :id AND kind = 'personal'",
         {"id": str(scope_id)},
     )
     return row["uid"] if row else None
@@ -69,8 +73,10 @@ async def _fetch_settings_json(
         )
         row = await db_engine.fetch_one(sql, {"scope_id": user_id})
     else:
-        sql = "SELECT settings_json FROM public.teams WHERE id = :scope_id"
-        row = await db_engine.fetch_one(sql, {"scope_id": scope_id})
+        # id::text = :scope_id — asyncpg-safe (str param vs bigint column);
+        # see _resolve_personal_user_id note.
+        sql = "SELECT settings_json FROM public.teams WHERE id::text = :scope_id"
+        row = await db_engine.fetch_one(sql, {"scope_id": str(scope_id)})
     if row is None:
         return None
     raw = row.get("settings_json")
@@ -152,9 +158,9 @@ async def _upsert_settings_key(
             "UPDATE public.teams SET settings_json = "
             "COALESCE(settings_json, '{}'::jsonb) "
             "|| jsonb_build_object(:key, to_jsonb(CAST(:value AS int))) "
-            "WHERE id = :scope_id"
+            "WHERE id::text = :scope_id"
         )
-        params = {"scope_id": scope_id, "key": key, "value": value}
+        params = {"scope_id": str(scope_id), "key": key, "value": value}
     await db_engine.execute(sql, params)
 
 
