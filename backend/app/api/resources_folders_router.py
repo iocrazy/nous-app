@@ -21,7 +21,7 @@ from app.schemas.resources import (
     SmartFolderCreate,
     SmartFolderUpdate,
 )
-from app.services.library.resources_service import ResourcesService, _scope_type_for
+from app.services.library.resources_service import ResourcesService
 
 router = APIRouter(prefix="/resources")
 
@@ -39,7 +39,6 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
         folder = await repo.create_smart_folder(
             {
                 "name": data.name,
-                "scope_type": await _scope_type_for(data.scope_id),
                 "scope_id": data.scope_id,
                 "created_by": auth.user_id,
                 "is_smart": True,
@@ -176,7 +175,6 @@ async def create_folder(data: FolderCreate, auth: AuthDep):
             {
                 "name": data.name,
                 "parent_id": data.parent_id,
-                "scope_type": await _scope_type_for(data.scope_id),
                 "scope_id": data.scope_id,
                 "created_by": auth.user_id,
                 "icon": data.icon,

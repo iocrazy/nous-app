@@ -194,7 +194,7 @@ export function useContextMenuItems({
         onClick: async () => {
           try {
             for (const item of ops.operationTargetItems) {
-              if (item.resource?.id) await copyResourceItem(String(item.resource.id), scopeId, isPersonal, selectedFolderId, selectedLibraryId);
+              if (item.resource?.id) await copyResourceItem(String(item.resource.id), scopeId, selectedFolderId, selectedLibraryId);
             }
             await reloadResources();
             ops.setOperationTargetItems([]);

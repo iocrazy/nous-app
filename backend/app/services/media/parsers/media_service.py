@@ -651,7 +651,7 @@ class MediaService:
                     await resources_repo.create_resource_item(
                         {
                             "resource_id": resource_id,
-                            "scope_type": "personal",
+                            # PR-E 4b: scope_type no longer written.
                             "scope_id": user_id,
                             "added_by": user_id,
                         }

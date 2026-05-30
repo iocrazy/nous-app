@@ -156,7 +156,7 @@ async def _ensure_temp_folder(scope_type: str, scope_id: str, user_id: str) -> s
     created = await repo.create_folder(
         {
             "name": TEMP_FOLDER_NAME,
-            "scope_type": scope_type,
+            # PR-E 4b: scope_type no longer written (nullable post mig 240).
             "scope_id": scope_id,
             "created_by": str(user_id),
             # parent_id, icon, color intentionally omitted → DB defaults (NULL)
