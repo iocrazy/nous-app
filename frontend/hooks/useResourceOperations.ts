@@ -159,7 +159,7 @@ export function useResourceOperations({
       } else if (folderPickerMode === 'copy') {
         for (const item of operationTargetItems) {
           if (item.resource?.id) {
-            await copyResourceItem(String(item.resource.id), scopeId, isPersonal, targetFolderId, targetLibraryId);
+            await copyResourceItem(String(item.resource.id), scopeId, targetFolderId, targetLibraryId);
           }
         }
         addToast(t('resources.copySuccess', { count: operationTargetItems.length }), 'success');
@@ -263,7 +263,7 @@ export function useResourceOperations({
         if (clipboardMode === 'copy') {
           for (const item of clipboardItems) {
             if (item.resource?.id) {
-              await copyResourceItem(String(item.resource.id), scopeId, isPersonal, selectedFolderId, selectedLibraryId);
+              await copyResourceItem(String(item.resource.id), scopeId, selectedFolderId, selectedLibraryId);
             }
           }
           addToast(t('resources.copySuccess', { count: clipboardItems.length }), 'success');

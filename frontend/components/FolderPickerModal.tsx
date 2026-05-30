@@ -170,7 +170,6 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
       await createFolder({
         name: newFolderName.trim(),
         parent_id: selectedFolderId,
-        isPersonal,
         scope_id: scopeId,
       });
       setNewFolderName('');

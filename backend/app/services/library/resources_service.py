@@ -179,11 +179,11 @@ class ResourcesService:
         }
         await self.repo.create_version(version_data)
 
-        # Create resource_item for scope. PR-E Phase 1: derive scope_type
-        # from team.kind when the caller no longer supplies it.
+        # Create resource_item for scope. PR-E Phase 4b: no longer write
+        # scope_type (column is nullable post mig 240, dropped in 4c); scope_id
+        # alone locates the scope.
         item_data = {
             "resource_id": resource_id,
-            "scope_type": scope_type or await _scope_type_for(scope_id),
             "scope_id": scope_id,
             "folder_id": folder_id,
             "library_id": library_id,
@@ -399,15 +399,13 @@ class ResourcesService:
         if existing:
             # Zero-copy: just add a resource_item reference
             target_scope_id = scope_id or await _resolve_personal_team_id(user_id)
-            effective_scope_type = scope_type or await _scope_type_for(target_scope_id)
             item = await self.repo.get_resource_item(
-                existing["id"], effective_scope_type, target_scope_id
+                existing["id"], None, target_scope_id
             )
             if not item:
                 await self.repo.create_resource_item(
                     {
                         "resource_id": existing["id"],
-                        "scope_type": effective_scope_type,
                         "scope_id": target_scope_id,
                         "added_by": user_id,
                     }
@@ -452,7 +450,6 @@ class ResourcesService:
         await self.repo.create_resource_item(
             {
                 "resource_id": resource["id"],
-                "scope_type": scope_type or await _scope_type_for(target_scope_id),
                 "scope_id": target_scope_id,
                 "added_by": user_id,
             }
@@ -532,10 +529,10 @@ class ResourcesService:
         if not resource.get("is_trashed"):
             raise ValueError("Resource is not in trash")
 
-        # Determine restore location
+        # Determine restore location (last_scope_type is no longer needed —
+        # PR-E 4b stopped writing resource_items.scope_type; scope_id locates it)
         folder_id = resource.get("last_folder_id")
         library_id = resource.get("last_library_id")
-        scope_type = resource.get("last_scope_type") or "personal"
         scope_id = resource.get("last_scope_id") or user_id
 
         # If last_folder_id references a trashed/deleted folder, clear it
@@ -557,7 +554,6 @@ class ResourcesService:
         await self.repo.create_resource_item(
             {
                 "resource_id": resource_id,
-                "scope_type": scope_type,
                 "scope_id": scope_id,
                 "folder_id": folder_id,
                 "library_id": library_id,

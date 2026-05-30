@@ -35,18 +35,14 @@ export async function createFolder(folder: {
   name: string;
   parent_id?: string | null;
   scope_id: string;
-  isPersonal: boolean;
 }): Promise<Folder> {
   const claims = (await supabase.auth.getClaims()).data.claims;
   if (!claims) throw new Error('Not authenticated');
 
-  const { isPersonal, ...rest } = folder;
+  // PR-E 4b: scope_type no longer written (nullable post mig 240, dropped 4c).
   const { data, error } = await supabase
     .from('folders')
-    // PR-E: scope_type is still NOT NULL until Phase 4, and this is a
-    // direct PostgREST insert (no backend derivation), so populate the
-    // column inline from isPersonal. Drop once Phase 4 makes it nullable.
-    .insert({ ...rest, scope_type: isPersonal ? 'personal' : 'team', created_by: claims.sub })
+    .insert({ ...folder, created_by: claims.sub })
     .select()
     .single();
 
@@ -1183,19 +1179,16 @@ export async function moveResourceItems(
 export async function copyResourceItem(
   resourceId: string,
   targetScopeId: string,
-  targetIsPersonal: boolean,
   targetFolderId: string | null,
   targetLibraryId?: string | null
 ): Promise<ResourceItem> {
   const claims = (await supabase.auth.getClaims()).data.claims;
   if (!claims) throw new Error('Not authenticated');
+  // PR-E 4b: scope_type no longer written (nullable post mig 240, dropped 4c).
   const { data, error } = await supabase
     .from('resource_items')
-    // PR-E: scope_type still NOT NULL until Phase 4; this is a direct
-    // PostgREST insert, so populate it inline from the discriminator.
     .insert({
       resource_id: resourceId,
-      scope_type: targetIsPersonal ? 'personal' : 'team',
       scope_id: targetScopeId,
       folder_id: targetFolderId,
       library_id: targetLibraryId || null,

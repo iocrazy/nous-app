@@ -145,7 +145,6 @@ export const ResourcesViewInner: React.FC = () => {
       await createFolder({
         name: trimmed,
         parent_id: selectedFolderId || null,
-        isPersonal,
         scope_id: scopeId,
         ...(selectedLibraryId ? { library_id: selectedLibraryId } : {}),
       });

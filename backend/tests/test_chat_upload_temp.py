@@ -197,7 +197,8 @@ async def test_ensure_temp_folder_create_path_sets_created_by(monkeypatch):
     fake_repo.create_folder.assert_awaited_once()
     data = fake_repo.create_folder.call_args.args[0]
     assert data["name"] == m.TEMP_FOLDER_NAME
-    assert data["scope_type"] == "team"
+    # PR-E 4b: scope_type is no longer written (column nullable post mig 240).
+    assert "scope_type" not in data
     assert data["scope_id"] == "42"
     assert data["created_by"] == "user-abc"
 
