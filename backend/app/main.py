@@ -401,13 +401,19 @@ try:
         raise HTTPException(status_code=404, detail="Media not found")
 
     async def _fetch_team_ids(resource_id) -> tuple[str, ...]:
-        """Fetch team scope IDs for a resource from resource_items (engine)."""
+        """Fetch scope IDs for a resource from resource_items (engine).
+
+        PR-E 4c: scope_id is always a teams.id snowflake post PR-C and authz is
+        purely team_members membership, so we no longer filter on
+        scope_type='team' — personal teams have only their owner as a member,
+        so including their scope_ids can't over-authorize anyone.
+        """
         from app.db import engine as db_engine
 
         try:
             rows = await db_engine.fetch_all(
                 "SELECT scope_id FROM public.resource_items "
-                "WHERE resource_id = :rid AND scope_type = 'team'",
+                "WHERE resource_id = :rid",
                 {"rid": resource_id},
             )
             return tuple(str(r["scope_id"]) for r in rows if r.get("scope_id"))

@@ -294,7 +294,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             row = await self.fetch_one(sql, *data.values())
             logger.info(
                 f"Created resource_item for resource {data.get('resource_id')} "
-                f"in {data.get('scope_type')}/{data.get('scope_id')}"
+                f"in scope {data.get('scope_id')}"
             )
             return row or {}
         except Exception as e:
@@ -654,7 +654,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             )
 
             sql = (
-                "SELECT i.id, i.resource_id, i.scope_type, i.scope_id, "
+                "SELECT i.id, i.resource_id, i.scope_id, "
                 "       i.folder_id, "
                 "       i.created_at AS i_created_at, "
                 "       i.updated_at AS i_updated_at, "
@@ -712,7 +712,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
 
         try:
             rows = await self.fetch_all(
-                "SELECT i.id, i.resource_id, i.scope_type, i.scope_id, "
+                "SELECT i.id, i.resource_id, i.scope_id, "
                 "       i.folder_id, i.created_at AS i_created_at, "
                 "       i.updated_at AS i_updated_at, "
                 "       row_to_json(r.*) AS resource "

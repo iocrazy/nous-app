@@ -99,14 +99,15 @@ async def _get_resource_ownership(
             creator_id = res.data["creator_id"]
             resource_id = res.data["id"]
 
-            # Get team scopes from resource_items
+            # Get scopes from resource_items. PR-E 4c: no scope_type filter —
+            # scope_id is always a teams.id snowflake and authz is team_members
+            # membership (personal teams have only their owner).
             team_ids: list[str] = []
             try:
                 items_res = (
                     await supabase.table("resource_items")
                     .select("scope_id")
                     .eq("resource_id", resource_id)
-                    .eq("scope_type", "team")
                     .execute()
                 )
                 if items_res.data:

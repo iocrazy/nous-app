@@ -29,17 +29,17 @@ async def _fetch_accessible_meta(
         SELECT r.id::text AS id, r.filename AS name,
                r.mime_type AS mime, r.file_size AS size,
                r.description AS brief, r.updated_at,
-               ri.scope_type, ri.scope_id::text AS scope_id,
-               t.name AS team_name
+               ri.scope_id::text AS scope_id,
+               t.name AS team_name, t.kind AS scope_kind
           FROM public.resources r
           JOIN public.resource_items ri ON ri.resource_id = r.id
-          LEFT JOIN public.teams t ON ri.scope_type = 'team' AND t.id = ri.scope_id
+          LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text
          WHERE r.id::text = ANY(:ids)
            AND r.is_trashed = false
            AND ri.is_trashed = false
-           -- After Spec 1 PR-C: ri.scope_id is always a teams.id snowflake.
-           -- scope_type is preserved as a display hint only (see scope label
-           -- assembly below).
+           -- PR-E 4c: ri.scope_id is always a teams.id snowflake; the
+           -- personal/team distinction now comes from teams.kind, not the
+           -- (dropped) scope_type column.
            AND ri.scope_id::text IN (
                  SELECT team_id::text FROM public.team_members WHERE user_id = :uid
                )
@@ -55,7 +55,7 @@ async def _fetch_accessible_meta(
             "size": row.get("size"),
             "scope": (
                 "personal"
-                if row["scope_type"] == "personal"
+                if row.get("scope_kind") == "personal"
                 else f"team:{row.get('team_name') or row['scope_id']}"
             ),
             "updated_at": row["updated_at"],

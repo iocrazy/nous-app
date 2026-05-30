@@ -345,7 +345,7 @@ class ResourcesRepository:
             result = await client.table(self.TABLE_ITEMS).insert(data).execute()
             logger.info(
                 f"Created resource_item for resource {data.get('resource_id')} "
-                f"in {data.get('scope_type')}/{data.get('scope_id')}"
+                f"in scope {data.get('scope_id')}"
             )
             return result.data[0] if result.data else {}
         except Exception as e:
@@ -1100,17 +1100,18 @@ class ResourcesRepository:
                 # Get resource_items with location info
                 items_result = await (
                     client.table(self.TABLE_ITEMS)
-                    .select("resource_id, folder_id, library_id, scope_type, scope_id")
+                    .select("resource_id, folder_id, library_id, scope_id")
                     .eq("folder_id", fid)
                     .execute()
                 )
                 for item in items_result.data or []:
                     rid = str(item["resource_id"])
+                    # PR-E 4c: scope_type no longer read/snapshotted (column
+                    # being dropped); restore uses last_scope_id + folder/library.
                     update_data = {
                         **trash_data,
                         "last_folder_id": item.get("folder_id"),
                         "last_library_id": item.get("library_id"),
-                        "last_scope_type": item.get("scope_type"),
                         "last_scope_id": item.get("scope_id"),
                     }
                     await (
@@ -1487,12 +1488,17 @@ class ResourcesRepository:
         capped_limit = min(max(int(limit), 1), 50)
         kinds_list = list(kinds or [])
 
+        # PR-E 4c: scope_type column is being dropped; derive the personal/team
+        # label from teams.kind (aliased as scope_type so the caller's response
+        # shape is unchanged). scope_id is always a teams.id snowflake post PR-C.
         sql_parts = [
             "SELECT r.id::text, r.filename AS name, ",
             "       r.mime_type AS mime, r.file_size AS size, ",
-            "       r.updated_at, ri.scope_type, ri.scope_id::text ",
+            "       r.updated_at, ri.scope_id::text, ",
+            "       CASE WHEN t.kind = 'personal' THEN 'personal' ELSE 'team' END AS scope_type ",
             "FROM public.resources r ",
             "JOIN public.resource_items ri ON ri.resource_id = r.id ",
+            "LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text ",
             "WHERE r.is_trashed = false AND ri.is_trashed = false ",
             # After Spec 1 PR-C, ri.scope_id is always a teams.id snowflake;
             # personal scope is a single-member team containing the user.
