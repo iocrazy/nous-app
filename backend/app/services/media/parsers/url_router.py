@@ -18,6 +18,7 @@ class URLRouter:
     """Detect URL source platform, dispatch to appropriate handler"""
 
     PLATFORM_PATTERNS: dict[str, list[str]] = {
+        "qishui": ["qishui.douyin.com", "music.douyin.com"],
         "douyin": ["douyin.com", "iesdouyin.com"],
         "youtube": ["youtube.com", "youtu.be"],
         "bilibili": ["bilibili.com", "b23.tv"],
@@ -47,7 +48,7 @@ class URLRouter:
         for platform, domains in URLRouter.PLATFORM_PATTERNS.items():
             for domain in domains:
                 if hostname == domain or hostname.endswith(f".{domain}"):
-                    handler_type = "ytdlp"
+                    handler_type = "soda" if platform == "qishui" else "ytdlp"
                     logger.info(
                         f"[URLRouter] Detected platform: {platform}, handler: {handler_type} for {url}"
                     )
