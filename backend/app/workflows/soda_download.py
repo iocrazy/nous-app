@@ -36,26 +36,23 @@ def build_audio_dest(*, media_id: str, ext: str, base_dir: str) -> tuple[Path, s
     return Path(base_dir) / rel, rel
 
 
-def build_resource_row(
-    *,
-    creator_id: str,
-    media_id: str,
-    file_path: str,
-    ext: str,
-    size_bytes: int,
-    title: str,
+def build_resource_fields(
+    *, file_path: str, ext: str, size_bytes: int, title: str
 ) -> dict[str, Any]:
-    """Build the ``resources`` row for a completed soda download."""
+    """Resource columns written when a soda download completes.
+
+    These file-completion fields are applied to the resource row that PARSE
+    already created (with file_path NULL). Every key is a real ``resources``
+    column — in particular there is **no** ``music_download_status`` column on
+    ``resources`` (per-format download status lives only on ``parsed_media``);
+    sending it triggers PostgREST PGRST204 and the row never persists.
+    """
     return {
-        "creator_id": creator_id,
-        "media_id": media_id,
-        "source_type": "web",
         "file_type": "audio",
         "mime_type": MIME_BY_EXT.get(ext, "audio/mpeg"),
         "filename": f"{title}.{ext}",
         "file_path": file_path,
         "file_size_bytes": size_bytes,
-        "music_download_status": "completed",
     }
 
 
@@ -119,21 +116,32 @@ async def soda_download_workflow(
 
     await manager.update_progress(wf_id, 80, subtitle="Saving to library")
 
-    # 5. Persist on parsed_media + create the resource row.
+    # 5. Persist on parsed_media + link the file to the resource row.
+    #    PARSE already created the resource row (with file_path NULL); the
+    #    download fills in file_path/size/mime. Update that row — do NOT create
+    #    a second one. Fall back to create only if parse somehow didn't.
     await MediaRepository().update(
         platform_id,
         {"music_download_status": "completed", "music_download_path": rel},
     )
-    await ResourcesRepository().create_resource(
-        build_resource_row(
-            creator_id=user_id,
-            media_id=str(media_id),
-            file_path=rel,
-            ext=plan.ext,
-            size_bytes=size,
-            title=title,
-        )
+    res_repo = ResourcesRepository()
+    fields = build_resource_fields(
+        file_path=rel, ext=plan.ext, size_bytes=size, title=title
     )
+    existing = await res_repo.get_resource_by_media_id_and_creator(
+        str(media_id), user_id
+    )
+    if existing:
+        await res_repo.update_resource(existing["id"], fields)
+    else:
+        await res_repo.create_resource(
+            {
+                "creator_id": user_id,
+                "media_id": str(media_id),
+                "source_type": "web",
+                **fields,
+            }
+        )
 
     await manager.complete(wf_id, subtitle=f"Downloaded {title}")
     return {"platform_id": platform_id, "media_id": media_id, "size": size}
