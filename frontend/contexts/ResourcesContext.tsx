@@ -39,7 +39,7 @@ import type { Resource } from '../types';
 
 // ─── Types ─────────────────────────────────────────────
 
-export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads';
+export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'temp';
 export type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 /** Subset of fetchResources params that the filter bar contributes.
@@ -69,7 +69,12 @@ export interface ResourcesContextType {
   isRecycleView: boolean;
   isSharedView: boolean;
   isDownloadsView: boolean;
+  isTempView: boolean;
   canUpload: boolean;
+
+  // ── Temp view state ──
+  tempFolderId: string | null;
+  tempResources: ResourceItem[];
 
   // ── Data state ──
   resources: ResourceItem[];
@@ -206,7 +211,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // ── URL-driven state ──
   const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
     ? 'resources'
-    : (['shared', 'recycle', 'downloads'].includes(section || '') ? section as SidebarView : 'resources');
+    : (['shared', 'recycle', 'downloads', 'temp'].includes(section || '') ? section as SidebarView : 'resources');
   const selectedFolderId = urlFolderId ?? null;
   const selectedSmartFolderId = urlSmartFolderId ?? null;
   const selectedLibraryId = urlLibraryId ?? null;
@@ -285,6 +290,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const isRecycleView = sidebarView === 'recycle';
   const isSharedView = sidebarView === 'shared';
   const isDownloadsView = sidebarView === 'downloads';
+  const isTempView = sidebarView === 'temp';
+
+  // ── Temp view state ──
+  const [tempFolderId, setTempFolderId] = useState<string | null>(null);
+  const [tempResources, setTempResources] = useState<ResourceItem[]>([]);
 
   // ── Permission check ──
   const permObjectType = selectedLibraryId ? 'library' : selectedFolderId ? 'folder' : null;
@@ -716,6 +726,40 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     }
   }, [sidebarView, loadDownloadedResources]);
 
+  // Load temp folder resources
+  useEffect(() => {
+    if (!isTempView) return;
+    let cancelled = false;
+    setSelectedIds(new Set());
+    setLoading(true);
+    const loadTemp = async () => {
+      try {
+        // Find the folder named 'temp' in the current scope
+        const allFolders = await fetchFolders(scopeId, isPersonal, selectedLibraryId);
+        if (cancelled) return;
+        const tempFolder = allFolders.find((f) => f.name === 'temp') ?? null;
+        setTempFolderId(tempFolder ? String(tempFolder.id) : null);
+        if (!tempFolder) {
+          setTempResources([]);
+          return;
+        }
+        const items = await fetchResources({
+          isPersonal,
+          scopeId,
+          folderId: String(tempFolder.id),
+        });
+        if (!cancelled) setTempResources(items);
+      } catch (err) {
+        console.error('[ResourcesContext] Failed to load temp folder resources:', err);
+        if (!cancelled) setTempResources([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    loadTemp();
+    return () => { cancelled = true; };
+  }, [isTempView, isPersonal, scopeId, selectedLibraryId]);
+
   // Load tags when selected resource changes
   useEffect(() => {
     if (!selectedResource?.resource?.id) {
@@ -893,7 +937,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     isRecycleView,
     isSharedView,
     isDownloadsView,
+    isTempView,
     canUpload,
+
+    tempFolderId,
+    tempResources,
 
     resources,
     setResources,
@@ -977,7 +1025,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     transcodingResourceIds,
   }), [
     isPersonal, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, canUpload,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, canUpload,
+    tempFolderId, tempResources,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
     libraries, smartFolders, allTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
     resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,

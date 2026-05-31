@@ -619,7 +619,9 @@
     },
     "getInfo": "Get Info",
     "trashFolderFailed": "Failed to move folder to trash",
-    "trashFolderConfirm": "This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?"
+    "trashFolderConfirm": "This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?",
+    "temp": "Temp",
+    "tempEmpty": "No chat uploads yet — files you paste or drop into the chat composer land here for 24h before being moved or expired."
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
