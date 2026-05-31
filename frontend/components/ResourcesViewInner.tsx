@@ -553,8 +553,8 @@ export const ResourcesViewInner: React.FC = () => {
         selectedIds={selectedIds}
         isRecycleView={isRecycleView}
         isDownloadsView={isDownloadsView}
-        currentItems={currentItems}
-        sortedItems={sortedItems}
+        currentItems={isTempView ? tempSortedItems : currentItems}
+        sortedItems={isTempView ? tempSortedItems : sortedItems}
         recycleSubFolders={recycleSubFolders}
         childFolders={childFolders}
         isPersonal={isPersonal}
