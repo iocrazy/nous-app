@@ -20,7 +20,6 @@ from app.services.media.parsers.soda_music.soda_decrypt import (
     extract_spade_key,
 )
 
-
 # ---------------------------------------------------------------------------
 # Test helpers — Spade encoder (inverse of extract_spade_key) + MP4 builder
 # ---------------------------------------------------------------------------
@@ -63,13 +62,19 @@ def _ctr(key: bytes, iv16: bytes, data: bytes) -> bytes:
 
 
 def _stsz(sample_sizes: list[int]) -> bytes:
-    payload = b"\x00\x00\x00\x00" + struct.pack(">I", 0) + struct.pack(">I", len(sample_sizes))
+    payload = (
+        b"\x00\x00\x00\x00"
+        + struct.pack(">I", 0)
+        + struct.pack(">I", len(sample_sizes))
+    )
     for s in sample_sizes:
         payload += struct.pack(">I", s)
     return _box(b"stsz", payload)
 
 
-def _senc(ivs8: list[bytes], subsamples: list[list[tuple[int, int]]] | None = None) -> bytes:
+def _senc(
+    ivs8: list[bytes], subsamples: list[list[tuple[int, int]]] | None = None
+) -> bytes:
     flags = 0x02 if subsamples else 0x00
     payload = struct.pack(">I", flags) + struct.pack(">I", len(ivs8))
     for i, iv in enumerate(ivs8):
@@ -90,9 +95,13 @@ def _stsd(original_format: bytes | None = None) -> bytes:
     return _box(b"stsd", payload)
 
 
-def _build_mp4(key: bytes, samples_plain: list[bytes], ivs8: list[bytes],
-               subsamples: list[list[tuple[int, int]]] | None = None,
-               original_format: bytes | None = None) -> bytes:
+def _build_mp4(
+    key: bytes,
+    samples_plain: list[bytes],
+    ivs8: list[bytes],
+    subsamples: list[list[tuple[int, int]]] | None = None,
+    original_format: bytes | None = None,
+) -> bytes:
     """Assemble a minimal encrypted MP4 + return (mp4_bytes, encrypted_mdat_payload)."""
     enc_samples: list[bytes] = []
     for i, plain in enumerate(samples_plain):
@@ -102,9 +111,9 @@ def _build_mp4(key: bytes, samples_plain: list[bytes], ivs8: list[bytes],
             pos = 0
             enc = Cipher(algorithms.AES(key), modes.CTR(iv16)).encryptor()
             for clear, encrypted in subsamples[i]:
-                out += plain[pos:pos + clear]
+                out += plain[pos : pos + clear]
                 pos += clear
-                out += enc.update(plain[pos:pos + encrypted])
+                out += enc.update(plain[pos : pos + encrypted])
                 pos += encrypted
             out += plain[pos:]
             enc_samples.append(bytes(out))
@@ -112,7 +121,12 @@ def _build_mp4(key: bytes, samples_plain: list[bytes], ivs8: list[bytes],
             enc_samples.append(_ctr(key, iv16, plain))
 
     mdat = _box(b"mdat", b"".join(enc_samples))
-    stbl = _box(b"stbl", _stsd(original_format) + _stsz([len(s) for s in samples_plain]) + _senc(ivs8, subsamples))
+    stbl = _box(
+        b"stbl",
+        _stsd(original_format)
+        + _stsz([len(s) for s in samples_plain])
+        + _senc(ivs8, subsamples),
+    )
     minf = _box(b"minf", stbl)
     mdia = _box(b"mdia", minf)
     trak = _box(b"trak", mdia)

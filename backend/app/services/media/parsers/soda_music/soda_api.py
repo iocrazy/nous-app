@@ -162,8 +162,13 @@ class SodaApiClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def _get_json(self, url: str, *, with_params: bool = True,
-                        extra_params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _get_json(
+        self,
+        url: str,
+        *,
+        with_params: bool = True,
+        extra_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         async with self._client_factory() as client:
             kwargs: dict[str, Any] = {
                 "headers": build_pc_headers(self._cookie),
@@ -194,9 +199,9 @@ class SodaApiClient:
         """GET the player-info URL — returns Result.Data.PlayInfoList (§A.3)."""
         # The url_player_info is a fully-formed signed URL; don't re-attach params.
         data = await self._get_json(url_player_info, with_params=False)
-        return (
-            (data.get("Result", {}) or {}).get("Data", {}) or {}
-        ).get("PlayInfoList", []) or []
+        return ((data.get("Result", {}) or {}).get("Data", {}) or {}).get(
+            "PlayInfoList", []
+        ) or []
 
     async def get_track_with_play_info(
         self, track_id: str, want_quality: str

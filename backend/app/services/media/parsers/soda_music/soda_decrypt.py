@@ -99,7 +99,9 @@ def extract_spade_key(play_auth: str) -> str:
     """
     try:
         data = base64.b64decode(play_auth)
-    except Exception as exc:  # noqa: BLE001 — surface a domain error, not base64 internals
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 — surface a domain error, not base64 internals
         raise SodaDecryptError(f"PlayAuth is not valid base64: {exc}") from exc
 
     if len(data) < 3:

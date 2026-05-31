@@ -128,7 +128,9 @@ def select_play_info(
         return None
     target = _normalize_quality_label(want_quality)
     for info in play_info_list:
-        label = _normalize_quality_label(str(_get(info, "Quality", "quality", default="")))
+        label = _normalize_quality_label(
+            str(_get(info, "Quality", "quality", default=""))
+        )
         if label and label == target:
             return info
     return max(

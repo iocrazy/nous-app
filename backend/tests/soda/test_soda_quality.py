@@ -13,12 +13,30 @@ from app.services.media.parsers.soda_music.soda_quality import (
     select_play_info,
 )
 
-LOSSLESS = {"Quality": "lossless", "Format": "flac", "Bitrate": 729, "Duration": 200,
-            "MainPlayUrl": "https://cdn/flac", "PlayAuth": "auth-flac"}
-HI_RES = {"Quality": "hi_res", "Format": "mp4", "Bitrate": 325, "Duration": 200,
-          "MainPlayUrl": "https://cdn/hires", "PlayAuth": "auth-hires"}
-MEDIUM = {"Quality": "medium", "Format": "mp4", "Bitrate": 68, "Duration": 200,
-          "MainPlayUrl": "https://cdn/medium", "PlayAuth": "auth-medium"}
+LOSSLESS = {
+    "Quality": "lossless",
+    "Format": "flac",
+    "Bitrate": 729,
+    "Duration": 200,
+    "MainPlayUrl": "https://cdn/flac",
+    "PlayAuth": "auth-flac",
+}
+HI_RES = {
+    "Quality": "hi_res",
+    "Format": "mp4",
+    "Bitrate": 325,
+    "Duration": 200,
+    "MainPlayUrl": "https://cdn/hires",
+    "PlayAuth": "auth-hires",
+}
+MEDIUM = {
+    "Quality": "medium",
+    "Format": "mp4",
+    "Bitrate": 68,
+    "Duration": 200,
+    "MainPlayUrl": "https://cdn/medium",
+    "PlayAuth": "auth-medium",
+}
 
 
 # --- select_play_info --------------------------------------------------------

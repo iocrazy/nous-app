@@ -24,7 +24,6 @@ from app.services.media.parsers.soda_music.soda_api import (
     cover_url,
 )
 
-
 # --- pure: device params -----------------------------------------------------
 
 
@@ -92,12 +91,16 @@ def test_cover_url_custom_size():
 
 
 def test_classify_landing_url_track():
-    c = classify_landing_url("https://music.douyin.com/qishui/share/track?track_id=7123")
+    c = classify_landing_url(
+        "https://music.douyin.com/qishui/share/track?track_id=7123"
+    )
     assert c == SodaContent(kind="track", content_id="7123")
 
 
 def test_classify_landing_url_ugc_video():
-    c = classify_landing_url("https://music.douyin.com/qishui/share/ugc_video?ugc_video_id=99")
+    c = classify_landing_url(
+        "https://music.douyin.com/qishui/share/ugc_video?ugc_video_id=99"
+    )
     assert c == SodaContent(kind="ugc_video", content_id="99")
 
 
@@ -149,13 +152,20 @@ def _client_with(fake: _FakeClient) -> SodaApiClient:
 
 
 def test_get_track_v2_posts_correct_request_and_parses():
-    fake = _FakeClient(post_response=_FakeResponse({
-        "track": {"id": "7123", "name": "Song"},
-        "track_player": {"url_player_info": "https://api.qishui.com/player?x=1"},
-    }))
+    fake = _FakeClient(
+        post_response=_FakeResponse(
+            {
+                "track": {"id": "7123", "name": "Song"},
+                "track_player": {
+                    "url_player_info": "https://api.qishui.com/player?x=1"
+                },
+            }
+        )
+    )
     client = _client_with(fake)
 
     import asyncio
+
     result = asyncio.run(client.get_track_v2("7123"))
 
     call = fake.calls[0]
@@ -170,48 +180,101 @@ def test_get_track_v2_posts_correct_request_and_parses():
 
 
 def test_get_play_info_returns_play_info_list():
-    fake = _FakeClient(get_responses=[_FakeResponse({
-        "Result": {"Data": {"PlayInfoList": [{"Quality": "lossless", "Bitrate": 729}]}}
-    })])
+    fake = _FakeClient(
+        get_responses=[
+            _FakeResponse(
+                {
+                    "Result": {
+                        "Data": {
+                            "PlayInfoList": [{"Quality": "lossless", "Bitrate": 729}]
+                        }
+                    }
+                }
+            )
+        ]
+    )
     client = _client_with(fake)
 
     import asyncio
+
     infos = asyncio.run(client.get_play_info("https://api.qishui.com/player?x=1"))
 
     assert infos == [{"Quality": "lossless", "Bitrate": 729}]
 
 
 def test_get_track_with_play_info_selects_quality():
-    track_resp = _FakeResponse({
-        "track": {"id": "7", "name": "S", "duration": 200000},
-        "track_player": {"url_player_info": "https://api.qishui.com/p"},
-    })
-    play_resp = _FakeResponse({"Result": {"Data": {"PlayInfoList": [
-        {"Quality": "medium", "Bitrate": 68, "Duration": 200, "MainPlayUrl": "u1", "PlayAuth": "a1"},
-        {"Quality": "lossless", "Bitrate": 729, "Duration": 200, "MainPlayUrl": "u2", "PlayAuth": "a2"},
-    ]}}})
+    track_resp = _FakeResponse(
+        {
+            "track": {"id": "7", "name": "S", "duration": 200000},
+            "track_player": {"url_player_info": "https://api.qishui.com/p"},
+        }
+    )
+    play_resp = _FakeResponse(
+        {
+            "Result": {
+                "Data": {
+                    "PlayInfoList": [
+                        {
+                            "Quality": "medium",
+                            "Bitrate": 68,
+                            "Duration": 200,
+                            "MainPlayUrl": "u1",
+                            "PlayAuth": "a1",
+                        },
+                        {
+                            "Quality": "lossless",
+                            "Bitrate": 729,
+                            "Duration": 200,
+                            "MainPlayUrl": "u2",
+                            "PlayAuth": "a2",
+                        },
+                    ]
+                }
+            }
+        }
+    )
     fake = _FakeClient(post_response=track_resp, get_responses=[play_resp])
     client = _client_with(fake)
 
     import asyncio
-    track, chosen = asyncio.run(client.get_track_with_play_info("7", want_quality="lossless"))
+
+    track, chosen = asyncio.run(
+        client.get_track_with_play_info("7", want_quality="lossless")
+    )
 
     assert track["name"] == "S"
     assert chosen["MainPlayUrl"] == "u2"
 
 
 def test_get_track_with_play_info_raises_on_preview_only():
-    track_resp = _FakeResponse({
-        "track": {"id": "7", "name": "S", "duration": 200000},  # 200s track
-        "track_player": {"url_player_info": "https://api.qishui.com/p"},
-    })
-    play_resp = _FakeResponse({"Result": {"Data": {"PlayInfoList": [
-        {"Quality": "medium", "Bitrate": 68, "Duration": 30, "MainPlayUrl": "u1", "PlayAuth": "a1"},
-    ]}}})  # only a 30s preview
+    track_resp = _FakeResponse(
+        {
+            "track": {"id": "7", "name": "S", "duration": 200000},  # 200s track
+            "track_player": {"url_player_info": "https://api.qishui.com/p"},
+        }
+    )
+    play_resp = _FakeResponse(
+        {
+            "Result": {
+                "Data": {
+                    "PlayInfoList": [
+                        {
+                            "Quality": "medium",
+                            "Bitrate": 68,
+                            "Duration": 30,
+                            "MainPlayUrl": "u1",
+                            "PlayAuth": "a1",
+                        },
+                    ]
+                }
+            }
+        }
+    )  # only a 30s preview
     fake = _FakeClient(post_response=track_resp, get_responses=[play_resp])
     client = _client_with(fake)
 
     import asyncio
+
     with pytest.raises(SodaPreviewError):
         asyncio.run(client.get_track_with_play_info("7", want_quality="lossless"))
 
@@ -222,5 +285,6 @@ def test_get_track_with_play_info_raises_when_no_player_info():
     client = _client_with(fake)
 
     import asyncio
+
     with pytest.raises(SodaApiError):
         asyncio.run(client.get_track_with_play_info("7", want_quality="lossless"))
