@@ -33,6 +33,11 @@ from dbos import DBOS
 from loguru import logger
 
 
+def is_soda_platform(platform: str) -> bool:
+    """qishui (Soda music) routes to the dedicated soda download workflow."""
+    return platform == "qishui"
+
+
 @DBOS.step()
 def extract_url_step(url: str) -> str:
     """Validate + canonicalise URL. Raises ValueError on bad input —
@@ -59,7 +64,17 @@ def fetch_and_parse_step(
     `platform` defaults to "douyin" so any in-flight workflows queued
     before this change keep the legacy behaviour. Heavy I/O — 3 retries
     matches the legacy Celery budget."""
-    if platform == "douyin":
+    if platform == "qishui":
+        from app.services.media.parsers.parse_helpers import fetch_and_parse_qishui
+
+        aweme_detail, parsed_data = fetch_and_parse_qishui(
+            valid_url,
+            video_bool,
+            cover_bool,
+            user_agent=user_agent,
+            user_id=user_id,
+        )
+    elif platform == "douyin":
         from app.services.media.parsers.parse_helpers import fetch_and_parse
 
         aweme_detail, parsed_data = fetch_and_parse(
@@ -170,6 +185,74 @@ def dispatch_download_step(
                 "video_title": video_title,
                 "user_agent": user_agent,
                 "resource_id": resource_id,
+                "flow_id": flow_id,
+            },
+            workflow_id=wf_id,
+        )
+
+    return asyncio.run(_do())
+
+
+def dispatch_soda_download_step(
+    *,
+    platform_id: str,
+    user_id: str,
+    media_id: Optional[str],
+    video_title: str,
+    resource_id: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    flow_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Soda (qishui) variant of ``dispatch_download_step``.
+
+    qishui media is audio-only, so it routes through ``soda_download_workflow``
+    (Phase 2) instead of the generic ``download_workflow``. Reuses task_type
+    "download" so no new routing row is needed — the routing table only keys
+    off task_type, while the actual callable is passed explicitly.
+
+    Mirrors ``dispatch_download_step`` exactly: not a ``@DBOS.step`` (it calls
+    ``DBOS.start_workflow`` via ``start_workflow_routed``, which asserts when
+    invoked from inside a step context), same wf_id generation, same
+    ``asyncio.run`` sync/async bridge.
+
+    NOTE: ``int(media_type)`` is deliberately NOT computed here — qishui's
+    parsed media_type is the string "audio", and the soda workflow does not
+    need a numeric media_type."""
+    import uuid as _uuid
+
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+
+    wf_id = str(_uuid.uuid4())
+
+    async def _do() -> dict[str, Any]:
+        # Pre-create task_tracking row — trigger updates lifecycle later.
+        try:
+            await get_task_manager().create(
+                user_id=user_id,
+                task_type="download",
+                title=f"Download {(video_title or platform_id)[:50]}",
+                subtitle="audio",
+                media_id=str(platform_id) if platform_id else None,
+                resource_id=str(resource_id) if resource_id else None,
+                dbos_workflow_id=wf_id,
+                flow_id=flow_id,
+            )
+        except Exception as e:
+            logger.warning(f"[parse] pre-create soda download task_tracking: {e}")
+
+        from app.workflows.soda_download import soda_download_workflow
+
+        return await start_workflow_routed(
+            "download",
+            dbos_workflow_callable=soda_download_workflow,
+            dbos_workflow_kwargs={
+                "platform_id": platform_id,
+                "user_id": user_id,
+                "media_id": media_id,
+                "title": video_title,
+                "resource_id": resource_id,
+                "user_agent": user_agent,
                 "flow_id": flow_id,
             },
             workflow_id=wf_id,
@@ -451,17 +534,31 @@ def parse_workflow(
     # can build resource_version v1 and the file shows up in 我的下载.
     download_dispatch: dict[str, Any] = {}
     if video_bool or cover_bool:
-        download_dispatch = dispatch_download_step(
-            platform_id=platform_id,
-            user_id=user_id,
-            download_video=video_bool,
-            download_cover=cover_bool,
-            media_type=int(media_type),
-            video_title=video_title,
-            user_agent=legacy_ua,
-            resource_id=str(resource_id) if resource_id else None,
-            flow_id=flow_id,
-        )
+        if is_soda_platform(platform):
+            # qishui is audio-only; media_type is the string "audio" so we
+            # MUST NOT call int(media_type) on this path. Route through the
+            # dedicated soda_download_workflow instead.
+            download_dispatch = dispatch_soda_download_step(
+                platform_id=platform_id,
+                user_id=user_id,
+                media_id=video_db_id,
+                video_title=video_title,
+                resource_id=str(resource_id) if resource_id else None,
+                user_agent=legacy_ua,
+                flow_id=flow_id,
+            )
+        else:
+            download_dispatch = dispatch_download_step(
+                platform_id=platform_id,
+                user_id=user_id,
+                download_video=video_bool,
+                download_cover=cover_bool,
+                media_type=int(media_type),
+                video_title=video_title,
+                user_agent=legacy_ua,
+                resource_id=str(resource_id) if resource_id else None,
+                flow_id=flow_id,
+            )
 
     # 6. (removed) Auto-dispatch of L1 cover analysis.
     # D9 design: AI tasks (analyze / summary / transcript) are user-triggered
@@ -470,11 +567,16 @@ def parse_workflow(
     # when the resource carries the "Analyze" tag.
 
     # 7. Audit log
+    #
+    # qishui's media_type is the string "audio" — int() would crash here too
+    # (this step runs for ALL platforms, not just the download branch above),
+    # so coerce to a numeric type code only for the non-soda path; soda logs 0.
+    audit_media_type = 0 if is_soda_platform(platform) else int(media_type)
     log_parse_outcome_step(
         user_id=user_id,
         platform_id=platform_id,
         video_title=video_title,
-        media_type=int(media_type),
+        media_type=audit_media_type,
         outcome="success",
     )
 

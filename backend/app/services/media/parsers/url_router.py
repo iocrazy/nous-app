@@ -4,8 +4,9 @@
 URL Router Service
 
 Detects source platform from URL and dispatches to the appropriate handler.
-All platforms use yt-dlp as the primary parser. Douyin falls back to
-LightHTTP / DrissionPage when yt-dlp fails (handled in media_router).
+Most platforms use yt-dlp as the primary parser; qishui (Soda Music) uses a
+dedicated 'soda' handler. Douyin falls back to LightHTTP / DrissionPage when
+yt-dlp fails (handled in media_router).
 """
 
 import re
@@ -18,6 +19,7 @@ class URLRouter:
     """Detect URL source platform, dispatch to appropriate handler"""
 
     PLATFORM_PATTERNS: dict[str, list[str]] = {
+        "qishui": ["qishui.douyin.com", "music.douyin.com"],
         "douyin": ["douyin.com", "iesdouyin.com"],
         "youtube": ["youtube.com", "youtu.be"],
         "bilibili": ["bilibili.com", "b23.tv"],
@@ -34,7 +36,8 @@ class URLRouter:
 
         Returns:
             tuple[str, str]: (platform_name, handler_type)
-                handler_type is always 'ytdlp' (all platforms use yt-dlp as primary parser).
+                handler_type is 'soda' for qishui (Soda Music) and 'ytdlp' for
+                all other platforms.
         """
         try:
             parsed = urlparse(url)
@@ -47,7 +50,7 @@ class URLRouter:
         for platform, domains in URLRouter.PLATFORM_PATTERNS.items():
             for domain in domains:
                 if hostname == domain or hostname.endswith(f".{domain}"):
-                    handler_type = "ytdlp"
+                    handler_type = "soda" if platform == "qishui" else "ytdlp"
                     logger.info(
                         f"[URLRouter] Detected platform: {platform}, handler: {handler_type} for {url}"
                     )
