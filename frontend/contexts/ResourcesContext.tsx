@@ -818,6 +818,10 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       const item = resources.find((r) => String(r.resource?.id) === rid);
       await trashResource(rid, scopeId, selectedFolderId);
       setResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
+      // The Temp sidebar view (#360) renders from a separate tempResources
+      // state, so the optimistic removal above must mirror into it or the
+      // trashed item lingers in the Temp view until a remount.
+      setTempResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
       if (String(selectedResource?.resource?.id) === rid) setSelectedResource(null);
       const filename = item?.resource?.filename || '';
       addToast(t('resources.trashedNotification', { name: filename }), 'success');
@@ -904,6 +908,13 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
         resource: { ...prev.resource, ...data } as Resource,
       } : null);
       setResources(prev => prev.map(item =>
+        String(item.resource?.id) === rid
+          ? { ...item, resource: { ...item.resource!, ...data } as Resource }
+          : item
+      ));
+      // Mirror into the Temp view's separate state (#360) so edits/renames
+      // made while in the Temp view reflect immediately there too.
+      setTempResources(prev => prev.map(item =>
         String(item.resource?.id) === rid
           ? { ...item, resource: { ...item.resource!, ...data } as Resource }
           : item
