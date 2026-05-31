@@ -23,6 +23,26 @@ router = APIRouter()
 
 TAGS_DOWNLOAD = ["Download Management"]
 
+# Map an audio file suffix (lowercased, e.g. ".flac") to its MIME content type.
+_AUDIO_CONTENT_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".opus": "audio/opus",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+}
+
+
+def audio_content_type(suffix: str) -> str:
+    """Return the MIME content type for an audio file suffix.
+
+    ``suffix`` should be a lowercased extension including the dot
+    (e.g. ``".flac"``). Unknown suffixes default to ``"audio/mpeg"``.
+    """
+    return _AUDIO_CONTENT_TYPES.get(suffix, "audio/mpeg")
+
 
 class RetryDownloadRequest(BaseModel):
     """Retry download request — select which media to re-download."""
@@ -325,14 +345,7 @@ async def download_music_file(platform_id: str, auth: AuthDep):
         suffix = audio_file.suffix or ".mp3"
         filename = f"{safe_title}_audio{suffix}"
 
-        content_type = {
-            ".mp3": "audio/mpeg",
-            ".m4a": "audio/mp4",
-            ".opus": "audio/opus",
-            ".ogg": "audio/ogg",
-            ".wav": "audio/wav",
-            ".aac": "audio/aac",
-        }.get(suffix, "audio/mpeg")
+        content_type = audio_content_type(suffix)
 
         return FileResponse(
             path=str(audio_file),
