@@ -171,7 +171,12 @@
 
 **Context**: Adversarial review (Claude subagent, 2026-04-25) CRITICAL #1. Affects `app/tasks/agent_runs_sweeper.py:48-70` and `app/services/workforce/state_machine.py:_hold_lock`.
 
-**Status**: pending — P0 follow-up after M2 ships
+**Status**: ✅ RESOLVED at current scale (2026-05-31) — the broken PostgREST advisory-lock RPC was removed, not patched. The three call sites now use exclusion primitives that don't depend on per-session RPC routing:
+- **Sweepers** (`app/workflows/agent_runs_sweeper.py`, `workflow_health_sweeper.py`) → ported to DBOS `@scheduled` workflows. DBOS derives a deterministic `workflow_id` (`sched-<name>-<iso>`) per tick and the system DB rejects duplicate ids, so only one worker runs each tick. The advisory-lock indirection is dropped entirely.
+- **Per-agent state transitions** → the workforce runs as a single in-process scheduler (M3); `AgentWorkerPool` (`app/services/workforce/worker_pool.py:79`) holds a per-agent `asyncio.Lock` that serialises transitions for the same agent. `state_machine.py:23-40` documents the rationale.
+- **Row-level CAS guards** (`status='unread'` / `lifecycle_status='queued'`) remain as the durable mutual-exclusion backstop.
+
+**Residual (future-only)**: if/when the backend is scaled to **multiple FastAPI worker processes**, in-process `asyncio.Lock` no longer suffices. The documented fix at that point is a distributed primitive (Redis lock or `SELECT … FOR UPDATE`) — explicitly NOT the broken PostgREST RPC (see `state_machine.py:38-40`). Not a live concern at the current single-process deployment.
 
 ---
 
