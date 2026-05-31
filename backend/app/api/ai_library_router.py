@@ -2630,6 +2630,40 @@ async def list_skill_versions(
 
 
 @router.get(
+    "/skills/{slug}/versions/{version_number}",
+    summary="Get a specific skill version (full body)",
+)
+async def get_skill_version(
+    slug: str,
+    version_number: int,
+    auth: AuthDep,
+) -> Dict[str, Any]:
+    """Full snapshot of one skill version (body_md / frontmatter_json), so the
+    version-history UI can preview what a rollback would restore. Mirrors
+    get_agent_version."""
+    _, skill_repo = _repos()
+    skill = await skill_repo.get_by_slug(slug)
+    if not skill:
+        raise HTTPException(status_code=404, detail="skill not found")
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("skill_versions")
+        .select("*")
+        .eq("skill_id", int(skill["id"]))
+        .eq("version_number", version_number)
+        .maybe_single()
+        .execute()
+    )
+    if not result or not result.data:
+        raise HTTPException(status_code=404, detail="version not found")
+    row = dict(result.data)
+    row["id"] = str(row["id"])
+    if row.get("created_by"):
+        row["created_by"] = str(row["created_by"])
+    return row
+
+
+@router.get(
     "/skills/{slug}/files/{path:path}/versions",
     summary="List version history of a skill file",
 )
