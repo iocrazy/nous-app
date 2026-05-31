@@ -207,6 +207,31 @@ class WorkerStateMachine:
         repo = self.repo
         worker = await repo.get_worker(agent_id)
         from_state: Optional[WorkerState] = worker.get("state") if worker else None
+
+        # AI-016: a presumed-dead worker may still hold an in-flight task. If
+        # we just terminate the worker, that task is orphaned in
+        # assigned/in_progress forever. Requeue it so it gets picked up again.
+        # ``requeue_task``'s CAS guard (phase IN ('assigned','in_progress')) is
+        # the race fence: if the task already completed between the heartbeat
+        # check and now, the requeue is a no-op and we don't resurrect it.
+        orphan_task_id = worker.get("current_task_id") if worker else None
+        if orphan_task_id:
+            try:
+                requeued = await repo.requeue_task(UUID(str(orphan_task_id)))
+                if requeued:
+                    logger.warning(
+                        "[state-machine] requeued orphan task %s from "
+                        "force-terminated worker %s",
+                        orphan_task_id,
+                        agent_id,
+                    )
+            except Exception:
+                logger.exception(
+                    "[state-machine] failed to requeue orphan task %s for %s",
+                    orphan_task_id,
+                    agent_id,
+                )
+
         if not worker:
             await repo.upsert_worker(agent_id=agent_id, state="terminated")
             from_state = None
