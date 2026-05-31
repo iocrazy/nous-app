@@ -616,6 +616,14 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
+  async rollbackSkill(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
+    const resp = await fetch(
+      `${base()}/skills/${encodeURIComponent(slug)}/rollback/${versionNumber}`,
+      { method: 'POST', headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
   /**
    * Phase 3: Per-user token-cost summary for the Billing dashboard.
    */

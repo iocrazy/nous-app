@@ -65,16 +65,15 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
 
   const handleRollback = useCallback(
     async (versionNumber: number) => {
-      if (kind !== 'agent') {
-        addToast(t('versionHistory.rollbackNotSupported'), 'info');
-        return;
-      }
       if (!window.confirm(t('versionHistory.rollbackConfirm', { version: versionNumber }))) {
         return;
       }
       setRollingBack(versionNumber);
       try {
-        const result = await aiLibraryService.rollbackAgent(slug, versionNumber);
+        const result =
+          kind === 'agent'
+            ? await aiLibraryService.rollbackAgent(slug, versionNumber)
+            : await aiLibraryService.rollbackSkill(slug, versionNumber);
         addToast(t('versionHistory.rollbackDone'), 'success');
         const newV = (result.new_version as number | undefined) ?? null;
         if (newV !== null) onRollback?.(newV);
@@ -190,7 +189,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                         </div>
                       )}
                     </div>
-                    {kind === 'agent' && !isCurrent && (
+                    {!isCurrent && (
                       <button
                         type="button"
                         disabled={rollingBack === v.version_number}
