@@ -29,6 +29,7 @@ def _patch_personal_team(monkeypatch, team_id="9001"):
         rs, "_resolve_personal_team_id", AsyncMock(return_value=team_id)
     )
 
+
 # ------------------------------------------------------------------ #
 # Task 1 — resolve_chat_scope
 # ------------------------------------------------------------------ #
