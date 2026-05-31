@@ -43,3 +43,26 @@ def test_build_resource_fields_mime_by_ext():
         ]
         == "audio/mpeg"
     )
+
+
+def test_already_downloaded_true(tmp_path):
+    from app.workflows.soda_download import already_downloaded
+
+    f = tmp_path / "a.flac"
+    f.write_bytes(b"x")
+    assert already_downloaded({"music_download_path": "a.flac"}, str(tmp_path)) is True
+
+
+def test_already_downloaded_false_no_path():
+    from app.workflows.soda_download import already_downloaded
+
+    assert already_downloaded({"music_download_path": None}, "/tmp") is False
+    assert already_downloaded({}, "/tmp") is False
+
+
+def test_already_downloaded_false_missing_file(tmp_path):
+    from app.workflows.soda_download import already_downloaded
+
+    assert (
+        already_downloaded({"music_download_path": "nope.flac"}, str(tmp_path)) is False
+    )
