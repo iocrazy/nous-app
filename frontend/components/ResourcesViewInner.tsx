@@ -167,17 +167,33 @@ export const ResourcesViewInner: React.FC = () => {
   };
 
   // ─── Resource selection ──────────────────────────────
+  // Single-click selection is delayed 250ms so a double-click can cancel it.
+  // Opening the info panel synchronously shrinks the grid, and the auto-fill
+  // (.downloads-grid) columns reflow — which would move the card out from under
+  // a double-click's second click, landing it on (and navigating into) the
+  // wrong card. Mirrors the DownloadsView fix (commit 8a7fa3b0).
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleResourceClick = useCallback((item: any) => {
-    if (selectedResource?.id === item.id) {
-      setSelectedResource(null);
-      setSelectedIds(new Set());
-    } else {
-      setSelectedResource(item);
-      setSelectedFolder(null);
-    }
+    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      if (selectedResource?.id === item.id) {
+        setSelectedResource(null);
+        setSelectedIds(new Set());
+      } else {
+        setSelectedResource(item);
+        setSelectedFolder(null);
+      }
+    }, 250);
   }, [selectedResource, setSelectedResource, setSelectedIds, setSelectedFolder]);
 
   const handleResourceDoubleClick = useCallback((item: any) => {
+    // Cancel the pending single-click selection to prevent grid reflow before nav.
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
     if (item.resource?.id) navigate(resPath(`/resources/file/${item.resource.id}`));
   }, [navigate, resPath]);
 
