@@ -287,6 +287,34 @@ async def test_cache_miss_then_set_with_ttl():
     assert kwargs["ex"] == 300
 
 
+@pytest.mark.asyncio
+async def test_empty_result_cached_with_short_ttl():
+    """AI-008: empty recall results use the short empty TTL, not the full
+    cache_ttl_s, so a rephrase shortly after re-runs the search."""
+    redis = MagicMock()
+    redis.get = AsyncMock(return_value=None)
+    redis.set = AsyncMock()
+
+    rows = [_row(user_id=uuid4(), agent_id=uuid4())]
+    client = _make_supabase(rpc_rows=rows)
+    retriever = MemoryRetriever(
+        supabase_client=client,
+        embedding_call=_embed_call,
+        sonnet_call=_sonnet_none,  # sonnet keeps nothing → empty final
+        redis_client=redis,
+        cache_ttl_s=300,
+        empty_cache_ttl_s=30,
+    )
+    result = await retriever.recall(
+        user_id=uuid4(), agent_id=uuid4(), session_id=None, user_query="hi"
+    )
+
+    assert result == []
+    redis.set.assert_called_once()
+    _, kwargs = redis.set.call_args
+    assert kwargs["ex"] == 30  # short TTL for empty, not 300
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_cache_disabled_when_redis_none():
