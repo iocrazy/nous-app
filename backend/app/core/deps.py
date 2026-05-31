@@ -324,7 +324,7 @@ async def get_team_id_for_user(user_id: str) -> Optional[str]:
         await admin.table("teams")
         .select("id")
         .eq("owner_id", user_id)
-        .eq("is_personal", True)
+        .eq("kind", "personal")
         .limit(1)
         .execute()
     )

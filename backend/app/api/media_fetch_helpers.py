@@ -88,7 +88,7 @@ async def resolve_team_id(user_id: str, request: Request) -> Optional[str]:
         await admin.table("teams")
         .select("id")
         .eq("owner_id", user_id)
-        .eq("is_personal", True)
+        .eq("kind", "personal")
         .limit(1)
         .execute()
     )
@@ -304,7 +304,6 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
     aweme_detail = None
     parse_method = "unknown"
     parse_method_name = "Unknown"
-    fallback_reason = None
 
     user_parse_mode = "lighthttp"
     try:
@@ -335,7 +334,6 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
                 logger.success("[BrowserAuto] Parse successful")
         except Exception as e:
             logger.error(f"[BrowserAuto] Parse failed: {e}")
-            fallback_reason = f"BrowserAuto error: {str(e)[:50]}"
     else:
         try:
             logger.info(f"[LightHTTP] Attempting parse: {url}")
@@ -344,10 +342,7 @@ async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]
                 parse_method = "light_http"
                 parse_method_name = "LightHTTP"
                 logger.success("[LightHTTP] Parse successful")
-            else:
-                fallback_reason = "LightHTTP returned empty result"
         except Exception as e:
-            fallback_reason = f"LightHTTP error: {str(e)[:50]}"
             logger.warning(f"[LightHTTP] Parse failed: {e}")
 
         if not aweme_detail:
@@ -444,8 +439,6 @@ async def handle_media_fetch_dispatch(
             )
         except Exception as e:
             logger.warning(f"[Cookie] Cookie check failed, proceeding without: {e}")
-
-    skip_ytdlp = platform == "douyin" and not has_cookie
 
     # ── L2 dedup: per-user already-owned short-circuit ──
     # Master used to return "already downloaded" toast at parse entry
