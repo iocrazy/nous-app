@@ -1,0 +1,59 @@
+# backend/tests/soda/test_soda_formatter.py
+from app.services.media.parsers.soda_music.formatter import format_track
+
+TRACK = {
+    "id": "7123",
+    "name": "Test Song",
+    "duration": 200000,  # ms
+    "artists": [
+        {"name": "Artist A", "url_avatar": {"urls": ["https://p/"], "uri": "av"}}
+    ],
+    "album": {
+        "name": "Album X",
+        "release_date": "2024-01-01",
+        "url_cover": {"urls": ["https://p/"], "uri": "cov"},
+    },
+    "stats": {"count_collected": 10, "count_comment": 2, "count_shared": 3},
+    "colors": {"cover_gradient_effect_color": "#fff"},
+    "tags": ["pop"],
+}
+CHOSEN = {
+    "Quality": "lossless",
+    "Format": "flac",
+    "Bitrate": 729,
+    "MainPlayUrl": "https://cdn/flac",
+    "PlayAuth": "auth",
+    "Duration": 200,
+}
+
+
+def test_format_track_core_fields():
+    pd = format_track(TRACK, CHOSEN, original_url="https://qishui.douyin.com/s/x/")
+    assert pd["platform_id"] == "7123"
+    assert pd["source_platform"] == "qishui"
+    assert pd["media_type"] == "audio"
+    assert pd["title"] == "Test Song"
+    assert pd["author"] == "Artist A"
+    assert pd["original_url"] == "https://qishui.douyin.com/s/x/"
+
+
+def test_format_track_cover_url_assembled():
+    pd = format_track(TRACK, CHOSEN, original_url="u")
+    assert pd["cover_urls"] == ["https://p/cov~c5_375x375.jpg"]
+
+
+def test_format_track_packs_metadata():
+    pd = format_track(TRACK, CHOSEN, original_url="u")
+    meta = pd["metadata"]
+    assert meta["album"]["name"] == "Album X"
+    assert meta["stats"]["count_collected"] == 10
+    assert meta["quality"]["Quality"] == "lossless"
+    assert meta["colors"]["cover_gradient_effect_color"] == "#fff"
+    assert pd["favorite_count"] == 10
+    assert pd["comment_count"] == 2
+    assert pd["share_count"] == 3
+
+
+def test_format_track_ext_from_format():
+    pd = format_track(TRACK, CHOSEN, original_url="u")
+    assert pd["metadata"]["ext"] == "flac"
