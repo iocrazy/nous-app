@@ -153,11 +153,16 @@ class AdminCreditsRepository:
         client = await self._client()
         result = (
             await client.table(self.TEAMS_TABLE)
-            .select("id, name, is_personal, owner_id")
+            .select("id, name, kind, owner_id")
             .in_("id", team_ids)
             .execute()
         )
-        return result.data or []
+        # PR-E dropped teams.is_personal; derive it from teams.kind so callers
+        # (admin teams/credits routers) that read ``is_personal`` keep working.
+        return [
+            {**row, "is_personal": row.get("kind") == "personal"}
+            for row in (result.data or [])
+        ]
 
     async def get_package_names(self, package_ids: list[str]) -> dict[str, str]:
         if not package_ids:
@@ -229,14 +234,15 @@ class AdminCreditsRepository:
         client = await self._client()
         result = (
             await client.table(self.TEAMS_TABLE)
-            .select("id, name, is_personal, owner_id")
+            .select("id, name, kind, owner_id")
             .eq("id", team_id)
             .maybe_single()
             .execute()
         )
-        if result is None:
+        if result is None or result.data is None:
             return None
-        return result.data
+        # PR-E dropped teams.is_personal; derive from teams.kind for callers.
+        return {**result.data, "is_personal": result.data.get("kind") == "personal"}
 
     async def get_team_quota(self, team_id: str) -> dict[str, Any]:
         client = await self._client()
