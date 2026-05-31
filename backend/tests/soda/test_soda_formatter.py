@@ -57,3 +57,43 @@ def test_format_track_packs_metadata():
 def test_format_track_ext_from_format():
     pd = format_track(TRACK, CHOSEN, original_url="u")
     assert pd["metadata"]["ext"] == "flac"
+
+
+def test_format_track_captures_lyrics_from_content_dict():
+    from app.services.media.parsers.soda_music.formatter import format_track
+
+    track = {
+        "id": "7",
+        "name": "S",
+        "artists": [],
+        "album": {},
+        "lyric": {"content": "[1000,1000]<0,1000,0>Hi"},
+    }
+    chosen = {"Quality": "lossless", "Format": "flac", "Bitrate": 729}
+    pd = format_track(track, chosen, original_url="https://q/x")
+    assert pd["metadata"]["lyrics"]["lrc"].startswith("[00:01.00]Hi")
+    assert pd["metadata"]["lyrics"]["lines"][0]["text"] == "Hi"
+
+
+def test_format_track_captures_lyrics_from_plain_string():
+    from app.services.media.parsers.soda_music.formatter import format_track
+
+    track = {
+        "id": "7",
+        "name": "S",
+        "artists": [],
+        "album": {},
+        "lyric": "[2000,1000]<0,1000,0>Yo",
+    }
+    chosen = {"Quality": "lossless", "Format": "flac", "Bitrate": 729}
+    pd = format_track(track, chosen, original_url="https://q/x")
+    assert pd["metadata"]["lyrics"]["lrc"].startswith("[00:02.00]Yo")
+
+
+def test_format_track_no_lyrics_is_empty():
+    from app.services.media.parsers.soda_music.formatter import format_track
+
+    track = {"id": "7", "name": "S", "artists": [], "album": {}}
+    chosen = {"Quality": "lossless", "Format": "flac", "Bitrate": 729}
+    pd = format_track(track, chosen, original_url="https://q/x")
+    assert pd["metadata"]["lyrics"] == {"lrc": "", "lines": []}
