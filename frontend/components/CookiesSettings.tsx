@@ -14,6 +14,7 @@ const PLATFORMS: PlatformConfig[] = [
   { id: 'douyin', name: 'Douyin', icon: '/icons/douyin.svg' },
   { id: 'bilibili', name: 'Bilibili', icon: '/icons/bilibili.svg' },
   { id: 'youtube', name: 'YouTube', icon: '/icons/youtube.svg' },
+  { id: 'qishui', name: 'Soda Music', icon: '/icons/qishui.svg' },
 ];
 
 type InputTab = 'paste' | 'upload';

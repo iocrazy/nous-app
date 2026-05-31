@@ -1,16 +1,26 @@
-# backend/app/services/media/parsers/soda_music/cookie_source.py
-"""Soda login cookie provider.
+"""Soda login cookie provider — reads the per-user user_cookies table.
 
-PHASE 2 STOPGAP: reads the SODA_COOKIE env var. PHASE 3 will replace the body
-with a read from the user_cookies table (platform='qishui') keyed by user_id —
-the signature stays the same so no caller changes.
+Replaces the Phase 2 env stopgap. Platform key is 'qishui' (matches URLRouter
++ the cookie API). Signature stays back-compatible: callers pass only user_id;
+`repo` is injectable for tests.
 """
 
 from __future__ import annotations
 
-import os
+from typing import Any
+
+SODA_COOKIE_PLATFORM = "qishui"
 
 
-async def get_soda_cookie(user_id: str | None) -> str:
-    """Return the Soda cookie string for a user (empty if none configured)."""
-    return os.environ.get("SODA_COOKIE", "")
+async def get_soda_cookie(user_id: str | None, *, repo: Any | None = None) -> str:
+    """Return the Soda cookie for a user from user_cookies (empty if none)."""
+    if not user_id:
+        return ""
+    if repo is None:
+        from app.repositories.cookies_repository import CookiesRepository
+
+        repo = CookiesRepository()
+    row = await repo.get_by_user_and_platform(user_id, SODA_COOKIE_PLATFORM)
+    if not row:
+        return ""
+    return row.get("cookie_text") or row.get("cookie_file") or ""

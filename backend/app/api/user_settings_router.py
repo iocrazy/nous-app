@@ -263,7 +263,7 @@ async def set_parse_mode(request: ParseModeRequest, auth: AuthDep):
 # Cookie Management
 # ============================================
 
-SUPPORTED_PLATFORMS = ["douyin", "bilibili", "youtube"]
+SUPPORTED_PLATFORMS = ["douyin", "bilibili", "youtube", "qishui"]
 
 
 class CookieStatusItem(BaseModel):
@@ -372,6 +372,26 @@ async def set_cookie(platform: str, request: CookieUpsertRequest, auth: AuthDep)
 
         if result is None:
             raise HTTPException(status_code=500, detail="保存 Cookie 失败")
+
+        # qishui-only: validate the saved cookie via a login check. The upsert
+        # already forced is_valid=True, so if validation fails we mark it invalid.
+        # A validation error itself (network/etc.) must not 500 the save.
+        if platform == "qishui":
+            try:
+                from app.services.media.parsers.soda_music.cookie_validate import (
+                    validate_soda_cookie,
+                )
+
+                cookie_val = request.cookie_text or request.cookie_file or ""
+                ok, err = await validate_soda_cookie(cookie_val)
+                if not ok:
+                    await repo.mark_invalid(
+                        auth.user_id, platform, err or "validation failed"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"qishui Cookie 校验异常（保存已成功，跳过校验）: user={auth.user_id}, error={e}"
+                )
 
         logger.info(f"用户 {auth.user_id} 保存 {platform} Cookie 成功")
         return {"success": True, "platform": platform}
