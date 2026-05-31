@@ -510,13 +510,18 @@ class ResourcesService:
         if resource["creator_id"] != user_id:
             raise PermissionError("Only the creator can trash this resource")
 
+        # last_scope_id remembers where to restore to. It feeds
+        # resource_items.scope_id (bigint, PR-E 4c-3) on restore, so it must be
+        # the personal-team snowflake — not the user UUID, which would fail
+        # 22P02 when restored.
+        last_scope_id = await _resolve_personal_team_id(user_id)
         return await self.repo.update_resource(
             resource_id,
             {
                 "is_trashed": True,
                 "trashed_at": datetime.now(timezone.utc).isoformat(),
                 "last_scope_type": "personal",
-                "last_scope_id": user_id,
+                "last_scope_id": last_scope_id,
             },
         )
 
@@ -533,7 +538,15 @@ class ResourcesService:
         # PR-E 4b stopped writing resource_items.scope_type; scope_id locates it)
         folder_id = resource.get("last_folder_id")
         library_id = resource.get("last_library_id")
-        scope_id = resource.get("last_scope_id") or user_id
+        # last_scope_id is a text column and legacy rows stored a user UUID
+        # there; only a numeric value is a valid teams.id (bigint) for
+        # resource_items.scope_id (PR-E 4c-3). Fall back to the personal team
+        # for UUID / missing values so restore can't fail with 22P02.
+        last_scope = resource.get("last_scope_id")
+        if last_scope is not None and str(last_scope).isdigit():
+            scope_id = str(last_scope)
+        else:
+            scope_id = await _resolve_personal_team_id(user_id)
 
         # If last_folder_id references a trashed/deleted folder, clear it
         if folder_id:

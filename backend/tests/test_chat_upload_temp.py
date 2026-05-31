@@ -3,7 +3,9 @@ persistence (Task 2).
 
 Task 1 tests pin the public contract of resolve_chat_scope:
 - Returns ("team", str(team_id)) when the session has a team.
-- Returns ("personal", str(user_id)) when session has no team or session_id is None.
+- Returns ("personal", str(personal_team_id)) when session has no team or
+  session_id is None. scope_id is always a teams.id snowflake (PR-E 4c-3 made
+  folders/resource_items.scope_id bigint), never the user UUID.
 
 Task 2 tests pin save_chat_temp_upload and helpers:
 - _kind_for_mime maps MIME types to kind strings correctly.
@@ -16,6 +18,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.services.library import chat_upload as m
+from app.services.library import resources_service as rs
+
+
+def _patch_personal_team(monkeypatch, team_id="9001"):
+    """resolve_chat_scope's personal branch resolves the user's personal team
+    via resources_service._resolve_personal_team_id (deferred import). Patch it
+    to a fixed snowflake so tests don't hit the DB."""
+    monkeypatch.setattr(
+        rs, "_resolve_personal_team_id", AsyncMock(return_value=team_id)
+    )
 
 # ------------------------------------------------------------------ #
 # Task 1 — resolve_chat_scope
@@ -31,18 +43,20 @@ async def test_resolve_scope_team_when_session_has_team(monkeypatch):
 @pytest.mark.asyncio
 async def test_resolve_scope_personal_when_no_team(monkeypatch):
     monkeypatch.setattr(m, "_get_session_team_id", AsyncMock(return_value=None))
+    _patch_personal_team(monkeypatch)
     assert await m.resolve_chat_scope(session_id=None, user_id="u1") == (
         "personal",
-        "u1",
+        "9001",
     )
 
 
 @pytest.mark.asyncio
 async def test_resolve_scope_personal_when_session_has_no_team(monkeypatch):
     monkeypatch.setattr(m, "_get_session_team_id", AsyncMock(return_value=None))
+    _patch_personal_team(monkeypatch)
     assert await m.resolve_chat_scope(session_id="s1", user_id="u1") == (
         "personal",
-        "u1",
+        "9001",
     )
 
 
@@ -80,8 +94,9 @@ def test_kind_for_mime_fallback_uses_extension():
 
 @pytest.mark.asyncio
 async def test_save_temp_upload_routes_to_resources_temp_folder(monkeypatch):
-    # Stub scope → personal
+    # Stub scope → personal (resolves to the personal-team snowflake)
     monkeypatch.setattr(m, "_get_session_team_id", AsyncMock(return_value=None))
+    _patch_personal_team(monkeypatch)
 
     # Stub ResourcesService
     fake_svc = MagicMock()
@@ -109,13 +124,14 @@ async def test_save_temp_upload_routes_to_resources_temp_folder(monkeypatch):
     assert out["filename"] == "x.png"
     assert out["size_bytes"] == len(b"\x89PNG\r\n\x1a\n")
 
-    # _ensure_temp_folder must receive user_id so it can set created_by
-    assert fake_ensure.call_args.args == ("personal", "u1", "u1")
+    # _ensure_temp_folder receives the resolved personal-team snowflake as
+    # scope_id, plus user_id so it can set created_by
+    assert fake_ensure.call_args.args == ("personal", "9001", "u1")
 
     # Verify upload_resource was called with the right keyword args
     kwargs = fake_svc.upload_resource.call_args.kwargs
     assert kwargs["scope_type"] == "personal"
-    assert kwargs["scope_id"] == "u1"
+    assert kwargs["scope_id"] == "9001"
     assert kwargs["folder_id"] == "folder-temp"
     # file arg must expose .filename and .content_type
     file_arg = kwargs["file"]
@@ -254,6 +270,7 @@ async def test_ensure_temp_folder_reuses_concurrently_created_folder(monkeypatch
 async def test_save_temp_upload_raises_on_incomplete_resource(monkeypatch):
     """upload_resource returning {} (no id/file_path) must fail fast."""
     monkeypatch.setattr(m, "_get_session_team_id", AsyncMock(return_value=None))
+    _patch_personal_team(monkeypatch)
     monkeypatch.setattr(m, "_ensure_temp_folder", AsyncMock(return_value="folder-temp"))
 
     fake_svc = MagicMock()
@@ -274,6 +291,7 @@ async def test_save_temp_upload_raises_on_incomplete_resource(monkeypatch):
 async def test_save_temp_upload_propagates_upload_resource_error(monkeypatch):
     """Errors from upload_resource are re-raised, not swallowed."""
     monkeypatch.setattr(m, "_get_session_team_id", AsyncMock(return_value=None))
+    _patch_personal_team(monkeypatch)
     monkeypatch.setattr(m, "_ensure_temp_folder", AsyncMock(return_value="folder-temp"))
 
     fake_svc = MagicMock()
