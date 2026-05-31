@@ -75,6 +75,7 @@ export interface ResourcesContextType {
   // ── Temp view state ──
   tempFolderId: string | null;
   tempResources: ResourceItem[];
+  reloadTemp: () => void;
 
   // ── Data state ──
   resources: ResourceItem[];
@@ -295,6 +296,10 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // ── Temp view state ──
   const [tempFolderId, setTempFolderId] = useState<string | null>(null);
   const [tempResources, setTempResources] = useState<ResourceItem[]>([]);
+  // Bumped to force the temp-view list to re-fetch (e.g. after a temp resource
+  // is promoted to permanent, so it drops out of the temp view).
+  const [tempRefreshTick, setTempRefreshTick] = useState(0);
+  const reloadTemp = useCallback(() => setTempRefreshTick((t) => t + 1), []);
 
   // ── Permission check ──
   const permObjectType = selectedLibraryId ? 'library' : selectedFolderId ? 'folder' : null;
@@ -758,7 +763,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     };
     loadTemp();
     return () => { cancelled = true; };
-  }, [isTempView, isPersonal, scopeId, selectedLibraryId]);
+  }, [isTempView, isPersonal, scopeId, selectedLibraryId, tempRefreshTick]);
 
   // Load tags when selected resource changes
   useEffect(() => {
@@ -942,6 +947,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
     tempFolderId,
     tempResources,
+    reloadTemp,
 
     resources,
     setResources,
@@ -1026,7 +1032,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   }), [
     isPersonal, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
     isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, canUpload,
-    tempFolderId, tempResources,
+    tempFolderId, tempResources, reloadTemp,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
     libraries, smartFolders, allTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
     resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,

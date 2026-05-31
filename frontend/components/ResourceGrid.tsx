@@ -267,6 +267,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     handleRestoreResource: handleRestore,
     handlePermanentDelete,
     reloadResources,
+    reloadTemp,
   } = ctx;
 
   // PR-E: temp_ttl service + child panels still speak the legacy
@@ -284,11 +285,16 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     ? filteredFolders.filter((f) => f.name !== 'temp')
     : filteredFolders;
 
-  // ─── Temp folder: TTL badge + Save actions ────────────
+  // ─── Temp: TTL badge + Save actions ────────────
+  // Two ways to be "in temp": navigating into the temp folder (legacy), or the
+  // dedicated Temp sidebar view (isTempView, no selectedFolder). Both need the
+  // TTL badge + promote-to-permanent action — gating on inTempFolder alone
+  // regressed the Temp sidebar view (#360).
   const inTempFolder = selectedFolder?.name === 'temp';
+  const isTempContext = inTempFolder || isTempView;
   const [scopeTtl, setScopeTtl] = useState<number | null>(null);
   useEffect(() => {
-    if (!inTempFolder || !scopeType || !scopeId) return;
+    if (!isTempContext || !scopeType || !scopeId) return;
     let cancelled = false;
     tempTtlService.getChatTempTtl(scopeType, scopeId).then((r) => {
       if (cancelled) return;
@@ -298,7 +304,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       /* badge falls back to '' on error */
     });
     return () => { cancelled = true; };
-  }, [inTempFolder, scopeType, scopeId]);
+  }, [isTempContext, scopeType, scopeId]);
 
   // Filter bar visibility — search-row toggle remembers the choice in
   // localStorage. Hidden in shared / recycle views where filters don't
@@ -976,7 +982,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   {viewMode === 'grid' ? (
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
                       {sortedItems.map((item) => {
-                        const badge = inTempFolder ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                        const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
                         return (
                         <div key={item.id} {...getItemTouchHandlers('file', item)}>
                         <ResourceCard
@@ -1011,7 +1017,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           compositeId={`item:${item.id}`}
                           isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                         />
-                        {inTempFolder && (
+                        {isTempContext && (
                           <div className="flex items-center gap-2 px-2 py-1.5 bg-zinc-900/60 rounded-b-xl border-t border-zinc-800/50">
                             {badge && (
                               <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
@@ -1022,7 +1028,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                               resourceId={item.resource_id}
                               scopeType={scopeType}
                               scopeId={scopeId}
-                              onDone={reloadResources}
+                              onDone={isTempView ? reloadTemp : reloadResources}
                             />
                           </div>
                         )}
@@ -1033,7 +1039,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   ) : (
                     <div className="space-y-1.5">
                       {sortedItems.map((item) => {
-                        const badge = inTempFolder ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                        const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
                         return (
                         <div key={item.id} {...getItemTouchHandlers('file', item)}>
                         <ResourceCard
@@ -1068,7 +1074,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           compositeId={`item:${item.id}`}
                           isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                         />
-                        {inTempFolder && (
+                        {isTempContext && (
                           <div className="flex items-center gap-2 px-4 py-1.5 border-t border-zinc-800/50">
                             {badge && (
                               <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
@@ -1079,7 +1085,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                               resourceId={item.resource_id}
                               scopeType={scopeType}
                               scopeId={scopeId}
-                              onDone={reloadResources}
+                              onDone={isTempView ? reloadTemp : reloadResources}
                             />
                           </div>
                         )}
