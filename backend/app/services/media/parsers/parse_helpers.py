@@ -260,6 +260,22 @@ def fetch_and_parse_ytdlp(
     return aweme_detail_stub, parsed_data
 
 
+def fetch_and_parse_qishui(
+    valid_url: str,
+    video_bool: bool,
+    cover_bool: bool,
+    user_agent=None,
+    user_id=None,
+):
+    """Qishui (Soda) parse: resolve track metadata. Returns (aweme_detail, parsed_data)."""
+    from app.services.media.parsers.soda_music.parse_entry import (
+        resolve_qishui_metadata,
+    )
+
+    parsed_data = _run_async(resolve_qishui_metadata(url=valid_url, user_id=user_id))
+    return {}, parsed_data
+
+
 def save_media_to_db(
     parsed_data: dict, platform_id: str, video_bool: bool
 ) -> Optional[dict]:

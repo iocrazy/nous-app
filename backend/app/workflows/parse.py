@@ -59,7 +59,17 @@ def fetch_and_parse_step(
     `platform` defaults to "douyin" so any in-flight workflows queued
     before this change keep the legacy behaviour. Heavy I/O — 3 retries
     matches the legacy Celery budget."""
-    if platform == "douyin":
+    if platform == "qishui":
+        from app.services.media.parsers.parse_helpers import fetch_and_parse_qishui
+
+        aweme_detail, parsed_data = fetch_and_parse_qishui(
+            valid_url,
+            video_bool,
+            cover_bool,
+            user_agent=user_agent,
+            user_id=user_id,
+        )
+    elif platform == "douyin":
         from app.services.media.parsers.parse_helpers import fetch_and_parse
 
         aweme_detail, parsed_data = fetch_and_parse(
