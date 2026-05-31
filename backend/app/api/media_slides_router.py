@@ -171,9 +171,11 @@ async def serve_audio_file(
         if not audio_file:
             raise HTTPException(status_code=404, detail="Audio file not found")
 
+        from app.api.media_download_router import audio_content_type
+
         return FileResponse(
             path=str(audio_file),
-            media_type="audio/mpeg",
+            media_type=audio_content_type(audio_file.suffix.lower()),
             content_disposition_type="inline",
         )
     except HTTPException:
