@@ -1401,8 +1401,7 @@
     "rollback": "Rollback",
     "rollbackConfirm": "Roll back to v{{version}}? A new version with the old content will be created (audit trail preserved).",
     "rollbackDone": "Rolled back",
-    "rollbackFailed": "Rollback failed: {{message}}",
-    "rollbackNotSupported": "Rollback only supported for agents currently"
+    "rollbackFailed": "Rollback failed: {{message}}"
   },
   "tokenUsage": {
     "title": "Token Usage",

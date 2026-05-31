@@ -2674,6 +2674,62 @@ async def list_skill_file_versions(
     }
 
 
+@router.post(
+    "/skills/{slug}/rollback/{version_number}",
+    summary="Rollback skill to a previous version (creates a new version with the old content)",
+)
+async def rollback_skill(
+    slug: str,
+    version_number: int,
+    auth: AuthDep,
+) -> Dict[str, Any]:
+    """Rollback writes a NEW version with the old body content rather than
+    moving the current_version pointer back — same audit-preserving pattern
+    as rollback_agent. Snapshots the live row, then writes the old
+    body_md / frontmatter_json (+ legacy content_md mirror) as a new version."""
+    _, skill_repo = _repos()
+    skill = await skill_repo.get_by_slug(slug)
+    if not skill:
+        raise HTTPException(status_code=404, detail="skill not found")
+    if _is_system_skill(skill):
+        raise HTTPException(
+            status_code=403,
+            detail="cannot rollback a system preset skill",
+        )
+
+    skill_id = int(skill["id"])
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    client = await get_async_supabase_admin()
+    snap_q = (
+        await client.table("skill_versions")
+        .select("body_md,frontmatter_json")
+        .eq("skill_id", skill_id)
+        .eq("version_number", version_number)
+        .maybe_single()
+        .execute()
+    )
+    if not snap_q or not snap_q.data:
+        raise HTTPException(status_code=404, detail="version not found")
+    snap = snap_q.data
+
+    notes = f"rollback of v{version_number}"
+    updates: Dict[str, Any] = {
+        "body_md": snap.get("body_md"),
+        "frontmatter_json": snap.get("frontmatter_json"),
+        # Keep legacy content_md in sync with body_md (see update_skill / mig 152).
+        "content_md": snap.get("body_md"),
+    }
+    await skill_repo.update_fields_versioned(
+        skill_id, updates, created_by=user_uuid, notes=notes
+    )
+    refreshed = await skill_repo.get_by_slug(slug)
+    return {
+        "rolled_back_to": version_number,
+        "new_version": (refreshed.get("current_version") if refreshed else None),
+        "notes": notes,
+    }
+
+
 # ─── Phase 3: Token billing usage summary ─────────────────────────────
 
 

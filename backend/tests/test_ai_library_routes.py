@@ -393,3 +393,115 @@ async def test_get_script_ai_id_is_uuid(client: AsyncClient) -> None:
     assert resp.status_code == 200
     # Round-trip through UUID() to confirm it is a valid UUID string
     UUID(resp.json()["id"])
+
+
+# ---------------------------------------------------------------------------
+# Skill version rollback (POST /skills/{slug}/rollback/{version_number})
+# ---------------------------------------------------------------------------
+
+
+class _FakeVersionsChain:
+    """Minimal stand-in for the supabase select chain used by rollback_skill:
+    .table(..).select(..).eq(..).eq(..).maybe_single().execute() → data."""
+
+    def __init__(self, data: Any) -> None:
+        self._data = data
+
+    def select(self, *a: Any, **k: Any) -> "_FakeVersionsChain":
+        return self
+
+    def eq(self, *a: Any, **k: Any) -> "_FakeVersionsChain":
+        return self
+
+    def maybe_single(self) -> "_FakeVersionsChain":
+        return self
+
+    async def execute(self) -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(data=self._data)
+
+
+class _FakeAdminClient:
+    def __init__(self, snapshot: Any) -> None:
+        self._snapshot = snapshot
+
+    def table(self, _name: str) -> _FakeVersionsChain:
+        return _FakeVersionsChain(self._snapshot)
+
+
+@pytest.mark.asyncio
+async def test_rollback_skill_writes_old_content_as_new_version(
+    client: AsyncClient,
+) -> None:
+    """POST /skills/{slug}/rollback/{n} loads the v{n} snapshot and calls
+    update_fields_versioned with the old body (+ content_md mirror) and a
+    rollback note."""
+    skill = _skill_row(slug="my-skill", is_public=False, project_id=42)
+    skill["current_version"] = 5
+    update_mock = AsyncMock(return_value=None)
+    skill_patches = _patch_skill_repo(
+        get_by_slug=AsyncMock(return_value=skill),
+        update_fields_versioned=update_mock,
+    )
+    snapshot = {"body_md": "OLD body", "frontmatter_json": {"k": "v"}}
+    admin_patch = patch(
+        "app.api.ai_library_router.get_async_supabase_admin",
+        AsyncMock(return_value=_FakeAdminClient(snapshot)),
+    )
+    _apply(skill_patches)
+    admin_patch.__enter__()
+    try:
+        resp = await client.post(f"{BASE}/skills/my-skill/rollback/3")
+    finally:
+        admin_patch.__exit__(None, None, None)
+        _cleanup(skill_patches)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["rolled_back_to"] == 3
+    assert body["notes"] == "rollback of v3"
+
+    # update_fields_versioned called with old content + content_md mirror + note
+    assert update_mock.await_count == 1
+    _, kwargs = update_mock.call_args
+    args = update_mock.call_args.args
+    updates = args[1]
+    assert updates["body_md"] == "OLD body"
+    assert updates["content_md"] == "OLD body"
+    assert updates["frontmatter_json"] == {"k": "v"}
+    assert kwargs["notes"] == "rollback of v3"
+
+
+@pytest.mark.asyncio
+async def test_rollback_skill_version_not_found(client: AsyncClient) -> None:
+    """Unknown version_number → 404."""
+    skill = _skill_row(slug="my-skill", is_public=False, project_id=42)
+    skill_patches = _patch_skill_repo(get_by_slug=AsyncMock(return_value=skill))
+    admin_patch = patch(
+        "app.api.ai_library_router.get_async_supabase_admin",
+        AsyncMock(return_value=_FakeAdminClient(None)),  # no snapshot row
+    )
+    _apply(skill_patches)
+    admin_patch.__enter__()
+    try:
+        resp = await client.post(f"{BASE}/skills/my-skill/rollback/99")
+    finally:
+        admin_patch.__exit__(None, None, None)
+        _cleanup(skill_patches)
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rollback_skill_system_preset_rejected(client: AsyncClient) -> None:
+    """System-preset skill (public + no project) → 403."""
+    skill = _skill_row(slug="script-outline", is_public=True, project_id=None)
+    skill_patches = _patch_skill_repo(get_by_slug=AsyncMock(return_value=skill))
+    _apply(skill_patches)
+    try:
+        resp = await client.post(f"{BASE}/skills/script-outline/rollback/2")
+    finally:
+        _cleanup(skill_patches)
+
+    assert resp.status_code == 403

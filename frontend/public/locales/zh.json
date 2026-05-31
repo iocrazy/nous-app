@@ -1401,8 +1401,7 @@
     "rollback": "回滚",
     "rollbackConfirm": "回滚到 v{{version}}？将创建新版本保留旧内容（审计可追溯）。",
     "rollbackDone": "已回滚",
-    "rollbackFailed": "回滚失败：{{message}}",
-    "rollbackNotSupported": "目前仅 agent 支持回滚"
+    "rollbackFailed": "回滚失败：{{message}}"
   },
   "tokenUsage": {
     "title": "Token 消费",
