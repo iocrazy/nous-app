@@ -22,6 +22,7 @@ async def search_resources(
     auth: AuthDep,
     q: str = Query("", max_length=128),
     kinds: Optional[str] = Query(None, description="csv of video,image,doc,audio,pdf"),
+    team_id: Optional[str] = Query(None, description="narrow to this team + personal"),
     limit: int = Query(20, ge=1, le=50),
 ) -> dict:
     """Search visible resources for the @-reference picker."""
@@ -39,6 +40,7 @@ async def search_resources(
         q=q,
         kinds=kinds_list or None,
         limit=limit,
+        scope_team_id=team_id,
     )
 
     results = []

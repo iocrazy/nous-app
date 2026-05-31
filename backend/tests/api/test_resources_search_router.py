@@ -51,3 +51,51 @@ def test_search_returns_results_and_counts():
     body = r.json()
     assert "results" in body and "counts" in body
     assert body["results"][0]["name"] == "story.md"
+
+
+def test_search_forwards_team_id_to_repo():
+    captured = {}
+
+    async def _fake(self, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    def _fake_auth() -> AuthContext:
+        return AuthContext(user_id="u", auth_type="jwt")
+
+    app.dependency_overrides[get_auth] = _fake_auth
+    try:
+        with patch(
+            "app.repositories.resources_repository.ResourcesRepository.list_accessible_for_user",
+            new=_fake,
+        ):
+            r = client.get("/api/v1/resources/search?q=story&team_id=900123")
+            assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_auth, None)
+
+    assert captured.get("scope_team_id") == "900123"
+
+
+def test_search_without_team_id_passes_none():
+    captured = {}
+
+    async def _fake(self, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    def _fake_auth() -> AuthContext:
+        return AuthContext(user_id="u", auth_type="jwt")
+
+    app.dependency_overrides[get_auth] = _fake_auth
+    try:
+        with patch(
+            "app.repositories.resources_repository.ResourcesRepository.list_accessible_for_user",
+            new=_fake,
+        ):
+            r = client.get("/api/v1/resources/search?q=story")
+            assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_auth, None)
+
+    assert captured.get("scope_team_id") is None
