@@ -365,6 +365,12 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
         ...filterParamsRef.current,
       });
       setResources(items);
+      // Post-mutation refreshers (incl. the batch toolbar) call this; if the
+      // user is in the Temp view its separate tempResources state must also
+      // re-fetch, otherwise batch ops leave the Temp view stale. The temp
+      // effect early-returns when not in the Temp view, so this is a no-op
+      // elsewhere.
+      setTempRefreshTick((t) => t + 1);
     } catch (err) {
       console.error('[ResourcesContext] reloadResources failed:', err);
     }
