@@ -181,3 +181,39 @@ async def serve_audio_file(
     except Exception as e:
         logger.error(f"Failed to serve audio for media {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve audio file")
+
+
+def extract_lyrics(row: dict) -> dict:
+    """Extract persisted lyrics from a parsed_media row's metadata.
+
+    Reads ``metadata.lyrics`` (stored by the Soda formatter as
+    ``{"lrc": str, "lines": [...]}``). Defensively handles missing or null
+    metadata / lyrics, always returning the ``{"lrc", "lines"}`` shape.
+    """
+    meta = (row or {}).get("metadata") or {}
+    lyrics = meta.get("lyrics") or {}
+    return {"lrc": lyrics.get("lrc", ""), "lines": lyrics.get("lines", [])}
+
+
+@router.get("/{media_id}/lyrics", tags=TAGS_MEDIA_CONTENT)
+async def get_media_lyrics(media_id: str, auth: AuthDep):
+    """
+    Get persisted lyrics for a media item.
+
+    - **media_id**: parsed_media Snowflake ID
+
+    Returns ``{"lrc": str, "lines": [...]}`` from ``parsed_media.metadata.lyrics``.
+    Empty lyrics (``{"lrc": "", "lines": []}``) when none are stored.
+    """
+    from app.repositories.media_repository import MediaRepository
+
+    try:
+        row = await MediaRepository().get_by_id(media_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="media not found")
+        return extract_lyrics(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get lyrics for media {media_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get lyrics")
