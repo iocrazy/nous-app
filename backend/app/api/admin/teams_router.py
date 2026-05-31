@@ -86,7 +86,8 @@ async def list_teams(
                 owner_username=owner_username,
                 invite_code=team["invite_code"],
                 description=team.get("description"),
-                is_personal=team.get("is_personal", False),
+                # PR-E dropped teams.is_personal; derive from teams.kind.
+                is_personal=team.get("kind") == "personal",
                 member_count=member_counts.get(tid, 0),
                 points_balance=points_balances.get(str(tid), 0),
                 enabled_modules=team.get("enabled_modules", ALL_MODULE_KEYS),
@@ -130,7 +131,8 @@ async def get_team(
         owner_username=owner_username,
         invite_code=team["invite_code"],
         description=team.get("description"),
-        is_personal=team.get("is_personal", False),
+        # PR-E dropped teams.is_personal; derive from teams.kind.
+        is_personal=team.get("kind") == "personal",
         member_count=member_count,
         points_balance=points_balance,
         enabled_modules=team.get("enabled_modules", ALL_MODULE_KEYS),
