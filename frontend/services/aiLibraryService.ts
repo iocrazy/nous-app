@@ -608,6 +608,14 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
+  async getSkillVersion(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
+    const resp = await fetch(
+      `${base()}/skills/${encodeURIComponent(slug)}/versions/${versionNumber}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
   async rollbackAgent(slug: string, versionNumber: number): Promise<Record<string, unknown>> {
     const resp = await fetch(
       `${base()}/agents/${encodeURIComponent(slug)}/rollback/${versionNumber}`,

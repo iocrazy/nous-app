@@ -505,3 +505,51 @@ async def test_rollback_skill_system_preset_rejected(client: AsyncClient) -> Non
         _cleanup(skill_patches)
 
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_skill_version_returns_body(client: AsyncClient) -> None:
+    """GET /skills/{slug}/versions/{n} returns the full snapshot body."""
+    skill = _skill_row(slug="my-skill", is_public=False, project_id=42)
+    skill_patches = _patch_skill_repo(get_by_slug=AsyncMock(return_value=skill))
+    snapshot = {
+        "id": str(uuid4()),
+        "version_number": 3,
+        "body_md": "OLD body text",
+        "frontmatter_json": {"k": "v"},
+        "notes": None,
+        "created_by": None,
+    }
+    admin_patch = patch(
+        "app.api.ai_library_router.get_async_supabase_admin",
+        AsyncMock(return_value=_FakeAdminClient(snapshot)),
+    )
+    _apply(skill_patches)
+    admin_patch.__enter__()
+    try:
+        resp = await client.get(f"{BASE}/skills/my-skill/versions/3")
+    finally:
+        admin_patch.__exit__(None, None, None)
+        _cleanup(skill_patches)
+
+    assert resp.status_code == 200
+    assert resp.json()["body_md"] == "OLD body text"
+
+
+@pytest.mark.asyncio
+async def test_get_skill_version_not_found(client: AsyncClient) -> None:
+    skill = _skill_row(slug="my-skill", is_public=False, project_id=42)
+    skill_patches = _patch_skill_repo(get_by_slug=AsyncMock(return_value=skill))
+    admin_patch = patch(
+        "app.api.ai_library_router.get_async_supabase_admin",
+        AsyncMock(return_value=_FakeAdminClient(None)),
+    )
+    _apply(skill_patches)
+    admin_patch.__enter__()
+    try:
+        resp = await client.get(f"{BASE}/skills/my-skill/versions/99")
+    finally:
+        admin_patch.__exit__(None, None, None)
+        _cleanup(skill_patches)
+
+    assert resp.status_code == 404

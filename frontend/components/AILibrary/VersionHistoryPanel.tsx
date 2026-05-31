@@ -41,6 +41,38 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState<number | null>(null);
+  // Skill version bodies are not in the list response — fetch lazily on expand
+  // so the user can preview what a rollback would restore (agents show
+  // model/temp metadata from the list row instead). Keyed by version id.
+  const [skillBodies, setSkillBodies] = useState<
+    Record<string, { loading: boolean; body: string | null }>
+  >({});
+
+  const fetchSkillBody = useCallback(
+    async (versionId: string, versionNumber: number) => {
+      setSkillBodies((prev) => ({ ...prev, [versionId]: { loading: true, body: null } }));
+      try {
+        const v = await aiLibraryService.getSkillVersion(slug, versionNumber);
+        const body = typeof v.body_md === 'string' ? v.body_md : '';
+        setSkillBodies((prev) => ({ ...prev, [versionId]: { loading: false, body } }));
+      } catch (err) {
+        console.error('[VersionHistoryPanel] getSkillVersion failed:', err);
+        setSkillBodies((prev) => ({ ...prev, [versionId]: { loading: false, body: null } }));
+      }
+    },
+    [slug],
+  );
+
+  const handleToggleExpand = useCallback(
+    (versionId: string, versionNumber: number) => {
+      const next = expandedId === versionId ? null : versionId;
+      setExpandedId(next);
+      if (next && kind === 'skill' && !skillBodies[versionId]) {
+        void fetchSkillBody(versionId, versionNumber);
+      }
+    },
+    [expandedId, kind, skillBodies, fetchSkillBody],
+  );
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -137,7 +169,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                   <div className="flex items-start gap-2">
                     <button
                       type="button"
-                      onClick={() => setExpandedId(isExpanded ? null : v.id)}
+                      onClick={() => handleToggleExpand(v.id, v.version_number)}
                       className="text-zinc-500 hover:text-zinc-300 mt-0.5"
                       title={isExpanded ? t('versionHistory.collapse') : t('versionHistory.expand')}
                     >
@@ -186,6 +218,23 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                             </div>
                             <div className="text-zinc-300">{v.max_tokens ?? '—'}</div>
                           </div>
+                        </div>
+                      )}
+                      {isExpanded && kind === 'skill' && (
+                        <div className="mt-2 bg-zinc-950/50 rounded p-2">
+                          {skillBodies[v.id]?.loading ? (
+                            <div className="text-[10px] text-zinc-500">
+                              {t('versionHistory.loading')}
+                            </div>
+                          ) : skillBodies[v.id]?.body ? (
+                            <pre className="text-[10px] text-zinc-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto font-mono">
+                              {skillBodies[v.id]?.body}
+                            </pre>
+                          ) : (
+                            <div className="text-[10px] text-zinc-500">
+                              {t('versionHistory.empty')}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
