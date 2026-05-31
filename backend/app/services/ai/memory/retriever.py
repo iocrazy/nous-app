@@ -48,6 +48,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_TOP_K_CANDIDATES = 10
 DEFAULT_TOP_N_FINAL = 5
 DEFAULT_CACHE_TTL_S = 300  # 5 minutes (plan-eng-review Issue 1.1)
+# Empty recall results get a much shorter TTL (AI-008): caching "no memories"
+# for the full 5 min means a user who rephrases 3s later still gets no recall.
+# 30s is long enough to absorb a burst of identical queries, short enough that
+# a rephrase re-runs the search.
+EMPTY_CACHE_TTL_S = 30
 
 _COSINE_WEIGHT = 0.7
 _SALIENCE_WEIGHT = 0.3
@@ -87,6 +92,7 @@ class MemoryRetriever:
     top_k: int = DEFAULT_TOP_K_CANDIDATES
     top_n: int = DEFAULT_TOP_N_FINAL
     cache_ttl_s: int = DEFAULT_CACHE_TTL_S
+    empty_cache_ttl_s: int = EMPTY_CACHE_TTL_S
 
     async def recall(
         self,
@@ -408,7 +414,10 @@ class MemoryRetriever:
             return
         try:
             payload = json.dumps([str(u) for u in ids])
-            await self.redis_client.set(key, payload, ex=self.cache_ttl_s)
+            # Empty results expire fast (AI-008) so a rephrase re-runs the
+            # search instead of being stuck behind a 5-min "no memories" cache.
+            ttl = self.empty_cache_ttl_s if not ids else self.cache_ttl_s
+            await self.redis_client.set(key, payload, ex=ttl)
         except Exception:  # noqa: BLE001
             logger.exception("[memory.retriever] redis set failed; ignoring")
 
