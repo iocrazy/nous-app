@@ -829,13 +829,22 @@ class DownloaderService:
                 f"[Carousel/Resource] Created resource {resource_id} for media {media_id}"
             )
 
-            # Create resource_item for user's personal scope
+            # Create resource_item for user's personal scope.
+            # scope_id MUST be the personal-team snowflake (bigint), not the
+            # user UUID — resource_items.scope_id became bigint in PR-E 4c-3,
+            # so writing the raw UUID now fails 22P02 and silently orphans the
+            # downloaded resource from the owner's library.
             if resource_id and user_id:
+                from app.services.library.resources_service import (
+                    _resolve_personal_team_id,
+                )
+
+                scope_id = await _resolve_personal_team_id(user_id)
                 await resources_repo.create_resource_item(
                     {
                         "resource_id": resource_id,
-                        "scope_type": "personal",
-                        "scope_id": user_id,
+                        # PR-E 4b: scope_type no longer written.
+                        "scope_id": scope_id,
                         "added_by": user_id,
                     }
                 )

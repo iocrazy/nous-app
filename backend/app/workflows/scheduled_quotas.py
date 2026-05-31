@@ -63,7 +63,7 @@ async def grant_daily_free_points_step() -> dict[str, Any]:
     today = datetime.now(timezone.utc).date()  # DATE column → bind a date object
 
     personal_teams = await db_engine.fetch_all(
-        "SELECT id, owner_id FROM public.teams WHERE is_personal = true"
+        "SELECT id, owner_id FROM public.teams WHERE kind = 'personal'"
     )
 
     points_svc = PointsService()

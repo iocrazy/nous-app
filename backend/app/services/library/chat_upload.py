@@ -64,12 +64,21 @@ async def resolve_chat_scope(
 
     * ``("team", str(team_id))`` — when *session_id* resolves to a
       team-scoped session (``ai_sessions.team_id IS NOT NULL``).
-    * ``("personal", str(user_id))`` — for personal sessions or when no
-      session context is available.
+    * ``("personal", str(personal_team_id))`` — for personal sessions or
+      when no session context is available.
+
+    ``scope_id`` is always a ``teams.id`` snowflake (bigint), never the user
+    UUID: it feeds ``folders.scope_id`` / ``resource_items.scope_id`` which
+    became bigint in PR-E 4c-3, so the personal branch resolves the user's
+    personal team rather than returning the raw UUID (which fails 22P02).
 
     The returned tuple is intentionally immutable (a plain tuple) so callers
     can pass it directly to ``ResourcesService.upload_resource``.
     """
+    from app.services.library.resources_service import (  # noqa: PLC0415
+        _resolve_personal_team_id,
+    )
+
     if session_id:
         try:
             team_id = await _get_session_team_id(session_id)
@@ -81,7 +90,7 @@ async def resolve_chat_scope(
             team_id = None
         if team_id is not None:
             return ("team", str(team_id))
-    return ("personal", str(user_id))
+    return ("personal", await _resolve_personal_team_id(user_id))
 
 
 # ------------------------------------------------------------------ #
@@ -156,7 +165,7 @@ async def _ensure_temp_folder(scope_type: str, scope_id: str, user_id: str) -> s
     created = await repo.create_folder(
         {
             "name": TEMP_FOLDER_NAME,
-            "scope_type": scope_type,
+            # PR-E 4b: scope_type no longer written (nullable post mig 240).
             "scope_id": scope_id,
             "created_by": str(user_id),
             # parent_id, icon, color intentionally omitted → DB defaults (NULL)

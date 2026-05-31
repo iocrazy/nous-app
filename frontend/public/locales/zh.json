@@ -1335,6 +1335,16 @@
       "trigger_time": "Scheduled",
       "trigger_event": "Event",
       "trigger_next_session": "Next session"
+    },
+    "mentionPicker": {
+      "all": "全部",
+      "video": "视频",
+      "image": "图片",
+      "doc": "文档",
+      "audio": "音频",
+      "pdf": "PDF",
+      "noResults": "没有匹配 \"{{q}}\" 的资源",
+      "hintKbd": "↑↓ 选择 · ↵ 插入 · Esc 取消"
     }
   },
   "mcp": {

@@ -64,27 +64,127 @@ async def _require_admin(auth: AuthDep) -> None:
 # ============================================
 
 
+async def _ensure_personal_team_bootstrap(user_id: str) -> Optional[str]:
+    """Defensively re-run handle_new_user's setup if the auth trigger
+    didn't fire.
+
+    The DB-level ``on_auth_user_created`` trigger (mig 001 / mig 239) is
+    supposed to create user_profiles + personal team + team_members on
+    every auth.users INSERT. If that trigger is ever dropped again (it
+    has been once — recovery doc in mig 239) signups silently land in
+    auth.users with nothing else. This helper checks the post-trigger
+    invariants and fills them in via service-role writes if needed, so
+    the welcome-bonus path further down has a team to attach to.
+
+    Idempotent: the underlying constraints (uq_teams_owner_personal
+    partial index, user_profiles PK, team_members PK) make duplicate
+    INSERTs no-ops.
+
+    Returns the personal team_id, or None if the user genuinely doesn't
+    exist in auth.users.
+    """
+    client = await get_async_supabase_admin()
+
+    # 1. Probe for an existing personal team via team_members.
+    member_result = (
+        await client.schema("public")
+        .table("team_members")
+        .select("team_id, teams!inner(id, kind)")
+        .eq("user_id", user_id)
+        .eq("teams.kind", "personal")
+        .limit(1)
+        .execute()
+    )
+    if member_result.data:
+        return str(member_result.data[0]["team_id"])
+
+    # 2. No personal team — read the auth user to mirror handle_new_user's
+    #    username derivation.
+    auth_result = (
+        await client.schema("auth")
+        .table("users")
+        .select("id, email, raw_user_meta_data")
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not auth_result.data:
+        logger.warning(f"[bootstrap] auth.users row missing for {user_id} — skipping")
+        return None
+    user = auth_result.data[0]
+    raw = user.get("raw_user_meta_data") or {}
+    username = raw.get("username") or (user.get("email") or "").split("@")[0]
+    if not username:
+        username = "user"
+
+    # 3. Backfill user_profiles (idempotent via PK).
+    try:
+        await (
+            client.schema("public")
+            .table("user_profiles")
+            .upsert({"id": user_id, "username": username, "role": "user"})
+            .execute()
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[bootstrap] user_profiles upsert failed: {e}")
+
+    # 4. Insert the personal team. teams_add_owner_trigger (mig 009)
+    #    adds the team_members row automatically. The
+    #    uq_teams_owner_personal partial index blocks a second personal
+    #    team for the same owner so this stays idempotent under racing
+    #    callers.
+    team_payload = {
+        "name": f"{username}'s Workspace",
+        "owner_id": user_id,
+        "kind": "personal",
+    }
+    try:
+        team_insert = (
+            await client.schema("public").table("teams").insert(team_payload).execute()
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"[bootstrap] teams INSERT failed (race or unique violation?): {e}"
+        )
+        team_insert = None
+
+    if team_insert and team_insert.data:
+        team_id = str(team_insert.data[0]["id"])
+        logger.info(
+            f"[bootstrap] re-created personal team {team_id} for {user_id} "
+            "(auth trigger had not fired)"
+        )
+        return team_id
+
+    # 5. INSERT raced or partially succeeded — re-query to pick up the
+    #    row a parallel caller (or the trigger) wrote.
+    repick = (
+        await client.schema("public")
+        .table("teams")
+        .select("id")
+        .eq("owner_id", user_id)
+        .eq("kind", "personal")
+        .limit(1)
+        .execute()
+    )
+    if repick.data:
+        return str(repick.data[0]["id"])
+    return None
+
+
 async def _create_team_quota_for_new_user(user_id: str) -> None:
     """Look up the user's team and create a quota with free welcome points.
 
     This runs as a background task so it never blocks the signup response.
     """
     try:
-        client = await get_async_supabase_admin()
-        team_result = (
-            await client.table("team_members")
-            .select("team_id")
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if not team_result.data:
+        team_id = await _ensure_personal_team_bootstrap(user_id)
+        if not team_id:
             logger.info(
-                f"No team found for new user {user_id} – skipping quota creation"
+                f"No personal team for new user {user_id} – skipping quota " "creation"
             )
             return
 
-        team_id = team_result.data[0]["team_id"]
         points_service = PointsService()
         await points_service.ensure_team_quota(
             team_id, grant_free_points=True, user_id=user_id

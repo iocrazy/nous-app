@@ -275,7 +275,6 @@ export interface Folder {
   name: string;
   parent_id: string | null;
   library_id: string | null;
-  scope_type: 'personal' | 'team';
   scope_id: string;
   created_by: string;
   sort_order: number;
@@ -348,7 +347,6 @@ export interface Resource {
 export interface ResourceItem {
   id: string;
   resource_id: string;
-  scope_type: 'personal' | 'team';
   scope_id: string;
   folder_id: string | null;
   library_id: string | null;
@@ -1391,3 +1389,32 @@ export interface ChatResponse {
   run_id?: string | null;
   tool_calls?: ChatToolCall[];
 }
+
+/** Reference attachment for chat composer @-mention.
+ *  Body shape mirrors the backend `resource_ref` resolver expectation.
+ */
+export type ResourceRefAttachment = {
+  kind: 'resource_ref';
+  resource_id: string;        // BIGINT serialized as string (Snowflake)
+  name: string;               // snapshot — UI uses this even if resource deleted later
+  mime: string;
+  scope: { type: 'personal' | 'team'; id: string };
+};
+
+/** Search result row from GET /api/v1/resources/search */
+export type ResourceSearchResult = {
+  id: string;
+  name: string;
+  kind: 'video' | 'image' | 'doc' | 'audio' | 'pdf';
+  mime: string | null;
+  size: number | null;
+  scope: { type: 'personal' | 'team'; id: string };
+  updated_at: string;
+  thumbnail_url: string | null;
+};
+
+export type ResourceSearchResponse = {
+  results: ResourceSearchResult[];
+  counts: { all: number; video: number; image: number; doc: number; audio: number; pdf: number };
+  next_cursor: string | null;
+};

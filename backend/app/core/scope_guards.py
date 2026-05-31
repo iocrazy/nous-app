@@ -22,43 +22,33 @@ from app.db.supabase_client import get_async_supabase_admin
 
 async def verify_scope_access(
     auth: AuthContext = Depends(get_auth),
-    scope_type: str = Query(...),
     scope_id: str = Query(...),
 ) -> None:
-    """Guard for `?scope_type=&scope_id=` upload targets (resources library).
+    """Guard for `?scope_id=` write targets (resources library).
 
-    - personal: scope_id must equal the caller's own user_id.
-    - team:     caller must be a member of the team.
+    After Spec 1 PR-C, ``scope_id`` is always a ``teams.id`` snowflake —
+    personal scopes resolve to the user's auto-created single-member
+    personal team. Authorization collapses to a single check: the caller
+    must be a member of the team.
+
+    PR-E Phase 3: the vestigial ``scope_type`` query param has been
+    dropped entirely. FastAPI ignores any leftover ``scope_type=`` a stale
+    client still sends, so this is backward-compatible.
     """
-    if scope_type == "personal":
-        if scope_id != auth.user_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Cannot write to another user's personal scope",
-            )
-        return
-
-    if scope_type == "team":
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("team_members")
-            .select("team_id")
-            .eq("team_id", scope_id)
-            .eq("user_id", auth.user_id)
-            .limit(1)
-            .execute()
-        )
-        if not result.data:
-            raise HTTPException(
-                status_code=403,
-                detail="You are not a member of this team",
-            )
-        return
-
-    raise HTTPException(
-        status_code=422,
-        detail=f"Invalid scope_type: {scope_type!r} (expected 'personal' or 'team')",
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("team_members")
+        .select("team_id")
+        .eq("team_id", scope_id)
+        .eq("user_id", auth.user_id)
+        .limit(1)
+        .execute()
     )
+    if not result.data:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a member of this scope",
+        )
 
 
 async def verify_project_write_access(

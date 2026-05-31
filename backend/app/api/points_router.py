@@ -56,7 +56,7 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
             await client.table("teams")
             .select("id")
             .eq("owner_id", user_id)
-            .eq("is_personal", True)
+            .eq("kind", "personal")
             .limit(1)
             .execute()
         )
@@ -98,7 +98,7 @@ async def _auto_create_personal_team(user_id: str) -> str:
         await client.table("teams")
         .select("id")
         .eq("owner_id", user_id)
-        .eq("is_personal", True)
+        .eq("kind", "personal")
         .limit(1)
         .execute()
     )
@@ -148,7 +148,7 @@ async def _auto_create_personal_team(user_id: str) -> str:
                 "name": f"{username}'s Workspace",
                 "owner_id": user_id,
                 "invite_code": invite_code,
-                "is_personal": True,
+                "kind": "personal",
             }
         )
         .execute()

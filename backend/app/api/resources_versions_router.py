@@ -90,7 +90,7 @@ async def upload_version(
                     resource_id=resource_id,
                     file_path=result["file_path"],
                     mime_type=result.get("mime_type", ""),
-                    scope_type=item.get("scope_type", "personal"),
+                    # PR-E 4c: scope_type dropped; generate_thumbnail ignores it.
                     scope_id=item.get("scope_id", ""),
                 )
 

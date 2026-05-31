@@ -19,7 +19,7 @@ interface FolderPickerModalProps {
   onClose: () => void;
   onConfirm: (targetFolderId: string | null, targetLibraryId?: string | null) => void;
   mode: 'copy' | 'move';
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   scopeId: string;
   currentLibraryId?: string | null;
   excludeFolderIds?: string[];
@@ -100,7 +100,7 @@ function getFileIcon(mediaType?: string) {
 
 // ── Main Component ──
 export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
-  isOpen, onClose, onConfirm, mode, scopeType, scopeId,
+  isOpen, onClose, onConfirm, mode, isPersonal, scopeId,
   currentLibraryId, excludeFolderIds = [], movingItems = [],
 }) => {
   const { t } = useTranslation();
@@ -118,18 +118,18 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
 
   const loadFolders = useCallback(async () => {
     try {
-      const data = await fetchFolders(scopeType, scopeId, selectedLibraryId);
+      const data = await fetchFolders(scopeId, isPersonal, selectedLibraryId);
       setFolders(data);
     } catch { /* ignore */ }
-  }, [scopeType, scopeId, selectedLibraryId]);
+  }, [isPersonal, scopeId, selectedLibraryId]);
 
   useEffect(() => {
     if (!isOpen) return;
     loadFolders();
-    if (scopeType === 'team') {
+    if (!isPersonal) {
       fetchLibraries(scopeId).then(setLibraries).catch(() => {});
     }
-  }, [isOpen, loadFolders, scopeType, scopeId]);
+  }, [isOpen, loadFolders, isPersonal, scopeId]);
 
   useEffect(() => {
     if (creatingFolder && newFolderRef.current) {
@@ -170,14 +170,13 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
       await createFolder({
         name: newFolderName.trim(),
         parent_id: selectedFolderId,
-        scope_type: scopeType,
         scope_id: scopeId,
       });
       setNewFolderName('');
       setCreatingFolder(false);
       await loadFolders();
     } catch { /* ignore */ }
-  }, [newFolderName, selectedFolderId, scopeType, scopeId, loadFolders]);
+  }, [newFolderName, selectedFolderId, isPersonal, scopeId, loadFolders]);
 
   // Derive right-panel content: subfolders of selected folder
   const rightPanelFolders = useMemo(() => {
@@ -300,7 +299,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
 
             <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
               {/* Libraries section */}
-              {scopeType === 'team' && libraries.length > 0 && (
+              {!isPersonal && libraries.length > 0 && (
                 <>
                   <div className="px-2 pt-1 pb-1">
                     <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Libraries</span>
@@ -333,7 +332,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
               {/* Root */}
               <div
                 className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all text-sm select-none ${
-                  selectedFolderId === null && (scopeType !== 'team' || libraries.length === 0)
+                  selectedFolderId === null && (isPersonal || libraries.length === 0)
                     ? 'bg-indigo-500/20 text-indigo-300'
                     : 'hover:bg-zinc-800/80 text-zinc-400 hover:text-zinc-200'
                 }`}

@@ -51,7 +51,7 @@ class PermissionRepository:
             client = await self._get_client()
             result = (
                 await client.table("folders")
-                .select("id, parent_id, scope_type, scope_id, visibility")
+                .select("id, parent_id, scope_id, visibility")
                 .eq("id", folder_id)
                 .limit(1)
                 .execute()
@@ -111,7 +111,7 @@ class PermissionRepository:
             client = await self._get_client()
             result = (
                 await client.table("resource_items")
-                .select("scope_type, scope_id, folder_id")
+                .select("scope_id, folder_id")
                 .eq("resource_id", resource_id)
                 .limit(1)
                 .execute()

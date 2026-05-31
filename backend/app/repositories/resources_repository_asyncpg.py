@@ -252,33 +252,30 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     async def find_resource_item(
         self,
         resource_id: str,
-        scope_type: str,
+        scope_type: Optional[str],
         scope_id: str,
         folder_id: str | None = None,
     ) -> dict | None:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             if folder_id:
                 return await self.fetch_one(
                     "SELECT * FROM resource_items "
                     "WHERE resource_id = $1 "
-                    "  AND scope_type = $2 "
-                    "  AND scope_id = $3 "
-                    "  AND folder_id = $4 "
+                    "  AND scope_id = $2 "
+                    "  AND folder_id = $3 "
                     "LIMIT 1",
                     self._bigint(resource_id),
-                    scope_type,
                     scope_id,
                     self._bigint(folder_id),
                 )
             return await self.fetch_one(
                 "SELECT * FROM resource_items "
                 "WHERE resource_id = $1 "
-                "  AND scope_type = $2 "
-                "  AND scope_id = $3 "
+                "  AND scope_id = $2 "
                 "  AND folder_id IS NULL "
                 "LIMIT 1",
                 self._bigint(resource_id),
-                scope_type,
                 scope_id,
             )
         except Exception as e:
@@ -297,7 +294,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             row = await self.fetch_one(sql, *data.values())
             logger.info(
                 f"Created resource_item for resource {data.get('resource_id')} "
-                f"in {data.get('scope_type')}/{data.get('scope_id')}"
+                f"in scope {data.get('scope_id')}"
             )
             return row or {}
         except Exception as e:
@@ -364,17 +361,16 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             return []
 
     async def get_resource_item(
-        self, resource_id: str, scope_type: str, scope_id: str
+        self, resource_id: str, scope_type: Optional[str], scope_id: str
     ) -> Optional[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             return await self.fetch_one(
                 "SELECT * FROM resource_items "
                 "WHERE resource_id = $1 "
-                "  AND scope_type = $2 "
-                "  AND scope_id = $3 "
+                "  AND scope_id = $2 "
                 "LIMIT 1",
                 self._bigint(resource_id),
-                scope_type,
                 scope_id,
             )
         except Exception as e:
@@ -384,33 +380,30 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     async def get_resource_item_in_folder(
         self,
         resource_id: str,
-        scope_type: str,
+        scope_type: Optional[str],
         scope_id: str,
         folder_id: str | None,
     ) -> Optional[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             if folder_id:
                 return await self.fetch_one(
                     "SELECT * FROM resource_items "
                     "WHERE resource_id = $1 "
-                    "  AND scope_type = $2 "
-                    "  AND scope_id = $3 "
-                    "  AND folder_id = $4 "
+                    "  AND scope_id = $2 "
+                    "  AND folder_id = $3 "
                     "LIMIT 1",
                     self._bigint(resource_id),
-                    scope_type,
                     scope_id,
                     self._bigint(folder_id),
                 )
             return await self.fetch_one(
                 "SELECT * FROM resource_items "
                 "WHERE resource_id = $1 "
-                "  AND scope_type = $2 "
-                "  AND scope_id = $3 "
+                "  AND scope_id = $2 "
                 "  AND folder_id IS NULL "
                 "LIMIT 1",
                 self._bigint(resource_id),
-                scope_type,
                 scope_id,
             )
         except Exception as e:
@@ -529,8 +522,8 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
 
     async def get_resource_items(
         self,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: Optional[str] = None,
         include_trashed: bool = False,
         tag_ids: Optional[List[str]] = None,
@@ -587,8 +580,9 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             # Build dynamic WHERE. Each conditional appends a clause
             # and a $N param. Order matters: same-numbered placeholders
             # must match args[] index 1:1.
-            where: List[str] = ["i.scope_type = $1", "i.scope_id = $2"]
-            args: List[Any] = [scope_type, scope_id]
+            # PR-E Phase 1: scope_type no longer filters (scope_id is unique).
+            where: List[str] = ["i.scope_id = $1"]
+            args: List[Any] = [scope_id]
 
             def _ph() -> str:
                 return f"${len(args) + 1}"
@@ -660,7 +654,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             )
 
             sql = (
-                "SELECT i.id, i.resource_id, i.scope_type, i.scope_id, "
+                "SELECT i.id, i.resource_id, i.scope_id, "
                 "       i.folder_id, "
                 "       i.created_at AS i_created_at, "
                 "       i.updated_at AS i_updated_at, "
@@ -705,7 +699,7 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             return []
 
     async def get_trashed_resources(
-        self, scope_type: str, scope_id: str
+        self, scope_type: Optional[str], scope_id: str
     ) -> List[Dict[str, Any]]:
         """Trashed resources in a scope. JOIN with resources, re-shape
         flat row → ``{item_columns..., resource: {...}}`` to match the
@@ -718,17 +712,15 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
 
         try:
             rows = await self.fetch_all(
-                "SELECT i.id, i.resource_id, i.scope_type, i.scope_id, "
+                "SELECT i.id, i.resource_id, i.scope_id, "
                 "       i.folder_id, i.created_at AS i_created_at, "
                 "       i.updated_at AS i_updated_at, "
                 "       row_to_json(r.*) AS resource "
                 "FROM resource_items i "
                 "INNER JOIN resources r ON i.resource_id = r.id "
-                "WHERE i.scope_type = $1 "
-                "  AND i.scope_id = $2 "
+                "WHERE i.scope_id = $1 "
                 "  AND r.is_trashed = true "
                 "ORDER BY i.created_at DESC",
-                scope_type,
                 scope_id,
             )
             for row in rows:
@@ -748,19 +740,28 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
     # version_number column is monotonic per resource_id; reads almost
     # always sort DESC to get the latest first.
 
+    # resource_versions BIGINT columns that snowflake ids travel into as
+    # strings from FastAPI / Pydantic. asyncpg refuses to cast str → int8
+    # so coerce at the boundary or every download.finalize backfill 500s.
+    _VERSION_BIGINT_COLS = ("resource_id", "file_size_bytes")
+
     async def create_version(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            cols = list(data.keys())
+            coerced = {
+                k: (self._bigint(v) if k in self._VERSION_BIGINT_COLS else v)
+                for k, v in data.items()
+            }
+            cols = list(coerced.keys())
             placeholders = ", ".join(f"${i + 1}" for i in range(len(cols)))
             col_list = ", ".join(f'"{c}"' for c in cols)
             sql = (
                 f'INSERT INTO "resource_versions" ({col_list}) '
                 f"VALUES ({placeholders}) RETURNING *"
             )
-            row = await self.fetch_one(sql, *data.values())
+            row = await self.fetch_one(sql, *coerced.values())
             logger.info(
-                f"Created version {data.get('version_number')} "
-                f"for resource {data.get('resource_id')}"
+                f"Created version {coerced.get('version_number')} "
+                f"for resource {coerced.get('resource_id')}"
             )
             return row or {}
         except Exception as e:
@@ -896,16 +897,15 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             raise
 
     async def get_trashed_folders(
-        self, scope_type: str, scope_id: str
+        self, scope_type: Optional[str], scope_id: str
     ) -> List[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             return await self.fetch_all(
                 "SELECT * FROM folders "
-                "WHERE scope_type = $1 "
-                "  AND scope_id = $2 "
+                "WHERE scope_id = $1 "
                 "  AND is_trashed = true "
                 "ORDER BY trashed_at DESC",
-                scope_type,
                 scope_id,
             )
         except Exception as e:
@@ -914,26 +914,24 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
 
     async def get_folders(
         self,
-        scope_type: str,
+        scope_type: Optional[str],
         scope_id: str,
         include_trashed: bool = False,
     ) -> List[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             if include_trashed:
                 return await self.fetch_all(
                     "SELECT * FROM folders "
-                    "WHERE scope_type = $1 AND scope_id = $2 "
+                    "WHERE scope_id = $1 "
                     "ORDER BY sort_order ASC",
-                    scope_type,
                     scope_id,
                 )
             return await self.fetch_all(
                 "SELECT * FROM folders "
-                "WHERE scope_type = $1 "
-                "  AND scope_id = $2 "
+                "WHERE scope_id = $1 "
                 "  AND is_trashed = false "
                 "ORDER BY sort_order ASC",
-                scope_type,
                 scope_id,
             )
         except Exception as e:

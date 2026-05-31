@@ -62,7 +62,7 @@ export function TempResourceActions({ resourceId, scopeType, scopeId, onDone }: 
       <FolderPickerModal
         isOpen={pickerOpen}
         mode="move"
-        scopeType={scopeType}
+        isPersonal={scopeType === 'personal'}
         scopeId={scopeId}
         onClose={() => setPickerOpen(false)}
         onConfirm={(folderId) => {

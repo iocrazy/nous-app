@@ -32,6 +32,45 @@ from app.core.file_utils import (
 from app.repositories.resources_repository import ResourcesRepository
 
 
+async def _resolve_personal_team_id(user_id: str) -> str:
+    """Return the snowflake of the user's personal team.
+
+    After Spec 1 PR-C, ``resource_items.scope_id`` is always a
+    ``teams.id`` snowflake. Legacy call sites that defaulted to
+    ``scope_id or user_id`` (UUID) need this translation when scope_id
+    is omitted.
+    """
+    from app.db import engine as db_engine
+
+    row = await db_engine.fetch_one(
+        "SELECT id::text AS id FROM public.teams "
+        "WHERE owner_id::text = :uid AND kind = 'personal' "
+        "LIMIT 1",
+        {"uid": user_id},
+    )
+    if not row:
+        raise ValueError(f"No personal team found for user {user_id}")
+    return row["id"]
+
+
+async def _scope_type_for(scope_id: str) -> str:
+    """Derive the legacy ``scope_type`` literal from a team's ``kind``.
+
+    PR-E Phase 1: the frontend is being weaned off sending ``scope_type``.
+    The ``resource_items`` / ``folders`` columns are still ``NOT NULL CHECK
+    IN ('personal','team')`` until Phase 4, so every INSERT must supply a
+    value. We derive it from the target team's ``kind`` (the single source
+    of truth post PR-C) rather than trusting a client-supplied hint.
+    """
+    from app.db import engine as db_engine
+
+    row = await db_engine.fetch_one(
+        "SELECT kind FROM public.teams WHERE id::text = :sid",
+        {"sid": str(scope_id)},
+    )
+    return "personal" if (row and row["kind"] == "personal") else "team"
+
+
 class ResourcesService:
     """Resource library business logic"""
 
@@ -46,8 +85,8 @@ class ResourcesService:
         self,
         user_id: str,
         file,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: Optional[str] = None,
         library_id: Optional[str] = None,
     ) -> dict:
@@ -140,10 +179,11 @@ class ResourcesService:
         }
         await self.repo.create_version(version_data)
 
-        # Create resource_item for scope
+        # Create resource_item for scope. PR-E Phase 4b: no longer write
+        # scope_type (column is nullable post mig 240, dropped in 4c); scope_id
+        # alone locates the scope.
         item_data = {
             "resource_id": resource_id,
-            "scope_type": scope_type,
             "scope_id": scope_id,
             "folder_id": folder_id,
             "library_id": library_id,
@@ -358,15 +398,14 @@ class ResourcesService:
 
         if existing:
             # Zero-copy: just add a resource_item reference
-            target_scope_id = scope_id or user_id
+            target_scope_id = scope_id or await _resolve_personal_team_id(user_id)
             item = await self.repo.get_resource_item(
-                existing["id"], scope_type, target_scope_id
+                existing["id"], None, target_scope_id
             )
             if not item:
                 await self.repo.create_resource_item(
                     {
                         "resource_id": existing["id"],
-                        "scope_type": scope_type,
                         "scope_id": target_scope_id,
                         "added_by": user_id,
                     }
@@ -407,11 +446,10 @@ class ResourcesService:
         resource = await self.repo.create_resource(resource_data)
 
         # Create resource_item for user's personal scope
-        target_scope_id = scope_id or user_id
+        target_scope_id = scope_id or await _resolve_personal_team_id(user_id)
         await self.repo.create_resource_item(
             {
                 "resource_id": resource["id"],
-                "scope_type": scope_type,
                 "scope_id": target_scope_id,
                 "added_by": user_id,
             }
@@ -427,15 +465,22 @@ class ResourcesService:
         self,
         resource_id: str,
         user_id: str,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: str | None = None,
     ) -> bool:
         """
         Remove a resource from a specific folder by deleting the resource_item.
         Saves last location on the resource for restore.
         The DB trigger auto-trashes the resource if this was the last reference.
+
+        PR-E Phase 1: ``scope_type`` is derived from ``scope_id`` when the
+        caller no longer supplies it, so the ``last_scope_type`` snapshot
+        stays accurate for restore.
         """
+        if scope_type is None:
+            scope_type = await _scope_type_for(scope_id)
+
         if folder_id is not None:
             item = await self.repo.get_resource_item_in_folder(
                 resource_id, scope_type, scope_id, folder_id
@@ -465,13 +510,18 @@ class ResourcesService:
         if resource["creator_id"] != user_id:
             raise PermissionError("Only the creator can trash this resource")
 
+        # last_scope_id remembers where to restore to. It feeds
+        # resource_items.scope_id (bigint, PR-E 4c-3) on restore, so it must be
+        # the personal-team snowflake — not the user UUID, which would fail
+        # 22P02 when restored.
+        last_scope_id = await _resolve_personal_team_id(user_id)
         return await self.repo.update_resource(
             resource_id,
             {
                 "is_trashed": True,
                 "trashed_at": datetime.now(timezone.utc).isoformat(),
                 "last_scope_type": "personal",
-                "last_scope_id": user_id,
+                "last_scope_id": last_scope_id,
             },
         )
 
@@ -484,11 +534,19 @@ class ResourcesService:
         if not resource.get("is_trashed"):
             raise ValueError("Resource is not in trash")
 
-        # Determine restore location
+        # Determine restore location (last_scope_type is no longer needed —
+        # PR-E 4b stopped writing resource_items.scope_type; scope_id locates it)
         folder_id = resource.get("last_folder_id")
         library_id = resource.get("last_library_id")
-        scope_type = resource.get("last_scope_type") or "personal"
-        scope_id = resource.get("last_scope_id") or user_id
+        # last_scope_id is a text column and legacy rows stored a user UUID
+        # there; only a numeric value is a valid teams.id (bigint) for
+        # resource_items.scope_id (PR-E 4c-3). Fall back to the personal team
+        # for UUID / missing values so restore can't fail with 22P02.
+        last_scope = resource.get("last_scope_id")
+        if last_scope is not None and str(last_scope).isdigit():
+            scope_id = str(last_scope)
+        else:
+            scope_id = await _resolve_personal_team_id(user_id)
 
         # If last_folder_id references a trashed/deleted folder, clear it
         if folder_id:
@@ -509,7 +567,6 @@ class ResourcesService:
         await self.repo.create_resource_item(
             {
                 "resource_id": resource_id,
-                "scope_type": scope_type,
                 "scope_id": scope_id,
                 "folder_id": folder_id,
                 "library_id": library_id,
@@ -731,10 +788,12 @@ class ResourcesService:
         self,
         resource_id: str,
         user_id: str,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: Optional[str] = None,
     ) -> dict:
+        # PR-E Phase 1: scope_type no longer filters the lookup (scope_id is
+        # globally unique); accepted for compatibility but unused here.
         item = await self.repo.get_resource_item(resource_id, scope_type, scope_id)
         if not item:
             raise ValueError("Resource not found in this scope")

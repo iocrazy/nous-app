@@ -71,22 +71,25 @@ async def test_sweep_scope_no_temp_folder_skips(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_iter_scopes_yields_all_personal_and_team(monkeypatch):
-    """The sweeper iterates every user with a temp folder + every team.
+    """The sweeper enumerates every scope that owns a temp folder.
 
-    Both scope queries alias the result column as ``scope_id`` so the
-    iterator reads it uniformly.
+    PR-E 4c: a single query lists all temp folders and derives scope_type
+    from teams.kind (folders.scope_type is being dropped). The iterator yields
+    the (scope_type, scope_id) pairs from that query verbatim.
     """
     fake_fetch = AsyncMock(
-        side_effect=[
-            [{"scope_id": "u1"}, {"scope_id": "u2"}],
-            [{"scope_id": "42"}, {"scope_id": "99"}],
+        return_value=[
+            {"scope_id": "pt1", "scope_type": "personal"},
+            {"scope_id": "pt2", "scope_type": "personal"},
+            {"scope_id": "42", "scope_type": "team"},
+            {"scope_id": "99", "scope_type": "team"},
         ]
     )
-    monkeypatch.setattr(m, "_fetch_scopes_with_temp", fake_fetch)
+    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch)
     scopes = [s async for s in m._iter_scopes()]
     assert set(scopes) == {
-        ("personal", "u1"),
-        ("personal", "u2"),
+        ("personal", "pt1"),
+        ("personal", "pt2"),
         ("team", "42"),
         ("team", "99"),
     }

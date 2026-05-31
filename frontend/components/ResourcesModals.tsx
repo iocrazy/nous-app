@@ -32,7 +32,7 @@ interface ResourcesModalsProps {
   folderPickerMode: 'copy' | 'move' | null;
   operationTargetItems: ResourceItem[];
   operationTargetFolders: Folder[];
-  scopeType: 'personal' | 'team';
+  isPersonal: boolean;
   scopeId: string;
   selectedLibraryId: string | null | undefined;
   onCloseFolderPicker: () => void;
@@ -61,7 +61,7 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
   folderPickerMode,
   operationTargetItems,
   operationTargetFolders,
-  scopeType,
+  isPersonal,
   scopeId,
   selectedLibraryId,
   onCloseFolderPicker,
@@ -112,7 +112,7 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
           onClose={onCloseFolderPicker}
           onConfirm={onConfirmFolderPicker}
           mode={folderPickerMode}
-          scopeType={scopeType}
+          isPersonal={isPersonal}
           scopeId={scopeId}
           currentLibraryId={selectedLibraryId}
           excludeFolderIds={operationTargetFolders.map((f) => f.id)}

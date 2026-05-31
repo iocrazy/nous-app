@@ -117,14 +117,15 @@ function AppLayoutInner() {
     setIsMobileProfileOpen(false);
   };
 
-  // Load libraries + smart folders for mobile Resources popup
+  // Load libraries + smart folders for mobile Resources popup.
+  // After Spec 1 PR-C, scope_id is the personal-team snowflake (not the
+  // user UUID), so personal mode passes selectedTeamId (which equals
+  // personalTeamId in this branch) rather than currentUserId.
   useEffect(() => {
     if (!isResourcesMenuOpen || !selectedTeamId) return;
-    const scopeId = selectedTeamId === personalTeamId ? (currentUserId || '') : selectedTeamId;
-    const scopeType = selectedTeamId === personalTeamId ? 'personal' : 'team';
-    fetchLibraries(scopeId).then(setMobileLibraries).catch(() => setMobileLibraries([]));
-    fetchSmartFolders(scopeType, scopeId).then(setMobileSmartFolders).catch(() => setMobileSmartFolders([]));
-  }, [isResourcesMenuOpen, selectedTeamId, personalTeamId, currentUserId]);
+    fetchLibraries(selectedTeamId).then(setMobileLibraries).catch(() => setMobileLibraries([]));
+    fetchSmartFolders(selectedTeamId).then(setMobileSmartFolders).catch(() => setMobileSmartFolders([]));
+  }, [isResourcesMenuOpen, selectedTeamId, personalTeamId]);
 
   // Sidebar collapse state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {

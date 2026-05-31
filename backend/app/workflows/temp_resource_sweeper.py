@@ -31,34 +31,30 @@ def _build_repo():
     return ResourcesRepository()
 
 
-async def _fetch_scopes_with_temp(scope_type: str) -> list[dict]:
-    """Return scope rows that own at least one non-trashed ``temp`` folder.
+async def _iter_scopes() -> AsyncIterator[Tuple[str, str]]:
+    """Yield ``(scope_type, scope_id)`` pairs for all scopes with a temp folder.
 
-    Uses the SQLAlchemy engine (``db_engine.fetch_all``) so it works
-    even when the Supabase-py client isn't available in background jobs.
+    Uses the SQLAlchemy engine (``db_engine.fetch_all``) so it works even when
+    the Supabase-py client isn't available in background jobs.
 
-    Both scope types alias the result column as ``scope_id`` so callers
-    can read it uniformly — adding a third scope type later only needs
-    to follow the same convention.
+    PR-E 4c: ``folders.scope_type`` is being dropped, so we enumerate every
+    non-trashed ``temp`` folder directly and derive scope_type from
+    ``teams.kind`` instead (scope_type is still needed downstream for temp_ttl
+    routing — the UUID-keyed user_settings KEEP exception). scope_id is always
+    a teams.id snowflake post PR-C, so the join always resolves.
     """
     from app.db import engine as db_engine
 
-    sql = (
-        "SELECT DISTINCT scope_id::text AS scope_id FROM public.folders "
-        "WHERE scope_type = :scope_type AND name = :name AND is_trashed = false"
-    )
     rows = await db_engine.fetch_all(
-        sql, {"scope_type": scope_type, "name": TEMP_FOLDER_NAME}
+        "SELECT DISTINCT f.scope_id::text AS scope_id, "
+        "  CASE WHEN t.kind = 'personal' THEN 'personal' ELSE 'team' END AS scope_type "
+        "FROM public.folders f "
+        "LEFT JOIN public.teams t ON t.id::text = f.scope_id::text "
+        "WHERE f.name = :name AND f.is_trashed = false",
+        {"name": TEMP_FOLDER_NAME},
     )
-    return rows or []
-
-
-async def _iter_scopes() -> AsyncIterator[Tuple[str, str]]:
-    """Yield ``(scope_type, scope_id)`` pairs for all scopes with a temp folder."""
-    for scope_type in ("personal", "team"):
-        rows = await _fetch_scopes_with_temp(scope_type)
-        for row in rows:
-            yield (scope_type, str(row["scope_id"]))
+    for row in rows or []:
+        yield (str(row["scope_type"]), str(row["scope_id"]))
 
 
 def _is_expired(created_at_str: str, ttl_days: int, now: datetime) -> bool:

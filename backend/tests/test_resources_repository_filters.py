@@ -145,7 +145,9 @@ async def test_list_resources_no_filters_baseline(
     assert len(items) == 1
 
     eq_values = [c[1] for c in fake_query.calls if c[0] == "eq"]
-    assert ("scope_type", "personal") in eq_values
+    # PR-E Phase 1: scope_type no longer filters the query (scope_id is a
+    # globally-unique teams.id snowflake, so it alone scopes the rows).
+    assert ("scope_type", "personal") not in eq_values
     assert ("scope_id", "user-1") in eq_values
     # Default behaviour: no trashed resources.
     assert ("resource.is_trashed", False) in eq_values

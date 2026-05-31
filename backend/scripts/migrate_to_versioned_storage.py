@@ -41,9 +41,11 @@ async def main(dry_run: bool = False):
     print("=" * 60)
 
     # Fetch all resources with file_path
-    result = await client.table("resources").select(
-        "id, file_path, thumbnail_path, cover_image_path, source_type"
-    ).execute()
+    result = (
+        await client.table("resources")
+        .select("id, file_path, thumbnail_path, cover_image_path, source_type")
+        .execute()
+    )
     resources = result.data or []
 
     migrated = 0
@@ -166,11 +168,9 @@ async def main(dry_run: bool = False):
                 if new_thumb_path:
                     version_update["thumbnail_path"] = new_thumb_path
 
-                await client.table("resource_versions").update(
-                    version_update
-                ).eq("resource_id", resource_id).eq(
-                    "version_number", 1
-                ).execute()
+                await client.table("resource_versions").update(version_update).eq(
+                    "resource_id", resource_id
+                ).eq("version_number", 1).execute()
 
                 migrated += 1
             except Exception as e:

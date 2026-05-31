@@ -75,37 +75,20 @@ def _auth(user_id: str = "user-1") -> AuthContext:
 # ─── verify_scope_access ──────────────────────────────────────────────
 
 
-async def test_scope_personal_own_passes(patch_admin):
-    patch_admin({})
-    await verify_scope_access(auth=_auth("u1"), scope_type="personal", scope_id="u1")
+async def test_scope_member_passes(patch_admin):
+    # After Spec 1 PR-C, scope_id is always a teams.id snowflake (personal
+    # scopes resolve to the user's personal-team snowflake). PR-E Phase 3
+    # dropped the scope_type param entirely — authorization is purely a
+    # team_members check on scope_id.
+    patch_admin({"team_members": [{"team_id": "pt-u1"}]})
+    await verify_scope_access(auth=_auth("u1"), scope_id="pt-u1")
 
 
-async def test_scope_personal_other_user_403(patch_admin):
-    patch_admin({})
-    with pytest.raises(HTTPException) as ei:
-        await verify_scope_access(
-            auth=_auth("u1"), scope_type="personal", scope_id="u2"
-        )
-    assert ei.value.status_code == 403
-
-
-async def test_scope_team_member_passes(patch_admin):
-    patch_admin({"team_members": [{"team_id": "t1"}]})
-    await verify_scope_access(auth=_auth("u1"), scope_type="team", scope_id="t1")
-
-
-async def test_scope_team_non_member_403(patch_admin):
+async def test_scope_non_member_403(patch_admin):
     patch_admin({"team_members": []})
     with pytest.raises(HTTPException) as ei:
-        await verify_scope_access(auth=_auth("u1"), scope_type="team", scope_id="t1")
+        await verify_scope_access(auth=_auth("u1"), scope_id="pt-other")
     assert ei.value.status_code == 403
-
-
-async def test_scope_invalid_type_422(patch_admin):
-    patch_admin({})
-    with pytest.raises(HTTPException) as ei:
-        await verify_scope_access(auth=_auth("u1"), scope_type="bogus", scope_id="x")
-    assert ei.value.status_code == 422
 
 
 # ─── verify_project_write_access ──────────────────────────────────────

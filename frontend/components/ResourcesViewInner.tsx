@@ -43,7 +43,7 @@ import {
 export const ResourcesViewInner: React.FC = () => {
   const ctx = useResourcesContext();
   const {
-    scopeType, scopeId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId,
+    isPersonal, scopeId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId,
     resPath, navigate,
     isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, canUpload,
     resources, setResources, folders, childFolders, folderPreviews,
@@ -128,7 +128,6 @@ export const ResourcesViewInner: React.FC = () => {
     handleDragLeave,
     handleDrop,
   } = useResourceUpload({
-    scopeType,
     scopeId,
     selectedFolderId,
     selectedLibraryId,
@@ -147,7 +146,6 @@ export const ResourcesViewInner: React.FC = () => {
       await createFolder({
         name: trimmed,
         parent_id: selectedFolderId || null,
-        scope_type: scopeType,
         scope_id: scopeId,
         ...(selectedLibraryId ? { library_id: selectedLibraryId } : {}),
       });
@@ -307,7 +305,7 @@ export const ResourcesViewInner: React.FC = () => {
     sidebarView, resources, downloadedResources, trashedResources,
     trashedFolders, recycleFolderItems, recycleFolderId,
     childFolders, sortBy, debouncedSearch, resourceTagNamesMap,
-    aiSearchMatchedMediaIds, scopeType, selectedFolderId, selectedLibraryId,
+    aiSearchMatchedMediaIds, isPersonal, selectedFolderId, selectedLibraryId,
     selectedSmartFolderId, isSharedView, isRecycleView, isDownloadsView,
     smartFolders, libraries, folderChain, navigate, resPath, setRecycleFolderId,
     searchScope: resourceSearchScope,
@@ -315,7 +313,7 @@ export const ResourcesViewInner: React.FC = () => {
 
   // ─── Operations hook ──────────────────────────────────
   const ops = useResourceOperations({
-    scopeType, scopeId, selectedFolderId, selectedLibraryId,
+    isPersonal, scopeId, selectedFolderId, selectedLibraryId,
     resources, childFolders, sortedItems, selectedIds, allSelectableIds,
     isResourcesView, navigate, resPath,
     setResources, setSmartFolders, setSelectedIds,
@@ -374,7 +372,7 @@ export const ResourcesViewInner: React.FC = () => {
   // ─── Context menu items (extracted to hook) ──────────
   const contextMenuItems = useContextMenuItems({
     contextMenu,
-    scopeType, scopeId, selectedFolderId, selectedLibraryId,
+    isPersonal, scopeId, selectedFolderId, selectedLibraryId,
     navigate, resPath, canDo,
     fileInputRef, setCreatingFolder, setLoading,
     setSelectedResource, setSelectedFolder, setShowInfoPanel,
@@ -543,7 +541,7 @@ export const ResourcesViewInner: React.FC = () => {
         sortedItems={sortedItems}
         recycleSubFolders={recycleSubFolders}
         childFolders={childFolders}
-        scopeType={scopeType}
+        isPersonal={isPersonal}
         scopeId={scopeId}
         selectedFolderId={selectedFolderId}
         selectedLibraryId={selectedLibraryId}
@@ -581,7 +579,7 @@ export const ResourcesViewInner: React.FC = () => {
         folderPickerMode={ops.folderPickerMode}
         operationTargetItems={ops.operationTargetItems}
         operationTargetFolders={ops.operationTargetFolders}
-        scopeType={scopeType}
+        isPersonal={isPersonal}
         scopeId={scopeId}
         selectedLibraryId={selectedLibraryId}
         onCloseFolderPicker={() => { ops.setFolderPickerMode(null); ops.setOperationTargetItems([]); ops.setOperationTargetFolders([]); }}

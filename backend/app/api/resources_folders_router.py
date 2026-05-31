@@ -39,7 +39,6 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
         folder = await repo.create_smart_folder(
             {
                 "name": data.name,
-                "scope_type": data.scope_type,
                 "scope_id": data.scope_id,
                 "created_by": auth.user_id,
                 "is_smart": True,
@@ -57,14 +56,13 @@ async def create_smart_folder(data: SmartFolderCreate, auth: AuthDep):
 @router.get("/smart-folders")
 async def list_smart_folders(
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """List smart folders in a scope."""
     try:
         repo = ResourcesRepository()
-        folders = await repo.get_smart_folders(scope_type, scope_id)
+        folders = await repo.get_smart_folders(None, scope_id)
         return {"success": True, "data": folders}
     except Exception as e:
         logger.error(f"Failed to list smart folders: {e}")
@@ -120,7 +118,6 @@ async def delete_smart_folder(folder_id: str, auth: AuthDep):
 async def smart_folder_results(
     folder_id: str,
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
     _scope_guard: None = Depends(verify_scope_access),
 ):
@@ -137,7 +134,7 @@ async def smart_folder_results(
         if not rules or not rules.get("conditions"):
             return {"success": True, "data": []}
 
-        items = await repo.execute_smart_rules(scope_type, scope_id, rules)
+        items = await repo.execute_smart_rules(None, scope_id, rules)
         return {"success": True, "data": items}
     except HTTPException:
         raise
@@ -156,14 +153,13 @@ async def smart_folder_results(
 @router.get("/folders/list")
 async def list_folders(
     auth: AuthDep,
-    scope_type: str = Query(..., pattern="^(personal|team)$"),
     scope_id: str = Query(...),
     _scope_guard: None = Depends(verify_scope_access),
 ):
     """List folders in a scope."""
     try:
         repo = ResourcesRepository()
-        folders = await repo.get_folders(scope_type, scope_id)
+        folders = await repo.get_folders(None, scope_id)
         return {"success": True, "data": folders}
     except Exception as e:
         logger.error(f"Failed to list folders: {e}")
@@ -179,7 +175,6 @@ async def create_folder(data: FolderCreate, auth: AuthDep):
             {
                 "name": data.name,
                 "parent_id": data.parent_id,
-                "scope_type": data.scope_type,
                 "scope_id": data.scope_id,
                 "created_by": auth.user_id,
                 "icon": data.icon,
@@ -245,33 +240,26 @@ async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
     CRITICAL cascading endpoints (DELETE + cascade trash) — per the
     2026-05-18 #299 review, those cascade-destructive holes cannot be
     deferred even by 24h to the SECURITY-001 follow-up PR.
+
+    After Spec 1 PR-C, ``scope_id`` is always a ``teams.id`` snowflake
+    regardless of ``scope_type``, so authorization collapses to one
+    team_members check. PR-E Phase 1: ``scope_type`` is no longer read.
     """
-    scope_type = folder.get("scope_type")
     scope_id = folder.get("scope_id")
-    if scope_type == "personal":
-        if str(scope_id) != str(auth.user_id):
-            raise HTTPException(status_code=403, detail="You do not own this folder")
-        return
-    if scope_type == "team":
-        client = await get_async_supabase_admin()
-        result = (
-            await client.table("team_members")
-            .select("team_id")
-            .eq("team_id", str(scope_id))
-            .eq("user_id", str(auth.user_id))
-            .limit(1)
-            .execute()
-        )
-        if not result.data:
-            raise HTTPException(
-                status_code=403,
-                detail="You are not a member of this folder's team",
-            )
-        return
-    raise HTTPException(
-        status_code=500,
-        detail=f"Folder has invalid scope_type: {scope_type!r}",
+    client = await get_async_supabase_admin()
+    result = (
+        await client.table("team_members")
+        .select("team_id")
+        .eq("team_id", str(scope_id))
+        .eq("user_id", str(auth.user_id))
+        .limit(1)
+        .execute()
     )
+    if not result.data:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a member of this folder's scope",
+        )
 
 
 @router.post("/folders/{folder_id}/trash")

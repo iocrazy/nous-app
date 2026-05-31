@@ -19,10 +19,70 @@ vi.mock('../../services/aiLibraryService', () => ({
 
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
+// The @-mention resource picker hook fires a debounced network search on
+// mount (useResourceSearch → searchResources). Stub it so jsdom never hits
+// the network and the component renders deterministically.
+vi.mock('../../services/resourceSearchService', () => ({
+  searchResources: vi.fn().mockResolvedValue({
+    results: [],
+    counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
+    next_cursor: null,
+  }),
+}));
+
+// --- Controllable fake tiptap editor ----------------------------------------
+// Task 5 rewrote the composer from a <textarea> to a tiptap `useEditor`
+// editor. Driving a real tiptap editor in jsdom is unreliable (no layout,
+// contenteditable quirks), so we mock `@tiptap/react`'s `useEditor` and let
+// each test set what `getText()` returns and what resourceRef nodes
+// `descendants()` yields. The mock provides EVERY method/property the
+// component touches during render + submit (getText, commands.clearContent /
+// focus / insertResourceRef, setEditable, state.selection.from,
+// state.doc.textBetween, state.doc.descendants, on, off) — otherwise the
+// component throws on render.
+let editorText = '';
+let editorRefNodes: Array<{
+  resourceId: string;
+  name: string;
+  mime: string;
+  scope: { type: string; id: string };
+}> = [];
+
+vi.mock('@tiptap/react', () => ({
+  useEditor: () => ({
+    getText: () => editorText,
+    commands: {
+      clearContent: vi.fn(),
+      focus: vi.fn(),
+      insertResourceRef: vi.fn(),
+    },
+    setEditable: vi.fn(),
+    state: {
+      selection: { from: 0 },
+      doc: {
+        textBetween: () => '',
+        descendants: (cb: (n: unknown) => void) => {
+          for (const r of editorRefNodes) {
+            cb({ type: { name: 'resourceRef' }, attrs: r });
+          }
+        },
+      },
+    },
+    on: vi.fn(),
+    off: vi.fn(),
+    chain: () => ({ focus: () => ({ run: () => {} }) }),
+  }),
+  EditorContent: () => null,
+}));
+
 const _agents = [{ id: 'a1', slug: 'agent-1', name: 'Agent 1' }];
 
 describe('IssueReplyBox', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    editorText = '';
+    editorRefNodes = [];
+  });
 
   it('renders the attachment picker (paperclip button) when no chips', () => {
     render(
@@ -41,26 +101,26 @@ describe('IssueReplyBox', () => {
       <IssueReplyBox agents={_agents as never} defaultAgentId="a1" onSubmit={onSubmit} />,
     );
 
-    // Type a body
-    const textarea = container.querySelector('textarea')!;
-    fireEvent.change(textarea, { target: { value: 'hello' } });
+    // Editor body text (mocked editor — see top of file)
+    editorText = 'hello';
 
-    // Simulate a paste event with a file
+    // Stage a file through the attachment picker's hidden <input type=file>.
+    // The paste path can't be driven now that EditorContent is mocked away
+    // (tiptap's handlePaste lives on the real editor DOM, which no longer
+    // renders), so we exercise the SAME upload pipeline via the picker — it
+    // funnels through useChatAttachmentUpload → uploadChatAttachment exactly
+    // like paste/drag does. This honestly proves the chip → staged → merged
+    // into onSubmit's third arg contract.
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File(['data'], 'x.png', { type: 'image/png' });
-    const clipboardData = {
-      files: [file] as unknown as FileList,
-      items: [] as unknown as DataTransferItemList,
-      types: [],
-      getData: () => '',
-    };
-    fireEvent.paste(textarea, { clipboardData });
+    fireEvent.change(fileInput, { target: { files: [file] } });
 
     // Wait for the upload mock to resolve and the chip to appear
     await waitFor(() => {
       expect(screen.getByText(/x\.png/)).toBeInTheDocument();
     });
 
-    // Click Send — find the submit button (likely a Send icon button)
+    // Click Send — find the submit button (Send icon button, aria-label="send")
     const sendBtn = container.querySelector('button[type="submit"], button[aria-label*="send" i]')!;
     fireEvent.click(sendBtn);
 
@@ -96,18 +156,35 @@ describe('IssueReplyBox', () => {
     const { container } = render(
       <IssueReplyBox agents={_agents as never} defaultAgentId="a1" onSubmit={onSubmit} />,
     );
-    const textarea = container.querySelector('textarea')!;
-    fireEvent.change(textarea, { target: { value: 'msg' } });
+    editorText = 'msg';
 
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File(['data'], 'x.png', { type: 'image/png' });
-    fireEvent.paste(textarea, {
-      clipboardData: { files: [file] as unknown as FileList },
-    });
+    fireEvent.change(fileInput, { target: { files: [file] } });
     await waitFor(() => expect(screen.getByText(/x\.png/)).toBeInTheDocument());
 
     const sendBtn = container.querySelector('button[type="submit"], button[aria-label*="send" i]')!;
     fireEvent.click(sendBtn);
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByText(/x\.png/)).not.toBeInTheDocument());
+  });
+
+  it('emits a resource_ref attachment when a resource is referenced', async () => {
+    editorText = 'see this';
+    editorRefNodes = [
+      { resourceId: '900', name: 'demo.mp4', mime: 'video/mp4', scope: { type: 'team', id: 't1' } },
+    ];
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(
+      <IssueReplyBox agents={_agents as never} defaultAgentId="a1" teamId="t1" onSubmit={onSubmit} />,
+    );
+    const sendBtn = container.querySelector('button[type="submit"], button[aria-label*="send" i]')!;
+    fireEvent.click(sendBtn);
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalled();
+      const atts = onSubmit.mock.calls[0][2];
+      const ref = atts.find((a: { kind: string }) => a.kind === 'resource_ref');
+      expect(ref).toMatchObject({ kind: 'resource_ref', resource_id: '900', name: 'demo.mp4' });
+    });
   });
 });

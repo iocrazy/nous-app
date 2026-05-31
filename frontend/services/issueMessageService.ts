@@ -39,11 +39,15 @@ export interface IssueMessageList {
   total: number;
 }
 
-export interface IssueMessageAttachment {
-  kind: 'image' | 'video' | 'pdf';
-  url: string;
-  mime?: string | null;
-}
+export type IssueMessageAttachment =
+  | { kind: 'image' | 'video' | 'pdf'; url: string; mime?: string | null }
+  | {
+      kind: 'resource_ref';
+      resource_id: string;
+      name: string;
+      mime: string;
+      scope: { type: 'personal' | 'team'; id: string };
+    };
 
 export interface IssueMessagePostPayload {
   body: string;

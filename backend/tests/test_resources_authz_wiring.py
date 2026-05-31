@@ -34,14 +34,27 @@ pytestmark = pytest.mark.integration
 def client(monkeypatch):
     """TestClient with auth + supabase admin stubbed.
 
-    auth always resolves to user-A. team_members query always returns []
-    so the team-scope branch of verify_scope_access cannot accidentally
-    pass — we only want to exercise the personal-scope policy here.
+    auth always resolves to user-A. The fake team_members table records
+    user-A as a member of one team whose id == "user-a" (a stand-in for
+    their personal-team snowflake). After Spec 1 PR-C unified the guard
+    on team_members, this membership is what lets the personal-scope
+    test pass while foreign scope_ids ("user-b-not-me", "12345") still
+    400.
     """
 
-    # Stub the admin client used inside verify_scope_access so the team
-    # branch's PostgREST call doesn't try to reach a real Supabase.
+    # Stub the admin client used inside verify_scope_access so its
+    # PostgREST call doesn't try to reach a real Supabase. The fake
+    # records the last `.eq("team_id", X)` filter so we can decide
+    # whether the requested team_id matches the test caller's membership.
     class _FakeQuery:
+        def __init__(self) -> None:
+            self._team_id_filter: str | None = None
+
+        def eq(self, col: str, val: str) -> "_FakeQuery":
+            if col == "team_id":
+                self._team_id_filter = val
+            return self
+
         def __getattr__(self, _name: str):
             def _capture(*_a, **_kw) -> "_FakeQuery":
                 return self
@@ -49,10 +62,19 @@ def client(monkeypatch):
             return _capture
 
         async def execute(self):
-            class _R:
-                data = []  # caller is not in any team
+            # Membership: user-a is a member of team "user-a" only.
+            data = (
+                [{"team_id": self._team_id_filter}]
+                if self._team_id_filter == "user-a"
+                else []
+            )
 
-            return _R()
+            class _R:
+                pass
+
+            r = _R()
+            r.data = data
+            return r
 
     class _FakeClient:
         def table(self, _name: str) -> _FakeQuery:

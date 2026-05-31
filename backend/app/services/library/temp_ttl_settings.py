@@ -29,6 +29,34 @@ def _check_scope(scope_type: str) -> None:
         )
 
 
+async def _resolve_personal_user_id(scope_id: str) -> Optional[str]:
+    """Translate a personal scope_id to the user_settings.user_id key.
+
+    Callers pass scope_id in two shapes depending on origin:
+      - Old (UI panels): the user UUID directly
+      - New (post-PR-C iterators, e.g. temp_resource_sweeper): the
+        personal team snowflake
+
+    user_settings is keyed by auth.users.id (UUID), so translate the
+    snowflake variant by looking up the team's owner. Returns None when
+    no matching personal team exists.
+    """
+    from app.db import engine as db_engine
+
+    if not scope_id or not str(scope_id).isdigit():
+        return scope_id
+    # Compare via id::text = :id (text param), NOT id = CAST(:id AS bigint):
+    # under asyncpg, `CAST($1 AS bigint)` makes PG infer $1 as bigint, so
+    # binding a str raises DataError ('str' object cannot be encoded). The
+    # ::text form keeps $1 a text param. (feedback_asyncpg_bigint_str_strict)
+    row = await db_engine.fetch_one(
+        "SELECT owner_id::text AS uid FROM public.teams "
+        "WHERE id::text = :id AND kind = 'personal'",
+        {"id": str(scope_id)},
+    )
+    return row["uid"] if row else None
+
+
 async def _fetch_settings_json(
     scope_type: str, scope_id: str
 ) -> Optional[dict[str, Any]]:
@@ -36,13 +64,19 @@ async def _fetch_settings_json(
     from app.db import engine as db_engine  # deferred — codebase convention
 
     if scope_type == "personal":
+        user_id = await _resolve_personal_user_id(scope_id)
+        if user_id is None:
+            return None
         sql = (
             "SELECT settings_json FROM public.user_settings "
             "WHERE user_id = :scope_id"
         )
+        row = await db_engine.fetch_one(sql, {"scope_id": user_id})
     else:
-        sql = "SELECT settings_json FROM public.teams WHERE id = :scope_id"
-    row = await db_engine.fetch_one(sql, {"scope_id": scope_id})
+        # id::text = :scope_id — asyncpg-safe (str param vs bigint column);
+        # see _resolve_personal_user_id note.
+        sql = "SELECT settings_json FROM public.teams WHERE id::text = :scope_id"
+        row = await db_engine.fetch_one(sql, {"scope_id": str(scope_id)})
     if row is None:
         return None
     raw = row.get("settings_json")
@@ -98,6 +132,12 @@ async def _upsert_settings_key(
     from app.db import engine as db_engine
 
     if scope_type == "personal":
+        # user_settings is UUID-keyed; translate snowflake input to owner.
+        user_id = await _resolve_personal_user_id(scope_id)
+        if user_id is None:
+            raise ValueError(
+                f"cannot resolve personal scope_id {scope_id!r} to a user_settings key"
+            )
         # user_settings has UNIQUE(user_id) and may not have a row yet — upsert.
         # NOTE: use CAST(:value AS int), NOT :value::int — SQLAlchemy's text()
         # bind-param parser treats ``::`` as a Postgres cast and eats one ``:``
@@ -111,15 +151,17 @@ async def _upsert_settings_key(
             "|| jsonb_build_object(:key, to_jsonb(CAST(:value AS int))), "
             "updated_at = NOW()"
         )
+        params = {"scope_id": user_id, "key": key, "value": value}
     else:
         # teams.settings_json was added in migration 225 with default '{}'::jsonb.
         sql = (
             "UPDATE public.teams SET settings_json = "
             "COALESCE(settings_json, '{}'::jsonb) "
             "|| jsonb_build_object(:key, to_jsonb(CAST(:value AS int))) "
-            "WHERE id = :scope_id"
+            "WHERE id::text = :scope_id"
         )
-    await db_engine.execute(sql, {"scope_id": scope_id, "key": key, "value": value})
+        params = {"scope_id": str(scope_id), "key": key, "value": value}
+    await db_engine.execute(sql, params)
 
 
 async def set_chat_temp_ttl_days(scope_type: str, scope_id: str, ttl_days: int) -> None:

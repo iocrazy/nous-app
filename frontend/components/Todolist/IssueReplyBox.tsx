@@ -2,34 +2,77 @@
  * Paperclip-style reply composer at the bottom of an issue detail
  * (A8.3 wired to real agents via aiLibraryService).
  *
- * Task 6 additions: attachment picker (ChatAttachmentPicker) + paste
- * (useComposerPaste) + drag-and-drop (useComposerDropzone) + third
- * arg in onSubmit callback so the parent can forward attachments to the
- * backend.
+ * Task 5 additions: replaced the plain <textarea> with a tiptap editor wired
+ * to the reusable @-mention primitives (createResourceMentionExtension +
+ * ResourceChipNode + ResourcePickerSuggestion). On "@" we open a resource
+ * picker scoped to `teamId`; on pick we insert an inline chip; on send we
+ * emit staged file attachments AND collected resource refs together.
+ *
+ * Preserved from before: agent picker, attachment chip strip
+ * (ChatAttachmentPicker), paste (useComposerPaste), drag-drop
+ * (useComposerDropzone), and ⌘↩ / Ctrl+↩ to send (multi-line replies, NOT
+ * plain Enter).
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Send, ChevronDown } from 'lucide-react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import type { Editor } from '@tiptap/core';
+import type { ClipboardEvent } from 'react';
 import type { AgentRef } from './types';
 import { ChatAttachmentPicker } from '../ChatAttachmentPicker';
 import type { StagedAttachment } from '../ChatAttachmentPicker';
 import { useChatAttachmentUpload } from '../../hooks/useChatAttachmentUpload';
 import { useComposerDropzone } from '../../hooks/useComposerDropzone';
 import { useComposerPaste } from '../../hooks/useComposerPaste';
+import { useResourceSearch } from '../../hooks/useResourceSearch';
+import { createResourceMentionExtension } from '../chat/ChatInputResourceMention';
+import { ResourcePickerSuggestion } from '../chat/ResourcePickerSuggestion';
+import type { ResourceRefAttachment, ResourceSearchResult } from '../../types';
+
+/** Merged attachment payload the parent forwards to the backend: staged file
+ *  uploads plus collected resource references from @-mention chips. */
+export type ComposerAttachment = StagedAttachment | ResourceRefAttachment;
 
 interface IssueReplyBoxProps {
   agents: AgentRef[];
   defaultAgentId?: string | null;
-  /** Parent owns submission, returns rejection on error so we can stay in textarea.
-   *  Third arg carries staged attachments (may be empty). */
-  onSubmit: (body: string, agentId: string | null, attachments: StagedAttachment[]) => Promise<void>;
+  /** Parent owns submission, returns rejection on error so we can keep content.
+   *  Third arg carries staged attachments + resource refs (may be empty). */
+  onSubmit: (body: string, agentId: string | null, attachments: ComposerAttachment[]) => Promise<void>;
   disabled?: boolean;
+  /** Scope the @-mention resource picker to this team + personal resources. */
+  teamId?: string;
 }
 
-export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAgentId, onSubmit, disabled }) => {
+/** Walk the tiptap doc and collect all resourceRef nodes (mirrors ChatInput). */
+function collectRefs(editor: Editor): ResourceRefAttachment[] {
+  const refs: ResourceRefAttachment[] = [];
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'resourceRef') {
+      refs.push({
+        kind: 'resource_ref',
+        resource_id: String(node.attrs.resourceId ?? ''),
+        name: String(node.attrs.name ?? ''),
+        mime: String(node.attrs.mime ?? ''),
+        scope: node.attrs.scope ?? { type: 'personal', id: '' },
+      });
+    }
+  });
+  return refs;
+}
+
+export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
+  agents,
+  defaultAgentId,
+  onSubmit,
+  disabled,
+  teamId,
+}) => {
   const { t } = useTranslation();
-  const [body, setBody] = useState('');
   const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -53,32 +96,189 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
     disabled: inputBlocked,
   });
 
-  // Paste-from-clipboard handler for the textarea
+  // Paste-from-clipboard handler for the editor
   const { onPaste } = useComposerPaste({
     onFiles: handleFiles,
     disabled: inputBlocked,
   });
 
-  const submit = async () => {
-    const trimmed = body.trim();
-    if (!trimmed || submitting || uploading) return;
+  // --- Resource @-mention picker state (mirrors AIChatPanel) ---
+  const editorRef = useRef<Editor | null>(null);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionActiveKind, setMentionActiveKind] = useState<
+    '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf'
+  >('');
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  const { data: mentionData, loading: mentionLoading } = useResourceSearch(
+    mentionQuery,
+    mentionActiveKind,
+    teamId,
+  );
+
+  // submit() must be declared BEFORE useEditor — the editor's handleKeyDown
+  // closure references it (avoid a TDZ reference). Access the latest editor
+  // through editorRef so this stays stable across renders.
+  const submit = useCallback(async () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const text = editor.getText().trim();
+    const refs = collectRefs(editor);
+    if ((!text && refs.length === 0) || submitting || uploading) return;
     setSubmitting(true);
     try {
-      await onSubmit(trimmed, agentId, stagedAttachments);
-      setBody('');
+      await onSubmit(text, agentId, [...stagedAttachments, ...refs]);
+      editor.commands.clearContent(true);
       setStagedAttachments([]);
     } catch {
-      // parent toasts; keep body AND chips so user can retry
+      // parent toasts; keep editor content AND chips so the user can retry
     } finally {
       setSubmitting(false);
     }
-  };
+  }, [agentId, onSubmit, stagedAttachments, submitting, uploading]);
+
+  // Keep a stable ref to submit so the editor key-handler closure (created
+  // once) always calls the latest version without re-binding the editor.
+  const submitRef = useRef(submit);
+  useEffect(() => { submitRef.current = submit; }, [submit]);
+
+  // onPaste may change identity; forward through a ref so handlePaste is stable.
+  const onPasteRef = useRef(onPaste);
+  useEffect(() => { onPasteRef.current = onPaste; }, [onPaste]);
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({ hardBreak: false }),
+      Placeholder.configure({ placeholder: 'Reply' }),
+      // The parent drives the actual picker; onPick is a no-op resolver.
+      createResourceMentionExtension({ onPick: () => Promise.resolve(null) }),
+    ],
+    editorProps: {
+      attributes: {
+        class: [
+          'w-full bg-transparent px-3 py-2 text-[14px] text-zinc-200',
+          'placeholder-zinc-600 focus:outline-none',
+          'min-h-[72px] max-h-[200px] overflow-y-auto leading-6',
+          'tiptap-composer',
+        ].join(' '),
+      },
+      handleKeyDown(_view, event) {
+        // ⌘↩ / Ctrl+↩ → send (NOT plain Enter — issue replies are multi-line)
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+          event.preventDefault();
+          void submitRef.current();
+          return true;
+        }
+        // "@" → open the resource picker. Let the char insert first, then open
+        // on the next tick with an empty query (live tracking updates it after).
+        if (event.key === '@') {
+          setTimeout(() => {
+            setMentionQuery('');
+            setMentionActiveIndex(0);
+            setMentionOpen(true);
+          }, 0);
+          return false; // don't prevent insertion
+        }
+        return false;
+      },
+      handlePaste(_view, event) {
+        const cb = onPasteRef.current;
+        if (!cb) return false;
+        // tiptap gives the raw DOM ClipboardEvent; the React synthetic type is
+        // compatible for our purposes (we only read clipboardData.files).
+        cb(event as unknown as ClipboardEvent);
+        return false; // let tiptap also handle text paste
+      },
+    },
+    editable: !inputBlocked,
+  });
+
+  // Expose the editor to closures + the submit callback.
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
+
+  // Live-query tracking — after "@" is typed, follow subsequent chars and
+  // update mentionQuery; close the picker on whitespace / no preceding "@".
+  useEffect(() => {
+    if (!editor) return;
+    const handleUpdate = () => {
+      const { from } = editor.state.selection;
+      const textBefore = editor.state.doc.textBetween(Math.max(0, from - 80), from);
+      const atIdx = textBefore.lastIndexOf('@');
+      if (atIdx === -1) {
+        setMentionOpen(false);
+        return;
+      }
+      const queryCandidate = textBefore.slice(atIdx + 1);
+      if (/[\s\n,;]/.test(queryCandidate)) {
+        setMentionOpen(false);
+        return;
+      }
+      setMentionQuery(queryCandidate);
+    };
+    editor.on('update', handleUpdate);
+    return () => { editor.off('update', handleUpdate); };
+  }, [editor]);
+
+  // Keep the editor's editable flag synced with the blocked state.
+  useEffect(() => {
+    if (editor) editor.setEditable(!inputBlocked);
+  }, [editor, inputBlocked]);
+
+  // Close the picker on Escape or click-outside (mirrors AIChatPanel).
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMentionOpen(false);
+    };
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-testid="resource-picker"]')) {
+        setMentionOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [mentionOpen]);
+
+  const handleMentionSelect = useCallback((item: ResourceSearchResult) => {
+    const ed = editorRef.current;
+    if (ed) {
+      (ed.commands as unknown as {
+        insertResourceRef: (item: ResourceSearchResult) => boolean;
+      }).insertResourceRef(item);
+    }
+    setMentionOpen(false);
+    setMentionQuery('');
+    ed?.commands.focus();
+  }, []);
 
   return (
     <div
       {...rootProps}
       className="relative border border-zinc-800 rounded-lg bg-zinc-900/50 mx-4 mb-4"
     >
+      {/* @-mention resource picker — absolutely-positioned overlay above the composer */}
+      {mentionOpen && (
+        <div className="absolute bottom-full left-0 right-0 z-20 flex justify-start px-2 pb-1">
+          <ResourcePickerSuggestion
+            items={mentionData.results}
+            query={mentionQuery}
+            loading={mentionLoading}
+            counts={mentionData.counts}
+            activeKind={mentionActiveKind}
+            onKindChange={setMentionActiveKind}
+            onSelect={handleMentionSelect}
+            activeIndex={mentionActiveIndex}
+          />
+        </div>
+      )}
+
       {/* Attachment chip strip */}
       <div className="px-3 pt-2">
         <ChatAttachmentPicker
@@ -88,21 +288,8 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
         />
       </div>
 
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        onPaste={onPaste}
-        placeholder="Reply"
-        rows={3}
-        disabled={inputBlocked}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-        className="w-full bg-transparent px-3 py-2 text-[14px] text-zinc-200 placeholder-zinc-600 focus:outline-none resize-none disabled:opacity-50"
-      />
+      <EditorContent editor={editor} />
+
       <div className="flex items-center gap-2 px-2 pb-2 border-t border-zinc-800/80 pt-2">
         <span className="text-[12px] text-zinc-600 ml-1">⌘↩ to send</span>
         <div className="relative ml-auto">
@@ -154,8 +341,8 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({ agents, defaultAge
         </div>
         <button
           aria-label="send"
-          onClick={submit}
-          disabled={!body.trim() || inputBlocked}
+          onClick={() => void submit()}
+          disabled={inputBlocked}
           className="inline-flex items-center gap-1 px-3 py-1 text-[12px] rounded bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Send size={11} /> {submitting ? 'Sending…' : 'Send'}

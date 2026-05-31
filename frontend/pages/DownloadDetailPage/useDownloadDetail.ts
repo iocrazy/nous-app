@@ -238,12 +238,12 @@ export function useDownloadDetail({ propResourceId, propMediaId, preloaded }: Us
       // Use platform_id for trash (same method as DownloadsView batch delete)
       if (video.platform_id) {
         if (teamId) {
-          await trashResourceByPlatformId(video.platform_id, 'team', teamId);
+          await trashResourceByPlatformId(video.platform_id, teamId);
         } else {
           await trashResourceByPlatformId(video.platform_id);
         }
       } else if (video.id) {
-        await trashResourceByMediaId(video.id, teamId ? 'team' : undefined, teamId);
+        await trashResourceByMediaId(video.id, teamId);
       }
       trashed = true;
     } catch (err) {
@@ -251,7 +251,7 @@ export function useDownloadDetail({ propResourceId, propMediaId, preloaded }: Us
       // Try by media_id as fallback (resource might exist with different lookup)
       try {
         if (video.id) {
-          await trashResourceByMediaId(video.id, teamId ? 'team' : undefined, teamId);
+          await trashResourceByMediaId(video.id, teamId);
           trashed = true;
         } else {
           throw new Error('No video id');

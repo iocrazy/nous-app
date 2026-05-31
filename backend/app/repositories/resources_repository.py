@@ -307,18 +307,22 @@ class ResourcesRepository:
     async def find_resource_item(
         self,
         resource_id: str,
-        scope_type: str,
+        scope_type: Optional[str],
         scope_id: str,
         folder_id: str | None = None,
     ) -> dict | None:
-        """Find a resource_item by resource_id + scope + folder."""
+        """Find a resource_item by resource_id + scope + folder.
+
+        PR-E Phase 1: ``scope_type`` is accepted but unused — ``scope_id``
+        is a globally-unique ``teams.id`` snowflake, so it alone scopes
+        the row. The parameter remains for call-site compatibility.
+        """
         try:
             client = await self._get_client()
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*")
                 .eq("resource_id", resource_id)
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
             )
             if folder_id:
@@ -341,7 +345,7 @@ class ResourcesRepository:
             result = await client.table(self.TABLE_ITEMS).insert(data).execute()
             logger.info(
                 f"Created resource_item for resource {data.get('resource_id')} "
-                f"in {data.get('scope_type')}/{data.get('scope_id')}"
+                f"in scope {data.get('scope_id')}"
             )
             return result.data[0] if result.data else {}
         except Exception as e:
@@ -350,8 +354,8 @@ class ResourcesRepository:
 
     async def get_resource_items(
         self,
-        scope_type: str,
         scope_id: str,
+        scope_type: Optional[str] = None,
         folder_id: Optional[str] = None,
         include_trashed: bool = False,
         tag_ids: Optional[List[str]] = None,
@@ -451,7 +455,6 @@ class ResourcesRepository:
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*, resource:resources!inner(*)")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
             )
             if folder_id:
@@ -596,15 +599,15 @@ class ResourcesRepository:
             return []
 
     async def get_resource_item(
-        self, resource_id: str, scope_type: str, scope_id: str
+        self, resource_id: str, scope_type: Optional[str], scope_id: str
     ) -> Optional[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             client = await self._get_client()
             result = (
                 await client.table(self.TABLE_ITEMS)
                 .select("*")
                 .eq("resource_id", resource_id)
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .limit(1)
                 .execute()
@@ -615,16 +618,22 @@ class ResourcesRepository:
             return None
 
     async def get_resource_item_in_folder(
-        self, resource_id: str, scope_type: str, scope_id: str, folder_id: str | None
+        self,
+        resource_id: str,
+        scope_type: Optional[str],
+        scope_id: str,
+        folder_id: str | None,
     ) -> Optional[Dict[str, Any]]:
-        """Get a specific resource_item by resource_id + scope + folder_id."""
+        """Get a specific resource_item by resource_id + scope + folder_id.
+
+        PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
+        """
         try:
             client = await self._get_client()
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*")
                 .eq("resource_id", resource_id)
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
             )
             if folder_id:
@@ -720,14 +729,14 @@ class ResourcesRepository:
             return []
 
     async def get_trashed_resources(
-        self, scope_type: str, scope_id: str
+        self, scope_type: Optional[str], scope_id: str
     ) -> List[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             client = await self._get_client()
             result = (
                 await client.table(self.TABLE_ITEMS)
                 .select("*, resource:resources!inner(*)")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .eq("resource.is_trashed", True)
                 .order("created_at", desc=True)
@@ -885,15 +894,17 @@ class ResourcesRepository:
             raise
 
     async def get_trashed_folders(
-        self, scope_type: str, scope_id: str
+        self, scope_type: Optional[str], scope_id: str
     ) -> List[Dict[str, Any]]:
-        """Get all trashed folders. Frontend handles root-level filtering."""
+        """Get all trashed folders. Frontend handles root-level filtering.
+
+        PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
+        """
         try:
             client = await self._get_client()
             result = await (
                 client.table(self.TABLE_FOLDERS)
                 .select("*")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .eq("is_trashed", True)
                 .order("trashed_at", desc=True)
@@ -974,15 +985,13 @@ class ResourcesRepository:
             raise
 
     async def get_folders(
-        self, scope_type: str, scope_id: str, include_trashed: bool = False
+        self, scope_type: Optional[str], scope_id: str, include_trashed: bool = False
     ) -> List[Dict[str, Any]]:
+        # PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
         try:
             client = await self._get_client()
             query = (
-                client.table(self.TABLE_FOLDERS)
-                .select("*")
-                .eq("scope_type", scope_type)
-                .eq("scope_id", scope_id)
+                client.table(self.TABLE_FOLDERS).select("*").eq("scope_id", scope_id)
             )
             if not include_trashed:
                 query = query.eq("is_trashed", False)
@@ -1091,17 +1100,18 @@ class ResourcesRepository:
                 # Get resource_items with location info
                 items_result = await (
                     client.table(self.TABLE_ITEMS)
-                    .select("resource_id, folder_id, library_id, scope_type, scope_id")
+                    .select("resource_id, folder_id, library_id, scope_id")
                     .eq("folder_id", fid)
                     .execute()
                 )
                 for item in items_result.data or []:
                     rid = str(item["resource_id"])
+                    # PR-E 4c: scope_type no longer read/snapshotted (column
+                    # being dropped); restore uses last_scope_id + folder/library.
                     update_data = {
                         **trash_data,
                         "last_folder_id": item.get("folder_id"),
                         "last_library_id": item.get("library_id"),
-                        "last_scope_type": item.get("scope_type"),
                         "last_scope_id": item.get("scope_id"),
                     }
                     await (
@@ -1208,15 +1218,17 @@ class ResourcesRepository:
     # ------------------------------------------------------------------ #
 
     async def get_smart_folders(
-        self, scope_type: str, scope_id: str
+        self, scope_type: Optional[str], scope_id: str
     ) -> List[Dict[str, Any]]:
-        """Get all smart folders for a scope."""
+        """Get all smart folders for a scope.
+
+        PR-E Phase 1: scope_type accepted but unused (scope_id is unique).
+        """
         try:
             client = await self._get_client()
             result = (
                 await client.table(self.TABLE_FOLDERS)
                 .select("*")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .eq("is_smart", True)
                 .eq("is_trashed", False)
@@ -1240,7 +1252,7 @@ class ResourcesRepository:
             raise
 
     async def execute_smart_rules(
-        self, scope_type: str, scope_id: str, rules: Dict[str, Any]
+        self, scope_type: Optional[str], scope_id: str, rules: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
         Execute smart folder rules against resource_items + resources.
@@ -1266,7 +1278,6 @@ class ResourcesRepository:
             query = (
                 client.table(self.TABLE_ITEMS)
                 .select("*, resource:resources!inner(*)")
-                .eq("scope_type", scope_type)
                 .eq("scope_id", scope_id)
                 .eq("resource.is_trashed", False)
             )
@@ -1303,7 +1314,6 @@ class ResourcesRepository:
                 all_query = (
                     client.table(self.TABLE_ITEMS)
                     .select("*, resource:resources!inner(*)")
-                    .eq("scope_type", scope_type)
                     .eq("scope_id", scope_id)
                     .eq("resource.is_trashed", False)
                     .order("created_at", desc=True)
@@ -1441,6 +1451,107 @@ class ResourcesRepository:
             return any(results)
 
         return [item for item in items if matches_tags(item.get("resource_id", ""))]
+
+    # ------------------------------------------------------------------ #
+    # @-reference picker
+    # ------------------------------------------------------------------ #
+
+    async def list_accessible_for_user(
+        self,
+        *,
+        user_id: str,
+        q: str = "",
+        kinds: list[str] | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+        scope_team_id: str | None = None,
+    ) -> list[dict]:
+        """Resources the user can read: own personal + team-shared.
+
+        Returns list of dicts with keys: id, name, mime, size, updated_at,
+        scope_type, scope_id. Used by the @-reference picker.
+
+        Args:
+            user_id: caller's auth id; used for both personal-owned and
+                team-membership filtering.
+            q: substring to ILIKE-match against ``filename`` (empty = no filter).
+            kinds: optional list of canonical kinds — ``video``/``image``/
+                ``doc``/``audio``/``pdf``. Unknown values are silently ignored
+                (treated as wildcard), matching the picker UX intent.
+            limit: page size; capped at 50 (min 1).
+            cursor: reserved for Phase 2 pagination — currently unused.
+            scope_team_id: when provided, restricts results to this team
+                (membership verified) plus the caller's own personal team.
+                When None, returns resources across all the caller's teams.
+        """
+        # Inline import: matches the pattern used elsewhere in this repo for
+        # deferred-load services that would otherwise cause circular imports
+        # when ResourcesRepository is constructed during module init.
+        from app.db import engine as db_engine
+
+        capped_limit = min(max(int(limit), 1), 50)
+        kinds_list = list(kinds or [])
+
+        # PR-E 4c: scope_type column is being dropped; derive the personal/team
+        # label from teams.kind (aliased as scope_type so the caller's response
+        # shape is unchanged). scope_id is always a teams.id snowflake post PR-C.
+        sql_parts = [
+            "SELECT r.id::text, r.filename AS name, ",
+            "       r.mime_type AS mime, r.file_size AS size, ",
+            "       r.updated_at, ri.scope_id::text, ",
+            "       CASE WHEN t.kind = 'personal' THEN 'personal' ELSE 'team' END AS scope_type ",
+            "FROM public.resources r ",
+            "JOIN public.resource_items ri ON ri.resource_id = r.id ",
+            "LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text ",
+            "WHERE r.is_trashed = false AND ri.is_trashed = false ",
+        ]
+        params: dict = {"user_id": user_id, "limit": capped_limit}
+
+        # After Spec 1 PR-C, ri.scope_id is always a teams.id snowflake;
+        # personal scope is a single-member team containing the user.
+        if scope_team_id is not None:
+            # Issue-scoped picker: narrow to the current team (only if the
+            # caller is a member — no escalation) OR the caller's personal team.
+            sql_parts.append(
+                "  AND ri.scope_id::text IN ( "
+                "        SELECT team_id::text FROM public.team_members "
+                "          WHERE user_id = :user_id AND team_id::text = :scope_team_id "
+                "        UNION "
+                "        SELECT id::text FROM public.teams "
+                "          WHERE owner_id::text = :user_id AND kind = 'personal' "
+                "      ) "
+            )
+            params["scope_team_id"] = scope_team_id
+        else:
+            sql_parts.append(
+                "  AND ri.scope_id::text IN ( "
+                "        SELECT team_id::text FROM public.team_members WHERE user_id = :user_id "
+                "      ) "
+            )
+
+        if q:
+            sql_parts.append("AND r.filename ILIKE :q_like ")
+            params["q_like"] = f"%{q}%"
+
+        if kinds_list:
+            sql_parts.append("AND r.mime_type ~ :kinds_re ")
+            regex_segments = []
+            for k in kinds_list:
+                if k == "video":
+                    regex_segments.append("^video/")
+                elif k == "image":
+                    regex_segments.append("^image/")
+                elif k == "audio":
+                    regex_segments.append("^audio/")
+                elif k == "pdf":
+                    regex_segments.append("^application/pdf$")
+                elif k == "doc":
+                    regex_segments.append("^(text/|application/json)")
+            params["kinds_re"] = "|".join(regex_segments) if regex_segments else "."
+
+        sql_parts.append("ORDER BY r.updated_at DESC LIMIT :limit")
+        rows = await db_engine.fetch_all("".join(sql_parts), params)
+        return rows or []
 
     # ------------------------------------------------------------------ #
     # Temp-folder sweeper helpers
