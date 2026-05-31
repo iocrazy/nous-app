@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
@@ -163,17 +164,34 @@ class LLMRetryMiddleware:
     max_delay_s: float = DEFAULT_MAX_DELAY_S
     jitter_ratio: float = DEFAULT_JITTER_RATIO
 
+    # AI-007: hard ceiling on total wall-time across all retry attempts +
+    # backoff sleeps. None = no ceiling (legacy behavior). When set, the loop
+    # stops retrying once the deadline is reached and never sleeps past it, so
+    # worst-case retry time is bounded regardless of max_retries × backoff.
+    total_deadline_seconds: Optional[float] = None
+
     # Test seam: override the random source for deterministic backoff.
     rng: Optional[Callable[[], float]] = None
 
     # Test seam: override sleep so tests don't actually sleep seconds.
     sleep: Callable[[float], Awaitable[None]] = field(default=asyncio.sleep, init=False)
+    # Test seam: override the monotonic clock for deterministic deadline tests.
+    monotonic: Callable[[], float] = field(default=time.monotonic, init=False)
 
     async def call(
         self, composed: ComposedSystemPrompt, messages: list[dict]
     ) -> dict[str, Any]:
         last_exc: Optional[BaseException] = None
+        start = self.monotonic()
         for attempt in range(0, self.max_retries + 1):  # attempt=0 is first try
+            # AI-007: stop before a fresh attempt once the deadline is hit.
+            if attempt > 0 and self._deadline_remaining(start) <= 0:
+                logger.warning(
+                    "[LLMRetry] global deadline (%.1fs) reached before attempt %d",
+                    self.total_deadline_seconds,
+                    attempt + 1,
+                )
+                break
             try:
                 return await self.adapter.call(composed, messages)
             except Exception as exc:  # noqa: BLE001
@@ -197,11 +215,24 @@ class LLMRetryMiddleware:
                     jitter_ratio=self.jitter_ratio,
                     rng=self.rng,
                 )
+                # AI-007: never sleep past the deadline; if the backoff would
+                # blow it, give up now rather than wake up already-expired.
+                if self.total_deadline_seconds is not None:
+                    remaining = self._deadline_remaining(start)
+                    if remaining <= 0:
+                        break
+                    delay = min(delay, remaining)
                 await self._sleep_with_cancel(delay)
 
         raise LLMRetryExhausted(
             f"all {self.max_retries + 1} attempts exhausted; last={last_exc}"
         ) from last_exc
+
+    def _deadline_remaining(self, start: float) -> float:
+        """Seconds left before the global deadline; +inf when no deadline set."""
+        if self.total_deadline_seconds is None:
+            return float("inf")
+        return self.total_deadline_seconds - (self.monotonic() - start)
 
     async def _sleep_with_cancel(self, total_seconds: float) -> None:
         """Sleep ``total_seconds`` in poll-interval chunks; raise if cancelled."""
