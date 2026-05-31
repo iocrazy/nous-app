@@ -120,16 +120,18 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   const createdAt = resource?.created_at ?? item.created_at;
   const { icon: IconComponent, color, bg } = getFileIcon(mimeType);
 
-  // Determine thumbnail source: always use cover API endpoint. The
-  // backend now falls through to ``parsed_media.cover_download_path``
-  // when the resource has ``media_id`` set, so any of the three
-  // signals (thumbnail / cover_image / media_id) is enough to attempt
-  // the request.
+  // Determine thumbnail source: always use the cover API endpoint. The
+  // backend falls through thumbnail_path > cover_image_path >
+  // parsed_media.cover_download_path > (for image/* mime) the original file —
+  // so an UPLOADED image with none of the cover signals still previews via its
+  // own file. Attempt the request whenever any signal OR the mime is image/*.
+  const isImage = mimeType?.startsWith('image/') ?? false;
   const thumbnailSrc = React.useMemo(() => {
     if (
       (resource?.thumbnail_path ||
         resource?.cover_image_path ||
-        resource?.media_id) &&
+        resource?.media_id ||
+        isImage) &&
       resource?.id
     ) {
       return getResourceCoverUrl(String(resource.id));
@@ -139,6 +141,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     resource?.thumbnail_path,
     resource?.cover_image_path,
     resource?.media_id,
+    isImage,
     resource?.id,
   ]);
 
