@@ -27,6 +27,7 @@ failures don't get better with a different model. Surface them up.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -83,11 +84,20 @@ class LLMFallbackChain:
     base_delay_s: float = 1.0
     max_delay_s: float = 30.0
 
+    # AI-007: hard ceiling on total wall-time across the WHOLE chain
+    # (every model's retries + backoffs combined). None = no ceiling. When
+    # set, the chain stops trying further models once the deadline passes and
+    # shares the remaining budget with each model's inner retry middleware, so
+    # the worst case is bounded instead of (models × max_retries × backoff).
+    total_deadline_seconds: Optional[float] = None
+
     # Sprint 3: optional health registry. None = legacy behavior (try
     # every model in order, no skip-known-bad).
     health_registry: Optional[Any] = None
 
     _switch_log: list[_SwitchEvent] = field(default_factory=list, init=False)
+    # Test seam: override the monotonic clock for deterministic deadline tests.
+    monotonic: Callable[[], float] = field(default=time.monotonic, init=False)
 
     @property
     def switch_log(self) -> list[_SwitchEvent]:
@@ -105,8 +115,18 @@ class LLMFallbackChain:
         """
         models = [self.primary_model, *self.fallback_models]
         last_exc: Optional[BaseException] = None
+        start = self.monotonic()
 
         for idx, model in enumerate(models):
+            # AI-007: stop walking the chain once the global deadline passes.
+            if idx > 0 and self._deadline_remaining(start) <= 0:
+                logger.warning(
+                    "[Fallback] global deadline (%.1fs) reached; "
+                    "not trying %s or later models",
+                    self.total_deadline_seconds,
+                    model,
+                )
+                break
             # Sprint 3: skip recently-failed models. The registry has
             # already discovered their cooldown via report_status from
             # a prior call's failure — no point burning retries on them.
@@ -147,12 +167,18 @@ class LLMFallbackChain:
                 last_exc = exc
                 continue
 
+            # AI-007: share the remaining chain-wide budget with this model's
+            # retry loop so a single slow model can't overrun the whole ceiling.
+            remaining = self._deadline_remaining(start)
             mw = LLMRetryMiddleware(
                 adapter,
                 cancel_check=self.cancel_check,
                 max_retries=self.max_retries_per_model,
                 base_delay_s=self.base_delay_s,
                 max_delay_s=self.max_delay_s,
+                total_deadline_seconds=(
+                    None if remaining == float("inf") else max(0.0, remaining)
+                ),
             )
 
             try:
@@ -208,6 +234,12 @@ class LLMFallbackChain:
         raise AllModelsFailed(
             f"primary + {len(self.fallback_models)} fallback(s) exhausted"
         ) from last_exc
+
+    def _deadline_remaining(self, start: float) -> float:
+        """Seconds left before the chain-wide deadline; +inf when unset."""
+        if self.total_deadline_seconds is None:
+            return float("inf")
+        return self.total_deadline_seconds - (self.monotonic() - start)
 
     def _build_adapter(self, model: str) -> Any:
         return self.adapter_factory(model)

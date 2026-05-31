@@ -263,3 +263,53 @@ async def test_cancel_check_exception_does_not_break_sleep():
     result = await mw.call(_composed(), [])
 
     assert result["choices"][0]["message"]["content"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# AI-007: global retry deadline
+# ---------------------------------------------------------------------------
+
+
+def _clock(values):
+    """A fake monotonic() returning each value in turn, then the last forever."""
+    seq = list(values)
+
+    def _next() -> float:
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+
+    return _next
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_deadline_stops_retries_early():
+    """With a global deadline, the loop stops well before max_retries once the
+    clock shows the budget is spent — far fewer than 1 + max_retries calls."""
+    adapter = AsyncMock()
+    adapter.call.side_effect = _StatusError(503, "down")
+
+    mw = LLMRetryMiddleware(
+        adapter, max_retries=10, base_delay_s=0, total_deadline_seconds=5.0
+    )
+    # start=0, then every subsequent monotonic() reads 10s (> 5s deadline).
+    mw.monotonic = _clock([0.0, 10.0])
+
+    with pytest.raises(LLMRetryExhausted):
+        await mw.call(_composed(), [])
+
+    # First attempt runs; the deadline trips before any retry → just 1 call.
+    assert adapter.call.await_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_deadline_uses_full_retry_budget():
+    """total_deadline_seconds=None (default) keeps legacy behavior."""
+    adapter = AsyncMock()
+    adapter.call.side_effect = _StatusError(429)
+
+    mw = LLMRetryMiddleware(adapter, max_retries=2, base_delay_s=0)
+    with pytest.raises(LLMRetryExhausted):
+        await mw.call(_composed(), [])
+
+    assert adapter.call.await_count == 3  # 1 + 2 retries
