@@ -36,4 +36,14 @@ describe('useResourceSearch', () => {
     await waitFor(() => expect(svc.searchResources).toHaveBeenCalledTimes(2));
     expect(ctrls[0].signal.aborted).toBe(true);
   });
+
+  it('passes teamId through to searchResources', async () => {
+    const spy = vi.spyOn(svc, 'searchResources').mockResolvedValue({
+      results: [], counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 }, next_cursor: null,
+    });
+    renderHook(() => useResourceSearch('story', '', 'team-900'));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ teamId: 'team-900' })),
+    );
+  });
 });
