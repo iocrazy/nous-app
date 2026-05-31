@@ -45,6 +45,22 @@ from app.services.workforce.delegate_tool import DelegateToolService
 logger = logging.getLogger(__name__)
 
 
+def _llm_total_deadline_s() -> Optional[float]:
+    """AI-007: chain-wide wall-time ceiling for LLM retry + fallback.
+
+    Without it, primary retries + each fallback's retries + backoffs can spin
+    7-15 min on a flaky upstream. Default 120s bounds the worst case while
+    staying well above a normal multi-attempt recovery. ``LLM_TOTAL_DEADLINE_S=0``
+    disables it (legacy unbounded behavior).
+    """
+    raw = os.getenv("LLM_TOTAL_DEADLINE_S", "120")
+    try:
+        val = float(raw)
+    except ValueError:
+        return 120.0
+    return None if val <= 0 else val
+
+
 @dataclass(frozen=True)
 class AgentRunnerStack:
     """Bundle returned by :func:`build_agent_runner_stack`.
@@ -186,6 +202,7 @@ async def build_agent_runner_stack(
         fallback_models=fallback_models,
         adapter_factory=_adapter_factory,
         health_registry=health_registry,
+        total_deadline_seconds=_llm_total_deadline_s(),
     )
 
     # ── 4. Delegate tool (M2.5 wiring) ──────────────────────────────

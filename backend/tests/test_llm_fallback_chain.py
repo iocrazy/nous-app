@@ -235,3 +235,45 @@ async def test_adapter_factory_failure_skips_to_next_model():
     # Actually the code records based on idx-1 → model. Let's just verify it ran through.
     assert len(log) >= 1
     assert log[-1]["to"] == "qwen-turbo" or log[-2]["to"] == "qwen-plus"
+
+
+# ---------------------------------------------------------------------------
+# AI-007: chain-wide global deadline
+# ---------------------------------------------------------------------------
+
+
+def _clock(values):
+    seq = list(values)
+
+    def _next() -> float:
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+
+    return _next
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_deadline_stops_chain_before_later_models():
+    """Once the chain-wide deadline passes, no further fallback models are
+    tried — even though they were configured."""
+    primary = AsyncMock()
+    primary.call.side_effect = _StatusError(503)
+    fb0 = AsyncMock()
+    fb0.call.return_value = {"choices": [{"message": {"content": "fb0"}}]}
+
+    chain = LLMFallbackChain(
+        primary_model="qwen-max",
+        fallback_models=["qwen-plus"],
+        adapter_factory=_make_factory({"qwen-max": primary, "qwen-plus": fb0}),
+        max_retries_per_model=0,  # no inner retries — fail fast to fallback
+        base_delay_s=0,
+        total_deadline_seconds=5.0,
+    )
+    # start=0; every later monotonic() reads 10s (> 5s) → fallback gated out.
+    chain.monotonic = _clock([0.0, 10.0])
+
+    with pytest.raises(AllModelsFailed):
+        await chain.call(_composed(), [])
+
+    primary.call.assert_awaited()  # primary tried
+    fb0.call.assert_not_awaited()  # deadline blocked the fallback
