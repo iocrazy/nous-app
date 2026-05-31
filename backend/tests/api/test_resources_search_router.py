@@ -99,3 +99,27 @@ def test_search_without_team_id_passes_none():
         app.dependency_overrides.pop(get_auth, None)
 
     assert captured.get("scope_team_id") is None
+
+
+def test_search_empty_team_id_coerced_to_none():
+    captured = {}
+
+    async def _fake(self, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    def _fake_auth() -> AuthContext:
+        return AuthContext(user_id="u", auth_type="jwt")
+
+    app.dependency_overrides[get_auth] = _fake_auth
+    try:
+        with patch(
+            "app.repositories.resources_repository.ResourcesRepository.list_accessible_for_user",
+            new=_fake,
+        ):
+            r = client.get("/api/v1/resources/search?q=story&team_id=")
+            assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_auth, None)
+
+    assert captured.get("scope_team_id") is None
