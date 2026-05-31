@@ -4,8 +4,9 @@
 URL Router Service
 
 Detects source platform from URL and dispatches to the appropriate handler.
-All platforms use yt-dlp as the primary parser. Douyin falls back to
-LightHTTP / DrissionPage when yt-dlp fails (handled in media_router).
+Most platforms use yt-dlp as the primary parser; qishui (Soda Music) uses a
+dedicated 'soda' handler. Douyin falls back to LightHTTP / DrissionPage when
+yt-dlp fails (handled in media_router).
 """
 
 import re
@@ -35,7 +36,8 @@ class URLRouter:
 
         Returns:
             tuple[str, str]: (platform_name, handler_type)
-                handler_type is always 'ytdlp' (all platforms use yt-dlp as primary parser).
+                handler_type is 'soda' for qishui (Soda Music) and 'ytdlp' for
+                all other platforms.
         """
         try:
             parsed = urlparse(url)
