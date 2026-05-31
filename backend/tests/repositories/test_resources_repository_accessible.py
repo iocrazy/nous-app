@@ -49,3 +49,44 @@ async def test_default_limit_is_20_and_caps_at_50(monkeypatch):
         await repo.list_accessible_for_user(user_id="u", limit=999)
 
     assert captured["params"]["limit"] == 50  # capped
+
+
+@pytest.mark.asyncio
+async def test_scope_team_id_narrows_to_team_plus_personal():
+    repo = ResourcesRepository()
+    captured = {}
+
+    async def _fake_fetch(sql, params):
+        captured["sql"] = sql
+        captured["params"] = params
+        return []
+
+    with patch("app.db.engine.fetch_all", side_effect=_fake_fetch):
+        await repo.list_accessible_for_user(
+            user_id="user-1",
+            scope_team_id="900123",
+        )
+
+    sql = captured["sql"].lower()
+    # Still gated on membership (no escalation via a forged team_id)…
+    assert "team_members" in sql
+    # …but now narrowed to the passed team OR the caller's personal team.
+    assert captured["params"]["scope_team_id"] == "900123"
+    assert "kind = 'personal'" in sql
+
+
+@pytest.mark.asyncio
+async def test_scope_team_id_omitted_keeps_all_teams():
+    repo = ResourcesRepository()
+    captured = {}
+
+    async def _fake_fetch(sql, params):
+        captured["sql"] = sql
+        captured["params"] = params
+        return []
+
+    with patch("app.db.engine.fetch_all", side_effect=_fake_fetch):
+        await repo.list_accessible_for_user(user_id="user-1")
+
+    assert "scope_team_id" not in captured["params"]
+    assert "team_members" in captured["sql"].lower()

@@ -16,13 +16,12 @@ import {
   MessageSquare, Activity, Link2, Bot,
 } from 'lucide-react';
 import type { UiIssue, AgentRef } from './types';
-import type { StagedAttachment } from '../ChatAttachmentPicker';
 import type { IssueMessage } from '../../services/issueMessageService';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { IssueChatThread } from './IssueChatThread';
 import { IssueActivityTab } from './IssueActivityTab';
 import { IssueRelatedTab } from './IssueRelatedTab';
-import { IssueReplyBox } from './IssueReplyBox';
+import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
 import { dispatchIssue } from '../../services/issuesService';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
@@ -162,10 +161,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     return () => { void supa.removeChannel(channel); };
   }, [issue.id]);
 
-  const handleReply = async (body: string, agentId: string | null, attachments: StagedAttachment[] = []) => {
+  const handleReply = async (body: string, agentId: string | null, attachments: ComposerAttachment[] = []) => {
     try {
       const attachmentPayload = attachments.length > 0
-        ? attachments.map((a) => ({ kind: a.kind, url: a.url, mime: a.mime ?? undefined }))
+        ? attachments.map((a) =>
+            a.kind === 'resource_ref'
+              ? { kind: a.kind, resource_id: a.resource_id, name: a.name, mime: a.mime, scope: a.scope }
+              : { kind: a.kind, url: a.url, mime: a.mime ?? undefined },
+          )
         : undefined;
       await postIssueMessage(issue.id, { body, agent_id: agentId ?? undefined, attachments: attachmentPayload });
       // Spec-1b: for issues with an assigned agent the backend writes to
@@ -330,6 +333,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           agents={agents}
           defaultAgentId={issue.assignee?.id ?? null}
           onSubmit={handleReply}
+          teamId={teamId}
         />
       </div>
     </div>

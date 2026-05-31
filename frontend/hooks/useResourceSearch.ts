@@ -10,7 +10,7 @@ const EMPTY_RESPONSE: ResourceSearchResponse = {
   next_cursor: null,
 };
 
-export function useResourceSearch(query: string, kinds: string) {
+export function useResourceSearch(query: string, kinds: string, teamId?: string) {
   const [data, setData] = useState<ResourceSearchResponse>(EMPTY_RESPONSE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -18,7 +18,7 @@ export function useResourceSearch(query: string, kinds: string) {
   const cacheRef = useRef<Map<string, ResourceSearchResponse>>(new Map());
 
   useEffect(() => {
-    const key = `${query}|${kinds}`;
+    const key = `${query}|${kinds}|${teamId ?? ''}`;
     if (cacheRef.current.has(key)) {
       setData(cacheRef.current.get(key)!);
       return;
@@ -30,7 +30,7 @@ export function useResourceSearch(query: string, kinds: string) {
       setLoading(true);
       setError(null);
       try {
-        const resp = await searchResources({ q: query, kinds, limit: 20, signal: ctrl.signal });
+        const resp = await searchResources({ q: query, kinds, limit: 20, teamId, signal: ctrl.signal });
         if (ctrl.signal.aborted) return;
         cacheRef.current.set(key, resp);
         setData(resp);
@@ -42,7 +42,7 @@ export function useResourceSearch(query: string, kinds: string) {
       }
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [query, kinds]);
+  }, [query, kinds, teamId]);
 
   return { data, loading, error };
 }

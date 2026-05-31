@@ -22,6 +22,7 @@ async def search_resources(
     auth: AuthDep,
     q: str = Query("", max_length=128),
     kinds: Optional[str] = Query(None, description="csv of video,image,doc,audio,pdf"),
+    team_id: Optional[str] = Query(None, description="narrow to this team + personal"),
     limit: int = Query(20, ge=1, le=50),
 ) -> dict:
     """Search visible resources for the @-reference picker."""
@@ -33,12 +34,16 @@ async def search_resources(
             if k.strip() in {"video", "image", "doc", "audio", "pdf"}
         ]
 
+    # Treat empty-string team_id (e.g. `?team_id=`) as absent → global search.
+    scope_team_id = team_id or None
+
     repo = ResourcesRepository()
     rows = await repo.list_accessible_for_user(
         user_id=str(auth.user_id),
         q=q,
         kinds=kinds_list or None,
         limit=limit,
+        scope_team_id=scope_team_id,
     )
 
     results = []

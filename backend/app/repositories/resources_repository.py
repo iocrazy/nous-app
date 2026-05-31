@@ -1464,6 +1464,7 @@ class ResourcesRepository:
         kinds: list[str] | None = None,
         limit: int = 20,
         cursor: str | None = None,
+        scope_team_id: str | None = None,
     ) -> list[dict]:
         """Resources the user can read: own personal + team-shared.
 
@@ -1479,6 +1480,9 @@ class ResourcesRepository:
                 (treated as wildcard), matching the picker UX intent.
             limit: page size; capped at 50 (min 1).
             cursor: reserved for Phase 2 pagination — currently unused.
+            scope_team_id: when provided, restricts results to this team
+                (membership verified) plus the caller's own personal team.
+                When None, returns resources across all the caller's teams.
         """
         # Inline import: matches the pattern used elsewhere in this repo for
         # deferred-load services that would otherwise cause circular imports
@@ -1500,13 +1504,30 @@ class ResourcesRepository:
             "JOIN public.resource_items ri ON ri.resource_id = r.id ",
             "LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text ",
             "WHERE r.is_trashed = false AND ri.is_trashed = false ",
-            # After Spec 1 PR-C, ri.scope_id is always a teams.id snowflake;
-            # personal scope is a single-member team containing the user.
-            "  AND ri.scope_id::text IN ( ",
-            "        SELECT team_id::text FROM public.team_members WHERE user_id = :user_id ",
-            "      ) ",
         ]
         params: dict = {"user_id": user_id, "limit": capped_limit}
+
+        # After Spec 1 PR-C, ri.scope_id is always a teams.id snowflake;
+        # personal scope is a single-member team containing the user.
+        if scope_team_id is not None:
+            # Issue-scoped picker: narrow to the current team (only if the
+            # caller is a member — no escalation) OR the caller's personal team.
+            sql_parts.append(
+                "  AND ri.scope_id::text IN ( "
+                "        SELECT team_id::text FROM public.team_members "
+                "          WHERE user_id = :user_id AND team_id::text = :scope_team_id "
+                "        UNION "
+                "        SELECT id::text FROM public.teams "
+                "          WHERE owner_id::text = :user_id AND kind = 'personal' "
+                "      ) "
+            )
+            params["scope_team_id"] = scope_team_id
+        else:
+            sql_parts.append(
+                "  AND ri.scope_id::text IN ( "
+                "        SELECT team_id::text FROM public.team_members WHERE user_id = :user_id "
+                "      ) "
+            )
 
         if q:
             sql_parts.append("AND r.filename ILIKE :q_like ")
