@@ -21,7 +21,7 @@ describe('useResourceSearch', () => {
     rerender({ q: 'sto' });
     expect(spy).not.toHaveBeenCalled();
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(1), { timeout: 400 });
-    expect(spy).toHaveBeenLastCalledWith({ q: 'sto', kinds: '', limit: 20, signal: expect.anything() });
+    expect(spy).toHaveBeenLastCalledWith({ q: 'sto', kinds: '', limit: 20, teamId: undefined, signal: expect.anything() });
   });
 
   it('aborts in-flight when query changes', async () => {
