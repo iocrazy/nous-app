@@ -19,6 +19,7 @@ See ``docs/soda-music-integration.md`` §A.5.
 
 from __future__ import annotations
 
+import base64
 import struct
 from dataclasses import dataclass
 
@@ -96,8 +97,6 @@ def extract_spade_key(play_auth: str) -> str:
     Raises:
         SodaDecryptError: if the token is malformed or too short.
     """
-    import base64
-
     try:
         data = base64.b64decode(play_auth)
     except Exception as exc:  # noqa: BLE001 — surface a domain error, not base64 internals
