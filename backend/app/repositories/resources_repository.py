@@ -1480,6 +1480,9 @@ class ResourcesRepository:
                 (treated as wildcard), matching the picker UX intent.
             limit: page size; capped at 50 (min 1).
             cursor: reserved for Phase 2 pagination — currently unused.
+            scope_team_id: when provided, restricts results to this team
+                (membership verified) plus the caller's own personal team.
+                When None, returns resources across all the caller's teams.
         """
         # Inline import: matches the pattern used elsewhere in this repo for
         # deferred-load services that would otherwise cause circular imports
