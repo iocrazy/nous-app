@@ -93,6 +93,8 @@ class RunRecorder:
     _output_summary: Optional[str] = field(default=None, init=False)
     _prompt_rate: Optional[float] = field(default=None, init=False)  # cents per 1k
     _completion_rate: Optional[float] = field(default=None, init=False)
+    _cached_input_tokens: int = field(default=0, init=False)
+    _cached_rate: Optional[float] = field(default=None, init=False)  # cents per 1k
     _last_heartbeat_monotonic: float = field(default=0.0, init=False)
     _cancelled: bool = field(default=False, init=False)
 
@@ -140,10 +142,38 @@ class RunRecorder:
 
     # -------- public API for callers inside the `async with` block -------
 
-    def record_usage(self, *, prompt_tokens: int, completion_tokens: int) -> None:
-        """Accumulate token counts. Safe to call many times per run."""
+    def record_usage(
+        self,
+        *,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> None:
+        """Accumulate token counts. Safe to call many times per run.
+
+        ``cached_input_tokens`` is the subset of ``prompt_tokens`` served from
+        the provider's prompt cache (billed cheaper when a cached rate exists).
+        """
         self._prompt_tokens += max(0, prompt_tokens or 0)
         self._completion_tokens += max(0, completion_tokens or 0)
+        self._cached_input_tokens += max(0, cached_input_tokens or 0)
+
+    def compute_cost_cents(self) -> float:
+        """Cost so far in cents. Cached tokens use ``_cached_rate`` when set,
+        else the prompt rate (= legacy behavior, no billing regression).
+        Returns 0.0 when rates are unknown (UI shows '—')."""
+        if self._prompt_rate is None or self._completion_rate is None:
+            return 0.0
+        cached = min(self._cached_input_tokens, self._prompt_tokens)
+        billable_prompt = self._prompt_tokens - cached
+        cached_rate = (
+            self._cached_rate if self._cached_rate is not None else self._prompt_rate
+        )
+        return (
+            billable_prompt / 1000.0 * self._prompt_rate
+            + cached / 1000.0 * cached_rate
+            + self._completion_tokens / 1000.0 * self._completion_rate
+        )
 
     @property
     def prompt_tokens(self) -> int:
@@ -294,7 +324,10 @@ class RunRecorder:
             client = await get_async_supabase_admin()
             query = (
                 client.table("ai_model_prices")
-                .select("prompt_cents_per_1k,completion_cents_per_1k,effective_at")
+                .select(
+                    "prompt_cents_per_1k,completion_cents_per_1k,"
+                    "cached_input_cents_per_1k,effective_at"
+                )
                 .eq("model", self.model)
             )
             if self.provider:
@@ -304,6 +337,8 @@ class RunRecorder:
                 row = result.data[0]
                 self._prompt_rate = float(row["prompt_cents_per_1k"])
                 self._completion_rate = float(row["completion_cents_per_1k"])
+                cr = row.get("cached_input_cents_per_1k")
+                self._cached_rate = float(cr) if cr is not None else None
         except Exception as err:
             logger.warning(
                 f"[RunRecorder] price snapshot lookup failed "
@@ -349,16 +384,14 @@ class RunRecorder:
 
         cost_cents: Optional[float] = None
         if self._prompt_rate is not None and self._completion_rate is not None:
-            cost_cents = (
-                self._prompt_tokens / 1000.0 * self._prompt_rate
-                + self._completion_tokens / 1000.0 * self._completion_rate
-            )
+            cost_cents = self.compute_cost_cents()
 
         updates: dict[str, Any] = {
             "status": status,
             "ended_at": "now()",
             "prompt_tokens": self._prompt_tokens,
             "completion_tokens": self._completion_tokens,
+            "cached_input_tokens": self._cached_input_tokens,
             "skill_slugs_used": self._skill_slugs_used,
         }
         if cost_cents is not None:
