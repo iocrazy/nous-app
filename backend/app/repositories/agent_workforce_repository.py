@@ -518,7 +518,8 @@ class AgentWorkforceRepository:
         *,
         task_id: UUID,
         lifecycle_status: TaskLifecycle,
-        current_run_id: Optional[UUID] = None,
+        # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string.
+        current_run_id: Optional[str] = None,
         result: Optional[Dict[str, Any]] = None,
         error_code: Optional[str] = None,
         error_message: Optional[str] = None,

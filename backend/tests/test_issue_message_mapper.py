@@ -10,14 +10,15 @@ def test_assistant_row_maps_to_agent_run():
         "role": "assistant",
         "content": "hello",
         "agent_id": "22222222-2222-2222-2222-222222222222",
-        "metadata_json": {"run_id": "33333333-3333-3333-3333-333333333333"},
+        # agent_runs.id is a BIGINT Snowflake since mig 232 → numeric string.
+        "metadata_json": {"run_id": "310819108761487"},
         "created_at": "2026-05-25T00:00:00+00:00",
     }
     m = map_ai_message_to_issue_message(row, issue_id=5, session_user_id=None)
     assert m.kind == IssueMessageKind.AGENT_RUN
     assert m.body == "hello"
     assert m.author_agent_id == UUID("22222222-2222-2222-2222-222222222222")
-    assert m.agent_run_id == UUID("33333333-3333-3333-3333-333333333333")
+    assert m.agent_run_id == "310819108761487"
 
 
 def test_user_row_maps_to_comment_with_session_user():

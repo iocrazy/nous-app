@@ -249,7 +249,8 @@ async def post_issue_message(
 @router.post("/{issue_id}/agent-runs/{run_id}/simulate-complete")
 async def simulate_agent_run_complete(
     issue_id: int,
-    run_id: UUID,
+    # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string, not UUID.
+    run_id: str,
     auth: AuthDep,
     output_summary: Optional[str] = None,
 ) -> dict:

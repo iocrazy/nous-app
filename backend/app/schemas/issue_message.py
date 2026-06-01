@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.ai_library_chat import AttachmentRequest
 
@@ -23,6 +23,10 @@ class IssueMessageKind(str, Enum):
 
 
 class IssueMessage(BaseModel):
+    # agent_run_id is a BIGINT Snowflake (mig 232) modelled as str; DB rows
+    # deliver it as an int, so opt into int→str coercion.
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
     id: UUID
     issue_id: int
     kind: IssueMessageKind
@@ -31,7 +35,8 @@ class IssueMessage(BaseModel):
     body: Optional[str] = None
     meta: dict[str, Any] = Field(default_factory=dict)
     duration_seconds: Optional[int] = None
-    agent_run_id: Optional[UUID] = None
+    # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string, not UUID.
+    agent_run_id: Optional[str] = None
     from_status: Optional[str] = None
     to_status: Optional[str] = None
     created_at: datetime

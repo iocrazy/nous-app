@@ -64,11 +64,12 @@ class MemoryWriter:
         *,
         agent_id: UUID,
         user_id: UUID,
-        run_id: Optional[UUID],
+        # run_id / session_id are BIGINT Snowflake ids (mig 231/232) → str.
+        run_id: Optional[str],
         user_messages: list[str],
         assistant_messages: list[str],
         scope: MemoryScope = MemoryScope.AGENT_USER,
-        session_id: Optional[UUID] = None,
+        session_id: Optional[str] = None,
     ) -> int:
         """Run extraction → embedding → insert. Returns count of rows inserted.
 
@@ -317,10 +318,11 @@ class MemoryWriter:
         *,
         agent_id: UUID,
         user_id: UUID,
-        run_id: Optional[UUID],
+        # run_id / session_id are BIGINT Snowflake ids (mig 231/232) → str.
+        run_id: Optional[str],
         scope: MemoryScope,
         thread_id: Optional[UUID] = None,
-        session_id: Optional[UUID] = None,
+        session_id: Optional[str] = None,
     ) -> Optional[dict]:
         embedding = await self._embed(fact.when_to_use)
         if embedding is None:

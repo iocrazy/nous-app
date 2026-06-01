@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 RunStatus = Literal["running", "completed", "failed", "cancelled", "heartbeat_lost"]
 
@@ -19,7 +19,13 @@ RunStatus = Literal["running", "completed", "failed", "cancelled", "heartbeat_lo
 class RunListItem(BaseModel):
     """Slim row for the runs list view — no metadata_json / full_output."""
 
-    id: UUID
+    # BIGINT Snowflake ids (id / parent_run_id / session_id) arrive from the
+    # DB as ints but are modelled as str; Pydantic v2 won't coerce int→str
+    # without this opt-in. Inherited by RunDetail.
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
+    # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string, not UUID.
+    id: str
     agent_id: UUID
     status: RunStatus
     trigger: str
@@ -37,13 +43,14 @@ class RunListItem(BaseModel):
     # via the SubAgentTask tool point to the parent. Frontend uses this
     # to show "this is a sub-run" badges and to render Runs lists as a
     # tree.
-    parent_run_id: Optional[UUID] = None
+    parent_run_id: Optional[str] = None
 
 
 class RunDetail(RunListItem):
     """Full detail view — includes summaries + metadata_json + cancel_requested."""
 
-    session_id: Optional[UUID] = None
+    # ai_sessions.id is BIGINT Snowflake (mig 231) → numeric string.
+    session_id: Optional[str] = None
     team_id: Optional[int] = None
     project_id: Optional[int] = None
     heartbeat_at: datetime

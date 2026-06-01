@@ -77,9 +77,10 @@ class SubAgentTaskService:
         *,
         caller_agent_id: UUID,
         caller_user_id: UUID,
-        parent_run_id: Optional[UUID],
+        # parent_run_id / session_id are BIGINT Snowflake ids (mig 231/232) → str.
+        parent_run_id: Optional[str],
         agent_depth: int = 0,
-        session_id: Optional[UUID] = None,
+        session_id: Optional[str] = None,
         parent_recorder: Optional[Any] = None,
     ) -> None:
         self.caller_agent_id = caller_agent_id

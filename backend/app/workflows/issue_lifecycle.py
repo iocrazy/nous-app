@@ -153,7 +153,9 @@ async def run_issue_reply_step(
     )
 
     result = await AILibraryChatService().run_session_turn(
-        UUID(session_id),
+        # session_id is ai_sessions.id = BIGINT Snowflake (mig 231), a numeric
+        # string. Pass it through as-is; UUID() would raise ValueError.
+        session_id,
         user_id=UUID(user_id),
         content=reply_text,
         trigger="issue_reply",

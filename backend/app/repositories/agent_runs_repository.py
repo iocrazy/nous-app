@@ -80,7 +80,7 @@ class AgentRunsRepository:
             return {"items": [], "total": 0}
 
     async def get_by_id(
-        self, run_id: UUID, *, user_id: UUID
+        self, run_id: str, *, user_id: UUID
     ) -> Optional[Dict[str, Any]]:
         """Single run detail; returns None if not found OR not owned by user.
 
@@ -104,7 +104,7 @@ class AgentRunsRepository:
 
     async def list_children(
         self,
-        parent_run_id: UUID,
+        parent_run_id: str,
         *,
         user_id: UUID,
         limit: int = 100,
@@ -140,7 +140,7 @@ class AgentRunsRepository:
     # Cancel (flip flag; runner observes via RunRecorder.check_cancelled)
     # ------------------------------------------------------------------
 
-    async def request_cancel(self, run_id: UUID, *, user_id: UUID) -> bool:
+    async def request_cancel(self, run_id: str, *, user_id: UUID) -> bool:
         """Set cancel_requested=true. Idempotent. Only acts on running, owned rows.
 
         Returns True when the flag was flipped (or already pending). False if

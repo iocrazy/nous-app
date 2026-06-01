@@ -24,8 +24,10 @@ class ApprovalRequest:
     id: UUID
     user_id: UUID
     agent_id: UUID
-    session_id: Optional[UUID]
-    run_id: Optional[UUID]
+    # ai_sessions.id / agent_runs.id are BIGINT Snowflake (mig 231/232) →
+    # numeric strings, not UUIDs.
+    session_id: Optional[str]
+    run_id: Optional[str]
     hook_name: str
     reason: str
     payload: dict
@@ -47,8 +49,8 @@ class ApprovalRequest:
             id=UUID(str(row["id"])),
             user_id=UUID(str(row["user_id"])),
             agent_id=UUID(str(row["agent_id"])),
-            session_id=UUID(str(row["session_id"])) if row.get("session_id") else None,
-            run_id=UUID(str(row["run_id"])) if row.get("run_id") else None,
+            session_id=str(row["session_id"]) if row.get("session_id") else None,
+            run_id=str(row["run_id"]) if row.get("run_id") else None,
             hook_name=row["hook_name"],
             reason=row["reason"],
             payload=row.get("payload") or {},
@@ -75,8 +77,9 @@ class ApprovalRequestsRepository:
         hook_name: str,
         reason: str,
         payload: Optional[dict] = None,
-        session_id: Optional[UUID] = None,
-        run_id: Optional[UUID] = None,
+        # ai_sessions.id / agent_runs.id are BIGINT Snowflake (mig 231/232).
+        session_id: Optional[str] = None,
+        run_id: Optional[str] = None,
         ttl_hours: int = 24,
     ) -> Optional[ApprovalRequest]:
         try:

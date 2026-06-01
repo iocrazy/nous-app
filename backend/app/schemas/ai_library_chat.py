@@ -12,7 +12,13 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+# BIGINT Snowflake ids (ai_sessions.id, agent_runs.id, ai_messages.session_id)
+# arrive from the DB as JSON numbers / Python ints but are modelled as str.
+# Pydantic v2 does not coerce int→str by default, so opt in explicitly.
+_COERCE_IDS = ConfigDict(coerce_numbers_to_str=True)
+
 
 # ─── Sessions ───────────────────────────────────────────────────────────────
 
@@ -34,7 +40,11 @@ class SessionCreate(BaseModel):
 class SessionOut(BaseModel):
     """Slim representation for the session list."""
 
-    id: UUID
+    model_config = _COERCE_IDS
+
+    # ai_sessions.id is BIGINT Snowflake (mig 231) — a numeric string, not a
+    # UUID. Typing it UUID would 422 on every real session.
+    id: str
     user_id: UUID
     agent_id: Optional[UUID] = None
     agent_slug: Optional[str] = None
@@ -62,8 +72,12 @@ class SessionUpdate(BaseModel):
 class MessageOut(BaseModel):
     """One row from ai_messages — persisted chat turn."""
 
+    model_config = _COERCE_IDS
+
+    # ai_messages.id is still UUID (its own PK), but session_id FKs
+    # ai_sessions.id which became BIGINT Snowflake (mig 231) → numeric string.
     id: UUID
-    session_id: UUID
+    session_id: str
     role: Literal["user", "assistant", "system"]
     content: str
     agent_id: Optional[UUID] = None
@@ -164,7 +178,10 @@ class ChatResponse(BaseModel):
     """Non-streaming chat response — the assistant's assistant message +
     usage for this turn + traced tool calls (for UI sub-task rendering)."""
 
+    model_config = _COERCE_IDS
+
     message: MessageOut
     usage: dict[str, int] = Field(default_factory=dict)
-    run_id: UUID
+    # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string.
+    run_id: str
     tool_calls: list[ChatToolCall] = Field(default_factory=list)

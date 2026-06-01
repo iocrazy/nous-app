@@ -138,7 +138,7 @@ class AILibraryChatService:
         resp = await query.execute()
         return resp.data or []
 
-    async def get_session(self, session_id: UUID, *, user_id: UUID) -> Dict[str, Any]:
+    async def get_session(self, session_id: str, *, user_id: UUID) -> Dict[str, Any]:
         """Fetch a single session, enforcing ownership."""
         supabase = await get_async_supabase_admin()
         resp = (
@@ -161,7 +161,7 @@ class AILibraryChatService:
         return session
 
     async def get_messages(
-        self, session_id: UUID, *, user_id: UUID, limit: int = 200
+        self, session_id: str, *, user_id: UUID, limit: int = 200
     ) -> List[Dict[str, Any]]:
         """Fetch messages for a session in chronological order."""
         await self.get_session(session_id, user_id=user_id)
@@ -178,7 +178,7 @@ class AILibraryChatService:
 
     async def update_session(
         self,
-        session_id: UUID,
+        session_id: str,  # ai_sessions.id BIGINT Snowflake (mig 231)
         *,
         user_id: UUID,
         title: Optional[str] = None,
@@ -203,7 +203,7 @@ class AILibraryChatService:
             else await self.get_session(session_id, user_id=user_id)
         )
 
-    async def delete_session(self, session_id: UUID, *, user_id: UUID) -> None:
+    async def delete_session(self, session_id: str, *, user_id: UUID) -> None:
         """Soft-delete a session (status='deleted'). Messages stay for audit."""
         await self.get_session(session_id, user_id=user_id)
         supabase = await get_async_supabase_admin()
@@ -220,7 +220,7 @@ class AILibraryChatService:
 
     async def chat_stream(
         self,
-        session_id: UUID,
+        session_id: str,  # ai_sessions.id BIGINT Snowflake (mig 231)
         *,
         user_id: UUID,
         content: str,
@@ -322,7 +322,7 @@ class AILibraryChatService:
 
     async def chat(
         self,
-        session_id: UUID,
+        session_id: str,  # ai_sessions.id BIGINT Snowflake (mig 231)
         *,
         user_id: UUID,
         content: str,
@@ -359,7 +359,7 @@ class AILibraryChatService:
 
     async def run_session_turn(
         self,
-        session_id: UUID,
+        session_id: str,  # ai_sessions.id BIGINT Snowflake (mig 231)
         *,
         user_id: UUID,
         content: str,

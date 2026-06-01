@@ -75,8 +75,8 @@ class RunRecorder:
     user_id: UUID
     trigger: str  # 'chat' | 'script_ai' | 'visual_analysis' | 'summary' | ...
 
-    # Optional context
-    session_id: Optional[UUID] = None
+    # Optional context. ai_sessions.id is BIGINT Snowflake (mig 231) → str.
+    session_id: Optional[str] = None
     team_id: Optional[int] = None
     project_id: Optional[int] = None
     issue_id: Optional[int] = None  # links this run to an issue via mig-208 triggers

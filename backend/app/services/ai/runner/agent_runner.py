@@ -982,7 +982,9 @@ class AgentRunner:
     ) -> HookContext:
         # Recorder may be absent in test paths. Use safe defaults so the
         # hook signature stays stable.
-        run_id = recorder.run_id if recorder and recorder.run_id else UUID(int=0)
+        # run_id (agent_runs.id) is a BIGINT Snowflake string post mig 232; the
+        # test-path placeholder is the string "0" (cost_auditor skips it).
+        run_id = recorder.run_id if recorder and recorder.run_id else "0"
         user_id = recorder.user_id if recorder else UUID(int=0)
         session_id = recorder.session_id if recorder else None
 

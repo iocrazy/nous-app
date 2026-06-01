@@ -32,15 +32,17 @@ def map_ai_message_to_issue_message(
         kind = IssueMessageKind.COMMENT
         author_user_id: Optional[UUID] = session_user_id
         author_agent_id: Optional[UUID] = None
-        agent_run_id: Optional[UUID] = None
+        agent_run_id: Optional[str] = None
         from_status: Optional[str] = None
         to_status: Optional[str] = None
     elif role == "assistant":
         kind = IssueMessageKind.AGENT_RUN
         author_user_id = None
         author_agent_id = UUID(str(raw_agent_id)) if raw_agent_id else None
+        # agent_runs.id is BIGINT Snowflake (mig 232) — keep as numeric
+        # string; wrapping in UUID() raises ValueError on a bigint.
         raw_run_id = meta.get("run_id")
-        agent_run_id = UUID(str(raw_run_id)) if raw_run_id else None
+        agent_run_id = str(raw_run_id) if raw_run_id else None
         from_status = None
         to_status = None
     else:
