@@ -2,14 +2,16 @@ import React from 'react';
 import {
   ArrowLeft, Loader2, FileQuestion, UserRound,
   Share2, Download, MoreHorizontal, ExternalLink, Copy, Trash2,
-  Video as VideoIcon,
+  Video as VideoIcon, Music,
 } from 'lucide-react';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
+import { AudioWaveformPlayer } from '../components/AudioWaveformPlayer';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { ShareModal } from '../components/ShareModal';
 import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl, getGalleryZipUrl } from '../services/dataService';
-import { getVideoUrl, isAlbumType } from '../utils/awemeType';
+import { getVideoUrl, isAlbumType, isAudioType } from '../utils/awemeType';
+import { getApiUrl } from '../utils/apiConfig';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType, extractAudio } from '../services/parserService';
 import { useDownloadDetail } from './DownloadDetailPage/useDownloadDetail';
@@ -263,7 +265,23 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
           <div className="w-full aspect-video sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink bg-black">
-            {video.media_type && isAlbumType(video.media_type) ? (
+            {isAudioType(video.media_type) ? (
+              (video.music_download_path || video.extract_audio_path) ? (
+                <AudioWaveformPlayer
+                  src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
+                  filename={video.music_name || video.title || 'Audio'}
+                  duration={Number(video.duration) || undefined}
+                />
+              ) : (
+                <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
+                  <Music size={48} className="text-zinc-600" />
+                  <p className="text-zinc-400 text-sm font-medium">Audio not available</p>
+                  <p className="text-zinc-500 text-xs max-w-[300px] text-center">
+                    This audio hasn't been downloaded yet. Use the Download button to fetch the audio file.
+                  </p>
+                </div>
+              )
+            ) : video.media_type && isAlbumType(video.media_type) ? (
               <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} />
             ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
               <VideoPlayer

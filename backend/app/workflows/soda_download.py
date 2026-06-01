@@ -30,6 +30,14 @@ from app.services.media.parsers.soda_music.soda_downloader import download_and_d
 MIME_BY_EXT = {"flac": "audio/flac", "m4a": "audio/mp4", "mp3": "audio/mpeg"}
 
 
+def already_downloaded(media_row: dict, base_dir: str) -> bool:
+    """True if the track's audio file is already on disk (skip re-download)."""
+    rel = (media_row or {}).get("music_download_path")
+    if not rel:
+        return False
+    return (Path(base_dir) / rel).exists()
+
+
 def build_audio_dest(*, media_id: str, ext: str, base_dir: str) -> tuple[Path, str]:
     """Return ``(full_path, relative_path)`` for the decrypted audio file."""
     rel = f"global/resources/web/qishui/{media_id}/audio.{ext}"
@@ -76,14 +84,20 @@ async def soda_download_workflow(
     wf_id = DBOS.workflow_id
     await manager.start(wf_id)
 
-    # 1. Resolve media_id if the caller did not pass one.
+    # 1. Resolve the media row (always fetch so the skip-guard can inspect it).
+    row = await MediaRepository().get_by_platform_id(platform_id)
     if media_id is None:
-        row = await MediaRepository().get_by_platform_id(platform_id)
         if not row:
             raise RuntimeError(
                 f"soda_download: no parsed_media for platform_id={platform_id}"
             )
         media_id = row["id"]
+
+    # 1b. Skip re-download when the audio file is already on disk.
+    base_dir = Utils.get_download_base_path()
+    if already_downloaded(row, base_dir):
+        await manager.complete(wf_id, subtitle=f"Already downloaded {title}")
+        return {"platform_id": platform_id, "media_id": media_id, "skipped": True}
 
     # 2. Fresh cookie for this user.
     cookie = await get_soda_cookie(user_id)
@@ -105,7 +119,7 @@ async def soda_download_workflow(
     full, rel = build_audio_dest(
         media_id=str(media_id),
         ext=plan.ext,
-        base_dir=Utils.get_download_base_path(),
+        base_dir=base_dir,
     )
     size = await download_and_decrypt(
         url=plan.url,

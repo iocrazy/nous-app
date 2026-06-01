@@ -49,6 +49,13 @@ export const isAlbumType = (mediaType?: string | number): boolean => {
 };
 
 /**
+ * Check if media type is an audio type
+ */
+export const isAudioType = (mediaType?: string): boolean => {
+  return mediaType === 'audio';
+};
+
+/**
  * Get display label for media type
  */
 export const getMediaTypeLabel = (mediaType?: string | number): string => {

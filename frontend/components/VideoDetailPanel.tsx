@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
-  Clock, Tag, ChevronRight, Brain, AlertCircle, List, AlignLeft, ChevronDown,
+  Clock, Tag, ChevronRight, Brain, AlertCircle, List, AlignLeft, ChevronDown, Music,
 } from 'lucide-react';
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
 import { MediaCard } from './MediaCard';
+import SodaLyricsTab from './SodaLyricsTab';
+import { isAudioType } from '../utils/awemeType';
 import {
   triggerTranscription, triggerTranscriptionByResource,
   getTranscript, getTranscriptByResource,
@@ -37,7 +39,7 @@ interface VideoDetailPanelProps {
   mobileActions?: React.ReactNode;
 }
 
-type TabKey = 'overview' | 'transcript' | 'analysis';
+type TabKey = 'overview' | 'transcript' | 'analysis' | 'lyrics';
 
 // Format seconds to MM:SS
 const formatTimestamp = (seconds: number): string => {
@@ -277,11 +279,28 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     downloadTextFile(transcript.text, `${video.platform_id}_transcript.txt`, 'text/plain');
   };
 
+  const isAudio = isAudioType(video.media_type);
+
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     { key: 'overview', label: 'Overview', icon: <Eye size={16} /> },
     { key: 'transcript', label: 'Transcript', icon: <FileText size={16} /> },
     { key: 'analysis', label: 'Analysis', icon: <Sparkles size={16} /> },
+    { key: 'lyrics', label: 'Lyrics', icon: <Music size={16} /> },
   ];
+
+  // Audio items show only Overview + Lyrics (no transcript / analysis).
+  // Non-audio items keep the original tabs and never show a Lyrics tab.
+  const visibleTabs = isAudio
+    ? tabs.filter((t) => t.key === 'overview' || t.key === 'lyrics')
+    : tabs.filter((t) => t.key !== 'lyrics');
+
+  // Guard: if the active tab is no longer visible (e.g. switching to an audio
+  // item while on 'transcript'), fall back to 'overview' so nothing renders blank.
+  useEffect(() => {
+    if (!visibleTabs.some((t) => t.key === activeTab)) {
+      setActiveTab('overview');
+    }
+  }, [isAudio]);
 
   const getStatusIndicator = (status?: string) => {
     switch (status) {
@@ -300,7 +319,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     <div className="flex flex-col h-full">
       {/* Tab Navigation */}
       <div className="flex border-b border-zinc-800 mb-4 shrink-0">
-        {tabs.map((tab) => {
+        {visibleTabs.map((tab) => {
           const status = tab.key === 'transcript'
             ? video.transcript_status
             : tab.key === 'analysis'
@@ -345,6 +364,13 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             onNotesBlur={onNotesBlur}
             mobileActions={mobileActions}
           />
+        )}
+
+        {/* Lyrics Tab (audio items only) */}
+        {activeTab === 'lyrics' && (
+          <div className="animate-in fade-in duration-300">
+            <SodaLyricsTab mediaId={String(video.id)} />
+          </div>
         )}
 
         {/* Transcript Tab */}

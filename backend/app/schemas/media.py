@@ -102,6 +102,11 @@ class MediaBase(BaseModel):
     error_message: Optional[str] = Field(None, description="Error message")
     download_time: Optional[datetime] = Field(None, description="Download time")
 
+    # Rich source-specific metadata (jsonb column, migration 248)
+    metadata: Optional[dict] = Field(
+        None, description="Rich source-specific metadata (jsonb)"
+    )
+
 
 class MediaCreate(MediaBase):
     """Schema for creating a parsed media record"""

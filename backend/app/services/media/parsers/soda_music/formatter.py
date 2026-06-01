@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.media.parsers.soda_music.lyrics import parse_timed_lyrics, to_lrc
 from app.services.media.parsers.soda_music.soda_api import cover_url
 
 EXT_BY_FORMAT = {"flac": "flac", "mp4": "m4a", "m4a": "m4a", "aac": "m4a", "mp3": "mp3"}
@@ -33,6 +34,12 @@ def format_track(
     if album.get("url_cover"):
         cover_urls = [cover_url(album["url_cover"])]
 
+    raw_lyric = track.get("lyric")
+    lyric_text = (
+        raw_lyric.get("content") if isinstance(raw_lyric, dict) else (raw_lyric or "")
+    )
+    parsed_lines = parse_timed_lyrics(lyric_text or "")
+
     return {
         "platform_id": str(track.get("id")),
         "original_url": original_url,
@@ -54,6 +61,7 @@ def format_track(
             "tags": track.get("tags") or [],
             "song_maker_team": track.get("song_maker_team") or {},
             "duration_ms": track.get("duration"),
+            "lyrics": {"lrc": to_lrc(parsed_lines), "lines": parsed_lines},
             "quality": {
                 "Quality": chosen.get("Quality") or chosen.get("quality"),
                 "Format": chosen.get("Format") or chosen.get("format"),
