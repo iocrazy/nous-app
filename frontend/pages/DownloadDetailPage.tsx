@@ -149,12 +149,12 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   }
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col pt-[env(safe-area-inset-top)] sm:pt-0">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col pt-[var(--app-safe-top,env(safe-area-inset-top))] sm:pt-0">
       {/* Mobile: floating back button overlaying content */}
       <button
         onClick={handleBack}
         className="sm:hidden fixed left-3 z-40 p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
-        style={{ top: 'calc(env(safe-area-inset-top) + 0.625rem)' }}
+        style={{ top: 'calc(var(--app-safe-top, env(safe-area-inset-top)) + 0.625rem)' }}
       >
         <ArrowLeft size={20} className="drop-shadow-md" />
       </button>
