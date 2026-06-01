@@ -8,6 +8,7 @@ Uses media_id (parsed_media Snowflake ID) — consistent with /media/{media_id}.
 """
 
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -39,6 +40,45 @@ async def _get_media_download_path(media_id: str) -> tuple[dict, str]:
     if not download_path:
         raise HTTPException(status_code=404, detail="Download path not found")
     return res.data, download_path
+
+
+async def _get_media_row(media_id: str) -> dict:
+    """Fetch a parsed_media row by id (404 only if the row is missing).
+
+    Unlike _get_media_download_path, does NOT require a video download_path —
+    audio-only media (e.g. qishui music) has music_download_path but no
+    download_path, and must still be servable.
+    """
+    from app.db.supabase_client import get_async_supabase_admin
+
+    supabase = await get_async_supabase_admin()
+    res = (
+        await supabase.table("parsed_media")
+        .select("*")
+        .eq("id", media_id)
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:
+        raise HTTPException(status_code=404, detail="Media not found")
+    return res.data
+
+
+def _resolve_audio_file(media: dict, base_path: str) -> Optional[Path]:
+    """Resolve the on-disk audio file for a media row, tolerating a missing
+    video download_path. Order: music_download_path → extract_audio_path →
+    download_path/audio.mp3 (only if a video download_path exists)."""
+    candidates = [media.get("music_download_path"), media.get("extract_audio_path")]
+    dl = media.get("download_path")
+    if dl:
+        candidates.append(f"{dl}/audio.mp3")
+    for rel in candidates:
+        if not rel:
+            continue
+        candidate = Path(base_path) / rel
+        if candidate.exists():
+            return candidate
+    return None
 
 
 @router.get("/{media_id}/slides", tags=TAGS_MEDIA_CONTENT)
@@ -155,19 +195,10 @@ async def serve_audio_file(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
-        media, download_path = await _get_media_download_path(media_id)
+        media = await _get_media_row(media_id)
         base_path = Utils.get_download_base_path()
 
-        audio_file = None
-        music_path = media.get("music_download_path")
-        if music_path:
-            candidate = Path(base_path) / music_path
-            if candidate.exists():
-                audio_file = candidate
-        if not audio_file:
-            candidate = Path(base_path) / download_path / "audio.mp3"
-            if candidate.exists():
-                audio_file = candidate
+        audio_file = _resolve_audio_file(media, base_path)
         if not audio_file:
             raise HTTPException(status_code=404, detail="Audio file not found")
 
