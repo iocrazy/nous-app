@@ -33,7 +33,7 @@ interface DownloadDetailPageProps {
 export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMediaId, preloaded }: DownloadDetailPageProps = {}) {
   const detail = useDownloadDetail({ propResourceId, propMediaId, preloaded });
   const {
-    video, isLoading, notFound, playerRef,
+    video, isLoading, notFound, playerRef, currentTime,
     resourceId, resourceRating, resourceNotes, hlsUrl, authToken, mediaToken,
     panelWidth, showDownloadMenu, showMoreMenu, isShareModalOpen, showDeleteDialog,
     isDeleting, isDownloading, isFetching, isMobile,
@@ -271,6 +271,12 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                   src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
                   filename={video.music_name || video.title || 'Audio'}
                   duration={Number(video.duration) || undefined}
+                  onTimeUpdate={handleTimeUpdate}
+                  chorusStartSec={
+                    typeof video.metadata?.chorus?.start === 'number'
+                      ? video.metadata.chorus.start / 1000
+                      : undefined
+                  }
                 />
               ) : (
                 <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
@@ -348,6 +354,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               <VideoDetailPanel
                 video={video}
                 resourceId={resourceId || undefined}
+                playerCurrentTime={currentTime}
                 onClose={handleBack}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}

@@ -5,6 +5,10 @@ interface AudioWaveformPlayerProps {
   src: string;
   filename: string;
   duration?: number;
+  /** Emits the playback position (seconds) on every time update / frame. */
+  onTimeUpdate?: (seconds: number) => void;
+  /** Chorus / highlight marker position (seconds) overlaid on the waveform. */
+  chorusStartSec?: number;
 }
 
 const BAR_COUNT = 200;
@@ -19,6 +23,8 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
   src,
   filename,
   duration: initialDuration,
+  onTimeUpdate,
+  chorusStartSec,
 }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -156,11 +162,19 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     }
   }, [waveform, currentTime, duration]);
 
+  // Keep the latest onTimeUpdate in a ref so the rAF loop never re-subscribes.
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+  useEffect(() => {
+    onTimeUpdateRef.current = onTimeUpdate;
+  }, [onTimeUpdate]);
+
   // Animation loop for smooth updates
   useEffect(() => {
     const tick = () => {
       if (audioRef.current) {
-        setCurrentTime(audioRef.current.currentTime);
+        const t = audioRef.current.currentTime;
+        setCurrentTime(t);
+        onTimeUpdateRef.current?.(t);
       }
       animRef.current = requestAnimationFrame(tick);
     };
@@ -213,8 +227,9 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       const newTime = pct * duration;
       audio.currentTime = newTime;
       setCurrentTime(newTime);
+      onTimeUpdate?.(newTime);
     },
-    [duration],
+    [duration, onTimeUpdate],
   );
 
   const handleMouseDown = useCallback(
@@ -303,7 +318,11 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         }}
         onEnded={() => setIsPlaying(false)}
         onTimeUpdate={(e) => {
-          if (!isPlaying) setCurrentTime((e.target as HTMLAudioElement).currentTime);
+          const t = (e.target as HTMLAudioElement).currentTime;
+          if (!isPlaying) {
+            setCurrentTime(t);
+            onTimeUpdate?.(t);
+          }
         }}
       />
 
@@ -328,6 +347,25 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
           />
+        )}
+
+        {/* Chorus marker — thin amber line, clickable to seek there */}
+        {!isDecoding && chorusStartSec !== undefined && duration > 0 && chorusStartSec <= duration && (
+          <button
+            type="button"
+            title="Chorus"
+            onClick={() => {
+              const audio = audioRef.current;
+              if (!audio) return;
+              audio.currentTime = chorusStartSec;
+              setCurrentTime(chorusStartSec);
+              onTimeUpdate?.(chorusStartSec);
+            }}
+            className="absolute top-0 bottom-0 z-10 w-0.5 bg-amber-400/80 hover:bg-amber-300 cursor-pointer"
+            style={{ left: `${(chorusStartSec / duration) * 100}%` }}
+          >
+            <span className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-amber-400" />
+          </button>
         )}
       </div>
 

@@ -89,6 +89,15 @@ export interface ParsedMedia {
   // Resource linkage (joined from resources table via media_id)
   resource_id?: string;
 
+  // Soda / audio metadata (jsonb on parsed_media, present at runtime via
+  // parsed_media!inner(*) join but not always typed). Shape is platform-specific.
+  metadata?: {
+    quality?: { Quality?: string; Format?: string; Bitrate?: number };
+    chorus?: { start?: number; duration?: number };
+    lyrics?: { lrc?: string; lines?: Array<{ text?: string; line_start_ms?: number }> };
+    [k: string]: unknown;
+  } | null;
+
   // Timestamps
   created_at?: string;
   updated_at?: string;

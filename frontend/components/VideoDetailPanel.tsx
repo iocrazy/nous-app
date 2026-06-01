@@ -37,6 +37,8 @@ interface VideoDetailPanelProps {
   onNotesBlur?: () => void;
   /** Optional mobile action buttons rendered below the ID line */
   mobileActions?: React.ReactNode;
+  /** Current playback position (seconds) — drives synced lyrics highlight. */
+  playerCurrentTime?: number;
 }
 
 type TabKey = 'overview' | 'transcript' | 'analysis' | 'lyrics';
@@ -92,6 +94,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   onNotesChange,
   onNotesBlur,
   mobileActions,
+  playerCurrentTime,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -369,7 +372,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
         {/* Lyrics Tab (audio items only) */}
         {activeTab === 'lyrics' && (
           <div className="animate-in fade-in duration-300">
-            <SodaLyricsTab mediaId={String(video.id)} />
+            <SodaLyricsTab mediaId={String(video.id)} currentTime={playerCurrentTime} />
           </div>
         )}
 

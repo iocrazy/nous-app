@@ -63,6 +63,7 @@ def format_track(
             "tags": track.get("tags") or [],
             "song_maker_team": track.get("song_maker_team") or {},
             "duration_ms": track.get("duration"),
+            "chorus": track.get("chorus") or {},
             "lyrics": {"lrc": to_lrc(parsed_lines), "lines": parsed_lines},
             "quality": {
                 "Quality": chosen.get("Quality") or chosen.get("quality"),
