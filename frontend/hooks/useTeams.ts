@@ -63,10 +63,12 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
     if (isAuthenticated) {
       setTeamsLoading(true);
       let loadedTeams: Team[] = [];
+      let loadedPersonalId: string | null = null;
       Promise.all([
         fetchMyTeams().then(t => { loadedTeams = t; setTeams(t); }).catch(console.error),
         fetchPersonalTeam().then(pt => {
           if (pt) {
+            loadedPersonalId = pt.id;
             setPersonalTeamId(pt.id);
             localStorage.setItem('mediahub_personal_team', pt.id);
           }
@@ -77,17 +79,24 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
         // is only honoured if it's STILL one of the user's teams — otherwise a
         // stale id (e.g. a pre-snowflake-migration team id left in localStorage)
         // would be kept forever, leaving currentTeam=null and the whole UI
-        // rendering blank ("no issues"). Fall back to the first valid team.
+        // rendering blank ("no issues"). Fall back to the personal team, then
+        // the first available team.
+        //
+        // The personal team is NOT in loadedTeams (fetchMyTeams excludes it), so
+        // it must be checked separately or the user's own personal id would be
+        // wrongly treated as stale.
+        const isValid = (id: string) =>
+          loadedTeams.some(t => t.id === id) || id === loadedPersonalId;
         setSelectedTeamId(prev => {
-          if (prev && loadedTeams.some(t => t.id === prev)) return prev;
+          if (prev && isValid(prev)) return prev;
           if (prev) {
             console.warn(
               `[useTeams] selected team ${prev} is not in the user's teams; ` +
-                'falling back to the first available team',
+                'falling back to personal / first available team',
             );
             localStorage.removeItem('mediahub_selected_team');
           }
-          return loadedTeams.length > 0 ? loadedTeams[0].id : null;
+          return loadedPersonalId || (loadedTeams.length > 0 ? loadedTeams[0].id : null);
         });
         setTeamsLoading(false);
       });

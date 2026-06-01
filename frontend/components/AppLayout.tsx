@@ -65,12 +65,17 @@ function AppLayoutInner() {
   // (e.g. a stale bookmark from before the snowflake id migration) must NOT be
   // adopted — doing so leaves currentTeam=null and the whole app renders blank.
   // Redirect such URLs to a valid team (personal, or the first available).
+  //
+  // IMPORTANT: the personal team is NOT in `teams` — fetchMyTeams excludes it
+  // (.neq kind personal). A valid id is therefore (teams ∪ personalTeamId),
+  // otherwise navigating to the personal workspace would be wrongly rejected
+  // and loop-redirect forever.
   useEffect(() => {
     if (!urlTeamId) return;
-    if (!teamsLoading && teams.length > 0 && !teams.some(t => t.id === urlTeamId)) {
-      const fallback = personalTeamId && teams.some(t => t.id === personalTeamId)
-        ? personalTeamId
-        : teams[0].id;
+    const isValidTeam = teams.some(t => t.id === urlTeamId) || urlTeamId === personalTeamId;
+    if (!teamsLoading && (teams.length > 0 || personalTeamId) && !isValidTeam) {
+      const fallback = personalTeamId || (teams.length > 0 ? teams[0].id : null);
+      if (!fallback) return; // nothing valid to redirect to yet
       console.warn(
         `[AppLayout] URL team ${urlTeamId} is not one of the user's teams; ` +
           `redirecting to ${fallback}`,
