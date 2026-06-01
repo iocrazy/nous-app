@@ -20,6 +20,13 @@ def format_ugc_video(
     """Build the parsed_data dict for a single qishui UGC video."""
     cover = vo.get("coverURL")
     mp4_url = vo.get("url")
+    # UGC ``videoOptions.duration`` is SECONDS (float, e.g. 34.968) — unlike the
+    # music track's ``duration`` which is milliseconds. Convert to ms so it
+    # matches the rest of the pipeline (Utils.format_duration expects ms).
+    try:
+        duration_ms = int(round(float(vo.get("duration") or 0) * 1000))
+    except (TypeError, ValueError):
+        duration_ms = 0
     return {
         "platform_id": ugc_video_id,
         "original_url": original_url,
@@ -27,7 +34,7 @@ def format_ugc_video(
         "media_type": "video",
         "title": vo.get("videoName") or "untitled",
         "author": vo.get("artistName"),
-        "duration": Utils.format_duration(int(vo.get("duration") or 0)),
+        "duration": Utils.format_duration(duration_ms),
         "cover_urls": [cover] if cover else None,
         "video_download_urls": [mp4_url] if mp4_url else [],
         "published_at": None,
@@ -35,7 +42,8 @@ def format_ugc_video(
             "ext": "mp4",
             "width": vo.get("width"),
             "height": vo.get("height"),
-            "duration_ms": vo.get("duration"),
+            "duration_ms": duration_ms,
+            "duration_seconds": vo.get("duration"),
             "group_download_level": vo.get("group_download_level"),
             "hasCopyright": vo.get("hasCopyright"),
             "ugc_video_id": ugc_video_id,
