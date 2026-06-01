@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from app.api.media_soda_router import resolve_playlist_id
 from app.services.media.parsers.soda_music.soda_api import SodaContent
 
@@ -63,9 +61,7 @@ def test_resolve_playlist_id_short_link():
 
 
 def test_resolve_playlist_id_short_link_not_playlist_returns_none():
-    client = _FakeClient(
-        short_link_content=SodaContent(kind="track", content_id="7")
-    )
+    client = _FakeClient(short_link_content=SodaContent(kind="track", content_id="7"))
     pid = asyncio.run(resolve_playlist_id("https://v.douyin.com/abc/", client))
     assert pid is None
 
@@ -98,9 +94,11 @@ def _make_client(monkeypatch, *, tracks, resolve_to="PL999"):
 
     def _fake_api(cookie):
         return _Client(
-            short_link_content=SodaContent(kind="playlist", content_id=resolve_to)
-            if resolve_to
-            else None,
+            short_link_content=(
+                SodaContent(kind="playlist", content_id=resolve_to)
+                if resolve_to
+                else None
+            ),
             tracks=tracks,
         )
 
@@ -128,7 +126,9 @@ def test_playlist_endpoint_returns_tracks(monkeypatch):
     client = _make_client(monkeypatch, tracks=tracks)
     resp = client.post(
         "/api/v1/media/soda/playlist",
-        json={"url": "https://music.douyin.com/qishui/share/playlist?playlist_id=PL999"},
+        json={
+            "url": "https://music.douyin.com/qishui/share/playlist?playlist_id=PL999"
+        },
     )
     assert resp.status_code == 200
     body = resp.json()
