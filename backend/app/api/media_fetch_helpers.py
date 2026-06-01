@@ -114,12 +114,12 @@ async def resolve_team_id(user_id: str, request: Request) -> Optional[str]:
 # ============================================
 
 
-async def resolve_and_attach_tags(
-    resource_id: str, tag_names: list[str], user_id: str
-) -> list[str]:
-    """Resolve tag names to IDs (auto-create if missing) and attach to resource."""
+async def resolve_tag_names_to_ids(tag_names: list[str], user_id: str) -> list[str]:
+    """Resolve tag names to IDs, auto-creating any that don't exist yet.
+    Does NOT attach to a resource — use when you only need the ids (e.g. to
+    forward to a workflow before the resource exists)."""
     repo = TagsRepository()
-    tag_ids = []
+    tag_ids: list[str] = []
     for name in tag_names:
         name = name.strip()
         if not name:
@@ -128,6 +128,15 @@ async def resolve_and_attach_tags(
         if not tag:
             tag = await repo.create_tag(name=name, user_id=user_id)
         tag_ids.append(str(tag["id"]))
+    return tag_ids
+
+
+async def resolve_and_attach_tags(
+    resource_id: str, tag_names: list[str], user_id: str
+) -> list[str]:
+    """Resolve tag names to IDs (auto-create if missing) and attach to resource."""
+    repo = TagsRepository()
+    tag_ids = await resolve_tag_names_to_ids(tag_names, user_id)
     if tag_ids:
         await repo.bulk_add_tags_to_resource(resource_id, tag_ids, source="manual")
     return tag_ids
@@ -429,6 +438,22 @@ async def handle_media_fetch_dispatch(
 
     mgr = get_task_manager()
 
+    # Merge any tag NAMES into the tag_ids list. The single-fetch path only
+    # forwarded tag_ids to parse_workflow, so tags supplied by name (the common
+    # case for the Shortcuts / API push) were silently dropped and never
+    # attached to the downloaded resource. Resolve names → ids (auto-creating
+    # missing ones) up front, before the resource exists, then forward the
+    # combined id list through the existing tag_ids channel.
+    effective_tag_ids = list(tag_ids or [])
+    if tags:
+        try:
+            resolved = await resolve_tag_names_to_ids(tags, auth.user_id)
+            for tid in resolved:
+                if tid not in effective_tag_ids:
+                    effective_tag_ids.append(tid)
+        except Exception as e:
+            logger.warning(f"[Fetch] tag-name resolution failed (non-fatal): {e}")
+
     has_cookie = False
     if platform in ("douyin", "bilibili", "youtube"):
         try:
@@ -548,10 +573,11 @@ async def handle_media_fetch_dispatch(
             "user_id": auth.user_id,
             "video_bool": request.video_bool,
             "cover_bool": True,
-            # Forward the parse-page tag picker selection so the workflow
-            # can attach them to the new resource (was being silently
-            # dropped, breaking the tag-driven AI chain).
-            "tag_ids": tag_ids or [],
+            # Forward the parse-page tag picker selection (ids) PLUS any tags
+            # passed by name (resolved into effective_tag_ids above) so the
+            # workflow attaches them to the new resource. Previously only raw
+            # tag_ids were forwarded, dropping name-based tags entirely.
+            "tag_ids": effective_tag_ids,
             # Without this, parse_workflow defaults to platform="douyin"
             # and feeds bilibili / youtube URLs into the douyin fallback
             # chain — which can never succeed (DrissionPage waits on a
