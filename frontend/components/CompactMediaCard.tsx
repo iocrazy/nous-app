@@ -70,6 +70,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   const [imageError, setImageError] = useState(false);
 
   const isVideo = isVideoType(data.media_type);
+  const isAudio = data.media_type === 'audio';
   const images = data.image_download_urls || [];
   const isAlbum = !isVideo && images.length > 1;
 
@@ -301,7 +302,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         {/* Platform Logo Badge */}
         {!showingAnyScrub && data.source_platform && (
           <div className="absolute top-2 left-2 z-10 pointer-events-none">
-            {['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(data.source_platform) ? (
+            {['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter', 'qishui'].includes(data.source_platform) ? (
               <div className="bg-black/60 backdrop-blur-sm p-1 rounded-full">
                 <img src={`/icons/${data.source_platform}.svg`} alt="" className="w-4 h-4" />
               </div>
@@ -323,7 +324,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                 </div>
               )}
               <div className="bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90">
-                {isVideo ? <VideoIcon size={12} /> : <ImageIcon size={12} />}
+                {isVideo ? <VideoIcon size={12} /> : isAudio ? <AudioLines size={12} /> : <ImageIcon size={12} />}
               </div>
             </div>
             {isAlbum && (
