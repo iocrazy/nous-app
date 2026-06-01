@@ -71,7 +71,7 @@ class SodaPreviewError(SodaApiError):
 class SodaContent:
     """Result of classifying a short-link landing URL (§A.2.1)."""
 
-    kind: str  # "track" | "ugc_video"
+    kind: str  # "track" | "ugc_video" | "playlist"
     content_id: str
 
 
@@ -123,6 +123,8 @@ def classify_landing_url(url: str) -> SodaContent | None:
         return SodaContent(kind="track", content_id=query["track_id"][0])
     if "ugc_video_id" in query:
         return SodaContent(kind="ugc_video", content_id=query["ugc_video_id"][0])
+    if "playlist_id" in query:
+        return SodaContent(kind="playlist", content_id=query["playlist_id"][0])
     return None
 
 
