@@ -179,7 +179,7 @@ class ReconcileResult:
 
 async def reconcile_run(
     *,
-    run_id: UUID,
+    run_id: str | UUID,  # agent_runs.id is a BIGINT Snowflake (str) since mig 232
     user_id: UUID,
     team_id: Optional[int],
     project_id: Optional[int],
