@@ -95,6 +95,9 @@ class RunRecorder:
     _completion_rate: Optional[float] = field(default=None, init=False)
     _cached_input_tokens: int = field(default=0, init=False)
     _cached_rate: Optional[float] = field(default=None, init=False)  # cents per 1k
+    # Per-call ledger buffer (cost port P1b): one entry per record_usage call,
+    # flushed to agent_cost_events on _finish. Keeps record_usage sync.
+    _per_call_usage: list[dict] = field(default_factory=list, init=False)
     _last_heartbeat_monotonic: float = field(default=0.0, init=False)
     _cancelled: bool = field(default=False, init=False)
 
@@ -154,9 +157,14 @@ class RunRecorder:
         ``cached_input_tokens`` is the subset of ``prompt_tokens`` served from
         the provider's prompt cache (billed cheaper when a cached rate exists).
         """
-        self._prompt_tokens += max(0, prompt_tokens or 0)
-        self._completion_tokens += max(0, completion_tokens or 0)
-        self._cached_input_tokens += max(0, cached_input_tokens or 0)
+        p = max(0, prompt_tokens or 0)
+        c = max(0, completion_tokens or 0)
+        ci = max(0, cached_input_tokens or 0)
+        self._prompt_tokens += p
+        self._completion_tokens += c
+        self._cached_input_tokens += ci
+        # P1b: buffer this call for the per-call cost ledger (flushed on finish).
+        self._per_call_usage.append({"prompt": p, "completion": c, "cached": ci})
 
     def compute_cost_cents(self) -> float:
         """Cost so far in cents. Cached tokens use ``_cached_rate`` when set,
@@ -174,6 +182,54 @@ class RunRecorder:
             + cached / 1000.0 * cached_rate
             + self._completion_tokens / 1000.0 * self._completion_rate
         )
+
+    def _cost_for_call(self, prompt: int, cached: int, completion: int) -> float:
+        """Cost in cents for one call's tokens, same pricing as
+        compute_cost_cents (cached rate falls back to prompt rate). 0.0 when
+        rates unknown."""
+        if self._prompt_rate is None or self._completion_rate is None:
+            return 0.0
+        cached = min(cached, prompt)
+        billable_prompt = prompt - cached
+        cached_rate = (
+            self._cached_rate if self._cached_rate is not None else self._prompt_rate
+        )
+        return (
+            billable_prompt / 1000.0 * self._prompt_rate
+            + cached / 1000.0 * cached_rate
+            + completion / 1000.0 * self._completion_rate
+        )
+
+    async def _flush_cost_events(self, client) -> None:
+        """P1b: write one agent_cost_events row per buffered LLM call.
+
+        Append-only ledger borrowed from paperclip's cost_events. Best-effort:
+        a failure here must never break the run (caller wraps in try/except).
+        No-op when nothing was buffered.
+        """
+        if not self._per_call_usage or self.run_id is None:
+            return
+        rows = [
+            {
+                "run_id": str(self.run_id),
+                "agent_id": str(self.agent_id),
+                "user_id": str(self.user_id) if self.user_id else None,
+                "team_id": self.team_id,
+                "project_id": self.project_id,
+                "session_id": self.session_id,
+                "issue_id": self.issue_id,
+                "provider": self.provider,
+                "model": self.model,
+                "input_tokens": call["prompt"],
+                "cached_input_tokens": call["cached"],
+                "output_tokens": call["completion"],
+                "cost_cents": self._cost_for_call(
+                    call["prompt"], call["cached"], call["completion"]
+                ),
+            }
+            for call in self._per_call_usage
+        ]
+        await client.table("agent_cost_events").insert(rows).execute()
 
     @property
     def prompt_tokens(self) -> int:
@@ -411,6 +467,14 @@ class RunRecorder:
             .eq("status", "running")  # idempotent guard
             .execute()
         )
+
+        # P1b: flush the per-call cost ledger (agent_cost_events). Best-effort —
+        # a ledger failure must never break the run or roll back the agent_runs
+        # row above.
+        try:
+            await self._flush_cost_events(client)
+        except Exception as exc:
+            logger.warning(f"[RunRecorder] cost-events flush failed (non-fatal): {exc}")
 
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be

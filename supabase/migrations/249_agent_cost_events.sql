@@ -1,12 +1,14 @@
 -- Migration 249: per-call cost ledger (paperclip cost port Phase 1b)
 --
 -- Borrows paperclip's cost_events: one immutable row per LLM call (vs the
--- per-run aggregate on agent_runs). This is the foundation for windowed
--- budget aggregation (Phase 2). agent_runs stays the per-run rollup; this
--- table is the granular append-only ledger.
+-- per-run aggregate on agent_runs). Foundation for windowed budget
+-- aggregation (Phase 2). agent_runs stays the per-run rollup; this is the
+-- granular append-only ledger.
 --
--- Scope columns mirror agent_runs (uuid agent_id/user_id/session_id +
--- bigint team_id/project_id/issue_id) so cost can be summed by any scope.
+-- Scope column types mirror agent_runs EXACTLY (verified on prod via
+-- information_schema):
+--   id/agent_id/user_id = uuid
+--   team_id/project_id/session_id/issue_id = bigint
 
 CREATE TABLE IF NOT EXISTS public.agent_cost_events (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -15,7 +17,7 @@ CREATE TABLE IF NOT EXISTS public.agent_cost_events (
   user_id             uuid,
   team_id             bigint,
   project_id          bigint,
-  session_id          uuid,
+  session_id          bigint,
   issue_id            bigint,
   provider            text,
   model               text,
@@ -26,7 +28,6 @@ CREATE TABLE IF NOT EXISTS public.agent_cost_events (
   occurred_at         timestamptz NOT NULL DEFAULT now()
 );
 
--- Windowed aggregation indexes (Phase 2 reads sum(cost_cents) by scope+time).
 CREATE INDEX IF NOT EXISTS idx_cost_events_run
   ON public.agent_cost_events (run_id);
 CREATE INDEX IF NOT EXISTS idx_cost_events_user_occurred
