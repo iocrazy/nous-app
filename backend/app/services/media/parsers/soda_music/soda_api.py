@@ -15,6 +15,7 @@ See ``docs/soda-music-integration.md`` §A.2 / §A.3 / §B.13.
 
 from __future__ import annotations
 
+import html as _html
 import json
 import time
 from dataclasses import dataclass
@@ -33,7 +34,12 @@ from app.services.media.parsers.soda_music.soda_quality import (
 
 BASE_URL = "https://api.qishui.com"
 SHARE_BASE_URL = "https://music.douyin.com/qishui"
+SHARE_BASE = "https://music.douyin.com"
 USER_AGENT = "LunaPC/3.3.0(359450208)"
+SHARE_PAGE_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+)
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_COVER_SIZE = "~c5_375x375.jpg"
 
@@ -127,6 +133,77 @@ def classify_landing_url(url: str) -> SodaContent | None:
     if "playlist_id" in query:
         return SodaContent(kind="playlist", content_id=query["playlist_id"][0])
     return None
+
+
+# ---------------------------------------------------------------------------
+# Pure: UGC video share-page scrape (§A.2.1)
+# ---------------------------------------------------------------------------
+
+
+def _share_page_headers(cookie: str) -> dict[str, str]:
+    """Browser-ish headers for the UGC share page (a web page, not the JSON API).
+
+    The LunaPC ``build_pc_headers`` is for ``api.qishui.com``; the share page at
+    ``music.douyin.com`` wants a normal browser UA + cookie + referer.
+    """
+    return {
+        "User-Agent": SHARE_PAGE_USER_AGENT,
+        "Cookie": cookie,
+        "Referer": "https://music.douyin.com/",
+    }
+
+
+def _balanced_json_object(text: str, start: int) -> str | None:
+    """Return the JSON object substring starting at the ``{`` at ``start``.
+
+    Balance-scans braces (respecting string literals + escapes) to find the
+    matching ``}``. Returns ``None`` if no balanced object is found.
+    """
+    depth = 0
+    in_str = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def extract_router_data(html: str) -> dict[str, Any] | None:
+    """Scrape ``window._ROUTER_DATA`` → ``loaderData.ugc_video_page.videoOptions``.
+
+    Robust to HTML-entity-escaped JSON (retries with ``html.unescape``). Returns
+    ``None`` on any structural/parse failure — callers raise their own error.
+    """
+    try:
+        marker = "window._ROUTER_DATA"
+        idx = html.index(marker)
+        brace = html.index("{", idx)
+        blob = _balanced_json_object(html, brace)
+        if blob is None:
+            return None
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError:
+            data = json.loads(_html.unescape(blob))
+        vo = data["loaderData"]["ugc_video_page"]["videoOptions"]
+        return vo if isinstance(vo, dict) else None
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -343,3 +420,30 @@ class SodaApiClient:
         if content is None:
             logger.warning("soda: could not classify landing url {}", landing)
         return content
+
+    async def get_ugc_video(self, ugc_video_id: str) -> dict[str, Any]:
+        """Scrape the UGC share page → ``videoOptions`` dict (§A.2.1).
+
+        A qishui UGC video is a plain unencrypted MP4; the share page HTML
+        carries ``window._ROUTER_DATA`` with the direct (expiring) URL. This is
+        an HTML fetch, not the LunaPC JSON API — uses browser-ish headers.
+
+        Raises:
+            SodaApiError: on HTTP failure or when videoOptions can't be parsed.
+        """
+        url = f"{SHARE_BASE}/qishui/share/ugc_video?ugc_video_id={ugc_video_id}"
+        async with self._client_factory() as client:
+            resp = await client.get(
+                url, headers=_share_page_headers(self._cookie), timeout=self._timeout
+            )
+            try:
+                resp.raise_for_status()
+                text = resp.text
+            except (httpx.HTTPError, ValueError) as e:
+                raise SodaApiError(f"ugc_video fetch failed: {e}") from e
+        vo = extract_router_data(text)
+        if vo is None:
+            raise SodaApiError(
+                f"could not extract videoOptions for ugc_video {ugc_video_id}"
+            )
+        return vo
