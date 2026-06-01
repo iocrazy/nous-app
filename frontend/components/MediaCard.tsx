@@ -554,6 +554,15 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     }
   };
 
+  const isAudio = data.media_type === 'audio';
+  // PC API gives no per-track like count for audio — show a defensive bitrate
+  // tag instead of a misleading "0 likes" heart.
+  const audioBitrate = (() => {
+    const br = data.metadata?.quality?.Bitrate;
+    if (typeof br !== 'number' || br <= 0) return undefined;
+    return br >= 10000 ? Math.round(br / 1000) : br;
+  })();
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all duration-300 shadow-lg flex flex-col max-w-full">
       <div className={`flex ${hidePreview ? 'flex-col' : 'flex-col md:flex-row'} min-w-0`}>
@@ -663,7 +672,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             {/* Desktop: type badge + resolution */}
             <div className="hidden sm:flex gap-2 shrink-0">
                 <span className="px-2 py-1 text-xs font-semibold bg-zinc-800 text-zinc-300 rounded-md border border-zinc-700 uppercase tracking-wider">
-                {getAwemeTypeLabel(data.media_type)}
+                {isAudio
+                  ? (audioBitrate ? `Audio · ${audioBitrate}kbps` : 'Audio')
+                  : getAwemeTypeLabel(data.media_type)}
                 </span>
                 {data.resolution && (
                 <span className="px-2 py-1 text-xs font-semibold bg-indigo-900/30 text-indigo-400 rounded-md border border-indigo-900/50">
@@ -774,11 +785,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 mb-5 text-sm text-zinc-400">
              <div className="flex items-center gap-2">
                 <Clock size={14} className="text-zinc-500"/>
-                <span>Video Release Time: <span className="text-zinc-300 font-medium">{formatDateTime(data.published_at)}</span></span>
+                <span>Release Time: <span className="text-zinc-300 font-medium">{formatDateTime(data.published_at)}</span></span>
              </div>
              <div className="flex items-center gap-2">
                 <Timer size={14} className="text-zinc-500"/>
-                <span>Video Duration: <span className="text-zinc-300 font-medium">{formatDuration(data.duration)}</span></span>
+                <span>Duration: <span className="text-zinc-300 font-medium">{formatDuration(data.duration)}</span></span>
                 {data.resolution && (
                   <span className="sm:hidden px-1.5 py-0.5 text-xs font-medium bg-indigo-900/30 text-indigo-400 rounded border border-indigo-900/50">
                     {formatResolution(data.resolution)}
@@ -788,12 +799,14 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-4 gap-2 sm:gap-4 mb-6">
+          <div className={`grid ${isAudio ? 'grid-cols-3' : 'grid-cols-4'} gap-2 sm:gap-4 mb-6`}>
+            {!isAudio && (
             <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
               <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500 mb-1" />
               <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.like_count)}</span>
               <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Likes</span>
             </div>
+            )}
             <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
               <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />
               <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.comment_count)}</span>

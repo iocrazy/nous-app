@@ -12,6 +12,7 @@ export const MEDIA_TYPE_MAP: Record<string | number, string> = {
   'special': 'Video',
   'short': 'Short',
   'live_clip': 'Live Clip',
+  'audio': 'Audio',
   // Legacy numeric types (backward compatible)
   '0': 'Video',
   '2': 'Album',
