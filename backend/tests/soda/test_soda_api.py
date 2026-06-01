@@ -104,6 +104,13 @@ def test_classify_landing_url_ugc_video():
     assert c == SodaContent(kind="ugc_video", content_id="99")
 
 
+def test_classify_landing_url_playlist():
+    c = classify_landing_url(
+        "https://music.douyin.com/qishui/share/playlist?playlist_id=PL123"
+    )
+    assert c == SodaContent(kind="playlist", content_id="PL123")
+
+
 def test_classify_landing_url_unknown_returns_none():
     assert classify_landing_url("https://music.douyin.com/qishui/home") is None
 

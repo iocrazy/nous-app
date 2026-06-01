@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 from loguru import logger
 
 from app.boundary import safe_async_client
@@ -71,7 +72,7 @@ class SodaPreviewError(SodaApiError):
 class SodaContent:
     """Result of classifying a short-link landing URL (§A.2.1)."""
 
-    kind: str  # "track" | "ugc_video"
+    kind: str  # "track" | "ugc_video" | "playlist"
     content_id: str
 
 
@@ -123,6 +124,8 @@ def classify_landing_url(url: str) -> SodaContent | None:
         return SodaContent(kind="track", content_id=query["track_id"][0])
     if "ugc_video_id" in query:
         return SodaContent(kind="ugc_video", content_id=query["ugc_video_id"][0])
+    if "playlist_id" in query:
+        return SodaContent(kind="playlist", content_id=query["playlist_id"][0])
     return None
 
 
@@ -159,8 +162,11 @@ class SodaApiClient:
                 headers=build_pc_headers(self._cookie, post=True),
                 timeout=self._timeout,
             )
-            resp.raise_for_status()
-            return resp.json()
+            try:
+                resp.raise_for_status()
+                return resp.json()
+            except (httpx.HTTPError, ValueError) as e:
+                raise SodaApiError(f"qishui request failed: {e}") from e
 
     async def _get_json(
         self,
@@ -177,8 +183,11 @@ class SodaApiClient:
             if with_params:
                 kwargs["params"] = {**build_pc_params(), **(extra_params or {})}
             resp = await client.get(url, **kwargs)
-            resp.raise_for_status()
-            return resp.json()
+            try:
+                resp.raise_for_status()
+                return resp.json()
+            except (httpx.HTTPError, ValueError) as e:
+                raise SodaApiError(f"qishui request failed: {e}") from e
 
     async def get_track_v2(self, track_id: str) -> dict[str, Any]:
         """POST /luna/pc/track_v2 — returns {track, url_player_info, raw} (§A.3)."""
@@ -246,10 +255,71 @@ class SodaApiClient:
         )
 
     async def get_user_playlists(self, cursor: int = 0) -> dict[str, Any]:
-        """GET /luna/pc/user/playlist — the user's playlists incl. favourites (§A.3)."""
+        """GET /luna/pc/user/playlist — the user's playlists. Requires user_id
+        (from /me), else ERR_INVALID_PARAM."""
+        me = await self.get_me()
+        user_id = (me.get("my_info") or {}).get("id")
+        if not user_id:
+            raise SodaApiError("could not resolve user_id from /me")
         return await self._get_json(
-            f"{BASE_URL}/luna/pc/user/playlist", extra_params={"cursor": cursor}
+            f"{BASE_URL}/luna/pc/user/playlist",
+            extra_params={"user_id": user_id, "cursor": cursor, "count": 50},
         )
+
+    async def find_favorites_playlist_id(self) -> str | None:
+        """Resolve the 「我喜欢的音乐」 playlist id (type==1)."""
+        data = await self.get_user_playlists()
+        for p in data.get("playlists") or []:
+            if p.get("type") == 1:
+                return str(p.get("id"))
+        return None
+
+    async def get_playlist_tracks(
+        self, playlist_id: str, *, max_tracks: int = 500, count: int = 30
+    ) -> list[dict[str, Any]]:
+        """Flat list of music-track summaries in a playlist (skips UGC videos).
+
+        Each: {track_id, title, artist, cover_url, duration_ms}.
+        """
+        out: list[dict[str, Any]] = []
+        cursor = 0
+        while len(out) < max_tracks:
+            det = await self.get_playlist_detail(
+                playlist_id, cursor=cursor, count=count
+            )
+            resources = det.get("media_resources") or []
+            if not resources:
+                break
+            for mr in resources:
+                if mr.get("type") != "track":
+                    continue  # skip UGC video entries
+                tr = ((mr.get("entity") or {}).get("track_wrapper") or {}).get(
+                    "track"
+                ) or {}
+                if not tr.get("id"):
+                    continue
+                artists = tr.get("artists") or []
+                album = tr.get("album") or {}
+                out.append(
+                    {
+                        "track_id": str(tr.get("id")),
+                        "title": tr.get("name"),
+                        "artist": artists[0].get("name") if artists else None,
+                        "cover_url": (
+                            cover_url(album["url_cover"])
+                            if album.get("url_cover")
+                            else None
+                        ),
+                        "duration_ms": tr.get("duration"),
+                    }
+                )
+                if len(out) >= max_tracks:
+                    break
+            if not det.get("has_more"):
+                break
+            nxt = det.get("next_cursor")
+            cursor = nxt if isinstance(nxt, int) and nxt > cursor else cursor + count
+        return out
 
     async def get_me(self) -> dict[str, Any]:
         """GET /luna/pc/me — current user info (my_info.id) (§A.3)."""

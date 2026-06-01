@@ -26,6 +26,7 @@ from app.api.media_download_router import router as download_router
 # Import sub-routers
 from app.api.media_fetch_router import router as fetch_router
 from app.api.media_slides_router import router as slides_router
+from app.api.media_soda_router import router as soda_router
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
 from app.repositories.media_repository import MediaRepository
@@ -36,6 +37,7 @@ router = APIRouter(prefix="/media")
 # Include fetch and download sub-routers
 router.include_router(fetch_router)
 router.include_router(download_router)
+router.include_router(soda_router)
 
 # API group tags
 TAGS_VIDEOS = ["Video Management"]
