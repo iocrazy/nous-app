@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Loader2, Music, Download, ListMusic } from 'lucide-react';
+import { Loader2, Music, Download, ListMusic, Film } from 'lucide-react';
 import { useToast } from './Toast';
 import {
   getSodaPlaylist,
   downloadSodaTracks,
   SodaTrackSummary,
+  SodaDownloadItem,
 } from '../services/parserService';
 
 interface SodaPlaylistPanelProps {
@@ -73,7 +74,12 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await downloadSodaTracks([...selected], undefined);
+      // Build {id, kind} items by looking up each selected id's kind from the
+      // loaded tracks (default "track" for older responses without a kind).
+      const items: SodaDownloadItem[] = tracks
+        .filter((t) => selected.has(t.track_id))
+        .map((t) => ({ id: t.track_id, kind: t.kind ?? 'track' }));
+      const result = await downloadSodaTracks(items, undefined);
       if (result.submitted === 0 || !result.success) {
         const message = 'Failed to submit tracks for download';
         setError(message);
@@ -150,6 +156,7 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
             {tracks.map((track) => {
               const checked = selected.has(track.track_id);
               const duration = formatDuration(track.duration_ms);
+              const isVideo = track.kind === 'video';
               return (
                 <label
                   key={track.track_id}
@@ -171,13 +178,23 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
                           (e.currentTarget as HTMLImageElement).style.display = 'none';
                         }}
                       />
+                    ) : isVideo ? (
+                      <Film size={16} className="text-zinc-600" />
                     ) : (
                       <Music size={16} className="text-zinc-600" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-zinc-200 truncate">
-                      {track.title || 'Untitled'}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm text-zinc-200 truncate">
+                        {track.title || 'Untitled'}
+                      </span>
+                      {isVideo && (
+                        <span className="flex items-center gap-1 flex-shrink-0 text-[10px] font-medium uppercase tracking-wide text-purple-300 bg-purple-500/15 border border-purple-500/30 rounded px-1.5 py-0.5">
+                          <Film size={10} />
+                          Video
+                        </span>
+                      )}
                     </div>
                     {track.artist && (
                       <div className="text-xs text-zinc-500 truncate">{track.artist}</div>

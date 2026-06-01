@@ -60,13 +60,14 @@ class SodaPlaylistRequest(BaseModel):
 
 
 class SodaTrackSummary(BaseModel):
-    """One music track inside a playlist."""
+    """One item (music track or UGC video) inside a playlist."""
 
     track_id: str
     title: Optional[str] = None
     artist: Optional[str] = None
     cover_url: Optional[str] = None
     duration_ms: Optional[int] = None
+    kind: str = "track"  # "track" | "video"
 
 
 class SodaPlaylistResponse(BaseModel):
@@ -77,10 +78,23 @@ class SodaPlaylistResponse(BaseModel):
     total: int
 
 
-class SodaBatchDownloadRequest(BaseModel):
-    """Batch-download a set of selected playlist tracks."""
+class SodaDownloadItem(BaseModel):
+    """One selected playlist item to download (track or UGC video)."""
 
-    track_ids: list[str]
+    id: str
+    kind: str = "track"  # "track" | "video"
+
+
+class SodaBatchDownloadRequest(BaseModel):
+    """Batch-download a set of selected playlist items.
+
+    ``items`` carries per-item ``kind`` and is preferred. ``track_ids`` is kept
+    for backward compatibility — when only it is given, every id is treated as a
+    music track.
+    """
+
+    items: Optional[list[SodaDownloadItem]] = None
+    track_ids: Optional[list[str]] = None
     playlist_title: Optional[str] = None
 
 
@@ -117,6 +131,20 @@ def build_track_url(track_id: str) -> str:
     return f"https://music.douyin.com/qishui/share/track?track_id={track_id}"
 
 
+def build_item_url(item_id: str, kind: str) -> str:
+    """Build the share URL for a playlist item by kind.
+
+    ``video`` → the UGC share URL (routed to the UGC download workflow); any
+    other kind (``track``) → the track share URL. Mirrors the single-fetch
+    entrypoints so the batch path reuses the exact same parse routing.
+    """
+    if kind == "video":
+        return (
+            "https://music.douyin.com/qishui/share/ugc_video" f"?ugc_video_id={item_id}"
+        )
+    return build_track_url(item_id)
+
+
 def _workflow_id(url: str, user_id: str, bucket: int) -> str:
     """Deterministic DBOS workflow id (matches the single-fetch L3 scheme)."""
     url_hash = hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
@@ -124,32 +152,35 @@ def _workflow_id(url: str, user_id: str, bucket: int) -> str:
 
 
 def batch_plan(
-    track_ids: list[str],
+    items: list[dict[str, Any]],
     flow_id: str,
     user_id: str,
     *,
     bucket: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Build the per-track dispatch plan for a playlist batch download.
+    """Build the per-item dispatch plan for a playlist batch download.
 
-    Each entry is ``{"workflow_id": str, "kwargs": dict}`` where ``kwargs`` are
-    the ``parse_workflow`` arguments. The list is capped at ``MAX_BATCH`` — an
-    over-cap input is truncated with a logged warning (never a silent cap).
+    ``items`` is a list of ``{"id": str, "kind": str}`` (kind ``"track"`` or
+    ``"video"``). Each entry is ``{"workflow_id": str, "kwargs": dict}`` where
+    ``kwargs`` are the ``parse_workflow`` arguments. The URL is built per kind so
+    videos route to the UGC download workflow. The list is capped at
+    ``MAX_BATCH`` — an over-cap input is truncated with a logged warning (never
+    a silent cap). The deterministic workflow id is keyed on the built URL.
     """
-    if len(track_ids) > MAX_BATCH:
-        dropped = len(track_ids) - MAX_BATCH
+    if len(items) > MAX_BATCH:
+        dropped = len(items) - MAX_BATCH
         logger.warning(
             f"[Soda/Batch] playlist exceeds MAX_BATCH={MAX_BATCH}; "
-            f"dropping {dropped} track(s)"
+            f"dropping {dropped} item(s)"
         )
-        track_ids = track_ids[:MAX_BATCH]
+        items = items[:MAX_BATCH]
 
     if bucket is None:
         bucket = int(time.time() // 30)
 
     plan: list[dict[str, Any]] = []
-    for track_id in track_ids:
-        url = build_track_url(track_id)
+    for item in items:
+        url = build_item_url(item["id"], item.get("kind", "track"))
         plan.append(
             {
                 "workflow_id": _workflow_id(url, user_id, bucket),
@@ -224,10 +255,18 @@ async def download_soda_playlist(
     Points are charged per track up front (mirroring the batch douyin path), and
     tracks that fail to dispatch are refunded after the loop.
     """
-    if not request.track_ids:
-        raise HTTPException(status_code=422, detail="track_ids must not be empty")
+    # Effective item list: prefer ``items`` (carries per-item kind); fall back
+    # to the legacy ``track_ids`` (all treated as music tracks) for back-compat.
+    if request.items:
+        effective_items = [{"id": it.id, "kind": it.kind} for it in request.items]
+    elif request.track_ids:
+        effective_items = [{"id": tid, "kind": "track"} for tid in request.track_ids]
+    else:
+        raise HTTPException(
+            status_code=422, detail="items or track_ids must not be empty"
+        )
 
-    total = len(request.track_ids)
+    total = len(effective_items)
 
     # Charge points per track BEFORE any dispatch so a 402 short-circuits early.
     points_service = PointsService()
@@ -251,7 +290,7 @@ async def download_soda_playlist(
         name=request.playlist_title or "Soda playlist download",
     )
 
-    plan = batch_plan(request.track_ids, flow_id=flow_id, user_id=auth.user_id)
+    plan = batch_plan(effective_items, flow_id=flow_id, user_id=auth.user_id)
 
     submitted = 0
     for entry in plan:

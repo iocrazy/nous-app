@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import hashlib
 
-from app.api.media_soda_router import MAX_BATCH, batch_plan, build_track_url
+from app.api.media_soda_router import (
+    MAX_BATCH,
+    batch_plan,
+    build_item_url,
+    build_track_url,
+)
 
 # --- pure: build_track_url ---------------------------------------------------
 
@@ -21,6 +26,23 @@ def test_build_track_url_exact():
     )
 
 
+# --- pure: build_item_url ----------------------------------------------------
+
+
+def test_build_item_url_track():
+    assert (
+        build_item_url("abc", "track")
+        == "https://music.douyin.com/qishui/share/track?track_id=abc"
+    )
+
+
+def test_build_item_url_video():
+    assert (
+        build_item_url("uv9", "video")
+        == "https://music.douyin.com/qishui/share/ugc_video?ugc_video_id=uv9"
+    )
+
+
 # --- pure: batch_plan --------------------------------------------------------
 
 
@@ -29,8 +51,17 @@ def _expected_wf_id(url: str, user_id: str, bucket: int) -> str:
     return f"parse-{user_id[:8]}-{url_hash}-{bucket}"
 
 
+def _track_item(tid: str) -> dict:
+    return {"id": tid, "kind": "track"}
+
+
 def test_batch_plan_builds_one_entry_per_track():
-    plan = batch_plan(["1", "2"], flow_id="flow9", user_id="user1234", bucket=5)
+    plan = batch_plan(
+        [_track_item("1"), _track_item("2")],
+        flow_id="flow9",
+        user_id="user1234",
+        bucket=5,
+    )
     assert len(plan) == 2
     for entry, tid in zip(plan, ["1", "2"]):
         kwargs = entry["kwargs"]
@@ -45,15 +76,32 @@ def test_batch_plan_builds_one_entry_per_track():
         )
 
 
+def test_batch_plan_video_item_uses_ugc_url():
+    plan = batch_plan(
+        [_track_item("1"), {"id": "uv9", "kind": "video"}],
+        flow_id="flow9",
+        user_id="user1234",
+        bucket=5,
+    )
+    assert len(plan) == 2
+    track_url = build_item_url("1", "track")
+    video_url = build_item_url("uv9", "video")
+    assert plan[0]["kwargs"]["url"] == track_url
+    assert plan[1]["kwargs"]["url"] == video_url
+    # shared flow + deterministic workflow ids keyed on the built url
+    assert {p["kwargs"]["flow_id"] for p in plan} == {"flow9"}
+    assert plan[1]["workflow_id"] == _expected_wf_id(video_url, "user1234", 5)
+
+
 def test_batch_plan_deterministic_workflow_ids():
-    a = batch_plan(["7"], flow_id="f", user_id="user1234", bucket=3)
-    b = batch_plan(["7"], flow_id="f", user_id="user1234", bucket=3)
+    a = batch_plan([_track_item("7")], flow_id="f", user_id="user1234", bucket=3)
+    b = batch_plan([_track_item("7")], flow_id="f", user_id="user1234", bucket=3)
     assert a[0]["workflow_id"] == b[0]["workflow_id"]
 
 
 def test_batch_plan_truncates_over_cap():
-    ids = [str(i) for i in range(MAX_BATCH + 50)]
-    plan = batch_plan(ids, flow_id="f", user_id="u", bucket=1)
+    items = [_track_item(str(i)) for i in range(MAX_BATCH + 50)]
+    plan = batch_plan(items, flow_id="f", user_id="u", bucket=1)
     assert len(plan) == MAX_BATCH
 
 
@@ -125,12 +173,74 @@ def test_download_endpoint_dispatches_per_track(monkeypatch):
     assert {d["dbos_workflow_kwargs"]["platform"] for d in dispatched} == {"qishui"}
 
 
+def test_download_endpoint_dispatches_items_with_video(monkeypatch):
+    """A body with ``items`` containing a video dispatches the ugc_video URL."""
+    manager = _FakeManager()
+    dispatched: list = []
+    client = _make_client(monkeypatch, manager, dispatched)
+    resp = client.post(
+        "/api/v1/media/soda/playlist/download",
+        json={
+            "items": [
+                {"id": "1", "kind": "track"},
+                {"id": "uv9", "kind": "video"},
+            ],
+            "playlist_title": "Mixed",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert body["submitted"] == 2
+    assert body["total"] == 2
+    urls = {d["dbos_workflow_kwargs"]["url"] for d in dispatched}
+    assert build_item_url("1", "track") in urls
+    assert build_item_url("uv9", "video") in urls
+    assert "https://music.douyin.com/qishui/share/ugc_video?ugc_video_id=uv9" in urls
+
+
+def test_download_endpoint_legacy_track_ids_still_works(monkeypatch):
+    """A legacy body with only ``track_ids`` is treated as all-tracks."""
+    manager = _FakeManager()
+    dispatched: list = []
+    client = _make_client(monkeypatch, manager, dispatched)
+    resp = client.post(
+        "/api/v1/media/soda/playlist/download",
+        json={"track_ids": ["1", "2"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["submitted"] == 2
+    urls = {d["dbos_workflow_kwargs"]["url"] for d in dispatched}
+    assert urls == {build_item_url("1", "track"), build_item_url("2", "track")}
+
+
 def test_download_endpoint_rejects_empty(monkeypatch):
     manager = _FakeManager()
     client = _make_client(monkeypatch, manager, [])
     resp = client.post(
         "/api/v1/media/soda/playlist/download",
         json={"track_ids": []},
+    )
+    assert resp.status_code == 422
+
+
+def test_download_endpoint_rejects_empty_items(monkeypatch):
+    manager = _FakeManager()
+    client = _make_client(monkeypatch, manager, [])
+    resp = client.post(
+        "/api/v1/media/soda/playlist/download",
+        json={"items": [], "track_ids": []},
+    )
+    assert resp.status_code == 422
+
+
+def test_download_endpoint_rejects_no_body_fields(monkeypatch):
+    manager = _FakeManager()
+    client = _make_client(monkeypatch, manager, [])
+    resp = client.post(
+        "/api/v1/media/soda/playlist/download",
+        json={},
     )
     assert resp.status_code == 422
 

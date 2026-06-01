@@ -135,6 +135,63 @@ def classify_landing_url(url: str) -> SodaContent | None:
     return None
 
 
+def _summarize_track(tr: dict[str, Any]) -> dict[str, Any] | None:
+    """Summarize a ``track_wrapper.track`` entity into a playlist item."""
+    if not tr.get("id"):
+        return None
+    artists = tr.get("artists") or []
+    album = tr.get("album") or {}
+    return {
+        "track_id": str(tr.get("id")),
+        "title": tr.get("name"),
+        "artist": artists[0].get("name") if artists else None,
+        "cover_url": (
+            cover_url(album["url_cover"]) if album.get("url_cover") else None
+        ),
+        "duration_ms": tr.get("duration"),
+        "kind": "track",
+    }
+
+
+def _summarize_video(v: dict[str, Any]) -> dict[str, Any] | None:
+    """Summarize an ``entity.video`` UGC entity into a playlist item.
+
+    The ``entity.video`` shape is not fully live-probed — read defensively:
+    id, title (``name``/``videoName``), duration (``duration``), cover
+    (``coverURL`` or assembled ``url_cover``), artist (``artistName`` or
+    ``artists[0].name``).
+    """
+    if not v.get("id"):
+        return None
+    artists = v.get("artists") or []
+    cover = v.get("coverURL")
+    if not cover and v.get("url_cover"):
+        cover = cover_url(v["url_cover"])
+    return {
+        "track_id": str(v.get("id")),
+        "title": v.get("name") or v.get("videoName"),
+        "artist": v.get("artistName") or (artists[0].get("name") if artists else None),
+        "cover_url": cover,
+        "duration_ms": v.get("duration"),
+        "kind": "video",
+    }
+
+
+def _summarize_media_resource(mr: dict[str, Any]) -> dict[str, Any] | None:
+    """Summarize one ``media_resources[]`` entry (track or UGC video).
+
+    Returns ``None`` for unknown types or entries missing an id.
+    """
+    entity = mr.get("entity") or {}
+    mr_type = mr.get("type")
+    if mr_type == "track":
+        tr = (entity.get("track_wrapper") or {}).get("track") or {}
+        return _summarize_track(tr)
+    if mr_type == "video":
+        return _summarize_video(entity.get("video") or {})
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Pure: UGC video share-page scrape (§A.2.1)
 # ---------------------------------------------------------------------------
@@ -354,9 +411,11 @@ class SodaApiClient:
     async def get_playlist_tracks(
         self, playlist_id: str, *, max_tracks: int = 500, count: int = 30
     ) -> list[dict[str, Any]]:
-        """Flat list of music-track summaries in a playlist (skips UGC videos).
+        """Flat list of playlist item summaries — both tracks and UGC videos.
 
-        Each: {track_id, title, artist, cover_url, duration_ms}.
+        Each item: ``{track_id, title, artist, cover_url, duration_ms, kind}``
+        where ``kind`` is ``"track"`` or ``"video"``. The ``track_id`` key holds
+        the item id (track id or ugc_video id) for response uniformity.
         """
         out: list[dict[str, Any]] = []
         cursor = 0
@@ -368,28 +427,10 @@ class SodaApiClient:
             if not resources:
                 break
             for mr in resources:
-                if mr.get("type") != "track":
-                    continue  # skip UGC video entries
-                tr = ((mr.get("entity") or {}).get("track_wrapper") or {}).get(
-                    "track"
-                ) or {}
-                if not tr.get("id"):
-                    continue
-                artists = tr.get("artists") or []
-                album = tr.get("album") or {}
-                out.append(
-                    {
-                        "track_id": str(tr.get("id")),
-                        "title": tr.get("name"),
-                        "artist": artists[0].get("name") if artists else None,
-                        "cover_url": (
-                            cover_url(album["url_cover"])
-                            if album.get("url_cover")
-                            else None
-                        ),
-                        "duration_ms": tr.get("duration"),
-                    }
-                )
+                item = _summarize_media_resource(mr)
+                if item is None:
+                    continue  # unknown type or missing id
+                out.append(item)
                 if len(out) >= max_tracks:
                     break
             if not det.get("has_more"):
