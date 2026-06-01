@@ -162,15 +162,33 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
         {/* Desktop header only */}
         <div className="detail-header-glow hidden sm:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
+          {/* Glowing accent line that dips to cradle the round Back button */}
+          <svg
+            className="detail-header-glow__line"
+            preserveAspectRatio="none"
+            viewBox="0 0 1000 22"
+            aria-hidden="true"
+          >
+            <defs>
+              <linearGradient id="detailGlowGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="rgba(129,140,248,0.95)" />
+                <stop offset="50%" stopColor="rgba(139,92,246,0.6)" />
+                <stop offset="100%" stopColor="rgba(139,92,246,0.12)" />
+              </linearGradient>
+            </defs>
+            {/* flat → smooth dip cradling the ~38px button near the left → flat */}
+            <path d="M0 6 H14 C24 6 26 18 38 18 C50 18 52 6 62 6 H1000" />
+          </svg>
+
           {/* Left: back + title */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               onClick={handleBack}
               title="Back"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-zinc-200 bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-lg transition-colors shrink-0"
+              aria-label="Back"
+              className="detail-back-btn"
             >
-              <ArrowLeft size={16} />
-              <span className="hidden sm:inline">Back</span>
+              <ArrowLeft size={18} />
             </button>
             <span className="text-xs sm:text-sm text-zinc-200 font-medium truncate">
               {video.title || video.description || 'Media Player'}

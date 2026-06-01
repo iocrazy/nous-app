@@ -412,28 +412,55 @@ body {
   }
 }
 
-/* Detail-page header: a glowing accent line under the whole top bar
-   (replaces the flat gray border). Mirrors the back-button's glow so the
-   light extends across the title area. Indigo to match the app theme. */
+/* Detail-page header: a glowing accent line that dips down to cradle the
+   circular Back button (ref: the glowing slider that wraps its knob), then
+   runs flat across the rest of the bar. The dip is drawn with an inline SVG
+   path (.detail-header-glow__line); this container only positions it. */
 .detail-header-glow {
   position: relative;
-  border-bottom: 1px solid transparent;
 }
-.detail-header-glow::after {
-  content: '';
+.detail-header-glow__line {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -1px;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    rgba(99, 102, 241, 0.9) 0%,
-    rgba(139, 92, 246, 0.55) 45%,
-    rgba(139, 92, 246, 0.12) 100%
-  );
-  box-shadow:
-    0 0 6px rgba(99, 102, 241, 0.7),
-    0 0 14px rgba(99, 102, 241, 0.35);
+  bottom: -10px;
+  width: 100%;
+  height: 22px;
   pointer-events: none;
+  overflow: visible;
+}
+.detail-header-glow__line path {
+  fill: none;
+  stroke: url(#detailGlowGrad);
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.8))
+    drop-shadow(0 0 9px rgba(139, 92, 246, 0.45));
+}
+
+/* Circular Back button with a soft indigo glow ring. */
+.detail-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  color: #e4e4e7;
+  background: rgba(39, 39, 42, 0.85);
+  border: 1px solid rgba(99, 102, 241, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(99, 102, 241, 0.15),
+    0 0 10px rgba(99, 102, 241, 0.35);
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+.detail-back-btn:hover {
+  background: rgba(63, 63, 70, 0.95);
+  border-color: rgba(129, 140, 248, 0.85);
+  box-shadow:
+    0 0 0 1px rgba(99, 102, 241, 0.25),
+    0 0 16px rgba(99, 102, 241, 0.55);
+}
+.detail-back-btn:active {
+  transform: scale(0.94);
 }
