@@ -1,9 +1,15 @@
 """Entry helper: a qishui URL → parsed_media-shaped dict.
 
-Classifies the URL (track_id in query, or short link needing a HEAD redirect),
-then resolves track metadata. UGC-video links are out of scope for Phase 2
-(deferred to Phase 6) — raise a clear error. The download workflow re-resolves
-the stream separately, so no download plan is threaded from here.
+Classifies the URL (track_id / ugc_video_id in query, or a short link needing a
+HEAD redirect), then resolves the right metadata:
+
+- ``track`` → ``parse_track`` (audio, via the LunaPC JSON API).
+- ``ugc_video`` → ``get_ugc_video`` + ``format_ugc_video`` (video, scraped from
+  the share page; Phase 6).
+
+A ``playlist`` (or unknown) url shouldn't reach single-resolve — raise. The
+download workflow re-resolves the stream/MP4 separately, so no download plan is
+threaded from here.
 """
 
 from __future__ import annotations
@@ -13,20 +19,24 @@ from urllib.parse import parse_qs, urlparse
 
 from app.services.media.parsers.soda_music.soda_api import SodaApiClient, SodaApiError
 from app.services.media.parsers.soda_music.soda_parser import parse_track
+from app.services.media.parsers.soda_music.ugc_formatter import format_ugc_video
 
 
-async def _track_id_from_url(url: str, client: Any) -> str:
+async def _classify(url: str, client: Any) -> tuple[str, str]:
+    """Classify a qishui url into ``(kind, content_id)``.
+
+    Fast path: an explicit ``track_id`` / ``ugc_video_id`` in the query. Else
+    HEAD-follow the short link and classify the landing url.
+    """
     query = parse_qs(urlparse(url).query)
     if "track_id" in query:
-        return query["track_id"][0]
+        return "track", query["track_id"][0]
+    if "ugc_video_id" in query:
+        return "ugc_video", query["ugc_video_id"][0]
     content = await client.resolve_short_link(url)
     if content is None:
         raise SodaApiError(f"could not classify qishui url: {url}")
-    if content.kind != "track":
-        raise SodaApiError(
-            f"qishui {content.kind} not supported in Phase 2 (UGC video is Phase 6)"
-        )
-    return content.content_id
+    return content.kind, content.content_id
 
 
 async def resolve_qishui_metadata(
@@ -44,8 +54,16 @@ async def resolve_qishui_metadata(
         cookie = await get_soda_cookie(user_id)
         client = SodaApiClient(cookie=cookie)
 
-    track_id = await _track_id_from_url(url, client)
-    parsed_data, _plan = await parse_track(
-        client, track_id=track_id, want_quality=want_quality, original_url=url
-    )
-    return parsed_data
+    kind, content_id = await _classify(url, client)
+
+    if kind == "track":
+        parsed_data, _plan = await parse_track(
+            client, track_id=content_id, want_quality=want_quality, original_url=url
+        )
+        return parsed_data
+
+    if kind == "ugc_video":
+        vo = await client.get_ugc_video(content_id)
+        return format_ugc_video(vo, ugc_video_id=content_id, original_url=url)
+
+    raise SodaApiError(f"qishui {kind} not supported for single resolve")
