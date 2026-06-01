@@ -161,12 +161,13 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
 
       <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
         {/* Desktop header only */}
-        <div className="hidden sm:flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 mb-2 shrink-0">
+        <div className="detail-header-glow hidden sm:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
           {/* Left: back + title */}
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               onClick={handleBack}
-              className="flex items-center gap-1 sm:gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
+              title="Back"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-zinc-200 bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-lg transition-colors shrink-0"
             >
               <ArrowLeft size={16} />
               <span className="hidden sm:inline">Back</span>
