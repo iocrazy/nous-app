@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Video } from '../types';
-import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, AudioLines, FileText, Sparkles, Eye } from 'lucide-react';
+import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, AudioLines, Music, FileText, Sparkles, Eye } from 'lucide-react';
 import { isVideoType, getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { getPreviewSpriteUrl } from '../services/resourceService';
 import { useAuth } from '../contexts/AuthContext';
@@ -324,7 +324,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                 </div>
               )}
               <div className="bg-black/60 backdrop-blur-sm p-1.5 rounded-full text-white/90">
-                {isVideo ? <VideoIcon size={12} /> : isAudio ? <AudioLines size={12} /> : <ImageIcon size={12} />}
+                {isVideo ? <VideoIcon size={12} /> : isAudio ? <Music size={12} /> : <ImageIcon size={12} />}
               </div>
             </div>
             {isAlbum && (
