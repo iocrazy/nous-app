@@ -86,7 +86,8 @@ class RunRecorder:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # Internal state (populated by start / methods; not caller-facing)
-    run_id: Optional[UUID] = field(default=None, init=False)
+    # str form of agent_runs.id (BIGINT Snowflake since mig 232). Not a UUID.
+    run_id: Optional[str] = field(default=None, init=False)
     _prompt_tokens: int = field(default=0, init=False)
     _completion_tokens: int = field(default=0, init=False)
     _skill_slugs_used: list[str] = field(default_factory=list, init=False)
@@ -370,7 +371,13 @@ class RunRecorder:
             payload["issue_id"] = self.issue_id
         result = await client.table("agent_runs").insert(payload).execute()
         if result.data:
-            self.run_id = UUID(str(result.data[0]["id"]))
+            # agent_runs.id became a BIGINT Snowflake in migration 232 (was
+            # UUID at #57). Keep run_id as the string form of whatever the DB
+            # returned — every consumer only str()s it (the .eq("id", …)
+            # filters and reconcile_run). Wrapping in UUID() raised ValueError
+            # on the bigint, which __aenter__ swallowed as "telemetry disabled"
+            # → no agent_runs row was finalised for any run after mig 232.
+            self.run_id = str(result.data[0]["id"])
             self._last_heartbeat_monotonic = time.monotonic()
 
     async def _finish(

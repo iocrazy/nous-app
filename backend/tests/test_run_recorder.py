@@ -256,3 +256,30 @@ def test_truncate_long_strings() -> None:
 
 def test_truncate_none_safe() -> None:
     assert _truncate(None, 500) == ""  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_bigint_snowflake_id_finalises_run() -> None:
+    """Regression: agent_runs.id became a BIGINT Snowflake (mig 232). The
+    insert returns a numeric id; RunRecorder must keep run_id as a string and
+    still finalise the run. Previously it did UUID(str(id)) → ValueError, which
+    __aenter__ swallowed as 'telemetry disabled' → no run was ever recorded
+    after mig 232. The default test fixture used a UUID id and never caught it."""
+    table = _FakeTable(
+        price_row={"prompt_cents_per_1k": 0.4, "completion_cents_per_1k": 1.2},
+        insert_result_data=[{"id": 310819108761487}],  # bigint snowflake, not UUID
+    )
+    client = _FakeClient(table)
+
+    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+        rec = RunRecorder(
+            agent_id=uuid4(), user_id=uuid4(), trigger="chat", model="qwen-max"
+        )
+        async with rec:
+            rec.record_usage(prompt_tokens=100, completion_tokens=20)
+
+    # run_id captured as the string form (no UUID crash)
+    assert rec.run_id == "310819108761487"
+    # the run was actually finalised (update ran) — the bug skipped this
+    assert len(table.update_calls) == 1
+    assert table.update_calls[0]["status"] == "completed"
