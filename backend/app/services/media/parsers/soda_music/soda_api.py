@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -245,25 +246,44 @@ def _balanced_json_object(text: str, start: int) -> str | None:
     return None
 
 
-def extract_router_data(html: str) -> dict[str, Any] | None:
-    """Scrape ``window._ROUTER_DATA`` → ``loaderData.ugc_video_page.videoOptions``.
+_ROUTER_DATA_ASSIGN = re.compile(r"_ROUTER_DATA\s*=\s*\{")
 
-    Robust to HTML-entity-escaped JSON (retries with ``html.unescape``). Returns
-    ``None`` on any structural/parse failure — callers raise their own error.
+
+def extract_router_data(html: str) -> dict[str, Any] | None:
+    """Scrape ``_ROUTER_DATA`` → ``loaderData.ugc_video_page.videoOptions``.
+
+    The real share page emits ``_ROUTER_DATA = {"loaderData":...}`` inside an
+    inline ``<script>`` (no ``window.`` prefix — the blueprint was off), and
+    ALSO carries decoy hydration JS later in the page (``_ROUTER_DATA=JSON.parse
+    (...)``, ``_ROUTER_DATA={}``). So we iterate every ``_ROUTER_DATA = {``
+    assignment and return the first one that actually yields a ``videoOptions``
+    dict — robust to source ordering and the empty-object decoy. Retries with
+    ``html.unescape`` for entity-escaped JSON. Returns ``None`` on any failure;
+    callers raise their own error.
     """
     try:
-        marker = "window._ROUTER_DATA"
-        idx = html.index(marker)
-        brace = html.index("{", idx)
-        blob = _balanced_json_object(html, brace)
-        if blob is None:
-            return None
-        try:
-            data = json.loads(blob)
-        except json.JSONDecodeError:
-            data = json.loads(_html.unescape(blob))
-        vo = data["loaderData"]["ugc_video_page"]["videoOptions"]
-        return vo if isinstance(vo, dict) else None
+        for m in _ROUTER_DATA_ASSIGN.finditer(html):
+            brace = m.end() - 1  # the '{' the regex matched
+            blob = _balanced_json_object(html, brace)
+            if not blob:
+                continue
+            try:
+                data = json.loads(blob)
+            except json.JSONDecodeError:
+                try:
+                    data = json.loads(_html.unescape(blob))
+                except json.JSONDecodeError:
+                    continue
+            vo = (
+                ((data.get("loaderData") or {}).get("ugc_video_page") or {}).get(
+                    "videoOptions"
+                )
+                if isinstance(data, dict)
+                else None
+            )
+            if isinstance(vo, dict):
+                return vo
+        return None
     except (ValueError, KeyError, TypeError):
         return None
 

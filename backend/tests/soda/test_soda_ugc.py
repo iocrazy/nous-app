@@ -29,7 +29,7 @@ VIDEO_OPTIONS = {
     "videoName": "Clip",
     "artistName": "Bob",
     "coverURL": "https://c/cover.jpg",
-    "duration": 12000,
+    "duration": 12,  # SECONDS (float in the wild, e.g. 34.968) — not ms
     "width": 720,
     "height": 1280,
     "group_download_level": 2,
@@ -71,6 +71,51 @@ def test_extract_router_data_html_escaped():
     # Sanity: plain html.unescape round-trips the blob back to valid JSON.
     assert "&quot;" in escaped
     vo = extract_router_data(escaped)
+    assert vo == VIDEO_OPTIONS
+
+
+def test_extract_router_data_real_page_shape_no_window_prefix_with_decoy():
+    # Regression (2026-06-01 prod): the real share page emits
+    # ``_ROUTER_DATA = {...}`` with NO ``window.`` prefix, and ALSO carries
+    # decoy hydration JS later (``_ROUTER_DATA={}`` + ``_ROUTER_DATA=JSON.parse
+    # (...)``). The original extractor searched for the literal
+    # "window._ROUTER_DATA" → not found → None → SodaApiError on every real
+    # UGC download. The fix iterates every ``_ROUTER_DATA = {`` assignment and
+    # returns the first that yields a real videoOptions.
+    import json
+
+    blob = json.dumps(
+        {
+            "loaderData": {
+                "ugc_video_layout": None,
+                "ugc_video_page": {
+                    "video_id": "7637354879229798257",
+                    "videoOptions": VIDEO_OPTIONS,
+                },
+            }
+        }
+    )
+    html = (
+        "<div><!--/$--></div>"
+        f'<script async="" data-script-src="modern-inline">_ROUTER_DATA = {blob}</script>'
+        "<script>function initRouterData(e){try{"
+        "_ROUTER_DATA=JSON.parse(r.textContent)}catch(r){_ROUTER_DATA={}}}"
+        "</script>"
+    )
+    vo = extract_router_data(html)
+    assert vo == VIDEO_OPTIONS
+
+
+def test_extract_router_data_skips_empty_decoy_before_real():
+    # If an empty ``_ROUTER_DATA={}`` appears BEFORE the real one, the
+    # extractor must skip it (no videoOptions) and keep scanning.
+    import json
+
+    real = json.dumps(
+        {"loaderData": {"ugc_video_page": {"videoOptions": VIDEO_OPTIONS}}}
+    )
+    html = f"<script>_ROUTER_DATA={{}}</script><script>_ROUTER_DATA = {real}</script>"
+    vo = extract_router_data(html)
     assert vo == VIDEO_OPTIONS
 
 
@@ -207,7 +252,7 @@ def test_format_ugc_video():
     assert pd["media_type"] == "video"
     assert pd["title"] == "Clip"
     assert pd["author"] == "Bob"
-    assert pd["duration"] == "00:12"  # Utils.format_duration(12000)
+    assert pd["duration"] == "00:12"  # 12s → 12000ms → Utils.format_duration
     assert pd["cover_urls"] == ["https://c/cover.jpg"]
     assert pd["video_download_urls"] == ["https://x.douyinvod.com/v.mp4"]
     assert pd["published_at"] is None
@@ -216,7 +261,8 @@ def test_format_ugc_video():
     assert md["ext"] == "mp4"
     assert md["width"] == 720
     assert md["height"] == 1280
-    assert md["duration_ms"] == 12000
+    assert md["duration_ms"] == 12000  # 12 seconds × 1000
+    assert md["duration_seconds"] == 12
     assert md["group_download_level"] == 2
     assert md["hasCopyright"] is False
     assert md["ugc_video_id"] == "UV1"
