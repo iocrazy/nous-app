@@ -157,6 +157,66 @@ export const parseBatchLinks = async (
   return response.json();
 };
 
+export interface SodaTrackSummary {
+  track_id: string;
+  title: string | null;
+  artist: string | null;
+  cover_url: string | null;
+  duration_ms: number | null;
+}
+
+export interface SodaPlaylistResult {
+  playlist_id: string;
+  total: number;
+  tracks: SodaTrackSummary[];
+}
+
+/**
+ * Resolve a Soda Music playlist link into its track list.
+ */
+export const getSodaPlaylist = async (url: string): Promise<SodaPlaylistResult> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/media/soda/playlist`, {
+    method: 'POST',
+    headers: await buildHeaders(),
+    body: JSON.stringify({ url }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
+
+/**
+ * Submit a batch of Soda tracks to the download queue (Task Center grouped by flow_id).
+ */
+export const downloadSodaTracks = async (
+  trackIds: string[],
+  playlistTitle?: string,
+): Promise<{ success: boolean; flow_id: string; submitted: number; total: number }> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/media/soda/playlist/download`, {
+    method: 'POST',
+    headers: await buildHeaders(),
+    body: JSON.stringify({ track_ids: trackIds, playlist_title: playlistTitle }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    const detail = Array.isArray(error.detail)
+      ? error.detail.map((e: { msg?: string }) => e.msg).join('; ')
+      : error.detail;
+    throw new Error(detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+};
+
 /**
  * Fetch video list from backend API
  */

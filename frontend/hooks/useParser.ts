@@ -18,7 +18,7 @@ interface UseParserParams {
 export function useParser({ loadLibraryData, setLibrary, currentResult, setCurrentResult, isAuthenticated }: UseParserParams) {
   // Input state
   const [urlInput, setUrlInput] = useState('');
-  const [parserMode, setParserMode] = useState<'single' | 'batch'>('single');
+  const [parserMode, setParserMode] = useState<'single' | 'batch' | 'playlist'>('single');
   const [batchInput, setBatchInput] = useState('');
   const [downloadOptions, setDownloadOptions] = useState({
     video: true,

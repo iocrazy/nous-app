@@ -3,13 +3,14 @@ import {
   Link as LinkIcon, AlertCircle, Loader2,
   Layers, Download, CheckCircle2,
   ListVideo, HardDrive, X, ChevronDown, ChevronUp,
-  Mic, FileText, Eye,
+  Mic, FileText, Eye, ListMusic,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Video, Tag } from '../types';
 import { fetchAllTags as fetchTags, createTag } from '../services/unifiedTagService';
 import { MediaCard } from '../components/MediaCard';
 import { CompactMediaCard } from '../components/CompactMediaCard';
+import { SodaPlaylistPanel } from '../components/SodaPlaylistPanel';
 import { EagleTagPicker } from '../components/EagleTagPicker';
 import { TaskMonitor } from '../components/TaskMonitor';
 import { useAuth } from '../contexts/AuthContext';
@@ -122,9 +123,27 @@ export function ParserPage() {
               <span>{t('parser.batchDownload')}</span>
             </div>
           </button>
+          <button
+            onClick={() => setParserMode('playlist')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              parserMode === 'playlist'
+              ? 'bg-zinc-800 text-white shadow-sm'
+              : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <ListMusic size={14} />
+              <span>Soda Playlist</span>
+            </div>
+          </button>
         </div>
       </div>
 
+      {parserMode === 'playlist' ? (
+        <SodaPlaylistPanel
+          onSubmitted={() => setShowActiveTasks(true)}
+        />
+      ) : (
       <div className="relative group">
         <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl opacity-30 group-hover:opacity-60 transition duration-500 blur"></div>
         <div className="relative bg-zinc-900 rounded-xl p-2 border border-zinc-800 shadow-xl">
@@ -172,7 +191,11 @@ export function ParserPage() {
           )}
         </div>
       </div>
+      )}
 
+      {/* AI Processing + tag selection only apply to single/batch parse */}
+      {parserMode !== 'playlist' && (
+      <>
       {/* AI Processing — checking one attaches the system tag that
           triggers the matching post-download AI workflow */}
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3">
@@ -214,6 +237,8 @@ export function ParserPage() {
           } catch { return null; }
         }}
       />
+      </>
+      )}
 
       {error && (
         <div className="bg-red-950/20 border border-red-900/50 text-red-200 p-4 rounded-xl flex items-center gap-3">
