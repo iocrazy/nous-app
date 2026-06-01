@@ -672,15 +672,17 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             {/* Desktop: type badge + resolution */}
             <div className="hidden sm:flex gap-2 shrink-0">
                 <span className="px-2 py-1 text-xs font-semibold bg-zinc-800 text-zinc-300 rounded-md border border-zinc-700 uppercase tracking-wider">
-                {isAudio
-                  ? (audioBitrate ? `Audio · ${audioBitrate}kbps` : 'Audio')
-                  : getAwemeTypeLabel(data.media_type)}
+                {isAudio ? 'Audio' : getAwemeTypeLabel(data.media_type)}
                 </span>
-                {data.resolution && (
+                {data.resolution ? (
                 <span className="px-2 py-1 text-xs font-semibold bg-indigo-900/30 text-indigo-400 rounded-md border border-indigo-900/50">
                 {formatResolution(data.resolution)}
                 </span>
-                )}
+                ) : isAudio && audioBitrate ? (
+                <span className="px-2 py-1 text-xs font-semibold bg-indigo-900/30 text-indigo-400 rounded-md border border-indigo-900/50">
+                {audioBitrate}kbps
+                </span>
+                ) : null}
             </div>
             {/* Mobile: ID on the left */}
             <span className="sm:hidden text-xs text-zinc-500 font-mono truncate min-w-0">ID: {data.id}</span>

@@ -9,6 +9,7 @@ also mirrored to the top-level columns that already exist on parsed_media.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.utils import Utils
@@ -21,6 +22,17 @@ EXT_BY_FORMAT = {"flac": "flac", "mp4": "m4a", "m4a": "m4a", "aac": "m4a", "mp3"
 def _ext_for(chosen: dict[str, Any]) -> str:
     fmt = str(chosen.get("Format") or chosen.get("format") or "").lower()
     return EXT_BY_FORMAT.get(fmt, "m4a")
+
+
+def _release_datetime(release_date: Any) -> datetime | None:
+    """Album release_date is a unix timestamp (seconds) → datetime, else None."""
+    try:
+        ts = int(release_date)
+    except (TypeError, ValueError):
+        return None
+    if ts <= 0:
+        return None
+    return datetime.fromtimestamp(ts, tz=timezone.utc)
 
 
 def format_track(
@@ -48,6 +60,7 @@ def format_track(
         "media_type": "audio",
         "title": track.get("name") or "untitled",
         "duration": Utils.format_duration(int(track.get("duration") or 0)),
+        "published_at": _release_datetime(album.get("release_date")),
         "author": artists[0].get("name") if artists else None,
         "music_name": track.get("name"),
         "cover_urls": cover_urls or None,

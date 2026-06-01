@@ -125,3 +125,27 @@ def test_format_track_captures_chorus():
     chosen = {"Quality": "lossless", "Format": "flac", "Bitrate": 729}
     pd = format_track(track, chosen, original_url="https://q/x")
     assert pd["metadata"]["chorus"] == {"start": 79296, "duration": 0}
+
+
+def test_format_track_published_at_from_release_date():
+    from app.services.media.parsers.soda_music.formatter import format_track
+
+    track = {
+        "id": "7",
+        "name": "S",
+        "artists": [],
+        "duration": 1000,
+        "album": {"release_date": "1774569602"},
+    }
+    chosen = {"Quality": "lossless", "Format": "flac", "Bitrate": 729}
+    pd = format_track(track, chosen, original_url="https://q/x")
+    assert pd["published_at"] is not None
+    assert pd["published_at"].year == 2026
+
+
+def test_format_track_published_at_none_when_no_release_date():
+    from app.services.media.parsers.soda_music.formatter import format_track
+
+    track = {"id": "7", "name": "S", "artists": [], "album": {}}
+    chosen = {"Quality": "lossless", "Format": "flac", "Bitrate": 729}
+    assert format_track(track, chosen, original_url="u")["published_at"] is None
