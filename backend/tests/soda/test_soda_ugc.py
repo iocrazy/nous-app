@@ -292,12 +292,31 @@ class _UgcApi:
         return VIDEO_OPTIONS
 
 
-def test_resolve_qishui_metadata_ugc():
+def test_resolve_qishui_metadata_ugc(monkeypatch):
     api = _UgcApi()
+
+    # The ugc branch best-effort enriches with douyin stats. Patch the helper
+    # to exercise the wiring (id threaded through) + the merge into parsed_data,
+    # without touching the network.
+    enrich_calls: list[dict] = []
+
+    async def _fake_enrich(parsed_data, *, video_id, user_id):
+        enrich_calls.append({"video_id": video_id, "user_id": user_id})
+        out = dict(parsed_data)
+        out["like_count"] = 100
+        out["published_at"] = "2024-09-22T00:00:00+00:00"
+        return out
+
+    monkeypatch.setattr(
+        "app.services.media.parsers.soda_music.parse_entry."
+        "enrich_ugc_with_douyin_stats",
+        _fake_enrich,
+    )
+
     pd = asyncio.run(
         resolve_qishui_metadata(
             url=("https://music.douyin.com/qishui/share/ugc_video?ugc_video_id=UV1"),
-            user_id=None,
+            user_id="u1",
             api=api,
         )
     )
@@ -306,3 +325,7 @@ def test_resolve_qishui_metadata_ugc():
     assert pd["platform_id"] == "UV1"
     assert pd["video_download_urls"] == ["https://x.douyinvod.com/v.mp4"]
     assert api.calls == ["UV1"]
+    # Enrichment invoked with the UGC video_id (== douyin aweme_id) and merged.
+    assert enrich_calls == [{"video_id": "UV1", "user_id": "u1"}]
+    assert pd["like_count"] == 100
+    assert pd["published_at"] == "2024-09-22T00:00:00+00:00"
