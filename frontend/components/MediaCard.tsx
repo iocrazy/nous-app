@@ -555,6 +555,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   };
 
   const isAudio = data.media_type === 'audio';
+  // qishui UGC video: the share page (our only source) carries NO engagement
+  // stats and NO publish time — verified against the live page (desktop+mobile
+  // UA). So hide the Release Time row + the whole stats grid rather than show
+  // misleading 0 / N/A. (Normal douyin/bilibili videos keep them.)
+  const isQishuiVideo = data.source_platform === 'qishui' && isVideo;
   // PC API gives no per-track like count for audio — show a defensive bitrate
   // tag instead of a misleading "0 likes" heart.
   const audioBitrate = (() => {
@@ -785,10 +790,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
           {/* Time & Duration Row */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 mb-5 text-sm text-zinc-400">
+             {!isQishuiVideo && (
              <div className="flex items-center gap-2">
                 <Clock size={14} className="text-zinc-500"/>
                 <span>Release Time: <span className="text-zinc-300 font-medium">{formatDateTime(data.published_at)}</span></span>
              </div>
+             )}
              <div className="flex items-center gap-2">
                 <Timer size={14} className="text-zinc-500"/>
                 <span>Duration: <span className="text-zinc-300 font-medium">{formatDuration(data.duration)}</span></span>
@@ -800,7 +807,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
              </div>
           </div>
 
-          {/* Stats Grid */}
+          {/* Stats Grid — hidden for qishui UGC video (share page has no
+              engagement stats; showing 0/0/0/0 would be misleading). */}
+          {!isQishuiVideo && (
           <div className={`grid ${isAudio ? 'grid-cols-3' : 'grid-cols-4'} gap-2 sm:gap-4 mb-6`}>
             {!isAudio && (
             <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
@@ -839,6 +848,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Collects</span>
             </div>
           </div>
+          )}
 
           {/* Rating & Notes (from resources table) */}
           {onRatingChange && (
