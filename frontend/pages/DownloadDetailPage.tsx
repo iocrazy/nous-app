@@ -162,15 +162,44 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
         {/* Desktop header only */}
         <div className="detail-header-glow hidden sm:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
+          {/* Glowing accent line that dips to cradle the round Back button */}
+          <svg
+            className="detail-header-glow__line"
+            preserveAspectRatio="xMinYMid meet"
+            viewBox="0 0 1100 30"
+            aria-hidden="true"
+          >
+            <defs>
+              <linearGradient
+                id="detailGlowGrad"
+                x1="0"
+                y1="0"
+                x2="1100"
+                y2="0"
+                gradientUnits="userSpaceOnUse"
+              >
+                <stop offset="0" stopColor="rgba(165,180,252,0.95)" />
+                <stop offset="0.034" stopColor="rgba(199,210,254,1)" />
+                <stop offset="0.155" stopColor="rgba(139,92,246,0.7)" />
+                <stop offset="0.273" stopColor="rgba(139,92,246,0.3)" />
+                <stop offset="0.382" stopColor="rgba(139,92,246,0)" />
+              </linearGradient>
+            </defs>
+            {/* Tapering ribbon: thick where it cradles the ~38px button (dip
+                centered at x≈37), narrowing to a point by x≈420 (title end) so
+                the line gets thinner and fades out toward the right. */}
+            <path d="M0 5.2 H6 C22 5.2 24 19.2 37 19.2 C50 19.2 52 5.2 68 5.2 L420 6.6 L68 6.8 C52 6.8 50 20.8 37 20.8 C24 20.8 22 6.8 6 6.8 H0 Z" />
+          </svg>
+
           {/* Left: back + title */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               onClick={handleBack}
               title="Back"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-zinc-200 bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-lg transition-colors shrink-0"
+              aria-label="Back"
+              className="detail-back-btn"
             >
-              <ArrowLeft size={16} />
-              <span className="hidden sm:inline">Back</span>
+              <ArrowLeft size={18} />
             </button>
             <span className="text-xs sm:text-sm text-zinc-200 font-medium truncate">
               {video.title || video.description || 'Media Player'}
