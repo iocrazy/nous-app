@@ -22,11 +22,13 @@ import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel
 
+from app.api.media_fetch_helpers import resolve_team_id
 from app.core.deps import AuthDep
+from app.services.billing.points_service import PointsService
 from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
 from app.services.media.parsers.soda_music.cookie_source import get_soda_cookie
@@ -176,6 +178,10 @@ async def resolve_soda_playlist(
 ) -> SodaPlaylistResponse:
     """Resolve a Soda playlist link and return its music tracks."""
     cookie = await get_soda_cookie(auth.user_id)
+    if not cookie:
+        raise HTTPException(
+            status_code=400, detail="Connect your Soda Music account first"
+        )
     client = SodaApiClient(cookie=cookie)
 
     try:
@@ -207,15 +213,37 @@ async def resolve_soda_playlist(
 async def download_soda_playlist(
     request: SodaBatchDownloadRequest,
     auth: AuthDep,
+    raw_request: Request,
 ) -> dict[str, Any]:
     """Batch-download selected playlist tracks, grouped under one task flow.
 
     Each track reuses the single-track parse+download pipeline by dispatching a
     ``parse_workflow`` with a ``share/track`` URL. Per-track dispatch errors are
     absorbed (best-effort batch) so one bad track does not abort the rest.
+
+    Points are charged per track up front (mirroring the batch douyin path), and
+    tracks that fail to dispatch are refunded after the loop.
     """
     if not request.track_ids:
         raise HTTPException(status_code=422, detail="track_ids must not be empty")
+
+    total = len(request.track_ids)
+
+    # Charge points per track BEFORE any dispatch so a 402 short-circuits early.
+    points_service = PointsService()
+    _team_id = await resolve_team_id(auth.user_id, raw_request)
+    _batch_points_cost = 0
+    if _team_id:
+        await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
+        points_result = await points_service.check_and_consume(
+            team_id=_team_id,
+            user_id=auth.user_id,
+            action_type="video_parse_batch",
+            count=total,
+        )
+        if not points_result["success"]:
+            raise HTTPException(status_code=402, detail=points_result["reason"])
+        _batch_points_cost = points_result.get("points_cost", 0)
 
     mgr = get_task_manager()
     flow_id = await mgr.create_flow(
@@ -259,9 +287,30 @@ async def download_soda_playlist(
                 f"[Soda/Batch] dispatch failed for {kwargs['url'][:60]}: {e}"
             )
 
+    # Refund the tracks that failed to dispatch (mirrors the batch douyin path).
+    failed = total - submitted
+    if failed > 0 and _batch_points_cost > 0 and _team_id and total > 0:
+        per_track = _batch_points_cost // total
+        refund = per_track * failed
+        if refund > 0:
+            try:
+                await points_service.refund_points(
+                    team_id=_team_id,
+                    user_id=auth.user_id,
+                    amount=refund,
+                    reference_type="video_parse_batch",
+                    reason=f"Partial Soda batch refund: {failed}/{total} tracks failed",
+                )
+                logger.info(
+                    f"[Soda/Batch] refunded {refund} points for {failed} failed tracks"
+                )
+            except Exception as refund_err:
+                logger.error(f"[Soda/Batch] failed to refund points: {refund_err}")
+
+    success = submitted > 0
     return {
-        "success": True,
+        "success": success,
         "flow_id": flow_id,
         "submitted": submitted,
-        "total": len(request.track_ids),
+        "total": total,
     }

@@ -91,6 +91,11 @@ def _make_client(monkeypatch, manager, dispatched):
 
     monkeypatch.setattr(media_soda_router, "get_task_manager", lambda: manager)
 
+    async def _no_team(user_id, request):
+        return None
+
+    monkeypatch.setattr(media_soda_router, "resolve_team_id", _no_team)
+
     async def _fake_dispatch(task_type, **kwargs):
         dispatched.append(kwargs)
         return {"ok": True}
@@ -145,6 +150,11 @@ def test_download_endpoint_absorbs_dispatch_errors(monkeypatch):
     )
     monkeypatch.setattr(media_soda_router, "get_task_manager", lambda: manager)
 
+    async def _no_team(user_id, request):
+        return None
+
+    monkeypatch.setattr(media_soda_router, "resolve_team_id", _no_team)
+
     calls = {"n": 0}
 
     async def _flaky(task_type, **kwargs):
@@ -165,3 +175,158 @@ def test_download_endpoint_absorbs_dispatch_errors(monkeypatch):
     # best-effort batch: 2 succeed, 1 absorbed
     assert body["submitted"] == 2
     assert body["total"] == 3
+    assert body["success"] is True
+
+
+def test_download_endpoint_success_false_when_all_dispatch_fail(monkeypatch):
+    """When every dispatch fails (submitted==0), success must be False (200)."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import media_soda_router
+    from app.core.deps import AuthContext, get_auth
+
+    manager = _FakeManager()
+    app = FastAPI()
+    app.include_router(media_soda_router.router, prefix="/api/v1/media")
+    app.dependency_overrides[get_auth] = lambda: AuthContext(
+        user_id="user-123", auth_type="jwt"
+    )
+    monkeypatch.setattr(media_soda_router, "get_task_manager", lambda: manager)
+
+    async def _no_team(user_id, request):
+        return None
+
+    monkeypatch.setattr(media_soda_router, "resolve_team_id", _no_team)
+
+    async def _always_fail(task_type, **kwargs):
+        raise RuntimeError("dispatch boom")
+
+    monkeypatch.setattr(media_soda_router, "start_workflow_routed", _always_fail)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/media/soda/playlist/download",
+        json={"track_ids": ["1", "2", "3"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["submitted"] == 0
+    assert body["total"] == 3
+    assert body["success"] is False
+
+
+def test_download_endpoint_charges_and_refunds_points(monkeypatch):
+    """With a team, points are charged per track up front and failed tracks refunded."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import media_soda_router
+    from app.core.deps import AuthContext, get_auth
+
+    manager = _FakeManager()
+    app = FastAPI()
+    app.include_router(media_soda_router.router, prefix="/api/v1/media")
+    app.dependency_overrides[get_auth] = lambda: AuthContext(
+        user_id="user-123", auth_type="jwt"
+    )
+    monkeypatch.setattr(media_soda_router, "get_task_manager", lambda: manager)
+
+    async def _team(user_id, request):
+        return "team-1"
+
+    monkeypatch.setattr(media_soda_router, "resolve_team_id", _team)
+
+    events: dict = {"consume": None, "refund": None, "ensure": None}
+
+    class _FakePoints:
+        async def ensure_team_quota(self, team_id, *, user_id):
+            events["ensure"] = (team_id, user_id)
+
+        async def check_and_consume(self, *, team_id, user_id, action_type, count):
+            events["consume"] = {
+                "team_id": team_id,
+                "action_type": action_type,
+                "count": count,
+            }
+            return {"success": True, "points_cost": count * 10}
+
+        async def refund_points(
+            self, *, team_id, user_id, amount, reference_type, reason
+        ):
+            events["refund"] = {"amount": amount, "reference_type": reference_type}
+
+    monkeypatch.setattr(media_soda_router, "PointsService", lambda: _FakePoints())
+
+    calls = {"n": 0}
+
+    async def _flaky(task_type, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("dispatch boom")
+        return {"ok": True}
+
+    monkeypatch.setattr(media_soda_router, "start_workflow_routed", _flaky)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/media/soda/playlist/download",
+        json={"track_ids": ["1", "2", "3"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["submitted"] == 2
+    # charged per track via video_parse_batch
+    assert events["consume"]["action_type"] == "video_parse_batch"
+    assert events["consume"]["count"] == 3
+    # 1 track failed → refund per_track(=30//3=10) * 1
+    assert events["refund"]["amount"] == 10
+    assert events["refund"]["reference_type"] == "video_parse_batch"
+
+
+def test_download_endpoint_402_when_quota_exhausted(monkeypatch):
+    """A failed points check short-circuits with 402 before any dispatch."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import media_soda_router
+    from app.core.deps import AuthContext, get_auth
+
+    manager = _FakeManager()
+    app = FastAPI()
+    app.include_router(media_soda_router.router, prefix="/api/v1/media")
+    app.dependency_overrides[get_auth] = lambda: AuthContext(
+        user_id="user-123", auth_type="jwt"
+    )
+    monkeypatch.setattr(media_soda_router, "get_task_manager", lambda: manager)
+
+    async def _team(user_id, request):
+        return "team-1"
+
+    monkeypatch.setattr(media_soda_router, "resolve_team_id", _team)
+
+    class _NoQuotaPoints:
+        async def ensure_team_quota(self, team_id, *, user_id):
+            return None
+
+        async def check_and_consume(self, *, team_id, user_id, action_type, count):
+            return {"success": False, "reason": "Insufficient points"}
+
+    monkeypatch.setattr(media_soda_router, "PointsService", lambda: _NoQuotaPoints())
+
+    dispatched: list = []
+
+    async def _dispatch(task_type, **kwargs):
+        dispatched.append(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(media_soda_router, "start_workflow_routed", _dispatch)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/media/soda/playlist/download",
+        json={"track_ids": ["1", "2"]},
+    )
+    assert resp.status_code == 402
+    # short-circuit: nothing dispatched
+    assert dispatched == []

@@ -74,6 +74,12 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
     setError(null);
     try {
       const result = await downloadSodaTracks([...selected], undefined);
+      if (result.submitted === 0 || !result.success) {
+        const message = 'Failed to submit tracks for download';
+        setError(message);
+        addToast(message, 'error');
+        return;
+      }
       addToast(`Submitted ${result.submitted} tracks to download`, 'success');
       onSubmitted?.(result.flow_id, result.submitted);
     } catch (err) {

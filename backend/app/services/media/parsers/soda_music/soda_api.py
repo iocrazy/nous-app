@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 from loguru import logger
 
 from app.boundary import safe_async_client
@@ -161,8 +162,11 @@ class SodaApiClient:
                 headers=build_pc_headers(self._cookie, post=True),
                 timeout=self._timeout,
             )
-            resp.raise_for_status()
-            return resp.json()
+            try:
+                resp.raise_for_status()
+                return resp.json()
+            except (httpx.HTTPError, ValueError) as e:
+                raise SodaApiError(f"qishui request failed: {e}") from e
 
     async def _get_json(
         self,
@@ -179,8 +183,11 @@ class SodaApiClient:
             if with_params:
                 kwargs["params"] = {**build_pc_params(), **(extra_params or {})}
             resp = await client.get(url, **kwargs)
-            resp.raise_for_status()
-            return resp.json()
+            try:
+                resp.raise_for_status()
+                return resp.json()
+            except (httpx.HTTPError, ValueError) as e:
+                raise SodaApiError(f"qishui request failed: {e}") from e
 
     async def get_track_v2(self, track_id: str) -> dict[str, Any]:
         """POST /luna/pc/track_v2 — returns {track, url_player_info, raw} (§A.3)."""
