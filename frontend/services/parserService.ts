@@ -163,6 +163,14 @@ export interface SodaTrackSummary {
   artist: string | null;
   cover_url: string | null;
   duration_ms: number | null;
+  /** "track" (music) or "video" (UGC). Older responses omit it → treat as "track". */
+  kind?: 'track' | 'video';
+}
+
+/** A single selected playlist item to download, carrying its kind. */
+export interface SodaDownloadItem {
+  id: string;
+  kind: 'track' | 'video';
 }
 
 export interface SodaPlaylistResult {
@@ -192,10 +200,13 @@ export const getSodaPlaylist = async (url: string): Promise<SodaPlaylistResult> 
 };
 
 /**
- * Submit a batch of Soda tracks to the download queue (Task Center grouped by flow_id).
+ * Submit a batch of Soda playlist items (tracks and/or UGC videos) to the
+ * download queue (Task Center grouped by flow_id). Each item carries its kind so
+ * videos route to the UGC download path; the backend stays back-compatible with
+ * the legacy ``track_ids`` shape.
  */
 export const downloadSodaTracks = async (
-  trackIds: string[],
+  items: SodaDownloadItem[],
   playlistTitle?: string,
 ): Promise<{ success: boolean; flow_id: string; submitted: number; total: number }> => {
   const apiUrl = getApiUrl();
@@ -203,7 +214,7 @@ export const downloadSodaTracks = async (
   const response = await fetch(`${apiUrl}/api/v1/media/soda/playlist/download`, {
     method: 'POST',
     headers: await buildHeaders(),
-    body: JSON.stringify({ track_ids: trackIds, playlist_title: playlistTitle }),
+    body: JSON.stringify({ items, playlist_title: playlistTitle }),
   });
 
   if (!response.ok) {

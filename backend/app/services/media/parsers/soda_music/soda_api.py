@@ -15,6 +15,7 @@ See ``docs/soda-music-integration.md`` §A.2 / §A.3 / §B.13.
 
 from __future__ import annotations
 
+import html as _html
 import json
 import time
 from dataclasses import dataclass
@@ -33,9 +34,19 @@ from app.services.media.parsers.soda_music.soda_quality import (
 
 BASE_URL = "https://api.qishui.com"
 SHARE_BASE_URL = "https://music.douyin.com/qishui"
+SHARE_BASE = "https://music.douyin.com"
 USER_AGENT = "LunaPC/3.3.0(359450208)"
+SHARE_PAGE_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+)
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_COVER_SIZE = "~c5_375x375.jpg"
+
+# Byte ceiling for the UGC share-page HTML body. Share pages are small; 16 MiB
+# is a generous cap that guards against an upstream streaming an unbounded body
+# into ``resp.text`` (memory exhaustion).
+MAX_SHARE_PAGE_BYTES = 16 * 1024 * 1024  # 16 MiB
 
 # Fixed Luna PC device parameters (§A.2). Dynamic ids are filled per request.
 _FIXED_PC_PARAMS: dict[str, str] = {
@@ -127,6 +138,134 @@ def classify_landing_url(url: str) -> SodaContent | None:
     if "playlist_id" in query:
         return SodaContent(kind="playlist", content_id=query["playlist_id"][0])
     return None
+
+
+def _summarize_track(tr: dict[str, Any]) -> dict[str, Any] | None:
+    """Summarize a ``track_wrapper.track`` entity into a playlist item."""
+    if not tr.get("id"):
+        return None
+    artists = tr.get("artists") or []
+    album = tr.get("album") or {}
+    return {
+        "track_id": str(tr.get("id")),
+        "title": tr.get("name"),
+        "artist": artists[0].get("name") if artists else None,
+        "cover_url": (
+            cover_url(album["url_cover"]) if album.get("url_cover") else None
+        ),
+        "duration_ms": tr.get("duration"),
+        "kind": "track",
+    }
+
+
+def _summarize_video(v: dict[str, Any]) -> dict[str, Any] | None:
+    """Summarize an ``entity.video`` UGC entity into a playlist item.
+
+    The ``entity.video`` shape is not fully live-probed — read defensively:
+    id, title (``name``/``videoName``), duration (``duration``), cover
+    (``coverURL`` or assembled ``url_cover``), artist (``artistName`` or
+    ``artists[0].name``).
+    """
+    if not v.get("id"):
+        return None
+    artists = v.get("artists") or []
+    cover = v.get("coverURL")
+    if not cover and v.get("url_cover"):
+        cover = cover_url(v["url_cover"])
+    return {
+        "track_id": str(v.get("id")),
+        "title": v.get("name") or v.get("videoName"),
+        "artist": v.get("artistName") or (artists[0].get("name") if artists else None),
+        "cover_url": cover,
+        "duration_ms": v.get("duration"),
+        "kind": "video",
+    }
+
+
+def _summarize_media_resource(mr: dict[str, Any]) -> dict[str, Any] | None:
+    """Summarize one ``media_resources[]`` entry (track or UGC video).
+
+    Returns ``None`` for unknown types or entries missing an id.
+    """
+    entity = mr.get("entity") or {}
+    mr_type = mr.get("type")
+    if mr_type == "track":
+        tr = (entity.get("track_wrapper") or {}).get("track") or {}
+        return _summarize_track(tr)
+    if mr_type == "video":
+        return _summarize_video(entity.get("video") or {})
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Pure: UGC video share-page scrape (§A.2.1)
+# ---------------------------------------------------------------------------
+
+
+def _share_page_headers(cookie: str) -> dict[str, str]:
+    """Browser-ish headers for the UGC share page (a web page, not the JSON API).
+
+    The LunaPC ``build_pc_headers`` is for ``api.qishui.com``; the share page at
+    ``music.douyin.com`` wants a normal browser UA + cookie + referer.
+    """
+    return {
+        "User-Agent": SHARE_PAGE_USER_AGENT,
+        "Cookie": cookie,
+        "Referer": "https://music.douyin.com/",
+    }
+
+
+def _balanced_json_object(text: str, start: int) -> str | None:
+    """Return the JSON object substring starting at the ``{`` at ``start``.
+
+    Balance-scans braces (respecting string literals + escapes) to find the
+    matching ``}``. Returns ``None`` if no balanced object is found.
+    """
+    depth = 0
+    in_str = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def extract_router_data(html: str) -> dict[str, Any] | None:
+    """Scrape ``window._ROUTER_DATA`` → ``loaderData.ugc_video_page.videoOptions``.
+
+    Robust to HTML-entity-escaped JSON (retries with ``html.unescape``). Returns
+    ``None`` on any structural/parse failure — callers raise their own error.
+    """
+    try:
+        marker = "window._ROUTER_DATA"
+        idx = html.index(marker)
+        brace = html.index("{", idx)
+        blob = _balanced_json_object(html, brace)
+        if blob is None:
+            return None
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError:
+            data = json.loads(_html.unescape(blob))
+        vo = data["loaderData"]["ugc_video_page"]["videoOptions"]
+        return vo if isinstance(vo, dict) else None
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -277,9 +416,11 @@ class SodaApiClient:
     async def get_playlist_tracks(
         self, playlist_id: str, *, max_tracks: int = 500, count: int = 30
     ) -> list[dict[str, Any]]:
-        """Flat list of music-track summaries in a playlist (skips UGC videos).
+        """Flat list of playlist item summaries — both tracks and UGC videos.
 
-        Each: {track_id, title, artist, cover_url, duration_ms}.
+        Each item: ``{track_id, title, artist, cover_url, duration_ms, kind}``
+        where ``kind`` is ``"track"`` or ``"video"``. The ``track_id`` key holds
+        the item id (track id or ugc_video id) for response uniformity.
         """
         out: list[dict[str, Any]] = []
         cursor = 0
@@ -291,28 +432,10 @@ class SodaApiClient:
             if not resources:
                 break
             for mr in resources:
-                if mr.get("type") != "track":
-                    continue  # skip UGC video entries
-                tr = ((mr.get("entity") or {}).get("track_wrapper") or {}).get(
-                    "track"
-                ) or {}
-                if not tr.get("id"):
-                    continue
-                artists = tr.get("artists") or []
-                album = tr.get("album") or {}
-                out.append(
-                    {
-                        "track_id": str(tr.get("id")),
-                        "title": tr.get("name"),
-                        "artist": artists[0].get("name") if artists else None,
-                        "cover_url": (
-                            cover_url(album["url_cover"])
-                            if album.get("url_cover")
-                            else None
-                        ),
-                        "duration_ms": tr.get("duration"),
-                    }
-                )
+                item = _summarize_media_resource(mr)
+                if item is None:
+                    continue  # unknown type or missing id
+                out.append(item)
                 if len(out) >= max_tracks:
                     break
             if not det.get("has_more"):
@@ -343,3 +466,48 @@ class SodaApiClient:
         if content is None:
             logger.warning("soda: could not classify landing url {}", landing)
         return content
+
+    async def get_ugc_video(self, ugc_video_id: str) -> dict[str, Any]:
+        """Scrape the UGC share page → ``videoOptions`` dict (§A.2.1).
+
+        A qishui UGC video is a plain unencrypted MP4; the share page HTML
+        carries ``window._ROUTER_DATA`` with the direct (expiring) URL. This is
+        an HTML fetch, not the LunaPC JSON API — uses browser-ish headers.
+
+        Raises:
+            SodaApiError: on HTTP failure, when the share page exceeds
+                ``MAX_SHARE_PAGE_BYTES``, or when videoOptions can't be parsed.
+        """
+        url = f"{SHARE_BASE}/qishui/share/ugc_video?ugc_video_id={ugc_video_id}"
+        async with self._client_factory() as client:
+            resp = await client.get(
+                url, headers=_share_page_headers(self._cookie), timeout=self._timeout
+            )
+            try:
+                resp.raise_for_status()
+            except (httpx.HTTPError, ValueError) as e:
+                raise SodaApiError(f"ugc_video fetch failed: {e}") from e
+            # Cap the body size before/after buffering it into ``resp.text``.
+            # First the advertised content-length (cheap, catches honest
+            # upstreams early), then the decoded body itself (catches lying /
+            # chunked upstreams). Either overrun → SodaApiError.
+            declared = int(
+                (getattr(resp, "headers", None) or {}).get("content-length") or 0
+            )
+            if declared > MAX_SHARE_PAGE_BYTES:
+                raise SodaApiError(
+                    f"ugc_video share page too large "
+                    f"(content-length {declared} > {MAX_SHARE_PAGE_BYTES})"
+                )
+            text = resp.text
+            if len(text.encode("utf-8", "ignore")) > MAX_SHARE_PAGE_BYTES:
+                raise SodaApiError(
+                    f"ugc_video share page too large "
+                    f"(body > {MAX_SHARE_PAGE_BYTES})"
+                )
+        vo = extract_router_data(text)
+        if vo is None:
+            raise SodaApiError(
+                f"could not extract videoOptions for ugc_video {ugc_video_id}"
+            )
+        return vo
