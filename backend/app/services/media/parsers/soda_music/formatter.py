@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.utils import Utils
 from app.services.media.parsers.soda_music.lyrics import parse_timed_lyrics, to_lrc
 from app.services.media.parsers.soda_music.soda_api import cover_url
 
@@ -46,6 +47,7 @@ def format_track(
         "source_platform": "qishui",
         "media_type": "audio",
         "title": track.get("name") or "untitled",
+        "duration": Utils.format_duration(int(track.get("duration") or 0)),
         "author": artists[0].get("name") if artists else None,
         "music_name": track.get("name"),
         "cover_urls": cover_urls or None,

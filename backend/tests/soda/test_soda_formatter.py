@@ -59,6 +59,19 @@ def test_format_track_ext_from_format():
     assert pd["metadata"]["ext"] == "flac"
 
 
+def test_format_track_sets_top_level_duration():
+    from app.core.utils import Utils
+
+    track = {**TRACK, "duration": 227808}
+    pd = format_track(track, CHOSEN, original_url="u")
+    expected = Utils.format_duration(227808)
+    assert pd["duration"] == expected
+    assert pd["duration"]  # non-empty
+    assert pd["duration"] != "0s"
+    # still keeps the raw ms in metadata
+    assert pd["metadata"]["duration_ms"] == 227808
+
+
 def test_format_track_captures_lyrics_from_content_dict():
     from app.services.media.parsers.soda_music.formatter import format_track
 
