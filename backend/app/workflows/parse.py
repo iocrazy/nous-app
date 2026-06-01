@@ -261,6 +261,71 @@ def dispatch_soda_download_step(
     return asyncio.run(_do())
 
 
+def dispatch_soda_ugc_download_step(
+    *,
+    platform_id: str,
+    user_id: str,
+    media_id: Optional[str],
+    video_title: str,
+    resource_id: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    flow_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Soda (qishui) UGC-video variant of ``dispatch_soda_download_step``.
+
+    A qishui UGC video is a plain MP4 (no decrypt), so it routes through
+    ``soda_ugc_download_workflow`` (Phase 6) instead of the audio
+    ``soda_download_workflow``. Identical to ``dispatch_soda_download_step``
+    except the task_tracking subtitle is "video" and the dispatched callable is
+    the UGC workflow.
+
+    Reuses task_type "download" (the routing table keys off task_type; the
+    callable is passed explicitly). Like the audio path, ``int(media_type)`` is
+    deliberately NOT computed here — qishui's parsed media_type is the string
+    "video" and the soda workflow needs no numeric media_type."""
+    import uuid as _uuid
+
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+
+    wf_id = str(_uuid.uuid4())
+
+    async def _do() -> dict[str, Any]:
+        # Pre-create task_tracking row — trigger updates lifecycle later.
+        try:
+            await get_task_manager().create(
+                user_id=user_id,
+                task_type="download",
+                title=f"Download {(video_title or platform_id)[:50]}",
+                subtitle="video",
+                media_id=str(platform_id) if platform_id else None,
+                resource_id=str(resource_id) if resource_id else None,
+                dbos_workflow_id=wf_id,
+                flow_id=flow_id,
+            )
+        except Exception as e:
+            logger.warning(f"[parse] pre-create soda ugc download task_tracking: {e}")
+
+        from app.workflows.soda_ugc_download import soda_ugc_download_workflow
+
+        return await start_workflow_routed(
+            "download",
+            dbos_workflow_callable=soda_ugc_download_workflow,
+            dbos_workflow_kwargs={
+                "platform_id": platform_id,
+                "user_id": user_id,
+                "media_id": media_id,
+                "title": video_title,
+                "resource_id": resource_id,
+                "user_agent": user_agent,
+                "flow_id": flow_id,
+            },
+            workflow_id=wf_id,
+        )
+
+    return asyncio.run(_do())
+
+
 @DBOS.step()
 def update_parse_tracking_step(
     *,
@@ -535,18 +600,30 @@ def parse_workflow(
     download_dispatch: dict[str, Any] = {}
     if video_bool or cover_bool:
         if is_soda_platform(platform):
-            # qishui is audio-only; media_type is the string "audio" so we
-            # MUST NOT call int(media_type) on this path. Route through the
-            # dedicated soda_download_workflow instead.
-            download_dispatch = dispatch_soda_download_step(
-                platform_id=platform_id,
-                user_id=user_id,
-                media_id=video_db_id,
-                video_title=video_title,
-                resource_id=str(resource_id) if resource_id else None,
-                user_agent=legacy_ua,
-                flow_id=flow_id,
-            )
+            # qishui's parsed media_type is the STRING "audio" (track) or
+            # "video" (UGC), so we MUST NOT call int(media_type) on this path.
+            # Route audio → soda_download_workflow (decrypt), video → the
+            # soda_ugc_download_workflow (plain MP4 stream, no decrypt).
+            if str(media_type) == "video":
+                download_dispatch = dispatch_soda_ugc_download_step(
+                    platform_id=platform_id,
+                    user_id=user_id,
+                    media_id=video_db_id,
+                    video_title=video_title,
+                    resource_id=str(resource_id) if resource_id else None,
+                    user_agent=legacy_ua,
+                    flow_id=flow_id,
+                )
+            else:
+                download_dispatch = dispatch_soda_download_step(
+                    platform_id=platform_id,
+                    user_id=user_id,
+                    media_id=video_db_id,
+                    video_title=video_title,
+                    resource_id=str(resource_id) if resource_id else None,
+                    user_agent=legacy_ua,
+                    flow_id=flow_id,
+                )
         else:
             download_dispatch = dispatch_download_step(
                 platform_id=platform_id,
