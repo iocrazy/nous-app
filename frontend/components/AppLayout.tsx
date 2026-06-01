@@ -52,7 +52,7 @@ function AppLayoutInner() {
   } = useAuth();
 
   const {
-    teams, personalTeamId, selectedTeamId, setSelectedTeamId, notifications,
+    teams, teamsLoading, personalTeamId, selectedTeamId, setSelectedTeamId, notifications,
     currentTeam, userPermissions, isModuleEnabled, isViewEnabled,
     isCreateTeamModalOpen, setIsCreateTeamModalOpen,
     isSettingsModalOpen, setIsSettingsModalOpen, settingsModalInitialTab, setSettingsModalInitialTab,
@@ -60,12 +60,29 @@ function AppLayoutInner() {
     handleMarkNotificationRead, handleMarkAllNotificationsRead,
   } = useTeamContext();
 
-  // Sync teamId from URL to context
+  // Sync teamId from URL to context.
+  // Once teams have loaded, a URL team id that isn't one of the user's teams
+  // (e.g. a stale bookmark from before the snowflake id migration) must NOT be
+  // adopted — doing so leaves currentTeam=null and the whole app renders blank.
+  // Redirect such URLs to a valid team (personal, or the first available).
   useEffect(() => {
-    if (urlTeamId && urlTeamId !== selectedTeamId) {
+    if (!urlTeamId) return;
+    if (!teamsLoading && teams.length > 0 && !teams.some(t => t.id === urlTeamId)) {
+      const fallback = personalTeamId && teams.some(t => t.id === personalTeamId)
+        ? personalTeamId
+        : teams[0].id;
+      console.warn(
+        `[AppLayout] URL team ${urlTeamId} is not one of the user's teams; ` +
+          `redirecting to ${fallback}`,
+      );
+      const rest = location.pathname.replace(/^\/team\/[^/]+/, '');
+      navigate(`/team/${fallback}${rest}`, { replace: true });
+      return;
+    }
+    if (urlTeamId !== selectedTeamId) {
       setSelectedTeamId(urlTeamId);
     }
-  }, [urlTeamId, selectedTeamId, setSelectedTeamId]);
+  }, [urlTeamId, selectedTeamId, setSelectedTeamId, teams, teamsLoading, personalTeamId, location.pathname, navigate]);
 
   const view = pathnameToView(location.pathname);
   const isDownloadsRoute = location.pathname.includes('/resources/downloads');

@@ -73,9 +73,20 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
         }).catch(console.error),
         fetchNotifications().then(setNotifications).catch(console.error),
       ]).finally(() => {
-        // Fallback: if no selectedTeamId yet and we have teams, pick the first one
+        // Pick the active team. A previously-selected id (from URL/localStorage)
+        // is only honoured if it's STILL one of the user's teams — otherwise a
+        // stale id (e.g. a pre-snowflake-migration team id left in localStorage)
+        // would be kept forever, leaving currentTeam=null and the whole UI
+        // rendering blank ("no issues"). Fall back to the first valid team.
         setSelectedTeamId(prev => {
-          if (prev) return prev;
+          if (prev && loadedTeams.some(t => t.id === prev)) return prev;
+          if (prev) {
+            console.warn(
+              `[useTeams] selected team ${prev} is not in the user's teams; ` +
+                'falling back to the first available team',
+            );
+            localStorage.removeItem('mediahub_selected_team');
+          }
           return loadedTeams.length > 0 ? loadedTeams[0].id : null;
         });
         setTeamsLoading(false);
