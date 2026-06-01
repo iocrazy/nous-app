@@ -110,3 +110,18 @@ def test_format_track_no_lyrics_is_empty():
     chosen = {"Quality": "lossless", "Format": "flac", "Bitrate": 729}
     pd = format_track(track, chosen, original_url="https://q/x")
     assert pd["metadata"]["lyrics"] == {"lrc": "", "lines": []}
+
+
+def test_format_track_captures_chorus():
+    from app.services.media.parsers.soda_music.formatter import format_track
+
+    track = {
+        "id": "7",
+        "name": "S",
+        "artists": [],
+        "album": {},
+        "chorus": {"start": 79296, "duration": 0},
+    }
+    chosen = {"Quality": "lossless", "Format": "flac", "Bitrate": 729}
+    pd = format_track(track, chosen, original_url="https://q/x")
+    assert pd["metadata"]["chorus"] == {"start": 79296, "duration": 0}
