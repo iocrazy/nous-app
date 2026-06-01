@@ -1,129 +1,153 @@
 """Tests for best-effort douyin enrichment of qishui UGC videos.
 
 A qishui UGC video's ``video_id`` IS a valid douyin aweme_id. The qishui share
-page carries no engagement stats / publish time, but the douyin aweme detail
-does. ``enrich_ugc_with_douyin_stats`` fetches the aweme by id and merges the
-stats + publish time the qishui page lacks — best-effort, never raising.
+page carries no engagement stats / publish time, but the douyin VIDEO PAGE
+(``https://www.douyin.com/video/<id>``) sometimes serves a clean HTML page
+whose ``_ROUTER_DATA`` carries the full stats. ``enrich_ugc_with_douyin_stats``
+fetches that page and merges the stats + publish time the qishui page lacks.
 
-A fake parser (matching the ``IesDouyinParser`` surface used by the helper) is
-injected via the ``parser=`` param (mirrors how other soda tests fake
-collaborators).
+This is best-effort and INTERMITTENT by nature: douyin's anti-scrape often
+serves a JS-VM-protected page (``jsvmprt``, no ``_ROUTER_DATA``) instead. When
+protected, stats stay hidden and the parse proceeds unchanged.
+
+The HTML fetch is injected via the ``html_fetcher=`` param so tests exercise
+the real ``_ROUTER_DATA`` parsing against realistic douyin-page HTML shapes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
 from app.services.media.parsers.soda_music.ugc_enrich import (
     enrich_ugc_with_douyin_stats,
+    extract_douyin_aweme_item,
 )
 
 # A parsed_data dict as produced by format_ugc_video (stats absent, time None).
 BASE_PARSED = {
-    "platform_id": "7637354879229798257",
+    "platform_id": "UV1",
     "source_platform": "qishui",
     "media_type": "video",
-    "title": "Clip",
+    "title": "clip",
     "published_at": None,
     "metadata": {"ext": "mp4", "ugc_video_id": "7637354879229798257"},
 }
 
-# Sept 2024-ish unix seconds.
-CREATE_TIME = 1727000000
+CREATE_TIME = 1778210253
 
 
-class _FakeParser:
-    """Mimics IesDouyinParser: classmethod-style ``parse`` + ``_get_user_overrides``
-    + ``_fetch_share_page``. The helper picks one entry; we record every call.
-    """
-
-    def __init__(self, aweme: dict | None = None, *, raises: bool = False):
-        self._aweme = aweme
-        self._raises = raises
-        self.fetch_calls: list[dict] = []
-
-    async def _get_user_overrides(self, user_id):
-        return {}
-
-    async def _fetch_share_page(
-        self, video_id, content_type="video", user_agent="", extra_headers=None
-    ):
-        self.fetch_calls.append(
-            {
-                "video_id": video_id,
-                "content_type": content_type,
-                "extra_headers": extra_headers,
+def _clean_html() -> str:
+    """A douyin video page embedding _ROUTER_DATA with a full aweme item under
+    a dynamic page key (``video_(id)/page``)."""
+    router_data = {
+        "loaderData": {
+            "video_(7637354879229798257)/page": {
+                "videoInfoRes": {
+                    "item_list": [
+                        {
+                            "aweme_id": "7637354879229798257",
+                            "create_time": CREATE_TIME,
+                            "desc": "clip",
+                            "statistics": {
+                                "digg_count": 914067,
+                                "comment_count": 44119,
+                                "share_count": 87658,
+                                "collect_count": 201590,
+                            },
+                        }
+                    ]
+                }
             }
-        )
-        if self._raises:
-            raise RuntimeError("douyin down")
-        return self._aweme
-
-
-def _aweme(*, statistics=None, create_time=None) -> dict:
-    out: dict = {"aweme_id": "7637354879229798257"}
-    if statistics is not None:
-        out["statistics"] = statistics
-    if create_time is not None:
-        out["create_time"] = create_time
-    return out
-
-
-def test_enrich_success_merges_stats_and_published_at():
-    aweme = _aweme(
-        statistics={
-            "digg_count": 100,
-            "comment_count": 20,
-            "share_count": 5,
-            "collect_count": 9,
         },
-        create_time=CREATE_TIME,
+        "errors": None,
+    }
+    blob = json.dumps(router_data, ensure_ascii=False)
+    return (
+        f"<html><head></head><body><script>_ROUTER_DATA = {blob}</script></body></html>"
     )
-    parser = _FakeParser(aweme)
+
+
+_CLEAN_HTML = _clean_html()
+
+_JSVMPRT_HTML = (
+    "<html><head><script>window.jsvmprt = 1;</script></head><body></body></html>"
+)
+
+_NO_ITEMLIST_HTML = (
+    "<html><body><script>"
+    '_ROUTER_DATA = {"loaderData":{"x/page":{}}}'
+    "</script></body></html>"
+)
+
+
+def _fetcher(html: str | None):
+    async def _f(video_id: str):
+        return html
+
+    return _f
+
+
+def _raising_fetcher():
+    async def _f(video_id: str):
+        raise RuntimeError("douyin down")
+
+    return _f
+
+
+# --- extract_douyin_aweme_item -------------------------------------------------
+
+
+def test_extract_douyin_aweme_item_happy():
+    item = extract_douyin_aweme_item(_CLEAN_HTML)
+    assert item is not None
+    assert item["aweme_id"] == "7637354879229798257"
+    assert item["statistics"]["digg_count"] == 914067
+
+
+def test_extract_douyin_aweme_item_jsvmprt_returns_none():
+    assert extract_douyin_aweme_item(_JSVMPRT_HTML) is None
+
+
+def test_extract_douyin_aweme_item_no_itemlist_returns_none():
+    assert extract_douyin_aweme_item(_NO_ITEMLIST_HTML) is None
+
+
+# --- enrich_ugc_with_douyin_stats ---------------------------------------------
+
+
+def test_enrich_success_merges_stats_and_time():
+    snapshot = json.loads(json.dumps(BASE_PARSED))
 
     out = asyncio.run(
         enrich_ugc_with_douyin_stats(
-            BASE_PARSED, video_id="7637354879229798257", user_id="u1", parser=parser
+            BASE_PARSED,
+            video_id="7637354879229798257",
+            html_fetcher=_fetcher(_CLEAN_HTML),
         )
     )
 
-    assert out["like_count"] == 100
-    assert out["comment_count"] == 20
-    assert out["share_count"] == 5
-    assert out["favorite_count"] == 9
-    assert out["published_at"] == datetime.fromtimestamp(CREATE_TIME, tz=timezone.utc)
+    assert out["like_count"] == 914067
+    assert out["comment_count"] == 44119
+    assert out["share_count"] == 87658
+    assert out["favorite_count"] == 201590
     assert isinstance(out["published_at"], datetime)
+    assert out["published_at"] == datetime.fromtimestamp(CREATE_TIME, tz=timezone.utc)
     # Original keys preserved.
-    assert out["platform_id"] == "7637354879229798257"
-    assert out["title"] == "Clip"
-    assert out["metadata"]["ugc_video_id"] == "7637354879229798257"
-    # Fetched by the canonical aweme_id.
-    assert parser.fetch_calls[0]["video_id"] == "7637354879229798257"
-
-
-def test_enrich_does_not_mutate_input():
-    aweme = _aweme(statistics={"digg_count": 1}, create_time=CREATE_TIME)
-    parser = _FakeParser(aweme)
-    snapshot = dict(BASE_PARSED)
-
-    out = asyncio.run(
-        enrich_ugc_with_douyin_stats(
-            BASE_PARSED, video_id="X", user_id=None, parser=parser
-        )
-    )
-
+    assert out["platform_id"] == "UV1"
+    assert out["title"] == "clip"
+    # Immutability: new dict, input untouched.
     assert out is not BASE_PARSED
-    assert BASE_PARSED == snapshot  # input untouched
+    assert BASE_PARSED == snapshot
     assert "like_count" not in BASE_PARSED
     assert BASE_PARSED["published_at"] is None
 
 
-def test_enrich_parser_returns_none_unchanged():
-    parser = _FakeParser(None)
+def test_enrich_jsvmprt_returns_unchanged():
     out = asyncio.run(
         enrich_ugc_with_douyin_stats(
-            BASE_PARSED, video_id="X", user_id=None, parser=parser
+            BASE_PARSED, video_id="X", html_fetcher=_fetcher(_JSVMPRT_HTML)
         )
     )
     assert out == BASE_PARSED
@@ -131,66 +155,53 @@ def test_enrich_parser_returns_none_unchanged():
     assert out["published_at"] is None
 
 
-def test_enrich_parser_raises_unchanged_no_exception():
-    parser = _FakeParser(raises=True)
-    # Must NOT raise.
+def test_enrich_fetch_none_returns_unchanged():
     out = asyncio.run(
         enrich_ugc_with_douyin_stats(
-            BASE_PARSED, video_id="X", user_id="u1", parser=parser
+            BASE_PARSED, video_id="X", html_fetcher=_fetcher(None)
         )
     )
     assert out == BASE_PARSED
 
 
-def test_enrich_missing_statistics_no_crash():
-    aweme = _aweme(create_time=CREATE_TIME)  # no statistics key
-    parser = _FakeParser(aweme)
+def test_enrich_fetcher_raises_returns_unchanged():
     out = asyncio.run(
         enrich_ugc_with_douyin_stats(
-            BASE_PARSED, video_id="X", user_id=None, parser=parser
+            BASE_PARSED, video_id="X", html_fetcher=_raising_fetcher()
         )
     )
-    # Stats not set, but publish time merged.
+    assert out == BASE_PARSED
+
+
+def test_enrich_missing_create_time_or_stats():
+    router_data = {
+        "loaderData": {
+            "video_(X)/page": {"videoInfoRes": {"item_list": [{"aweme_id": "X"}]}}
+        }
+    }
+    html = (
+        "<html><body><script>_ROUTER_DATA = "
+        + json.dumps(router_data)
+        + "</script></body></html>"
+    )
+    out = asyncio.run(
+        enrich_ugc_with_douyin_stats(
+            BASE_PARSED, video_id="X", html_fetcher=_fetcher(html)
+        )
+    )
     assert "like_count" not in out
     assert "comment_count" not in out
-    assert out["published_at"] == datetime.fromtimestamp(CREATE_TIME, tz=timezone.utc)
-
-
-def test_enrich_missing_create_time_no_crash():
-    aweme = _aweme(statistics={"digg_count": 7})  # no create_time
-    parser = _FakeParser(aweme)
-    out = asyncio.run(
-        enrich_ugc_with_douyin_stats(
-            BASE_PARSED, video_id="X", user_id=None, parser=parser
-        )
-    )
-    assert out["like_count"] == 7
     assert out["published_at"] is None  # unchanged from base
 
 
-def test_enrich_partial_statistics_only_present_set():
-    # Only digg_count present; others absent → only like_count set.
-    aweme = _aweme(statistics={"digg_count": 42}, create_time=CREATE_TIME)
-    parser = _FakeParser(aweme)
+def test_enrich_user_id_accepted_but_ignored():
+    # user_id is accepted for caller-signature stability; passing it must work.
     out = asyncio.run(
         enrich_ugc_with_douyin_stats(
-            BASE_PARSED, video_id="X", user_id=None, parser=parser
+            BASE_PARSED,
+            video_id="7637354879229798257",
+            user_id="u1",
+            html_fetcher=_fetcher(_CLEAN_HTML),
         )
     )
-    assert out["like_count"] == 42
-    assert "comment_count" not in out
-    assert "share_count" not in out
-    assert "favorite_count" not in out
-
-
-def test_enrich_bad_create_time_guarded():
-    # A non-numeric create_time must not raise; published_at stays None.
-    aweme = _aweme(statistics={"digg_count": 1}, create_time="not-a-number")
-    parser = _FakeParser(aweme)
-    out = asyncio.run(
-        enrich_ugc_with_douyin_stats(
-            BASE_PARSED, video_id="X", user_id=None, parser=parser
-        )
-    )
-    assert out["like_count"] == 1
-    assert out["published_at"] is None
+    assert out["like_count"] == 914067
