@@ -133,7 +133,7 @@ class _FakeRecorder:
     def __init__(self):
         self.usage_calls = []
 
-    def record_usage(self, *, prompt_tokens, completion_tokens):
+    def record_usage(self, *, prompt_tokens, completion_tokens, cached_input_tokens=0):
         self.usage_calls.append((prompt_tokens, completion_tokens))
 
     async def heartbeat(self):

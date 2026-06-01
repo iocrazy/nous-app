@@ -293,12 +293,19 @@ class AgentRunner:
                         final_finish = chunk.finish_reason
                         final_usage = chunk.usage
                         if recorder is not None and chunk.usage:
+                            from app.services.ai.runner.usage_cached import (
+                                extract_cached_input_tokens,
+                            )
+
                             recorder.record_usage(
                                 prompt_tokens=int(
                                     chunk.usage.get("prompt_tokens") or 0
                                 ),
                                 completion_tokens=int(
                                     chunk.usage.get("completion_tokens") or 0
+                                ),
+                                cached_input_tokens=extract_cached_input_tokens(
+                                    chunk.usage
                                 ),
                             )
                         break
@@ -634,9 +641,14 @@ class AgentRunner:
 
             if recorder is not None:
                 usage = resp.get("usage") or {}
+                from app.services.ai.runner.usage_cached import (
+                    extract_cached_input_tokens,
+                )
+
                 recorder.record_usage(
                     prompt_tokens=int(usage.get("prompt_tokens") or 0),
                     completion_tokens=int(usage.get("completion_tokens") or 0),
+                    cached_input_tokens=extract_cached_input_tokens(usage),
                 )
 
             msg = resp["choices"][0]["message"]
