@@ -1,10 +1,21 @@
-from app.workflows.soda_download import build_audio_dest, build_resource_fields
+from app.workflows.soda_download import (
+    build_audio_dest,
+    build_cover_dest,
+    build_resource_fields,
+)
 
 
 def test_build_audio_dest_uses_platform_and_ext():
     full, rel = build_audio_dest(media_id="999", ext="flac", base_dir="/tmp/dl")
     assert rel == "global/resources/web/qishui/999/audio.flac"
     assert str(full).endswith("global/resources/web/qishui/999/audio.flac")
+
+
+def test_build_cover_dest_mirrors_audio_dest():
+    full, rel = build_cover_dest(media_id="999", base_dir="/tmp/dl")
+    assert rel == "global/resources/web/qishui/999/cover.jpg"
+    assert str(full).endswith("global/resources/web/qishui/999/cover.jpg")
+    assert str(full).startswith("/tmp/dl")
 
 
 def test_build_resource_fields_are_valid_resources_columns():

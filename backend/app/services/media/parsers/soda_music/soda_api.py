@@ -192,6 +192,10 @@ class SodaApiClient:
             },
         )
         track = data.get("track", {}) or {}
+        if "lyric" in data and "lyric" not in track:
+            # lyric lives at the response root, not inside track — inject it so
+            # it flows through to format_track (§A.3).
+            track["lyric"] = data.get("lyric")
         url_player_info = (data.get("track_player", {}) or {}).get("url_player_info")
         return {"track": track, "url_player_info": url_player_info, "raw": data}
 

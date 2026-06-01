@@ -179,6 +179,29 @@ def test_get_track_v2_posts_correct_request_and_parses():
     assert result["url_player_info"] == "https://api.qishui.com/player?x=1"
 
 
+def test_get_track_v2_injects_root_lyric_into_track():
+    # track_v2 returns `lyric` as a SIBLING of `track` at the response root.
+    # get_track_v2 must inject it into the track dict so format_track sees it.
+    fake = _FakeClient(
+        post_response=_FakeResponse(
+            {
+                "track": {"id": "7123", "name": "Song"},
+                "lyric": {"content": "[1000,1000]<0,1000,0>Hi"},
+                "track_player": {
+                    "url_player_info": "https://api.qishui.com/player?x=1"
+                },
+            }
+        )
+    )
+    client = _client_with(fake)
+
+    import asyncio
+
+    result = asyncio.run(client.get_track_v2("7123"))
+
+    assert result["track"]["lyric"]["content"] == "[1000,1000]<0,1000,0>Hi"
+
+
 def test_get_play_info_returns_play_info_list():
     fake = _FakeClient(
         get_responses=[

@@ -288,9 +288,18 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       <audio
         ref={audioRef}
         src={src}
+        preload="metadata"
         onLoadedMetadata={(e) => {
           const d = (e.target as HTMLAudioElement).duration;
           if (d && isFinite(d)) setDuration(d);
+        }}
+        onError={(e) => {
+          const el = e.target as HTMLAudioElement;
+          console.error('Audio playback failed:', {
+            src,
+            code: el.error?.code,
+            message: el.error?.message,
+          });
         }}
         onEnded={() => setIsPlaying(false)}
         onTimeUpdate={(e) => {

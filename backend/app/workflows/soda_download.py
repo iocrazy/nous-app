@@ -18,8 +18,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+import aiofiles
 from dbos import DBOS
+from loguru import logger
 
+from app.boundary import safe_async_client
 from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
@@ -44,6 +47,17 @@ def build_audio_dest(*, media_id: str, ext: str, base_dir: str) -> tuple[Path, s
     return Path(base_dir) / rel, rel
 
 
+def build_cover_dest(*, media_id: str, base_dir: str) -> tuple[Path, str]:
+    """Return ``(full_path, relative_path)`` for the downloaded cover image.
+
+    Mirrors :func:`build_audio_dest` — covers are downloaded server-side because
+    douyinpic.com blocks browser hot-linking, so the assembled remote URL 404s
+    in the UI. A local cover served via ``/media/{id}/cover`` avoids that.
+    """
+    rel = f"global/resources/web/qishui/{media_id}/cover.jpg"
+    return Path(base_dir) / rel, rel
+
+
 def build_resource_fields(
     *, file_path: str, ext: str, size_bytes: int, title: str
 ) -> dict[str, Any]:
@@ -62,6 +76,55 @@ def build_resource_fields(
         "file_path": file_path,
         "file_size_bytes": size_bytes,
     }
+
+
+async def _download_cover(
+    *,
+    parsed: dict[str, Any],
+    media_id: str,
+    platform_id: str,
+    user_id: str,
+    base_dir: str,
+    res_repo: ResourcesRepository,
+    existing: Optional[dict[str, Any]],
+) -> None:
+    """Download the album cover server-side and persist its local path.
+
+    Best-effort: the caller wraps this in try/except so a cover failure never
+    fails the (already-successful) audio download. ``album.url_cover`` is the
+    raw dict the soda API returns; ``cover_url`` assembles the fetchable URL.
+    """
+    from app.services.media.parsers.soda_music.soda_api import USER_AGENT, cover_url
+
+    album = (parsed.get("metadata") or {}).get("album") or {}
+    url_cover = album.get("url_cover")
+    if not url_cover:
+        return
+
+    curl_url = cover_url(url_cover)
+    full, rel = build_cover_dest(media_id=media_id, base_dir=base_dir)
+
+    async with safe_async_client() as client:
+        resp = await client.get(
+            curl_url, headers={"User-Agent": USER_AGENT}, timeout=30
+        )
+        resp.raise_for_status()
+        data = resp.content
+
+    full.parent.mkdir(parents=True, exist_ok=True)
+    async with aiofiles.open(full, mode="wb") as f:
+        await f.write(data)
+
+    await MediaRepository().update(
+        platform_id,
+        {"cover_download_path": rel, "cover_download_status": "completed"},
+    )
+
+    res_row = existing or await res_repo.get_resource_by_media_id_and_creator(
+        media_id, user_id
+    )
+    if res_row:
+        await res_repo.update_resource(res_row["id"], {"cover_image_path": rel})
 
 
 @DBOS.workflow()
@@ -156,6 +219,22 @@ async def soda_download_workflow(
                 **fields,
             }
         )
+
+    # 6. Best-effort cover download (douyinpic.com blocks browser hot-linking,
+    #    so the assembled remote URL 404s in the UI). The audio already
+    #    succeeded — a cover failure must NEVER fail the workflow.
+    try:
+        await _download_cover(
+            parsed=_pd,
+            media_id=str(media_id),
+            platform_id=platform_id,
+            user_id=user_id,
+            base_dir=base_dir,
+            res_repo=res_repo,
+            existing=existing,
+        )
+    except Exception as exc:  # noqa: BLE001 — cover is non-critical
+        logger.warning("soda_download: cover download failed (non-fatal): {}", exc)
 
     await manager.complete(wf_id, subtitle=f"Downloaded {title}")
     return {"platform_id": platform_id, "media_id": media_id, "size": size}
