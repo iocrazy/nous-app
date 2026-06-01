@@ -138,6 +138,30 @@ def test_download_video_file_streams_to_disk(tmp_path):
     assert rec["headers"]["Cookie"] == "ck=1"
 
 
+def test_download_video_file_writes_dest_and_removes_part(tmp_path):
+    # Happy path: chunks under the cap → file written at dest, .part gone,
+    # correct byte count returned.
+    from app.workflows.soda_ugc_download import download_video_file
+
+    rec: dict = {}
+    chunks = [b"abc", b"defgh", b"i"]
+    dest = tmp_path / "out" / "video.mp4"
+    size = asyncio.run(
+        download_video_file(
+            url="https://x.douyinvod.com/v.mp4",
+            dest_path=str(dest),
+            cookie="ck=1",
+            client_factory=lambda: _FakeStreamClient(chunks, rec),
+        )
+    )
+
+    assert size == 9
+    assert dest.exists()
+    assert dest.read_bytes() == b"abcdefghi"
+    # the temp .part file must be gone after a successful atomic rename
+    assert not (tmp_path / "out" / "video.mp4.part").exists()
+
+
 def test_download_video_file_raises_on_http_error(tmp_path):
     import httpx
 
@@ -160,3 +184,35 @@ def test_download_video_file_raises_on_http_error(tmp_path):
                 client_factory=lambda: _BadClient([], {}),
             )
         )
+
+
+def test_download_video_file_caps_oversized_stream(tmp_path):
+    # A malicious/huge MP4 that exceeds the byte cap must raise — and leave
+    # neither the .part temp file nor the final dest behind (no partial-file
+    # poisoning of the skip-guard).
+    from app.boundary import MaxBytesExceededError
+    from app.workflows import soda_ugc_download
+    from app.workflows.soda_ugc_download import download_video_file
+
+    # Shrink the cap so the test stays fast / memory-light.
+    monkey_cap = 8
+    orig = soda_ugc_download.MAX_UGC_VIDEO_BYTES
+    soda_ugc_download.MAX_UGC_VIDEO_BYTES = monkey_cap
+    try:
+        rec: dict = {}
+        # 12 bytes total > 8-byte cap → overrun on the 2nd chunk.
+        chunks = [b"aaaaa", b"bbbbbbb"]
+        dest = tmp_path / "out" / "video.mp4"
+        with pytest.raises(MaxBytesExceededError):
+            asyncio.run(
+                download_video_file(
+                    url="https://evil.douyinvod.com/huge.mp4",
+                    dest_path=str(dest),
+                    cookie="ck=1",
+                    client_factory=lambda: _FakeStreamClient(chunks, rec),
+                )
+            )
+        assert not dest.exists()
+        assert not (tmp_path / "out" / "video.mp4.part").exists()
+    finally:
+        soda_ugc_download.MAX_UGC_VIDEO_BYTES = orig

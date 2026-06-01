@@ -22,6 +22,7 @@ Route C discipline (CLAUDE.md):
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -29,13 +30,19 @@ import aiofiles
 from dbos import DBOS
 from loguru import logger
 
-from app.boundary import safe_async_client
+from app.boundary import cap_aiter, safe_async_client
 from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.infra.unified_task_manager import get_task_manager
 from app.services.media.parsers.soda_music.cookie_source import get_soda_cookie
 from app.services.media.parsers.soda_music.soda_api import _share_page_headers
+
+# Byte ceiling for a single UGC MP4. The host comes from the scraped
+# ``videoOptions.url`` (``*.douyinvod.com``), which is attacker-influenceable;
+# without a cap a malicious/huge stream could fill the disk. UGC clips are
+# short, so 2 GiB is a generous ceiling that real content never reaches.
+MAX_UGC_VIDEO_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 
 
 def already_downloaded(media_row: dict, base_dir: str) -> bool:
@@ -88,11 +95,22 @@ async def download_video_file(
 
     The qishui UGC MP4 is a plain ``douyinvod.com`` file — no decryption. We
     stream rather than buffer the whole file (videos are larger than tracks).
+
+    Safety:
+        - The byte stream is wrapped with ``cap_aiter(..., MAX_UGC_VIDEO_BYTES)``
+          so a malicious/huge upstream cannot fill the disk; on overrun the cap
+          raises ``MaxBytesExceededError`` (→ DBOS FAILED).
+        - The download is written to a ``.part`` temp file and atomically
+          ``os.replace``-d into place only on success, so a failed/aborted
+          download never leaves a truncated ``video.mp4`` that the
+          ``already_downloaded`` skip-guard would treat as complete.
+
     HTTP errors propagate (the workflow's failure = DBOS FAILED).
 
     Raises:
         ValueError: if url is empty.
         httpx.HTTPError: on a non-2xx response (via ``raise_for_status``).
+        MaxBytesExceededError: if the stream exceeds ``MAX_UGC_VIDEO_BYTES``.
     """
     if not url:
         raise ValueError("soda ugc download url is empty")
@@ -102,15 +120,28 @@ async def download_video_file(
 
     dest = Path(dest_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
 
     total = 0
-    async with factory() as client:
-        async with client.stream("GET", url, headers=headers, timeout=120.0) as resp:
-            resp.raise_for_status()
-            async with aiofiles.open(dest, "wb") as fp:
-                async for chunk in resp.aiter_bytes():
-                    await fp.write(chunk)
-                    total += len(chunk)
+    try:
+        async with factory() as client:
+            async with client.stream(
+                "GET", url, headers=headers, timeout=120.0
+            ) as resp:
+                resp.raise_for_status()
+                async with aiofiles.open(part, "wb") as fp:
+                    async for chunk in cap_aiter(
+                        resp.aiter_bytes(), max_bytes=MAX_UGC_VIDEO_BYTES
+                    ):
+                        await fp.write(chunk)
+                        total += len(chunk)
+        os.replace(part, dest)
+    except BaseException:
+        # Best-effort cleanup so a failed/aborted/over-cap download never
+        # leaves a partial file the skip-guard would treat as complete.
+        Path(part).unlink(missing_ok=True)
+        raise
+
     logger.info("soda ugc: wrote {} bytes to {}", total, dest_path)
     return total
 

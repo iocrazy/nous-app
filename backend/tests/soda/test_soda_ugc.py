@@ -83,10 +83,17 @@ def test_extract_router_data_missing_video_options_returns_none():
 
 
 class _FakeResp:
-    def __init__(self, text: str, status: int = 200, url: str = ""):
+    def __init__(
+        self,
+        text: str,
+        status: int = 200,
+        url: str = "",
+        headers: dict | None = None,
+    ):
         self.text = text
         self.status_code = status
         self.url = url
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -140,6 +147,48 @@ def test_get_ugc_video_raises_when_no_video_options():
 
     with pytest.raises(SodaApiError):
         asyncio.run(client.get_ugc_video("UV1"))
+
+
+def test_get_ugc_video_rejects_oversized_content_length():
+    # An upstream advertising a huge content-length is rejected before the
+    # body is read into resp.text.
+    import pytest
+
+    from app.services.media.parsers.soda_music.soda_api import (
+        MAX_SHARE_PAGE_BYTES,
+        SodaApiError,
+    )
+
+    resp = _FakeResp(
+        _share_html(VIDEO_OPTIONS),
+        headers={"content-length": str(MAX_SHARE_PAGE_BYTES + 1)},
+    )
+    fake = _FakeClient(resp)
+    client = SodaApiClient(cookie="c", client_factory=lambda: fake)
+
+    with pytest.raises(SodaApiError):
+        asyncio.run(client.get_ugc_video("UV1"))
+
+
+def test_get_ugc_video_rejects_oversized_body():
+    # An upstream that lies about content-length (or omits it) but streams an
+    # oversized body is still rejected after decoding.
+    import pytest
+
+    from app.services.media.parsers.soda_music import soda_api
+    from app.services.media.parsers.soda_music.soda_api import SodaApiError
+
+    orig = soda_api.MAX_SHARE_PAGE_BYTES
+    soda_api.MAX_SHARE_PAGE_BYTES = 32  # shrink so the test stays small
+    try:
+        # Valid HTML but well over the (shrunk) 32-byte cap, no content-length.
+        resp = _FakeResp(_share_html(VIDEO_OPTIONS))
+        fake = _FakeClient(resp)
+        client = SodaApiClient(cookie="c", client_factory=lambda: fake)
+        with pytest.raises(SodaApiError):
+            asyncio.run(client.get_ugc_video("UV1"))
+    finally:
+        soda_api.MAX_SHARE_PAGE_BYTES = orig
 
 
 # --- Task 2: format_ugc_video ------------------------------------------------

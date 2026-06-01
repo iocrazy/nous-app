@@ -43,6 +43,11 @@ SHARE_PAGE_USER_AGENT = (
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_COVER_SIZE = "~c5_375x375.jpg"
 
+# Byte ceiling for the UGC share-page HTML body. Share pages are small; 16 MiB
+# is a generous cap that guards against an upstream streaming an unbounded body
+# into ``resp.text`` (memory exhaustion).
+MAX_SHARE_PAGE_BYTES = 16 * 1024 * 1024  # 16 MiB
+
 # Fixed Luna PC device parameters (§A.2). Dynamic ids are filled per request.
 _FIXED_PC_PARAMS: dict[str, str] = {
     "aid": "386088",
@@ -470,7 +475,8 @@ class SodaApiClient:
         an HTML fetch, not the LunaPC JSON API — uses browser-ish headers.
 
         Raises:
-            SodaApiError: on HTTP failure or when videoOptions can't be parsed.
+            SodaApiError: on HTTP failure, when the share page exceeds
+                ``MAX_SHARE_PAGE_BYTES``, or when videoOptions can't be parsed.
         """
         url = f"{SHARE_BASE}/qishui/share/ugc_video?ugc_video_id={ugc_video_id}"
         async with self._client_factory() as client:
@@ -479,9 +485,26 @@ class SodaApiClient:
             )
             try:
                 resp.raise_for_status()
-                text = resp.text
             except (httpx.HTTPError, ValueError) as e:
                 raise SodaApiError(f"ugc_video fetch failed: {e}") from e
+            # Cap the body size before/after buffering it into ``resp.text``.
+            # First the advertised content-length (cheap, catches honest
+            # upstreams early), then the decoded body itself (catches lying /
+            # chunked upstreams). Either overrun → SodaApiError.
+            declared = int(
+                (getattr(resp, "headers", None) or {}).get("content-length") or 0
+            )
+            if declared > MAX_SHARE_PAGE_BYTES:
+                raise SodaApiError(
+                    f"ugc_video share page too large "
+                    f"(content-length {declared} > {MAX_SHARE_PAGE_BYTES})"
+                )
+            text = resp.text
+            if len(text.encode("utf-8", "ignore")) > MAX_SHARE_PAGE_BYTES:
+                raise SodaApiError(
+                    f"ugc_video share page too large "
+                    f"(body > {MAX_SHARE_PAGE_BYTES})"
+                )
         vo = extract_router_data(text)
         if vo is None:
             raise SodaApiError(
