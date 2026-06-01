@@ -556,10 +556,14 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
   const isAudio = data.media_type === 'audio';
   // qishui UGC video: the share page (our only source) carries NO engagement
-  // stats and NO publish time — verified against the live page (desktop+mobile
-  // UA). So hide the Release Time row + the whole stats grid rather than show
-  // misleading 0 / N/A. (Normal douyin/bilibili videos keep them.)
+  // stats and NO publish time. We best-effort enrich these from douyin (the UGC
+  // video_id IS a douyin aweme_id) at parse time; published_at is the
+  // enrichment-success sentinel (set from douyin create_time; null when
+  // enrichment failed/absent). Hide the Release Time row + stats grid ONLY when
+  // douyin enrichment didn't yield data — otherwise show the real numbers.
+  // (Normal douyin/bilibili videos keep them; isQishuiVideo is false for them.)
   const isQishuiVideo = data.source_platform === 'qishui' && isVideo;
+  const ugcStatsMissing = isQishuiVideo && !data.published_at;
   // PC API gives no per-track like count for audio — show a defensive bitrate
   // tag instead of a misleading "0 likes" heart.
   const audioBitrate = (() => {
@@ -790,7 +794,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
           {/* Time & Duration Row */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 mb-5 text-sm text-zinc-400">
-             {!isQishuiVideo && (
+             {!ugcStatsMissing && (
              <div className="flex items-center gap-2">
                 <Clock size={14} className="text-zinc-500"/>
                 <span>Release Time: <span className="text-zinc-300 font-medium">{formatDateTime(data.published_at)}</span></span>
@@ -807,9 +811,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
              </div>
           </div>
 
-          {/* Stats Grid — hidden for qishui UGC video (share page has no
-              engagement stats; showing 0/0/0/0 would be misleading). */}
-          {!isQishuiVideo && (
+          {/* Stats Grid — hidden for qishui UGC video ONLY when douyin
+              enrichment didn't yield data (no published_at); showing 0/0/0/0
+              would be misleading. Enriched UGC shows real Likes/Comments/
+              Shares/Collects. */}
+          {!ugcStatsMissing && (
           <div className={`grid ${isAudio ? 'grid-cols-3' : 'grid-cols-4'} gap-2 sm:gap-4 mb-6`}>
             {!isAudio && (
             <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
