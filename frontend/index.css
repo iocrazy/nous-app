@@ -423,43 +423,55 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -10px;
+  bottom: -12px;
   width: 100%;
-  height: 22px;
+  height: 30px;
   pointer-events: none;
   overflow: visible;
 }
+/* The line is a FILLED tapering ribbon (thick at the button, narrowing to a
+   point toward the right) so it visibly gets thinner and fades out — not a
+   constant-width stroke. */
 .detail-header-glow__line path {
-  fill: none;
-  stroke: url(#detailGlowGrad);
-  stroke-width: 1.5;
-  filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.8))
-    drop-shadow(0 0 9px rgba(139, 92, 246, 0.45));
+  fill: url(#detailGlowGrad);
+  stroke: none;
+  filter: drop-shadow(0 0 3px rgba(129, 140, 248, 0.85))
+    drop-shadow(0 0 7px rgba(99, 102, 241, 0.45));
 }
 
-/* Circular Back button with a soft indigo glow ring. */
+/* Circular Back button: neutral surface, glow only on its BOTTOM half (an arc
+   of light under the circle), not a full ring. */
 .detail-back-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 38px;
   height: 38px;
   border-radius: 9999px;
-  color: #e4e4e7;
-  background: rgba(39, 39, 42, 0.85);
-  border: 1px solid rgba(99, 102, 241, 0.55);
-  box-shadow:
-    0 0 0 1px rgba(99, 102, 241, 0.15),
-    0 0 10px rgba(99, 102, 241, 0.35);
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  color: #d4d4d8;
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
   flex-shrink: 0;
 }
-.detail-back-btn:hover {
-  background: rgba(63, 63, 70, 0.95);
-  border-color: rgba(129, 140, 248, 0.85);
+.detail-back-btn::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  height: 55%;
+  border-radius: 0 0 9999px 9999px;
   box-shadow:
-    0 0 0 1px rgba(99, 102, 241, 0.25),
-    0 0 16px rgba(99, 102, 241, 0.55);
+    0 5px 12px -2px rgba(99, 102, 241, 0.85),
+    0 2px 7px -1px rgba(129, 140, 248, 0.6);
+  pointer-events: none;
+}
+.detail-back-btn:hover {
+  background: #3f3f46;
+  border-color: #52525b;
 }
 .detail-back-btn:active {
   transform: scale(0.94);

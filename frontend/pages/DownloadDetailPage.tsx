@@ -165,19 +165,30 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           {/* Glowing accent line that dips to cradle the round Back button */}
           <svg
             className="detail-header-glow__line"
-            preserveAspectRatio="none"
-            viewBox="0 0 1000 22"
+            preserveAspectRatio="xMinYMid meet"
+            viewBox="0 0 1100 30"
             aria-hidden="true"
           >
             <defs>
-              <linearGradient id="detailGlowGrad" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="rgba(129,140,248,0.95)" />
-                <stop offset="50%" stopColor="rgba(139,92,246,0.6)" />
-                <stop offset="100%" stopColor="rgba(139,92,246,0.12)" />
+              <linearGradient
+                id="detailGlowGrad"
+                x1="0"
+                y1="0"
+                x2="1100"
+                y2="0"
+                gradientUnits="userSpaceOnUse"
+              >
+                <stop offset="0" stopColor="rgba(165,180,252,0.95)" />
+                <stop offset="0.034" stopColor="rgba(199,210,254,1)" />
+                <stop offset="0.155" stopColor="rgba(139,92,246,0.7)" />
+                <stop offset="0.273" stopColor="rgba(139,92,246,0.3)" />
+                <stop offset="0.382" stopColor="rgba(139,92,246,0)" />
               </linearGradient>
             </defs>
-            {/* flat → smooth dip cradling the ~38px button near the left → flat */}
-            <path d="M0 6 H14 C24 6 26 18 38 18 C50 18 52 6 62 6 H1000" />
+            {/* Tapering ribbon: thick where it cradles the ~38px button (dip
+                centered at x≈37), narrowing to a point by x≈420 (title end) so
+                the line gets thinner and fades out toward the right. */}
+            <path d="M0 5.2 H6 C22 5.2 24 19.2 37 19.2 C50 19.2 52 5.2 68 5.2 L420 6.6 L68 6.8 C52 6.8 50 20.8 37 20.8 C24 20.8 22 6.8 6 6.8 H0 Z" />
           </svg>
 
           {/* Left: back + title */}
