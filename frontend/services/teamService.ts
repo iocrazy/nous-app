@@ -1,9 +1,12 @@
 import { getSupabaseClient } from '../supabaseClient';
 import { Team, TeamMember } from '../types';
 
-// PostgREST returns BIGINT as JSON number; ensure IDs are always strings
+// PostgREST returns BIGINT as JSON number; ensure IDs are always strings.
+// teams.is_personal was dropped in PR-E (mig 243) in favour of teams.kind;
+// derive the legacy boolean from kind so downstream consumers (types.Team,
+// SettingsPage, useNavigation) keep working unchanged.
 function normalizeTeam(t: any): Team {
-  return { ...t, id: String(t.id) };
+  return { ...t, id: String(t.id), is_personal: t.kind === 'personal' };
 }
 
 export const fetchMyTeams = async (): Promise<Team[]> => {
@@ -21,7 +24,7 @@ export const fetchMyTeams = async (): Promise<Team[]> => {
     .from('teams')
     .select('*')
     .in('id', teamIds)
-    .eq('is_personal', false)
+    .neq('kind', 'personal')
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -43,7 +46,7 @@ export const fetchPersonalTeam = async (): Promise<Team | null> => {
     .from('teams')
     .select('*')
     .in('id', teamIds)
-    .eq('is_personal', true)
+    .eq('kind', 'personal')
     .limit(1)
     .maybeSingle();
 
