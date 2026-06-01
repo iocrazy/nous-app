@@ -68,14 +68,16 @@ export default defineConfig(({ mode }) => {
           navigateFallback: '/index.html',
           navigateFallbackDenylist: [/^\/api\//, /^\/media\//, /^\/stream\//],
           runtimeCaching: [
-            {
-              urlPattern: /\/assets\/.+/,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'assets-cache',
-                expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              },
-            },
+            // NOTE: do NOT add a CacheFirst rule for /assets/. Vite emits
+            // content-hashed bundles (index-<hash>.js) that VitePWA already
+            // precaches via the manifest, which is regenerated every build so
+            // a new deploy ships new hashes + a fresh manifest. A CacheFirst
+            // runtimeCaching rule on /assets/ overrides that: it serves the
+            // OLD cached bundle and never fetches the new hash, so even after
+            // the SW updates (skipWaiting/clientsClaim) the app keeps running
+            // stale code until the user manually clears the SW. This was the
+            // cause of users being stuck on old builds (e.g. the dropped
+            // teams.is_personal query 400ing long after the fix shipped).
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'StaleWhileRevalidate',
