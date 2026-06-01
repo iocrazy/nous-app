@@ -19,6 +19,9 @@ from urllib.parse import parse_qs, urlparse
 
 from app.services.media.parsers.soda_music.soda_api import SodaApiClient, SodaApiError
 from app.services.media.parsers.soda_music.soda_parser import parse_track
+from app.services.media.parsers.soda_music.ugc_enrich import (
+    enrich_ugc_with_douyin_stats,
+)
 from app.services.media.parsers.soda_music.ugc_formatter import format_ugc_video
 
 
@@ -64,6 +67,13 @@ async def resolve_qishui_metadata(
 
     if kind == "ugc_video":
         vo = await client.get_ugc_video(content_id)
-        return format_ugc_video(vo, ugc_video_id=content_id, original_url=url)
+        pd = format_ugc_video(vo, ugc_video_id=content_id, original_url=url)
+        # The qishui share page has no engagement stats / publish time, but the
+        # UGC video_id IS a douyin aweme_id. Best-effort enrich from douyin
+        # (never fails the parse).
+        pd = await enrich_ugc_with_douyin_stats(
+            pd, video_id=content_id, user_id=user_id
+        )
+        return pd
 
     raise SodaApiError(f"qishui {kind} not supported for single resolve")
