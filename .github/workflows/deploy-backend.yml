@@ -238,18 +238,30 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           exit 1
 
-      - name: Ensure worker container is running (Watchtower restart-race guard)
+      - name: Ensure backend + worker containers are running (Watchtower restart-race guard)
         # Watchtower recreates backend + worker (they share mediahub-backend:latest)
-        # on deploy but intermittently leaves mediahub-app-worker Exited
+        # on deploy but intermittently leaves a container Exited
         # (143 SIGTERM / 128 context-canceled) and does NOT restart it
         # (restart=unless-stopped honors the explicit stop; autoheal only
-        # handles unhealthy, not exited). The worker runs ALL DBOS workflows
-        # (execute_issue / respond_to_issue_reply / sweepers), so a dead worker
-        # = issue dispatch + agent turns silently broken while the gateway still
-        # reports healthy. Hit manually on #348 and #349. Runs AFTER verify-deploy
-        # (Watchtower has finished its recreate pass by then) and idempotently
-        # starts the worker. See memory bug_worker_down_after_deploy.
-        if: github.ref == 'refs/heads/master'
+        # handles unhealthy, not exited). Two distinct blast radii:
+        #   - dead WORKER (mediahub-app-worker) runs ALL DBOS workflows
+        #     (execute_issue / respond_to_issue_reply / sweepers), so issue
+        #     dispatch + agent turns silently break while the gateway still
+        #     reports healthy. Hit manually on #348 and #349.
+        #   - dead GATEWAY (mediahub-app-backend) = the WHOLE API 502s behind
+        #     nginx. Hit on 2026-06-01: the #422 deploy recreated the backend,
+        #     Watchtower's stop/recreate cancelled it the instant startup
+        #     finished (Exited 128 "context canceled"), unless-stopped left it
+        #     down → prod 502 until a manual `docker start`.
+        #
+        # `if: always()` is REQUIRED. This step previously had a bare
+        # `github.ref` condition, which GitHub implicitly ANDs with success(),
+        # so it was SKIPPED whenever "Verify deploy" failed. But a verify
+        # timeout is the *exact symptom* of a stuck-Exited container — so the
+        # revive must run precisely when verify failed, not be skipped by it.
+        # Idempotently starts BOTH containers (no-op when already running).
+        # See memory bug_worker_down_after_deploy.
+        if: always() && github.ref == 'refs/heads/master'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.NAS_HOST }}
@@ -258,20 +270,29 @@ jobs:
           key: ${{ secrets.NAS_SSH_KEY }}
           script: |
             DOCKER=/usr/local/bin/docker
-            for i in 1 2 3 4 5 6; do
-              # idempotent: no-op if already running, starts it if Exited
-              sudo $DOCKER start mediahub-app-worker >/dev/null 2>&1 || true
-              STATUS=$(sudo $DOCKER inspect -f '{{.State.Status}}' mediahub-app-worker 2>/dev/null || echo missing)
-              echo "mediahub-app-worker status: $STATUS (check $i/6)"
-              [ "$STATUS" = "running" ] && break
-              sleep 10
+            FAILED=""
+            for C in mediahub-app-backend mediahub-app-worker; do
+              for i in 1 2 3 4 5 6; do
+                # idempotent: no-op if already running, starts it if Exited
+                sudo $DOCKER start "$C" >/dev/null 2>&1 || true
+                STATUS=$(sudo $DOCKER inspect -f '{{.State.Status}}' "$C" 2>/dev/null || echo missing)
+                echo "$C status: $STATUS (check $i/6)"
+                [ "$STATUS" = "running" ] && break
+                sleep 10
+              done
+              FINAL=$(sudo $DOCKER inspect -f '{{.State.Status}}' "$C" 2>/dev/null || echo missing)
+              if [ "$FINAL" = "running" ]; then
+                echo "✅ $C running"
+              else
+                echo "::error::$C not running after deploy (status=$FINAL)"
+                FAILED="$FAILED $C"
+              fi
             done
-            FINAL=$(sudo $DOCKER inspect -f '{{.State.Status}}' mediahub-app-worker 2>/dev/null || echo missing)
-            if [ "$FINAL" != "running" ]; then
-              echo "::error::mediahub-app-worker not running after deploy (status=$FINAL)"
+            if [ -n "$FAILED" ]; then
+              echo "::error::container(s) not running after deploy:$FAILED"
               exit 1
             fi
-            echo "✅ mediahub-app-worker running"
+            echo "✅ backend + worker both running"
 
       - name: Summary
         run: |
