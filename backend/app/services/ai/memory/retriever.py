@@ -99,7 +99,8 @@ class MemoryRetriever:
         *,
         user_id: UUID,
         agent_id: UUID,
-        session_id: Optional[UUID],
+        # ai_sessions.id is BIGINT Snowflake (mig 231) → numeric string.
+        session_id: Optional[str],
         user_query: str,
         agent_row: Optional[dict] = None,
     ) -> list[MemoryRecord]:
@@ -385,7 +386,8 @@ class MemoryRetriever:
         *,
         user_id: UUID,
         agent_id: UUID,
-        session_id: Optional[UUID],
+        # ai_sessions.id is BIGINT Snowflake (mig 231) → numeric string.
+        session_id: Optional[str],
         user_query: str,
     ) -> str:
         h = hashlib.sha1(user_query.encode("utf-8")).hexdigest()[:12]  # noqa: S324

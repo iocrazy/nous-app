@@ -183,7 +183,8 @@ async def reconcile_run(
     user_id: UUID,
     team_id: Optional[int],
     project_id: Optional[int],
-    session_id: Optional[UUID],
+    # ai_sessions.id is BIGINT Snowflake (mig 231) → numeric string.
+    session_id: Optional[str],
     agent_id: Optional[UUID],
     model: str,
     prompt_tokens: int,

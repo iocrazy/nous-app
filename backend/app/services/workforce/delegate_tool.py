@@ -113,7 +113,8 @@ class DelegateToolService:
         *,
         caller_agent_id: UUID,
         caller_user_id: UUID,
-        parent_run_id: Optional[UUID],
+        # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string.
+        parent_run_id: Optional[str],
         agent_depth: int = 0,
         agent_repo: Optional[AgentRepository] = None,
         workforce_repo: Optional[AgentWorkforceRepository] = None,

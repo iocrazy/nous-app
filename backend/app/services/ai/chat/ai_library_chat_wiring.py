@@ -80,10 +80,11 @@ async def build_agent_runner_stack(
     agent: dict[str, Any],
     skill_repo: Any,
     user_id: UUID,
-    session_id: Optional[UUID],
+    # session_id / parent_run_id are BIGINT Snowflake ids (mig 231/232) → str.
+    session_id: Optional[str],
     user_query: str,
     settings: Any,
-    parent_run_id: Optional[UUID] = None,
+    parent_run_id: Optional[str] = None,
     agent_depth: int = 0,
 ) -> AgentRunnerStack:
     """Construct a fully-wired AgentRunner for one agent turn.
@@ -300,7 +301,8 @@ async def _safe_recall_memories(
     *,
     agent_id: UUID,
     user_id: UUID,
-    session_id: Optional[UUID],
+    # ai_sessions.id is BIGINT Snowflake (mig 231) → numeric string.
+    session_id: Optional[str],
     user_query: str,
     settings: Any,
 ) -> list[RecalledMemory]:

@@ -63,11 +63,14 @@ class HookContext:
     change.
     """
 
-    run_id: UUID
+    # run_id (agent_runs.id) and session_id (ai_sessions.id) are BIGINT
+    # Snowflake ids (mig 231/232) → numeric strings. agent_id / user_id are
+    # still UUID. The all-zero sentinel for run_id in test paths is "0".
+    run_id: str
     agent_id: UUID
     agent_slug: str
     user_id: UUID
-    session_id: Optional[UUID]
+    session_id: Optional[str]
 
     tool_name: str
     tool_args: dict[str, Any]

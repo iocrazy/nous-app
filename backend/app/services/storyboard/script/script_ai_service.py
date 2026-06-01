@@ -95,7 +95,8 @@ class ScriptAIService:
         user_content: str,
         *,
         user_id: Optional[Any] = None,
-        session_id: Optional[UUID] = None,
+        # ai_sessions.id is BIGINT Snowflake (mig 231) → numeric string.
+        session_id: Optional[str] = None,
         team_id: Optional[int] = None,
         project_id: Optional[int] = None,
     ) -> str:

@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import UUID
 
 from app.services.infra.hooks import HookContext, HookResult
 
@@ -101,7 +100,7 @@ class CostAuditorHook:
     async def _write_event(
         self,
         *,
-        run_id: UUID,
+        run_id: str,
         iteration: int,
         tool_name: str,
         tool_args_summary: str,
@@ -120,9 +119,10 @@ class CostAuditorHook:
             )
             return
 
-        # Skip the all-zero placeholder run_id used in test paths without a
-        # real RunRecorder. Production paths always pass a real UUID.
-        if run_id == UUID(int=0):
+        # Skip the placeholder run_id used in test paths without a real
+        # RunRecorder. Production paths always pass a real BIGINT Snowflake id
+        # (agent_runs.id, mig 232) as a string.
+        if run_id == "0":
             logger.debug("[CostAuditor] sentinel run_id, skipping DB write")
             return
 

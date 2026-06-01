@@ -143,10 +143,10 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
 
     # Mark in_progress before the LLM call so observability shows what
     # the worker is doing right now.
+    # agent_runs.id is BIGINT Snowflake (mig 232) — keep the numeric string;
+    # UUID() would raise ValueError on a bigint.
     parent_run_id_raw = payload.get("parent_run_id")
-    parent_run_id: Optional[UUID] = (
-        UUID(parent_run_id_raw) if parent_run_id_raw else None
-    )
+    parent_run_id: Optional[str] = str(parent_run_id_raw) if parent_run_id_raw else None
 
     user_query = payload.get("prompt") or ""
     if not user_query:
@@ -364,8 +364,9 @@ async def _lookup_inbox_message(
 
 async def _attach_to_parent_run(
     *,
-    run_id: UUID,
-    parent_run_id: UUID,
+    # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string.
+    run_id: str,
+    parent_run_id: str,
     agent_depth: int,
 ) -> None:
     """Set ``agent_runs.parent_run_id`` and propagate ``root_run_id``.

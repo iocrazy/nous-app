@@ -17,7 +17,8 @@ def _ctx(
     prompt_tokens: int = 100,
     completion_tokens: int = 200,
     cost_cents: float = 5.0,
-    run_id: UUID = UUID("00000000-0000-0000-0000-000000000010"),
+    # agent_runs.id is a BIGINT Snowflake string since mig 232.
+    run_id: str = "310819108761487",
 ) -> HookContext:
     return HookContext(
         run_id=run_id,
@@ -98,8 +99,8 @@ async def test_per_run_isolation_no_cross_user_pollution():
     """
     hook = CostAuditorHook()
     write_mock = AsyncMock()
-    run_a = UUID("00000000-0000-0000-0000-00000000aaaa")
-    run_b = UUID("00000000-0000-0000-0000-00000000bbbb")
+    run_a = "310819108761001"
+    run_b = "310819108761002"
 
     with patch.object(CostAuditorHook, "_write_event", write_mock):
         # Run A iter 1 — prompt_tokens=100 (delta=100)
@@ -120,7 +121,7 @@ async def test_iteration_one_always_treats_as_full_amount():
     with UUID4, but defensive), iteration=1 resets the baseline."""
     hook = CostAuditorHook()
     write_mock = AsyncMock()
-    run = UUID("00000000-0000-0000-0000-00000000cccc")
+    run = "310819108761003"
 
     with patch.object(CostAuditorHook, "_write_event", write_mock):
         await hook(_ctx(run_id=run, iteration=1, prompt_tokens=100), {})
@@ -156,7 +157,7 @@ async def test_db_write_failure_is_swallowed():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_sentinel_run_id_skipped():
-    """run_id of all zeros (test path with no RunRecorder) skips the DB write."""
+    """run_id sentinel "0" (test path with no RunRecorder) skips the DB write."""
     hook = CostAuditorHook()
     fake_admin = MagicMock()
     fake_admin.table.return_value.insert.return_value.execute = AsyncMock()
@@ -165,7 +166,7 @@ async def test_sentinel_run_id_skipped():
         return fake_admin
 
     with patch("app.db.get_async_supabase_admin", fake_get_admin):
-        result = await hook(_ctx(run_id=UUID(int=0)), {"prompt": "ok"})
+        result = await hook(_ctx(run_id="0"), {"prompt": "ok"})
 
     assert result.decision == "continue"
     # Insert was NOT called because of sentinel detection.

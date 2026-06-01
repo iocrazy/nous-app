@@ -77,7 +77,9 @@ async def extract_and_persist_memories_step(
     rows = await writer.write(
         agent_id=UUID(agent_id),
         user_id=UUID(user_id),
-        run_id=UUID(run_id) if run_id else None,
+        # agent_runs.id is BIGINT Snowflake (mig 232) — pass the numeric
+        # string through; UUID() would raise ValueError on a bigint.
+        run_id=run_id,
         user_messages=user_msgs,
         assistant_messages=asst_msgs,
     )

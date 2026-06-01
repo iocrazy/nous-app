@@ -129,7 +129,8 @@ async def test_session_path_assistant_message_maps_to_agent_run():
     session_id = uuid4()
     msg_id = uuid4()
     agent_uuid = uuid4()
-    run_uuid = uuid4()
+    # agent_runs.id is a BIGINT Snowflake since mig 232 → numeric string.
+    run_bigint = "310819108761487"
     session_user_id = uuid4()
 
     issue_row = _fake_issue(ai_session_id=session_id, user_id=session_user_id)
@@ -142,7 +143,7 @@ async def test_session_path_assistant_message_maps_to_agent_run():
             "role": "assistant",
             "content": "I can help with that",
             "agent_id": str(agent_uuid),
-            "metadata_json": {"run_id": str(run_uuid)},
+            "metadata_json": {"run_id": run_bigint},
             "prompt_tokens": 100,
             "completion_tokens": 50,
             "created_at": _dt(),
@@ -177,7 +178,7 @@ async def test_session_path_assistant_message_maps_to_agent_run():
     assert msg.author_agent_id == agent_uuid
     assert msg.author_user_id is None
     assert msg.body == "I can help with that"
-    assert msg.agent_run_id == run_uuid
+    assert msg.agent_run_id == run_bigint
 
 
 async def test_session_path_system_message_maps_to_system_status():

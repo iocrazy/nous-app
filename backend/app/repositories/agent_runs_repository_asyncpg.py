@@ -78,14 +78,16 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
             return {"items": [], "total": 0}
 
     async def get_by_id(
-        self, run_id: UUID, *, user_id: UUID
+        self, run_id: str, *, user_id: UUID
     ) -> Optional[Dict[str, Any]]:
         """Single run; None if not found OR not owned (no existence
         leak)."""
         try:
             return await self.fetch_one(
                 "SELECT * FROM agent_runs WHERE id = $1 AND user_id = $2",
-                run_id,
+                # agent_runs.id is BIGINT (mig 232); the int8 codec rejects
+                # the snowflake-as-str → coerce.
+                self._bigint(run_id),
                 user_id,
             )
         except Exception as e:
@@ -94,7 +96,7 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
 
     async def list_children(
         self,
-        parent_run_id: UUID,
+        parent_run_id: str,
         *,
         user_id: UUID,
         limit: int = 100,
@@ -106,7 +108,8 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
                 "WHERE parent_run_id = $1 AND user_id = $2 "
                 "ORDER BY started_at DESC "
                 "LIMIT $3",
-                parent_run_id,
+                # agent_runs.parent_run_id is BIGINT (mig 232) → coerce.
+                self._bigint(parent_run_id),
                 user_id,
                 limit,
             )
@@ -116,7 +119,7 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
 
     # ── Writes ──────────────────────────────────────────────────────
 
-    async def request_cancel(self, run_id: UUID, *, user_id: UUID) -> bool:
+    async def request_cancel(self, run_id: str, *, user_id: UUID) -> bool:
         """Set cancel_requested=true. Idempotent. Only acts on running,
         owned rows. Returns True iff a row was actually updated."""
         try:
@@ -125,7 +128,8 @@ class AgentRunsRepositoryAsyncpg(AsyncpgRepository):
                 "SET cancel_requested = true "
                 "WHERE id = $1 AND user_id = $2 AND status = 'running' "
                 "RETURNING id",
-                run_id,
+                # agent_runs.id is BIGINT (mig 232) → coerce.
+                self._bigint(run_id),
                 user_id,
             )
             return updated is not None

@@ -1277,7 +1277,7 @@ async def list_agent_runs(
     response_model=RunDetail,
     summary="Get run detail",
 )
-async def get_run(run_id: UUID, auth: AuthDep) -> Dict[str, Any]:
+async def get_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
     """Full run row with metadata_json. 404 if not owned by caller."""
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -1299,7 +1299,7 @@ async def get_run(run_id: UUID, auth: AuthDep) -> Dict[str, Any]:
     response_model=List[RunListItem],
     summary="List direct sub-runs spawned by this run via the Task tool",
 )
-async def list_run_children(run_id: UUID, auth: AuthDep) -> List[Dict[str, Any]]:
+async def list_run_children(run_id: str, auth: AuthDep) -> List[Dict[str, Any]]:
     """Phase 4 of issue #199. Direct children only — UI calls
     recursively when it wants a full tree. Returns [] when the parent
     run is unknown / not owned (avoids leaking existence)."""
@@ -1320,7 +1320,7 @@ async def list_run_children(run_id: UUID, auth: AuthDep) -> List[Dict[str, Any]]
     status_code=status.HTTP_202_ACCEPTED,
     summary="Request cancellation (runner observes via RunRecorder polling)",
 )
-async def cancel_run(run_id: UUID, auth: AuthDep) -> Dict[str, Any]:
+async def cancel_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
     """Flip cancel_requested=true. Idempotent; 404 if not found or not running.
 
     The cancel is asynchronous. The runner polls cancel_requested between
@@ -1484,7 +1484,7 @@ async def list_chat_sessions(
     response_model=SessionWithMessages,
     summary="Get a chat session with its message history",
 )
-async def get_chat_session(session_id: UUID, auth: AuthDep) -> Dict[str, Any]:
+async def get_chat_session(session_id: str, auth: AuthDep) -> Dict[str, Any]:
     svc = AILibraryChatService()
     user_uuid = _coerce_user_uuid(auth.user_id)
     session = await svc.get_session(session_id, user_id=user_uuid)
@@ -1498,7 +1498,7 @@ async def get_chat_session(session_id: UUID, auth: AuthDep) -> Dict[str, Any]:
     summary="Rename a chat session",
 )
 async def update_chat_session(
-    session_id: UUID, payload: SessionUpdate, auth: AuthDep
+    session_id: str, payload: SessionUpdate, auth: AuthDep
 ) -> Dict[str, Any]:
     svc = AILibraryChatService()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -1510,7 +1510,7 @@ async def update_chat_session(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Soft-delete a chat session (status='deleted')",
 )
-async def delete_chat_session(session_id: UUID, auth: AuthDep) -> None:
+async def delete_chat_session(session_id: str, auth: AuthDep) -> None:
     svc = AILibraryChatService()
     user_uuid = _coerce_user_uuid(auth.user_id)
     await svc.delete_session(session_id, user_id=user_uuid)
@@ -1522,7 +1522,7 @@ async def delete_chat_session(session_id: UUID, auth: AuthDep) -> None:
     summary="Send a user turn and get the assistant response",
 )
 async def send_chat_message(
-    session_id: UUID, payload: ChatRequest, auth: AuthDep
+    session_id: str, payload: ChatRequest, auth: AuthDep
 ) -> Dict[str, Any]:
     """Non-streaming chat endpoint. Persists both the user and the
     assistant message, increments session counters, and returns
@@ -1553,7 +1553,7 @@ async def send_chat_message(
     summary="Send a user turn and stream the assistant response (SSE)",
 )
 async def send_chat_message_stream(
-    session_id: UUID, payload: ChatRequest, auth: AuthDep
+    session_id: str, payload: ChatRequest, auth: AuthDep
 ):
     """Wave I (I2): Server-Sent Events streaming variant.
 
