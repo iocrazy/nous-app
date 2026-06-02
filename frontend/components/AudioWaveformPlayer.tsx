@@ -390,7 +390,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         {/* Waveform — fills the rest of the row and acts as the seek bar. */}
         <div
           ref={containerRef}
-          className="relative flex-1 min-w-0 h-9 cursor-pointer select-none"
+          className="relative flex-1 min-w-0 h-14 cursor-pointer select-none"
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
