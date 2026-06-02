@@ -156,10 +156,13 @@ class ResourcesService:
 
         relative_path = f"teams/{scope_id}/uploads/{resource_id}/v1/{safe_name}"
 
-        # Extract media metadata (video & audio: duration, resolution, etc.)
+        # Extract media metadata (video & audio: duration, resolution;
+        # image: resolution via Pillow).
         metadata = {}
         if file_type in ("video", "audio"):
             metadata = await self._extract_video_metadata(str(target))
+        elif file_type == "image":
+            metadata = await self._extract_image_metadata(str(target))
 
         # Update resource with file path and metadata
         update_data = {"file_path": relative_path, **metadata}
@@ -257,6 +260,8 @@ class ResourcesService:
         metadata = {}
         if file_type in ("video", "audio"):
             metadata = await self._extract_video_metadata(str(target))
+        elif file_type == "image":
+            metadata = await self._extract_image_metadata(str(target))
 
         relative_path = f"{base_relative}/v{next_version}/{safe_name}"
         version_data = {
@@ -977,4 +982,24 @@ class ResourcesService:
             return result
         except Exception as e:
             logger.warning(f"ffprobe failed for {filepath}: {e}")
+            return {}
+
+    async def _extract_image_metadata(self, filepath: str) -> dict:
+        """Read pixel dimensions from an image via Pillow. Returns
+        ``{"resolution": "WxH"}`` (same format as video) or ``{}`` on failure.
+        Runs the blocking PIL call off the event loop."""
+
+        def _probe() -> dict:
+            from PIL import Image
+
+            with Image.open(filepath) as img:
+                w, h = img.size
+            if w and h:
+                return {"resolution": f"{w}x{h}"}
+            return {}
+
+        try:
+            return await asyncio.to_thread(_probe)
+        except Exception as e:
+            logger.warning(f"PIL image probe failed for {filepath}: {e}")
             return {}
