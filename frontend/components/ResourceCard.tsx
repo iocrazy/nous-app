@@ -33,6 +33,8 @@ interface ResourceCardProps {
   compositeId?: string;
   // Transcode indicator
   isTranscoding?: boolean;
+  // Justified view: real aspect ratio (w/h) for the thumbnail (no letterbox bars)
+  aspectRatio?: number;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -111,6 +113,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   selectedIds,
   compositeId,
   isTranscoding = false,
+  aspectRatio,
 }) => {
   const { t } = useTranslation();
   const resource = item.resource;
@@ -393,7 +396,8 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       {/* Thumbnail + Hover Scrub */}
       <div
         ref={thumbRef}
-        className={`relative h-28 flex items-center justify-center bg-black ${!thumbnailSrc ? bg : ''}`}
+        className={`relative flex items-center justify-center ${aspectRatio == null ? 'h-28 bg-black' : ''} ${!thumbnailSrc ? bg : ''}`}
+        style={aspectRatio == null ? undefined : { aspectRatio }}
         onMouseEnter={handleThumbMouseEnter}
         onMouseLeave={handleThumbMouseLeave}
         onMouseMove={handleThumbMouseMove}
@@ -402,7 +406,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           <img
             src={thumbnailSrc}
             alt={filename}
-            className={`w-full h-full object-contain transition-opacity duration-150 ${isHovering && spriteLoaded ? 'opacity-0' : 'opacity-100'}`}
+            className={`w-full h-full ${aspectRatio == null ? 'object-contain' : 'object-cover'} transition-opacity duration-150 ${isHovering && spriteLoaded ? 'opacity-0' : 'opacity-100'}`}
             loading="lazy"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
