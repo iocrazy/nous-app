@@ -149,12 +149,16 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   }
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col pt-[var(--app-safe-top,env(safe-area-inset-top))] sm:pt-0">
-      {/* Mobile: floating back button overlaying content */}
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col relative">
+      {/* Mobile: floating back button overlaying content. Positioned `absolute`
+          relative to this (already status-bar-cleared) root rather than fixed +
+          env(), so it doesn't depend on iOS re-resolving env(safe-area-inset-top)
+          for a freshly-mounted route (which only happens after a scroll). The
+          root sits below the status bar because AppLayout's persistent <main>
+          carries pt-[env(safe-area-inset-top)]. */}
       <button
         onClick={handleBack}
-        className="sm:hidden fixed left-3 z-40 p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
-        style={{ top: 'calc(var(--app-safe-top, env(safe-area-inset-top)) + 0.625rem)' }}
+        className="sm:hidden absolute left-3 top-2.5 z-40 p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
       >
         <ArrowLeft size={20} className="drop-shadow-md" />
       </button>

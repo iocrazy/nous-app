@@ -32,14 +32,9 @@ import { TeamProvider } from './contexts/TeamContext';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { installErrorReporter } from './services/errorReporter';
-import { installSafeAreaVars } from './utils/safeArea';
 
 // Capture window.onerror + unhandledrejection into frontend_error_logs.
 installErrorReporter();
-
-// Publish real safe-area insets as stable px CSS vars (--app-safe-top/bottom),
-// so SPA routes don't hit the iOS first-paint env(safe-area-inset-*)=0 bug.
-installSafeAreaVars();
 
 // Loading component for i18n lazy loading
 const LoadingFallback = () => (
