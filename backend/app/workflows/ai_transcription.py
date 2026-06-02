@@ -286,7 +286,11 @@ async def ai_transcription_workflow(
     Workflow_id idempotency: re-running with the same workflow_id returns the
     cached result; the actual whisper call (expensive) runs once.
     """
+    from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows._failure_handler import record_workflow_failure
+
+    manager = get_task_manager()
+    wf_id = DBOS.workflow_id
 
     try:
         inputs = await load_transcribe_inputs(parsed_media_id, user_id)
@@ -295,6 +299,7 @@ async def ai_transcription_workflow(
         # manual trigger gate checks extract_audio_path/music_download_path
         # on disk, so this is a defense-in-depth check, not a wait loop.
         audio_path = assert_audio_present_step(inputs["audio_path"])
+        await manager.update_progress(wf_id, 40, subtitle="Transcribing audio...")
         summary = await run_whisper(
             audio_path=audio_path,
             resource_id=inputs["resource_id"],
@@ -304,6 +309,7 @@ async def ai_transcription_workflow(
             task_assignment=inputs.get("task_assignment", ""),
         )
         await mark_transcript_completed(parsed_media_id)
+        await manager.update_progress(wf_id, 100, subtitle="Transcription complete")
         # Chain ai_summary AFTER transcript completes (was concurrent in
         # download_helpers.chain_transcript_summary_for_tags pre-this-fix —
         # ai_summary fired alongside transcript and failed with "no
