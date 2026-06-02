@@ -16,9 +16,14 @@ from loguru import logger
 from app.core.deps import AuthDep, get_team_id_for_user
 from app.db.supabase_client import get_async_supabase_admin as _get_admin
 from app.repositories.ai_repository import AIRepository
+from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
-from app.schemas.ai import SummaryResponse, TranscriptResponse
+from app.schemas.ai import (
+    SummaryResponse,
+    TranscriptResponse,
+    VisualAnalysisResponse,
+)
 from app.services.billing.points_service import PointsService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -873,6 +878,36 @@ async def get_summary_by_resource(resource_id: str, auth: AuthDep):
         llm_model=summary.get("llm_model"),
         llm_provider=summary.get("llm_provider"),
         created_at=summary.get("created_at"),
+    )
+
+
+@router.get("/analysis/resource/{resource_id}", response_model=VisualAnalysisResponse)
+async def get_analysis_by_resource(resource_id: str, auth: AuthDep):
+    """Get the L1 visual (cover) analysis for a resource.
+
+    Returns 200 with null fields (NOT 404) when the resource hasn't been
+    analyzed yet — same rationale as the transcript/summary endpoints: avoids a
+    red request in DevTools on every tab open, and lets the frontend detect
+    presence via `visual_description`. The analysis row is keyed by the linked
+    media id (parsed_media.id), so resolve resource → media first.
+    """
+    resource, _platform_id, media = await _resolve_resource_to_platform_id(resource_id)
+    if resource.get("creator_id") != auth.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    analysis = await AnalysisRepository().get_analysis(int(media["id"])) or {}
+
+    return VisualAnalysisResponse(
+        media_id=str(media["id"]),
+        analysis_level=analysis.get("analysis_level"),
+        visual_description=analysis.get("visual_description"),
+        detected_objects=analysis.get("detected_objects"),
+        detected_scenes=analysis.get("detected_scenes"),
+        detected_people=analysis.get("detected_people"),
+        detected_text=analysis.get("detected_text"),
+        analysis_model=analysis.get("analysis_model"),
+        analysis_cost=analysis.get("analysis_cost"),
+        analyzed_at=analysis.get("analyzed_at"),
     )
 
 

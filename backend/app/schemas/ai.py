@@ -130,3 +130,18 @@ class SummaryResponse(BaseModel):
     llm_model: Optional[str] = None
     llm_provider: Optional[str] = None
     created_at: Optional[str] = None
+
+
+class VisualAnalysisResponse(BaseModel):
+    """Response body for a resource's L1 visual (cover) analysis."""
+
+    media_id: str
+    analysis_level: Optional[str] = None
+    visual_description: Optional[str] = None
+    detected_objects: Optional[List[str]] = None
+    detected_scenes: Optional[List[str]] = None
+    detected_people: Optional[List[str]] = None
+    detected_text: Optional[str] = None
+    analysis_model: Optional[str] = None
+    analysis_cost: Optional[float] = None
+    analyzed_at: Optional[str] = None
