@@ -49,6 +49,17 @@ soda_download_queue = Queue(
 )
 
 
+def set_soda_concurrency(n: int) -> None:
+    """Set the per-user soda queue concurrency live (clamped 1..20). Driven by
+    the `config.parse_concurrency` lifecycle subscriber on Settings save."""
+    try:
+        n = max(1, min(20, int(n)))
+        soda_download_queue.concurrency = n
+        logger.info(f"[soda_queue] per-user concurrency set to {n}")
+    except Exception as e:
+        logger.warning(f"[soda_queue] set concurrency failed: {e}")
+
+
 def already_downloaded(media_row: dict, base_dir: str) -> bool:
     """True if the track's audio file is already on disk (skip re-download)."""
     rel = (media_row or {}).get("music_download_path")
