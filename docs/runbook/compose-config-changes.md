@@ -92,3 +92,21 @@ If we ever change this calculus, the place to wire it is
   (this is what triggered the executor cascade that masked the
   config-drift issue)
 - [`docker/docker-compose.yml` ⚠️ DEPLOYMENT GOTCHA section](../docker/docker-compose.yml)
+
+## 2026-06-02 — gateway enqueue-only + DBOS__VMID
+
+The gateway now launches DBOS in enqueue-only mode (consumes no user queues;
+workflows run on the worker). Two new `environment:` entries were added to
+`docker/docker-compose.yml`: `DBOS__VMID=gateway` and `DBOS__VMID=worker`.
+
+Watchtower does NOT apply `environment:` changes — it only pulls the new image
+and restarts with the container's EXISTING env. To activate `DBOS__VMID`, run
+on the NAS:
+
+    cd /volume1/docker/mediahub/docker && sudo docker compose up -d
+
+Verify after apply:
+- `sudo docker exec mediahub-app-backend printenv DBOS__VMID` → `gateway`
+- `sudo docker exec mediahub-app-worker  printenv DBOS__VMID` → `worker`
+- Gateway logs show `enqueue-only mode — listening to no user queues` at startup.
+- A download/parse task still completes (executed by the worker).

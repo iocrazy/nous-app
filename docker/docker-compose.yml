@@ -65,6 +65,12 @@ services:
       # Crashes / OOMs in workflow code now stay isolated to worker
       # pods; HTTP API stays available throughout.
       - MEDIAHUB_ROLE=gateway
+      # Distinct executor id per container. DBOS startup recovery claims
+      # pending workflows by (executor_id, app_version) and re-runs them
+      # DIRECTLY — a path that ignores listen_queues. Without a unique VMID
+      # both containers default to "local", so a gateway restart could
+      # recover + run the worker's in-flight workflows on the gateway.
+      - DBOS__VMID=gateway
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
@@ -149,6 +155,7 @@ services:
       - TZ=Asia/Shanghai
       - REDIS_URL=redis://redis:6379/0
       - MEDIAHUB_ROLE=worker          # skip API router, run DBOS pool
+      - DBOS__VMID=worker             # distinct executor id — see gateway note
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
