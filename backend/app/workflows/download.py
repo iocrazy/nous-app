@@ -34,11 +34,43 @@ ported) — D4 wiring will swap parse → download chain.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from dbos import DBOS
+from dbos import DBOS, Queue
 from loguru import logger
+
+
+# Per-user partitioned queue for GENERIC downloads (non-soda). Mirrors
+# parse_user_queue / soda_download_queue: at most `concurrency` downloads run
+# PER USER at once; the rest queue durably. Bounds a user's egress hit-rate for
+# big batches (ban-avoidance) and fits the future per-user proxy/fingerprint
+# model. Module-level so the poller registers before DBOS.launch().
+MAX_DOWNLOAD_CONCURRENCY_DEFAULT = int(
+    os.environ.get("MAX_DOWNLOAD_CONCURRENCY_PER_USER", "3")
+)
+download_user_queue = Queue(
+    "download_user",
+    concurrency=MAX_DOWNLOAD_CONCURRENCY_DEFAULT,
+    partition_queue=True,
+)
+
+
+def set_download_concurrency(n: int) -> None:
+    """Set the per-user generic-download queue concurrency live (clamped 1..20).
+
+    Driven by the `config.parse_concurrency` lifecycle subscriber when a user
+    saves Settings → General. The DBOS poller re-reads `concurrency` each cycle,
+    so the change takes effect without a restart. Garbage input is swallowed
+    (the value comes from user settings).
+    """
+    try:
+        n = max(1, min(20, int(n)))
+        download_user_queue.concurrency = n
+        logger.info(f"[download_queue] per-user concurrency set to {n}")
+    except Exception as e:
+        logger.warning(f"[download_queue] set concurrency failed: {e}")
 
 
 @DBOS.step()
