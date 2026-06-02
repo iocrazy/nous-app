@@ -12,7 +12,7 @@ import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { getAuthHeaders, parseShareLink, fetchMediaByType } from '../services/parserService';
 import { CollectionPicker } from './CollectionPicker';
-import { detailCardClass, StatGrid, StatCard, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
+import { detailCardClass, StatGrid, StatCard, RatingStars, AiIntentBadges, MetaTimeRow } from './detail/DetailCardKit';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 import { useToast } from './Toast';
 import {
@@ -780,23 +780,16 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           </h2>
 
           {/* Time & Duration Row */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 mb-5 text-sm text-zinc-400">
-             {!ugcStatsMissing && (
-             <div className="flex items-center gap-2">
-                <Clock size={14} className="text-zinc-500"/>
-                <span>Release Time: <span className="text-zinc-300 font-medium">{formatDateTime(data.published_at)}</span></span>
-             </div>
-             )}
-             <div className="flex items-center gap-2">
-                <Timer size={14} className="text-zinc-500"/>
-                <span>Duration: <span className="text-zinc-300 font-medium">{formatDuration(data.duration)}</span></span>
-                {data.resolution && (
-                  <span className="sm:hidden px-1.5 py-0.5 text-xs font-medium bg-indigo-900/30 text-indigo-400 rounded border border-indigo-900/50">
-                    {formatResolution(data.resolution)}
-                  </span>
-                )}
-             </div>
-          </div>
+          <MetaTimeRow
+            className="mb-5"
+            releaseTime={ugcStatsMissing ? null : formatDateTime(data.published_at)}
+            duration={formatDuration(data.duration)}
+            durationSuffix={data.resolution ? (
+              <span className="sm:hidden px-1.5 py-0.5 text-xs font-medium bg-indigo-900/30 text-indigo-400 rounded border border-indigo-900/50">
+                {formatResolution(data.resolution)}
+              </span>
+            ) : undefined}
+          />
 
           {/* Stats Grid — hidden for qishui UGC video ONLY when douyin
               enrichment didn't yield data (no published_at); showing 0/0/0/0

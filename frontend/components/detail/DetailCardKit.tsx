@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Star, FileText, Sparkles, Eye } from 'lucide-react';
+import { Star, FileText, Sparkles, Eye, Clock, Timer } from 'lucide-react';
 
 /**
  * Shared presentational kit for media/resource detail panels.
@@ -89,6 +89,43 @@ export function DetailBadge({
     <span className="px-2 py-1 text-xs font-semibold bg-zinc-800 text-zinc-300 rounded-md border border-zinc-700 uppercase tracking-wider">
       {children}
     </span>
+  );
+}
+
+// ── Release time + duration meta row ─────────────────────────────────────────
+/**
+ * The "Release Time · Duration" row with clock/timer icons. Pass pre-formatted
+ * strings. `durationSuffix` renders after the duration value (e.g. a mobile-only
+ * resolution badge in the download view).
+ */
+export function MetaTimeRow({
+  releaseTime,
+  duration,
+  durationSuffix,
+  className = '',
+}: {
+  releaseTime?: string | null;
+  duration?: string | null;
+  durationSuffix?: React.ReactNode;
+  className?: string;
+}) {
+  if (!releaseTime && !duration) return null;
+  return (
+    <div className={`flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 text-sm text-zinc-400 ${className}`}>
+      {releaseTime && (
+        <div className="flex items-center gap-2">
+          <Clock size={14} className="text-zinc-500" />
+          <span>Release Time: <span className="text-zinc-300 font-medium">{releaseTime}</span></span>
+        </div>
+      )}
+      {duration && (
+        <div className="flex items-center gap-2">
+          <Timer size={14} className="text-zinc-500" />
+          <span>Duration: <span className="text-zinc-300 font-medium">{duration}</span></span>
+          {durationSuffix}
+        </div>
+      )}
+    </div>
   );
 }
 
