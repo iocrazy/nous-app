@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
+import { ActiveTaskCard } from './TaskCenter/ActiveTaskCard';
 import { TaskCenterStatusBar, type TaskTab } from './TaskCenter/TaskCenterStatusBar';
 import { summarizeTasks, isActiveStatus } from './TaskCenter/taskCenterSummary';
 import { aiLibraryService } from '../services/aiLibraryService';
@@ -156,7 +157,18 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     .sort(byRecency)
     .slice(0, 50);
 
+  const runningTasks = activeBackend.filter((tk) => tk.status === 'processing');
+  const queuedTasks = activeBackend.filter((tk) => tk.status === 'pending');
   const showActive = tab === 'active';
+
+  // Shared 1s clock for the live running cards' elapsed time — only ticks while
+  // something is actually running (and the panel is open, since it only mounts then).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (counts.running === 0) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [counts.running]);
 
   return (
     <PanelShell className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
@@ -192,6 +204,16 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           <div className="max-h-80 overflow-y-auto">
             {showActive ? (
               <>
+                {/* Running now — prominent live cards */}
+                {runningTasks.length > 0 && (
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    {t('topbar.running')} · {runningTasks.length}
+                  </div>
+                )}
+                {runningTasks.map((task) => (
+                  <ActiveTaskCard key={task.id} task={task} now={now} onCancel={cancelTask} />
+                ))}
+
                 {/* Active uploads from UploadContext (client-side progress) */}
                 {uploadingItems.map((item) => (
                   <div key={item.id} className="px-3 py-2.5 border-b border-zinc-800/50">
@@ -225,7 +247,14 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     </div>
                   </div>
                 ))}
-                {activeBackend.map((task) => (
+
+                {/* Queued */}
+                {queuedTasks.length > 0 && (
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500 border-t border-zinc-800/50">
+                    {t('topbar.queued')} · {queuedTasks.length}
+                  </div>
+                )}
+                {queuedTasks.map((task) => (
                   <TaskCenterRow
                     key={task.id}
                     task={task}
@@ -234,6 +263,7 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     onOpenResource={openResource}
                   />
                 ))}
+
                 {uploadingItems.length === 0 && activeBackend.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
                     <CheckCircle2 size={24} className="mb-2 text-zinc-600" />
