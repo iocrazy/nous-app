@@ -220,8 +220,10 @@ def dispatch_soda_download_step(
     need a numeric media_type."""
     import uuid as _uuid
 
-    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from dbos import SetEnqueueOptions, SetWorkflowID
+
     from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.soda_download import soda_download_queue, soda_download_workflow
 
     wf_id = str(_uuid.uuid4())
 
@@ -241,22 +243,23 @@ def dispatch_soda_download_step(
         except Exception as e:
             logger.warning(f"[parse] pre-create soda download task_tracking: {e}")
 
-        from app.workflows.soda_download import soda_download_workflow
-
-        return await start_workflow_routed(
-            "download",
-            dbos_workflow_callable=soda_download_workflow,
-            dbos_workflow_kwargs={
-                "platform_id": platform_id,
-                "user_id": user_id,
-                "media_id": media_id,
-                "title": video_title,
-                "resource_id": resource_id,
-                "user_agent": user_agent,
-                "flow_id": flow_id,
-            },
-            workflow_id=wf_id,
-        )
+        # Enqueue on the per-user partitioned soda queue (combined audio+UGC
+        # cap) instead of start_workflow_routed — this bounds the qishui API
+        # hit-rate per user for big playlist batches. Bypassing the routing
+        # gate is fine: soda is always DBOS. enqueue() is sync; the with-blocks
+        # are sync context managers.
+        with SetWorkflowID(wf_id), SetEnqueueOptions(queue_partition_key=str(user_id)):
+            soda_download_queue.enqueue(
+                soda_download_workflow,
+                platform_id,
+                user_id,
+                media_id=media_id,
+                title=video_title,
+                resource_id=resource_id,
+                user_agent=user_agent,
+                flow_id=flow_id,
+            )
+        return {"dbos_workflow_id": wf_id, "queued": True}
 
     return asyncio.run(_do())
 
@@ -285,8 +288,11 @@ def dispatch_soda_ugc_download_step(
     "video" and the soda workflow needs no numeric media_type."""
     import uuid as _uuid
 
-    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from dbos import SetEnqueueOptions, SetWorkflowID
+
     from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.soda_download import soda_download_queue
+    from app.workflows.soda_ugc_download import soda_ugc_download_workflow
 
     wf_id = str(_uuid.uuid4())
 
@@ -306,22 +312,22 @@ def dispatch_soda_ugc_download_step(
         except Exception as e:
             logger.warning(f"[parse] pre-create soda ugc download task_tracking: {e}")
 
-        from app.workflows.soda_ugc_download import soda_ugc_download_workflow
-
-        return await start_workflow_routed(
-            "download",
-            dbos_workflow_callable=soda_ugc_download_workflow,
-            dbos_workflow_kwargs={
-                "platform_id": platform_id,
-                "user_id": user_id,
-                "media_id": media_id,
-                "title": video_title,
-                "resource_id": resource_id,
-                "user_agent": user_agent,
-                "flow_id": flow_id,
-            },
-            workflow_id=wf_id,
-        )
+        # Enqueue on the SAME per-user partitioned soda queue as the audio path
+        # (combined per-user cap — ban is per-user/cookie), just with the UGC
+        # workflow callable. Bypassing the routing gate is fine: soda is always
+        # DBOS. enqueue() is sync; the with-blocks are sync context managers.
+        with SetWorkflowID(wf_id), SetEnqueueOptions(queue_partition_key=str(user_id)):
+            soda_download_queue.enqueue(
+                soda_ugc_download_workflow,
+                platform_id,
+                user_id,
+                media_id=media_id,
+                title=video_title,
+                resource_id=resource_id,
+                user_agent=user_agent,
+                flow_id=flow_id,
+            )
+        return {"dbos_workflow_id": wf_id, "queued": True}
 
     return asyncio.run(_do())
 

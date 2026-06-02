@@ -15,11 +15,12 @@ Route C discipline (CLAUDE.md):
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Optional
 
 import aiofiles
-from dbos import DBOS
+from dbos import DBOS, Queue
 from loguru import logger
 
 from app.boundary import safe_async_client
@@ -31,6 +32,21 @@ from app.services.media.parsers.soda_music.cookie_source import get_soda_cookie
 from app.services.media.parsers.soda_music.soda_downloader import download_and_decrypt
 
 MIME_BY_EXT = {"flac": "audio/flac", "m4a": "audio/mp4", "mp3": "audio/mpeg"}
+
+# Per-user concurrency cap for qishui downloads (audio + UGC share it). A
+# partitioned queue keyed on user_id runs at most SODA_DOWNLOAD_CONCURRENCY
+# workflows PER USER at once; the rest queue durably. Bounds the qishui API
+# hit-rate for big playlist batches (ban-avoidance). Fits the future
+# per-user proxy/fingerprint model (each user = own egress = own cap).
+#
+# NOTE: defined at module level (imported pre-launch via _dispatch_bundle) so
+# the queue + its poller are registered BEFORE DBOS.launch().
+SODA_DOWNLOAD_CONCURRENCY = int(os.environ.get("SODA_DOWNLOAD_CONCURRENCY", "3"))
+soda_download_queue = Queue(
+    "soda_download",
+    concurrency=SODA_DOWNLOAD_CONCURRENCY,
+    partition_queue=True,
+)
 
 
 def already_downloaded(media_row: dict, base_dir: str) -> bool:
