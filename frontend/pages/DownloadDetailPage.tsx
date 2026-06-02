@@ -216,9 +216,20 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           for a freshly-mounted route (which only happens after a scroll). The
           root sits below the status bar because AppLayout's persistent <main>
           carries pt-[env(safe-area-inset-top)]. */}
+      {/* Mobile: top scrim (Douyin-style immersive header — no opaque bar). A
+          gradient behind the floating controls keeps the back arrow / author
+          legible over ANY media, and the controls are placed at the safe-area
+          inset (with a floor) so they never depend on env() resolving on mount.
+          The player itself stays full-bleed under it. */}
+      <div
+        aria-hidden="true"
+        className="sm:hidden absolute inset-x-0 top-0 z-30 pointer-events-none bg-gradient-to-b from-black/55 via-black/25 to-transparent"
+        style={{ height: 'calc(max(env(safe-area-inset-top), 10px) + 64px)' }}
+      />
       <button
         onClick={handleBack}
-        className="sm:hidden absolute left-3 top-2.5 z-40 p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
+        style={{ top: 'calc(max(env(safe-area-inset-top), 10px) + 6px)' }}
+        className="sm:hidden absolute left-3 z-40 p-2 bg-black/30 backdrop-blur-md rounded-full text-white hover:bg-black/45 transition-colors shadow-lg border border-white/10"
       >
         <ArrowLeft size={20} className="drop-shadow-md" />
       </button>
@@ -226,7 +237,10 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       {/* Mobile-audio top bar: @author next to the back chevron (locked layout).
           Mobile-video keeps the author overlay badge on the player instead. */}
       {isMobile && isAudio && video.author && (
-        <div className="sm:hidden absolute left-14 top-2.5 z-40 h-9 flex items-center text-white/90 text-sm font-medium drop-shadow-md pointer-events-none truncate max-w-[60%]">
+        <div
+          style={{ top: 'calc(max(env(safe-area-inset-top), 10px) + 6px)' }}
+          className="sm:hidden absolute left-14 z-40 h-9 flex items-center text-white/90 text-sm font-medium drop-shadow-md pointer-events-none truncate max-w-[60%]"
+        >
           @{video.author}
         </div>
       )}
