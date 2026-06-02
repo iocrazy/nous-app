@@ -77,3 +77,25 @@ def test_already_downloaded_false_missing_file(tmp_path):
     assert (
         already_downloaded({"music_download_path": "nope.flac"}, str(tmp_path)) is False
     )
+
+
+def test_download_cover_returns_false_when_no_url_cover():
+    # Regression: a skipped cover (no album.url_cover) must return False so the
+    # caller marks cover_download_status='failed' (terminal). Leaving it at
+    # 'pending' is what made the UI spin "Cover Downloading..." forever.
+    import asyncio
+
+    from app.workflows.soda_download import _download_cover
+
+    result = asyncio.run(
+        _download_cover(
+            parsed={"metadata": {"album": {}}},  # no url_cover
+            media_id="1",
+            platform_id="1",
+            user_id="u",
+            base_dir="/tmp",
+            res_repo=None,  # never touched on the skip path
+            existing=None,
+        )
+    )
+    assert result is False
