@@ -18,6 +18,7 @@ Safety (mirrors the UGC ``download_video_file`` hardening):
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -71,7 +72,12 @@ async def download_and_decrypt(
                 buf.extend(chunk)
     encrypted = bytes(buf)
 
-    decrypted = decrypt_audio(encrypted, play_auth)
+    # decrypt_audio is heavy synchronous CPU work (per-sample AES-CTR over the
+    # whole mdat, pure-Python loops). Run it in a thread so it does NOT block
+    # the shared DBOS event loop — otherwise a concurrent soda download sitting
+    # in asyncio.wait_for(getaddrinfo) gets starved and spuriously raises
+    # TimeoutError that looks like a DNS failure (it isn't).
+    decrypted = await asyncio.to_thread(decrypt_audio, encrypted, play_auth)
 
     # Atomic write: a crash / disk-full mid-write must never leave a truncated
     # file that already_downloaded() would treat as a completed download.
