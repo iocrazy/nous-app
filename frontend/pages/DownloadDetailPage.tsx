@@ -8,6 +8,7 @@ import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
 import { AudioHero } from '../components/AudioHero';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
+import { MobileAudioMeta } from '../components/MobileAudioMeta';
 import { ShareModal } from '../components/ShareModal';
 import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl, getGalleryZipUrl } from '../services/dataService';
 import { getVideoUrl, getCoverUrl, isAlbumType, isAudioType } from '../utils/awemeType';
@@ -427,6 +428,18 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             className="w-full md:w-auto shrink-0 overflow-y-auto custom-scrollbar"
             style={isMobile ? undefined : { width: panelWidth }}
           >
+            {isMobile && isAudio ? (
+              <MobileAudioMeta
+                video={video}
+                resourceId={resourceId || undefined}
+                resourceRating={resourceRating}
+                resourceNotes={resourceNotes}
+                onRatingChange={resourceId ? handleRatingChange : undefined}
+                onNotesChange={resourceId ? handleNotesChange : undefined}
+                onNotesBlur={resourceId ? handleNotesBlur : undefined}
+                theme={sodaTheme}
+              />
+            ) : (
               <VideoDetailPanel
                 video={video}
                 resourceId={resourceId || undefined}
@@ -494,6 +507,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                   </>
                 }
               />
+            )}
           </div>
         </div>
       </div>
