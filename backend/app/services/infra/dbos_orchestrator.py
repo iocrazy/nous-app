@@ -73,10 +73,19 @@ async def get_routing(task_type: str) -> RoutingDecision:
     return RoutingDecision(task_type=task_type, mode=mode)
 
 
-def init_dbos() -> None:
+def init_dbos(executor_id: str | None = None) -> None:
     """Initialize the DBOS singleton (idempotent). Called from FastAPI lifespan
     BEFORE workflow modules are imported (decorators register against the
     singleton at import time).
+
+    ``executor_id`` (when given) is a STABLE identity for this process, set on
+    DBOSConfig. DBOS's startup recovery claims pending workflows by
+    ``(executor_id, app_version)`` — a path that ignores ``listen_queues`` — so
+    distinct ids per role keep a gateway restart from re-running the worker's
+    in-flight workflows. Must be stable across restarts (we pass the role name,
+    e.g. "gateway"/"worker", NOT a per-process uuid). Default leaves DBOS's own
+    ``DBOS__VMID``-or-"local" behavior. See
+    docs/superpowers/plans/2026-06-02-gateway-enqueue-only.md.
     """
     global _dbos
     if _dbos is not None:
@@ -116,6 +125,8 @@ def init_dbos() -> None:
             "pool_recycle": 300,  # 5 min — drop stale tunneled connections
         },
     }
+    if executor_id:
+        cfg["executor_id"] = executor_id
     _dbos = DBOS(config=cfg)
     logger.info(
         f"[dbos] singleton instantiated (sys + app share same DB, "
@@ -123,9 +134,15 @@ def init_dbos() -> None:
     )
 
 
-def launch_dbos() -> None:
+def launch_dbos(consume_queues: bool = True) -> None:
     """Start the DBOS worker pool + run pending-workflow recovery. Call AFTER
     all `@DBOS.workflow` modules have been imported.
+
+    ``consume_queues=False`` (gateway role) launches DBOS so the process can
+    still ENQUEUE workflows (dispatch needs ``_sys_db``), but restricts it to
+    zero user queues via ``DBOS.listen_queues([])`` so it never dequeues /
+    executes them. The worker container consumes the queues. See
+    docs/superpowers/plans/2026-06-02-gateway-enqueue-only.md.
 
     Also runs a pre-launch sweep of stale internal scheduled workflows
     (see `_pre_launch_sweep_stale_scheduled`) to prevent recovery storms.
@@ -147,6 +164,12 @@ def launch_dbos() -> None:
     from dbos import DBOS
 
     _pre_launch_sweep_stale_scheduled()
+
+    if not consume_queues:
+        # Enqueue-only: service no user queues. Must precede launch(); the
+        # SDK raises if called after launch or more than once.
+        DBOS.listen_queues([])
+        logger.info("[dbos] enqueue-only mode — listening to no user queues")
 
     DBOS.launch()
     logger.info("[dbos] launched (worker pool started, recovery complete)")

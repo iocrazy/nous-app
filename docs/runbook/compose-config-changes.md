@@ -92,3 +92,18 @@ If we ever change this calculus, the place to wire it is
   (this is what triggered the executor cascade that masked the
   config-drift issue)
 - [`docker/docker-compose.yml` ⚠️ DEPLOYMENT GOTCHA section](../docker/docker-compose.yml)
+
+## 2026-06-02 — gateway enqueue-only (no compose change needed)
+
+The gateway now launches DBOS in enqueue-only mode (consumes no user queues;
+workflows run on the worker). The DBOS executor id is derived **in code** from
+`MEDIAHUB_ROLE` (already present in each container) via `DBOSConfig`'s
+`executor_id` — gateway → `"gateway"`, worker → `"worker"`. This isolates the
+startup-recovery path (which claims pending workflows by executor_id and
+ignores `listen_queues`) with no compose env, so a normal backend deploy
+(Watchtower) is enough — **no manual `docker compose up -d` required.**
+
+Verify after deploy (no compose apply needed):
+- Gateway logs: `enqueue-only mode — listening to no user queues` + `Executor ID: gateway`.
+- Worker logs: `Executor ID: worker`.
+- A download/parse task still completes (executed by the worker).
