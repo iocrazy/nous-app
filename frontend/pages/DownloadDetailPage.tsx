@@ -8,7 +8,7 @@ import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
 import { AudioHero } from '../components/AudioHero';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
-import { MobileAudioMeta } from '../components/MobileAudioMeta';
+import { MobileAudioScreen } from '../components/MobileAudioScreen';
 import { ShareModal } from '../components/ShareModal';
 import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl, getGalleryZipUrl } from '../services/dataService';
 import { getVideoUrl, getCoverUrl, isAlbumType, isAudioType } from '../utils/awemeType';
@@ -199,6 +199,14 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         <ArrowLeft size={20} className="drop-shadow-md" />
       </button>
 
+      {/* Mobile-audio top bar: @author next to the back chevron (locked layout).
+          Mobile-video keeps the author overlay badge on the player instead. */}
+      {isMobile && isAudio && video.author && (
+        <div className="sm:hidden absolute left-14 top-2.5 z-40 h-9 flex items-center text-white/90 text-sm font-medium drop-shadow-md pointer-events-none truncate max-w-[60%]">
+          @{video.author}
+        </div>
+      )}
+
       <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
         {/* Desktop header only */}
         <div className="detail-header-glow hidden sm:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
@@ -333,6 +341,53 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           </div>
         </div>
         <div ref={scrollRef} className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
+          {isMobile && isAudio ? (
+            /* LOCKED mobile-audio layout — ONE continuous gradient surface.
+               Replaces the player-column / detail-panel split for mobile audio
+               only; desktop + mobile-video are untouched. */
+            (video.music_download_path || video.extract_audio_path) ? (
+              <MobileAudioScreen
+                video={video}
+                src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
+                coverUrl={audioCoverUrl}
+                theme={sodaTheme}
+                mediaId={String(video.id)}
+                currentTime={currentTime}
+                onTimeUpdate={handleTimeUpdate}
+                chorusStartSec={
+                  typeof video.metadata?.chorus?.start === 'number'
+                    ? video.metadata.chorus.start / 1000
+                    : undefined
+                }
+                resourceId={resourceId || undefined}
+                resourceRating={resourceRating}
+                resourceNotes={resourceNotes}
+                onRatingChange={resourceId ? handleRatingChange : undefined}
+                onNotesChange={resourceId ? handleNotesChange : undefined}
+                onNotesBlur={resourceId ? handleNotesBlur : undefined}
+                onDownloadAudio={() => handleToolbarDownload('audio')}
+                onShare={() => setIsShareModalOpen(true)}
+                onDelete={() => setShowDeleteDialog(true)}
+                onCopyLink={video.original_url ? () => {
+                  navigator.clipboard.writeText(video.original_url);
+                  addToast('Link copied to clipboard', 'success');
+                } : undefined}
+                canShare={!!resourceId}
+              />
+            ) : (
+              <div
+                className="w-full min-h-[78vh] flex flex-col items-center justify-center gap-3 px-6"
+                style={{ background: sodaTheme?.gradientCss }}
+              >
+                <Music size={48} className="text-white/40" />
+                <p className="text-white/80 text-sm font-medium">Audio not available</p>
+                <p className="text-white/50 text-xs max-w-[300px] text-center">
+                  This audio hasn't been downloaded yet. Use the Download button to fetch the audio file.
+                </p>
+              </div>
+            )
+          ) : (
+          <>
           {/* Video Player — main area */}
           <div
             className={`w-full ${isAudio ? 'min-h-[78vh]' : 'aspect-video'} sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink ${isAudio ? '' : 'bg-black'}`}
@@ -428,18 +483,10 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             className="w-full md:w-auto shrink-0 overflow-y-auto custom-scrollbar"
             style={isMobile ? undefined : { width: panelWidth }}
           >
-            {isMobile && isAudio ? (
-              <MobileAudioMeta
-                video={video}
-                resourceId={resourceId || undefined}
-                resourceRating={resourceRating}
-                resourceNotes={resourceNotes}
-                onRatingChange={resourceId ? handleRatingChange : undefined}
-                onNotesChange={resourceId ? handleNotesChange : undefined}
-                onNotesBlur={resourceId ? handleNotesBlur : undefined}
-                theme={sodaTheme}
-              />
-            ) : (
+            {/* Mobile-audio is handled by the MobileAudioScreen short-circuit
+                above, so this column only ever renders for desktop or
+                mobile-video. */}
+            {(
               <VideoDetailPanel
                 video={video}
                 resourceId={resourceId || undefined}
@@ -509,6 +556,8 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               />
             )}
           </div>
+          </>
+          )}
         </div>
       </div>
 

@@ -12,6 +12,23 @@ interface AudioWaveformPlayerProps {
   chorusStartSec?: number;
   /** Track's own Soda palette. When absent, a stable per-track color is derived. */
   theme?: SodaTheme;
+  /**
+   * Layout variant.
+   * - `'full'` (default): desktop look — large waveform above a control bar
+   *   with play / time / speed / volume. Unchanged from before.
+   * - `'compact'`: mobile-audio color-block look — a single row of
+   *   play + time + a short waveform that doubles as the seek bar. NO speed
+   *   chip (relocated to the stats row) and NO volume (phones use physical
+   *   volume keys). Playback rate is controlled externally via the
+   *   `playbackRate` + `onPlaybackRateChange` props.
+   */
+  layout?: 'full' | 'compact';
+  /**
+   * Compact-only: externally-controlled playback rate. When provided, the
+   * player applies it to the audio element so a sibling (the stats-row speed
+   * chip) can own the value/cycle. Ignored in `'full'` layout.
+   */
+  playbackRate?: number;
 }
 
 const BAR_COUNT = 200;
@@ -29,7 +46,10 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
   onTimeUpdate,
   chorusStartSec,
   theme,
+  layout = 'full',
+  playbackRate: externalPlaybackRate,
 }) => {
+  const isCompact = layout === 'compact';
   // Use the track's Soda palette when given; otherwise derive a stable vivid
   // color from the src so every audio player is colorful + consistent (no flat
   // gray) regardless of source (downloads / uploads / share).
@@ -264,6 +284,14 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     setIsSeeking(false);
   }, []);
 
+  // Compact layout: playback rate is owned by the parent (stats-row speed chip).
+  // Apply it to the audio element whenever it changes.
+  useEffect(() => {
+    if (!isCompact || typeof externalPlaybackRate !== 'number') return;
+    const audio = audioRef.current;
+    if (audio) audio.playbackRate = externalPlaybackRate;
+  }, [isCompact, externalPlaybackRate]);
+
   // Playback rate
   const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
   const cycleRate = useCallback(() => {
@@ -309,34 +337,105 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     return () => window.removeEventListener('keydown', handler);
   }, [togglePlay]);
 
+  // Shared <audio> element used by both layouts.
+  const audioEl = (
+    <audio
+      ref={audioRef}
+      src={src}
+      preload="metadata"
+      onLoadedMetadata={(e) => {
+        const d = (e.target as HTMLAudioElement).duration;
+        if (d && isFinite(d)) setDuration(d);
+      }}
+      onError={(e) => {
+        const el = e.target as HTMLAudioElement;
+        console.error('Audio playback failed:', {
+          src,
+          code: el.error?.code,
+          message: el.error?.message,
+        });
+      }}
+      onEnded={() => setIsPlaying(false)}
+      onTimeUpdate={(e) => {
+        const t = (e.target as HTMLAudioElement).currentTime;
+        if (!isPlaying) {
+          setCurrentTime(t);
+          onTimeUpdate?.(t);
+        }
+      }}
+    />
+  );
+
+  // Compact (mobile-audio color block): play + time + short waveform-as-seek-bar
+  // on ONE row. No speed chip (lives in the stats row), no volume.
+  if (isCompact) {
+    return (
+      <div className="flex items-center gap-3.5 w-full">
+        {audioEl}
+        {/* Play / Pause */}
+        <button
+          onClick={togglePlay}
+          disabled={isDecoding}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+          className="flex items-center justify-center w-11 h-11 rounded-full bg-white/[0.18] hover:bg-white/[0.26] active:bg-white/30 transition-colors text-white shrink-0 disabled:opacity-40"
+        >
+          {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
+        </button>
+
+        {/* Time */}
+        <span className="text-[13px] text-white/85 tabular-nums whitespace-nowrap shrink-0">
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </span>
+
+        {/* Waveform — fills the rest of the row and acts as the seek bar. */}
+        <div
+          ref={containerRef}
+          className="relative flex-1 min-w-0 h-9 cursor-pointer select-none"
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          {isDecoding ? (
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full h-1 rounded-full bg-white/15 overflow-hidden">
+                <div
+                  className="h-full w-1/3 animate-pulse rounded-full"
+                  style={{ backgroundColor: tm.accent }}
+                />
+              </div>
+            </div>
+          ) : (
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+            />
+          )}
+          {/* Chorus marker — thin amber line, clickable to seek there */}
+          {!isDecoding && chorusStartSec !== undefined && duration > 0 && chorusStartSec <= duration && (
+            <button
+              type="button"
+              title="Chorus"
+              onClick={() => {
+                const audio = audioRef.current;
+                if (!audio) return;
+                audio.currentTime = chorusStartSec;
+                setCurrentTime(chorusStartSec);
+                onTimeUpdate?.(chorusStartSec);
+              }}
+              className="absolute top-0 bottom-0 z-10 w-0.5 bg-amber-400/80 hover:bg-amber-300 cursor-pointer"
+              style={{ left: `${(chorusStartSec / duration) * 100}%` }}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col w-full h-full">
       {/* Hidden audio element */}
-      <audio
-        ref={audioRef}
-        src={src}
-        preload="metadata"
-        onLoadedMetadata={(e) => {
-          const d = (e.target as HTMLAudioElement).duration;
-          if (d && isFinite(d)) setDuration(d);
-        }}
-        onError={(e) => {
-          const el = e.target as HTMLAudioElement;
-          console.error('Audio playback failed:', {
-            src,
-            code: el.error?.code,
-            message: el.error?.message,
-          });
-        }}
-        onEnded={() => setIsPlaying(false)}
-        onTimeUpdate={(e) => {
-          const t = (e.target as HTMLAudioElement).currentTime;
-          if (!isPlaying) {
-            setCurrentTime(t);
-            onTimeUpdate?.(t);
-          }
-        }}
-      />
+      {audioEl}
 
       {/* Waveform area */}
       <div
