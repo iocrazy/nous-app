@@ -8,26 +8,17 @@ import {
   Settings,
   HelpCircle,
   Inbox,
-  CheckCircle2,
-  XCircle,
-  X,
-  RotateCcw,
   ShieldAlert,
   Upload as UploadIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { ApprovalsPanel } from './ApprovalsPanel';
+import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useUpload, formatSpeed as uploadFormatSpeed, formatFileSize as uploadFormatFileSize } from '../contexts/UploadContext';
-import {
-  useTaskManager,
-  formatSpeed,
-  formatFileSize,
-  taskTypeIcon,
-  taskTypeLabel,
-  type TaskStatus,
-} from '../contexts/TaskManagerContext';
+import { useTaskManager } from '../contexts/TaskManagerContext';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -122,34 +113,17 @@ const PanelShell: React.FC<{
 // TaskCenter panel
 // ---------------------------------------------------------------------------
 
-// Task type → background color for icon badge
-function taskTypeBg(type: string): string {
-  switch (type) {
-    case 'upload':              return 'bg-blue-500/20 text-blue-400';
-    case 'download':            return 'bg-purple-500/20 text-purple-400';
-    case 'transcode':           return 'bg-amber-500/20 text-amber-400';
-    case 'ai_pipeline':         return 'bg-cyan-500/20 text-cyan-400';
-    case 'ai_extract':          return 'bg-violet-500/20 text-violet-400';
-    case 'ai_transcription':    return 'bg-fuchsia-500/20 text-fuchsia-400';
-    case 'ai_summary':          return 'bg-cyan-500/20 text-cyan-400';
-    default:                    return 'bg-zinc-700/50 text-zinc-400';
-  }
-}
-
-// Progress bar color based on status
-function progressBarColor(status: TaskStatus): string {
-  switch (status) {
-    case 'completed':  return 'bg-emerald-500';
-    case 'failed':     return 'bg-red-500';
-    case 'cancelled':  return 'bg-zinc-600';
-    default:           return 'bg-indigo-500';
-  }
-}
-
-const TaskCenterPanel: React.FC = () => {
+const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { tasks, activeTasks, totalActive, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
   const upload = useUpload();
+
+  // Open a produced resource's detail page; RedirectToTeam injects the team.
+  const openResource = (resourceId: string) => {
+    onClose();
+    navigate(`/resources/file/${resourceId}`);
+  };
   const completedCount = tasks.filter(
     (tk) => tk.status === 'completed' || tk.status === 'failed' || tk.status === 'cancelled',
   ).length;
@@ -224,79 +198,13 @@ const TaskCenterPanel: React.FC = () => {
               const bTime = b.created_at || '';
               return bTime.localeCompare(aTime);
             }).slice(0, 50).map((task) => (
-              <div key={task.id} className="px-3 py-2.5 border-b border-zinc-800/50 last:border-b-0">
-                <div className="flex items-center gap-2.5">
-                  {/* Task type icon */}
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm ${taskTypeBg(task.task_type)}`}>
-                    {taskTypeIcon(task.task_type)}
-                  </div>
-                  {/* Task info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-zinc-300 truncate max-w-[180px]">{task.title}</span>
-                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                        {(task.status === 'pending' || task.status === 'processing') && (
-                          <>
-                            {task.progress > 0 && (
-                              <span className="text-[10px] text-zinc-500">{task.progress}%</span>
-                            )}
-                            {task.speed != null && task.speed > 0 && (
-                              <span className="text-[10px] text-zinc-600">{formatSpeed(task.speed)}</span>
-                            )}
-                            <button
-                              onClick={() => cancelTask(task.id)}
-                              className="p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors"
-                              title={t('common.cancel')}
-                            >
-                              <X size={12} />
-                            </button>
-                          </>
-                        )}
-                        {task.status === 'completed' && (
-                          <CheckCircle2 size={14} className="text-emerald-400" />
-                        )}
-                        {(task.status === 'failed' || task.status === 'cancelled') && (
-                          <>
-                            <button
-                              onClick={() => retryTask(task.id)}
-                              className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors"
-                              title="Retry"
-                            >
-                              <RotateCcw size={12} />
-                            </button>
-                            {task.status === 'failed' ? (
-                              <XCircle size={14} className="text-red-400" />
-                            ) : (
-                              <X size={14} className="text-zinc-500" />
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-zinc-600">{taskTypeLabel(task.task_type)}</span>
-                      {task.subtitle && (
-                        <span className="text-[10px] text-zinc-600 truncate">{task.subtitle}</span>
-                      )}
-                      {task.total_bytes != null && task.total_bytes > 0 && (
-                        <span className="text-[10px] text-zinc-600">{formatFileSize(task.total_bytes)}</span>
-                      )}
-                    </div>
-                    {task.error_msg && (
-                      <div className="text-[10px] text-red-400 mt-0.5 truncate">{task.error_msg}</div>
-                    )}
-                  </div>
-                </div>
-                {/* Progress bar for active tasks */}
-                {(task.status === 'pending' || task.status === 'processing') && (
-                  <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-300 ${progressBarColor(task.status)}`}
-                      style={{ width: `${Math.max(task.progress, task.status === 'processing' ? 2 : 0)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
+              <TaskCenterRow
+                key={task.id}
+                task={task}
+                onCancel={cancelTask}
+                onRetry={retryTask}
+                onOpenResource={openResource}
+              />
             ))}
           </div>
 
@@ -530,7 +438,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         >
           <ListTodo size={18} />
         </IconButton>
-        {openPanel === 'taskCenter' && <TaskCenterPanel />}
+        {openPanel === 'taskCenter' && <TaskCenterPanel onClose={closeAll} />}
       </div>
 
       {/* Notifications — hidden on mobile (accessible via MobileProfilePage) */}

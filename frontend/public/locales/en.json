@@ -263,7 +263,9 @@
     "active": "active",
     "activeCount": "{{count}} active",
     "allComplete": "All tasks completed",
-    "clearCompleted": "Clear"
+    "clearCompleted": "Clear",
+    "openResource": "Open",
+    "downloadResult": "Download"
   },
   "plans": {
     "free": "Free"
