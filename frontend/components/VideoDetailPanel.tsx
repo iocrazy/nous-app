@@ -6,6 +6,7 @@ import {
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
 import { MediaCard } from './MediaCard';
 import SodaLyricsTab from './SodaLyricsTab';
+import type { SodaTheme } from '../utils/sodaTheme';
 import { isAudioType } from '../utils/awemeType';
 import {
   triggerTranscription, triggerTranscriptionByResource,
@@ -39,6 +40,8 @@ interface VideoDetailPanelProps {
   mobileActions?: React.ReactNode;
   /** Current playback position (seconds) — drives synced lyrics highlight. */
   playerCurrentTime?: number;
+  /** Track's own Soda palette — themes the lyrics tab for audio items. */
+  sodaTheme?: SodaTheme;
 }
 
 type TabKey = 'overview' | 'transcript' | 'analysis' | 'lyrics';
@@ -95,6 +98,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   onNotesBlur,
   mobileActions,
   playerCurrentTime,
+  sodaTheme,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -372,7 +376,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
         {/* Lyrics Tab (audio items only) */}
         {activeTab === 'lyrics' && (
           <div className="animate-in fade-in duration-300">
-            <SodaLyricsTab mediaId={String(video.id)} currentTime={playerCurrentTime} />
+            <SodaLyricsTab mediaId={String(video.id)} currentTime={playerCurrentTime} theme={sodaTheme} />
           </div>
         )}
 
