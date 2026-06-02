@@ -66,6 +66,7 @@ import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
+import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, StatGrid, StatCard, RatingStars } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { fetchComments } from '../services/reviewService';
@@ -246,46 +247,6 @@ const FilePreview: React.FC<{
   );
 };
 
-// ─── InfoRow (matches ResourceInfoPanel) ────────────────
-
-const InfoRow = ({ label, value, children }: { label: string; value?: string | null | undefined; children?: React.ReactNode }) => {
-  if (!value && !children) return null;
-  return (
-    <div className="flex justify-between items-center py-1.5">
-      <span className="text-xs text-zinc-500">{label}</span>
-      {children || <span className="text-xs text-zinc-300 text-right">{value}</span>}
-    </div>
-  );
-};
-
-// ─── Star Rating ────────────────────────────────────────
-
-const StarRating: React.FC<{ value: number; onChange: (v: number) => void }> = ({ value, onChange }) => {
-  const [hover, setHover] = useState(0);
-
-  return (
-    <div className="flex items-center gap-0.5" onMouseLeave={() => setHover(0)}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          className="p-0 transition-colors"
-          onMouseEnter={() => setHover(star)}
-          onClick={() => onChange(star === value ? 0 : star)}
-        >
-          <Star
-            size={14}
-            className={
-              (hover || value) >= star
-                ? 'text-amber-400 fill-amber-400'
-                : 'text-zinc-600'
-            }
-          />
-        </button>
-      ))}
-    </div>
-  );
-};
-
 // ─── Main Component ──────────────────────────────────────
 
 interface ResourceDetailProps {
@@ -317,6 +278,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [authToken, setAuthToken] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Resizable inspector panel — shared logic/handle with the download detail
+  // view via DetailCardKit (single source of truth for the resize behavior).
+  const { panelWidth, handleResizeStart } = useResizablePanel();
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const handler = () => setIsDesktop(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
@@ -1158,8 +1132,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
         </div>
 
-        {/* Right: Inspector panel (Eagle style) — full-width card on mobile, fixed sidebar on desktop */}
-        <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-zinc-800 flex flex-col shrink-0">
+        {/* Resize handle — desktop only (shared with download detail via DetailCardKit) */}
+        <ResizeHandle onMouseDown={handleResizeStart} />
+
+        {/* Right: Inspector panel — full-width on mobile, resizable on desktop */}
+        <div
+          className="w-full md:w-auto border-t md:border-t-0 md:border-l border-zinc-800 flex flex-col shrink-0"
+          style={isDesktop ? { width: panelWidth } : undefined}
+        >
           {/* Tab bar */}
           <div className="flex border-b border-zinc-800 shrink-0">
             <button
@@ -1216,7 +1196,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
           {rightTab === 'info' ? (
           <div className="overflow-y-auto flex-1 bg-zinc-950 md:bg-transparent p-3">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-lg">
+          <div className={detailCardClass}>
           {/* Mobile: ID row with share + more (like Downloads) */}
           <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
             <span className="text-xs text-zinc-600 font-mono">ID: {String(resource.id)}</span>
@@ -1270,8 +1250,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               </div>
             </div>
           </div>
-          {/* Editable Filename */}
-          <div className="px-4 pt-1 md:pt-4">
+          {/* Header: type/resolution badges + ID (desktop) — download-detail style */}
+          <div className="hidden md:flex justify-between items-start gap-2 px-4 pt-4 mb-1 min-w-0">
+            <div className="flex gap-2 shrink-0 flex-wrap">
+              <DetailBadge>{resource.file_type || resource.mime_type?.split('/').pop() || 'File'}</DetailBadge>
+              {isVideo && resource.resolution && (
+                <DetailBadge variant="accent">{resource.resolution.replace(/:/g, 'x')}</DetailBadge>
+              )}
+            </div>
+            <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {String(resource.id)}</span>
+          </div>
+
+          {/* Editable Filename — big title */}
+          <div className="px-4 pt-1 md:pt-0">
             {editingName ? (
               <input
                 ref={nameInputRef}
@@ -1282,7 +1273,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   if (e.key === 'Enter') commitName();
                   if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
                 }}
-                className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
+                className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold text-white focus:outline-none"
                 autoFocus
               />
             ) : (
@@ -1290,8 +1281,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 className="group flex items-start gap-1.5 cursor-pointer"
                 onClick={() => setEditingName(true)}
               >
-                <h4 className="text-sm font-medium text-white break-words leading-snug flex-1">{resource.filename}</h4>
-                <Pencil size={12} className="text-zinc-600 group-hover:text-zinc-400 mt-0.5 shrink-0 transition-colors" />
+                <h2 className="text-lg md:text-xl font-bold text-zinc-100 break-words leading-tight flex-1">{resource.filename}</h2>
+                <Pencil size={14} className="text-zinc-600 group-hover:text-zinc-400 mt-1 shrink-0 transition-colors" />
               </div>
             )}
           </div>
@@ -1338,32 +1329,61 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             }}
           />
 
-          {/* Properties */}
-          <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-              {t('resources.infoPanel.properties')}
-            </h4>
-            <div className="space-y-0">
-              <InfoRow label={t('resources.infoPanel.rating')}>
-                <StarRating value={resource.rating ?? 0} onChange={handleRating} />
-              </InfoRow>
-              {(isVideo || isAudio) && resource.duration_seconds != null && (
-                <InfoRow label={t('resources.infoPanel.duration')} value={formatDuration(resource.duration_seconds)} />
-              )}
-              <InfoRow label={t('resources.infoPanel.size')} value={formatFileSize(resource.file_size_bytes)} />
-              <InfoRow label={t('resources.infoPanel.type')} value={resource.file_type || resource.mime_type} />
-              {isVideo && resource.resolution && (
-                <InfoRow label={t('resources.infoPanel.resolution')} value={resource.resolution?.replace(/:/g, 'x')} />
-              )}
-              {resource.current_version > 1 && (
-                <InfoRow label={t('resources.infoPanel.version')} value={`v${resource.current_version}`} />
-              )}
-              <InfoRow
-                label={t('resources.infoPanel.source')}
-                value={resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}
+          {/* Rating — inline (download-detail style) */}
+          <div className="px-4 mt-4 flex items-center gap-4">
+            <span className="text-xs text-zinc-500 uppercase tracking-wider">{t('resources.infoPanel.rating')}</span>
+            <RatingStars value={resource.rating ?? 0} onChange={handleRating} />
+          </div>
+
+          {/* Properties — stat-card grid (shared look with download detail via DetailCardKit) */}
+          <div className="px-4 mt-4">
+            <StatGrid cols={4}>
+              <StatCard
+                icon={<File className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />}
+                value={formatFileSize(resource.file_size_bytes)}
+                label={t('resources.infoPanel.size')}
               />
-              <InfoRow label={t('resources.infoPanel.created')} value={formatDate(resource.created_at)} />
-              <InfoRow label={t('resources.infoPanel.modified')} value={formatDate(resource.updated_at)} />
+              <StatCard
+                icon={<FileText className="w-4 h-4 sm:w-5 sm:h-5 text-violet-500 mb-1" />}
+                value={(resource.file_type || resource.mime_type?.split('/').pop() || '—').toUpperCase()}
+                label={t('resources.infoPanel.type')}
+              />
+              {(isVideo || isAudio) && resource.duration_seconds != null ? (
+                <StatCard
+                  icon={<Clock className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />}
+                  value={formatDuration(resource.duration_seconds)}
+                  label={t('resources.infoPanel.duration')}
+                />
+              ) : isVideo && resource.resolution ? (
+                <StatCard
+                  icon={<Film className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />}
+                  value={resource.resolution.replace(/:/g, 'x')}
+                  label={t('resources.infoPanel.resolution')}
+                />
+              ) : (
+                <StatCard
+                  icon={<Layers className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />}
+                  value={`v${resource.current_version}`}
+                  label={t('resources.infoPanel.version')}
+                />
+              )}
+              <StatCard
+                icon={<Download className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500 mb-1" />}
+                value={resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}
+                label={t('resources.infoPanel.source')}
+              />
+            </StatGrid>
+          </div>
+
+          {/* Dates */}
+          <div className="px-4 mt-3 flex flex-col gap-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.created')}</span>
+              <span className="text-zinc-400">{formatDate(resource.created_at)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.modified')}</span>
+              <span className="text-zinc-400">{formatDate(resource.updated_at)}</span>
             </div>
           </div>
 

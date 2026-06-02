@@ -12,6 +12,7 @@ import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { getAuthHeaders, parseShareLink, fetchMediaByType } from '../services/parserService';
 import { CollectionPicker } from './CollectionPicker';
+import { detailCardClass, StatGrid, StatCard, RatingStars } from './detail/DetailCardKit';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 import { useToast } from './Toast';
 import {
@@ -573,7 +574,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   })();
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all duration-300 shadow-lg flex flex-col max-w-full">
+    <div className={detailCardClass}>
       <div className={`flex ${hidePreview ? 'flex-col' : 'flex-col md:flex-row'} min-w-0`}>
         {/* Media Preview Section - Left Side */}
         {!hidePreview && <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">
@@ -816,20 +817,20 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               would be misleading. Enriched UGC shows real Likes/Comments/
               Shares/Collects. */}
           {!ugcStatsMissing && (
-          <div className={`grid ${isAudio ? 'grid-cols-3' : 'grid-cols-4'} gap-2 sm:gap-4 mb-6`}>
+          <StatGrid cols={isAudio ? 3 : 4} className="mb-6">
             {!isAudio && (
-            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.like_count)}</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Likes</span>
-            </div>
+              <StatCard
+                icon={<Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500 mb-1" />}
+                value={formatNumber(data.like_count)}
+                label="Likes"
+              />
             )}
-            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.comment_count)}</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Comments</span>
-            </div>
-            <button
+            <StatCard
+              icon={<MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />}
+              value={formatNumber(data.comment_count)}
+              label="Comments"
+            />
+            <StatCard
               onClick={() => {
                 if (data.original_url) {
                   navigator.clipboard.writeText(data.original_url);
@@ -837,43 +838,28 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   setTimeout(() => setCopiedShare(false), 2000);
                 }
               }}
-              className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group"
               title="Click to copy link"
-            >
-              {copiedShare ? (
+              icon={copiedShare ? (
                 <Check className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 mb-1" />
               ) : (
                 <Share2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
               )}
-              <span className="text-xs sm:text-sm font-bold text-white">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{copiedShare ? 'Link' : 'Shares'}</span>
-            </button>
-            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <Bookmark className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.favorite_count)}</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Collects</span>
-            </div>
-          </div>
+              value={copiedShare ? 'Copied!' : formatNumber(data.share_count)}
+              label={copiedShare ? 'Link' : 'Shares'}
+            />
+            <StatCard
+              icon={<Bookmark className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />}
+              value={formatNumber(data.favorite_count)}
+              label="Collects"
+            />
+          </StatGrid>
           )}
 
           {/* Rating & Notes (from resources table) */}
           {onRatingChange && (
             <div className="mb-4 flex items-center gap-4">
               <span className="text-xs text-zinc-500 uppercase tracking-wider">Rating</span>
-              <div className="flex items-center gap-0.5">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    className="p-0 transition-colors"
-                    onClick={() => onRatingChange(star === resourceRating ? 0 : star)}
-                  >
-                    <Star
-                      size={16}
-                      className={(resourceRating || 0) >= star ? 'text-amber-400 fill-amber-400' : 'text-zinc-600'}
-                    />
-                  </button>
-                ))}
-              </div>
+              <RatingStars value={resourceRating || 0} onChange={onRatingChange} />
             </div>
           )}
           {onNotesChange && (
