@@ -87,19 +87,24 @@ async def _download_cover(
     base_dir: str,
     res_repo: ResourcesRepository,
     existing: Optional[dict[str, Any]],
-) -> None:
+) -> bool:
     """Download the album cover server-side and persist its local path.
 
     Best-effort: the caller wraps this in try/except so a cover failure never
     fails the (already-successful) audio download. ``album.url_cover`` is the
     raw dict the soda API returns; ``cover_url`` assembles the fetchable URL.
+
+    Returns True when a cover was downloaded + persisted, False when skipped
+    (no ``url_cover``). On a download error it raises (the caller marks the
+    status failed) — either non-success path resolves cover_download_status to
+    a terminal state so the UI never shows a perpetual "Cover Downloading...".
     """
     from app.services.media.parsers.soda_music.soda_api import USER_AGENT, cover_url
 
     album = (parsed.get("metadata") or {}).get("album") or {}
     url_cover = album.get("url_cover")
     if not url_cover:
-        return
+        return False
 
     curl_url = cover_url(url_cover)
     full, rel = build_cover_dest(media_id=media_id, base_dir=base_dir)
@@ -125,6 +130,7 @@ async def _download_cover(
     )
     if res_row:
         await res_repo.update_resource(res_row["id"], {"cover_image_path": rel})
+    return True
 
 
 @DBOS.workflow()
@@ -223,8 +229,9 @@ async def soda_download_workflow(
     # 6. Best-effort cover download (douyinpic.com blocks browser hot-linking,
     #    so the assembled remote URL 404s in the UI). The audio already
     #    succeeded — a cover failure must NEVER fail the workflow.
+    cover_ok = False
     try:
-        await _download_cover(
+        cover_ok = await _download_cover(
             parsed=_pd,
             media_id=str(media_id),
             platform_id=platform_id,
@@ -235,6 +242,17 @@ async def soda_download_workflow(
         )
     except Exception as exc:  # noqa: BLE001 — cover is non-critical
         logger.warning("soda_download: cover download failed (non-fatal): {}", exc)
+
+    # Resolve cover_download_status to a TERMINAL state. If the cover was
+    # skipped (no url_cover) or errored, mark it failed — otherwise it stays
+    # 'pending' forever and the UI shows a perpetual "Cover Downloading...".
+    if not cover_ok:
+        try:
+            await MediaRepository().update(
+                platform_id, {"cover_download_status": "failed"}
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("soda_download: could not mark cover failed: {}", exc)
 
     await manager.complete(wf_id, subtitle=f"Downloaded {title}")
     return {"platform_id": platform_id, "media_id": media_id, "size": size}

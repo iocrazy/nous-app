@@ -155,17 +155,21 @@ async def _download_cover(
     base_dir: str,
     res_repo: ResourcesRepository,
     existing: Optional[dict[str, Any]],
-) -> None:
+) -> bool:
     """Download the UGC cover server-side and persist its local path.
 
     Best-effort: the caller wraps this in try/except so a cover failure never
     fails the (already-successful) video download. Unlike the album path, the
     UGC ``coverURL`` is already a fetchable URL — no assembly needed.
+
+    Returns True on success, False when skipped (no ``cover_url``); on a
+    download error it raises. Either non-success path lets the caller resolve
+    cover_download_status to a terminal state (no perpetual spinner).
     """
     from app.services.media.parsers.soda_music.soda_api import SHARE_PAGE_USER_AGENT
 
     if not cover_url:
-        return
+        return False
 
     full, rel = build_cover_dest(media_id=media_id, base_dir=base_dir)
 
@@ -190,6 +194,7 @@ async def _download_cover(
     )
     if res_row:
         await res_repo.update_resource(res_row["id"], {"cover_image_path": rel})
+    return True
 
 
 @DBOS.workflow()
@@ -278,8 +283,9 @@ async def soda_ugc_download_workflow(
 
     # 6. Best-effort cover download. The video already succeeded — a cover
     #    failure must NEVER fail the workflow.
+    cover_ok = False
     try:
-        await _download_cover(
+        cover_ok = await _download_cover(
             cover_url=vo.get("coverURL") or "",
             media_id=str(media_id),
             platform_id=platform_id,
@@ -290,6 +296,16 @@ async def soda_ugc_download_workflow(
         )
     except Exception as exc:  # noqa: BLE001 — cover is non-critical
         logger.warning("soda_ugc_download: cover download failed (non-fatal): {}", exc)
+
+    # Resolve cover_download_status to a TERMINAL state so the UI never shows a
+    # perpetual "Cover Downloading...".
+    if not cover_ok:
+        try:
+            await MediaRepository().update(
+                platform_id, {"cover_download_status": "failed"}
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("soda_ugc_download: could not mark cover failed: {}", exc)
 
     await manager.complete(wf_id, subtitle=f"Downloaded {title}")
     return {"platform_id": platform_id, "media_id": media_id, "size": size}
