@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
+import { TaskDetailModal } from './TaskCenter/TaskDetailModal';
 import { ActiveTaskCard } from './TaskCenter/ActiveTaskCard';
 import { TaskCenterStatusBar, type TaskTab } from './TaskCenter/TaskCenterStatusBar';
 import { summarizeTasks, isActiveStatus } from './TaskCenter/taskCenterSummary';
@@ -118,7 +119,10 @@ const PanelShell: React.FC<{
 // TaskCenter panel
 // ---------------------------------------------------------------------------
 
-const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+const TaskCenterPanel: React.FC<{
+  onClose: () => void;
+  onOpenDetail: (task: UnifiedTask) => void;
+}> = ({ onClose, onOpenDetail }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { tasks, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
@@ -266,6 +270,7 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     onCancel={cancelTask}
                     onRetry={retryTask}
                     onOpenResource={openResource}
+                    onOpenDetail={onOpenDetail}
                   />
                 ))}
 
@@ -285,6 +290,7 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     onCancel={cancelTask}
                     onRetry={retryTask}
                     onOpenResource={openResource}
+                    onOpenDetail={onOpenDetail}
                   />
                 ))}
                 {historyList.length === 0 && (
@@ -477,6 +483,16 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
 
   const closeAll = () => setOpenPanel(null);
 
+  // Typed result modal — owned here (not inside TaskCenterPanel) so the panel's
+  // outside-click-close doesn't unmount the portaled modal when it's clicked.
+  const navigate = useNavigate();
+  const [detailTask, setDetailTask] = useState<UnifiedTask | null>(null);
+  const openResourceFromModal = (resourceId: string) => {
+    setDetailTask(null);
+    closeAll();
+    navigate(`/resources/file/${resourceId}`);
+  };
+
   // Close handlers for each panel
   useCloseOnOutsideOrEscape(taskCenterRef, openPanel === 'taskCenter', closeAll);
   useCloseOnOutsideOrEscape(notificationsRef, openPanel === 'notifications', closeAll);
@@ -510,8 +526,17 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         >
           <ListTodo size={18} />
         </IconButton>
-        {openPanel === 'taskCenter' && <TaskCenterPanel onClose={closeAll} />}
+        {openPanel === 'taskCenter' && (
+          <TaskCenterPanel onClose={closeAll} onOpenDetail={setDetailTask} />
+        )}
       </div>
+
+      {/* Typed result detail modal (portals to body; survives panel close) */}
+      <TaskDetailModal
+        task={detailTask}
+        onClose={() => setDetailTask(null)}
+        onOpenResource={openResourceFromModal}
+      />
 
       {/* Notifications — hidden on mobile (accessible via MobileProfilePage) */}
       <div ref={notificationsRef} className="relative hidden sm:block">

@@ -53,3 +53,24 @@ describe('agentRunToTask', () => {
     expect(agentRunToTask(baseRow()).resource_id).toBeUndefined();
   });
 });
+
+describe('agentRunToTask — LLM stats in metadata', () => {
+  it('carries tokens / cost / model into metadata for the agent card', () => {
+    const task = agentRunToTask(
+      baseRow({
+        status: 'completed',
+        output_summary: 'done',
+        prompt_tokens: 234,
+        completion_tokens: 56,
+        cost_cents: 1.5,
+        model: 'qwen3-32b',
+      }),
+    );
+    expect(task.metadata).toMatchObject({
+      agent_prompt_tokens: 234,
+      agent_completion_tokens: 56,
+      agent_cost_cents: 1.5,
+      agent_model: 'qwen3-32b',
+    });
+  });
+});

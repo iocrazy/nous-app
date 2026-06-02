@@ -198,9 +198,9 @@ def dispatch_download_step(
     context."""
     import uuid as _uuid
 
-    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from dbos import SetEnqueueOptions, SetWorkflowID
     from app.services.infra.unified_task_manager import get_task_manager
-    from app.workflows.download import download_workflow
+    from app.workflows.download import download_user_queue, download_workflow
 
     wf_id = str(_uuid.uuid4())
 
@@ -224,22 +224,25 @@ def dispatch_download_step(
         except Exception as e:
             logger.warning(f"[parse] pre-create download task_tracking: {e}")
 
-        return await start_workflow_routed(
-            "download",
-            dbos_workflow_callable=download_workflow,
-            dbos_workflow_kwargs={
-                "platform_id": platform_id,
-                "user_id": user_id,
-                "download_video": download_video,
-                "download_cover": download_cover,
-                "media_type": media_type,
-                "video_title": video_title,
-                "user_agent": user_agent,
-                "resource_id": resource_id,
-                "flow_id": flow_id,
-            },
-            workflow_id=wf_id,
-        )
+        # Enqueue on the per-user partitioned download queue (not
+        # start_workflow_routed's unbounded default queue) so the user's "max
+        # simultaneous downloads" cap bounds regular downloads too — parity with
+        # the soda path. Bypassing the routing gate is fine: download is always
+        # DBOS. enqueue() is sync; the with-blocks are sync context managers.
+        with SetWorkflowID(wf_id), SetEnqueueOptions(queue_partition_key=str(user_id)):
+            download_user_queue.enqueue(
+                download_workflow,
+                platform_id,
+                user_id,
+                download_video=download_video,
+                download_cover=download_cover,
+                media_type=media_type,
+                video_title=video_title,
+                user_agent=user_agent,
+                resource_id=resource_id,
+                flow_id=flow_id,
+            )
+        return {"workflow_id": wf_id, "status": "enqueued"}
 
     return asyncio.run(_do())
 
