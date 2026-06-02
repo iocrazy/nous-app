@@ -233,6 +233,45 @@ class ResourcesRepository:
             )
             return None
 
+    async def get_owned_platform_ids(
+        self, platform_ids: List[str], creator_id: str
+    ) -> set:
+        """Of the given vids (parsed_media.platform_id), return the subset this
+        user has already downloaded (a resources row with file_path set). ONE
+        batched, index-backed query for the whole list — no N+1.
+
+        supabase-py fallback path (asyncpg is prod). Chunks the input into
+        batches of 100 to avoid URL-length blowups on the PostgREST ``in``
+        filter, and queries through the ``parsed_media!inner`` embed so a
+        single round-trip per chunk yields the owned platform_ids."""
+        if not platform_ids:
+            return set()
+        owned: set = set()
+        try:
+            client = await self._get_client()
+            for start in range(0, len(platform_ids), 100):
+                chunk = platform_ids[start : start + 100]
+                result = (
+                    await client.table(self.TABLE_RESOURCES)
+                    .select("media_id, parsed_media!inner(platform_id)")
+                    .eq("creator_id", creator_id)
+                    .not_.is_("file_path", "null")
+                    .in_("parsed_media.platform_id", chunk)
+                    .execute()
+                )
+                for row in result.data or []:
+                    pm = row.get("parsed_media") or {}
+                    pid = pm.get("platform_id")
+                    if pid is not None:
+                        owned.add(pid)
+            return owned
+        except Exception as e:
+            logger.error(
+                f"Failed to resolve owned platform_ids for creator "
+                f"{creator_id}: {e}"
+            )
+            return owned
+
     async def update_resource(
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:

@@ -69,7 +69,9 @@ def test_resolve_playlist_id_short_link_not_playlist_returns_none():
 # --- endpoint ----------------------------------------------------------------
 
 
-def _make_client(monkeypatch, *, tracks, resolve_to="PL999"):
+def _make_client(
+    monkeypatch, *, tracks, resolve_to="PL999", owned=None, owned_raises=False
+):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -88,6 +90,17 @@ def _make_client(monkeypatch, *, tracks, resolve_to="PL999"):
         return "sessionid=fake"
 
     monkeypatch.setattr(media_soda_router, "get_soda_cookie", _fake_cookie)
+
+    # Stub the ownership probe so no DB is touched.
+    class _FakeRepo:
+        async def get_owned_platform_ids(self, ids, creator_id):
+            if owned_raises:
+                raise RuntimeError("dedup probe boom")
+            return set(owned or [])
+
+    monkeypatch.setattr(
+        media_soda_router, "get_resources_repository", lambda: _FakeRepo()
+    )
 
     class _Client(_FakeClient):
         pass
@@ -136,6 +149,56 @@ def test_playlist_endpoint_returns_tracks(monkeypatch):
     assert body["total"] == 2
     assert body["tracks"][0]["track_id"] == "1"
     assert body["tracks"][1]["artist"] is None
+    # Nothing owned → all new.
+    assert body["downloaded_count"] == 0
+    assert body["new_count"] == 2
+    assert body["tracks"][0]["downloaded"] is False
+
+
+def test_playlist_endpoint_marks_owned_tracks(monkeypatch):
+    tracks = [
+        {"track_id": "1", "title": "Song A"},
+        {"track_id": "2", "title": "Song B"},
+        {"track_id": "3", "title": "Song C"},
+    ]
+    # Track "2" is already downloaded.
+    client = _make_client(monkeypatch, tracks=tracks, owned=["2"])
+    resp = client.post(
+        "/api/v1/media/soda/playlist",
+        json={
+            "url": "https://music.douyin.com/qishui/share/playlist?playlist_id=PL999"
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 3
+    assert body["downloaded_count"] == 1
+    assert body["new_count"] == 2
+    by_id = {t["track_id"]: t for t in body["tracks"]}
+    assert by_id["1"]["downloaded"] is False
+    assert by_id["2"]["downloaded"] is True
+    assert by_id["3"]["downloaded"] is False
+
+
+def test_playlist_endpoint_owned_probe_failure_is_graceful(monkeypatch):
+    """A failing ownership probe must never fail the load — all tracks
+    fall back to not-downloaded."""
+    tracks = [
+        {"track_id": "1", "title": "Song A"},
+        {"track_id": "2", "title": "Song B"},
+    ]
+    client = _make_client(monkeypatch, tracks=tracks, owned_raises=True)
+    resp = client.post(
+        "/api/v1/media/soda/playlist",
+        json={
+            "url": "https://music.douyin.com/qishui/share/playlist?playlist_id=PL999"
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["downloaded_count"] == 0
+    assert body["new_count"] == 2
+    assert all(t["downloaded"] is False for t in body["tracks"])
 
 
 def test_playlist_endpoint_rejects_non_playlist(monkeypatch):

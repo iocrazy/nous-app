@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from app.api.media_fetch_helpers import resolve_team_id
 from app.core.deps import AuthDep
+from app.repositories.resources_repository import get_resources_repository
 from app.services.billing.points_service import PointsService
 from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
@@ -68,14 +69,20 @@ class SodaTrackSummary(BaseModel):
     cover_url: Optional[str] = None
     duration_ms: Optional[int] = None
     kind: str = "track"  # "track" | "video"
+    downloaded: bool = False  # this user already downloaded this vid
 
 
 class SodaPlaylistResponse(BaseModel):
-    """The resolved playlist id plus its flattened track list."""
+    """The resolved playlist id plus its flattened track list.
+
+    ``downloaded_count`` / ``new_count`` let the client default-select only
+    the tracks the user has not downloaded yet (incremental sync)."""
 
     playlist_id: str
     tracks: list[SodaTrackSummary]
     total: int
+    downloaded_count: int = 0
+    new_count: int = 0
 
 
 class SodaDownloadItem(BaseModel):
@@ -234,9 +241,30 @@ async def resolve_soda_playlist(
             status_code=502, detail="Failed to load Soda playlist tracks"
         )
 
-    summaries = [SodaTrackSummary(**t) for t in tracks]
+    # Incremental sync: mark vids this user has already downloaded so the
+    # client can default-select only the new ones. A failing probe must never
+    # fail the load — fall back to treating everything as not-downloaded.
+    ids = [t["track_id"] for t in tracks]
+    owned: set[str] = set()
+    try:
+        owned = await get_resources_repository().get_owned_platform_ids(
+            ids, auth.user_id
+        )
+    except Exception as e:  # pragma: no cover - defensive, exercised via stub
+        logger.warning(f"[Soda/Playlist] ownership probe failed: {e}")
+        owned = set()
+
+    summaries = [
+        SodaTrackSummary(**{**t, "downloaded": t["track_id"] in owned}) for t in tracks
+    ]
+    downloaded_count = sum(1 for s in summaries if s.downloaded)
+    total = len(summaries)
     return SodaPlaylistResponse(
-        playlist_id=playlist_id, tracks=summaries, total=len(summaries)
+        playlist_id=playlist_id,
+        tracks=summaries,
+        total=total,
+        downloaded_count=downloaded_count,
+        new_count=total - downloaded_count,
     )
 
 
