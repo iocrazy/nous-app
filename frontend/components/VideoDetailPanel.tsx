@@ -42,6 +42,12 @@ interface VideoDetailPanelProps {
   playerCurrentTime?: number;
   /** Track's own Soda palette — themes the lyrics tab for audio items. */
   sodaTheme?: SodaTheme;
+  /**
+   * Compact mode — forwarded to MediaCard. When true (mobile audio player),
+   * the Overview tab hides AI intent badges, the action row, and description.
+   * Defaults to false so desktop / mobile-video render identically.
+   */
+  compact?: boolean;
 }
 
 type TabKey = 'overview' | 'transcript' | 'analysis' | 'lyrics';
@@ -99,6 +105,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   mobileActions,
   playerCurrentTime,
   sodaTheme,
+  compact = false,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -370,6 +377,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             onNotesChange={onNotesChange}
             onNotesBlur={onNotesBlur}
             mobileActions={mobileActions}
+            compact={compact}
           />
         )}
 
