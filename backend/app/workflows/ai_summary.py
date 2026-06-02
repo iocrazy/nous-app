@@ -192,10 +192,15 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
     will return cached result on retry. Use a unique workflow_id per user-initiated
     request — production handlers should generate `uuid4()` per click.
     """
+    from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows._failure_handler import record_workflow_failure
+
+    manager = get_task_manager()
+    wf_id = DBOS.workflow_id
 
     try:
         inputs = await load_summary_inputs(parsed_media_id, user_id)
+        await manager.update_progress(wf_id, 25, subtitle="Preparing transcript...")
         agent_out = await run_summarize_agent(
             transcript=inputs["transcript"],
             title=inputs.get("title", ""),
@@ -204,13 +209,16 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
             provider_key=inputs.get("provider_key", ""),
             provider_config=inputs.get("provider_config", {}),
         )
-        return await persist_summary(
+        await manager.update_progress(wf_id, 70, subtitle="Summary generated")
+        result = await persist_summary(
             parsed_media_id,
             resource_id=inputs["resource_id"],
             summary=agent_out["summary"],
             key_points=agent_out["key_points"],
             topics=agent_out["topics"],
         )
+        await manager.update_progress(wf_id, 100, subtitle="Summary saved")
+        return result
     except Exception as e:  # noqa: BLE001
         return await record_workflow_failure(
             workflow_id=DBOS.workflow_id,

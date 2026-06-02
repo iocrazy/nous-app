@@ -132,11 +132,16 @@ async def analyze_l1_workflow(
     workflow_id idempotency: re-running with same id replays the cached
     analysis result (no double LLM cost + no double embedding write).
     """
+    from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows._failure_handler import record_workflow_failure
+
+    manager = get_task_manager()
+    wf_id = DBOS.workflow_id
 
     try:
         cfg = resolve_analyze_provider(user_id)
-        return await call_analyze_l1(
+        await manager.update_progress(wf_id, 20, subtitle="Analyzing cover image...")
+        result = await call_analyze_l1(
             media_id=media_id,
             cover_url=cover_url,
             title=title,
@@ -146,6 +151,8 @@ async def analyze_l1_workflow(
             provider_config=cfg["provider_config"],
             agent_model=cfg["agent_model"],
         )
+        await manager.update_progress(wf_id, 100, subtitle="Analysis complete")
+        return result
     except Exception as e:  # noqa: BLE001
         return await record_workflow_failure(
             workflow_id=DBOS.workflow_id,
