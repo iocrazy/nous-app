@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Play, Pause, Volume2, VolumeX } from 'lucide-react';
-import type { SodaTheme } from '../utils/sodaTheme';
+import { buildSodaTheme, type SodaTheme } from '../utils/sodaTheme';
 
 interface AudioWaveformPlayerProps {
   src: string;
@@ -10,15 +10,9 @@ interface AudioWaveformPlayerProps {
   onTimeUpdate?: (seconds: number) => void;
   /** Chorus / highlight marker position (seconds) overlaid on the waveform. */
   chorusStartSec?: number;
-  /** Track's own Soda palette. When absent, neutral non-blue fallbacks apply. */
+  /** Track's own Soda palette. When absent, a stable per-track color is derived. */
   theme?: SodaTheme;
 }
-
-// Neutral, non-blue defaults used when no track theme is supplied.
-const NEUTRAL_PLAYED = '#e4e4e7'; // zinc-200
-const NEUTRAL_PLAYED_DIM = 'rgba(228,228,231,0.6)';
-const NEUTRAL_UNPLAYED = 'rgba(113,113,122,0.5)'; // zinc-500
-const NEUTRAL_CURSOR = 'rgba(244,244,245,0.85)'; // zinc-100
 
 const BAR_COUNT = 200;
 
@@ -36,6 +30,11 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
   chorusStartSec,
   theme,
 }) => {
+  // Use the track's Soda palette when given; otherwise derive a stable vivid
+  // color from the src so every audio player is colorful + consistent (no flat
+  // gray) regardless of source (downloads / uploads / share).
+  const tm = useMemo(() => theme ?? buildSodaTheme(null, src), [theme, src]);
+
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -127,11 +126,11 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     const barW = W / BAR_COUNT;
     const gap = Math.max(0.5, barW * 0.15); // gap between bars
 
-    // Colors — driven by the track's own Soda palette, neutral non-blue fallback.
-    const playedColor = theme?.accent ?? NEUTRAL_PLAYED;
-    const playedDimColor = theme?.accentSoft ?? NEUTRAL_PLAYED_DIM;
-    const unplayedColor = theme?.waveUnplayed ?? NEUTRAL_UNPLAYED;
-    const unplayedDimColor = theme?.waveUnplayed ?? 'rgba(82, 82, 91, 0.35)'; // slightly dim mirror
+    // Colors — driven by the track's palette (or a stable per-track color).
+    const playedColor = tm.accent;
+    const playedDimColor = tm.accentSoft;
+    const unplayedColor = tm.waveUnplayed;
+    const unplayedDimColor = tm.waveUnplayed; // slightly dim mirror (globalAlpha below)
 
     for (let i = 0; i < waveform.length; i++) {
       const amp = waveform[i];
@@ -166,14 +165,14 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     // Playback cursor
     if (duration > 0) {
       const cursorX = progress * W;
-      ctx.strokeStyle = theme?.lyricActive ?? theme?.accent ?? NEUTRAL_CURSOR;
+      ctx.strokeStyle = tm.lyricActive;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(cursorX, 8);
       ctx.lineTo(cursorX, H - 8);
       ctx.stroke();
     }
-  }, [waveform, currentTime, duration, theme]);
+  }, [waveform, currentTime, duration, tm]);
 
   // Keep the latest onTimeUpdate in a ref so the rAF loop never re-subscribes.
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -351,7 +350,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             <div className="flex flex-col items-center gap-3">
               <div
                 className="w-8 h-8 border-2 border-zinc-300 border-t-transparent rounded-full animate-spin"
-                style={theme ? { borderColor: theme.accent, borderTopColor: 'transparent' } : undefined}
+                style={{ borderColor: tm.accent, borderTopColor: 'transparent' }}
               />
               <span className="text-xs text-zinc-500">Decoding audio...</span>
             </div>
@@ -393,8 +392,8 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
           disabled={isDecoding}
           className="p-2 rounded-full transition-opacity hover:opacity-90 disabled:opacity-40"
           style={{
-            backgroundColor: theme?.accent ?? NEUTRAL_PLAYED,
-            color: theme?.onAccent ?? '#0a0a0a',
+            backgroundColor: tm.accent,
+            color: tm.onAccent,
           }}
         >
           {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
@@ -405,10 +404,8 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
 
-        {/* Filename */}
-        <span className="text-xs text-zinc-500 truncate flex-1 min-w-0">
-          {filename}
-        </span>
+        {/* Spacer — filename intentionally not shown (pushes controls right) */}
+        <span className="flex-1 min-w-0" />
 
         {/* Playback rate */}
         <button
@@ -434,8 +431,8 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             value={isMuted ? 0 : volume}
             onChange={handleVolumeChange}
             style={{
-              accentColor: theme?.accent ?? NEUTRAL_PLAYED,
-              ['--sw' as string]: theme?.accent ?? NEUTRAL_PLAYED,
+              accentColor: tm.accent,
+              ['--sw' as string]: tm.accent,
             } as React.CSSProperties}
             className="w-20 h-1 bg-zinc-700 rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
