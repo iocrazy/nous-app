@@ -90,7 +90,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
 
       {/* Body: scrolling synced lyrics */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+24px)]">
-        <SodaLyricsTab mediaId={mediaId} currentTime={currentTime} theme={theme} />
+        <SodaLyricsTab mediaId={mediaId} currentTime={currentTime} theme={theme} variant="bare" />
       </div>
     </div>
   );

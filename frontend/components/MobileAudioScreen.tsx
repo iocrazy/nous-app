@@ -77,19 +77,33 @@ const RATES = [1, 1.25, 1.5, 2, 0.75];
 
 interface StatDef {
   key: string;
-  Icon: typeof Heart;
+  Icon?: typeof Heart;
+  /** Custom icon node (used for share — a filled arrow lucide can't fill). */
+  node?: React.ReactNode;
   value?: number | null;
+  /** When set, the stat becomes a button (e.g. share → copy original link). */
+  onClick?: () => void;
 }
 
 /** A filled-icon social stat with its count as a small number at the top-right. */
-function SocialStat({ Icon, value }: { Icon: typeof Heart; value?: number | null }) {
-  return (
-    <span className="relative inline-flex text-white">
-      <Icon size={27} fill="currentColor" stroke="none" />
+function SocialStat({ Icon, node, value, onClick }: {
+  Icon?: typeof Heart;
+  node?: React.ReactNode;
+  value?: number | null;
+  onClick?: () => void;
+}) {
+  const body = (
+    <>
+      {node ?? (Icon ? <Icon size={27} fill="currentColor" stroke="none" /> : null)}
       <span className="absolute left-full top-[-4px] ml-px text-[11px] font-semibold leading-none whitespace-nowrap">
         {formatCount(value)}
       </span>
-    </span>
+    </>
+  );
+  return onClick ? (
+    <button type="button" onClick={onClick} className="relative inline-flex text-white" title="Copy original link">{body}</button>
+  ) : (
+    <span className="relative inline-flex text-white">{body}</span>
   );
 }
 
@@ -239,10 +253,17 @@ export function MobileAudioScreen({
   }, []);
 
   // Social stats — filled white icons, skip any that are 0/missing.
+  const shareArrow = (
+    <svg width={27} height={27} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M14 9V5l8 7-8 7v-4C7 14 4 17 3 21c0-7 4-11 11-12Z" />
+    </svg>
+  );
   const stats: StatDef[] = [
     { key: 'like', Icon: Heart, value: video.like_count },
     { key: 'comment', Icon: MessageCircle, value: video.comment_count },
-    { key: 'share', Icon: Share2, value: video.share_count },
+    // share = filled forward arrow; tapping it copies the original link (restores
+    // the old MediaCard behavior). lucide Share2 fills to 3 dots, so use a custom path.
+    { key: 'share', node: shareArrow, value: video.share_count, onClick: video.original_url ? onCopyLink : undefined },
     { key: 'collect', Icon: Bookmark, value: video.favorite_count },
   ];
   const visibleStats = stats.filter((s) => (s.value ?? 0) > 0);
@@ -297,7 +318,7 @@ export function MobileAudioScreen({
         {visibleStats.length > 0 && (
           <div className="flex items-start gap-[30px]">
             {visibleStats.map((s) => (
-              <SocialStat key={s.key} Icon={s.Icon} value={s.value} />
+              <SocialStat key={s.key} Icon={s.Icon} node={s.node} value={s.value} onClick={s.onClick} />
             ))}
           </div>
         )}
@@ -381,6 +402,7 @@ export function MobileAudioScreen({
       {resolvedResourceId && (
         <div className="mt-4">
           <EagleTagPicker
+            variant="bare"
             assignedTags={resourceTags.map((item) => item.tag).filter((tg): tg is Tag => !!tg)}
             allTags={allTags}
             onAdd={handleAddTag}

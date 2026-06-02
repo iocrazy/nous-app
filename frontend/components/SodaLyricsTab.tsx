@@ -10,6 +10,12 @@ interface SodaLyricsTabProps {
   currentTime?: number;
   /** Track's own Soda palette for active / inactive lyric coloring. */
   theme?: SodaTheme;
+  /**
+   * `'card'` (default) = the zinc card with a "Lyrics" header (desktop panel).
+   * `'bare'` = no card / no header, large centered lines flowing directly on
+   * the backdrop (full-screen Soda-style lyrics page).
+   */
+  variant?: 'card' | 'bare';
 }
 
 /**
@@ -17,7 +23,8 @@ interface SodaLyricsTabProps {
  * When `currentTime` is provided, the active line is highlighted and the list
  * auto-scrolls to keep it centered. Renders statically when it's undefined.
  */
-const SodaLyricsTab = ({ mediaId, currentTime, theme }: SodaLyricsTabProps) => {
+const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card' }: SodaLyricsTabProps) => {
+  const isBare = variant === 'bare';
   const [lines, setLines] = useState<LyricLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +75,14 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme }: SodaLyricsTabProps) => {
   }, [mediaId]);
 
   if (loading) {
+    if (isBare) {
+      return (
+        <div className="flex items-center justify-center gap-2 py-16 text-white/60">
+          <Loader2 size={16} className="animate-spin" />
+          <span className="text-sm">Loading lyrics...</span>
+        </div>
+      );
+    }
     return (
       <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800">
         <div className="flex items-center justify-center gap-2 text-zinc-500">
@@ -79,6 +94,14 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme }: SodaLyricsTabProps) => {
   }
 
   if (error) {
+    if (isBare) {
+      return (
+        <div className="flex items-center justify-center gap-2 py-16 text-red-300">
+          <AlertCircle size={16} />
+          <span className="text-sm">{error}</span>
+        </div>
+      );
+    }
     return (
       <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800">
         <div className="flex items-center justify-center gap-2 text-red-400">
@@ -90,12 +113,47 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme }: SodaLyricsTabProps) => {
   }
 
   if (lines.length === 0) {
+    if (isBare) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-2 py-20 text-white/55">
+          <Music size={20} />
+          <span className="text-sm">No lyrics available</span>
+        </div>
+      );
+    }
     return (
       <div className="p-6 bg-zinc-900 rounded-xl border border-zinc-800">
         <div className="flex flex-col items-center justify-center gap-2 text-zinc-500">
           <Music size={20} />
           <span className="text-sm">No lyrics available</span>
         </div>
+      </div>
+    );
+  }
+
+  // Bare = full-screen Soda lyrics: no card chrome, large lines flowing on the
+  // gradient, active line bold + themed, others dimmed. The overlay owns scroll.
+  if (isBare) {
+    return (
+      <div className="py-[35vh] space-y-6">
+        {lines.map((line, index) => {
+          const isActive = index === activeIndex;
+          const themedStyle = theme
+            ? { color: isActive ? theme.lyricActive : theme.lyricNormal }
+            : undefined;
+          return (
+            <p
+              key={index}
+              ref={isActive ? activeLineRef : undefined}
+              style={themedStyle}
+              className={`leading-relaxed transition-all duration-300 ${
+                isActive ? 'text-[22px] font-bold' : 'text-[17px] font-medium opacity-60'
+              } ${theme ? '' : isActive ? 'text-white' : 'text-white/55'}`}
+            >
+              {line.text || ' '}
+            </p>
+          );
+        })}
       </div>
     );
   }
