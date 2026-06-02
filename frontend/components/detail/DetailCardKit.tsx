@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Star } from 'lucide-react';
+import { Star, FileText, Sparkles, Eye } from 'lucide-react';
 
 /**
  * Shared presentational kit for media/resource detail panels.
@@ -144,6 +144,80 @@ export function SectionLabel({ children, className = '' }: { children: React.Rea
     <h4 className={`text-[11px] font-semibold text-zinc-500 uppercase tracking-widest ${className}`}>
       {children}
     </h4>
+  );
+}
+
+// ── AI intent badges (transcript / summary / analyze status chips) ───────────
+/** Lifecycle colour for an AI status pill. */
+export function aiIntentPillClass(status?: string): string {
+  switch (status) {
+    case 'completed':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
+    case 'processing':
+    case 'pending':
+    case 'running':
+      return 'bg-amber-500/15 text-amber-300 border-amber-500/40 animate-pulse';
+    case 'failed':
+      return 'bg-red-500/15 text-red-300 border-red-500/40';
+    default:
+      return 'bg-zinc-800/40 text-zinc-500 border-zinc-700/50';
+  }
+}
+
+function AiBadge({
+  status,
+  label,
+  icon,
+  onClick,
+}: {
+  status?: string;
+  label: string;
+  icon: React.ReactNode;
+  onClick?: () => void;
+}) {
+  const cls = `inline-flex items-center justify-center w-6 h-6 rounded-full border ${aiIntentPillClass(status)}`;
+  const title = `${label} — ${status || 'not requested'}`;
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} title={title} className={`${cls} hover:brightness-125 transition cursor-pointer`}>
+        {icon}
+      </button>
+    );
+  }
+  return (
+    <span title={title} className={cls}>
+      {icon}
+    </span>
+  );
+}
+
+/**
+ * Row of three AI status chips (Transcript / Summary / Analyze). Status-only by
+ * default; pass onClick handlers to make a chip a shortcut (e.g. jump to a tab).
+ */
+export function AiIntentBadges({
+  transcriptStatus,
+  summaryStatus,
+  analyzeStatus,
+  onTranscript,
+  onSummary,
+  onAnalyze,
+  className = '',
+}: {
+  transcriptStatus?: string;
+  summaryStatus?: string;
+  analyzeStatus?: string;
+  onTranscript?: () => void;
+  onSummary?: () => void;
+  onAnalyze?: () => void;
+  className?: string;
+}) {
+  return (
+    <div className={`flex items-center gap-1.5 justify-end ${className}`}>
+      <AiBadge status={transcriptStatus} label="Transcript" icon={<FileText size={11} />} onClick={onTranscript} />
+      <AiBadge status={summaryStatus} label="Summary" icon={<Sparkles size={11} />} onClick={onSummary} />
+      <AiBadge status={analyzeStatus} label="Analyze" icon={<Eye size={11} />} onClick={onAnalyze} />
+    </div>
   );
 }
 

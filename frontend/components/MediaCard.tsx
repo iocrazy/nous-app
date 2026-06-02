@@ -12,7 +12,7 @@ import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { getAuthHeaders, parseShareLink, fetchMediaByType } from '../services/parserService';
 import { CollectionPicker } from './CollectionPicker';
-import { detailCardClass, StatGrid, StatCard, RatingStars } from './detail/DetailCardKit';
+import { detailCardClass, StatGrid, StatCard, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 import { useToast } from './Toast';
 import {
@@ -95,20 +95,6 @@ const getAIStatusClass = (status?: string): string => {
 // Pill styling for the AI Intent badge row — matches the 4-state mental
 // model (done / pending / failed / not requested) and gives a one-glance
 // view of the resource's AI workflow state without opening Task Center.
-const getAIIntentPillClass = (status?: string): string => {
-  switch (status) {
-    case 'completed':
-      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
-    case 'processing':
-    case 'pending':
-    case 'running':
-      return 'bg-amber-500/15 text-amber-300 border-amber-500/40 animate-pulse';
-    case 'failed':
-      return 'bg-red-500/15 text-red-300 border-red-500/40';
-    default:
-      return 'bg-zinc-800/40 text-zinc-500 border-zinc-700/50';
-  }
-};
 
 const getAIIntentSymbol = (status?: string): string => {
   switch (status) {
@@ -909,26 +895,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               (which already labels Transcript / Summary / Analyze).
               4 colour states encode lifecycle: completed / running /
               failed / not requested. */}
-          <div className="mb-4 flex items-center gap-1.5 justify-end">
-            <span
-              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.transcript_status)}`}
-              title={`Transcript — ${data.transcript_status || 'not requested'}`}
-            >
-              <FileText size={11} />
-            </span>
-            <span
-              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.summary_status)}`}
-              title={`Summary — ${data.summary_status || 'not requested'}`}
-            >
-              <Sparkles size={11} />
-            </span>
-            <span
-              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.visual_analysis_status)}`}
-              title={`Analyze — ${data.visual_analysis_status || 'not requested'}`}
-            >
-              <Eye size={11} />
-            </span>
-          </div>
+          <AiIntentBadges
+            className="mb-4"
+            transcriptStatus={data.transcript_status}
+            summaryStatus={data.summary_status}
+            analyzeStatus={data.visual_analysis_status}
+          />
 
           {/* Action Buttons Row */}
           <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-5">

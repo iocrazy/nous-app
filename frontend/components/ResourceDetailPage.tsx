@@ -66,7 +66,7 @@ import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
-import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, StatGrid, StatCard, RatingStars } from './detail/DetailCardKit';
+import { detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { fetchComments } from '../services/reviewService';
@@ -278,19 +278,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [authToken, setAuthToken] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Resizable inspector panel — shared logic/handle with the download detail
-  // view via DetailCardKit (single source of truth for the resize behavior).
-  const { panelWidth, handleResizeStart } = useResizablePanel();
-  const [isDesktop, setIsDesktop] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 768px)');
-    const handler = () => setIsDesktop(mq.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
@@ -1132,14 +1119,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
         </div>
 
-        {/* Resize handle — desktop only (shared with download detail via DetailCardKit) */}
-        <ResizeHandle onMouseDown={handleResizeStart} />
-
-        {/* Right: Inspector panel — full-width on mobile, resizable on desktop */}
-        <div
-          className="w-full md:w-auto border-t md:border-t-0 md:border-l border-zinc-800 flex flex-col shrink-0"
-          style={isDesktop ? { width: panelWidth } : undefined}
-        >
+        {/* Right: Inspector panel — full-width on mobile, fixed sidebar on desktop */}
+        <div className="w-full md:w-96 border-t md:border-t-0 md:border-l border-zinc-800 flex flex-col shrink-0">
           {/* Tab bar */}
           <div className="flex border-b border-zinc-800 shrink-0">
             <button
@@ -1287,11 +1268,27 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             )}
           </div>
 
-          {/* Notes */}
+          {/* AI status — transcript / summary / analyze (video/audio); click a chip to open its tab */}
+          {(isVideo || isAudio) && (
+            <AiIntentBadges
+              className="px-4 mt-3"
+              transcriptStatus={resource.transcript_status}
+              summaryStatus={resource.summary_status}
+              analyzeStatus={resource.visual_analysis_status}
+              onTranscript={() => setRightTab('transcript')}
+              onSummary={() => setRightTab('analysis')}
+              onAnalyze={() => setRightTab('analysis')}
+            />
+          )}
+
+          {/* Rating — above notes (download-detail style) */}
+          <div className="px-4 mt-3 flex items-center gap-4">
+            <span className="text-xs text-zinc-500 uppercase tracking-wider">{t('resources.infoPanel.rating')}</span>
+            <RatingStars value={resource.rating ?? 0} onChange={handleRating} />
+          </div>
+
+          {/* Notes (no section title) */}
           <div className="px-4 mt-3">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
-              {t('resources.infoPanel.notes')}
-            </h4>
             <textarea
               value={notesValue}
               onChange={(e) => setNotesValue(e.target.value)}
@@ -1329,61 +1326,41 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             }}
           />
 
-          {/* Rating — inline (download-detail style) */}
-          <div className="px-4 mt-4 flex items-center gap-4">
-            <span className="text-xs text-zinc-500 uppercase tracking-wider">{t('resources.infoPanel.rating')}</span>
-            <RatingStars value={resource.rating ?? 0} onChange={handleRating} />
-          </div>
-
-          {/* Properties — stat-card grid (shared look with download detail via DetailCardKit) */}
-          <div className="px-4 mt-4">
-            <StatGrid cols={4}>
-              <StatCard
-                icon={<File className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />}
-                value={formatFileSize(resource.file_size_bytes)}
-                label={t('resources.infoPanel.size')}
-              />
-              <StatCard
-                icon={<FileText className="w-4 h-4 sm:w-5 sm:h-5 text-violet-500 mb-1" />}
-                value={(resource.file_type || resource.mime_type?.split('/').pop() || '—').toUpperCase()}
-                label={t('resources.infoPanel.type')}
-              />
-              {(isVideo || isAudio) && resource.duration_seconds != null ? (
-                <StatCard
-                  icon={<Clock className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />}
-                  value={formatDuration(resource.duration_seconds)}
-                  label={t('resources.infoPanel.duration')}
-                />
-              ) : isVideo && resource.resolution ? (
-                <StatCard
-                  icon={<Film className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />}
-                  value={resource.resolution.replace(/:/g, 'x')}
-                  label={t('resources.infoPanel.resolution')}
-                />
-              ) : (
-                <StatCard
-                  icon={<Layers className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />}
-                  value={`v${resource.current_version}`}
-                  label={t('resources.infoPanel.version')}
-                />
-              )}
-              <StatCard
-                icon={<Download className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500 mb-1" />}
-                value={resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}
-                label={t('resources.infoPanel.source')}
-              />
-            </StatGrid>
-          </div>
-
-          {/* Dates */}
-          <div className="px-4 mt-3 flex flex-col gap-1">
+          {/* Properties — simple rows (Type omitted: already shown as badge above the title) */}
+          <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.size')}</span>
+              <span className="text-zinc-300">{formatFileSize(resource.file_size_bytes)}</span>
+            </div>
+            {(isVideo || isAudio) && resource.duration_seconds != null && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-500">{t('resources.infoPanel.duration')}</span>
+                <span className="text-zinc-300">{formatDuration(resource.duration_seconds)}</span>
+              </div>
+            )}
+            {isVideo && resource.resolution && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-500">{t('resources.infoPanel.resolution')}</span>
+                <span className="text-zinc-300">{resource.resolution.replace(/:/g, 'x')}</span>
+              </div>
+            )}
+            {resource.current_version > 1 && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-500">{t('resources.infoPanel.version')}</span>
+                <span className="text-zinc-300">v{resource.current_version}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.source')}</span>
+              <span className="text-zinc-300">{resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}</span>
+            </div>
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-500">{t('resources.infoPanel.created')}</span>
-              <span className="text-zinc-400">{formatDate(resource.created_at)}</span>
+              <span className="text-zinc-300">{formatDate(resource.created_at)}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-500">{t('resources.infoPanel.modified')}</span>
-              <span className="text-zinc-400">{formatDate(resource.updated_at)}</span>
+              <span className="text-zinc-300">{formatDate(resource.updated_at)}</span>
             </div>
           </div>
 
