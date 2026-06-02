@@ -39,6 +39,11 @@ export function DownloadMenuDropdown({
   const hasVideoFile = !!(video.download_path || video.hls_path);
   const hasCoverFile = !!video.cover_download_path;
   const hasAudioFile = !!(video.extract_audio_path || video.music_download_path);
+  // qishui covers are best-effort at download time and shown in the player
+  // hero. The Retry/Fetch-Cover actions call the douyin/yt-dlp generic
+  // re-fetch endpoint, which can't service a qishui cover — so for qishui we
+  // only expose "Cover" when it already succeeded, never a (broken) retry.
+  const isQishui = video.source_platform === 'qishui';
 
   const videoStatus = isCompleted(video.video_download_status) && !hasVideoFile ? undefined : video.video_download_status;
   const coverStatus = isCompleted(video.cover_download_status) && !hasCoverFile ? undefined : video.cover_download_status;
@@ -88,7 +93,7 @@ export function DownloadMenuDropdown({
             <button onClick={() => onDownload('cover')} className={btnClass}>
               <ImageIcon size={13} className="text-emerald-400" /> Cover
             </button>
-          ) : isPending(coverStatus) ? (
+          ) : isQishui ? null : isPending(coverStatus) ? (
             <button disabled className={disabledClass}>
               <Loader2 size={13} className="text-emerald-400 animate-spin" /> Cover Downloading...
             </button>
