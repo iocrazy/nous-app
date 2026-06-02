@@ -454,6 +454,60 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </div>
            </div>
 
+           {/* Section 2: Batch Download Concurrency */}
+           <div className="px-6 py-4 border-y border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+              <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
+                 <Zap size={20} />
+              </div>
+              <h2 className="font-semibold text-zinc-200">Batch Download Concurrency</h2>
+           </div>
+           <div className="p-6">
+              <label className="block text-sm font-medium text-zinc-300 mb-2">
+                 Max simultaneous downloads
+              </label>
+              <div className="flex items-center gap-3">
+                 <button
+                    type="button"
+                    onClick={() => setLocalSettings({
+                      ...localSettings,
+                      maxConcurrentDownloads: Math.max(1, (localSettings.maxConcurrentDownloads ?? 3) - 1),
+                    })}
+                    className="w-9 h-9 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-lg font-semibold transition-colors disabled:opacity-40"
+                    disabled={(localSettings.maxConcurrentDownloads ?? 3) <= 1}
+                    aria-label="Decrease"
+                 >
+                    −
+                 </button>
+                 <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={localSettings.maxConcurrentDownloads ?? 3}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      const clamped = Number.isNaN(raw) ? 3 : Math.min(20, Math.max(1, raw));
+                      setLocalSettings({ ...localSettings, maxConcurrentDownloads: clamped });
+                    }}
+                    className="w-20 text-center bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                 />
+                 <button
+                    type="button"
+                    onClick={() => setLocalSettings({
+                      ...localSettings,
+                      maxConcurrentDownloads: Math.min(20, (localSettings.maxConcurrentDownloads ?? 3) + 1),
+                    })}
+                    className="w-9 h-9 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-lg font-semibold transition-colors disabled:opacity-40"
+                    disabled={(localSettings.maxConcurrentDownloads ?? 3) >= 20}
+                    aria-label="Increase"
+                 >
+                    +
+                 </button>
+              </div>
+              <p className="mt-2 text-xs text-zinc-500">
+                 Max simultaneous downloads per user — lower to avoid rate-limits / bans. Applies on save (no restart).
+              </p>
+           </div>
+
            {/* Chat Attachment TTL */}
            {currentUserId && (
              <div className="px-6 pb-2 border-t border-zinc-800">

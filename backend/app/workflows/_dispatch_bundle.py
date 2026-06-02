@@ -27,7 +27,7 @@ from app.workflows.issue_lifecycle import (  # noqa: F401
     execute_issue,
     respond_to_issue_reply,
 )
-from app.workflows.parse import parse_workflow  # noqa: F401
+from app.workflows.parse import parse_user_queue, parse_workflow  # noqa: F401
 from app.workflows.script_outline import script_outline_workflow  # noqa: F401
 from app.workflows.soda_download import (  # noqa: F401
     soda_download_queue,

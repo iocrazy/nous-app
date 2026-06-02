@@ -2,7 +2,10 @@
 
 The pure helpers (``build_track_url`` / ``batch_plan``) are asserted directly.
 The endpoint is exercised through FastAPI's TestClient with a fake task manager
-and a stubbed ``start_workflow_routed`` so no real DBOS workflow is started.
+and a stubbed ``enqueue_parse_for_user`` so no real DBOS workflow is started.
+The batch now enqueues on the per-user partitioned parse queue (so the user's
+"max simultaneous downloads" cap bounds the playlist), hence dispatch stubs
+record the ``kwargs`` parse-args dict directly rather than a routed envelope.
 """
 
 from __future__ import annotations
@@ -144,11 +147,11 @@ def _make_client(monkeypatch, manager, dispatched):
 
     monkeypatch.setattr(media_soda_router, "resolve_team_id", _no_team)
 
-    async def _fake_dispatch(task_type, **kwargs):
-        dispatched.append(kwargs)
-        return {"ok": True}
+    def _fake_dispatch(*, user_id, workflow_id, kwargs):
+        dispatched.append({"workflow_id": workflow_id, **kwargs})
+        return workflow_id
 
-    monkeypatch.setattr(media_soda_router, "start_workflow_routed", _fake_dispatch)
+    monkeypatch.setattr(media_soda_router, "enqueue_parse_for_user", _fake_dispatch)
     return TestClient(app)
 
 
@@ -169,8 +172,8 @@ def test_download_endpoint_dispatches_per_track(monkeypatch):
     assert manager.flow_name == "My Mix"
     assert len(dispatched) == 3
     # all dispatched under the same flow
-    assert {d["dbos_workflow_kwargs"]["flow_id"] for d in dispatched} == {"flow-abc"}
-    assert {d["dbos_workflow_kwargs"]["platform"] for d in dispatched} == {"qishui"}
+    assert {d["flow_id"] for d in dispatched} == {"flow-abc"}
+    assert {d["platform"] for d in dispatched} == {"qishui"}
 
 
 def test_download_endpoint_dispatches_items_with_video(monkeypatch):
@@ -193,7 +196,7 @@ def test_download_endpoint_dispatches_items_with_video(monkeypatch):
     assert body["success"] is True
     assert body["submitted"] == 2
     assert body["total"] == 2
-    urls = {d["dbos_workflow_kwargs"]["url"] for d in dispatched}
+    urls = {d["url"] for d in dispatched}
     assert build_item_url("1", "track") in urls
     assert build_item_url("uv9", "video") in urls
     assert "https://music.douyin.com/qishui/share/ugc_video?ugc_video_id=uv9" in urls
@@ -211,7 +214,7 @@ def test_download_endpoint_legacy_track_ids_still_works(monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["submitted"] == 2
-    urls = {d["dbos_workflow_kwargs"]["url"] for d in dispatched}
+    urls = {d["url"] for d in dispatched}
     assert urls == {build_item_url("1", "track"), build_item_url("2", "track")}
 
 
@@ -267,13 +270,13 @@ def test_download_endpoint_absorbs_dispatch_errors(monkeypatch):
 
     calls = {"n": 0}
 
-    async def _flaky(task_type, **kwargs):
+    def _flaky(*, user_id, workflow_id, kwargs):
         calls["n"] += 1
         if calls["n"] == 2:
             raise RuntimeError("dispatch boom")
-        return {"ok": True}
+        return workflow_id
 
-    monkeypatch.setattr(media_soda_router, "start_workflow_routed", _flaky)
+    monkeypatch.setattr(media_soda_router, "enqueue_parse_for_user", _flaky)
 
     client = TestClient(app)
     resp = client.post(
@@ -309,10 +312,10 @@ def test_download_endpoint_success_false_when_all_dispatch_fail(monkeypatch):
 
     monkeypatch.setattr(media_soda_router, "resolve_team_id", _no_team)
 
-    async def _always_fail(task_type, **kwargs):
+    def _always_fail(*, user_id, workflow_id, kwargs):
         raise RuntimeError("dispatch boom")
 
-    monkeypatch.setattr(media_soda_router, "start_workflow_routed", _always_fail)
+    monkeypatch.setattr(media_soda_router, "enqueue_parse_for_user", _always_fail)
 
     client = TestClient(app)
     resp = client.post(
@@ -370,13 +373,13 @@ def test_download_endpoint_charges_and_refunds_points(monkeypatch):
 
     calls = {"n": 0}
 
-    async def _flaky(task_type, **kwargs):
+    def _flaky(*, user_id, workflow_id, kwargs):
         calls["n"] += 1
         if calls["n"] == 2:
             raise RuntimeError("dispatch boom")
-        return {"ok": True}
+        return workflow_id
 
-    monkeypatch.setattr(media_soda_router, "start_workflow_routed", _flaky)
+    monkeypatch.setattr(media_soda_router, "enqueue_parse_for_user", _flaky)
 
     client = TestClient(app)
     resp = client.post(
@@ -426,11 +429,11 @@ def test_download_endpoint_402_when_quota_exhausted(monkeypatch):
 
     dispatched: list = []
 
-    async def _dispatch(task_type, **kwargs):
+    def _dispatch(*, user_id, workflow_id, kwargs):
         dispatched.append(kwargs)
-        return {"ok": True}
+        return workflow_id
 
-    monkeypatch.setattr(media_soda_router, "start_workflow_routed", _dispatch)
+    monkeypatch.setattr(media_soda_router, "enqueue_parse_for_user", _dispatch)
 
     client = TestClient(app)
     resp = client.post(

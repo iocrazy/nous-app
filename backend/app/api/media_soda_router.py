@@ -30,7 +30,6 @@ from app.api.media_fetch_helpers import resolve_team_id
 from app.core.deps import AuthDep
 from app.repositories.resources_repository import get_resources_repository
 from app.services.billing.points_service import PointsService
-from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
 from app.services.media.parsers.soda_music.cookie_source import get_soda_cookie
 from app.services.media.parsers.soda_music.soda_api import (
@@ -38,7 +37,7 @@ from app.services.media.parsers.soda_music.soda_api import (
     SodaApiError,
     classify_landing_url,
 )
-from app.workflows.parse import parse_workflow
+from app.workflows.parse import enqueue_parse_for_user
 
 router = APIRouter()
 
@@ -342,11 +341,13 @@ async def download_soda_playlist(
                 logger.warning(f"[Soda/Batch] pre-create task failed: {e}")
 
         try:
-            await start_workflow_routed(
-                "parse",
-                dbos_workflow_callable=parse_workflow,
-                dbos_workflow_kwargs=kwargs,
+            # Enqueue on the per-user partitioned parse queue so the user's
+            # "max simultaneous downloads" cap bounds the playlist batch
+            # (also protects the qishui API hit-rate per cookie).
+            enqueue_parse_for_user(
+                user_id=auth.user_id,
                 workflow_id=wf_id,
+                kwargs=kwargs,
             )
             submitted += 1
         except Exception as e:

@@ -168,6 +168,8 @@ export interface UserSettings {
   apiUrl?: string;
   apiKey?: string;
   progressStyle?: 'neon' | 'wave';
+  // Max simultaneous downloads per user (batch concurrency cap, 1..20)
+  maxConcurrentDownloads?: number;
   // Transcode settings
   transcodeEnabled?: boolean;
   transcodeTiers?: string;
