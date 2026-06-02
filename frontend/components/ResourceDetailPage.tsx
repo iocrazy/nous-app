@@ -338,7 +338,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         const ctx = await fetchResourceContext(resourceId);
         if (!ctx || cancelled) return;
         const items = await fetchResources(
-          ctx.isPersonal,
+          !teamId, // personal when the URL has no team segment
           ctx.scope_id,
           ctx.folder_id,
           ctx.library_id,
@@ -351,7 +351,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     };
     loadSiblings();
     return () => { cancelled = true; };
-  }, [resourceId]);
+  }, [resourceId, teamId]);
 
   // Compute current index in sibling list
   useEffect(() => {
