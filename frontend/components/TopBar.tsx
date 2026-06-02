@@ -19,6 +19,7 @@ import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
 import { ActiveTaskCard } from './TaskCenter/ActiveTaskCard';
 import { TaskCenterStatusBar, type TaskTab } from './TaskCenter/TaskCenterStatusBar';
 import { summarizeTasks, isActiveStatus } from './TaskCenter/taskCenterSummary';
+import { useAgentRunTasks } from './TaskCenter/useAgentRunTasks';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useUpload, formatSpeed as uploadFormatSpeed, formatFileSize as uploadFormatFileSize } from '../contexts/UploadContext';
@@ -131,34 +132,38 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   };
   const uploadingItems = upload.items.filter(i => i.status === 'uploading');
 
-  // Backend tasks excluding active uploads — UploadContext renders those live,
-  // so counting/listing them here too would double up.
+  // Agent runs (chat / issue / scheduled) come from agent_runs, not
+  // task_tracking — merged in here so the Task Center is the one place to see
+  // ALL execution. Backend task_tracking excludes active uploads (UploadContext
+  // renders those live, so counting them here too would double up).
+  const agentTasks = useAgentRunTasks();
   const backendTasks = tasks.filter(
     (tk) => !(tk.task_type === 'upload' && (tk.status === 'pending' || tk.status === 'processing')),
   );
+  const allTasks = [...backendTasks, ...agentTasks];
 
-  const counts = summarizeTasks(backendTasks, uploadingItems.length);
+  const counts = summarizeTasks(allTasks, uploadingItems.length);
   const completedCount = counts.completed + counts.failed;
   const activeTotal = counts.running + counts.queued;
-  const hasTasks = tasks.length > 0 || uploadingItems.length > 0;
+  const hasTasks = allTasks.length > 0 || uploadingItems.length > 0;
 
   // Newest first; within the Active tab, running sorts above queued.
   const byRecency = (a: UnifiedTask, b: UnifiedTask) =>
     (b.created_at || '').localeCompare(a.created_at || '');
-  const activeBackend = backendTasks
+  const activeList = allTasks
     .filter((tk) => isActiveStatus(tk.status))
     .sort((a, b) => {
       const ar = a.status === 'processing' ? 1 : 0;
       const br = b.status === 'processing' ? 1 : 0;
       return ar !== br ? br - ar : byRecency(a, b);
     });
-  const historyBackend = backendTasks
+  const historyList = allTasks
     .filter((tk) => !isActiveStatus(tk.status))
     .sort(byRecency)
     .slice(0, 50);
 
-  const runningTasks = activeBackend.filter((tk) => tk.status === 'processing');
-  const queuedTasks = activeBackend.filter((tk) => tk.status === 'pending');
+  const runningTasks = activeList.filter((tk) => tk.status === 'processing');
+  const queuedTasks = activeList.filter((tk) => tk.status === 'pending');
   const showActive = tab === 'active';
 
   // Shared 1s clock for the live running cards' elapsed time — only ticks while
@@ -264,7 +269,7 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   />
                 ))}
 
-                {uploadingItems.length === 0 && activeBackend.length === 0 && (
+                {uploadingItems.length === 0 && activeList.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
                     <CheckCircle2 size={24} className="mb-2 text-zinc-600" />
                     <span className="text-xs">{t('topbar.noActiveTasks')}</span>
@@ -273,7 +278,7 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               </>
             ) : (
               <>
-                {historyBackend.map((task) => (
+                {historyList.map((task) => (
                   <TaskCenterRow
                     key={task.id}
                     task={task}
@@ -282,7 +287,7 @@ const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     onOpenResource={openResource}
                   />
                 ))}
-                {historyBackend.length === 0 && (
+                {historyList.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
                     <Inbox size={24} className="mb-2 text-zinc-600" />
                     <span className="text-xs">{t('topbar.noItems')}</span>
