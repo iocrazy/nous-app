@@ -47,7 +47,12 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
     >
       {/* Header: close + cover thumbnail + title/artist */}
       <div
-        className="flex items-center gap-3 px-4 pt-[calc(env(safe-area-inset-top)+12px)] pb-3 shrink-0"
+        // `fixed inset-0` covers the status bar, but on a freshly-rendered fixed
+        // overlay iOS resolves env(safe-area-inset-top) to 0 until the first
+        // scroll — which jams the back arrow / cover under the status bar. The
+        // 44px floor guarantees clearance on mount; env() corrects upward once
+        // resolved (notch / dynamic island).
+        className="flex items-center gap-3 px-4 pt-[calc(max(env(safe-area-inset-top),44px)+8px)] pb-3 shrink-0"
       >
         <button
           type="button"
