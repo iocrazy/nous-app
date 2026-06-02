@@ -45,6 +45,18 @@ export async function getSystemStatus(): Promise<SystemStatus> {
   return apiClient.get<SystemStatus>('/api/v1/system/status');
 }
 
+export interface QueueBreakdownRow {
+  task_type: string;
+  running: number;
+  pending: number;
+  oldest_queued_age_sec: number;
+}
+
+/** Per-task_type queue depth + oldest queued age (ops/admin visibility). */
+export async function getQueueBreakdown(): Promise<QueueBreakdownRow[]> {
+  return apiClient.get<QueueBreakdownRow[]>('/api/v1/system/queue-breakdown');
+}
+
 /**
  * Format bytes to human readable string
  */

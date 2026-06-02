@@ -19,6 +19,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { getAuthHeaders } from '../services/parserService';
+import { getQueueBreakdown, type QueueBreakdownRow } from '../services/systemService';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { getApiUrl } from '../utils/apiConfig';
 
@@ -74,6 +75,7 @@ export const SystemMonitorPanel: React.FC = () => {
   const [network, setNetwork] = useState<NetworkStatus | null>(null);
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
   const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([]);
+  const [breakdown, setBreakdown] = useState<QueueBreakdownRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
@@ -111,6 +113,10 @@ export const SystemMonitorPanel: React.FC = () => {
           if (data.active_tasks) setActiveTasks(data.active_tasks as ActiveTask[]);
         }
       }
+      // Per-task_type queue breakdown (ops visibility) — best-effort.
+      try {
+        setBreakdown(await getQueueBreakdown());
+      } catch { /* breakdown is supplementary; don't fail the whole panel */ }
       setLastUpdate(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch system status');
@@ -343,6 +349,38 @@ export const SystemMonitorPanel: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Queue breakdown by task type (ops visibility) */}
+      {breakdown.length > 0 && (
+        <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+          <div className="flex items-center gap-2 mb-3">
+            <ListVideo size={18} className="text-indigo-400" />
+            <h3 className="font-medium text-zinc-200">Queue by Type</h3>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-zinc-500 border-b border-zinc-800">
+                <th className="py-1.5 font-medium">Type</th>
+                <th className="py-1.5 font-medium text-right">Running</th>
+                <th className="py-1.5 font-medium text-right">Queued</th>
+                <th className="py-1.5 font-medium text-right">Oldest queued</th>
+              </tr>
+            </thead>
+            <tbody>
+              {breakdown.map((r) => (
+                <tr key={r.task_type} className="border-b border-zinc-800/50 last:border-0">
+                  <td className="py-1.5 text-zinc-300">{r.task_type}</td>
+                  <td className="py-1.5 text-right font-mono text-emerald-400">{r.running}</td>
+                  <td className="py-1.5 text-right font-mono text-amber-400">{r.pending}</td>
+                  <td className="py-1.5 text-right font-mono text-zinc-400">
+                    {r.pending > 0 ? `${r.oldest_queued_age_sec}s` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Workers Section */}
       <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">

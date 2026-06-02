@@ -19,6 +19,7 @@ from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.services.infra.system_monitor_service import (
     get_network_status,
+    get_queue_breakdown,
     get_queue_status,
     get_storage_status,
 )
@@ -34,6 +35,13 @@ class QueueStatus(BaseModel):
     scheduled: int = 0
     status: str = "offline"  # offline | online | outdated
     missing_tasks: list[str] = []
+
+
+class QueueBreakdownRow(BaseModel):
+    task_type: str
+    running: int = 0
+    pending: int = 0
+    oldest_queued_age_sec: int = 0
 
 
 class StorageStatus(BaseModel):
@@ -55,6 +63,15 @@ class SystemStatusResponse(BaseModel):
     storage: StorageStatus
     network: NetworkStatus
     timestamp: float
+
+
+@router.get(
+    "/queue-breakdown", tags=TAGS, response_model=list[QueueBreakdownRow]
+)
+async def get_system_queue_breakdown(auth: AuthDep):
+    """Per-task_type queue depth + oldest queued age (ops/admin visibility).
+    Reads task_tracking only (route-C)."""
+    return await get_queue_breakdown()
 
 
 @router.get("/status", tags=TAGS, response_model=SystemStatusResponse)

@@ -174,6 +174,100 @@ async def get_queue_status() -> dict:
         return result
 
 
+_breakdown_cache: dict = {"data": None, "timestamp": 0.0, "ttl": 5}
+
+
+def _coerce_dt(value):
+    """Normalize created_at (datetime or ISO string) to an aware datetime."""
+    from datetime import datetime, timezone
+
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _aggregate_breakdown(rows: list[dict], now) -> list[dict]:
+    """Pivot task_tracking rows (task_type, phase, created_at) into one entry
+    per task_type: running / pending counts + oldest queued age (seconds).
+
+    Pure (no DB / no clock) so it's unit testable. `now` is passed in.
+    """
+    acc: dict[str, dict] = {}
+    for r in rows:
+        tt = r.get("task_type") or "unknown"
+        phase = r.get("phase")
+        entry = acc.setdefault(
+            tt, {"task_type": tt, "running": 0, "pending": 0, "oldest_queued_age_sec": 0}
+        )
+        if phase == "processing":
+            entry["running"] += 1
+        elif phase == "queued":
+            entry["pending"] += 1
+            dt = _coerce_dt(r.get("created_at"))
+            if dt is not None:
+                age = int((now - dt).total_seconds())
+                if age > entry["oldest_queued_age_sec"]:
+                    entry["oldest_queued_age_sec"] = age
+    return sorted(
+        acc.values(), key=lambda e: (e["pending"], e["running"]), reverse=True
+    )
+
+
+async def get_queue_breakdown() -> list[dict]:
+    """Per-task_type queue depth + oldest queued age, from public.task_tracking
+    (route-C: NOT dbos.workflow_status). Ops/admin visibility. 5s cache."""
+    import time
+    from datetime import datetime, timezone
+
+    current_time = time.time()
+    if (
+        _breakdown_cache["data"] is not None
+        and (current_time - _breakdown_cache["timestamp"]) < _breakdown_cache["ttl"]
+    ):
+        return _breakdown_cache["data"]
+
+    rows: list[dict] = []
+    try:
+        from app.db import engine as db_engine
+
+        if db_engine.is_configured():
+            from sqlalchemy import text
+
+            eng = db_engine.get_engine()
+            async with eng.connect() as conn:
+                res = await conn.execute(
+                    text(
+                        "SELECT task_type, phase, created_at FROM public.task_tracking "
+                        "WHERE phase IN ('processing', 'queued')"
+                    )
+                )
+                rows = [dict(m) for m in res.mappings().all()]
+        else:
+            from app.db import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            resp = (
+                await client.table("task_tracking")
+                .select("task_type, phase, created_at")
+                .in_("phase", ["processing", "queued"])
+                .execute()
+            )
+            rows = resp.data or []
+
+        result = _aggregate_breakdown(rows, datetime.now(timezone.utc))
+        _breakdown_cache.update(data=result, timestamp=current_time)
+        return result
+    except Exception as e:
+        logger.warning(f"get_queue_breakdown failed: {e}")
+        return _breakdown_cache["data"] or []
+
+
 def get_storage_status() -> dict:
     """Return disk usage for the configured download path."""
     try:
