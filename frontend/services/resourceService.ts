@@ -761,20 +761,24 @@ export async function fetchTrashedResources(
   scopeId: string
 ): Promise<ResourceItem[]> {
   // Query resources where is_trashed=true.
-  // For personal scope: filter by creator_id (most reliable, works even if last_scope is null).
-  // For team scope: filter by last_scope fields. (resources.last_scope_type
-  // is the restore-location snapshot and survives PR-E — it is NOT one of
-  // the dropped scope_type columns.)
-  let query = supabase
+  //
+  // On trash the resource_items row is deleted and the origin is snapshotted
+  // onto the resource as last_scope_type / last_scope_id (the restore-location
+  // snapshot — it survives PR-E, it is NOT one of the dropped scope_type
+  // columns). So the recycle bin must filter by that snapshot.
+  //
+  // Post PR-C/PR-E, `scopeId` is the team snowflake — for personal mode it is
+  // the *personal-team* id, NOT the user UUID. trash_resource() writes
+  // last_scope_id = personal-team snowflake + last_scope_type = 'personal',
+  // so personal must filter by last_scope (mirroring team). The old
+  // `creator_id == scopeId` check compared a UUID column to a bigint id and
+  // always returned zero rows → empty recycle bin.
+  const query = supabase
     .from('resources')
     .select('*')
-    .eq('is_trashed', true);
-
-  if (isPersonal) {
-    query = query.eq('creator_id', scopeId);
-  } else {
-    query = query.eq('last_scope_type', 'team').eq('last_scope_id', scopeId);
-  }
+    .eq('is_trashed', true)
+    .eq('last_scope_type', isPersonal ? 'personal' : 'team')
+    .eq('last_scope_id', scopeId);
 
   const { data, error } = await query.order('trashed_at', { ascending: false });
 
