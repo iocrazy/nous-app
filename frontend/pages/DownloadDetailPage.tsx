@@ -394,6 +394,8 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                 onNotesChange={resourceId ? handleNotesChange : undefined}
                 onNotesBlur={resourceId ? handleNotesBlur : undefined}
                 onDownloadAudio={() => handleToolbarDownload('audio')}
+                onDownloadCover={() => handleToolbarDownload('cover')}
+                onFetchCover={video.source_platform === 'qishui' ? handleFetchSodaAudio : undefined}
                 onShare={() => setIsShareModalOpen(true)}
                 onDelete={() => setShowDeleteDialog(true)}
                 onCopyLink={video.original_url ? () => {
