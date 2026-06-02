@@ -73,6 +73,30 @@ async def get_routing(task_type: str) -> RoutingDecision:
     return RoutingDecision(task_type=task_type, mode=mode)
 
 
+_BUILD_INFO_PATH = "/app/build-info.json"
+
+
+def _resolve_pinned_app_version() -> str | None:
+    """Shared, per-deploy DBOS application_version from the baked build-info
+    commit_sha. Both gateway and worker run the same image → same commit_sha →
+    same version → the worker can claim workflows the gateway enqueues. Returns
+    None (DBOS computes its own version) when build-info is absent — e.g. dev,
+    which runs the single `combined` role where there's no cross-process
+    enqueue/dequeue to mismatch.
+    """
+    import json
+    from pathlib import Path
+
+    p = Path(_BUILD_INFO_PATH)
+    if not p.exists():
+        return None
+    try:
+        sha = json.loads(p.read_text(encoding="utf-8")).get("commit_sha")
+        return str(sha) if sha else None
+    except Exception:
+        return None
+
+
 def init_dbos(executor_id: str | None = None) -> None:
     """Initialize the DBOS singleton (idempotent). Called from FastAPI lifespan
     BEFORE workflow modules are imported (decorators register against the
@@ -127,6 +151,17 @@ def init_dbos(executor_id: str | None = None) -> None:
     }
     if executor_id:
         cfg["executor_id"] = executor_id
+    # Pin a SHARED application_version across gateway + worker. DBOS dequeues
+    # queued workflows filtered by application_version; gateway and worker
+    # register different workflow sets (gateway skips _scheduled_bundle), so
+    # DBOS would compute DIFFERENT versions per role — and a download the
+    # gateway enqueues would never be claimed by the worker (orphaned →
+    # marked 'lost' after 1h). Both roles run the same image, so the baked
+    # build-info commit_sha is a stable, shared, per-deploy version.
+    pinned = _resolve_pinned_app_version()
+    if pinned:
+        cfg["application_version"] = pinned
+        logger.info(f"[dbos] pinned application_version={pinned}")
     _dbos = DBOS(config=cfg)
     logger.info(
         f"[dbos] singleton instantiated (sys + app share same DB, "
