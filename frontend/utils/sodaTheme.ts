@@ -103,12 +103,66 @@ function rgba([r, g, b]: [number, number, number], a: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 
+/** Stable 32-bit hash of a string (djb2). Same seed → same hue. */
+function hashSeed(seed: string): number {
+  let h = 5381;
+  for (let i = 0; i < seed.length; i++) h = ((h << 5) + h + seed.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+/** HSL (h 0-360, s/l 0-1) → [r,g,b] 0-255. */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  const [r1, g1, b1] =
+    hp < 1 ? [c, x, 0]
+    : hp < 2 ? [x, c, 0]
+    : hp < 3 ? [0, c, x]
+    : hp < 4 ? [0, x, c]
+    : hp < 5 ? [x, 0, c]
+    : [c, 0, x];
+  const m = l - c / 2;
+  return [
+    Math.round((r1 + m) * 255),
+    Math.round((g1 + m) * 255),
+    Math.round((b1 + m) * 255),
+  ];
+}
+
+/**
+ * A pleasant, deterministic-per-seed theme for audio that has NO Soda palette
+ * (extracted audio, uploads, non-qishui). Each track/file gets a stable vivid
+ * hue so the player is colorful + consistent rather than flat gray.
+ */
+function randomThemeFromSeed(seed: string): SodaTheme {
+  const hue = hashSeed(seed) % 360;
+  const accentRgb = hslToRgb(hue, 0.62, 0.58); // vivid but not neon
+  const accentHex = `#${accentRgb.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+  return {
+    accent: accentHex,
+    accentSoft: rgba(accentRgb, 0.6),
+    waveUnplayed: rgba(hslToRgb(hue, 0.18, 0.45), 0.5), // desaturated
+    lyricActive: `#${hslToRgb(hue, 0.7, 0.85).map((c) => c.toString(16).padStart(2, '0')).join('')}`,
+    lyricNormal: rgba(hslToRgb(hue, 0.22, 0.62), 0.7),
+    gradientCss: `linear-gradient(180deg, ${rgba(hslToRgb(hue, 0.4, 0.12), 1)} 0%, #000 100%)`,
+    bg: rgba(hslToRgb(hue, 0.4, 0.07), 1),
+    onAccent: luminance(accentRgb) > 0.6 ? '#0a0a0a' : '#ffffff',
+  };
+}
+
 /**
  * Build a full SodaTheme from a (possibly malformed / absent) palette.
  * Any unusable field independently falls back to its neutral default.
+ *
+ * When no usable palette is given but a ``seed`` is provided, returns a
+ * deterministic vivid theme derived from the seed (so non-Soda audio still
+ * gets a per-track color instead of flat gray).
  */
-export function buildSodaTheme(colors?: SodaColors | null): SodaTheme {
-  if (!colors || typeof colors !== 'object') return { ...FALLBACK };
+export function buildSodaTheme(colors?: SodaColors | null, seed?: string): SodaTheme {
+  if (!colors || typeof colors !== 'object') {
+    return seed ? randomThemeFromSeed(seed) : { ...FALLBACK };
+  }
 
   const accentRgb = parseRgb(colors.playing_wave_color?.rgb);
   const accent = accentRgb

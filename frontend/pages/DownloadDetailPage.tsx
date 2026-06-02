@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
-import { AudioWaveformPlayer } from '../components/AudioWaveformPlayer';
+import { AudioHero } from '../components/AudioHero';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
 import { ShareModal } from '../components/ShareModal';
 import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl, getGalleryZipUrl } from '../services/dataService';
@@ -174,10 +174,13 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     );
   }
 
-  // Build the track's Soda palette once (audio only). buildSodaTheme handles
-  // all missing/malformed cases with neutral non-blue fallbacks.
+  // Build the track's Soda palette once (audio only). Soda tracks use their own
+  // colors; non-Soda audio (e.g. extracted audio) has no palette, so seed a
+  // stable per-track color from the id instead of flat gray.
   const isAudio = isAudioType(video.media_type);
-  const sodaTheme = isAudio ? buildSodaTheme(video.metadata?.colors) : undefined;
+  const sodaTheme = isAudio
+    ? buildSodaTheme(video.metadata?.colors, String(video.id))
+    : undefined;
   const audioCoverUrl = isAudio ? getCoverUrl(video, mediaToken ?? undefined) : undefined;
 
   return (
@@ -332,43 +335,22 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           {/* Video Player — main area */}
           <div
             className={`w-full aspect-video sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink ${isAudio ? '' : 'bg-black'}`}
-            style={isAudio ? { background: sodaTheme?.gradientCss } : undefined}
           >
             {isAudio ? (
               (video.music_download_path || video.extract_audio_path) ? (
-                <div className="w-full h-full flex flex-col items-center justify-center gap-6 px-6 py-8">
-                  {/* Large album cover — the 汽水 look */}
-                  {audioCoverUrl ? (
-                    <img
-                      src={audioCoverUrl}
-                      alt={video.music_name || video.title || 'Cover'}
-                      className="w-44 h-44 sm:w-56 sm:h-56 rounded-2xl object-cover shadow-2xl shrink-0"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  ) : (
-                    <div
-                      className="w-44 h-44 sm:w-56 sm:h-56 rounded-2xl flex items-center justify-center shadow-2xl shrink-0"
-                      style={{ backgroundColor: sodaTheme?.accentSoft }}
-                    >
-                      <Music size={64} style={{ color: sodaTheme?.onAccent }} />
-                    </div>
-                  )}
-                  {/* Waveform + controls below the cover */}
-                  <div className="w-full max-w-2xl flex-1 min-h-[160px]">
-                    <AudioWaveformPlayer
-                      src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
-                      filename={video.music_name || video.title || 'Audio'}
-                      duration={Number(video.duration) || undefined}
-                      onTimeUpdate={handleTimeUpdate}
-                      chorusStartSec={
-                        typeof video.metadata?.chorus?.start === 'number'
-                          ? video.metadata.chorus.start / 1000
-                          : undefined
-                      }
-                      theme={sodaTheme}
-                    />
-                  </div>
-                </div>
+                <AudioHero
+                  src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
+                  title={video.music_name || video.title || 'Audio'}
+                  coverUrl={audioCoverUrl}
+                  duration={Number(video.duration) || undefined}
+                  onTimeUpdate={handleTimeUpdate}
+                  chorusStartSec={
+                    typeof video.metadata?.chorus?.start === 'number'
+                      ? video.metadata.chorus.start / 1000
+                      : undefined
+                  }
+                  theme={sodaTheme}
+                />
               ) : (
                 <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
                   <Music size={48} className="text-zinc-600" />

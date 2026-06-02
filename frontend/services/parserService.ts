@@ -165,6 +165,8 @@ export interface SodaTrackSummary {
   duration_ms: number | null;
   /** "track" (music) or "video" (UGC). Older responses omit it → treat as "track". */
   kind?: 'track' | 'video';
+  /** True when this user has already downloaded this vid (incremental sync). */
+  downloaded?: boolean;
 }
 
 /** A single selected playlist item to download, carrying its kind. */
@@ -177,6 +179,10 @@ export interface SodaPlaylistResult {
   playlist_id: string;
   total: number;
   tracks: SodaTrackSummary[];
+  /** Count of tracks the user has already downloaded (incremental sync). */
+  downloaded_count?: number;
+  /** Count of tracks the user has NOT downloaded yet. */
+  new_count?: number;
 }
 
 /**

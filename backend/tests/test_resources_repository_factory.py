@@ -131,6 +131,7 @@ _PHASE_3A_METHODS = [
     "get_resource_by_platform_id",
     "get_resource_by_media_id_and_creator",
     "get_completed_resource_by_url_and_creator",
+    "get_owned_platform_ids",
     "update_resource",
     "delete_resource",
     "count_resources_by_media_id",

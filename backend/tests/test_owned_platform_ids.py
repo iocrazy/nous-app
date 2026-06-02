@@ -1,0 +1,125 @@
+"""Unit tests for ``get_owned_platform_ids`` on both repo tracks.
+
+The method answers: of the given vids (parsed_media.platform_id), which
+ones has this user already downloaded (a resources row with file_path
+set)? Used by the Soda playlist endpoint to mark already-owned tracks so
+the user only re-downloads new ones.
+
+The must-have here is the empty-input short-circuit (no DB hit) on both
+the asyncpg (prod) path and the supabase-py (fallback) path. Live
+JOIN behaviour is covered by the integration suite (gated on a real DB).
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+
+def test_asyncpg_empty_input_no_db_hit():
+    """Empty platform_ids → set() WITHOUT touching the DB."""
+    from app.repositories.resources_repository_asyncpg import (
+        ResourcesRepositoryAsyncpg,
+    )
+
+    repo = ResourcesRepositoryAsyncpg()
+
+    async def _boom(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("fetch_all must not be called for empty input")
+
+    repo.fetch_all = _boom  # type: ignore[assignment]
+    result = asyncio.run(repo.get_owned_platform_ids([], "user-1"))
+    assert result == set()
+
+
+def test_supabase_empty_input_no_db_hit():
+    """Empty platform_ids → set() WITHOUT touching the DB."""
+    from app.repositories.resources_repository import ResourcesRepository
+
+    repo = ResourcesRepository()
+
+    async def _boom(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("_get_client must not be called for empty input")
+
+    repo._get_client = _boom  # type: ignore[assignment]
+    result = asyncio.run(repo.get_owned_platform_ids([], "user-1"))
+    assert result == set()
+
+
+def test_asyncpg_returns_subset_from_rows():
+    """asyncpg path returns exactly the platform_ids the query yields."""
+    from app.repositories.resources_repository_asyncpg import (
+        ResourcesRepositoryAsyncpg,
+    )
+
+    repo = ResourcesRepositoryAsyncpg()
+    captured = {}
+
+    async def _fake_fetch_all(sql, *params):
+        captured["sql"] = sql
+        captured["params"] = params
+        return [{"platform_id": "vid_a"}, {"platform_id": "vid_c"}]
+
+    repo.fetch_all = _fake_fetch_all  # type: ignore[assignment]
+    result = asyncio.run(
+        repo.get_owned_platform_ids(["vid_a", "vid_b", "vid_c"], "user-9")
+    )
+    assert result == {"vid_a", "vid_c"}
+    # creator_id is bound first, the vid list second.
+    assert captured["params"][0] == "user-9"
+    assert captured["params"][1] == ["vid_a", "vid_b", "vid_c"]
+    assert "file_path IS NOT NULL" in captured["sql"]
+
+
+def test_supabase_returns_subset_chunked():
+    """supabase-py path collects nested platform_id across chunks."""
+    from app.repositories.resources_repository import ResourcesRepository
+
+    repo = ResourcesRepository()
+
+    # Build a chainable fake matching the postgrest builder surface.
+    class _Builder:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def select(self, *a, **k):
+            return self
+
+        def eq(self, *a, **k):
+            return self
+
+        @property
+        def not_(self):
+            return self
+
+        def is_(self, *a, **k):
+            return self
+
+        def in_(self, *a, **k):
+            return self
+
+        async def execute(self):
+            class _R:
+                data = self._rows
+
+            return _R()
+
+    class _Table:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def table(self, name):
+            return _Builder(self._rows)
+
+    rows = [
+        {"media_id": 1, "parsed_media": {"platform_id": "vid_a"}},
+        {"media_id": 2, "parsed_media": {"platform_id": "vid_b"}},
+    ]
+
+    async def _fake_client():
+        return _Table(rows)
+
+    repo._get_client = _fake_client  # type: ignore[assignment]
+    result = asyncio.run(
+        repo.get_owned_platform_ids(["vid_a", "vid_b", "vid_z"], "user-9")
+    )
+    assert result == {"vid_a", "vid_b"}
