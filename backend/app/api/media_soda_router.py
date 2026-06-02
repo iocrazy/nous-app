@@ -117,6 +117,20 @@ async def resolve_playlist_id(url: str, client: Any) -> str | None:
     followed, returning the landing playlist id when the landing page is a
     playlist. Any other kind (track / ugc_video / unknown) returns ``None``.
     """
+    # The input is whatever the user pasted — qishui's share text is messy,
+    # e.g. "歌单｜深夜 emo https://qishui.douyin.com/s/XXXX/ @汽水音乐". Extract
+    # the real URL first; otherwise urlparse sees an empty scheme and the SSRF
+    # layer rejects it with URLBlockedError → 400 (the single-fetch path already
+    # does this via Utils.extract_valid_url).
+    from app.core.utils import Utils
+
+    try:
+        found = Utils.extract_valid_url(url)
+        if found:
+            url = found[0]
+    except Exception:
+        pass
+
     query = parse_qs(urlparse(url).query)
     if "playlist_id" in query:
         return query["playlist_id"][0]

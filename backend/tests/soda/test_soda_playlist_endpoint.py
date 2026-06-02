@@ -41,6 +41,20 @@ def test_resolve_playlist_id_from_query():
     assert pid == "PL999"
 
 
+def test_resolve_playlist_id_extracts_url_from_messy_share_text():
+    # Regression (2026-06-02 prod 400): qishui share text wraps the URL, e.g.
+    # "歌单｜深夜 emo https://...share/playlist?playlist_id=X @汽水音乐". Without
+    # URL extraction, urlparse sees an empty scheme → SSRF rejects → 400.
+    client = _FakeClient()
+    messy = (
+        "歌单｜深夜 emo "
+        "https://music.douyin.com/qishui/share/playlist?playlist_id=PL777&sec=x "
+        "@汽水音乐"
+    )
+    pid = asyncio.run(resolve_playlist_id(messy, client))
+    assert pid == "PL777"
+
+
 def test_resolve_playlist_id_track_url_returns_none():
     client = _FakeClient()
     pid = asyncio.run(
