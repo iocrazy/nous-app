@@ -281,7 +281,9 @@
     "resSize": "Size",
     "agentPrompt": "Prompt",
     "agentResponse": "Response",
-    "agentModel": "Model"
+    "agentModel": "Model",
+    "visionDescription": "Description",
+    "visionText": "Detected text"
   },
   "plans": {
     "free": "Free"

@@ -281,7 +281,9 @@
     "resSize": "大小",
     "agentPrompt": "输入",
     "agentResponse": "回复",
-    "agentModel": "模型"
+    "agentModel": "模型",
+    "visionDescription": "描述",
+    "visionText": "识别文字"
   },
   "plans": {
     "free": "免费"

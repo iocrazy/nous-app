@@ -273,6 +273,45 @@ export const triggerVisualAnalysisByResource = async (
   return response.json();
 };
 
+export interface VisualAnalysisData {
+  description: string;
+  objects: string[];
+  scenes: string[];
+  people: string[];
+  text: string | null;
+  model: string | null;
+  cost: number | null;
+}
+
+/** Read the completed L1 visual analysis for a resource (vision result card). */
+export const getVisualAnalysisByResource = async (
+  resourceId: string
+): Promise<VisualAnalysisData> => {
+  const apiUrl = getApiUrl();
+
+  const response = await fetch(`${apiUrl}/api/v1/ai/analysis/resource/${resourceId}`, {
+    method: 'GET',
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  const raw = await response.json();
+  // Backend returns 200 + null fields when not analyzed yet — map to empty.
+  return {
+    description: raw.visual_description || '',
+    objects: raw.detected_objects || [],
+    scenes: raw.detected_scenes || [],
+    people: raw.detected_people || [],
+    text: raw.detected_text ?? null,
+    model: raw.analysis_model ?? null,
+    cost: raw.analysis_cost ?? null,
+  };
+};
+
 // --- Settings ---
 
 export const getAISettings = async (): Promise<AISettings> => {

@@ -8,6 +8,7 @@ import { useTaskResult } from './useTaskResult';
 import { MediaResultBody } from './bodies/MediaResultBody';
 import { AgentResultBody } from './bodies/AgentResultBody';
 import { TextResultBody } from './bodies/TextResultBody';
+import { VisionResultBody } from './bodies/VisionResultBody';
 
 interface TaskDetailModalProps {
   task: UnifiedTask | null;
@@ -81,6 +82,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               {(result.kind === 'transcript' || result.kind === 'summary') && (
                 <TextResultBody kind={result.kind} data={result.data} />
               )}
+              {result.kind === 'vision' && <VisionResultBody task={task} data={result.data} />}
               {result.kind === 'generic' && <GenericResultBody task={task} />}
             </>
           )}

@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import { taskResultKind, type ResultKind } from './taskResultKind';
 import { fetchResourceById } from '../../services/resourceService';
-import { getTranscriptByResource, getSummaryByResource } from '../../services/aiService';
+import {
+  getTranscriptByResource,
+  getSummaryByResource,
+  getVisualAnalysisByResource,
+} from '../../services/aiService';
 
 export interface TaskResultState {
   kind: ResultKind;
@@ -41,6 +45,7 @@ export function useTaskResult(task: UnifiedTask | null): TaskResultState {
         if (kind === 'media') data = await fetchResourceById(rid);
         else if (kind === 'transcript') data = await getTranscriptByResource(rid);
         else if (kind === 'summary') data = await getSummaryByResource(rid);
+        else if (kind === 'vision') data = await getVisualAnalysisByResource(rid);
         if (!cancelled) setState({ loading: false, error: null, data });
       } catch (err) {
         if (!cancelled) {
