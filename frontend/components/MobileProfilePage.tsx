@@ -2,6 +2,9 @@ import React from 'react';
 import { Check, ChevronRight, User } from 'lucide-react';
 import { ViewState } from '../types';
 
+// Build-time app version (Vite define), same as the web settings sidebar.
+declare const __APP_VERSION__: string;
+
 // ---------------------------------------------------------------------------
 // MobileProfilePage — Figma-style Settings page for mobile
 // ---------------------------------------------------------------------------
@@ -159,6 +162,11 @@ export function MobileProfilePage({
         >
           <span className="text-[15px] text-zinc-300">Log Out</span>
         </button>
+
+        {/* Version — so the user can tell if the app is up to date */}
+        <div className="px-5 pt-6 text-center text-[12px] text-zinc-600">
+          v{__APP_VERSION__}
+        </div>
 
         {/* Bottom spacer */}
         <div className="pb-[calc(env(safe-area-inset-bottom,16px)+24px)]" />
