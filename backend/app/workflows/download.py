@@ -226,6 +226,26 @@ async def finalize_post_download_step(
                         e,
                     )
 
+            # Mirror resolution from parsed_media → resources so the library
+            # grid / Justified view can size by aspect ratio. The download
+            # path previously only stored resolution on parsed_media, leaving
+            # resources.resolution NULL (the download *detail* reads
+            # parsed_media, so it looked fine there). Non-fatal.
+            resolution = fresh_media.get("resolution")
+            if resolution:
+                try:
+                    await res_repo.update_resource(
+                        resource_id, {"resolution": resolution}
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[download.finalize] resolution mirror failed "
+                        "(non-fatal) resource_id=%s err=%s: %r",
+                        resource_id,
+                        type(e).__name__,
+                        e,
+                    )
+
         try:
             existing_versions = await res_repo.get_versions(resource_id)
             if not existing_versions and fresh_download_path:
