@@ -309,7 +309,10 @@ export interface FetchLibraryFilterParams {
 const MEDIA_TYPE_VALUES_BY_TYPE: Record<string, string[]> = {
   video: ['video', 'special', 'short', 'live_clip', '0', '4', '61'],
   image: ['carousel', 'image_text', '2', '68'],
-  audio: [],
+  // qishui (Soda) audio sets parsed_media.media_type='audio'. Was empty (no
+  // audio producers existed pre-Soda) → the Audio chip forced an __impossible__
+  // query → "No content" even when audio downloads exist.
+  audio: ['audio'],
   document: [],
   other: [],
 };
