@@ -214,9 +214,9 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                 y2="0"
                 gradientUnits="userSpaceOnUse"
               >
-                <stop offset="0" stopColor="rgba(165,180,252,0.95)" />
-                <stop offset="0.034" stopColor="rgba(199,210,254,1)" />
-                <stop offset="0.155" stopColor="rgba(139,92,246,0.7)" />
+                <stop offset="0" stopColor="rgba(139,92,246,1)" />
+                <stop offset="0.034" stopColor="rgba(139,92,246,0.95)" />
+                <stop offset="0.155" stopColor="rgba(139,92,246,0.6)" />
                 <stop offset="0.273" stopColor="rgba(139,92,246,0.3)" />
                 <stop offset="0.382" stopColor="rgba(139,92,246,0)" />
               </linearGradient>
