@@ -245,23 +245,11 @@ class MediaRepository:
             except Exception as e:
                 logger.debug(f"Stale cleanup parsed_media.{field}: {e}")
 
-            # Clean resources (per-user download state)
-            try:
-                result = await (
-                    client.table("resources")
-                    .update(
-                        {
-                            field: "failed",
-                            "updated_at": now,
-                        }
-                    )
-                    .eq(field, "downloading")
-                    .lt("updated_at", cutoff)
-                    .execute()
-                )
-                count += len(result.data) if result.data else 0
-            except Exception as e:
-                logger.debug(f"Stale cleanup resources.{field}: {e}")
+            # NOTE: download statuses live ONLY on parsed_media (route-C / PR-C:
+            # the canonical physical-file state). `resources` has no
+            # *_download_status columns, so PATCHing them here returned
+            # PostgREST 400 on every sweep (swallowed at debug, but pure noise +
+            # wasted requests). Removed — parsed_media above is the source.
 
         if count > 0:
             logger.info(
