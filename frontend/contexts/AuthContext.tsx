@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   downloadPath: '/home/user/downloads/mediahub',
   supabaseUrl: '',
   supabaseAnonKey: '',
+  maxConcurrentDownloads: 3,
 };
 
 const DEFAULT_AI_SETTINGS: AISettingsType = {
@@ -192,9 +193,14 @@ export function AuthProvider({
         fetchUserSettings()
           .then((settings) => {
             if (settings) {
+              const sj = (settings.settings_json || {}) as Record<string, unknown>;
+              const cap = sj.maxConcurrentDownloads;
               setUserSettings(prev => ({
                 ...prev,
                 downloadPath: settings.download_path || prev.downloadPath,
+                ...(typeof cap === 'number'
+                  ? { maxConcurrentDownloads: cap }
+                  : {}),
               }));
             }
           })
@@ -281,8 +287,18 @@ export function AuthProvider({
 
       if (isAuthenticated && isSupabaseConfigured()) {
         try {
+          // settings_json carries per-user General preferences the backend
+          // reads. maxConcurrentDownloads drives the live batch-concurrency
+          // cap (backend emits config.parse_concurrency on save → no restart).
+          const settingsJson: Record<string, unknown> = {};
+          if (typeof newSettings.maxConcurrentDownloads === 'number') {
+            settingsJson.maxConcurrentDownloads = newSettings.maxConcurrentDownloads;
+          }
           await saveUserSettings({
-            download_path: newSettings.downloadPath
+            download_path: newSettings.downloadPath,
+            ...(Object.keys(settingsJson).length > 0
+              ? { settings_json: settingsJson }
+              : {}),
           });
         } catch (err) {
           console.error('Failed to save settings to Supabase:', err);

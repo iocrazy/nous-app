@@ -112,6 +112,28 @@ async def update_user_settings(request: UserSettingsRequest, auth: AuthDep):
 
         settings = await repo.upsert(auth.user_id, update_data)
 
+        # Live-apply the batch concurrency cap (Settings → General) without a
+        # restart: emit on the lifecycle bus so the worker + gateway poller
+        # pick up the new value. Honest semantics: the value is stored
+        # per-user in settings_json, but the parse queue concurrency is one
+        # global number (last save wins across users). Per-user *isolation* is
+        # still automatic — the queue is partitioned by user_id, so the cap
+        # applies per user regardless of who saved last. Correct for a
+        # single-primary-user deploy. Non-fatal: never break the save.
+        if request.settings_json is not None:
+            raw_cap = request.settings_json.get("maxConcurrentDownloads")
+            if isinstance(raw_cap, (int, float)) and not isinstance(raw_cap, bool):
+                try:
+                    from app.services.lifecycle_bus import get_bus
+
+                    await get_bus().emit(
+                        "config.parse_concurrency", {"value": int(raw_cap)}
+                    )
+                except Exception as emit_exc:
+                    logger.warning(
+                        f"[user_settings] parse_concurrency emit failed: {emit_exc}"
+                    )
+
         if settings:
             return UserSettingsResponse(
                 id=settings.get("id"),
