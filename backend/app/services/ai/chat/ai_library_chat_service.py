@@ -359,6 +359,33 @@ class AILibraryChatService:
 
     async def run_session_turn(
         self,
+        session_id: str,
+        *,
+        user_id: UUID,
+        content: str,
+        trigger: str = "chat",
+        plan_mode: Optional[str] = None,
+        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        attachments: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        """Per-user concurrency gate around the turn. Both chat (.chat) and
+        issue (run_issue_reply_step) funnel through here, so one gate caps a
+        user's concurrent agent turns. See agent_concurrency."""
+        from app.services.ai.chat.agent_concurrency import user_slot
+
+        async with user_slot(str(user_id)):
+            return await self._run_session_turn_inner(
+                session_id,
+                user_id=user_id,
+                content=content,
+                trigger=trigger,
+                plan_mode=plan_mode,
+                chunk_callback=chunk_callback,
+                attachments=attachments,
+            )
+
+    async def _run_session_turn_inner(
+        self,
         session_id: str,  # ai_sessions.id BIGINT Snowflake (mig 231)
         *,
         user_id: UUID,
