@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Music } from 'lucide-react';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
+import { LyricsOverlay } from './LyricsOverlay';
+import { getMediaLyrics, type LyricLine } from '../services/lyricsService';
 import { buildSodaTheme, type SodaTheme } from '../utils/sodaTheme';
 
 interface AudioHeroProps {
@@ -18,6 +20,21 @@ interface AudioHeroProps {
    * renders with the SAME layout + a consistent color treatment.
    */
   theme?: SodaTheme;
+  /**
+   * Optional artist / author shown under the title on the mobile full-screen
+   * player. Only rendered when present.
+   */
+  subtitle?: string;
+  /**
+   * Media id used to fetch synced lyrics for the mobile inline preview + the
+   * tap-to-expand full-screen lyrics overlay. When absent, no lyrics UI renders.
+   */
+  mediaId?: string;
+  /**
+   * Current playback position (seconds). Drives the active lyric line in the
+   * inline preview and the overlay. When absent, the first line is previewed.
+   */
+  currentTime?: number;
 }
 
 /**
@@ -34,31 +51,110 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
   chorusStartSec,
   onTimeUpdate,
   theme,
+  subtitle,
+  mediaId,
+  currentTime,
 }) => {
   const t = theme ?? buildSodaTheme(null, src);
+
+  // Lyrics for the mobile inline preview. Fetched once per media id; the
+  // overlay reuses SodaLyricsTab (which fetches its own copy when opened).
+  const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
+  const [showLyrics, setShowLyrics] = useState(false);
+
+  useEffect(() => {
+    if (!mediaId) {
+      setLyricLines([]);
+      return;
+    }
+    let cancelled = false;
+    getMediaLyrics(mediaId)
+      .then((data) => {
+        if (!cancelled) setLyricLines(data.lines);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to load lyrics for inline preview:', err);
+          setLyricLines([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaId]);
+
+  // Active line = last line whose start time has passed; fallback 0 when no
+  // playback time yet. Mirrors SodaLyricsTab's activeIndex logic.
+  let activeIndex = 0;
+  if (typeof currentTime === 'number' && currentTime > 0) {
+    for (let i = 0; i < lyricLines.length; i++) {
+      const startMs = lyricLines[i].line_start_ms;
+      if (typeof startMs === 'number' && startMs / 1000 <= currentTime) {
+        activeIndex = i;
+      } else if (typeof startMs === 'number') {
+        break;
+      }
+    }
+  }
+  const activeLine = lyricLines[activeIndex]?.text?.trim() || '';
+  const nextLine = lyricLines[activeIndex + 1]?.text?.trim() || '';
+  const hasLyrics = mediaId && lyricLines.length > 0 && activeLine.length > 0;
+
   return (
     <div
-      className="w-full h-full flex flex-col items-center justify-center gap-6 px-6 py-8"
+      className="w-full h-full flex flex-col items-center justify-center gap-8 sm:gap-6 px-6 py-10 sm:py-8"
       style={{ background: t.gradientCss }}
     >
       {coverUrl ? (
         <img
           src={coverUrl}
           alt={title || 'Cover'}
-          className="w-44 h-44 sm:w-56 sm:h-56 rounded-2xl object-cover shadow-2xl shrink-0"
+          className="w-64 h-64 sm:w-56 sm:h-56 rounded-2xl object-cover shadow-2xl shrink-0"
           onError={(e) => {
             (e.currentTarget as HTMLImageElement).style.display = 'none';
           }}
         />
       ) : (
         <div
-          className="w-44 h-44 sm:w-56 sm:h-56 rounded-2xl flex items-center justify-center shadow-2xl shrink-0"
+          className="w-64 h-64 sm:w-56 sm:h-56 rounded-2xl flex items-center justify-center shadow-2xl shrink-0"
           style={{ backgroundColor: t.accentSoft }}
         >
           <Music size={64} style={{ color: t.onAccent }} />
         </div>
       )}
-      <div className="w-full max-w-2xl flex-1 min-h-[160px]">
+      {/* Title + artist — mobile only (full-screen player look); hidden on
+          tablet/desktop where the metadata panel carries this info. */}
+      {(title || subtitle) && (
+        <div className="sm:hidden w-full max-w-md text-center px-2 shrink-0">
+          {title && (
+            <h2 className="text-xl font-bold text-white truncate" title={title}>
+              {title}
+            </h2>
+          )}
+          {subtitle && (
+            <p className="mt-1 text-sm text-white/70 truncate" title={subtitle}>
+              {subtitle}
+            </p>
+          )}
+        </div>
+      )}
+      {/* Inline lyric preview — mobile only, the visual centerpiece between the
+          title/artist and the waveform. Tapping opens the full-screen synced-
+          lyrics overlay. Hidden entirely when no lyrics are available. */}
+      {hasLyrics && (
+        <button
+          type="button"
+          onClick={() => setShowLyrics(true)}
+          aria-label="Open lyrics"
+          className="sm:hidden w-full max-w-md px-4 text-center shrink-0 focus:outline-none"
+        >
+          <p className="text-lg font-semibold text-white leading-snug line-clamp-2">{activeLine}</p>
+          {nextLine && (
+            <p className="mt-1 text-sm text-white/45 truncate">{nextLine}</p>
+          )}
+        </button>
+      )}
+      <div className="w-full max-w-2xl flex-1 min-h-[96px] sm:min-h-[160px]">
         <AudioWaveformPlayer
           src={src}
           filename={title || 'Audio'}
@@ -68,6 +164,17 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
           theme={t}
         />
       </div>
+      {showLyrics && mediaId && (
+        <LyricsOverlay
+          mediaId={mediaId}
+          currentTime={currentTime}
+          title={title}
+          subtitle={subtitle}
+          coverUrl={coverUrl}
+          theme={t}
+          onClose={() => setShowLyrics(false)}
+        />
+      )}
     </div>
   );
 };

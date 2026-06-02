@@ -8,6 +8,7 @@ import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
 import { AudioHero } from '../components/AudioHero';
 import { VideoDetailPanel } from '../components/VideoDetailPanel';
+import { MobileAudioMeta } from '../components/MobileAudioMeta';
 import { ShareModal } from '../components/ShareModal';
 import { getDownloadUrl, getCoverDownloadUrl, getMusicDownloadUrl, getGalleryZipUrl } from '../services/dataService';
 import { getVideoUrl, getCoverUrl, isAlbumType, isAudioType } from '../utils/awemeType';
@@ -334,16 +335,19 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         <div ref={scrollRef} className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
           <div
-            className={`w-full aspect-video sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink ${isAudio ? '' : 'bg-black'}`}
+            className={`w-full ${isAudio ? 'min-h-[78vh]' : 'aspect-video'} sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink ${isAudio ? '' : 'bg-black'}`}
           >
             {isAudio ? (
               (video.music_download_path || video.extract_audio_path) ? (
                 <AudioHero
                   src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
                   title={video.music_name || video.title || 'Audio'}
+                  subtitle={video.author || undefined}
                   coverUrl={audioCoverUrl}
                   duration={Number(video.duration) || undefined}
                   onTimeUpdate={handleTimeUpdate}
+                  mediaId={String(video.id)}
+                  currentTime={currentTime}
                   chorusStartSec={
                     typeof video.metadata?.chorus?.start === 'number'
                       ? video.metadata.chorus.start / 1000
@@ -424,11 +428,24 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             className="w-full md:w-auto shrink-0 overflow-y-auto custom-scrollbar"
             style={isMobile ? undefined : { width: panelWidth }}
           >
+            {isMobile && isAudio ? (
+              <MobileAudioMeta
+                video={video}
+                resourceId={resourceId || undefined}
+                resourceRating={resourceRating}
+                resourceNotes={resourceNotes}
+                onRatingChange={resourceId ? handleRatingChange : undefined}
+                onNotesChange={resourceId ? handleNotesChange : undefined}
+                onNotesBlur={resourceId ? handleNotesBlur : undefined}
+                theme={sodaTheme}
+              />
+            ) : (
               <VideoDetailPanel
                 video={video}
                 resourceId={resourceId || undefined}
                 playerCurrentTime={currentTime}
                 sodaTheme={sodaTheme}
+                compact={isMobile && isAudio}
                 onClose={handleBack}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
@@ -490,6 +507,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                   </>
                 }
               />
+            )}
           </div>
         </div>
       </div>
