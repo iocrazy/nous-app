@@ -18,6 +18,11 @@ interface AudioHeroProps {
    * renders with the SAME layout + a consistent color treatment.
    */
   theme?: SodaTheme;
+  /**
+   * Optional artist / author shown under the title on the mobile full-screen
+   * player. Only rendered when present.
+   */
+  subtitle?: string;
 }
 
 /**
@@ -34,28 +39,45 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
   chorusStartSec,
   onTimeUpdate,
   theme,
+  subtitle,
 }) => {
   const t = theme ?? buildSodaTheme(null, src);
   return (
     <div
-      className="w-full h-full flex flex-col items-center justify-center gap-6 px-6 py-8"
+      className="w-full h-full flex flex-col items-center justify-center gap-8 sm:gap-6 px-6 py-10 sm:py-8"
       style={{ background: t.gradientCss }}
     >
       {coverUrl ? (
         <img
           src={coverUrl}
           alt={title || 'Cover'}
-          className="w-44 h-44 sm:w-56 sm:h-56 rounded-2xl object-cover shadow-2xl shrink-0"
+          className="w-64 h-64 sm:w-56 sm:h-56 rounded-2xl object-cover shadow-2xl shrink-0"
           onError={(e) => {
             (e.currentTarget as HTMLImageElement).style.display = 'none';
           }}
         />
       ) : (
         <div
-          className="w-44 h-44 sm:w-56 sm:h-56 rounded-2xl flex items-center justify-center shadow-2xl shrink-0"
+          className="w-64 h-64 sm:w-56 sm:h-56 rounded-2xl flex items-center justify-center shadow-2xl shrink-0"
           style={{ backgroundColor: t.accentSoft }}
         >
           <Music size={64} style={{ color: t.onAccent }} />
+        </div>
+      )}
+      {/* Title + artist — mobile only (full-screen player look); hidden on
+          tablet/desktop where the metadata panel carries this info. */}
+      {(title || subtitle) && (
+        <div className="sm:hidden w-full max-w-md text-center px-2 shrink-0">
+          {title && (
+            <h2 className="text-xl font-bold text-white truncate" title={title}>
+              {title}
+            </h2>
+          )}
+          {subtitle && (
+            <p className="mt-1 text-sm text-white/70 truncate" title={subtitle}>
+              {subtitle}
+            </p>
+          )}
         </div>
       )}
       <div className="w-full max-w-2xl flex-1 min-h-[160px]">

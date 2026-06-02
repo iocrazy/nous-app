@@ -334,13 +334,14 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
         <div ref={scrollRef} className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
           <div
-            className={`w-full aspect-video sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink ${isAudio ? '' : 'bg-black'}`}
+            className={`w-full ${isAudio ? 'min-h-[78vh]' : 'aspect-video'} sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink ${isAudio ? '' : 'bg-black'}`}
           >
             {isAudio ? (
               (video.music_download_path || video.extract_audio_path) ? (
                 <AudioHero
                   src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
                   title={video.music_name || video.title || 'Audio'}
+                  subtitle={video.author || undefined}
                   coverUrl={audioCoverUrl}
                   duration={Number(video.duration) || undefined}
                   onTimeUpdate={handleTimeUpdate}
