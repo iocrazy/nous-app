@@ -66,7 +66,7 @@ import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
-import { detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
+import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { fetchComments } from '../services/reviewService';
@@ -278,6 +278,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [authToken, setAuthToken] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Resizable inspector panel — drag handle is invisible until hover (no
+  // persistent divider line); shared with the download detail via DetailCardKit.
+  const { panelWidth, handleResizeStart } = useResizablePanel();
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const handler = () => setIsDesktop(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
@@ -1119,8 +1132,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
         </div>
 
-        {/* Right: Inspector panel — full-width on mobile, fixed sidebar on desktop */}
-        <div className="w-full md:w-96 border-t md:border-t-0 md:border-l border-zinc-800 flex flex-col shrink-0">
+        {/* Resize handle — desktop only, invisible until hover (no persistent divider) */}
+        <ResizeHandle onMouseDown={handleResizeStart} />
+
+        {/* Right: Inspector panel — full-width on mobile, resizable on desktop (no border-l divider) */}
+        <div
+          className="w-full md:w-auto border-t md:border-t-0 border-zinc-800 flex flex-col shrink-0"
+          style={isDesktop ? { width: panelWidth } : undefined}
+        >
           {/* Tab bar */}
           <div className="flex border-b border-zinc-800 shrink-0">
             <button
