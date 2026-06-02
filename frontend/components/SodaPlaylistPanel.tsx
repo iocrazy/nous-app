@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2, Music, Download, ListMusic, Film } from 'lucide-react';
+import { Loader2, Music, Download, ListMusic, Film, Check } from 'lucide-react';
 import { useToast } from './Toast';
 import {
   getSodaPlaylist,
@@ -30,6 +30,8 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [downloadedCount, setDownloadedCount] = useState(0);
+  const [newCount, setNewCount] = useState(0);
 
   const handleLoad = async () => {
     if (!url.trim() || loading) return;
@@ -38,7 +40,17 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
     try {
       const result = await getSodaPlaylist(url.trim());
       setTracks(result.tracks);
-      setSelected(new Set(result.tracks.map((t) => t.track_id)));
+      // Incremental sync: default-select only the tracks the user has NOT
+      // downloaded yet. Downloaded ones stay selectable for a forced re-download.
+      setSelected(
+        new Set(result.tracks.filter((t) => !t.downloaded).map((t) => t.track_id)),
+      );
+      // Prefer the server counts; fall back to deriving from the track flags.
+      const dc =
+        result.downloaded_count ??
+        result.tracks.filter((t) => t.downloaded).length;
+      setDownloadedCount(dc);
+      setNewCount(result.new_count ?? result.tracks.length - dc);
       setLoaded(true);
     } catch (err) {
       console.error('Failed to load Soda playlist:', err);
@@ -46,6 +58,8 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
       setError(message);
       setTracks([]);
       setSelected(new Set());
+      setDownloadedCount(0);
+      setNewCount(0);
       setLoaded(false);
     } finally {
       setLoading(false);
@@ -148,7 +162,9 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
             >
               {allSelected ? 'Deselect all' : 'Select all'}
             </button>
-            <span className="text-xs text-zinc-500">({selected.size} selected)</span>
+            <span className="text-xs text-zinc-500">
+              {newCount} new · {downloadedCount} downloaded
+            </span>
           </div>
 
           {/* Rows */}
@@ -157,10 +173,13 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
               const checked = selected.has(track.track_id);
               const duration = formatDuration(track.duration_ms);
               const isVideo = track.kind === 'video';
+              const isDownloaded = track.downloaded === true;
               return (
                 <label
                   key={track.track_id}
-                  className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-zinc-800/40 transition-colors"
+                  className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-zinc-800/40 transition-colors ${
+                    isDownloaded ? 'opacity-50' : ''
+                  }`}
                 >
                   <input
                     type="checkbox"
@@ -193,6 +212,12 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
                         <span className="flex items-center gap-1 flex-shrink-0 text-[10px] font-medium uppercase tracking-wide text-purple-300 bg-purple-500/15 border border-purple-500/30 rounded px-1.5 py-0.5">
                           <Film size={10} />
                           Video
+                        </span>
+                      )}
+                      {isDownloaded && (
+                        <span className="flex items-center gap-1 flex-shrink-0 text-[10px] font-medium uppercase tracking-wide text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 rounded px-1.5 py-0.5">
+                          <Check size={10} />
+                          Downloaded
                         </span>
                       )}
                     </div>
