@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Music } from 'lucide-react';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
+import { LyricsOverlay } from './LyricsOverlay';
+import { getMediaLyrics, type LyricLine } from '../services/lyricsService';
 import { buildSodaTheme, type SodaTheme } from '../utils/sodaTheme';
 
 interface AudioHeroProps {
@@ -23,6 +25,16 @@ interface AudioHeroProps {
    * player. Only rendered when present.
    */
   subtitle?: string;
+  /**
+   * Media id used to fetch synced lyrics for the mobile inline preview + the
+   * tap-to-expand full-screen lyrics overlay. When absent, no lyrics UI renders.
+   */
+  mediaId?: string;
+  /**
+   * Current playback position (seconds). Drives the active lyric line in the
+   * inline preview and the overlay. When absent, the first line is previewed.
+   */
+  currentTime?: number;
 }
 
 /**
@@ -40,8 +52,54 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
   onTimeUpdate,
   theme,
   subtitle,
+  mediaId,
+  currentTime,
 }) => {
   const t = theme ?? buildSodaTheme(null, src);
+
+  // Lyrics for the mobile inline preview. Fetched once per media id; the
+  // overlay reuses SodaLyricsTab (which fetches its own copy when opened).
+  const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
+  const [showLyrics, setShowLyrics] = useState(false);
+
+  useEffect(() => {
+    if (!mediaId) {
+      setLyricLines([]);
+      return;
+    }
+    let cancelled = false;
+    getMediaLyrics(mediaId)
+      .then((data) => {
+        if (!cancelled) setLyricLines(data.lines);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to load lyrics for inline preview:', err);
+          setLyricLines([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaId]);
+
+  // Active line = last line whose start time has passed; fallback 0 when no
+  // playback time yet. Mirrors SodaLyricsTab's activeIndex logic.
+  let activeIndex = 0;
+  if (typeof currentTime === 'number' && currentTime > 0) {
+    for (let i = 0; i < lyricLines.length; i++) {
+      const startMs = lyricLines[i].line_start_ms;
+      if (typeof startMs === 'number' && startMs / 1000 <= currentTime) {
+        activeIndex = i;
+      } else if (typeof startMs === 'number') {
+        break;
+      }
+    }
+  }
+  const activeLine = lyricLines[activeIndex]?.text?.trim() || '';
+  const nextLine = lyricLines[activeIndex + 1]?.text?.trim() || '';
+  const hasLyrics = mediaId && lyricLines.length > 0 && activeLine.length > 0;
+
   return (
     <div
       className="w-full h-full flex flex-col items-center justify-center gap-8 sm:gap-6 px-6 py-10 sm:py-8"
@@ -80,6 +138,21 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
           )}
         </div>
       )}
+      {/* Inline lyric preview — mobile only. Tapping opens the full-screen
+          synced-lyrics overlay. Hidden entirely when no lyrics are available. */}
+      {hasLyrics && (
+        <button
+          type="button"
+          onClick={() => setShowLyrics(true)}
+          aria-label="Open lyrics"
+          className="sm:hidden w-full max-w-md px-4 text-center shrink-0 focus:outline-none"
+        >
+          <p className="text-base font-semibold text-white truncate">{activeLine}</p>
+          {nextLine && (
+            <p className="mt-0.5 text-sm text-white/50 truncate">{nextLine}</p>
+          )}
+        </button>
+      )}
       <div className="w-full max-w-2xl flex-1 min-h-[160px]">
         <AudioWaveformPlayer
           src={src}
@@ -90,6 +163,17 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
           theme={t}
         />
       </div>
+      {showLyrics && mediaId && (
+        <LyricsOverlay
+          mediaId={mediaId}
+          currentTime={currentTime}
+          title={title}
+          subtitle={subtitle}
+          coverUrl={coverUrl}
+          theme={t}
+          onClose={() => setShowLyrics(false)}
+        />
+      )}
     </div>
   );
 };

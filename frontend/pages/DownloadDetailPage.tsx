@@ -345,6 +345,8 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                   coverUrl={audioCoverUrl}
                   duration={Number(video.duration) || undefined}
                   onTimeUpdate={handleTimeUpdate}
+                  mediaId={String(video.id)}
+                  currentTime={currentTime}
                   chorusStartSec={
                     typeof video.metadata?.chorus?.start === 'number'
                       ? video.metadata.chorus.start / 1000
