@@ -29,6 +29,11 @@ from app.workflows.issue_lifecycle import (  # noqa: F401
 )
 from app.workflows.parse import parse_workflow  # noqa: F401
 from app.workflows.script_outline import script_outline_workflow  # noqa: F401
+from app.workflows.soda_download import (  # noqa: F401
+    soda_download_queue,
+    soda_download_workflow,
+)
+from app.workflows.soda_ugc_download import soda_ugc_download_workflow  # noqa: F401
 from app.workflows.storyboard import (  # noqa: F401
     storyboard_annotation_workflow,
     storyboard_export_workflow,
