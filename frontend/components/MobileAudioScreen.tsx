@@ -402,6 +402,7 @@ export function MobileAudioScreen({
       {resolvedResourceId && (
         <div className="mt-4">
           <EagleTagPicker
+            variant="bare"
             assignedTags={resourceTags.map((item) => item.tag).filter((tg): tg is Tag => !!tg)}
             allTags={allTags}
             onAdd={handleAddTag}

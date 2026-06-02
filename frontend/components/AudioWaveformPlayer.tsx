@@ -50,6 +50,10 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
   playbackRate: externalPlaybackRate,
 }) => {
   const isCompact = layout === 'compact';
+  // Compact lives in a narrow row, so 200 hair-thin bars compress into an
+  // unreadable blur. Fewer, wider bars (and a proportional vertical margin
+  // below) make the waveform legible even for short tracks.
+  const barCount = isCompact ? 56 : BAR_COUNT;
   // Use the track's Soda palette when given; otherwise derive a stable vivid
   // color from the src so every audio player is colorful + consistent (no flat
   // gray) regardless of source (downloads / uploads / share).
@@ -89,10 +93,10 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         if (cancelled) return;
 
         const channel = decoded.getChannelData(0);
-        const blockSize = Math.floor(channel.length / BAR_COUNT);
+        const blockSize = Math.floor(channel.length / barCount);
         const bars: number[] = [];
 
-        for (let i = 0; i < BAR_COUNT; i++) {
+        for (let i = 0; i < barCount; i++) {
           let sum = 0;
           const start = i * blockSize;
           const end = Math.min(start + blockSize, channel.length);
@@ -116,7 +120,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
 
     decodeAudio();
     return () => { cancelled = true; };
-  }, [src]);
+  }, [src, barCount]);
 
   // Draw waveform on canvas
   const drawWaveform = useCallback(() => {
@@ -142,9 +146,12 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
 
     const progress = duration > 0 ? currentTime / duration : 0;
     const centerY = H / 2;
-    const maxBarH = (H - 32) / 2; // leave margin
-    const barW = W / BAR_COUNT;
-    const gap = Math.max(0.5, barW * 0.15); // gap between bars
+    // A fixed 32px margin crushes amplitude on the short compact height (~56px
+    // → only 12px per half). Use a proportional margin so bars fill the space.
+    const verticalMargin = isCompact ? H * 0.16 : 32;
+    const maxBarH = (H - verticalMargin) / 2;
+    const barW = W / barCount;
+    const gap = Math.max(0.5, barW * 0.18); // gap between bars
 
     // Colors — driven by the track's palette (or a stable per-track color).
     const playedColor = tm.accent;
@@ -156,7 +163,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       const amp = waveform[i];
       const x = i * barW;
       const barH = Math.max(1, amp * maxBarH);
-      const isPlayed = i / BAR_COUNT < progress;
+      const isPlayed = i / barCount < progress;
 
       // Main color based on played state
       const mainColor = isPlayed ? playedColor : unplayedColor;
@@ -192,7 +199,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       ctx.lineTo(cursorX, H - 8);
       ctx.stroke();
     }
-  }, [waveform, currentTime, duration, tm]);
+  }, [waveform, currentTime, duration, tm, barCount, isCompact]);
 
   // Keep the latest onTimeUpdate in a ref so the rAF loop never re-subscribes.
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -382,12 +389,8 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
           {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
         </button>
 
-        {/* Time */}
-        <span className="text-[13px] text-white/85 tabular-nums whitespace-nowrap shrink-0">
-          {formatTime(currentTime)} / {formatTime(duration)}
-        </span>
-
-        {/* Waveform — fills the rest of the row and acts as the seek bar. */}
+        {/* Waveform — takes the wide middle so the bars aren't compressed, and
+            acts as the seek bar. Time sits to the right, compact. */}
         <div
           ref={containerRef}
           className="relative flex-1 min-w-0 h-14 cursor-pointer select-none"
@@ -428,6 +431,11 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             />
           )}
         </div>
+
+        {/* Time — right side, compact */}
+        <span className="text-[12px] text-white/80 tabular-nums whitespace-nowrap shrink-0">
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </span>
       </div>
     );
   }

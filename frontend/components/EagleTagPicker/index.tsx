@@ -15,7 +15,9 @@ export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
   allTags,
   readOnly = false,
   onCreate,
+  variant = 'default',
 }) => {
+  const isBare = variant === 'bare';
   const { t } = useTranslation();
   const [panelOpen, setPanelOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -74,19 +76,25 @@ export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
   }, [onCreate, handleToggleTag]);
 
   return (
-    <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-      <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-        {t('resources.tags', 'Tags')}
-      </h4>
+    <div className={isBare ? '' : 'px-4 mt-4 border-t border-zinc-800/60 pt-3'}>
+      {!isBare && (
+        <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+          {t('resources.tags', 'Tags')}
+        </h4>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {displayTags.map((tag) => (
-          <TagPill key={tag.id} tag={tag} onRemove={handleRemove} readOnly={readOnly} />
+          <TagPill key={tag.id} tag={tag} onRemove={handleRemove} readOnly={readOnly} tonal={isBare} />
         ))}
         {!readOnly && (
           <button
             ref={triggerRef}
             onClick={() => setPanelOpen(!panelOpen)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            className={
+              isBare
+                ? 'inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-white/[0.14] text-white/80 border border-white/20 hover:bg-white/20 hover:text-white transition-colors'
+                : 'inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors'
+            }
           >
             <Plus size={10} />
             {t('resources.addTag', 'Add Tag')}
