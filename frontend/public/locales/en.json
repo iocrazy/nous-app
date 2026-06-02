@@ -436,6 +436,7 @@
     "toggleInfoPanel": "Toggle Info Panel",
     "gridView": "Grid View",
     "listView": "List View",
+    "justifiedView": "Justified View",
     "mimeType": "MIME Type",
     "fileProperties": "File Properties",
     "copyToTitle": "Copy To",

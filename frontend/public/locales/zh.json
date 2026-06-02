@@ -436,6 +436,7 @@
     "toggleInfoPanel": "切换信息面板",
     "gridView": "平铺模式",
     "listView": "列表模式",
+    "justifiedView": "自适应模式",
     "mimeType": "MIME 类型",
     "fileProperties": "文件属性",
     "copyToTitle": "复制到",
