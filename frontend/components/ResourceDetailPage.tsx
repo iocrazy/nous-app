@@ -66,7 +66,7 @@ import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
-import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges, MetaTimeRow } from './detail/DetailCardKit';
+import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { fetchComments } from '../services/reviewService';
@@ -1287,13 +1287,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             )}
           </div>
 
-          {/* Release time + duration (download-detail style) */}
-          <MetaTimeRow
-            className="px-4 mt-2"
-            releaseTime={formatDate(resource.created_at)}
-            duration={(isVideo || isAudio) ? formatDuration(resource.duration_seconds) : null}
-          />
-
           {/* AI status — transcript / summary / analyze (video/audio); click a chip to open its tab */}
           {(isVideo || isAudio) && (
             <AiIntentBadges
@@ -1358,6 +1351,12 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <span className="text-zinc-500">{t('resources.infoPanel.size')}</span>
               <span className="text-zinc-300">{formatFileSize(resource.file_size_bytes)}</span>
             </div>
+            {(isVideo || isAudio) && resource.duration_seconds != null && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-500">{t('resources.infoPanel.duration')}</span>
+                <span className="text-zinc-300">{formatDuration(resource.duration_seconds)}</span>
+              </div>
+            )}
             {resource.current_version > 1 && (
               <div className="flex items-center justify-between text-xs">
                 <span className="text-zinc-500">{t('resources.infoPanel.version')}</span>
@@ -1367,6 +1366,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-500">{t('resources.infoPanel.source')}</span>
               <span className="text-zinc-300">{resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.created')}</span>
+              <span className="text-zinc-300">{formatDate(resource.created_at)}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-500">{t('resources.infoPanel.modified')}</span>
