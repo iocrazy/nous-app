@@ -1,6 +1,6 @@
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 
-export type ResultKind = 'media' | 'agent' | 'transcript' | 'summary' | 'generic';
+export type ResultKind = 'media' | 'agent' | 'transcript' | 'summary' | 'vision' | 'generic';
 
 /**
  * Which detail body renders a task's result. Media types need a produced
@@ -22,6 +22,8 @@ export function taskResultKind(
       return task.resource_id ? 'transcript' : 'generic';
     case 'ai_summary':
       return task.resource_id ? 'summary' : 'generic';
+    case 'ai_extract':
+      return task.resource_id ? 'vision' : 'generic';
     default:
       return 'generic';
   }

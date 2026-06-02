@@ -31,8 +31,12 @@ describe('taskResultKind', () => {
     expect(taskResultKind(t({ task_type: 'ai_summary', resource_id: 'r' }))).toBe('summary');
   });
 
-  it('generic for vision (ai_extract) — no read endpoint yet', () => {
-    expect(taskResultKind(t({ task_type: 'ai_extract', resource_id: 'r' }))).toBe('generic');
+  it('vision for ai_extract with a resource', () => {
+    expect(taskResultKind(t({ task_type: 'ai_extract', resource_id: 'r' }))).toBe('vision');
+  });
+
+  it('generic for ai_extract with no resource', () => {
+    expect(taskResultKind(t({ task_type: 'ai_extract', resource_id: undefined }))).toBe('generic');
   });
 
   it('generic for media tasks with no resource (e.g. failed)', () => {
