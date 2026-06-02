@@ -42,15 +42,22 @@ def init_dbos(app: FastAPI) -> None:
     `from app import workflows` (not `import app.workflows`) so the `app`
     parameter isn't shadowed by a local module binding. Failure is
     non-fatal; only DBOS-routed task_types degrade.
+
+    The gateway role launches DBOS (dispatch needs `_sys_db`) but consumes no
+    user queues — `runs_dbos_workers` is False for gateway, so workflows only
+    execute on the worker. See
+    docs/superpowers/plans/2026-06-02-gateway-enqueue-only.md.
     """
     try:
         dbos_orchestrator.init_dbos()
         if dbos_orchestrator.is_enabled():
             from app import workflows  # noqa: F401 — registers @DBOS decorators
 
-            dbos_orchestrator.launch_dbos()
+            consume = app.state.process_role.runs_dbos_workers
+            dbos_orchestrator.launch_dbos(consume_queues=consume)
             logger.info(
-                f"DBOS orchestrator launched (role={app.state.process_role.value})"
+                f"DBOS orchestrator launched (role={app.state.process_role.value}, "
+                f"consume_queues={consume})"
             )
     except Exception as e:
         logger.error(
