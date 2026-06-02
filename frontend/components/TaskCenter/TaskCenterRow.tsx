@@ -41,6 +41,8 @@ interface TaskCenterRowProps {
   onRetry: (id: string) => void;
   /** Open the produced resource's detail page (and close the panel). */
   onOpenResource: (resourceId: string) => void;
+  /** Open the in-panel typed result modal for a terminal task. */
+  onOpenDetail: (task: UnifiedTask) => void;
 }
 
 /**
@@ -54,6 +56,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
   onCancel,
   onRetry,
   onOpenResource,
+  onOpenDetail,
 }) => {
   const { t } = useTranslation();
   const [coverFailed, setCoverFailed] = useState(false);
@@ -69,9 +72,9 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
   return (
     <div
       className={`group px-3 py-2.5 border-b border-zinc-800/50 last:border-b-0 ${
-        actions.open ? 'cursor-pointer hover:bg-zinc-800/40 transition-colors' : ''
+        !isActive ? 'cursor-pointer hover:bg-zinc-800/40 transition-colors' : ''
       }`}
-      onClick={actions.open ? handleOpen : undefined}
+      onClick={!isActive ? () => onOpenDetail(task) : undefined}
     >
       <div className="flex items-center gap-2.5">
         {/* Cover thumbnail (completed w/ resource) or type-icon badge */}
