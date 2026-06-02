@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Music, Heart, MessageCircle, Share2, Bookmark,
-  MoreVertical, Download, Copy, Trash2, ExternalLink,
+  MoreVertical, Download, Copy, Trash2, ExternalLink, CloudDownload,
 } from 'lucide-react';
 import type { Video, Tag } from '../types';
 import { buildSodaTheme, type SodaTheme } from '../utils/sodaTheme';
@@ -35,8 +35,15 @@ import { RatingStars } from './detail/DetailCardKit';
 
 interface MobileAudioScreenProps {
   video: Video;
-  /** Audio stream URL (already token-signed). */
+  /** Audio stream URL (already token-signed). Empty when not downloaded yet. */
   src: string;
+  /** Whether the audio file is downloaded. When false, the player area shows a
+   * "not downloaded — Fetch" prompt instead of the waveform, but the cover,
+   * title, stats, actions, rating/notes/tags all stay (the track still has
+   * info + actions). */
+  hasAudio: boolean;
+  /** Re-download the track (e.g. qishui soda fetch). Shown in the no-audio prompt. */
+  onFetchAudio?: () => void;
   /** Album cover URL; falls back to a themed Music placeholder. */
   coverUrl?: string;
   /** Track's Soda palette (gradient + accents). */
@@ -110,6 +117,8 @@ function SocialStat({ Icon, node, value, onClick }: {
 export function MobileAudioScreen({
   video,
   src,
+  hasAudio,
+  onFetchAudio,
   coverUrl,
   theme,
   mediaId,
@@ -412,18 +421,38 @@ export function MobileAudioScreen({
         </div>
       )}
 
-      {/* Color block: play + time + waveform-as-seek-bar */}
+      {/* Color block: the player when downloaded, else a "not downloaded —
+          Fetch" prompt in the SAME spot (keeps the player footprint + the
+          surrounding info/actions instead of blanking the whole screen). */}
       <div className="mt-4 bg-black/20 rounded-2xl p-4">
-        <AudioWaveformPlayer
-          src={src}
-          filename={title}
-          duration={Number(video.duration) || undefined}
-          chorusStartSec={chorusStartSec}
-          onTimeUpdate={onTimeUpdate}
-          theme={t}
-          layout="compact"
-          playbackRate={playbackRate}
-        />
+        {hasAudio ? (
+          <AudioWaveformPlayer
+            src={src}
+            filename={title}
+            duration={Number(video.duration) || undefined}
+            chorusStartSec={chorusStartSec}
+            onTimeUpdate={onTimeUpdate}
+            theme={t}
+            layout="compact"
+            playbackRate={playbackRate}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-3 py-6 text-center">
+            <Music size={28} className="text-white/40" />
+            <p className="text-[13px] text-white/70">
+              This track isn&apos;t downloaded yet.
+            </p>
+            {onFetchAudio && (
+              <button
+                type="button"
+                onClick={onFetchAudio}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white/15 hover:bg-white/25 text-sm font-medium text-white transition-colors"
+              >
+                <CloudDownload size={15} /> Fetch Audio
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Rating */}
