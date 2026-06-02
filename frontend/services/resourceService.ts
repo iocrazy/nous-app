@@ -184,12 +184,14 @@ export async function fetchChildFolders(
 
 export async function fetchResourceContext(
   resourceId: string
-): Promise<{ folder_id: string | null; scope_id: string; library_id: string | null; isPersonal: boolean } | null> {
-  // PR-E: scope_type is read internally only to derive the personal/team
-  // discriminator; it is not exposed. (Column still exists until Phase 4.)
+): Promise<{ folder_id: string | null; scope_id: string; library_id: string | null } | null> {
+  // PR-E dropped resource_items.scope_type (mig 243). Selecting it caused a
+  // 42703 → this returned null → detail-page sibling files silently failed to
+  // load. Select only the scope locator columns; the caller derives
+  // personal/team from URL context (teamId).
   const { data, error } = await supabase
     .from('resource_items')
-    .select('folder_id, scope_type, scope_id, library_id')
+    .select('folder_id, scope_id, library_id')
     .eq('resource_id', resourceId)
     .limit(1)
     .single();
@@ -199,7 +201,6 @@ export async function fetchResourceContext(
     folder_id: data.folder_id,
     scope_id: data.scope_id,
     library_id: data.library_id,
-    isPersonal: data.scope_type === 'personal',
   };
 }
 
