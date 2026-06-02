@@ -18,6 +18,8 @@ interface DownloadMenuDropdownProps {
   onDownload: (type: 'video' | 'cover' | 'audio' | 'images') => void;
   onFetchMedia: (options: { video?: boolean; cover?: boolean }) => void;
   onExtractAudio: () => void;
+  /** Re-download a qishui (Soda) audio track via the soda path. */
+  onFetchSodaAudio?: () => void;
 }
 
 export function DownloadMenuDropdown({
@@ -28,6 +30,7 @@ export function DownloadMenuDropdown({
   onDownload,
   onFetchMedia,
   onExtractAudio,
+  onFetchSodaAudio,
 }: DownloadMenuDropdownProps) {
   const isCompleted = (s?: string) => s?.toLowerCase() === 'completed';
   const isPending = (s?: string) => { const l = s?.toLowerCase(); return l === 'pending' || l === 'downloading'; };
@@ -130,6 +133,17 @@ export function DownloadMenuDropdown({
                 </button>
               );
             }
+            // qishui (Soda) audio-only track: re-download via the soda path
+            // (the douyin/yt-dlp fetch can't service it). Without this, a
+            // missing-audio soda track had NO actionable menu item.
+            if (isQishui && onFetchSodaAudio) {
+              return (
+                <button onClick={onFetchSodaAudio} className={btnClass}>
+                  <CloudDownload size={13} className="text-amber-400" />{' '}
+                  {isFailed(audioStatus) ? 'Retry Audio' : 'Fetch Audio'}
+                </button>
+              );
+            }
             if (!isAlbum && hasVideoFile) {
               return (
                 <button onClick={onExtractAudio} className={btnClass}>
@@ -150,6 +164,7 @@ interface MobileDownloadMenuProps {
   onClose: () => void;
   onDownload: (type: 'video' | 'cover' | 'audio' | 'images') => void;
   onFetchMedia: (options: { video?: boolean; cover?: boolean }) => void;
+  onFetchSodaAudio?: () => void;
 }
 
 export function MobileDownloadMenu({
@@ -157,6 +172,7 @@ export function MobileDownloadMenu({
   onClose,
   onDownload,
   onFetchMedia,
+  onFetchSodaAudio,
 }: MobileDownloadMenuProps) {
   const isCompleted = (s?: string) => s?.toLowerCase() === 'completed';
   const hasVideoFile = !!(video.download_path || video.hls_path);
@@ -191,6 +207,12 @@ export function MobileDownloadMenu({
       {hasAudioFile && (
         <button onClick={() => { onClose(); onDownload('audio'); }} className={btnClass}>
           <Download size={13} className="text-amber-400" /> Download Audio
+        </button>
+      )}
+      {/* qishui (Soda) audio with no file → re-download via the soda path */}
+      {!hasAudioFile && video.source_platform === 'qishui' && onFetchSodaAudio && (
+        <button onClick={() => { onClose(); onFetchSodaAudio(); }} className={btnClass}>
+          <CloudDownload size={13} className="text-amber-400" /> Fetch Audio
         </button>
       )}
     </>

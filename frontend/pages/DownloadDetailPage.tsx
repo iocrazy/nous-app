@@ -15,7 +15,8 @@ import { getVideoUrl, getCoverUrl, isAlbumType, isAudioType } from '../utils/awe
 import { buildSodaTheme } from '../utils/sodaTheme';
 import { getApiUrl } from '../utils/apiConfig';
 import { downloadFile, downloadWithAuth } from '../utils/download';
-import { fetchMediaByType, extractAudio } from '../services/parserService';
+import { fetchMediaByType, extractAudio, downloadSodaTracks } from '../services/parserService';
+import { sodaTrackId } from './DownloadDetailPage/sodaTrackId';
 import { useDownloadDetail } from './DownloadDetailPage/useDownloadDetail';
 import { DownloadMenuDropdown, MobileDownloadMenu } from './DownloadDetailPage/DownloadMenuDropdown';
 import { DeleteDialog } from './DownloadDetailPage/DeleteDialog';
@@ -144,6 +145,29 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     } catch (error) {
       console.error('Extract audio error:', error);
       addToast(error instanceof Error ? error.message : 'Audio extraction failed', 'error');
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
+  // qishui (Soda) audio can't be re-fetched via the douyin/yt-dlp generic path
+  // (fetchMediaByType) — it has its own download endpoint. Re-download the
+  // single track through the soda path so a missing-audio track isn't a dead end.
+  const handleFetchSodaAudio = async () => {
+    if (!video) return;
+    const trackId = sodaTrackId(video);
+    if (!trackId) {
+      addToast('No track id available to re-fetch', 'error');
+      return;
+    }
+    setShowDownloadMenu(false);
+    setIsFetching(true);
+    try {
+      await downloadSodaTracks([{ id: trackId, kind: 'track' }], video.title || undefined);
+      addToast('Fetch submitted: Audio. Will update automatically.', 'success');
+    } catch (error) {
+      console.error('Soda audio fetch error:', error);
+      addToast(error instanceof Error ? error.message : 'Audio fetch failed', 'error');
     } finally {
       setIsFetching(false);
     }
@@ -285,6 +309,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                   onDownload={handleToolbarDownload}
                   onFetchMedia={handleFetchMedia}
                   onExtractAudio={handleExtractAudio}
+                  onFetchSodaAudio={handleFetchSodaAudio}
                 />
               )}
             </div>
@@ -528,6 +553,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                               onClose={() => setShowMoreMenu(false)}
                               onDownload={handleToolbarDownload}
                               onFetchMedia={handleFetchMedia}
+                              onFetchSodaAudio={handleFetchSodaAudio}
                             />
                             {video.original_url && (
                               <a
