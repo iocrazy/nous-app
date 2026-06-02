@@ -174,10 +174,13 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     );
   }
 
-  // Build the track's Soda palette once (audio only). buildSodaTheme handles
-  // all missing/malformed cases with neutral non-blue fallbacks.
+  // Build the track's Soda palette once (audio only). Soda tracks use their own
+  // colors; non-Soda audio (e.g. extracted audio) has no palette, so seed a
+  // stable per-track color from the id instead of flat gray.
   const isAudio = isAudioType(video.media_type);
-  const sodaTheme = isAudio ? buildSodaTheme(video.metadata?.colors) : undefined;
+  const sodaTheme = isAudio
+    ? buildSodaTheme(video.metadata?.colors, String(video.id))
+    : undefined;
   const audioCoverUrl = isAudio ? getCoverUrl(video, mediaToken ?? undefined) : undefined;
 
   return (
