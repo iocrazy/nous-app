@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Pause, Volume2, VolumeX } from 'lucide-react';
+import type { SodaTheme } from '../utils/sodaTheme';
 
 interface AudioWaveformPlayerProps {
   src: string;
@@ -9,7 +10,15 @@ interface AudioWaveformPlayerProps {
   onTimeUpdate?: (seconds: number) => void;
   /** Chorus / highlight marker position (seconds) overlaid on the waveform. */
   chorusStartSec?: number;
+  /** Track's own Soda palette. When absent, neutral non-blue fallbacks apply. */
+  theme?: SodaTheme;
 }
+
+// Neutral, non-blue defaults used when no track theme is supplied.
+const NEUTRAL_PLAYED = '#e4e4e7'; // zinc-200
+const NEUTRAL_PLAYED_DIM = 'rgba(228,228,231,0.6)';
+const NEUTRAL_UNPLAYED = 'rgba(113,113,122,0.5)'; // zinc-500
+const NEUTRAL_CURSOR = 'rgba(244,244,245,0.85)'; // zinc-100
 
 const BAR_COUNT = 200;
 
@@ -25,6 +34,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
   duration: initialDuration,
   onTimeUpdate,
   chorusStartSec,
+  theme,
 }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -117,11 +127,11 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     const barW = W / BAR_COUNT;
     const gap = Math.max(0.5, barW * 0.15); // gap between bars
 
-    // Colors
-    const playedColor = 'rgba(129, 140, 248, 1)';      // indigo-400
-    const playedDimColor = 'rgba(99, 102, 241, 0.6)';   // indigo-500 dim
-    const unplayedColor = 'rgba(113, 113, 122, 0.5)';   // zinc-500
-    const unplayedDimColor = 'rgba(82, 82, 91, 0.35)';  // zinc-600
+    // Colors — driven by the track's own Soda palette, neutral non-blue fallback.
+    const playedColor = theme?.accent ?? NEUTRAL_PLAYED;
+    const playedDimColor = theme?.accentSoft ?? NEUTRAL_PLAYED_DIM;
+    const unplayedColor = theme?.waveUnplayed ?? NEUTRAL_UNPLAYED;
+    const unplayedDimColor = theme?.waveUnplayed ?? 'rgba(82, 82, 91, 0.35)'; // slightly dim mirror
 
     for (let i = 0; i < waveform.length; i++) {
       const amp = waveform[i];
@@ -138,8 +148,11 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       ctx.fillRect(x + gap / 2, centerY - barH, barW - gap, barH);
 
       // Draw lower half (slightly dimmer mirror)
+      ctx.save();
+      ctx.globalAlpha = isPlayed ? 1 : 0.7;
       ctx.fillStyle = dimColor;
       ctx.fillRect(x + gap / 2, centerY, barW - gap, barH * 0.8);
+      ctx.restore();
     }
 
     // Center line
@@ -153,14 +166,14 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
     // Playback cursor
     if (duration > 0) {
       const cursorX = progress * W;
-      ctx.strokeStyle = 'rgba(199, 210, 254, 0.8)'; // indigo-200
+      ctx.strokeStyle = theme?.lyricActive ?? theme?.accent ?? NEUTRAL_CURSOR;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(cursorX, 8);
       ctx.lineTo(cursorX, H - 8);
       ctx.stroke();
     }
-  }, [waveform, currentTime, duration]);
+  }, [waveform, currentTime, duration, theme]);
 
   // Keep the latest onTimeUpdate in a ref so the rAF loop never re-subscribes.
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -336,7 +349,10 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         {isDecoding ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+              <div
+                className="w-8 h-8 border-2 border-zinc-300 border-t-transparent rounded-full animate-spin"
+                style={theme ? { borderColor: theme.accent, borderTopColor: 'transparent' } : undefined}
+              />
               <span className="text-xs text-zinc-500">Decoding audio...</span>
             </div>
           </div>
@@ -375,7 +391,11 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
         <button
           onClick={togglePlay}
           disabled={isDecoding}
-          className="p-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-40"
+          className="p-2 rounded-full transition-opacity hover:opacity-90 disabled:opacity-40"
+          style={{
+            backgroundColor: theme?.accent ?? NEUTRAL_PLAYED,
+            color: theme?.onAccent ?? '#0a0a0a',
+          }}
         >
           {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
         </button>
@@ -413,9 +433,13 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             step="0.05"
             value={isMuted ? 0 : volume}
             onChange={handleVolumeChange}
+            style={{
+              accentColor: theme?.accent ?? NEUTRAL_PLAYED,
+              ['--sw' as string]: theme?.accent ?? NEUTRAL_PLAYED,
+            } as React.CSSProperties}
             className="w-20 h-1 bg-zinc-700 rounded-full appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
-              [&::-webkit-slider-thumb]:bg-indigo-400 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+              [&::-webkit-slider-thumb]:bg-[var(--sw)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
           />
         </div>
       </div>

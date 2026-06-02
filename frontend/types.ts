@@ -95,6 +95,16 @@ export interface ParsedMedia {
     quality?: { Quality?: string; Format?: string; Bitrate?: number };
     chorus?: { start?: number; duration?: number };
     lyrics?: { lrc?: string; lines?: Array<{ text?: string; line_start_ms?: number }> };
+    // Soda (qishui) own color palette — drives the themed audio player / detail page.
+    colors?: {
+      playing_wave_color?: { rgb?: string; alpha?: string };
+      paused_wave_color?: { rgb?: string; alpha?: string };
+      playing_lyric_color?: { rgb?: string; alpha?: string };
+      normal_lyric_color?: { rgb?: string; alpha?: string };
+      background_color?: { rgb?: string; alpha?: string };
+      cover_gradient_effect_color?: Array<{ rgb?: string; alpha?: string }>;
+      base_colors?: Array<{ rgb?: string; alpha?: string }>;
+    };
     [k: string]: unknown;
   } | null;
 

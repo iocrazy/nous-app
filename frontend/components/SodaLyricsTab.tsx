@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, Music, AlertCircle } from 'lucide-react';
 import { getMediaLyrics, type LyricLine } from '../services/lyricsService';
+import type { SodaTheme } from '../utils/sodaTheme';
 
 interface SodaLyricsTabProps {
   mediaId: string;
   /** Current playback position (seconds). When provided (>0), the matching
    * lyric line is highlighted and scrolled into view. */
   currentTime?: number;
+  /** Track's own Soda palette for active / inactive lyric coloring. */
+  theme?: SodaTheme;
 }
 
 /**
@@ -14,7 +17,7 @@ interface SodaLyricsTabProps {
  * When `currentTime` is provided, the active line is highlighted and the list
  * auto-scrolls to keep it centered. Renders statically when it's undefined.
  */
-const SodaLyricsTab = ({ mediaId, currentTime }: SodaLyricsTabProps) => {
+const SodaLyricsTab = ({ mediaId, currentTime, theme }: SodaLyricsTabProps) => {
   const [lines, setLines] = useState<LyricLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,23 +103,29 @@ const SodaLyricsTab = ({ mediaId, currentTime }: SodaLyricsTabProps) => {
   return (
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
       <div className="flex items-center gap-2 p-3 border-b border-zinc-800">
-        <Music size={16} className="text-indigo-400" />
+        <Music
+          size={16}
+          className={theme ? '' : 'text-zinc-300'}
+          style={theme ? { color: theme.accent } : undefined}
+        />
         <span className="text-sm font-medium text-white">Lyrics</span>
       </div>
       <div className="max-h-96 overflow-y-auto p-3 space-y-1">
         {lines.map((line, index) => {
           const isActive = index === activeIndex;
+          // When a theme is present, lyric colors come from the track palette;
+          // otherwise keep the neutral zinc/white classes.
+          const themedStyle = theme
+            ? { color: isActive ? theme.lyricActive : synced ? theme.lyricNormal : undefined }
+            : undefined;
           return (
             <p
               key={index}
               ref={isActive ? activeLineRef : undefined}
-              className={`text-sm leading-relaxed transition-colors ${
-                isActive
-                  ? 'text-white font-medium'
-                  : synced
-                    ? 'text-zinc-500'
-                    : 'text-zinc-300'
-              }`}
+              style={themedStyle}
+              className={`leading-relaxed transition-all duration-200 ${
+                isActive ? 'text-base font-semibold' : 'text-sm font-medium'
+              } ${theme ? '' : isActive ? 'text-white' : synced ? 'text-zinc-500' : 'text-zinc-300'}`}
             >
               {line.text || ' '}
             </p>
