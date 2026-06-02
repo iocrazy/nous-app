@@ -67,7 +67,7 @@ import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
-import { AudioWaveformPlayer } from './AudioWaveformPlayer';
+import { AudioHero } from './AudioHero';
 import { fetchComments } from '../services/reviewService';
 import {
   triggerTranscriptionByResource,
@@ -199,9 +199,10 @@ const FilePreview: React.FC<{
 
   if (mime.startsWith('audio/')) {
     return (
-      <AudioWaveformPlayer
+      <AudioHero
         src={fileUrl}
-        filename={resource.filename}
+        title={resource.filename}
+        coverUrl={resource.thumbnail_path || undefined}
         duration={resource.duration_seconds ?? undefined}
       />
     );
