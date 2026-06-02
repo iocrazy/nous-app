@@ -1254,7 +1254,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           <div className="hidden md:flex justify-between items-start gap-2 px-4 pt-4 mb-1 min-w-0">
             <div className="flex gap-2 shrink-0 flex-wrap">
               <DetailBadge>{resource.file_type || resource.mime_type?.split('/').pop() || 'File'}</DetailBadge>
-              {isVideo && resource.resolution && (
+              {resource.resolution && (
                 <DetailBadge variant="accent">{resource.resolution.replace(/:/g, 'x')}</DetailBadge>
               )}
             </div>
@@ -1358,12 +1358,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <span className="text-zinc-500">{t('resources.infoPanel.size')}</span>
               <span className="text-zinc-300">{formatFileSize(resource.file_size_bytes)}</span>
             </div>
-            {isVideo && resource.resolution && (
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-zinc-500">{t('resources.infoPanel.resolution')}</span>
-                <span className="text-zinc-300">{resource.resolution.replace(/:/g, 'x')}</span>
-              </div>
-            )}
             {resource.current_version > 1 && (
               <div className="flex items-center justify-between text-xs">
                 <span className="text-zinc-500">{t('resources.infoPanel.version')}</span>
