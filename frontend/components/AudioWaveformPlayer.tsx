@@ -341,7 +341,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
       {/* Waveform area */}
       <div
         ref={containerRef}
-        className="flex-1 relative cursor-pointer select-none min-h-[120px]"
+        className="flex-1 relative cursor-pointer select-none min-h-[72px] sm:min-h-[120px]"
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >

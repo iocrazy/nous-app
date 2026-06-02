@@ -138,8 +138,9 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
           )}
         </div>
       )}
-      {/* Inline lyric preview — mobile only. Tapping opens the full-screen
-          synced-lyrics overlay. Hidden entirely when no lyrics are available. */}
+      {/* Inline lyric preview — mobile only, the visual centerpiece between the
+          title/artist and the waveform. Tapping opens the full-screen synced-
+          lyrics overlay. Hidden entirely when no lyrics are available. */}
       {hasLyrics && (
         <button
           type="button"
@@ -147,13 +148,13 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
           aria-label="Open lyrics"
           className="sm:hidden w-full max-w-md px-4 text-center shrink-0 focus:outline-none"
         >
-          <p className="text-base font-semibold text-white truncate">{activeLine}</p>
+          <p className="text-lg font-semibold text-white leading-snug line-clamp-2">{activeLine}</p>
           {nextLine && (
-            <p className="mt-0.5 text-sm text-white/50 truncate">{nextLine}</p>
+            <p className="mt-1 text-sm text-white/45 truncate">{nextLine}</p>
           )}
         </button>
       )}
-      <div className="w-full max-w-2xl flex-1 min-h-[160px]">
+      <div className="w-full max-w-2xl flex-1 min-h-[96px] sm:min-h-[160px]">
         <AudioWaveformPlayer
           src={src}
           filename={title || 'Audio'}

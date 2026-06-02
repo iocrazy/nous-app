@@ -432,6 +432,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                 resourceId={resourceId || undefined}
                 playerCurrentTime={currentTime}
                 sodaTheme={sodaTheme}
+                compact={isMobile && isAudio}
                 onClose={handleBack}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}

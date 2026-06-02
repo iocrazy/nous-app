@@ -50,6 +50,13 @@ interface MediaCardProps {
   onNotesBlur?: () => void;
   /** Optional mobile action buttons rendered below the ID line (PlayerPage uses this) */
   mobileActions?: React.ReactNode;
+  /**
+   * Compact mode (mobile audio player). When true, hides the AI intent badges,
+   * the Copy/Transcript/Summary/Analyze action row, and the description block —
+   * keeping only the light info (stats / rating / notes / tags). Defaults to
+   * false so every other caller renders identically.
+   */
+  compact?: boolean;
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -131,6 +138,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   onNotesChange,
   onNotesBlur,
   mobileActions,
+  compact = false,
 }) => {
   const { mediaToken } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -887,15 +895,19 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               Avoids label duplication with the action buttons row below
               (which already labels Transcript / Summary / Analyze).
               4 colour states encode lifecycle: completed / running /
-              failed / not requested. */}
+              failed / not requested.
+              Hidden in compact mode (mobile audio player). */}
+          {!compact && (
           <AiIntentBadges
             className="mb-4"
             transcriptStatus={data.transcript_status}
             summaryStatus={data.summary_status}
             analyzeStatus={data.visual_analysis_status}
           />
+          )}
 
-          {/* Action Buttons Row */}
+          {/* Action Buttons Row — hidden in compact mode (mobile audio player) */}
+          {!compact && (
           <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-5">
              <button
                onClick={(e) => handleAction(e, 'copy')}
@@ -938,13 +950,17 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                <span className="ai-text text-[10px] sm:text-xs relative z-10 truncate">Analyze</span>
              </button>
           </div>
+          )}
 
-          {/* Description - No Background - Adaptive */}
+          {/* Description - No Background - Adaptive.
+              Hidden in compact mode (mobile audio player). */}
+          {!compact && (
           <div className="mb-4">
              <p className="text-zinc-300 text-sm whitespace-pre-wrap leading-relaxed">
                {data.description || <span className="text-zinc-500 italic">No description available.</span>}
              </p>
           </div>
+          )}
 
           {/* AI Content Area - Adaptive */}
           <div className="space-y-4 mb-6 flex-grow">
