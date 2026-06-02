@@ -183,6 +183,38 @@ class ResourcesRepositoryAsyncpg(AsyncpgRepository, ResourcesRepository):
             )
             return None
 
+    async def get_owned_platform_ids(
+        self, platform_ids: List[str], creator_id: str
+    ) -> set:
+        """Of the given vids (parsed_media.platform_id), return the subset this
+        user has already downloaded (a resources row with file_path set). ONE
+        batched, index-backed query for the whole list — no N+1.
+
+        Backed by ``idx_parsed_media_platform_id`` via the ``= ANY($2::text[])``
+        predicate (same shape as ``_resource_ids_for_platforms``) joined to
+        ``resources`` on ``media_id``. Empty input short-circuits to ``set()``
+        without a query."""
+        if not platform_ids:
+            return set()
+        try:
+            rows = await self.fetch_all(
+                "SELECT DISTINCT p.platform_id "
+                "FROM resources r "
+                "INNER JOIN parsed_media p ON r.media_id = p.id "
+                "WHERE r.creator_id = $1 "
+                "  AND p.platform_id = ANY($2::text[]) "
+                "  AND r.file_path IS NOT NULL",
+                creator_id,
+                list(platform_ids),
+            )
+            return {row["platform_id"] for row in rows}
+        except Exception as e:
+            logger.error(
+                f"Failed to resolve owned platform_ids for creator "
+                f"{creator_id}: {e}"
+            )
+            return set()
+
     async def update_resource(
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
