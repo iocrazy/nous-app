@@ -17,6 +17,10 @@ export interface AgentRunRow {
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  cost_cents?: number | null;
+  model?: string | null;
 }
 
 /** agent_runs has no "queued" state — a run is executing or terminal. */
@@ -44,7 +48,16 @@ export function agentRunToTask(run: AgentRunRow): UnifiedTask {
     subtitle: status === 'completed' ? run.output_summary || undefined : run.trigger,
     progress: 0,
     error_msg: run.error_message || undefined,
-    metadata: {},
+    // Stash LLM stats so the agent result card can render tokens/cost/model +
+    // the full input/output without a second fetch.
+    metadata: {
+      agent_prompt_tokens: run.prompt_tokens ?? null,
+      agent_completion_tokens: run.completion_tokens ?? null,
+      agent_cost_cents: run.cost_cents ?? null,
+      agent_model: run.model ?? null,
+      agent_output: run.output_summary ?? null,
+      agent_input: run.input_summary ?? null,
+    },
     created_at: run.created_at,
     started_at: run.started_at || undefined,
     completed_at: run.ended_at || undefined,

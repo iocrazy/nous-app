@@ -272,7 +272,16 @@
     "queued": "Queued",
     "completed": "Done",
     "failed": "Failed",
-    "noActiveTasks": "No active tasks"
+    "noActiveTasks": "No active tasks",
+    "noResultDetail": "No result detail",
+    "keyPoints": "Key points",
+    "resFilename": "File",
+    "resResolution": "Resolution",
+    "resDuration": "Duration",
+    "resSize": "Size",
+    "agentPrompt": "Prompt",
+    "agentResponse": "Response",
+    "agentModel": "Model"
   },
   "plans": {
     "free": "Free"

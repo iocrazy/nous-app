@@ -272,7 +272,16 @@
     "queued": "排队",
     "completed": "完成",
     "failed": "失败",
-    "noActiveTasks": "暂无进行中的任务"
+    "noActiveTasks": "暂无进行中的任务",
+    "noResultDetail": "暂无结果详情",
+    "keyPoints": "要点",
+    "resFilename": "文件",
+    "resResolution": "分辨率",
+    "resDuration": "时长",
+    "resSize": "大小",
+    "agentPrompt": "输入",
+    "agentResponse": "回复",
+    "agentModel": "模型"
   },
   "plans": {
     "free": "免费"
