@@ -49,7 +49,11 @@ def init_dbos(app: FastAPI) -> None:
     docs/superpowers/plans/2026-06-02-gateway-enqueue-only.md.
     """
     try:
-        dbos_orchestrator.init_dbos()
+        # Stable per-role executor id isolates the DBOS recovery path (which
+        # ignores listen_queues) so a gateway restart can't re-run the worker's
+        # in-flight workflows. Role name is stable across restarts; container
+        # hostname is NOT (it changes on recreate), so don't use it.
+        dbos_orchestrator.init_dbos(executor_id=app.state.process_role.value)
         if dbos_orchestrator.is_enabled():
             from app import workflows  # noqa: F401 — registers @DBOS decorators
 

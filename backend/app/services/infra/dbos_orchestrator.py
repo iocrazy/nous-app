@@ -73,10 +73,19 @@ async def get_routing(task_type: str) -> RoutingDecision:
     return RoutingDecision(task_type=task_type, mode=mode)
 
 
-def init_dbos() -> None:
+def init_dbos(executor_id: str | None = None) -> None:
     """Initialize the DBOS singleton (idempotent). Called from FastAPI lifespan
     BEFORE workflow modules are imported (decorators register against the
     singleton at import time).
+
+    ``executor_id`` (when given) is a STABLE identity for this process, set on
+    DBOSConfig. DBOS's startup recovery claims pending workflows by
+    ``(executor_id, app_version)`` — a path that ignores ``listen_queues`` — so
+    distinct ids per role keep a gateway restart from re-running the worker's
+    in-flight workflows. Must be stable across restarts (we pass the role name,
+    e.g. "gateway"/"worker", NOT a per-process uuid). Default leaves DBOS's own
+    ``DBOS__VMID``-or-"local" behavior. See
+    docs/superpowers/plans/2026-06-02-gateway-enqueue-only.md.
     """
     global _dbos
     if _dbos is not None:
@@ -116,6 +125,8 @@ def init_dbos() -> None:
             "pool_recycle": 300,  # 5 min — drop stale tunneled connections
         },
     }
+    if executor_id:
+        cfg["executor_id"] = executor_id
     _dbos = DBOS(config=cfg)
     logger.info(
         f"[dbos] singleton instantiated (sys + app share same DB, "
