@@ -263,7 +263,16 @@
     "active": "进行中",
     "activeCount": "{{count}} 个进行中",
     "allComplete": "所有任务已完成",
-    "clearCompleted": "清除"
+    "clearCompleted": "清除",
+    "openResource": "打开",
+    "downloadResult": "下载",
+    "tabActive": "进行中",
+    "tabHistory": "历史",
+    "running": "运行",
+    "queued": "排队",
+    "completed": "完成",
+    "failed": "失败",
+    "noActiveTasks": "暂无进行中的任务"
   },
   "plans": {
     "free": "免费"

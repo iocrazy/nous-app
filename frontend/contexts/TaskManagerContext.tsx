@@ -17,7 +17,10 @@ export type TaskType =
   | 'ai_pipeline'
   | 'ai_extract'
   | 'ai_transcription'
-  | 'ai_summary';
+  | 'ai_summary'
+  // Agent execution (chat / issue turns) — sourced from agent_runs, not
+  // task_tracking; merged into the Task Center view client-side.
+  | 'agent';
 
 export type TaskCategory = 'transfer' | 'processing' | 'ai';
 
@@ -81,6 +84,7 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'ai_extract':
     case 'ai_transcription':
     case 'ai_summary':
+    case 'agent':
       return 'ai';
     default:
       return 'processing';
@@ -605,6 +609,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     ai_extract: 0,
     ai_transcription: 0,
     ai_summary: 0,
+    agent: 0,
   };
   for (const t of activeTasks) {
     if (t.task_type in activeCounts) {
@@ -689,6 +694,7 @@ export function taskTypeIcon(type: TaskType): string {
     case 'ai_extract': return '\uD83C\uDFA4';    // 🎤 (audio extract)
     case 'ai_transcription': return '\uD83D\uDCDD'; // 📝 (transcription)
     case 'ai_summary': return '\u2726';           // ✦ (summary)
+    case 'agent': return '\ud83e\udd16';     // \ud83e\udd16 (agent run)
     default: return '\u2022';
   }
 }
@@ -703,6 +709,7 @@ export function taskTypeLabel(type: TaskType): string {
     case 'ai_extract': return 'Audio Extract';
     case 'ai_transcription': return 'Transcription';
     case 'ai_summary': return 'Summary';
+    case 'agent': return 'Agent';
     default: return type;
   }
 }

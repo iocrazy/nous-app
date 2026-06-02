@@ -263,7 +263,16 @@
     "active": "active",
     "activeCount": "{{count}} active",
     "allComplete": "All tasks completed",
-    "clearCompleted": "Clear"
+    "clearCompleted": "Clear",
+    "openResource": "Open",
+    "downloadResult": "Download",
+    "tabActive": "Active",
+    "tabHistory": "History",
+    "running": "Running",
+    "queued": "Queued",
+    "completed": "Done",
+    "failed": "Failed",
+    "noActiveTasks": "No active tasks"
   },
   "plans": {
     "free": "Free"

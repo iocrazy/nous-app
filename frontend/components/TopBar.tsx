@@ -9,25 +9,21 @@ import {
   HelpCircle,
   Inbox,
   CheckCircle2,
-  XCircle,
-  X,
-  RotateCcw,
   ShieldAlert,
   Upload as UploadIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { ApprovalsPanel } from './ApprovalsPanel';
+import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
+import { ActiveTaskCard } from './TaskCenter/ActiveTaskCard';
+import { TaskCenterStatusBar, type TaskTab } from './TaskCenter/TaskCenterStatusBar';
+import { summarizeTasks, isActiveStatus } from './TaskCenter/taskCenterSummary';
+import { useAgentRunTasks } from './TaskCenter/useAgentRunTasks';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useUpload, formatSpeed as uploadFormatSpeed, formatFileSize as uploadFormatFileSize } from '../contexts/UploadContext';
-import {
-  useTaskManager,
-  formatSpeed,
-  formatFileSize,
-  taskTypeIcon,
-  taskTypeLabel,
-  type TaskStatus,
-} from '../contexts/TaskManagerContext';
+import { useTaskManager, type UnifiedTask } from '../contexts/TaskManagerContext';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -122,52 +118,75 @@ const PanelShell: React.FC<{
 // TaskCenter panel
 // ---------------------------------------------------------------------------
 
-// Task type → background color for icon badge
-function taskTypeBg(type: string): string {
-  switch (type) {
-    case 'upload':              return 'bg-blue-500/20 text-blue-400';
-    case 'download':            return 'bg-purple-500/20 text-purple-400';
-    case 'transcode':           return 'bg-amber-500/20 text-amber-400';
-    case 'ai_pipeline':         return 'bg-cyan-500/20 text-cyan-400';
-    case 'ai_extract':          return 'bg-violet-500/20 text-violet-400';
-    case 'ai_transcription':    return 'bg-fuchsia-500/20 text-fuchsia-400';
-    case 'ai_summary':          return 'bg-cyan-500/20 text-cyan-400';
-    default:                    return 'bg-zinc-700/50 text-zinc-400';
-  }
-}
-
-// Progress bar color based on status
-function progressBarColor(status: TaskStatus): string {
-  switch (status) {
-    case 'completed':  return 'bg-emerald-500';
-    case 'failed':     return 'bg-red-500';
-    case 'cancelled':  return 'bg-zinc-600';
-    default:           return 'bg-indigo-500';
-  }
-}
-
-const TaskCenterPanel: React.FC = () => {
+const TaskCenterPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { t } = useTranslation();
-  const { tasks, activeTasks, totalActive, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
+  const navigate = useNavigate();
+  const { tasks, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
   const upload = useUpload();
-  const completedCount = tasks.filter(
-    (tk) => tk.status === 'completed' || tk.status === 'failed' || tk.status === 'cancelled',
-  ).length;
+  const [tab, setTab] = useState<TaskTab>('active');
+
+  // Open a produced resource's detail page; RedirectToTeam injects the team.
+  const openResource = (resourceId: string) => {
+    onClose();
+    navigate(`/resources/file/${resourceId}`);
+  };
   const uploadingItems = upload.items.filter(i => i.status === 'uploading');
-  // Exclude active upload tasks from totalActive to avoid double-counting with UploadContext
-  const activeUploadTasks = activeTasks.filter(t => t.task_type === 'upload').length;
-  const hasTasks = tasks.length > 0 || uploadingItems.length > 0;
-  const activeCount = (totalActive - activeUploadTasks) + uploadingItems.length;
+
+  // Agent runs (chat / issue / scheduled) come from agent_runs, not
+  // task_tracking — merged in here so the Task Center is the one place to see
+  // ALL execution. Backend task_tracking excludes active uploads (UploadContext
+  // renders those live, so counting them here too would double up).
+  const agentTasks = useAgentRunTasks();
+  const backendTasks = tasks.filter(
+    (tk) => !(tk.task_type === 'upload' && (tk.status === 'pending' || tk.status === 'processing')),
+  );
+  const allTasks = [...backendTasks, ...agentTasks];
+
+  const counts = summarizeTasks(allTasks, uploadingItems.length);
+  const completedCount = counts.completed + counts.failed;
+  const activeTotal = counts.running + counts.queued;
+  const hasTasks = allTasks.length > 0 || uploadingItems.length > 0;
+
+  // Newest first; within the Active tab, running sorts above queued.
+  const byRecency = (a: UnifiedTask, b: UnifiedTask) =>
+    (b.created_at || '').localeCompare(a.created_at || '');
+  const activeList = allTasks
+    .filter((tk) => isActiveStatus(tk.status))
+    .sort((a, b) => {
+      const ar = a.status === 'processing' ? 1 : 0;
+      const br = b.status === 'processing' ? 1 : 0;
+      return ar !== br ? br - ar : byRecency(a, b);
+    });
+  const historyList = allTasks
+    .filter((tk) => !isActiveStatus(tk.status))
+    .sort(byRecency)
+    .slice(0, 50);
+
+  const runningTasks = activeList.filter((tk) => tk.status === 'processing');
+  const queuedTasks = activeList.filter((tk) => tk.status === 'pending');
+  const showActive = tab === 'active';
+
+  // Shared 1s clock for the live running cards' elapsed time — only ticks while
+  // something is actually running (and the panel is open, since it only mounts then).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (counts.running === 0) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [counts.running]);
 
   return (
     <PanelShell className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <span className="text-sm font-semibold text-zinc-200">{t('topbar.taskCenter')}</span>
-        {activeCount > 0 && (
-          <span className="px-2 py-0.5 text-[10px] font-medium bg-indigo-500/20 text-indigo-400 rounded-full">
-            {activeCount} {t('topbar.active')}
-          </span>
+        {completedCount > 0 && (
+          <button
+            onClick={() => clearCompleted()}
+            className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            {t('topbar.clearCompleted')}
+          </button>
         )}
       </div>
 
@@ -178,142 +197,103 @@ const TaskCenterPanel: React.FC = () => {
         </div>
       ) : hasTasks ? (
         <>
+          <TaskCenterStatusBar
+            counts={counts}
+            tab={tab}
+            onTab={setTab}
+            activeTotal={activeTotal}
+            historyTotal={completedCount}
+          />
+
           {/* Task list */}
           <div className="max-h-80 overflow-y-auto">
-            {/* Active uploads from UploadContext (client-side progress) */}
-            {uploadingItems.map((item) => (
-              <div key={item.id} className="px-3 py-2.5 border-b border-zinc-800/50">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-blue-500/20 text-blue-400">
-                    <UploadIcon size={14} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-zinc-300 truncate max-w-[180px]">{item.filename}</span>
-                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                        <span className="text-[10px] text-zinc-500">{item.percent}%</span>
-                        {item.speed > 0 && (
-                          <span className="text-[10px] text-zinc-600">{uploadFormatSpeed(item.speed)}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-zinc-600">Upload</span>
-                      {item.fileSize > 0 && (
-                        <span className="text-[10px] text-zinc-600">{uploadFormatFileSize(item.fileSize)}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-300 bg-indigo-500"
-                    style={{ width: `${Math.max(item.percent, 2)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-            {/* Unified tasks from backend — hide active uploads (UploadContext already shows them) */}
-            {[...tasks].filter((t) =>
-              !(t.task_type === 'upload' && (t.status === 'pending' || t.status === 'processing'))
-            ).sort((a, b) => {
-              const aActive = a.status === 'pending' || a.status === 'processing' ? 1 : 0;
-              const bActive = b.status === 'pending' || b.status === 'processing' ? 1 : 0;
-              if (aActive !== bActive) return bActive - aActive;
-              const aTime = a.created_at || '';
-              const bTime = b.created_at || '';
-              return bTime.localeCompare(aTime);
-            }).slice(0, 50).map((task) => (
-              <div key={task.id} className="px-3 py-2.5 border-b border-zinc-800/50 last:border-b-0">
-                <div className="flex items-center gap-2.5">
-                  {/* Task type icon */}
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm ${taskTypeBg(task.task_type)}`}>
-                    {taskTypeIcon(task.task_type)}
-                  </div>
-                  {/* Task info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-zinc-300 truncate max-w-[180px]">{task.title}</span>
-                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                        {(task.status === 'pending' || task.status === 'processing') && (
-                          <>
-                            {task.progress > 0 && (
-                              <span className="text-[10px] text-zinc-500">{task.progress}%</span>
-                            )}
-                            {task.speed != null && task.speed > 0 && (
-                              <span className="text-[10px] text-zinc-600">{formatSpeed(task.speed)}</span>
-                            )}
-                            <button
-                              onClick={() => cancelTask(task.id)}
-                              className="p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors"
-                              title={t('common.cancel')}
-                            >
-                              <X size={12} />
-                            </button>
-                          </>
-                        )}
-                        {task.status === 'completed' && (
-                          <CheckCircle2 size={14} className="text-emerald-400" />
-                        )}
-                        {(task.status === 'failed' || task.status === 'cancelled') && (
-                          <>
-                            <button
-                              onClick={() => retryTask(task.id)}
-                              className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors"
-                              title="Retry"
-                            >
-                              <RotateCcw size={12} />
-                            </button>
-                            {task.status === 'failed' ? (
-                              <XCircle size={14} className="text-red-400" />
-                            ) : (
-                              <X size={14} className="text-zinc-500" />
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-zinc-600">{taskTypeLabel(task.task_type)}</span>
-                      {task.subtitle && (
-                        <span className="text-[10px] text-zinc-600 truncate">{task.subtitle}</span>
-                      )}
-                      {task.total_bytes != null && task.total_bytes > 0 && (
-                        <span className="text-[10px] text-zinc-600">{formatFileSize(task.total_bytes)}</span>
-                      )}
-                    </div>
-                    {task.error_msg && (
-                      <div className="text-[10px] text-red-400 mt-0.5 truncate">{task.error_msg}</div>
-                    )}
-                  </div>
-                </div>
-                {/* Progress bar for active tasks */}
-                {(task.status === 'pending' || task.status === 'processing') && (
-                  <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-300 ${progressBarColor(task.status)}`}
-                      style={{ width: `${Math.max(task.progress, task.status === 'processing' ? 2 : 0)}%` }}
-                    />
+            {showActive ? (
+              <>
+                {/* Running now — prominent live cards */}
+                {runningTasks.length > 0 && (
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    {t('topbar.running')} · {runningTasks.length}
                   </div>
                 )}
-              </div>
-            ))}
-          </div>
+                {runningTasks.map((task) => (
+                  <ActiveTaskCard key={task.id} task={task} now={now} onCancel={cancelTask} />
+                ))}
 
-          {/* Bottom status bar */}
-          <div className="flex items-center justify-between px-3 py-2 border-t border-zinc-800 bg-zinc-900/80">
-            <div className="text-[10px] text-zinc-500">
-              {totalActive > 0
-                ? t('topbar.activeCount', { count: totalActive })
-                : t('topbar.allComplete')}
-            </div>
-            {completedCount > 0 && (
-              <button
-                onClick={() => clearCompleted()}
-                className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
-              >
-                {t('topbar.clearCompleted')}
-              </button>
+                {/* Active uploads from UploadContext (client-side progress) */}
+                {uploadingItems.map((item) => (
+                  <div key={item.id} className="px-3 py-2.5 border-b border-zinc-800/50">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-blue-500/20 text-blue-400">
+                        <UploadIcon size={14} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-zinc-300 truncate max-w-[180px]">{item.filename}</span>
+                          <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                            <span className="text-[10px] text-zinc-500">{item.percent}%</span>
+                            {item.speed > 0 && (
+                              <span className="text-[10px] text-zinc-600">{uploadFormatSpeed(item.speed)}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] text-zinc-600">Upload</span>
+                          {item.fileSize > 0 && (
+                            <span className="text-[10px] text-zinc-600">{uploadFormatFileSize(item.fileSize)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300 bg-indigo-500"
+                        style={{ width: `${Math.max(item.percent, 2)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                {/* Queued */}
+                {queuedTasks.length > 0 && (
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500 border-t border-zinc-800/50">
+                    {t('topbar.queued')} · {queuedTasks.length}
+                  </div>
+                )}
+                {queuedTasks.map((task) => (
+                  <TaskCenterRow
+                    key={task.id}
+                    task={task}
+                    onCancel={cancelTask}
+                    onRetry={retryTask}
+                    onOpenResource={openResource}
+                  />
+                ))}
+
+                {uploadingItems.length === 0 && activeList.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
+                    <CheckCircle2 size={24} className="mb-2 text-zinc-600" />
+                    <span className="text-xs">{t('topbar.noActiveTasks')}</span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {historyList.map((task) => (
+                  <TaskCenterRow
+                    key={task.id}
+                    task={task}
+                    onCancel={cancelTask}
+                    onRetry={retryTask}
+                    onOpenResource={openResource}
+                  />
+                ))}
+                {historyList.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
+                    <Inbox size={24} className="mb-2 text-zinc-600" />
+                    <span className="text-xs">{t('topbar.noItems')}</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>
@@ -530,7 +510,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         >
           <ListTodo size={18} />
         </IconButton>
-        {openPanel === 'taskCenter' && <TaskCenterPanel />}
+        {openPanel === 'taskCenter' && <TaskCenterPanel onClose={closeAll} />}
       </div>
 
       {/* Notifications — hidden on mobile (accessible via MobileProfilePage) */}
