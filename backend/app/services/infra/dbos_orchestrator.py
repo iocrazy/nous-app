@@ -123,9 +123,15 @@ def init_dbos() -> None:
     )
 
 
-def launch_dbos() -> None:
+def launch_dbos(consume_queues: bool = True) -> None:
     """Start the DBOS worker pool + run pending-workflow recovery. Call AFTER
     all `@DBOS.workflow` modules have been imported.
+
+    ``consume_queues=False`` (gateway role) launches DBOS so the process can
+    still ENQUEUE workflows (dispatch needs ``_sys_db``), but restricts it to
+    zero user queues via ``DBOS.listen_queues([])`` so it never dequeues /
+    executes them. The worker container consumes the queues. See
+    docs/superpowers/plans/2026-06-02-gateway-enqueue-only.md.
 
     Also runs a pre-launch sweep of stale internal scheduled workflows
     (see `_pre_launch_sweep_stale_scheduled`) to prevent recovery storms.
@@ -147,6 +153,12 @@ def launch_dbos() -> None:
     from dbos import DBOS
 
     _pre_launch_sweep_stale_scheduled()
+
+    if not consume_queues:
+        # Enqueue-only: service no user queues. Must precede launch(); the
+        # SDK raises if called after launch or more than once.
+        DBOS.listen_queues([])
+        logger.info("[dbos] enqueue-only mode — listening to no user queues")
 
     DBOS.launch()
     logger.info("[dbos] launched (worker pool started, recovery complete)")
