@@ -5,7 +5,7 @@ import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import { agentRunToTask, type AgentRunRow } from './agentRunPresentation';
 
 const SELECT =
-  'id,user_id,status,trigger,input_summary,output_summary,error_message,started_at,ended_at,created_at';
+  'id,user_id,status,trigger,input_summary,output_summary,error_message,started_at,ended_at,created_at,prompt_tokens,completion_tokens,cost_cents,model';
 const RECENT_LIMIT = 50;
 
 /**
