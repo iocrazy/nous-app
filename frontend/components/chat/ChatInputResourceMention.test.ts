@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { createResourceMentionExtension } from './ChatInputResourceMention';
@@ -11,8 +11,20 @@ const FAKE_ITEM: ResourceSearchResult = {
 };
 
 describe('ChatInputResourceMention', () => {
+  // Track the editor so we can tear down its prosemirror EditorView. Without
+  // destroy(), prosemirror-view's DOMObserver schedules a setTimeout flush that
+  // fires AFTER the test (and after jsdom tears down `document`) →
+  // "ReferenceError: document is not defined" unhandled error → vitest exits 1
+  // even though every test passed (flaked CI on #438 / #446).
+  let editor: Editor | null = null;
+
+  afterEach(() => {
+    editor?.destroy();
+    editor = null;
+  });
+
   it('inserts a resourceRef node when commands.insertResourceRef is called', () => {
-    const editor = new Editor({
+    editor = new Editor({
       extensions: [StarterKit, createResourceMentionExtension({ onPick: async () => null })],
       content: '',
     });
@@ -23,7 +35,7 @@ describe('ChatInputResourceMention', () => {
   });
 
   it('renderText returns @name for resourceRef chips', () => {
-    const editor = new Editor({
+    editor = new Editor({
       extensions: [StarterKit, createResourceMentionExtension({ onPick: async () => null })],
       content: '',
     });
