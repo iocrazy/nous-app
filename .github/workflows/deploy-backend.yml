@@ -270,6 +270,21 @@ jobs:
           key: ${{ secrets.NAS_SSH_KEY }}
           script: |
             DOCKER=/usr/local/bin/docker
+            COMPOSE=/usr/local/bin/docker-compose
+            CDIR=/volume1/docker/mediahub/docker
+            # Watchtower updates the GATEWAY (mediahub-app-backend) image but NOT
+            # the worker — the worker silently drifts behind on a stale image for
+            # days. Because DBOS recovery + partitioned-queue dequeue are gated by
+            # application_version, a gateway on a newer version than the worker
+            # ORPHANS every workflow it enqueues (the stale worker can't recover
+            # them; the gateway role doesn't consume queues). Symptom: tasks stuck
+            # "queued", 0 running, while the worker looks healthy. Fix: explicitly
+            # pull + recreate the worker from latest every deploy so gateway and
+            # worker always run the SAME application_version. (2026-06-02: soda
+            # download stuck ENQUEUED on executor=gateway after a 35h worker drift.)
+            echo "Pulling + recreating worker so it matches the gateway version..."
+            sudo $COMPOSE -f "$CDIR/docker-compose.yml" pull mediahub-worker 2>&1 | tail -3 || true
+            sudo $COMPOSE -f "$CDIR/docker-compose.yml" up -d --force-recreate mediahub-worker 2>&1 | tail -5 || true
             FAILED=""
             for C in mediahub-app-backend mediahub-app-worker; do
               for i in 1 2 3 4 5 6; do
