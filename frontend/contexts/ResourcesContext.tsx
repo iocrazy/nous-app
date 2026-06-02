@@ -140,8 +140,8 @@ export interface ResourcesContextType {
   setMultiSelectMode: React.Dispatch<React.SetStateAction<boolean>>;
 
   // ── View / UI state ──
-  viewMode: 'grid' | 'list';
-  setViewMode: React.Dispatch<React.SetStateAction<'grid' | 'list'>>;
+  viewMode: 'grid' | 'list' | 'justified';
+  setViewMode: React.Dispatch<React.SetStateAction<'grid' | 'list' | 'justified'>>;
   sortBy: SortBy;
   setSortBy: React.Dispatch<React.SetStateAction<SortBy>>;
   searchQuery: string;
@@ -258,7 +258,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [multiSelectMode, setMultiSelectMode] = useState(false);
 
   // ── View / UI state ──
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'justified'>('grid');
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

@@ -9,6 +9,7 @@ import {
   Trash2,
   LayoutGrid,
   LayoutList,
+  LayoutTemplate,
   ArrowUpDown,
   ChevronDown,
   ChevronLeft,
@@ -42,6 +43,21 @@ import { ResourceFetchUrlModal } from './ResourceFetchUrlModal';
 import { TempResourceActions } from './TempResourceActions';
 import { ttlBadgeText } from '../utils/tempTtl';
 import { tempTtlService } from '../services/tempTtlService';
+
+// ─── Justified layout helper ────────────────────────────
+// Derive a display aspect ratio (w/h) for a resource, clamped to a sane range.
+// Used by the Eagle-style "justified" view to size thumbnails by their real
+// proportions while keeping rows roughly equal-height.
+function aspectRatioOf(resource?: { resolution?: string | null; mime_type?: string | null }): number {
+  const res = resource?.resolution;
+  if (res) {
+    const m = res.match(/(\d+)\s*[x:×]\s*(\d+)/i);
+    if (m) { const w = +m[1], h = +m[2]; if (w > 0 && h > 0) return Math.min(3, Math.max(0.4, w / h)); }
+  }
+  const mt = resource?.mime_type || '';
+  if (mt.startsWith('video/')) return 16 / 9;
+  return 1; // square fallback for images/audio/other without resolution
+}
 
 // ─── Skeleton components ────────────────────────────────
 
@@ -528,13 +544,29 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               )}
             </div>
 
-            {/* View toggle */}
+            {/* View toggle — cycles grid → justified → list → grid */}
             <button
-              onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+              onClick={() =>
+                setViewMode(
+                  viewMode === 'grid' ? 'justified' : viewMode === 'justified' ? 'list' : 'grid',
+                )
+              }
               className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-              title={viewMode === 'grid' ? t('resources.listView') : t('resources.gridView')}
+              title={
+                viewMode === 'grid'
+                  ? t('resources.gridView')
+                  : viewMode === 'justified'
+                  ? t('resources.justifiedView')
+                  : t('resources.listView')
+              }
             >
-              {viewMode === 'grid' ? <LayoutList size={14} /> : <LayoutGrid size={14} />}
+              {viewMode === 'grid' ? (
+                <LayoutGrid size={14} />
+              ) : viewMode === 'justified' ? (
+                <LayoutTemplate size={14} />
+              ) : (
+                <LayoutList size={14} />
+              )}
             </button>
 
             {/* Upload button */}
@@ -704,7 +736,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
       {/* Content area */}
       <div
-        className="flex-1 overflow-y-auto p-3 md:p-6 relative"
+        className="flex-1 overflow-y-auto p-3 md:p-6 relative lib-scroll"
         style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onDragEnter={canUploadDrop ? onDragEnter : undefined}
         onDragOver={canUploadDrop ? onDragOver : undefined}
@@ -799,7 +831,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         {/* Resources / Recycle content */}
         {!isSharedView && (
           loading ? (
-            viewMode === 'grid' ? <SkeletonGrid /> : <SkeletonList />
+            viewMode === 'list' ? <SkeletonList /> : <SkeletonGrid />
           ) : (visibleFolders.length > 0 || sortedItems.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) ? (
             <div className="space-y-5">
               {/* Trashed folders in recycle bin */}
@@ -844,7 +876,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   {sortedItems.length > 0 && (
                     <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
-                  {viewMode === 'grid' ? (
+                  {viewMode === 'grid' || viewMode === 'justified' ? (
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
                       {visibleFolders.map((folder) => {
                         const folderNavigate = () => {
@@ -979,7 +1011,71 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                       </button>
                     </div>
                   )}
-                  {viewMode === 'grid' ? (
+                  {viewMode === 'justified' ? (
+                    <div className="flex flex-wrap gap-2 justified-grid">
+                      {sortedItems.map((item) => {
+                        const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
+                        const ar = aspectRatioOf(item.resource);
+                        return (
+                        <div
+                          key={item.id}
+                          style={{ flexGrow: ar, flexBasis: `${ar * 170}px` }}
+                          className="min-w-[140px] max-w-full"
+                          {...getItemTouchHandlers('file', item)}
+                        >
+                        <ResourceCard
+                          item={item}
+                          onClick={(e?: any) => {
+                            if (isMobileDevice) {
+                              onResourceDoubleClick(item);
+                              return;
+                            }
+                            onCardClick(`item:${item.id}`, e);
+                            if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) onResourceClick(item);
+                          }}
+                          onDoubleClick={() => onResourceDoubleClick(item)}
+                          viewMode="grid"
+                          aspectRatio={ar}
+                          isSelected={selectedResource?.id === item.id}
+                          showRestoreAction={isRecycleView}
+                          onTrash={isRecycleView ? undefined : handleTrash}
+                          onRestore={isRecycleView ? handleRestore : undefined}
+                          onPermanentDelete={isRecycleView ? handlePermanentDelete : undefined}
+                          onContextMenu={!isRecycleView ? (e) => onFileContextMenu(e, item) : undefined}
+                          renaming={renamingResourceId === item.id}
+                          renameValue={renamingResourceId === item.id ? renameValue : undefined}
+                          onRenameChange={onRenameChange}
+                          onRenameConfirm={onRenameResourceConfirm}
+                          onRenameCancel={onRenameResourceCancel}
+                          onStartRename={() => onStartRenameResource(item.id, item.resource?.filename ?? '')}
+                          selectable
+                          isChecked={selectedIds.has(`item:${item.id}`)}
+                          onToggleSelect={(e) => onToggleSelect(`item:${item.id}`, e)}
+                          forceShowCheckbox={multiSelectMode}
+                          selectedIds={selectedIds}
+                          compositeId={`item:${item.id}`}
+                          isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
+                        />
+                        {isTempContext && (
+                          <div className="flex items-center gap-2 px-2 py-1.5 bg-zinc-900/60 rounded-b-xl border-t border-zinc-800/50">
+                            {badge && (
+                              <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
+                                {badge}
+                              </span>
+                            )}
+                            <TempResourceActions
+                              resourceId={item.resource_id}
+                              scopeType={scopeType}
+                              scopeId={scopeId}
+                              onDone={isTempView ? reloadTemp : reloadResources}
+                            />
+                          </div>
+                        )}
+                        </div>
+                        );
+                      })}
+                    </div>
+                  ) : viewMode === 'grid' ? (
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
                       {sortedItems.map((item) => {
                         const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
