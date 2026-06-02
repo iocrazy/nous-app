@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   ArrowLeft, Loader2, FileQuestion, UserRound,
   Share2, Download, MoreHorizontal, ExternalLink, Copy, Trash2,
@@ -43,6 +43,31 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     handleRatingChange, handleNotesChange, handleNotesBlur,
     handleUpdate, handleDelete, handleBack, addToast,
   } = detail;
+
+  // iOS WebKit (standalone PWA): safe-area insets / viewport can stay unsettled
+  // until the first scroll, leaving the header tucked under the status bar until
+  // the user scrolls. Force the same reflow on mount so it's correct from the
+  // first paint instead of after a manual scroll.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const kick = () => {
+      const el = scrollRef.current;
+      if (el && el.scrollHeight > el.clientHeight) {
+        el.scrollTop = 1;
+        el.scrollTop = 0;
+      }
+      window.scrollTo(0, window.scrollY || 0);
+      window.dispatchEvent(new Event('resize'));
+    };
+    const raf = requestAnimationFrame(kick);
+    const t1 = window.setTimeout(kick, 80);
+    const t2 = window.setTimeout(kick, 250);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, []);
 
   // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {
@@ -296,7 +321,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             </div>
           </div>
         </div>
-        <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
+        <div ref={scrollRef} className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {/* Video Player — main area */}
           <div className="w-full aspect-video sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink bg-black">
             {isAudioType(video.media_type) ? (
