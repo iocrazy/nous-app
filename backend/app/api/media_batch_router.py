@@ -61,28 +61,29 @@ async def fetch_videos_batch(
         _batch_points_cost = points_result.get("points_cost", 0)
 
     if request.use_celery:
-        # PR-D7 phase 3: was Celery parse_batch_links_task. Now loops
-        # parse_workflow per URL via start_workflow_routed. Per-URL
-        # failures are absorbed (best-effort batch).
-        from app.services.infra.dbos_orchestrator import start_workflow_routed
-        from app.workflows.parse import parse_workflow
+        # PR-D7 phase 3: was Celery parse_batch_links_task. Now enqueues
+        # parse_workflow per URL on the per-user partitioned queue
+        # (enqueue_parse_for_user) so the user's "max simultaneous downloads"
+        # cap bounds how many run at once. Per-URL failures are absorbed
+        # (best-effort batch).
+        from uuid import uuid4
+
+        from app.workflows.parse import enqueue_parse_for_user
 
         wf_ids: list[str] = []
         for u in request.urls:
             try:
-                d = await start_workflow_routed(
-                    "parse",
-                    dbos_workflow_callable=parse_workflow,
-                    dbos_workflow_kwargs={
+                wid = enqueue_parse_for_user(
+                    user_id=auth.user_id,
+                    workflow_id=f"parse-{auth.user_id[:8]}-{uuid4().hex[:12]}",
+                    kwargs={
                         "url": u,
                         "user_id": auth.user_id,
                         "video_bool": request.video_bool,
                         "cover_bool": request.cover_bool,
                     },
                 )
-                wid = d.get("dbos_workflow_id")
-                if wid:
-                    wf_ids.append(wid)
+                wf_ids.append(wid)
             except Exception as exc:
                 logger.warning(f"[BatchFetch] dispatch failed for {u}: {exc}")
 

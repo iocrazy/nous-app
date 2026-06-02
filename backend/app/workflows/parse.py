@@ -27,10 +27,61 @@ shadow mode against a real ResourceVersion before the canonical flip.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, Optional
 
-from dbos import DBOS
+from dbos import DBOS, Queue
 from loguru import logger
+
+# ── Per-user batch concurrency cap ──────────────────────────────────
+# Partitioned by user_id → at most N parse workflows run per user at once;
+# the rest queue durably. `concurrency` is read by the DBOS poller each
+# cycle, so mutating it at runtime (set_parse_concurrency) takes effect live
+# — the Settings → General "max simultaneous downloads" value applies without
+# a restart. Defined at module level (imported pre-launch via
+# _dispatch_bundle) so the queue + its poller are registered BEFORE
+# DBOS.launch().
+MAX_PARSE_CONCURRENCY_DEFAULT = int(
+    os.environ.get("MAX_PARSE_CONCURRENCY_PER_USER", "3")
+)
+parse_user_queue = Queue(
+    "parse_user",
+    concurrency=MAX_PARSE_CONCURRENCY_DEFAULT,
+    partition_queue=True,
+)
+
+
+def set_parse_concurrency(n: int) -> None:
+    """Set the per-user parse queue concurrency live (clamped 1..20).
+
+    Called by the `config.parse_concurrency` lifecycle subscriber whenever a
+    user saves Settings → General. The DBOS poller re-reads `concurrency`
+    each cycle, so the new cap applies without a restart.
+    """
+    try:
+        n = max(1, min(int(n), 20))
+        parse_user_queue.concurrency = n
+        logger.info(f"[parse_queue] per-user concurrency set to {n}")
+    except Exception as e:
+        logger.warning(f"[parse_queue] set concurrency failed: {e}")
+
+
+def enqueue_parse_for_user(*, user_id: str, workflow_id: str, kwargs: dict) -> str:
+    """Enqueue parse_workflow on the per-user partitioned queue. Returns wf id.
+
+    Partition key = user_id → the queue enforces `concurrency` PER user, so a
+    big batch from one user can't starve another (or hammer the source site
+    past the cap). `parse_workflow` is a module-level @DBOS.workflow referenced
+    at call-time, so define order doesn't matter.
+    """
+    from dbos import SetEnqueueOptions, SetWorkflowID
+
+    with (
+        SetWorkflowID(workflow_id),
+        SetEnqueueOptions(queue_partition_key=str(user_id)),
+    ):
+        parse_user_queue.enqueue(parse_workflow, **kwargs)
+    return workflow_id
 
 
 def is_soda_platform(platform: str) -> bool:
