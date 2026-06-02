@@ -66,6 +66,7 @@ import { VersionManagerModal } from './VersionManagerModal';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
+import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioHero } from './AudioHero';
 import { fetchComments } from '../services/reviewService';
@@ -247,46 +248,6 @@ const FilePreview: React.FC<{
   );
 };
 
-// ─── InfoRow (matches ResourceInfoPanel) ────────────────
-
-const InfoRow = ({ label, value, children }: { label: string; value?: string | null | undefined; children?: React.ReactNode }) => {
-  if (!value && !children) return null;
-  return (
-    <div className="flex justify-between items-center py-1.5">
-      <span className="text-xs text-zinc-500">{label}</span>
-      {children || <span className="text-xs text-zinc-300 text-right">{value}</span>}
-    </div>
-  );
-};
-
-// ─── Star Rating ────────────────────────────────────────
-
-const StarRating: React.FC<{ value: number; onChange: (v: number) => void }> = ({ value, onChange }) => {
-  const [hover, setHover] = useState(0);
-
-  return (
-    <div className="flex items-center gap-0.5" onMouseLeave={() => setHover(0)}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          className="p-0 transition-colors"
-          onMouseEnter={() => setHover(star)}
-          onClick={() => onChange(star === value ? 0 : star)}
-        >
-          <Star
-            size={14}
-            className={
-              (hover || value) >= star
-                ? 'text-amber-400 fill-amber-400'
-                : 'text-zinc-600'
-            }
-          />
-        </button>
-      ))}
-    </div>
-  );
-};
-
 // ─── Main Component ──────────────────────────────────────
 
 interface ResourceDetailProps {
@@ -318,6 +279,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [authToken, setAuthToken] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Resizable inspector panel — drag handle is invisible until hover (no
+  // persistent divider line); shared with the download detail via DetailCardKit.
+  const { panelWidth, handleResizeStart } = useResizablePanel();
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const handler = () => setIsDesktop(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // File list panel state
   const [showFileList, setShowFileList] = useState(false);
@@ -1159,8 +1133,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
         </div>
 
-        {/* Right: Inspector panel (Eagle style) — full-width card on mobile, fixed sidebar on desktop */}
-        <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-zinc-800 flex flex-col shrink-0">
+        {/* Resize handle — desktop only, invisible until hover (no persistent divider) */}
+        <ResizeHandle onMouseDown={handleResizeStart} />
+
+        {/* Right: Inspector panel — full-width on mobile, resizable on desktop (no border-l divider) */}
+        <div
+          className="w-full md:w-auto border-t md:border-t-0 border-zinc-800 flex flex-col shrink-0"
+          style={isDesktop ? { width: panelWidth } : undefined}
+        >
           {/* Tab bar */}
           <div className="flex border-b border-zinc-800 shrink-0">
             <button
@@ -1171,8 +1151,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
               }`}
             >
-              <Eye size={16} className="md:hidden" />
-              Info
+              <Eye size={16} />
+              Overview
             </button>
             <button
               onClick={() => { setRightTab('review'); setViewAnnotations(undefined); }}
@@ -1182,7 +1162,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
               }`}
             >
-              <Pencil size={16} className="md:hidden" />
+              <Pencil size={16} />
               Review
             </button>
             {(isVideo || isAudio) && (
@@ -1195,7 +1175,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
                   }`}
                 >
-                  <FileText size={16} className="md:hidden" />
+                  <FileText size={16} />
                   Transcript
                   {getAIStatusIndicator(resource.transcript_status)}
                 </button>
@@ -1207,7 +1187,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
                   }`}
                 >
-                  <Sparkles size={16} className="md:hidden" />
+                  <Sparkles size={16} />
                   Analysis
                   {getAIStatusIndicator(resource.summary_status || resource.visual_analysis_status)}
                 </button>
@@ -1217,7 +1197,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
           {rightTab === 'info' ? (
           <div className="overflow-y-auto flex-1 bg-zinc-950 md:bg-transparent p-3">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-lg">
+          <div className={detailCardClass}>
           {/* Mobile: ID row with share + more (like Downloads) */}
           <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
             <span className="text-xs text-zinc-600 font-mono">ID: {String(resource.id)}</span>
@@ -1271,8 +1251,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               </div>
             </div>
           </div>
-          {/* Editable Filename */}
-          <div className="px-4 pt-1 md:pt-4">
+          {/* Header: type/resolution badges + ID (desktop) — download-detail style */}
+          <div className="hidden md:flex justify-between items-start gap-2 px-4 pt-4 mb-1 min-w-0">
+            <div className="flex gap-2 shrink-0 flex-wrap">
+              <DetailBadge>{resource.file_type || resource.mime_type?.split('/').pop() || 'File'}</DetailBadge>
+              {resource.resolution && (
+                <DetailBadge variant="accent">{resource.resolution.replace(/:/g, 'x')}</DetailBadge>
+              )}
+            </div>
+            <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {String(resource.id)}</span>
+          </div>
+
+          {/* Editable Filename — big title */}
+          <div className="px-4 pt-1 md:pt-0">
             {editingName ? (
               <input
                 ref={nameInputRef}
@@ -1283,7 +1274,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   if (e.key === 'Enter') commitName();
                   if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
                 }}
-                className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
+                className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold text-white focus:outline-none"
                 autoFocus
               />
             ) : (
@@ -1291,17 +1282,33 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 className="group flex items-start gap-1.5 cursor-pointer"
                 onClick={() => setEditingName(true)}
               >
-                <h4 className="text-sm font-medium text-white break-words leading-snug flex-1">{resource.filename}</h4>
-                <Pencil size={12} className="text-zinc-600 group-hover:text-zinc-400 mt-0.5 shrink-0 transition-colors" />
+                <h2 className="text-lg md:text-xl font-bold text-zinc-100 break-words leading-tight flex-1">{resource.filename}</h2>
+                <Pencil size={14} className="text-zinc-600 group-hover:text-zinc-400 mt-1 shrink-0 transition-colors" />
               </div>
             )}
           </div>
 
-          {/* Notes */}
+          {/* AI status — transcript / summary / analyze (video/audio); click a chip to open its tab */}
+          {(isVideo || isAudio) && (
+            <AiIntentBadges
+              className="px-4 mt-3"
+              transcriptStatus={resource.transcript_status}
+              summaryStatus={resource.summary_status}
+              analyzeStatus={resource.visual_analysis_status}
+              onTranscript={() => setRightTab('transcript')}
+              onSummary={() => setRightTab('analysis')}
+              onAnalyze={() => setRightTab('analysis')}
+            />
+          )}
+
+          {/* Rating — above notes (download-detail style) */}
+          <div className="px-4 mt-3 flex items-center gap-4">
+            <span className="text-xs text-zinc-500 uppercase tracking-wider">{t('resources.infoPanel.rating')}</span>
+            <RatingStars value={resource.rating ?? 0} onChange={handleRating} />
+          </div>
+
+          {/* Notes (no section title) */}
           <div className="px-4 mt-3">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
-              {t('resources.infoPanel.notes')}
-            </h4>
             <textarea
               value={notesValue}
               onChange={(e) => setNotesValue(e.target.value)}
@@ -1339,32 +1346,35 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             }}
           />
 
-          {/* Properties */}
-          <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
-              {t('resources.infoPanel.properties')}
-            </h4>
-            <div className="space-y-0">
-              <InfoRow label={t('resources.infoPanel.rating')}>
-                <StarRating value={resource.rating ?? 0} onChange={handleRating} />
-              </InfoRow>
-              {(isVideo || isAudio) && resource.duration_seconds != null && (
-                <InfoRow label={t('resources.infoPanel.duration')} value={formatDuration(resource.duration_seconds)} />
-              )}
-              <InfoRow label={t('resources.infoPanel.size')} value={formatFileSize(resource.file_size_bytes)} />
-              <InfoRow label={t('resources.infoPanel.type')} value={resource.file_type || resource.mime_type} />
-              {isVideo && resource.resolution && (
-                <InfoRow label={t('resources.infoPanel.resolution')} value={resource.resolution?.replace(/:/g, 'x')} />
-              )}
-              {resource.current_version > 1 && (
-                <InfoRow label={t('resources.infoPanel.version')} value={`v${resource.current_version}`} />
-              )}
-              <InfoRow
-                label={t('resources.infoPanel.source')}
-                value={resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}
-              />
-              <InfoRow label={t('resources.infoPanel.created')} value={formatDate(resource.created_at)} />
-              <InfoRow label={t('resources.infoPanel.modified')} value={formatDate(resource.updated_at)} />
+          {/* Properties — simple rows (Type omitted: already shown as badge above the title) */}
+          <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.size')}</span>
+              <span className="text-zinc-300">{formatFileSize(resource.file_size_bytes)}</span>
+            </div>
+            {(isVideo || isAudio) && resource.duration_seconds != null && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-500">{t('resources.infoPanel.duration')}</span>
+                <span className="text-zinc-300">{formatDuration(resource.duration_seconds)}</span>
+              </div>
+            )}
+            {resource.current_version > 1 && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-500">{t('resources.infoPanel.version')}</span>
+                <span className="text-zinc-300">v{resource.current_version}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.source')}</span>
+              <span className="text-zinc-300">{resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.created')}</span>
+              <span className="text-zinc-300">{formatDate(resource.created_at)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500">{t('resources.infoPanel.modified')}</span>
+              <span className="text-zinc-300">{formatDate(resource.updated_at)}</span>
             </div>
           </div>
 

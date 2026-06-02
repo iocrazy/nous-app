@@ -12,6 +12,7 @@ import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { getAuthHeaders, parseShareLink, fetchMediaByType } from '../services/parserService';
 import { CollectionPicker } from './CollectionPicker';
+import { detailCardClass, StatGrid, StatCard, RatingStars, AiIntentBadges, MetaTimeRow } from './detail/DetailCardKit';
 import { DownloadProgress, DownloadStatus as ProgressStatus, ProgressStyleType } from './DownloadProgress';
 import { useToast } from './Toast';
 import {
@@ -94,20 +95,6 @@ const getAIStatusClass = (status?: string): string => {
 // Pill styling for the AI Intent badge row — matches the 4-state mental
 // model (done / pending / failed / not requested) and gives a one-glance
 // view of the resource's AI workflow state without opening Task Center.
-const getAIIntentPillClass = (status?: string): string => {
-  switch (status) {
-    case 'completed':
-      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
-    case 'processing':
-    case 'pending':
-    case 'running':
-      return 'bg-amber-500/15 text-amber-300 border-amber-500/40 animate-pulse';
-    case 'failed':
-      return 'bg-red-500/15 text-red-300 border-red-500/40';
-    default:
-      return 'bg-zinc-800/40 text-zinc-500 border-zinc-700/50';
-  }
-};
 
 const getAIIntentSymbol = (status?: string): string => {
   switch (status) {
@@ -573,7 +560,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   })();
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all duration-300 shadow-lg flex flex-col max-w-full">
+    <div className={detailCardClass}>
       <div className={`flex ${hidePreview ? 'flex-col' : 'flex-col md:flex-row'} min-w-0`}>
         {/* Media Preview Section - Left Side */}
         {!hidePreview && <div className="md:w-2/5 bg-black relative h-64 md:h-auto md:max-h-[70vh] md:min-h-[400px] group flex-shrink-0 flex items-center justify-center">
@@ -793,43 +780,36 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           </h2>
 
           {/* Time & Duration Row */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 mb-5 text-sm text-zinc-400">
-             {!ugcStatsMissing && (
-             <div className="flex items-center gap-2">
-                <Clock size={14} className="text-zinc-500"/>
-                <span>Release Time: <span className="text-zinc-300 font-medium">{formatDateTime(data.published_at)}</span></span>
-             </div>
-             )}
-             <div className="flex items-center gap-2">
-                <Timer size={14} className="text-zinc-500"/>
-                <span>Duration: <span className="text-zinc-300 font-medium">{formatDuration(data.duration)}</span></span>
-                {data.resolution && (
-                  <span className="sm:hidden px-1.5 py-0.5 text-xs font-medium bg-indigo-900/30 text-indigo-400 rounded border border-indigo-900/50">
-                    {formatResolution(data.resolution)}
-                  </span>
-                )}
-             </div>
-          </div>
+          <MetaTimeRow
+            className="mb-5"
+            releaseTime={ugcStatsMissing ? null : formatDateTime(data.published_at)}
+            duration={formatDuration(data.duration)}
+            durationSuffix={data.resolution ? (
+              <span className="sm:hidden px-1.5 py-0.5 text-xs font-medium bg-indigo-900/30 text-indigo-400 rounded border border-indigo-900/50">
+                {formatResolution(data.resolution)}
+              </span>
+            ) : undefined}
+          />
 
           {/* Stats Grid — hidden for qishui UGC video ONLY when douyin
               enrichment didn't yield data (no published_at); showing 0/0/0/0
               would be misleading. Enriched UGC shows real Likes/Comments/
               Shares/Collects. */}
           {!ugcStatsMissing && (
-          <div className={`grid ${isAudio ? 'grid-cols-3' : 'grid-cols-4'} gap-2 sm:gap-4 mb-6`}>
+          <StatGrid cols={isAudio ? 3 : 4} className="mb-6">
             {!isAudio && (
-            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.like_count)}</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Likes</span>
-            </div>
+              <StatCard
+                icon={<Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500 mb-1" />}
+                value={formatNumber(data.like_count)}
+                label="Likes"
+              />
             )}
-            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.comment_count)}</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Comments</span>
-            </div>
-            <button
+            <StatCard
+              icon={<MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 mb-1" />}
+              value={formatNumber(data.comment_count)}
+              label="Comments"
+            />
+            <StatCard
               onClick={() => {
                 if (data.original_url) {
                   navigator.clipboard.writeText(data.original_url);
@@ -837,43 +817,28 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   setTimeout(() => setCopiedShare(false), 2000);
                 }
               }}
-              className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all cursor-pointer group"
               title="Click to copy link"
-            >
-              {copiedShare ? (
+              icon={copiedShare ? (
                 <Check className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 mb-1" />
               ) : (
                 <Share2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500 mb-1 group-hover:scale-110 transition-transform" />
               )}
-              <span className="text-xs sm:text-sm font-bold text-white">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{copiedShare ? 'Link' : 'Shares'}</span>
-            </button>
-            <div className="flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <Bookmark className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />
-              <span className="text-xs sm:text-sm font-bold text-white">{formatNumber(data.favorite_count)}</span>
-              <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">Collects</span>
-            </div>
-          </div>
+              value={copiedShare ? 'Copied!' : formatNumber(data.share_count)}
+              label={copiedShare ? 'Link' : 'Shares'}
+            />
+            <StatCard
+              icon={<Bookmark className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 mb-1" />}
+              value={formatNumber(data.favorite_count)}
+              label="Collects"
+            />
+          </StatGrid>
           )}
 
           {/* Rating & Notes (from resources table) */}
           {onRatingChange && (
             <div className="mb-4 flex items-center gap-4">
               <span className="text-xs text-zinc-500 uppercase tracking-wider">Rating</span>
-              <div className="flex items-center gap-0.5">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    className="p-0 transition-colors"
-                    onClick={() => onRatingChange(star === resourceRating ? 0 : star)}
-                  >
-                    <Star
-                      size={16}
-                      className={(resourceRating || 0) >= star ? 'text-amber-400 fill-amber-400' : 'text-zinc-600'}
-                    />
-                  </button>
-                ))}
-              </div>
+              <RatingStars value={resourceRating || 0} onChange={onRatingChange} />
             </div>
           )}
           {onNotesChange && (
@@ -923,26 +888,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               (which already labels Transcript / Summary / Analyze).
               4 colour states encode lifecycle: completed / running /
               failed / not requested. */}
-          <div className="mb-4 flex items-center gap-1.5 justify-end">
-            <span
-              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.transcript_status)}`}
-              title={`Transcript — ${data.transcript_status || 'not requested'}`}
-            >
-              <FileText size={11} />
-            </span>
-            <span
-              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.summary_status)}`}
-              title={`Summary — ${data.summary_status || 'not requested'}`}
-            >
-              <Sparkles size={11} />
-            </span>
-            <span
-              className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${getAIIntentPillClass(data.visual_analysis_status)}`}
-              title={`Analyze — ${data.visual_analysis_status || 'not requested'}`}
-            >
-              <Eye size={11} />
-            </span>
-          </div>
+          <AiIntentBadges
+            className="mb-4"
+            transcriptStatus={data.transcript_status}
+            summaryStatus={data.summary_status}
+            analyzeStatus={data.visual_analysis_status}
+          />
 
           {/* Action Buttons Row */}
           <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-5">
