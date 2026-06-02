@@ -247,14 +247,16 @@ class Utils:
         """
         获取下载基础路径
 
-        优先级: frontend_config.yml > .env (DOWNLOAD_PATH)
+        优先级: frontend_config.yml > .env (DOWNLOAD_PATH) > /app/downloads 兜底
 
         Returns:
             str: 下载基础路径
 
         Raises:
-            ValueError: 未配置下载路径时抛出
+            ValueError: 未配置下载路径且无可写兜底目录时抛出
         """
+        configured: str | None = None
+
         # 1. 优先从 frontend_config.yml 读取
         if SERVER_CONFIG_FILE.exists():
             try:
@@ -262,16 +264,48 @@ class Utils:
                     config = yaml.safe_load(f) or {}
                     download_path = config.get("default_download_path")
                     if download_path and download_path.strip():
-                        return download_path.strip()
+                        configured = download_path.strip()
             except Exception as e:
                 logger.warning(f"读取 frontend_config.yml 失败: {e}")
 
         # 2. 后备：从 .env 读取 DOWNLOAD_PATH
-        if settings.DOWNLOAD_PATH and settings.DOWNLOAD_PATH.strip():
-            return settings.DOWNLOAD_PATH.strip()
+        if not configured and settings.DOWNLOAD_PATH and settings.DOWNLOAD_PATH.strip():
+            configured = settings.DOWNLOAD_PATH.strip()
 
-        # 3. 都没配置，抛出错误
+        # 3. 健壮性兜底：一个配置好的路径在本容器里不一定可写。生产是
+        #    gateway/worker 双容器，曾出现 gateway 跑着旧配置
+        #    (default_download_path=/home/user/downloads/douyin，容器内既不存在
+        #    也不可写) → 下载 PermissionError。``/app/downloads`` 是两个容器都
+        #    rw 挂载的标准下载目录；配置路径不可写时回退到它，避免因单容器配置
+        #    漂移而整批下载失败。
+        if configured and cls._base_path_writable(configured):
+            return configured
+
+        fallback = "/app/downloads"
+        if os.path.isdir(fallback) and os.access(fallback, os.W_OK):
+            if configured:
+                logger.warning(
+                    f"download base {configured!r} 不可写，回退到 {fallback}"
+                )
+            return fallback
+
+        if configured:
+            # 最后退路：返回配置值，让下游带清晰路径报错（而不是静默吞）。
+            return configured
+
         raise ValueError("未配置下载路径，请在设置中配置 Default Download Path")
+
+    @staticmethod
+    def _base_path_writable(path: str) -> bool:
+        """``path`` 本身可写，或其最近的已存在祖先目录可写（目录按需创建）。"""
+        p = os.path.abspath(path)
+        while True:
+            if os.path.isdir(p):
+                return os.access(p, os.W_OK)
+            parent = os.path.dirname(p)
+            if parent == p:
+                return False
+            p = parent
 
     @classmethod
     def get_relative_month_folder(cls) -> str:
