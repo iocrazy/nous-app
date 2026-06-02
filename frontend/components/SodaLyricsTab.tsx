@@ -135,7 +135,9 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card' }: SodaLy
   // gradient, active line bold + themed, others dimmed. The overlay owns scroll.
   if (isBare) {
     return (
-      <div className="py-[35vh] space-y-6">
+      // Small top gap (lyrics start right under the header — no big blank), with
+      // generous bottom space so the last lines can still scroll up to center.
+      <div className="pt-4 pb-[55vh] space-y-6">
         {lines.map((line, index) => {
           const isActive = index === activeIndex;
           const themedStyle = theme
