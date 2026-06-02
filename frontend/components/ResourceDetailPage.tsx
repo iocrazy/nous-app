@@ -787,9 +787,43 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
       {/* Top bar — [PanelLeft | ← Back] | [◀ prev | filename (2/5) | next ▶] | [Download | ⋯] */}
-      <div className="hidden md:flex items-center justify-between px-4 py-2.5 border-b border-zinc-800 shrink-0">
-        {/* Left: panel toggle + back */}
-        <div className="flex items-center gap-1.5 md:min-w-[140px]">
+      <div className="detail-header-glow hidden md:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
+        {/* Glowing accent line that dips to cradle the round Back button */}
+        <svg
+          className="detail-header-glow__line"
+          preserveAspectRatio="xMinYMid meet"
+          viewBox="0 0 1100 30"
+          aria-hidden="true"
+        >
+          <defs>
+            <linearGradient
+              id="detailGlowGrad"
+              x1="0"
+              y1="0"
+              x2="1100"
+              y2="0"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0" stopColor="rgba(139,92,246,0)" />
+              <stop offset="0.034" stopColor="rgba(139,92,246,1)" />
+              <stop offset="0.155" stopColor="rgba(139,92,246,0.55)" />
+              <stop offset="0.273" stopColor="rgba(139,92,246,0.25)" />
+              <stop offset="0.382" stopColor="rgba(139,92,246,0)" />
+            </linearGradient>
+          </defs>
+          <path d="M0 5.2 H6 C22 5.2 24 19.2 37 19.2 C50 19.2 52 5.2 68 5.2 L420 6.6 L68 6.8 C52 6.8 50 20.8 37 20.8 C24 20.8 22 6.8 6 6.8 H0 Z" />
+        </svg>
+
+        {/* Left: back + panel toggle */}
+        <div className="flex items-center gap-2 md:min-w-[140px]">
+          <button
+            onClick={handleBack}
+            title={t('common.back')}
+            aria-label="Back"
+            className="detail-back-btn"
+          >
+            <ArrowLeft size={18} />
+          </button>
           <button
             onClick={() => setShowFileList(!showFileList)}
             className={`hidden md:block p-1.5 rounded-lg transition-colors ${
@@ -798,13 +832,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             title={t('resources.fileListPanel')}
           >
             <PanelLeft size={16} />
-          </button>
-          <button
-            onClick={handleBack}
-            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors p-1.5 md:p-0"
-          >
-            <ArrowLeft size={18} />
-            <span className="hidden md:inline">{t('common.back')}</span>
           </button>
         </div>
 
@@ -1188,8 +1215,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
 
           {rightTab === 'info' ? (
-          <div className="overflow-y-auto flex-1 bg-zinc-950 md:bg-transparent p-3 md:p-0">
-          <div className="bg-zinc-900/80 border border-zinc-800/60 rounded-xl overflow-hidden md:bg-transparent md:border-0 md:rounded-none">
+          <div className="overflow-y-auto flex-1 bg-zinc-950 md:bg-transparent p-3">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-lg">
           {/* Mobile: ID row with share + more (like Downloads) */}
           <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
             <span className="text-xs text-zinc-600 font-mono">ID: {String(resource.id)}</span>
