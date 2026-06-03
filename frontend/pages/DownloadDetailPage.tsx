@@ -55,11 +55,16 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   useEffect(() => {
     const kick = () => {
       const el = scrollRef.current;
-      if (el && el.scrollHeight > el.clientHeight) {
+      if (el) {
+        // Reset the inner scroller to the top (it can carry over a previous
+        // page's scrollTop) and nudge it to trigger an iOS reflow.
         el.scrollTop = 1;
         el.scrollTop = 0;
       }
-      window.scrollTo(0, window.scrollY || 0);
+      // Reset the document to the top too — navigating from a scrolled feed
+      // leaves window.scrollY non-zero; scrolling back to 0 also kicks the
+      // iOS safe-area/viewport recompute.
+      window.scrollTo(0, 0);
       window.dispatchEvent(new Event('resize'));
     };
     const raf = requestAnimationFrame(kick);
