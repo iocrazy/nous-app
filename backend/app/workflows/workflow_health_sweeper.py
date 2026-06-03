@@ -212,11 +212,22 @@ def _classify_in_python(row: Dict[str, Any]) -> str:
         return "HEALTHY"
 
     elapsed = (now - started).total_seconds()
-    heartbeat_age = (now - heartbeat).total_seconds() if heartbeat else elapsed
     progress_age = (now - updated).total_seconds() if updated else elapsed
 
-    if heartbeat_age > policy["heartbeat_stale"]:
-        return "LOST"
+    if heartbeat is not None:
+        # We have a heartbeat signal — stale heartbeat = worker died.
+        heartbeat_age = (now - heartbeat).total_seconds()
+        if heartbeat_age > policy["heartbeat_stale"]:
+            return "LOST"
+    else:
+        # No heartbeat to be "stale". Download/soda workflows write NO
+        # heartbeat (heartbeat_at always NULL), so the heartbeat signal is
+        # meaningless for them — using it would mark EVERY download past
+        # heartbeat_stale (600s) as LOST at 10 min of normal runtime (G1).
+        # Fall back to the absolute `hard` ceiling on elapsed: only LOST
+        # once the workflow has run past its hard maximum.
+        if elapsed > policy["hard"]:
+            return "LOST"
 
     if user_max_min is not None and elapsed > user_max_min * 60:
         return "USER_TIMEOUT"
