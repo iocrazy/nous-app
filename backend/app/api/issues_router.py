@@ -22,6 +22,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
+from dbos import DBOS, SetWorkflowID
+
 from app.core.deps import AuthDep
 from app.repositories.issue_repository import issue_repository
 from app.schemas.issue import (
@@ -31,8 +33,43 @@ from app.schemas.issue import (
     IssueStatusTransition,
     IssueUpdate,
 )
+from app.workflows.issue_lifecycle import execute_issue
 
 router = APIRouter(prefix="/issues", tags=["Issues"])
+
+
+def _dispatch_execute_issue(issue_id: int, wf_id: str) -> None:
+    """Dispatch the execute_issue DBOS workflow under a pinned workflow_id.
+
+    Client-aware (gateway→DBOSClient prep, currently DORMANT): when the gateway
+    has constructed a DBOSClient, enqueue through it into the `dbos_dispatch`
+    queue so the worker process claims+runs the workflow. Otherwise (client is
+    None — today's reality) fall back to the in-process
+    `SetWorkflowID + DBOS.start_workflow` path. Zero behavior change while the
+    client stays None.
+    """
+    from app.services.infra.dbos_orchestrator import (
+        _resolve_pinned_app_version,
+        get_dbos_client,
+    )
+
+    client = get_dbos_client()
+    if client is not None:
+        from dbos import EnqueueOptions
+
+        opts: dict = {
+            "workflow_name": "execute_issue",
+            "queue_name": "dbos_dispatch",
+            "workflow_id": wf_id,
+        }
+        pinned = _resolve_pinned_app_version()
+        if pinned:
+            opts["app_version"] = pinned
+        client.enqueue(EnqueueOptions(**opts), issue_id)
+        return
+
+    with SetWorkflowID(wf_id):
+        DBOS.start_workflow(execute_issue, issue_id)
 
 
 def _normalise_uuid_strs(row: dict) -> dict:
@@ -188,18 +225,13 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
 
     import uuid as _uuid
 
-    from dbos import DBOS, SetWorkflowID
-
-    from app.workflows.issue_lifecycle import execute_issue
-
     # Unique per dispatch so an issue can be re-dispatched after a prior run
     # finished or errored — a fixed `issue-{id}` id would dedup in DBOS → the
     # re-dispatch becomes a silent no-op. The atomic_checkout CAS lock
     # (execution_locked_at) still prevents concurrent double-runs.
     workflow_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
     try:
-        with SetWorkflowID(workflow_id):
-            DBOS.start_workflow(execute_issue, issue_id)
+        _dispatch_execute_issue(issue_id, workflow_id)
     except Exception as e:
         # Duplicate workflow_id is a soft success — DBOS already has it.
         if (
