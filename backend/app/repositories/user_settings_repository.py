@@ -85,11 +85,11 @@ class UserSettingsRepository:
         """
         创建或更新用户设置
 
-        ``settings_json`` is auto-merged here — the single write path — so no
-        caller can wholesale-replace the shared blob and clobber keys it did
-        not intend to touch (see ``merge_settings_json``). A caller passing
-        only its own top-level keys (e.g. ``{"settings_json": {"parse_mode":
-        ...}}``) leaves every other key, including ``ai_settings``, intact.
+        ``settings_json`` is routed through ``patch_settings_json`` — the single
+        merge path — so no caller can wholesale-replace the shared blob and
+        clobber keys it did not intend to touch. Plain columns (download_path…)
+        are upserted as-is; PostgREST only touches the columns in the payload,
+        so a ``download_path`` write never disturbs ``settings_json``.
 
         Args:
             user_id: 用户 ID
@@ -99,28 +99,30 @@ class UserSettingsRepository:
             更新后的设置数据
         """
         try:
-            data = {"user_id": user_id, **settings}
+            rest = dict(settings)
+            settings_json = rest.pop("settings_json", None)
 
-            if data.get("settings_json") is not None:
-                # Merge against the latest COMMITTED value (uncached read), then
-                # write the merged blob. Reading fresh — not the 30s cache —
-                # narrows the read-modify-write window for back-to-back saves.
-                current = await self._load_user_settings(user_id)
-                existing_json = (current or {}).get("settings_json") or {}
-                data["settings_json"] = merge_settings_json(
-                    existing_json, data["settings_json"]
-                )
+            result_row: Optional[Dict[str, Any]] = None
 
-            table = await self._get_table()
-            result = await table.upsert(data, on_conflict="user_id").execute()
+            # Plain columns (everything except settings_json) — PostgREST upsert
+            # updates only the named columns on conflict, leaving settings_json
+            # untouched.
+            if rest:
+                data = {"user_id": user_id, **rest}
+                table = await self._get_table()
+                result = await table.upsert(data, on_conflict="user_id").execute()
+                if result.data and len(result.data) > 0:
+                    result_row = result.data[0]
 
-            # Invalidate the cached copy so subsequent reads see the write.
+            # settings_json — atomic top-level merge (race-free).
+            if settings_json is not None:
+                merged = await self.patch_settings_json(user_id, settings_json)
+                result_row = merged or result_row
+
             user_settings_cache.invalidate(user_id)
-
-            if result.data and len(result.data) > 0:
+            if result_row is not None:
                 logger.info(f"用户设置已保存: user_id={user_id}")
-                return result.data[0]
-            return None
+            return result_row
         except Exception as e:
             logger.error(f"保存用户设置失败: {e}")
             return None
@@ -128,14 +130,101 @@ class UserSettingsRepository:
     async def patch_settings_json(
         self, user_id: str, partial: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Merge ``partial`` top-level keys into ``settings_json``.
+        """Merge ``partial`` top-level keys into ``settings_json``, atomically.
 
         THE canonical way to write ``user_settings.settings_json``. Pass only
         the keys you own (``{"parse_mode": ...}``, ``{"ai_settings": {...}}``);
-        the rest of the blob is preserved by ``upsert``'s merge. Prefer this
-        over building the whole blob and calling ``upsert`` directly.
+        every other key is preserved.
+
+        Uses a single ``INSERT … ON CONFLICT DO UPDATE SET settings_json =
+        existing || patch`` so the merge happens inside one statement under a
+        row lock — concurrent saves serialize and both patches survive, with no
+        read-modify-write window. Falls back to the (non-atomic) PostgREST
+        read-merge-write only when the SQLAlchemy engine isn't configured.
         """
-        return await self.upsert(user_id, {"settings_json": partial})
+        partial = partial or {}
+        from app.db import engine as db_engine
+
+        if db_engine.is_configured():
+            try:
+                row = await self._atomic_merge_settings_json(user_id, partial)
+                user_settings_cache.invalidate(user_id)
+                if row is not None:
+                    logger.info(f"用户设置已保存 (atomic merge): user_id={user_id}")
+                    return row
+            except Exception as e:
+                # Atomic path failed (transient DB error, role issue). Fall back
+                # to the legacy read-merge-write rather than dropping the save.
+                logger.error(
+                    f"atomic settings_json merge failed, falling back to RMW: "
+                    f"user_id={user_id}, error={e}"
+                )
+
+        row = await self._rmw_merge_settings_json(user_id, partial)
+        user_settings_cache.invalidate(user_id)
+        return row
+
+    async def _atomic_merge_settings_json(
+        self, user_id: str, patch: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Single-statement jsonb merge: ``settings_json = existing || patch``.
+
+        Race-free: the ``||`` runs inside the ``ON CONFLICT DO UPDATE`` against
+        the locked, committed row. ``CAST(:patch AS jsonb)`` (not ``:patch::jsonb``)
+        — SQLAlchemy's text() bind parser eats a colon from ``::``.
+        """
+        import json
+
+        from app.db import engine as db_engine
+
+        sql = (
+            "INSERT INTO public.user_settings (user_id, settings_json) "
+            "VALUES (:uid, CAST(:patch AS jsonb)) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "settings_json = COALESCE(public.user_settings.settings_json, '{}'::jsonb) "
+            "|| CAST(:patch AS jsonb), "
+            "updated_at = NOW() "
+            "RETURNING *"
+        )
+        row = await db_engine.execute_returning_one(
+            sql, {"uid": user_id, "patch": json.dumps(patch)}
+        )
+        return self._normalize_row(row)
+
+    async def _rmw_merge_settings_json(
+        self, user_id: str, patch: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Legacy non-atomic merge via PostgREST (read fresh → merge → upsert).
+
+        Used only when the SQLAlchemy engine isn't configured (migration window
+        / local without Supavisor). Reads uncached to narrow the race window.
+        """
+        current = await self._load_user_settings(user_id)
+        existing_json = (current or {}).get("settings_json") or {}
+        merged = merge_settings_json(existing_json, patch)
+
+        table = await self._get_table()
+        result = await table.upsert(
+            {"user_id": user_id, "settings_json": merged}, on_conflict="user_id"
+        ).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        return None
+
+    @staticmethod
+    def _normalize_row(
+        row: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """asyncpg returns ``jsonb`` as a JSON string — decode settings_json back
+        to a dict so callers get the same shape PostgREST gives them."""
+        if row and isinstance(row.get("settings_json"), str):
+            import json
+
+            try:
+                return {**row, "settings_json": json.loads(row["settings_json"])}
+            except (ValueError, TypeError):
+                pass
+        return row
 
     async def delete(self, user_id: str) -> bool:
         """
