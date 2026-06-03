@@ -150,13 +150,25 @@ def signal_approval_decision(
     already finished — DBOS drops messages destined for terminal
     workflows.
     """
-    from dbos import DBOS
     from loguru import logger
+
+    from app.services.infra.dbos_orchestrator import get_dbos_client
 
     topic = _topic_for(approval_id)
     payload: dict[str, Any] = {"approved": approved, "note": note}
     try:
-        DBOS.send(workflow_id, payload, topic=topic)
+        # Gateway-client prep (DORMANT): when the gateway DBOSClient
+        # handle is set, the send goes through the client; otherwise the
+        # in-process `DBOS.send` path is used (unchanged). The client is
+        # None everywhere today, so the existing branch is always taken
+        # — ZERO behavior change.
+        client = get_dbos_client()
+        if client is not None:
+            client.send(workflow_id, payload, topic=topic)
+        else:
+            from dbos import DBOS
+
+            DBOS.send(workflow_id, payload, topic=topic)
         return True
     except Exception as exc:
         # Most common: workflow_id doesn't exist (chat path — no
