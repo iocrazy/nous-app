@@ -372,7 +372,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   }, [showNewDropdown]);
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col">
+    <div className="flex-1 min-w-0 flex flex-col md:h-full md:min-h-0">
       {/* Mobile breadcrumb navigation — hidden at root, shown inside folders */}
       {(selectedFolderId || isRecycleView) && (
         <div className="md:hidden px-3 py-2.5 min-h-[40px] flex items-center gap-2">
@@ -736,7 +736,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
       {/* Content area */}
       <div
-        className="flex-1 overflow-y-auto p-3 md:p-6 relative lib-scroll"
+        className="flex-1 md:min-h-0 overflow-y-auto p-3 md:p-6 relative lib-scroll"
         style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onDragEnter={canUploadDrop ? onDragEnter : undefined}
         onDragOver={canUploadDrop ? onDragOver : undefined}
