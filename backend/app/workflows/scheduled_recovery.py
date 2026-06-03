@@ -31,8 +31,9 @@ from app.workflows.workflow_health_sweeper import _dbos_claims_workflow  # noqa:
 
 
 @DBOS.step()
-async def retry_failed_downloads_step() -> dict[str, Any]:
-    """Find FAILED downloads, reset to PENDING, re-dispatch download task.
+async def collect_retryable_downloads_step() -> dict[str, Any]:
+    """Find FAILED downloads, reset the retryable ones to PENDING, and return
+    dispatch specs. DB reads/writes only — NO workflow dispatch here.
 
     Owner resolution: parsed_media has no user_id column (dropped in scope-1),
     so the download owner is read from resources.creator_id via
@@ -40,67 +41,89 @@ async def retry_failed_downloads_step() -> dict[str, Any]:
     genuine orphan (legacy/system download) and is skipped — re-dispatching
     without an owner would spam user_logs/user_settings with 23502/22P02.
 
-    PR-D7 phase 2: dispatch goes through start_workflow_routed so the
-    routing table picks DBOS / celery / shadow per task_type."""
+    NOTE: dispatch (start_workflow_routed → DBOS.start_workflow) MUST NOT
+    happen inside a @DBOS.step — DBOS asserts (bare `assert workflow_id is
+    not None` → empty AssertionError) when a child workflow is started from a
+    step. The workflow body does the dispatch instead (see
+    retry_failed_downloads_workflow), mirroring download.py / parse.py.
+    """
     from app.core.enums import DownloadStatus
     from app.repositories.media_repository import get_media_repository
-    from app.services.infra.dbos_orchestrator import start_workflow_routed
-    from app.workflows.download import download_workflow
 
     repo = get_media_repository()
     failed = await repo.get_pending_downloads(status=DownloadStatus.FAILED, limit=50)
     if not failed:
-        return {
-            "status": "success",
-            "total_failed": 0,
-            "retried": 0,
-            "skipped_orphan": 0,
-        }
+        return {"specs": [], "total_failed": 0, "skipped_orphan": 0}
 
     # Resolve media_id -> owner (resources.creator_id) in one batch.
     media_ids = [v.get("id") for v in failed if v.get("id") is not None]
     owner_map = await repo.get_media_owner_map(media_ids)
 
-    retried = 0
+    specs: list[dict[str, Any]] = []
     skipped_orphan = 0
     for video in failed:
         platform_id = video.get("platform_id")
-        media_type = video.get("media_type", 0)
         user_id = owner_map.get(str(video.get("id")))
-
         if not user_id:
             skipped_orphan += 1
             continue
+        # Reset to PENDING now (durable, in-step). If the dispatch in the
+        # workflow body fails, the row stays PENDING and is re-collected next
+        # hour — idempotent.
+        await repo.update(
+            platform_id,
+            {
+                "video_download_status": DownloadStatus.PENDING.value,
+                "error_message": None,
+            },
+        )
+        specs.append(
+            {
+                "platform_id": platform_id,
+                "user_id": user_id,
+                "media_type": int(video.get("media_type", 0)),
+            }
+        )
 
+    return {
+        "specs": specs,
+        "total_failed": len(failed),
+        "skipped_orphan": skipped_orphan,
+    }
+
+
+async def _dispatch_download_retries(specs: list[dict[str, Any]]) -> int:
+    """Dispatch each collected retry spec as a download workflow.
+
+    Plain async helper called from the workflow body — NOT a @DBOS.step,
+    because start_workflow_routed → DBOS.start_workflow asserts when invoked
+    from within a step (see collect_retryable_downloads_step)."""
+    if not specs:
+        return 0
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.workflows.download import download_workflow
+
+    retried = 0
+    for spec in specs:
+        platform_id = spec.get("platform_id")
         try:
-            await repo.update(
-                platform_id,
-                {
-                    "video_download_status": DownloadStatus.PENDING.value,
-                    "error_message": None,
-                },
-            )
             await start_workflow_routed(
                 "download",
                 dbos_workflow_callable=download_workflow,
                 dbos_workflow_kwargs={
                     "platform_id": platform_id,
-                    "user_id": user_id,
+                    "user_id": spec.get("user_id"),
                     "download_video": True,
                     "download_cover": True,
-                    "media_type": int(media_type),
+                    "media_type": int(spec.get("media_type", 0)),
                 },
             )
             retried += 1
         except Exception as e:
-            logger.warning(f"[retry_failed_downloads] {platform_id}: {e}")
-
-    return {
-        "status": "success",
-        "total_failed": len(failed),
-        "retried": retried,
-        "skipped_orphan": skipped_orphan,
-    }
+            # repr() so PostgREST/DBOS exceptions with empty __str__ still
+            # surface their type instead of logging a blank reason.
+            logger.warning(f"[retry_failed_downloads] {platform_id}: {e!r}")
+    return retried
 
 
 @DBOS.step()
@@ -302,8 +325,18 @@ async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
 async def retry_failed_downloads_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    result = await retry_failed_downloads_step()
-    if result.get("retried") or result.get("skipped_orphan"):
+    # Step does DB work (collect + reset to pending); dispatch happens here in
+    # the workflow body, NOT in the step (DBOS asserts on start_workflow from
+    # within a step).
+    collected = await collect_retryable_downloads_step()
+    retried = await _dispatch_download_retries(collected.get("specs", []))
+    result = {
+        "status": "success",
+        "total_failed": collected.get("total_failed", 0),
+        "retried": retried,
+        "skipped_orphan": collected.get("skipped_orphan", 0),
+    }
+    if retried or collected.get("skipped_orphan"):
         logger.info(f"[retry_failed_downloads] {result}")
 
 
