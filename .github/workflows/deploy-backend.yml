@@ -309,6 +309,33 @@ jobs:
             fi
             echo "✅ backend + worker both running"
 
+            # ── Verify worker IMAGE == gateway IMAGE (application_version sync) ──
+            # "running" is NOT enough. 2026-06-03: ensure-worker reported ✅ but
+            # the worker sat ~46 min on the PREVIOUS image while the gateway was
+            # current — DBOS dequeue is gated by application_version, so 167
+            # downloads stalled "queued / 0 running" until Watchtower's slow poll
+            # finally synced the worker. The recreate above can no-op against a
+            # stale cached :latest or lose a race with Watchtower. So compare the
+            # two containers' resolved image IDs and re-sync until they match.
+            for i in 1 2 3 4 5; do
+              GW_IMG=$(sudo $DOCKER inspect -f '{{.Image}}' mediahub-app-backend 2>/dev/null || echo gw)
+              WK_IMG=$(sudo $DOCKER inspect -f '{{.Image}}' mediahub-app-worker 2>/dev/null || echo wk)
+              if [ "$GW_IMG" = "$WK_IMG" ]; then
+                echo "✅ worker image matches gateway — application_version in sync ($GW_IMG)"
+                break
+              fi
+              echo "⚠️ worker/gateway image skew (gw=$GW_IMG wk=$WK_IMG) — re-syncing worker (try $i/5)"
+              sudo $COMPOSE -f "$CDIR/docker-compose.yml" pull mediahub-worker 2>&1 | tail -2 || true
+              sudo $COMPOSE -f "$CDIR/docker-compose.yml" up -d --force-recreate mediahub-worker 2>&1 | tail -3 || true
+              sleep 15
+            done
+            GW_IMG=$(sudo $DOCKER inspect -f '{{.Image}}' mediahub-app-backend 2>/dev/null || echo gw)
+            WK_IMG=$(sudo $DOCKER inspect -f '{{.Image}}' mediahub-app-worker 2>/dev/null || echo wk)
+            if [ "$GW_IMG" != "$WK_IMG" ]; then
+              echo "::error::worker still on a different image than gateway after 5 re-syncs (gw=$GW_IMG wk=$WK_IMG). Downloads WILL stall on version skew. Manual fix: cd $CDIR && sudo $COMPOSE pull mediahub-worker && sudo $COMPOSE up -d --force-recreate mediahub-worker"
+              exit 1
+            fi
+
       - name: Summary
         run: |
           echo "### ✅ Image pushed to ACR" >> $GITHUB_STEP_SUMMARY
