@@ -6,6 +6,7 @@ import {
   cancelWorkflow,
   restartWorkflow,
 } from '../services/dbosWorkflowService';
+import { paginateAll } from '../utils/paginate';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -310,23 +311,44 @@ function getWsBaseUrl(): string {
   return base.replace(/^http/, 'ws');
 }
 
-async function fetchAllTasks(limit = 200): Promise<UnifiedTask[]> {
+const TASK_PAGE_SIZE = 200; // backend caps limit at 200 (le=200)
+const TASK_MAX = 5000; // safety cap against pathological sets
+
+async function fetchAllTasks(): Promise<UnifiedTask[]> {
   // Read from public.task_tracking via the legacy task-manager REST
   // endpoint (renamed internally to point at task_tracking; URL kept
   // for backwards compat). This table is the application-side sidecar
   // of dbos.workflow_status — DBOS lifecycle is auto-mirrored here by
   // PG trigger (see migration 180), so a single fetch returns everything
   // the UI needs (title/subtitle/progress + status/started_at/error_msg).
-  const resp = await fetch(`${API_BASE}/api/v1/task-manager/tasks?limit=${limit}`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!resp.ok) {
-    console.error(`[TaskManager] fetchAllTasks failed: ${resp.status} ${resp.statusText}`);
-    return [];
+  //
+  // Drain ALL pages: status/type/search filters run client-side, so a
+  // partial load would hide matching rows on unloaded pages. The endpoint
+  // hard-caps limit at 200, so >200 tasks need offset pagination — the
+  // original single limit=200 fetch silently dropped the oldest tail.
+  const headers = await getAuthHeaders();
+  const { items, capped } = await paginateAll<Record<string, unknown>>(
+    async (offset, pageSize) => {
+      const resp = await fetch(
+        `${API_BASE}/api/v1/task-manager/tasks?limit=${pageSize}&offset=${offset}`,
+        { headers },
+      );
+      if (!resp.ok) {
+        console.error(
+          `[TaskManager] fetchAllTasks failed at offset ${offset}: ${resp.status} ${resp.statusText}`,
+        );
+        return []; // stop pagination; keep pages fetched so far
+      }
+      const json = await resp.json();
+      return (json.data as Record<string, unknown>[]) || [];
+    },
+    TASK_PAGE_SIZE,
+    TASK_MAX,
+  );
+  if (capped) {
+    console.warn(`[TaskManager] task list hit ${TASK_MAX}-row cap; oldest tasks omitted`);
   }
-  const json = await resp.json();
-  const rows: Record<string, unknown>[] = json.data || [];
-  return rows.map(rowToTask);
+  return items.map(rowToTask);
 }
 
 async function apiCancelTask(taskId: string): Promise<void> {

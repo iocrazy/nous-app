@@ -174,18 +174,34 @@ export function filterTasks(tasks: UnifiedTask[], filter: TaskFilter): UnifiedTa
 
 export type SortBy = 'created_desc' | 'created_asc' | 'updated_desc' | 'title_asc';
 
+/**
+ * Parse an ISO timestamp to epoch ms. created_at/updated_at arrive in mixed
+ * formats (PostgREST timestamptz `...+00:00` with variable fractional digits,
+ * optimistic placeholders `...Z` via toISOString, occasionally non-UTC
+ * offsets). Comparing the raw strings with localeCompare interleaves them —
+ * "newest first" showed older rows mid-list. Compare parsed instants instead.
+ * Unparseable/missing values sort oldest (epoch 0).
+ */
+function instant(iso: string | undefined): number {
+  if (!iso) return 0;
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
 export function sortTasks(tasks: UnifiedTask[], by: SortBy): UnifiedTask[] {
   const arr = [...tasks];
   switch (by) {
     case 'created_asc':
-      return arr.sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''));
+      return arr.sort((a, b) => instant(a.created_at) - instant(b.created_at));
     case 'updated_desc':
-      return arr.sort((a, b) => (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''));
+      return arr.sort(
+        (a, b) => instant(b.updated_at ?? b.created_at) - instant(a.updated_at ?? a.created_at),
+      );
     case 'title_asc':
       return arr.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
     case 'created_desc':
     default:
-      return arr.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
+      return arr.sort((a, b) => instant(b.created_at) - instant(a.created_at));
   }
 }
 
