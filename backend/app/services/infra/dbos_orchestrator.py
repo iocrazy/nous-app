@@ -29,6 +29,11 @@ from app.db import get_async_supabase_admin
 
 # DBOS instance — set by `init_dbos`; None until lifespan startup runs.
 _dbos = None
+# DBOSClient — gateway-only enqueue handle, set by `init_dbos_client`; None
+# until a later task constructs it on the gateway (dormant for now). Unlike
+# the full DBOS singleton, a client only needs DB connections to enqueue
+# workflows — it never dequeues/executes them.
+_client = None
 _routing_cache: dict[str, str] = {}
 _routing_loaded_at: float = 0.0
 _routing_refresh_interval_s: float = 60.0  # poll dbos_workflow_routing every 60s
@@ -347,8 +352,63 @@ def shutdown_dbos(timeout_seconds: float = 5.0) -> None:
     logger.info("[dbos] destroyed")
 
 
+def get_dbos_client():
+    """Return the gateway DBOSClient handle (None until `init_dbos_client`
+    constructs it). Dormant for now — nobody constructs it yet."""
+    return _client
+
+
+def init_dbos_client() -> None:
+    """Gateway-only constructor for a dormant DBOSClient enqueue handle.
+
+    Idempotent: if `_client` is already set, returns immediately. Reads the
+    DB url from `DBOS_DATABASE_URL`; if missing, logs a warning and returns
+    (clean no-op — no raise). Otherwise constructs a `DBOSClient` against the
+    same co-located `dbos` schema `init_dbos` uses, so the client enqueues
+    into the same sys tables the worker dequeues from.
+
+    NOT wired anywhere yet — a later task constructs this on the gateway.
+    """
+    global _client
+    if _client is not None:
+        return
+
+    db_url = os.environ.get("DBOS_DATABASE_URL", "")
+    if not db_url:
+        logger.warning(
+            "[dbos] DBOS_DATABASE_URL not set; DBOSClient not constructed"
+        )
+        return
+
+    try:
+        from dbos import DBOSClient
+
+        # Match init_dbos's co-located schema. The client only opens DB
+        # connections to enqueue; it never runs migrations or dequeues.
+        _client = DBOSClient(
+            system_database_url=db_url,
+            dbos_system_schema="dbos",
+        )
+        logger.info("[dbos] DBOSClient constructed (enqueue-only handle)")
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"[dbos] DBOSClient construction failed: {exc!r}")
+        _client = None
+
+
+def shutdown_dbos_client() -> None:
+    """Tear down the gateway DBOSClient, releasing its DB connections."""
+    global _client
+    if _client is None:
+        return
+    try:
+        _client.destroy()
+    finally:
+        _client = None
+        logger.info("[dbos] DBOSClient destroyed")
+
+
 def is_enabled() -> bool:
-    return _dbos is not None
+    return _dbos is not None or _client is not None
 
 
 # Sprint 5.5: optional bounds registry — gateway sets this on app.state
