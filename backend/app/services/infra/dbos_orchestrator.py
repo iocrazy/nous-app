@@ -29,6 +29,11 @@ from app.db import get_async_supabase_admin
 
 # DBOS instance — set by `init_dbos`; None until lifespan startup runs.
 _dbos = None
+# DBOSClient — gateway-only enqueue handle, set by `init_dbos_client`; None
+# until a later task constructs it on the gateway (dormant for now). Unlike
+# the full DBOS singleton, a client only needs DB connections to enqueue
+# workflows — it never dequeues/executes them.
+_client = None
 _routing_cache: dict[str, str] = {}
 _routing_loaded_at: float = 0.0
 _routing_refresh_interval_s: float = 60.0  # poll dbos_workflow_routing every 60s
@@ -347,8 +352,61 @@ def shutdown_dbos(timeout_seconds: float = 5.0) -> None:
     logger.info("[dbos] destroyed")
 
 
+def get_dbos_client():
+    """Return the gateway DBOSClient handle (None until `init_dbos_client`
+    constructs it). Dormant for now — nobody constructs it yet."""
+    return _client
+
+
+def init_dbos_client() -> None:
+    """Gateway-only constructor for a dormant DBOSClient enqueue handle.
+
+    Idempotent: if `_client` is already set, returns immediately. Reads the
+    DB url from `DBOS_DATABASE_URL`; if missing, logs a warning and returns
+    (clean no-op — no raise). Otherwise constructs a `DBOSClient` against the
+    same co-located `dbos` schema `init_dbos` uses, so the client enqueues
+    into the same sys tables the worker dequeues from.
+
+    NOT wired anywhere yet — a later task constructs this on the gateway.
+    """
+    global _client
+    if _client is not None:
+        return
+
+    db_url = os.environ.get("DBOS_DATABASE_URL", "")
+    if not db_url:
+        logger.warning("[dbos] DBOS_DATABASE_URL not set; DBOSClient not constructed")
+        return
+
+    try:
+        from dbos import DBOSClient
+
+        # Match init_dbos's co-located schema. The client only opens DB
+        # connections to enqueue; it never runs migrations or dequeues.
+        _client = DBOSClient(
+            system_database_url=db_url,
+            dbos_system_schema="dbos",
+        )
+        logger.info("[dbos] DBOSClient constructed (enqueue-only handle)")
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"[dbos] DBOSClient construction failed: {exc!r}")
+        _client = None
+
+
+def shutdown_dbos_client() -> None:
+    """Tear down the gateway DBOSClient, releasing its DB connections."""
+    global _client
+    if _client is None:
+        return
+    try:
+        _client.destroy()
+    finally:
+        _client = None
+        logger.info("[dbos] DBOSClient destroyed")
+
+
 def is_enabled() -> bool:
-    return _dbos is not None
+    return _dbos is not None or _client is not None
 
 
 # Sprint 5.5: optional bounds registry — gateway sets this on app.state
@@ -361,6 +419,22 @@ def set_bounds_registry(registry: Optional[Any]) -> None:
     """Wire-up hook called from FastAPI lifespan. None = disable gating."""
     global _bounds_registry
     _bounds_registry = registry
+
+
+# Gateway enqueue routing: task_types that need per-user queue partitioning
+# (fairness — one user's backlog can't starve others) map to a named
+# partitioned queue. Everything else falls to the shared default queue.
+_PARTITIONED_QUEUE = {
+    "parse": "parse_user",
+    "download": "download_user",
+    "soda_download": "soda_download",
+}
+
+
+def _queue_for_task(task_type: str) -> tuple[str, bool]:
+    """Resolve the named queue + whether it's user-partitioned for a task_type."""
+    q = _PARTITIONED_QUEUE.get(task_type)
+    return (q, True) if q else ("dbos_dispatch", False)
 
 
 async def start_workflow_routed(
@@ -439,6 +513,49 @@ async def start_workflow_routed(
     # GET /api/v1/workflows can filter by user. Requires user_id
     # in workflow kwargs.
     user_id = kwargs.get("user_id")
+
+    # Gateway enqueue-only path (dormant): when a DBOSClient is wired, the
+    # gateway only opens DB connections to enqueue into a NAMED queue — it
+    # never runs the workflow in-process. The worker dequeues + executes.
+    # `_client` is None everywhere today, so this branch is not taken; it
+    # exists ready for when the gateway constructs the client.
+    if _client is not None:
+        from dbos import EnqueueOptions
+
+        wf_name = getattr(dbos_workflow_callable, "__qualname__", None) or getattr(
+            dbos_workflow_callable, "__name__", ""
+        )
+        queue_name, partitioned = _queue_for_task(task_type)
+        opts: dict[str, Any] = dict(
+            workflow_name=wf_name,
+            queue_name=queue_name,
+        )
+        # Only pin app_version when we actually have one (build-info present).
+        # A NULL app_version would let a version-pinned worker skip the row →
+        # the orphan/"lost" failure init_dbos warns about. Mirror its `if pinned`.
+        pinned_version = _resolve_pinned_app_version()
+        if pinned_version:
+            opts["app_version"] = pinned_version
+        if workflow_id:
+            opts["workflow_id"] = workflow_id
+        if user_id:
+            opts["authenticated_user"] = user_id
+        if partitioned:
+            if not user_id:
+                raise RuntimeError(
+                    f"partitioned queue {queue_name} requires user_id "
+                    f"(task_type={task_type})"
+                )
+            opts["queue_partition_key"] = str(user_id)
+        handle = _client.enqueue(EnqueueOptions(**opts), **kwargs)
+        return {
+            "mode": "dbos",
+            "task_type": task_type,
+            "dbos_workflow_id": handle.workflow_id,
+        }
+
+    # In-process path (combined / worker, `_client is None`): start the
+    # workflow directly via the DBOS singleton.
     auth_ctx = DBOSContextSetAuth(user=user_id, roles=[]) if user_id else nullcontext()
     with auth_ctx:
         if workflow_id:

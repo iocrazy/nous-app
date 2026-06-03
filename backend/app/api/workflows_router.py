@@ -99,24 +99,123 @@ def _safe_json(value: Any) -> Any:
         return repr(value)[:500]
 
 
+async def _status_read(workflow_id: str) -> Any:
+    """Read one WorkflowStatus (or None if unknown), client-aware.
+
+    Gateway-client prep (DORMANT): when the gateway DBOSClient handle is
+    set, status reads go through the client; otherwise the in-process
+    `DBOS.*` path is used (unchanged). `get_dbos_client()` is None
+    everywhere today, so the existing `DBOS.get_workflow_status_async`
+    branch is always taken — ZERO behavior change.
+
+    The client has no `get_workflow_status_async`; we mirror the
+    Optional[WorkflowStatus] contract via
+    `retrieve_workflow_async(id).get_status()`, converting the
+    `DBOSNonExistentWorkflowError` (raised for unknown ids) back into a
+    `None` return so callers keep their 404 semantics."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        from dbos._error import DBOSNonExistentWorkflowError
+
+        try:
+            handle = await client.retrieve_workflow_async(workflow_id)
+            return await handle.get_status()
+        except DBOSNonExistentWorkflowError:
+            return None
+    from dbos import DBOS
+
+    return await DBOS.get_workflow_status_async(workflow_id)
+
+
+async def _retrieve_result(workflow_id: str) -> None:
+    """Realise an ERROR workflow's result so its exception surfaces,
+    client-aware. Dormant client branch uses the gateway handle; default
+    uses the in-process `DBOS.retrieve_workflow`."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        handle = await client.retrieve_workflow_async(workflow_id)
+        await handle.get_result()
+    else:
+        from dbos import DBOS
+
+        handle = DBOS.retrieve_workflow(workflow_id)
+        await handle.get_result_async()
+
+
+async def _steps_read(workflow_id: str) -> list[Any]:
+    """List workflow steps, client-aware. Dormant client branch uses the
+    gateway handle's `list_workflow_steps_async`; default uses
+    `DBOS.list_workflow_steps_async`."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        return await client.list_workflow_steps_async(workflow_id)
+    from dbos import DBOS
+
+    return await DBOS.list_workflow_steps_async(workflow_id)
+
+
+async def _cancel(workflow_id: str) -> None:
+    """Cancel a workflow, client-aware."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        await client.cancel_workflow_async(workflow_id)
+    else:
+        from dbos import DBOS
+
+        await DBOS.cancel_workflow_async(workflow_id)
+
+
+async def _resume(workflow_id: str) -> None:
+    """Resume a workflow, client-aware."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        await client.resume_workflow_async(workflow_id)
+    else:
+        from dbos import DBOS
+
+        await DBOS.resume_workflow_async(workflow_id)
+
+
+async def _fork(workflow_id: str) -> Any:
+    """Fork a workflow from step 1 (full replay), client-aware. Returns
+    the new handle. `fork_workflow_async(workflow_id, start_step)` takes
+    `start_step` positionally."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        return await client.fork_workflow_async(workflow_id, 1)
+    from dbos import DBOS
+
+    return await DBOS.fork_workflow_async(workflow_id, start_step=1)
+
+
 async def _get_status(workflow_id: str) -> Optional[dict[str, Any]]:
     """One DBOS status read. Returns None if workflow_id is unknown.
 
-    For ERROR workflows we additionally call retrieve_workflow().get_result_async()
-    to surface the underlying exception — `WorkflowStatus.error` from
+    For ERROR workflows we additionally realise the result to surface
+    the underlying exception — `WorkflowStatus.error` from
     list/get_status alone is None until the result is realised."""
     if not dbos_orchestrator.is_enabled():
         return None
-    from dbos import DBOS
 
-    ws = await DBOS.get_workflow_status_async(workflow_id)
+    ws = await _status_read(workflow_id)
     if ws is None:
         return None
     snapshot = _serialize_status(ws, include_io=True)
     if snapshot.get("status") == "ERROR" and not snapshot.get("error"):
         try:
-            handle = DBOS.retrieve_workflow(workflow_id)
-            await handle.get_result_async()
+            await _retrieve_result(workflow_id)
         except Exception as exc:
             snapshot["error"] = _stringify_error(exc)
     return snapshot
@@ -136,9 +235,7 @@ async def _get_steps(workflow_id: str) -> list[dict[str, Any]]:
     if not dbos_orchestrator.is_enabled():
         return []
     try:
-        from dbos import DBOS
-
-        steps = await DBOS.list_workflow_steps_async(workflow_id)
+        steps = await _steps_read(workflow_id)
         return [
             {
                 "function_id": _step_field(s, "function_id"),
@@ -198,10 +295,9 @@ async def cancel_workflow(
     in-flight steps complete or raise depending on the runtime."""
     if not dbos_orchestrator.is_enabled():
         raise HTTPException(503, detail="DBOS not enabled")
-    from dbos import DBOS
 
     try:
-        await DBOS.cancel_workflow_async(workflow_id)
+        await _cancel(workflow_id)
     except Exception as e:
         logger.warning(f"[workflows] cancel({workflow_id}): {e}")
         raise HTTPException(400, detail=str(e))
@@ -216,10 +312,9 @@ async def resume_workflow(
     """Resume a previously paused or cancelled workflow."""
     if not dbos_orchestrator.is_enabled():
         raise HTTPException(503, detail="DBOS not enabled")
-    from dbos import DBOS
 
     try:
-        await DBOS.resume_workflow_async(workflow_id)
+        await _resume(workflow_id)
     except Exception as e:
         logger.warning(f"[workflows] resume({workflow_id}): {e}")
         raise HTTPException(400, detail=str(e))
@@ -239,13 +334,12 @@ async def restart_workflow(
     """
     if not dbos_orchestrator.is_enabled():
         raise HTTPException(503, detail="DBOS not enabled")
-    from dbos import DBOS
 
     try:
         # start_step=1: replay all steps from scratch (DBOS step ids
         # are 1-indexed). For partial restart, frontend would need to
         # let user pick the step.
-        new_handle = await DBOS.fork_workflow_async(workflow_id, start_step=1)
+        new_handle = await _fork(workflow_id)
     except Exception as e:
         logger.warning(f"[workflows] restart({workflow_id}): {e}")
         raise HTTPException(400, detail=str(e))

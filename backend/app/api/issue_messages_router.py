@@ -48,6 +48,52 @@ from app.workflows.issue_lifecycle import respond_to_issue_reply
 router = APIRouter(prefix="/issues", tags=["Issue Messages"])
 
 
+def _dispatch_respond_to_issue_reply(
+    issue_id: int,
+    owner_id: str,
+    body: str,
+    attachments: list | None,
+    wf_id: str,
+) -> None:
+    """Dispatch the respond_to_issue_reply DBOS workflow under a pinned wf id.
+
+    Client-aware (gateway→DBOSClient prep, currently DORMANT): when the gateway
+    has constructed a DBOSClient, enqueue through it into the `dbos_dispatch`
+    queue. Otherwise (client is None — today's reality) fall back to the
+    in-process `SetWorkflowID + DBOS.start_workflow` path. Zero behavior change
+    while the client stays None. Positional args preserved exactly:
+    (issue_id, owner_id, body, attachments).
+    """
+    from app.services.infra.dbos_orchestrator import (
+        _resolve_pinned_app_version,
+        get_dbos_client,
+    )
+
+    client = get_dbos_client()
+    if client is not None:
+        from dbos import EnqueueOptions
+
+        opts: dict = {
+            "workflow_name": "respond_to_issue_reply",
+            "queue_name": "dbos_dispatch",
+            "workflow_id": wf_id,
+        }
+        pinned = _resolve_pinned_app_version()
+        if pinned:
+            opts["app_version"] = pinned
+        client.enqueue(EnqueueOptions(**opts), issue_id, owner_id, body, attachments)
+        return
+
+    with SetWorkflowID(wf_id):
+        DBOS.start_workflow(
+            respond_to_issue_reply,
+            issue_id,
+            owner_id,
+            body,
+            attachments,
+        )
+
+
 async def _assert_issue_visible(issue_id: int, auth) -> dict:
     """Return the issue row if the caller can see it; 404 otherwise.
 
@@ -198,14 +244,13 @@ async def post_issue_message(
         )
         wf_id = f"issue-reply-{issue_id}-{uuid.uuid4()}"
         try:
-            with SetWorkflowID(wf_id):
-                DBOS.start_workflow(
-                    respond_to_issue_reply,
-                    issue_id,
-                    str(owner_id),
-                    payload.body,
-                    attachments_payload,
-                )
+            _dispatch_respond_to_issue_reply(
+                issue_id,
+                str(owner_id),
+                payload.body,
+                attachments_payload,
+                wf_id,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 f"dispatch respond_to_issue_reply failed (issue_id={issue_id}): {exc}"

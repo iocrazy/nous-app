@@ -14,6 +14,24 @@ from loguru import logger
 router = APIRouter()
 
 
+def _list_workflows(**kwargs):
+    """List DBOS workflows, client-aware.
+
+    Gateway-client prep (DORMANT): when the gateway DBOSClient handle is
+    set, the synchronous list goes through the client; otherwise the
+    in-process `DBOS.list_workflows` path is used (unchanged). The client
+    is None everywhere today, so the existing branch is always taken —
+    ZERO behavior change."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        return client.list_workflows(**kwargs)
+    from dbos import DBOS
+
+    return DBOS.list_workflows(**kwargs)
+
+
 @router.get("/workers")
 async def get_celery_workers():
     """Return DBOS worker info. Single in-process 'worker' since DBOS
@@ -25,9 +43,7 @@ async def get_celery_workers():
         return {"online": 0, "total": 0, "workers": []}
 
     try:
-        from dbos import DBOS
-
-        running = DBOS.list_workflows(status="RUNNING") or []
+        running = _list_workflows(status="RUNNING") or []
     except Exception as e:
         logger.warning(f"DBOS workflow list failed: {e}")
         running = []
@@ -56,11 +72,8 @@ async def get_celery_queues():
     queues: list[dict] = []
     if dbos_orchestrator.is_enabled():
         try:
-            from dbos import DBOS
-
             enqueued = (
-                DBOS.list_workflows(queue_name="agent_workforce", status="ENQUEUED")
-                or []
+                _list_workflows(queue_name="agent_workforce", status="ENQUEUED") or []
             )
             queues.append({"name": "agent_workforce", "messages": len(enqueued)})
         except Exception as e:

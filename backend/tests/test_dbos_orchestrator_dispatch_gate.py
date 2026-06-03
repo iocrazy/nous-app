@@ -248,3 +248,104 @@ async def test_registry_without_advertised_workflow_fails_fast(
         await dbos_orchestrator.start_workflow_routed(
             "x", dbos_workflow_callable=registered_workflow_callable
         )
+
+
+# ---------------------------------------------------------------------------
+# Gateway enqueue-only client branch (dormant — `_client` is None everywhere
+# today, but the branch must be correct for when the gateway constructs it).
+# EnqueueOptions is a TypedDict (dict at runtime), so assert via dict keys.
+# ---------------------------------------------------------------------------
+
+
+class _FakeHandle:
+    workflow_id = "wf-x"
+
+
+class _FakeClient:
+    def __init__(self):
+        self.calls = []
+
+    def enqueue(self, options, *args, **kwargs):
+        self.calls.append((options, args, kwargs))
+        return _FakeHandle()
+
+
+def _dummy(*args, **kwargs): ...
+
+
+async def _route_dbos(_task_type):
+    return dbos_orchestrator.RoutingDecision(task_type=_task_type, mode="dbos")
+
+
+@pytest.mark.asyncio
+async def test_client_branch_partitioned_parse(monkeypatch):
+    monkeypatch.setattr(dbos_orchestrator, "get_routing", _route_dbos)
+    monkeypatch.setattr(
+        dbos_orchestrator, "_resolve_pinned_app_version", lambda: "abc123"
+    )
+    fc = _FakeClient()
+    monkeypatch.setattr(dbos_orchestrator, "_client", fc)
+    monkeypatch.setattr(dbos_orchestrator, "_dbos", None)
+
+    p = _dummy
+    p.__qualname__ = "parse_workflow"
+    res = await dbos_orchestrator.start_workflow_routed(
+        "parse",
+        dbos_workflow_callable=p,
+        dbos_workflow_kwargs={"user_id": "u1", "url": "x"},
+        workflow_id="wf1",
+    )
+    opts, args, kwargs = fc.calls[0]
+    assert opts["queue_name"] == "parse_user"  # partitioned
+    assert opts["queue_partition_key"] == "u1"
+    assert opts["app_version"] == "abc123"
+    assert opts["workflow_name"] == "parse_workflow"
+    assert opts["workflow_id"] == "wf1"
+    assert opts["authenticated_user"] == "u1"
+    # workflow kwargs forwarded to enqueue
+    assert kwargs == {"user_id": "u1", "url": "x"}
+    assert res["dbos_workflow_id"] == "wf-x"
+
+
+@pytest.mark.asyncio
+async def test_client_branch_nonpartitioned_transcode(monkeypatch):
+    monkeypatch.setattr(dbos_orchestrator, "get_routing", _route_dbos)
+    monkeypatch.setattr(
+        dbos_orchestrator, "_resolve_pinned_app_version", lambda: "abc123"
+    )
+    fc = _FakeClient()
+    monkeypatch.setattr(dbos_orchestrator, "_client", fc)
+    monkeypatch.setattr(dbos_orchestrator, "_dbos", None)
+
+    t = _dummy
+    t.__qualname__ = "transcode_workflow"
+    res = await dbos_orchestrator.start_workflow_routed(
+        "transcode",
+        dbos_workflow_callable=t,
+        dbos_workflow_kwargs={"user_id": "u1"},
+    )
+    opts, _, _ = fc.calls[0]
+    assert opts["queue_name"] == "dbos_dispatch"  # non-partitioned default
+    # partition key NOT set for non-partitioned queues
+    assert opts.get("queue_partition_key", None) in (None, "")
+    assert opts["authenticated_user"] == "u1"
+    assert res["dbos_workflow_id"] == "wf-x"
+
+
+@pytest.mark.asyncio
+async def test_partitioned_without_user_id_raises(monkeypatch):
+    monkeypatch.setattr(dbos_orchestrator, "get_routing", _route_dbos)
+    monkeypatch.setattr(dbos_orchestrator, "_resolve_pinned_app_version", lambda: "v")
+    fc = _FakeClient()
+    monkeypatch.setattr(dbos_orchestrator, "_client", fc)
+    monkeypatch.setattr(dbos_orchestrator, "_dbos", None)
+
+    p = _dummy
+    p.__qualname__ = "parse_workflow"
+    with pytest.raises(RuntimeError):
+        await dbos_orchestrator.start_workflow_routed(
+            "parse",
+            dbos_workflow_callable=p,
+            dbos_workflow_kwargs={},  # no user_id
+        )
+    assert fc.calls == []  # never enqueued

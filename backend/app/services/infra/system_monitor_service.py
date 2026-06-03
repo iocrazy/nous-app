@@ -203,7 +203,8 @@ def _aggregate_breakdown(rows: list[dict], now) -> list[dict]:
         tt = r.get("task_type") or "unknown"
         phase = r.get("phase")
         entry = acc.setdefault(
-            tt, {"task_type": tt, "running": 0, "pending": 0, "oldest_queued_age_sec": 0}
+            tt,
+            {"task_type": tt, "running": 0, "pending": 0, "oldest_queued_age_sec": 0},
         )
         if phase == "processing":
             entry["running"] += 1
@@ -397,6 +398,24 @@ def get_connection_stats() -> dict:
         }
 
 
+async def _list_workflows_async(**kwargs):
+    """List DBOS workflows asynchronously, client-aware.
+
+    Gateway-client prep (DORMANT): when the gateway DBOSClient handle is
+    set, the async list goes through the client; otherwise the
+    in-process `DBOS.list_workflows_async` path is used (unchanged). The
+    client is None everywhere today, so the existing branch is always
+    taken — ZERO behavior change."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        return await client.list_workflows_async(**kwargs)
+    from dbos import DBOS
+
+    return await DBOS.list_workflows_async(**kwargs)
+
+
 async def get_worker_stats() -> list[dict]:
     """Return DBOS worker pool info. PR-D7: replaces Celery worker
     inspection. DBOS workers are in-process; we report a single
@@ -407,8 +426,6 @@ async def get_worker_stats() -> list[dict]:
     if not dbos_orchestrator.is_enabled():
         return []
     try:
-        from dbos import DBOS
-
         return [
             {
                 "name": "dbos@local",
@@ -416,9 +433,7 @@ async def get_worker_stats() -> list[dict]:
                 "concurrency": 8,  # matches WORKFORCE_QUEUE_CONCURRENCY default
                 "processes": [],
                 "total_tasks": {
-                    "running": len(
-                        await DBOS.list_workflows_async(status="RUNNING") or []
-                    )
+                    "running": len(await _list_workflows_async(status="RUNNING") or [])
                 },
             }
         ]
@@ -436,9 +451,7 @@ async def get_active_tasks() -> list[dict]:
     if not dbos_orchestrator.is_enabled():
         return []
     try:
-        from dbos import DBOS
-
-        running = await DBOS.list_workflows_async(status="RUNNING") or []
+        running = await _list_workflows_async(status="RUNNING") or []
         return [
             {
                 "task_id": getattr(w, "workflow_id", None)
