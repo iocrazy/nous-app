@@ -1,15 +1,19 @@
-"""retry_failed_downloads must resolve the download owner from
-resources.creator_id, NOT from parsed_media.user_id (dropped in scope-1).
+"""retry_failed_downloads recovery: two regressions covered here.
 
-Regression: after the scope-1 refactor removed parsed_media.user_id, the
-retry step read `video.get("user_id")` → always None → every failed download
-was counted as a "skipped orphan" and never re-dispatched. Production showed
-`{total_failed: 8, retried: 0, skipped_orphan: 8}` every hour.
+1. OWNER RESOLUTION — parsed_media.user_id was dropped in the scope-1
+   refactor, but the step read `video.get("user_id")` → always None → every
+   FAILED download counted as skipped_orphan and never re-dispatched.
+   Production ran `{total_failed: 8, retried: 0, skipped_orphan: 8}` hourly.
+   Ownership now resolves from resources.creator_id via get_media_owner_map.
 
-Ownership now lives in resources.creator_id (resources.media_id ->
-parsed_media.id). The step resolves media_id -> creator_id in one batch and
-re-dispatches under the owner. Media with no backing resource is a genuine
-orphan (legacy/system download) and is still skipped.
+2. DISPATCH-IN-STEP — start_workflow_routed (→ DBOS.start_workflow) MUST NOT
+   be called from inside a @DBOS.step: DBOS asserts (bare
+   `assert workflow_id is not None` → empty AssertionError) when a child
+   workflow is started from a step. So `collect_retryable_downloads_step`
+   (a @DBOS.step) only does DB work and returns specs; the dispatch happens
+   in `_dispatch_download_retries`, a plain helper called from the workflow
+   body. This split is what the rest of the codebase already does
+   (download.py / parse.py).
 """
 
 import pytest
@@ -34,10 +38,80 @@ class _FakeRepo:
         self.updated.append((platform_id, fields))
 
 
-def _wire(monkeypatch, repo):
+# --- collect step: owner resolution + reset-to-pending --------------------
+
+
+@pytest.mark.asyncio
+async def test_collect_resolves_owner_and_resets_pending(monkeypatch):
+    """A failed download backed by a resource yields a dispatch spec under its
+    creator_id and is reset to PENDING; a genuine orphan is skipped."""
+    failed = [
+        {"id": "m1", "platform_id": "p1", "media_type": 0},  # owned by u1
+        {"id": "m2", "platform_id": "p2", "media_type": 2},  # genuine orphan
+    ]
+    repo = _FakeRepo(failed, owner_map={"m1": "u1"})
     monkeypatch.setattr(
         "app.repositories.media_repository.get_media_repository", lambda: repo
     )
+
+    out = await recovery.collect_retryable_downloads_step()
+
+    assert out["total_failed"] == 2
+    assert out["skipped_orphan"] == 1
+    assert out["specs"] == [{"platform_id": "p1", "user_id": "u1", "media_type": 0}]
+    # only the owned one was reset to pending; orphan left alone
+    assert repo.updated == [
+        ("p1", {"video_download_status": "pending", "error_message": None})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collect_genuine_orphans_skipped(monkeypatch):
+    """No backing resource for any failed download → all skipped, no specs,
+    nothing reset. Preserves the orphan-skip safety."""
+    failed = [
+        {"id": "m1", "platform_id": "p1", "media_type": 0},
+        {"id": "m2", "platform_id": "p2", "media_type": 0},
+    ]
+    repo = _FakeRepo(failed, owner_map={})
+    monkeypatch.setattr(
+        "app.repositories.media_repository.get_media_repository", lambda: repo
+    )
+
+    out = await recovery.collect_retryable_downloads_step()
+
+    assert out == {"specs": [], "total_failed": 2, "skipped_orphan": 2}
+    assert repo.updated == []
+
+
+@pytest.mark.asyncio
+async def test_collect_no_failed_short_circuits(monkeypatch):
+    repo = _FakeRepo(failed=[], owner_map={})
+    monkeypatch.setattr(
+        "app.repositories.media_repository.get_media_repository", lambda: repo
+    )
+
+    out = await recovery.collect_retryable_downloads_step()
+    assert out == {"specs": [], "total_failed": 0, "skipped_orphan": 0}
+
+
+# --- dispatch helper: must NOT be a @DBOS.step ----------------------------
+
+
+def test_dispatch_helper_is_not_a_dbos_step():
+    """Regression guard: _dispatch_download_retries must stay a plain async
+    function. A @DBOS.step wrapper exposes .__wrapped__ / dbos attributes;
+    start_workflow_routed asserts if dispatched from inside a step."""
+    fn = recovery._dispatch_download_retries
+    assert not hasattr(fn, "__wrapped__")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_starts_download_per_spec(monkeypatch):
+    specs = [
+        {"platform_id": "p1", "user_id": "u1", "media_type": 0},
+        {"platform_id": "p2", "user_id": "u2", "media_type": 68},
+    ]
     dispatched = []
 
     async def _fake_dispatch(
@@ -48,79 +122,49 @@ def _wire(monkeypatch, repo):
     monkeypatch.setattr(
         "app.services.infra.dbos_orchestrator.start_workflow_routed", _fake_dispatch
     )
-    return dispatched
 
+    retried = await recovery._dispatch_download_retries(specs)
 
-@pytest.mark.asyncio
-async def test_retry_resolves_owner_from_resources(monkeypatch):
-    """A failed download backed by a resource is re-dispatched under its
-    creator_id — even though parsed_media carries no user_id."""
-    failed = [
-        {"id": "m1", "platform_id": "p1", "media_type": 0},  # owned by u1
-        {"id": "m2", "platform_id": "p2", "media_type": 2},  # genuine orphan
-    ]
-    repo = _FakeRepo(failed, owner_map={"m1": "u1"})
-    dispatched = _wire(monkeypatch, repo)
-
-    result = await recovery.retry_failed_downloads_step()
-
-    assert result["total_failed"] == 2
-    assert result["retried"] == 1
-    assert result["skipped_orphan"] == 1
-    # only m1 dispatched, under its resolved owner
-    assert len(dispatched) == 1
+    assert retried == 2
+    assert [d[0] for d in dispatched] == ["download", "download"]
     assert dispatched[0][1]["platform_id"] == "p1"
     assert dispatched[0][1]["user_id"] == "u1"
-    assert dispatched[0][1]["media_type"] == 0
-    # m1 reset to pending before re-dispatch; m2 left alone
-    assert repo.updated == [
-        ("p1", {"video_download_status": "pending", "error_message": None})
-    ]
+    assert dispatched[1][1]["media_type"] == 68
 
 
 @pytest.mark.asyncio
-async def test_genuine_orphans_still_skipped(monkeypatch):
-    """No backing resource for any failed download → all skipped, nothing
-    dispatched. Preserves the user_id-is-None orphan-skip safety."""
-    failed = [
-        {"id": "m1", "platform_id": "p1", "media_type": 0},
-        {"id": "m2", "platform_id": "p2", "media_type": 0},
+async def test_dispatch_counts_only_successes(monkeypatch):
+    """A dispatch that raises (e.g. the old empty AssertionError) is logged
+    and does not increment retried; other specs still dispatch."""
+    specs = [
+        {"platform_id": "boom", "user_id": "u1", "media_type": 0},
+        {"platform_id": "ok", "user_id": "u2", "media_type": 0},
     ]
-    repo = _FakeRepo(failed, owner_map={})  # no owners resolvable
-    dispatched = _wire(monkeypatch, repo)
 
-    result = await recovery.retry_failed_downloads_step()
+    async def _fake_dispatch(
+        task_type, *, dbos_workflow_callable=None, dbos_workflow_kwargs=None
+    ):
+        if dbos_workflow_kwargs["platform_id"] == "boom":
+            raise AssertionError("")  # mimic the DBOS step-context assert
+        return None
 
-    assert result["total_failed"] == 2
-    assert result["retried"] == 0
-    assert result["skipped_orphan"] == 2
-    assert dispatched == []
-    assert repo.updated == []
+    monkeypatch.setattr(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed", _fake_dispatch
+    )
+
+    retried = await recovery._dispatch_download_retries(specs)
+    assert retried == 1
 
 
 @pytest.mark.asyncio
-async def test_no_failed_downloads_short_circuits(monkeypatch):
-    repo = _FakeRepo(failed=[], owner_map={})
-    dispatched = _wire(monkeypatch, repo)
-
-    result = await recovery.retry_failed_downloads_step()
-
-    assert result == {
-        "status": "success",
-        "total_failed": 0,
-        "retried": 0,
-        "skipped_orphan": 0,
-    }
-    assert dispatched == []
+async def test_dispatch_empty_specs():
+    assert await recovery._dispatch_download_retries([]) == 0
 
 
 # --- repo method: get_media_owner_map -------------------------------------
 
 
 class _FakeQuery:
-    """Minimal fluent stub mimicking the supabase-py query builder chain
-    table().select().in_().eq().execute()."""
-
     def __init__(self, rows):
         self._rows = rows
 
