@@ -196,7 +196,7 @@ async def soda_download_workflow(
     """
     manager = get_task_manager()
     wf_id = DBOS.workflow_id
-    await manager.start(wf_id)
+    await manager.start(wf_id, user_id=user_id)
 
     # 1. Resolve the media row (always fetch so the skip-guard can inspect it).
     row = await MediaRepository().get_by_platform_id(platform_id)

@@ -313,7 +313,13 @@ class UnifiedTaskManager:
 
     # ── Lifecycle: start ──────────────────────────────────────────────
 
-    async def start(self, task_id: str) -> None:
+    async def start(
+        self,
+        task_id: str,
+        *,
+        user_id: str | None = None,
+        task_type: str = "download",
+    ) -> None:
         """Transition to PROCESSING phase.
 
         Idempotent: already-PROCESSING or terminal tasks are silently skipped.
@@ -323,12 +329,18 @@ class UnifiedTaskManager:
         the dispatcher was swallowed), create a minimal one so downstream
         ``update_progress``/``complete`` have a row to update instead of
         no-op'ing forever. The self-heal never crashes the workflow.
+
+        ``user_id`` MUST be threaded from the call site for the self-heal to
+        succeed — ``task_tracking.user_id`` is ``UUID NOT NULL`` (mig 064), so
+        a blank/None user_id makes the recovery INSERT fail with PG 22P02.
+        Callers that cannot provide it fall back to "" (recovery becomes a
+        best-effort no-op rather than a crash).
         """
         if not await self._row_exists(task_id):
             try:
                 await self.create(
-                    user_id="",
-                    task_type="download",
+                    user_id=user_id or "",
+                    task_type=task_type,
                     title="(recovered)",
                     dbos_workflow_id=task_id,
                 )

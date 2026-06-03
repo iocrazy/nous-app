@@ -59,5 +59,22 @@ async def test_start_missing_row_selfheals_create(monkeypatch):
         return kwargs.get("dbos_workflow_id")
     monkeypatch.setattr(m, "create", _fake_create)
 
-    await m.start("wf-missing")
+    await m.start("wf-missing", user_id="u-123")
     assert created.get("dbos_workflow_id") == "wf-missing"
+    assert created.get("user_id") == "u-123"
+
+
+async def test_start_selfheal_create_failure_is_swallowed(monkeypatch):
+    """Self-heal must never crash the workflow: if create() raises (e.g. the
+    realistic UUID-NOT-NULL INSERT failure), start() swallows and continues."""
+    m = UnifiedTaskManager()
+    async def _client():
+        return _Query()  # phase lookup returns data=None (0 rows)
+    monkeypatch.setattr(m, "_get_client", _client)
+
+    async def _boom(**kwargs):
+        raise Exception("boom")
+    monkeypatch.setattr(m, "create", _boom)
+
+    # Must not raise.
+    await m.start("wf-missing", user_id="u-1")
