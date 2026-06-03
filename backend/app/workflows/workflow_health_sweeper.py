@@ -95,8 +95,18 @@ async def classify_and_act_step() -> Dict[str, int]:
 
         # Take action only on the auto-action states.
         if classification == "LOST":
-            await _mark_lost(row)
-            counters["lost_marked"] += 1
+            # G3: don't steal a row DBOS still owns (PENDING/ENQUEUED). It
+            # will resume or finalize the workflow — the lifecycle trigger
+            # then mirrors the real outcome to task_tracking.
+            if await _dbos_still_owns(row.get("dbos_workflow_id")):
+                logger.info(
+                    "[workflow_health] skip LOST (DBOS still owns): "
+                    f"workflow_id={row.get('dbos_workflow_id')} "
+                    f"task_type={row.get('task_type')}"
+                )
+            else:
+                await _mark_lost(row)
+                counters["lost_marked"] += 1
         elif classification == "ORPHAN_PENDING" and not row.get("do_not_auto_cancel"):
             await _cancel_orphan(row)
             counters["auto_cancelled"] += 1
@@ -240,6 +250,57 @@ def _classify_in_python(row: Dict[str, Any]) -> str:
     if progress_age > policy["expected"] / 2:
         return "STALLED"
     return "SLOW"
+
+
+# ── DBOS ownership guard (G3) ──────────────────────────────────────
+# Before flipping a task to LOST/failed, consult dbos.workflow_status:
+# if DBOS still owns the row (PENDING/ENQUEUED), it will resume or
+# finalize the workflow — we must NOT mark it LOST and steal the row out
+# from under the engine. Only mark LOST when DBOS has no live/queued claim
+# (no row at all, or a terminal status that simply didn't mirror yet).
+
+_DBOS_LIVE_STATUSES = frozenset({"PENDING", "ENQUEUED"})
+
+
+def _dbos_claims_workflow(status: "str | None") -> bool:
+    """Pure decision: True when the DBOS status means the engine still
+    owns / will recover the workflow, so the sweeper must SKIP marking it
+    LOST. PENDING/ENQUEUED → owned; SUCCESS/ERROR/CANCELLED/None → no claim.
+    """
+    if not status:
+        return False
+    return status.strip().upper() in _DBOS_LIVE_STATUSES
+
+
+async def _dbos_status(dbos_workflow_id: "str | None") -> "str | None":
+    """One indexed SELECT on dbos.workflow_status.status for this row's
+    workflow_uuid. Returns None when there's no row (or on error — fail
+    open to current behavior so a DB hiccup never blocks reconciliation).
+    """
+    if not dbos_workflow_id:
+        return None
+    from app.db import engine as db_engine
+
+    try:
+        return await db_engine.fetch_val(
+            "SELECT status FROM dbos.workflow_status " "WHERE workflow_uuid = :wid",
+            {"wid": dbos_workflow_id},
+        )
+    except Exception as exc:
+        logger.opt(exception=True).debug(
+            f"[workflow_health] _dbos_status lookup failed for "
+            f"{dbos_workflow_id}: {exc}"
+        )
+        return None
+
+
+async def _dbos_still_owns(dbos_workflow_id: "str | None") -> bool:
+    """True when DBOS still has a live/queued claim on the workflow.
+    Tasks with no dbos_workflow_id keep current behavior (returns False).
+    """
+    if not dbos_workflow_id:
+        return False
+    return _dbos_claims_workflow(await _dbos_status(dbos_workflow_id))
 
 
 # NOTE on the writers below: _mark_lost / _cancel_orphan / _mark_timed_out
