@@ -85,6 +85,15 @@ async def classify_and_act_step() -> Dict[str, int]:
     # in one place (admin can `SELECT classify_workflow_health(...)`
     # too). One round-trip per row keeps the code simple — N is
     # bounded by active workflows (typically <100).
+    # G2: within the post-boot grace window, classify + persist for the UI
+    # but take NO destructive reconciliation action. A deploy/restart leaves
+    # started_at + heartbeat stale across the gap; DBOS is concurrently
+    # recovering those workflows. Marking them LOST/cancelled now would steal
+    # in-flight work that is about to resume.
+    from app.workflows.sweep_guard import within_boot_grace
+
+    in_grace = within_boot_grace()
+
     counters = _zero_counters()
     for row in rows:
         classification = await _classify_one(row)
@@ -92,6 +101,10 @@ async def classify_and_act_step() -> Dict[str, int]:
 
         # Persist the classification so the UI can surface it.
         await _persist_classification(row, classification)
+
+        if in_grace:
+            # Skip all LOST/stuck/timeout marking until grace elapses.
+            continue
 
         # Take action only on the auto-action states.
         if classification == "LOST":

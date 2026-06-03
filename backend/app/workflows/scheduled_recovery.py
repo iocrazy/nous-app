@@ -102,6 +102,19 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     # Direct PG via the SQLAlchemy engine (no httpx). tz-aware UTC so
     # timestamptz comparisons don't fall back to the connection's local TZ.
     from app.db import engine as db_engine
+    from app.workflows.sweep_guard import within_boot_grace
+
+    # G2: right after a deploy/restart, in-flight tasks look stale across the
+    # gap; DBOS is recovering them. Skip the task-tracking reap during the
+    # boot grace window (resource AI-status reaping below is independent of
+    # the restart gap — it's gated on its own 1h staleness — so it still runs).
+    if within_boot_grace():
+        return {
+            "status": "success",
+            "tasks_reaped": 0,
+            "resources_reaped": 0,
+            "skipped_boot_grace": True,
+        }
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     now_dt = datetime.now(timezone.utc)
@@ -177,7 +190,13 @@ async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
     Becomes obsolete in D3d (DBOS workflow_id replaces this)."""
     from app.agent_framework import is_stuck
     from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.sweep_guard import within_boot_grace
     from app.workflows.workflow_health_sweeper import _dbos_still_owns
+
+    # G2: skip lock recovery during the post-boot grace window — DBOS is
+    # recovering workflows that look stuck only because of the restart gap.
+    if within_boot_grace():
+        return {"status": "success", "recovered": 0, "skipped_boot_grace": True}
 
     mgr = get_task_manager()
     from app.db import engine as db_engine
