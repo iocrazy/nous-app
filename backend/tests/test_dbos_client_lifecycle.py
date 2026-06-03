@@ -1,5 +1,6 @@
 """Gateway enqueue-only prep: DBOSClient lifecycle in dbos_orchestrator (dormant
 until a later task constructs it on the gateway)."""
+
 import app.services.infra.dbos_orchestrator as o
 
 
@@ -23,8 +24,11 @@ def test_get_dbos_client_returns_module_client(monkeypatch):
 
 def test_shutdown_dbos_client_calls_destroy_and_clears(monkeypatch):
     destroyed = {"n": 0}
+
     class FakeClient:
-        def destroy(self): destroyed["n"] += 1
+        def destroy(self):
+            destroyed["n"] += 1
+
     monkeypatch.setattr(o, "_client", FakeClient())
     o.shutdown_dbos_client()
     assert destroyed["n"] == 1

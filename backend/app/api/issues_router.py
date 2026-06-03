@@ -19,10 +19,9 @@ from __future__ import annotations
 
 from typing import Optional
 
+from dbos import DBOS, SetWorkflowID
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
-
-from dbos import DBOS, SetWorkflowID
 
 from app.core.deps import AuthDep
 from app.repositories.issue_repository import issue_repository

@@ -169,9 +169,7 @@ def _install_fake_dbos(monkeypatch, record: list[tuple[str, tuple, dict]]):
 
         @staticmethod
         def send(destination_id, message, topic=None, **kw):
-            record.append(
-                ("send", (destination_id, message), {"topic": topic, **kw})
-            )
+            record.append(("send", (destination_id, message), {"topic": topic, **kw}))
 
     fake_mod = types.ModuleType("dbos")
     fake_mod.DBOS = _FakeDBOS

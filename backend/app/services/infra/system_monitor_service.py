@@ -203,7 +203,8 @@ def _aggregate_breakdown(rows: list[dict], now) -> list[dict]:
         tt = r.get("task_type") or "unknown"
         phase = r.get("phase")
         entry = acc.setdefault(
-            tt, {"task_type": tt, "running": 0, "pending": 0, "oldest_queued_age_sec": 0}
+            tt,
+            {"task_type": tt, "running": 0, "pending": 0, "oldest_queued_age_sec": 0},
         )
         if phase == "processing":
             entry["running"] += 1
@@ -432,9 +433,7 @@ async def get_worker_stats() -> list[dict]:
                 "concurrency": 8,  # matches WORKFORCE_QUEUE_CONCURRENCY default
                 "processes": [],
                 "total_tasks": {
-                    "running": len(
-                        await _list_workflows_async(status="RUNNING") or []
-                    )
+                    "running": len(await _list_workflows_async(status="RUNNING") or [])
                 },
             }
         ]

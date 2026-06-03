@@ -61,9 +61,7 @@ def test_dispatch_pins_app_version_when_present(monkeypatch):
         dbos_orchestrator, "_resolve_pinned_app_version", lambda: "cafe1234"
     )
 
-    msgs_router._dispatch_respond_to_issue_reply(
-        1, "o", "b", None, "issue-reply-1-x"
-    )
+    msgs_router._dispatch_respond_to_issue_reply(1, "o", "b", None, "issue-reply-1-x")
 
     options, args = fake.calls[0]
     assert options["app_version"] == "cafe1234"

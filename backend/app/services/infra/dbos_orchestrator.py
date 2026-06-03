@@ -375,9 +375,7 @@ def init_dbos_client() -> None:
 
     db_url = os.environ.get("DBOS_DATABASE_URL", "")
     if not db_url:
-        logger.warning(
-            "[dbos] DBOS_DATABASE_URL not set; DBOSClient not constructed"
-        )
+        logger.warning("[dbos] DBOS_DATABASE_URL not set; DBOSClient not constructed")
         return
 
     try:

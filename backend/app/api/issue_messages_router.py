@@ -81,9 +81,7 @@ def _dispatch_respond_to_issue_reply(
         pinned = _resolve_pinned_app_version()
         if pinned:
             opts["app_version"] = pinned
-        client.enqueue(
-            EnqueueOptions(**opts), issue_id, owner_id, body, attachments
-        )
+        client.enqueue(EnqueueOptions(**opts), issue_id, owner_id, body, attachments)
         return
 
     with SetWorkflowID(wf_id):

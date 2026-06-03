@@ -73,8 +73,7 @@ async def get_celery_queues():
     if dbos_orchestrator.is_enabled():
         try:
             enqueued = (
-                _list_workflows(queue_name="agent_workforce", status="ENQUEUED")
-                or []
+                _list_workflows(queue_name="agent_workforce", status="ENQUEUED") or []
             )
             queues.append({"name": "agent_workforce", "messages": len(enqueued)})
         except Exception as e:
