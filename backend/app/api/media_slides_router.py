@@ -250,3 +250,33 @@ async def get_media_lyrics(media_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to get lyrics for media {media_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get lyrics")
+
+
+@router.post("/{media_id}/lyrics/fetch", tags=TAGS_MEDIA_CONTENT)
+async def fetch_media_lyrics(media_id: str, auth: AuthDep):
+    """Re-fetch lyrics from the source platform and persist into metadata.
+
+    - **media_id**: parsed_media Snowflake ID
+
+    For tracks missing lyrics (legacy parse / source returned none). Dispatches
+    by ``source_platform`` — only ``qishui`` (Soda) is wired today. Returns the
+    ``{"lrc": str, "lines": [...]}`` payload (empty when the track has no lyrics,
+    e.g. instrumental).
+    """
+    from app.services.media.lyrics_fetch_service import (
+        LyricsFetchUnsupported,
+        fetch_and_persist_lyrics,
+    )
+
+    try:
+        return await fetch_and_persist_lyrics(media_id, auth.user_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="media not found")
+    except LyricsFetchUnsupported as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Lyrics fetch not supported for platform '{e}'",
+        )
+    except Exception as e:
+        logger.error(f"Failed to fetch lyrics for media {media_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch lyrics")

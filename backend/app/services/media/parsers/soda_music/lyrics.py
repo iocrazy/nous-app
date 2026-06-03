@@ -182,3 +182,26 @@ def to_plain_text(parsed: list[dict[str, Any]]) -> str:
         return ""
 
     return "\n".join(line["text"] for line in parsed)
+
+
+def extract_lyric_text(track: dict[str, Any]) -> str:
+    """Pull the raw timed-lyric text out of a Soda track dict.
+
+    Soda returns ``lyric`` either as a dict ``{"content": "..."}`` or, on some
+    endpoints, as a bare string. Either way return the text ("" when absent).
+    """
+    raw = track.get("lyric")
+    if isinstance(raw, dict):
+        return raw.get("content") or ""
+    return raw or ""
+
+
+def lyrics_payload_from_track(track: dict[str, Any]) -> dict[str, Any]:
+    """Build the persisted ``metadata.lyrics`` payload from a Soda track dict.
+
+    Returns ``{"lrc": str, "lines": [...]}`` — empty when the track has no
+    lyric (e.g. instrumental). Shared by the parse-time formatter and the
+    on-demand lyrics top-up endpoint so both produce the identical shape.
+    """
+    lines = parse_timed_lyrics(extract_lyric_text(track))
+    return {"lrc": to_lrc(lines), "lines": lines}

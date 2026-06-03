@@ -35,6 +35,8 @@ interface AudioHeroProps {
    * inline preview and the overlay. When absent, the first line is previewed.
    */
   currentTime?: number;
+  /** Source platform — gates the "Fetch Lyrics" action (only qishui today). */
+  sourcePlatform?: string;
 }
 
 /**
@@ -54,8 +56,10 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
   subtitle,
   mediaId,
   currentTime,
+  sourcePlatform,
 }) => {
   const t = theme ?? buildSodaTheme(null, src);
+  const canFetchLyrics = sourcePlatform === 'qishui';
 
   // Lyrics for the mobile inline preview. Fetched once per media id; the
   // overlay reuses SodaLyricsTab (which fetches its own copy when opened).
@@ -141,7 +145,7 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
       {/* Inline lyric preview — mobile only, the visual centerpiece between the
           title/artist and the waveform. Tapping opens the full-screen synced-
           lyrics overlay. Hidden entirely when no lyrics are available. */}
-      {hasLyrics && (
+      {hasLyrics ? (
         <button
           type="button"
           onClick={() => setShowLyrics(true)}
@@ -153,7 +157,16 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
             <p className="mt-1 text-sm text-white/45 truncate">{nextLine}</p>
           )}
         </button>
-      )}
+      ) : canFetchLyrics ? (
+        // No lyrics yet — reachable entry to the overlay (Fetch Lyrics lives there).
+        <button
+          type="button"
+          onClick={() => setShowLyrics(true)}
+          className="sm:hidden flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-sm font-medium text-white/80 transition-colors shrink-0"
+        >
+          <Music size={14} /> Fetch Lyrics
+        </button>
+      ) : null}
       <div className="w-full max-w-2xl flex-1 min-h-[96px] sm:min-h-[160px]">
         <AudioWaveformPlayer
           src={src}
@@ -173,6 +186,7 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
           coverUrl={coverUrl}
           theme={t}
           onClose={() => setShowLyrics(false)}
+          sourcePlatform={sourcePlatform}
         />
       )}
     </div>

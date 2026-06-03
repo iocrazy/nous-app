@@ -351,7 +351,7 @@ export function MobileAudioScreen({
 
       {/* Lyric couplet — tap opens the full lyrics sub-page. Collapses when no
           synced lyrics (the rest moves up). */}
-      {hasLyrics && (
+      {hasLyrics ? (
         <button
           type="button"
           onClick={() => setShowLyrics(true)}
@@ -363,7 +363,17 @@ export function MobileAudioScreen({
             <p className="mt-1.5 text-sm text-white/45 truncate">{nextLine}</p>
           )}
         </button>
-      )}
+      ) : isQishui ? (
+        // No lyrics yet — the couplet collapses, so give a reachable entry to
+        // the lyrics overlay (where the Fetch Lyrics button lives).
+        <button
+          type="button"
+          onClick={() => setShowLyrics(true)}
+          className="mt-5 mx-auto flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-sm font-medium text-white/80 transition-colors"
+        >
+          <Music size={14} /> Fetch Lyrics
+        </button>
+      ) : null}
 
       {/* Stats + actions row */}
       <div className="mt-6 flex items-center">
@@ -535,6 +545,7 @@ export function MobileAudioScreen({
           coverUrl={coverUrl}
           theme={t}
           onClose={() => setShowLyrics(false)}
+          sourcePlatform={video.source_platform}
         />
       )}
     </div>

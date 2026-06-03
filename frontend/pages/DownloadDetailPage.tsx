@@ -427,6 +427,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                       : undefined
                   }
                   theme={sodaTheme}
+                  sourcePlatform={video.source_platform}
                 />
               ) : (
                 <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">

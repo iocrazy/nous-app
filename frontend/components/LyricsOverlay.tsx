@@ -11,6 +11,8 @@ interface LyricsOverlayProps {
   coverUrl?: string;
   theme: SodaTheme;
   onClose: () => void;
+  /** Source platform — forwarded to SodaLyricsTab to gate the Fetch Lyrics action. */
+  sourcePlatform?: string;
 }
 
 /**
@@ -27,6 +29,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   coverUrl,
   theme,
   onClose,
+  sourcePlatform,
 }) => {
   // Nice-to-have: lock body scroll while the overlay is open.
   useEffect(() => {
@@ -95,7 +98,7 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
 
       {/* Body: scrolling synced lyrics */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+24px)]">
-        <SodaLyricsTab mediaId={mediaId} currentTime={currentTime} theme={theme} variant="bare" />
+        <SodaLyricsTab mediaId={mediaId} currentTime={currentTime} theme={theme} variant="bare" sourcePlatform={sourcePlatform} />
       </div>
     </div>
   );
