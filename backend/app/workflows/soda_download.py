@@ -245,7 +245,9 @@ async def soda_download_workflow(
                 logger.warning("soda_download: could not mark cover failed: {}", exc)
         await manager.complete(
             wf_id,
-            subtitle=f"Cover updated {title}" if cover_ok else f"Already downloaded {title}",
+            subtitle=(
+                f"Cover updated {title}" if cover_ok else f"Already downloaded {title}"
+            ),
         )
         return {
             "platform_id": platform_id,

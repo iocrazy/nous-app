@@ -1,6 +1,7 @@
 """R3: internal-queue reaper cancels ONLY provably-dead rows (gateway-stranded
 internal-queue PENDING, any age) + stale sched-* ENQUEUED ticks. It must NEVER
 cancel an arbitrary PENDING workflow by age (would risk a live long task)."""
+
 from app.startup.bootstrap import build_reap_predicates
 
 
