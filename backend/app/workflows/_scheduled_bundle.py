@@ -8,6 +8,11 @@ do NOT want (2026-05-27 restart-loop investigation).
 
 from __future__ import annotations
 
+# Import for its side effect: sweep_guard captures the process boot time at
+# import. The worker imports this bundle at launch (before the first sweep
+# tick), so the boot-grace window (G2) is anchored to actual process start,
+# not to the first sweeper invocation.
+from app.workflows import sweep_guard  # noqa: F401,E402
 from app.workflows.agent_runs_sweeper import agent_runs_sweeper_workflow  # noqa: F401
 from app.workflows.liveness_scanner import (  # noqa: F401
     liveness_scan_scheduled,

@@ -25,6 +25,10 @@ from typing import Any
 from dbos import DBOS
 from loguru import logger
 
+# Shared DBOS-ownership decision (G3) — single source of truth so the
+# sweeper and the reaper never drift on what "DBOS still owns it" means.
+from app.workflows.workflow_health_sweeper import _dbos_claims_workflow  # noqa: F401
+
 
 @DBOS.step()
 async def retry_failed_downloads_step() -> dict[str, Any]:
@@ -98,6 +102,20 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     # Direct PG via the SQLAlchemy engine (no httpx). tz-aware UTC so
     # timestamptz comparisons don't fall back to the connection's local TZ.
     from app.db import engine as db_engine
+    from app.workflows.sweep_guard import within_boot_grace
+
+    # G2: right after a deploy/restart, in-flight tasks look stale across the
+    # gap; DBOS is recovering them. Skip ALL reaping during the boot grace
+    # window — this early return short-circuits the whole step, so the resource
+    # AI-status pass below is also deferred. That's fine: it's gated on its own
+    # 1h staleness, so a ≤grace (≤300s default) delay is immaterial.
+    if within_boot_grace():
+        return {
+            "status": "success",
+            "tasks_reaped": 0,
+            "resources_reaped": 0,
+            "skipped_boot_grace": True,
+        }
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     now_dt = datetime.now(timezone.utc)
@@ -105,11 +123,21 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     # status/phase 'lost' on orphaned tasks: a deliberate "writer of last
     # resort" exception to the trigger-owns-phase rule — the DBOS lifecycle
     # trigger never fires for tasks the worker never claimed.
+    #
+    # G3: NOT EXISTS guard against dbos.workflow_status — never reap a row
+    # DBOS still owns (PENDING/ENQUEUED). DBOS will recover/finalize it and
+    # the lifecycle trigger mirrors the real outcome. Only flip rows DBOS
+    # has no live/queued claim on (terminal status, or no row at all).
     tasks_reaped = await db_engine.execute(
-        "UPDATE public.task_tracking SET status = 'lost', phase = 'lost', "
+        "UPDATE public.task_tracking tt SET status = 'lost', phase = 'lost', "
         "error_msg = :msg, error_code = 'WORKER_LOST', updated_at = :now "
-        "WHERE status = 'pending' AND phase = 'queued' "
-        "AND started_at IS NULL AND created_at < :cutoff",
+        "WHERE tt.status = 'pending' AND tt.phase = 'queued' "
+        "AND tt.started_at IS NULL AND tt.created_at < :cutoff "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM dbos.workflow_status ws "
+        "  WHERE ws.workflow_uuid = tt.dbos_workflow_id "
+        "  AND ws.status IN ('PENDING', 'ENQUEUED')"
+        ")",
         {
             "msg": (
                 "Worker never claimed this task within 1h — DBOS workflow "
@@ -163,6 +191,13 @@ async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
     Becomes obsolete in D3d (DBOS workflow_id replaces this)."""
     from app.agent_framework import is_stuck
     from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.sweep_guard import within_boot_grace
+    from app.workflows.workflow_health_sweeper import _dbos_still_owns
+
+    # G2: skip lock recovery during the post-boot grace window — DBOS is
+    # recovering workflows that look stuck only because of the restart gap.
+    if within_boot_grace():
+        return {"status": "success", "recovered": 0, "skipped_boot_grace": True}
 
     mgr = get_task_manager()
     from app.db import engine as db_engine
@@ -221,6 +256,16 @@ async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
 
         if not is_stuck(task_type, elapsed_seconds=elapsed):
             # Within ceiling — leave alone
+            continue
+
+        # G3: even past the ceiling, don't mark_lost a workflow DBOS still
+        # owns (PENDING/ENQUEUED). It will resume across a restart or get
+        # finalized by the engine; the lifecycle trigger mirrors the truth.
+        if await _dbos_still_owns(tid):
+            logger.info(
+                f"[recover_stale_orchestrator_locks] skip (DBOS still owns) "
+                f"task {tid} type={task_type}"
+            )
             continue
 
         try:

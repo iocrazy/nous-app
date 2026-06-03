@@ -85,6 +85,15 @@ async def classify_and_act_step() -> Dict[str, int]:
     # in one place (admin can `SELECT classify_workflow_health(...)`
     # too). One round-trip per row keeps the code simple — N is
     # bounded by active workflows (typically <100).
+    # G2: within the post-boot grace window, classify + persist for the UI
+    # but take NO destructive reconciliation action. A deploy/restart leaves
+    # started_at + heartbeat stale across the gap; DBOS is concurrently
+    # recovering those workflows. Marking them LOST/cancelled now would steal
+    # in-flight work that is about to resume.
+    from app.workflows.sweep_guard import within_boot_grace
+
+    in_grace = within_boot_grace()
+
     counters = _zero_counters()
     for row in rows:
         classification = await _classify_one(row)
@@ -93,10 +102,24 @@ async def classify_and_act_step() -> Dict[str, int]:
         # Persist the classification so the UI can surface it.
         await _persist_classification(row, classification)
 
+        if in_grace:
+            # Skip all LOST/stuck/timeout marking until grace elapses.
+            continue
+
         # Take action only on the auto-action states.
         if classification == "LOST":
-            await _mark_lost(row)
-            counters["lost_marked"] += 1
+            # G3: don't steal a row DBOS still owns (PENDING/ENQUEUED). It
+            # will resume or finalize the workflow — the lifecycle trigger
+            # then mirrors the real outcome to task_tracking.
+            if await _dbos_still_owns(row.get("dbos_workflow_id")):
+                logger.info(
+                    "[workflow_health] skip LOST (DBOS still owns): "
+                    f"workflow_id={row.get('dbos_workflow_id')} "
+                    f"task_type={row.get('task_type')}"
+                )
+            else:
+                await _mark_lost(row)
+                counters["lost_marked"] += 1
         elif classification == "ORPHAN_PENDING" and not row.get("do_not_auto_cancel"):
             await _cancel_orphan(row)
             counters["auto_cancelled"] += 1
@@ -212,11 +235,22 @@ def _classify_in_python(row: Dict[str, Any]) -> str:
         return "HEALTHY"
 
     elapsed = (now - started).total_seconds()
-    heartbeat_age = (now - heartbeat).total_seconds() if heartbeat else elapsed
     progress_age = (now - updated).total_seconds() if updated else elapsed
 
-    if heartbeat_age > policy["heartbeat_stale"]:
-        return "LOST"
+    if heartbeat is not None:
+        # We have a heartbeat signal — stale heartbeat = worker died.
+        heartbeat_age = (now - heartbeat).total_seconds()
+        if heartbeat_age > policy["heartbeat_stale"]:
+            return "LOST"
+    else:
+        # No heartbeat to be "stale". Download/soda workflows write NO
+        # heartbeat (heartbeat_at always NULL), so the heartbeat signal is
+        # meaningless for them — using it would mark EVERY download past
+        # heartbeat_stale (600s) as LOST at 10 min of normal runtime (G1).
+        # Fall back to the absolute `hard` ceiling on elapsed: only LOST
+        # once the workflow has run past its hard maximum.
+        if elapsed > policy["hard"]:
+            return "LOST"
 
     if user_max_min is not None and elapsed > user_max_min * 60:
         return "USER_TIMEOUT"
@@ -229,6 +263,64 @@ def _classify_in_python(row: Dict[str, Any]) -> str:
     if progress_age > policy["expected"] / 2:
         return "STALLED"
     return "SLOW"
+
+
+# ── DBOS ownership guard (G3) ──────────────────────────────────────
+# Before flipping a task to LOST/failed, consult dbos.workflow_status:
+# if DBOS still owns the row (PENDING/ENQUEUED), it will resume or
+# finalize the workflow — we must NOT mark it LOST and steal the row out
+# from under the engine. Only mark LOST when DBOS has no live/queued claim
+# (no row at all, or a terminal status that simply didn't mirror yet).
+
+_DBOS_LIVE_STATUSES = frozenset({"PENDING", "ENQUEUED"})
+
+
+def _dbos_claims_workflow(status: "str | None") -> bool:
+    """Pure decision: True when the DBOS status means the engine still
+    owns / will recover the workflow, so the sweeper must SKIP marking it
+    LOST. PENDING/ENQUEUED → owned; SUCCESS/ERROR/CANCELLED/None → no claim.
+    """
+    if not status:
+        return False
+    return status.strip().upper() in _DBOS_LIVE_STATUSES
+
+
+async def _dbos_status(dbos_workflow_id: "str | None") -> "str | None":
+    """One indexed SELECT on dbos.workflow_status.status for this row's
+    workflow_uuid. Returns None when there's no row. RAISES on a DB error —
+    the caller (`_dbos_still_owns`) decides the fail policy.
+    """
+    if not dbos_workflow_id:
+        return None
+    from app.db import engine as db_engine
+
+    return await db_engine.fetch_val(
+        "SELECT status FROM dbos.workflow_status " "WHERE workflow_uuid = :wid",
+        {"wid": dbos_workflow_id},
+    )
+
+
+async def _dbos_still_owns(dbos_workflow_id: "str | None") -> bool:
+    """True when DBOS still has a live/queued claim on the workflow (caller
+    must then SKIP marking it LOST — DBOS will recover/finalize it).
+
+    Tasks with no dbos_workflow_id → False (current behavior). FAIL-CLOSED:
+    on a DB error return True (treat as owned → skip). The whole point of this
+    guard is to stop wrongly failing recoverable tasks, so a transient
+    `dbos.workflow_status` hiccup must NOT cause a wrong LOST — the next sweep
+    tick retries, and a genuinely-dead task is still gated by hard-ceiling +
+    boot-grace, so skipping one tick is harmless.
+    """
+    if not dbos_workflow_id:
+        return False
+    try:
+        return _dbos_claims_workflow(await _dbos_status(dbos_workflow_id))
+    except Exception as exc:
+        logger.opt(exception=True).debug(
+            f"[workflow_health] _dbos_status lookup failed for "
+            f"{dbos_workflow_id}; treating as owned (skip mark): {exc}"
+        )
+        return True
 
 
 # NOTE on the writers below: _mark_lost / _cancel_orphan / _mark_timed_out
