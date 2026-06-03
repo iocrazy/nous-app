@@ -189,15 +189,30 @@ async def _resume(workflow_id: str) -> None:
 async def _fork(workflow_id: str) -> Any:
     """Fork a workflow from step 1 (full replay), client-aware. Returns
     the new handle. `fork_workflow_async(workflow_id, start_step)` takes
-    `start_step` positionally."""
-    from app.services.infra.dbos_orchestrator import get_dbos_client
+    `start_step` positionally.
 
+    Pass the pinned application_version so the forked (ENQUEUED) row carries
+    the same version the worker is pinned to — DBOS `fork_workflow` inserts
+    application_version verbatim with NO fallback to the live version, so
+    omitting it leaves NULL and a version-pinned worker may never dequeue the
+    fork (orphan → 'lost'). None in dev (combined, unpinned) is harmless.
+    """
+    from app.services.infra.dbos_orchestrator import (
+        _resolve_pinned_app_version,
+        get_dbos_client,
+    )
+
+    version = _resolve_pinned_app_version()
     client = get_dbos_client()
     if client is not None:
-        return await client.fork_workflow_async(workflow_id, 1)
+        return await client.fork_workflow_async(
+            workflow_id, 1, application_version=version
+        )
     from dbos import DBOS
 
-    return await DBOS.fork_workflow_async(workflow_id, start_step=1)
+    return await DBOS.fork_workflow_async(
+        workflow_id, start_step=1, application_version=version
+    )
 
 
 async def _get_status(workflow_id: str) -> Optional[dict[str, Any]]:
