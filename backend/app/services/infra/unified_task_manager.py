@@ -168,9 +168,13 @@ class UnifiedTaskManager:
             client.table("task_tracking")
             .select("phase")
             .eq("dbos_workflow_id", task_id)
-            .single()
+            .maybe_single()
             .execute()
         )
+        # A missing task_tracking row (0 rows) must not crash the workflow:
+        # treat it as QUEUED rather than raising PGRST116.
+        if result is None or result.data is None:
+            return TaskPhase.QUEUED
         raw = result.data.get("phase", "queued")
         try:
             return TaskPhase(raw)
@@ -192,6 +196,22 @@ class UnifiedTaskManager:
         await client.table("task_tracking").update(updates).eq(
             "dbos_workflow_id", task_id
         ).execute()
+
+    async def _row_exists(self, task_id: str) -> bool:
+        """Return True if a task_tracking row exists for this workflow id.
+
+        Uses ``maybe_single()`` so 0 rows return ``data=None`` rather than
+        raising PGRST116.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table("task_tracking")
+            .select("dbos_workflow_id")
+            .eq("dbos_workflow_id", task_id)
+            .maybe_single()
+            .execute()
+        )
+        return bool(result and result.data)
 
     # ── Lifecycle: create ─────────────────────────────────────────────
 
@@ -293,12 +313,46 @@ class UnifiedTaskManager:
 
     # ── Lifecycle: start ──────────────────────────────────────────────
 
-    async def start(self, task_id: str) -> None:
+    async def start(
+        self,
+        task_id: str,
+        *,
+        user_id: str | None = None,
+        task_type: str = "download",
+    ) -> None:
         """Transition to PROCESSING phase.
 
         Idempotent: already-PROCESSING or terminal tasks are silently skipped.
         Allows transitions from QUEUED or DEDUP_CHECK.
+
+        Self-healing: if no task_tracking row exists (e.g. the pre-create in
+        the dispatcher was swallowed), create a minimal one so downstream
+        ``update_progress``/``complete`` have a row to update instead of
+        no-op'ing forever. The self-heal never crashes the workflow.
+
+        ``user_id`` MUST be threaded from the call site for the self-heal to
+        succeed — ``task_tracking.user_id`` is ``UUID NOT NULL`` (mig 064), so
+        a blank/None user_id makes the recovery INSERT fail with PG 22P02.
+        Callers that cannot provide it fall back to "" (recovery becomes a
+        best-effort no-op rather than a crash).
         """
+        if not await self._row_exists(task_id):
+            try:
+                await self.create(
+                    user_id=user_id or "",
+                    task_type=task_type,
+                    title="(recovered)",
+                    dbos_workflow_id=task_id,
+                )
+                logger.warning(
+                    f"[TaskManager] start() self-healed missing task_tracking row "
+                    f"for {task_id}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[TaskManager] start() self-heal create failed for {task_id} "
+                    f"(continuing): {e!r}"
+                )
         current = await self._get_phase(task_id)
         if current == TaskPhase.PROCESSING:
             return  # already processing

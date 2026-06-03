@@ -11,23 +11,35 @@ same agent at once; only the PG row CAS in
 work, not concurrent runs.
 
 DBOS Queue gives us:
-    - **cluster-wide** concurrency cap (`concurrency=N`)
-    - **partitioned per-agent serialization** (`partition_queue=True`
-      keyed on `agent_id`) — DBOS only runs one workflow per partition
-      at a time, GLOBALLY. Stronger than the in-process lock the legacy
-      pool had.
+    - **per-worker** concurrency cap (`worker_concurrency=N`, see note
+      below on why not global `concurrency`)
+    - **partitioned per-agent dispatch** (`partition_queue=True` keyed
+      on `agent_id`) — the per-worker cap is enforced PER agent partition.
     - durable retry / replay via workflow_id memoization
     - workflow status events feed the existing D4 SSE endpoint for
       free, so a workforce dispatch is observable from any frontend
       that already speaks DBOS workflow status
 
 Concurrency tuning rationale:
-    - `concurrency=8`: matches the M3 default capacity. Bump via
-      `WORKFORCE_QUEUE_CONCURRENCY` env override if memory headroom
-      allows. Each in-flight workflow holds an LLM connection +
-      AgentRunner stack — typical RSS is ~80MB/turn.
-    - `worker_concurrency` left None: per-worker cap = global cap
-      since we expect one DBOS worker per uvicorn pod for now.
+    - `worker_concurrency=8` (NOT global `concurrency`): matches the M3
+      default capacity. Bump via `WORKFORCE_QUEUE_CONCURRENCY` env
+      override if memory headroom allows. Each in-flight workflow holds
+      an LLM connection + AgentRunner stack — typical RSS ~80MB/turn.
+    - **Why `worker_concurrency` not global `concurrency`:** DBOS uses
+      `FOR UPDATE NOWAIT` + REPEATABLE READ when a global `concurrency`
+      is set, which under load raises LockNotAvailable and backs the
+      poll interval off to a 120s cap (queue stalls). `worker_concurrency`
+      uses `FOR UPDATE SKIP LOCKED` + READ COMMITTED — no contention
+      backoff. (2026-06-03 pipeline-immediacy fix.)
+    - **Multi-worker caveat:** the cap is now PER WORKER, so on an
+      N-worker deploy the effective per-agent ceiling is 8×N and the
+      queue no longer coordinates per-agent serialization cluster-wide.
+      Today we run one DBOS worker per pod, so per-worker == global.
+      Duplicate-run prevention does NOT rely on the queue regardless —
+      it is the PG row-level CAS in
+      ``AgentWorkforceRepository.claim_next_queued`` / ``update_task_status``
+      (a second worker that dequeues the same agent short-circuits in
+      ``run_one_task`` if the task is no longer ``queued``).
 """
 
 from __future__ import annotations
@@ -46,7 +58,7 @@ _DEFAULT_CONCURRENCY = int(os.environ.get("WORKFORCE_QUEUE_CONCURRENCY", "8"))
 # partition.
 agent_workforce_queue = Queue(
     "agent_workforce",
-    concurrency=_DEFAULT_CONCURRENCY,
+    worker_concurrency=_DEFAULT_CONCURRENCY,
     partition_queue=True,
 )
 

@@ -46,7 +46,7 @@ MAX_PARSE_CONCURRENCY_DEFAULT = int(
 )
 parse_user_queue = Queue(
     "parse_user",
-    concurrency=MAX_PARSE_CONCURRENCY_DEFAULT,
+    worker_concurrency=MAX_PARSE_CONCURRENCY_DEFAULT,
     partition_queue=True,
 )
 
@@ -60,7 +60,7 @@ def set_parse_concurrency(n: int) -> None:
     """
     try:
         n = max(1, min(int(n), 20))
-        parse_user_queue.concurrency = n
+        parse_user_queue.worker_concurrency = n
         logger.info(f"[parse_queue] per-user concurrency set to {n}")
     except Exception as e:
         logger.warning(f"[parse_queue] set concurrency failed: {e}")
@@ -199,6 +199,7 @@ def dispatch_download_step(
     import uuid as _uuid
 
     from dbos import SetEnqueueOptions, SetWorkflowID
+
     from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows.download import download_user_queue, download_workflow
 
@@ -295,7 +296,10 @@ def dispatch_soda_download_step(
                 flow_id=flow_id,
             )
         except Exception as e:
-            logger.warning(f"[parse] pre-create soda download task_tracking: {e}")
+            logger.error(
+                f"[parse] pre-create soda download task_tracking FAILED "
+                f"(wf={wf_id}, will self-heal in workflow.start): {e!r}"
+            )
 
         # Enqueue on the per-user partitioned soda queue (combined audio+UGC
         # cap) instead of start_workflow_routed — this bounds the qishui API

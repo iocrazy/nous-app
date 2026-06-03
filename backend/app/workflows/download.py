@@ -41,7 +41,6 @@ from typing import Any, Optional
 from dbos import DBOS, Queue
 from loguru import logger
 
-
 # Per-user partitioned queue for GENERIC downloads (non-soda). Mirrors
 # parse_user_queue / soda_download_queue: at most `concurrency` downloads run
 # PER USER at once; the rest queue durably. Bounds a user's egress hit-rate for
@@ -52,7 +51,7 @@ MAX_DOWNLOAD_CONCURRENCY_DEFAULT = int(
 )
 download_user_queue = Queue(
     "download_user",
-    concurrency=MAX_DOWNLOAD_CONCURRENCY_DEFAULT,
+    worker_concurrency=MAX_DOWNLOAD_CONCURRENCY_DEFAULT,
     partition_queue=True,
 )
 
@@ -67,7 +66,7 @@ def set_download_concurrency(n: int) -> None:
     """
     try:
         n = max(1, min(20, int(n)))
-        download_user_queue.concurrency = n
+        download_user_queue.worker_concurrency = n
         logger.info(f"[download_queue] per-user concurrency set to {n}")
     except Exception as e:
         logger.warning(f"[download_queue] set concurrency failed: {e}")
