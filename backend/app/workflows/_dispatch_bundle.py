@@ -14,6 +14,8 @@ ticks while preserving its ability to dispatch user-triggered work.
 
 from __future__ import annotations
 
+from dbos import Queue
+
 from app.workflows.agent_workforce import (  # noqa: F401
     agent_workforce_queue,
     agent_workforce_workflow,
@@ -21,7 +23,10 @@ from app.workflows.agent_workforce import (  # noqa: F401
 from app.workflows.ai_summary import ai_summary_workflow  # noqa: F401
 from app.workflows.ai_transcription import ai_transcription_workflow  # noqa: F401
 from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
-from app.workflows.download import download_workflow  # noqa: F401
+from app.workflows.download import (  # noqa: F401
+    download_user_queue,
+    download_workflow,
+)
 from app.workflows.extract_audio import extract_audio_workflow  # noqa: F401
 from app.workflows.issue_lifecycle import (  # noqa: F401
     execute_issue,
@@ -47,3 +52,11 @@ from app.workflows.storyboard import (  # noqa: F401
 from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
 from app.workflows.transcode import transcode_workflow  # noqa: F401
 from app.workflows.write_memory import write_memory_workflow  # noqa: F401
+
+# Shared NON-partitioned dispatch queue for the gateway → DBOSClient migration.
+# Workflows that today run in-process via DBOS.start_workflow (transcode / ai_* /
+# storyboard / script / issue / memory) will be enqueued here once the gateway
+# goes enqueue-only. Declared in the dispatch bundle so the WORKER (which imports
+# this module) registers a poller for it. ADDITIVE + dormant: nothing enqueues to
+# it yet. Non-partitioned (no per-user key) — it is a global dispatch lane.
+dbos_dispatch = Queue("dbos_dispatch")
