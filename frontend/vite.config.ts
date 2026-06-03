@@ -30,6 +30,24 @@ export default defineConfig(({ mode }) => {
     plugins: [
       tailwindcss(),
       react(),
+      // Emit dist/version.json so a running tab can compare the live build's
+      // version against its own baked-in __APP_VERSION__ (focus-triggered
+      // check). Single source of truth = package.json. commitSha lets CI
+      // verify the prod deploy carries this exact build.
+      {
+        name: 'emit-version-json',
+        generateBundle() {
+          this.emitFile({
+            type: 'asset',
+            fileName: 'version.json',
+            source: JSON.stringify({
+              version: pkg.version,
+              commitSha: (env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7),
+              buildTime: new Date().toISOString(),
+            }),
+          });
+        },
+      },
       VitePWA({
         // ``autoUpdate`` instead of ``prompt`` — the prompt path leaves the
         // new SW in a waiting state until the user clicks an "update"
@@ -57,6 +75,9 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB
+          // version.json must always be network-fresh — it's how a running
+          // tab learns a newer build is live. Never precache it.
+          globIgnores: ['**/version.json'],
           // Discard caches from previous SW versions on activation so the
           // new manifest doesn't try to reuse stale 404'd chunk URLs.
           cleanupOutdatedCaches: true,

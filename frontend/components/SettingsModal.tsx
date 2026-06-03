@@ -7,6 +7,7 @@ import { PersonalSettings } from './PersonalSettings';
 import { SettingsView } from './SettingsView';
 import { TeamSettings } from './TeamSettings';
 import { UserSettings, AISettings as AISettingsType, Team } from '../types';
+import { VersionBadge } from './VersionBadge';
 
 declare const __APP_VERSION__: string;
 
@@ -272,7 +273,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Version — bottom of settings sidebar, no divider */}
           <div className="px-5 py-3 text-[11px] text-zinc-600">
-            v{__APP_VERSION__}
+            <VersionBadge />
           </div>
         </div>
 
