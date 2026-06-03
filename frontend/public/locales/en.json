@@ -115,6 +115,7 @@
   "common": {
     "confirm": "Confirm",
     "cancel": "Cancel",
+    "retry": "Retry",
     "close": "Close",
     "create": "Create",
     "delete": "Delete",

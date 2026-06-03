@@ -11,6 +11,7 @@ import {
   type TaskStatus,
 } from '../../contexts/TaskManagerContext';
 import { taskRowActions, taskShowsCover } from './taskRowPresentation';
+import { failureLabel } from '../../utils/taskFailure';
 
 // Task type → background color for the icon badge (fallback when no cover).
 function taskTypeBg(type: string): string {
@@ -157,13 +158,15 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                       <ExternalLink size={13} />
                     </button>
                   )}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onRetry(task.id); }}
-                    className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors"
-                    title={t('common.retry')}
-                  >
-                    <RotateCcw size={12} />
-                  </button>
+                  {actions.retry && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onRetry(task.id); }}
+                      className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors"
+                      title={t('common.retry')}
+                    >
+                      <RotateCcw size={12} />
+                    </button>
+                  )}
                   {task.status === 'failed' ? (
                     <XCircle size={14} className="text-red-400 shrink-0" />
                   ) : (
@@ -186,7 +189,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
 
           {task.error_msg && (
             <div className="text-[10px] text-red-400 mt-0.5 line-clamp-2 break-words">
-              {task.error_msg}
+              {failureLabel(task.error_msg)}
             </div>
           )}
         </div>

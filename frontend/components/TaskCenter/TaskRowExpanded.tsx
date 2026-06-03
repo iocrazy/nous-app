@@ -11,6 +11,7 @@ import {
   taskTypeLabel, useTaskManager, type UnifiedTask,
 } from '../../contexts/TaskManagerContext';
 import { taskIdLabel, statusVisual, relativeTime } from '../../utils/taskDisplay';
+import { classifyFailure } from '../../utils/taskFailure';
 
 interface TaskRowExpandedProps {
   task: UnifiedTask;
@@ -41,7 +42,9 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
   const v = statusVisual(task.status);
   const md = (task.metadata ?? {}) as Record<string, unknown>;
   const isTerminal = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
-  const isFailedRetryable = task.status === 'failed';
+  // Hide Retry on permanent failures (source unavailable / not found) —
+  // re-running the same input fails identically.
+  const isFailedRetryable = task.status === 'failed' && !classifyFailure(task.error_msg).permanent;
 
   const onCancel = async () => { await cancelTask(task.id); };
   const onRetry  = async () => { await retryTask(task.id); };

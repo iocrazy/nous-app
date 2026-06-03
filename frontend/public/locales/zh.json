@@ -115,6 +115,7 @@
   "common": {
     "confirm": "确认",
     "cancel": "取消",
+    "retry": "重试",
     "close": "关闭",
     "create": "创建",
     "delete": "删除",
