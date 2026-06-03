@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from loguru import logger
 
 from app.agent_framework import role_from_env
+from app.agent_framework.role import ProcessRole
 from app.services.infra import dbos_orchestrator
 
 
@@ -37,30 +38,42 @@ def install_cleanup_handlers() -> None:
 
 
 def init_dbos(app: FastAPI) -> None:
-    """Init + launch DBOS orchestrator (registers @DBOS.workflow decorators).
+    """Init DBOS per process role (Stage C FLIP).
+
+    GATEWAY: construct an enqueue-only ``DBOSClient`` and do NOT launch a DBOS
+    executor. This activates the client dispatch branches and stops the gateway
+    running an executor / consuming ``_dbos_internal_queue``. The HTTP routers
+    still import ``@DBOS.workflow``-decorated callables at module level for
+    their fallback branches — that registers into the SDK's module-level
+    registry and does not require a constructed/launched DBOS singleton.
+
+    WORKER / COMBINED: launch a DBOS executor as before (dispatch needs
+    ``_sys_db``) consuming user queues per ``runs_dbos_workers``.
 
     `from app import workflows` (not `import app.workflows`) so the `app`
     parameter isn't shadowed by a local module binding. Failure is
-    non-fatal; only DBOS-routed task_types degrade.
-
-    The gateway role launches DBOS (dispatch needs `_sys_db`) but consumes no
-    user queues — `runs_dbos_workers` is False for gateway, so workflows only
-    execute on the worker. See
+    non-fatal; only DBOS-routed task_types degrade. See
     docs/superpowers/plans/2026-06-02-gateway-enqueue-only.md.
     """
     try:
+        role = app.state.process_role
+        if role == ProcessRole.GATEWAY:
+            dbos_orchestrator.init_dbos_client()
+            logger.info("DBOS gateway: enqueue-only DBOSClient (no executor)")
+            return
+
         # Stable per-role executor id isolates the DBOS recovery path (which
         # ignores listen_queues) so a gateway restart can't re-run the worker's
         # in-flight workflows. Role name is stable across restarts; container
         # hostname is NOT (it changes on recreate), so don't use it.
-        dbos_orchestrator.init_dbos(executor_id=app.state.process_role.value)
+        dbos_orchestrator.init_dbos(executor_id=role.value)
         if dbos_orchestrator.is_enabled():
             from app import workflows  # noqa: F401 — registers @DBOS decorators
 
-            consume = app.state.process_role.runs_dbos_workers
+            consume = role.runs_dbos_workers
             dbos_orchestrator.launch_dbos(consume_queues=consume)
             logger.info(
-                f"DBOS orchestrator launched (role={app.state.process_role.value}, "
+                f"DBOS orchestrator launched (role={role.value}, "
                 f"consume_queues={consume})"
             )
     except Exception as e:
@@ -74,3 +87,8 @@ async def shutdown_dbos() -> None:
         dbos_orchestrator.shutdown_dbos()
     except Exception as e:
         logger.warning(f"DBOS shutdown raised {e!r}")
+    # Close the gateway enqueue-only client too (no-op on worker/combined).
+    try:
+        dbos_orchestrator.shutdown_dbos_client()
+    except Exception as e:
+        logger.warning(f"DBOS client shutdown raised {e!r}")
