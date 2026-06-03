@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Music, Heart, MessageCircle, Share2, Bookmark,
-  MoreVertical, Download, Copy, Trash2, ExternalLink, CloudDownload,
+  MoreVertical, Copy, Trash2, ExternalLink, CloudDownload,
+  Image as ImageIcon,
 } from 'lucide-react';
 import type { Video, Tag } from '../types';
+import { audioMenuActions } from './mobileAudioMenu';
 import { buildSodaTheme, type SodaTheme } from '../utils/sodaTheme';
 import { getMediaLyrics, type LyricLine } from '../services/lyricsService';
 import { getSupabaseClient } from '../supabaseClient';
@@ -65,8 +67,14 @@ interface MobileAudioScreenProps {
   onNotesChange?: (s: string) => void;
   onNotesBlur?: () => void;
 
-  /** ⋮ overflow actions — wired to DownloadDetailPage's existing handlers. */
+  /** ⋮ overflow actions — wired to DownloadDetailPage's existing handlers.
+   * The menu is per-asset (audio + cover), mirroring the PC DownloadMenuDropdown:
+   * each asset shows Download (present) or Fetch/Retry (missing). */
   onDownloadAudio?: () => void;
+  /** Download the cover file (when already on disk). */
+  onDownloadCover?: () => void;
+  /** Re-fetch a missing/failed cover (qishui → soda re-download tops it up). */
+  onFetchCover?: () => void;
   onShare?: () => void;
   onDelete?: () => void;
   onCopyLink?: () => void;
@@ -132,6 +140,8 @@ export function MobileAudioScreen({
   onNotesChange,
   onNotesBlur,
   onDownloadAudio,
+  onDownloadCover,
+  onFetchCover,
   onShare,
   onDelete,
   onCopyLink,
@@ -139,6 +149,39 @@ export function MobileAudioScreen({
 }: MobileAudioScreenProps) {
   const t = theme ?? buildSodaTheme(null, src);
   const title = video.music_name || video.title || 'Audio';
+
+  // ── Per-asset ⋮ menu (audio + cover), mirroring PC DownloadMenuDropdown ────
+  const isQishui = video.source_platform === 'qishui';
+  const assetActions = audioMenuActions(video, { hasAudio, isQishui });
+  // Resolve each asset action to a concrete menu entry (label/icon/handler).
+  // Drop any whose handler wasn't supplied so we never render a dead button.
+  const assetMenuItems = assetActions
+    .map((a) => {
+      if (a.asset === 'audio') {
+        if (a.kind === 'download') {
+          return onDownloadAudio && { key: 'audio-dl', label: 'Download Audio', Icon: Music, color: 'text-amber-400', onClick: onDownloadAudio };
+        }
+        return onFetchAudio && {
+          key: 'audio-fetch',
+          label: a.kind === 'retry' ? 'Retry Audio' : 'Fetch Audio',
+          Icon: CloudDownload,
+          color: a.kind === 'retry' ? 'text-red-400' : 'text-amber-400',
+          onClick: onFetchAudio,
+        };
+      }
+      // cover
+      if (a.kind === 'download') {
+        return onDownloadCover && { key: 'cover-dl', label: 'Download Cover', Icon: ImageIcon, color: 'text-emerald-400', onClick: onDownloadCover };
+      }
+      return onFetchCover && {
+        key: 'cover-fetch',
+        label: a.kind === 'retry' ? 'Retry Cover' : 'Fetch Cover',
+        Icon: CloudDownload,
+        color: a.kind === 'retry' ? 'text-red-400' : 'text-emerald-400',
+        onClick: onFetchCover,
+      };
+    })
+    .filter(Boolean) as Array<{ key: string; label: string; Icon: typeof Music; color: string; onClick: () => void }>;
 
   // ── Lyrics (couplet preview + full sub-page) ────────────────────────────
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
@@ -161,6 +204,16 @@ export function MobileAudioScreen({
         }
       });
     return () => { cancelled = true; };
+  }, [mediaId]);
+
+  // Re-pull lyrics after the overlay closes — the overlay can Fetch lyrics for a
+  // track that had none, and this keeps the couplet/entry in sync (otherwise the
+  // "Fetch Lyrics" entry lingers even after a successful fetch).
+  const reloadLyrics = useCallback(() => {
+    if (!mediaId) return;
+    getMediaLyrics(mediaId)
+      .then((data) => setLyricLines(data.lines))
+      .catch((err) => console.error('Failed to reload lyrics:', err));
   }, [mediaId]);
 
   let activeIndex = 0;
@@ -308,7 +361,7 @@ export function MobileAudioScreen({
 
       {/* Lyric couplet — tap opens the full lyrics sub-page. Collapses when no
           synced lyrics (the rest moves up). */}
-      {hasLyrics && (
+      {hasLyrics ? (
         <button
           type="button"
           onClick={() => setShowLyrics(true)}
@@ -320,7 +373,17 @@ export function MobileAudioScreen({
             <p className="mt-1.5 text-sm text-white/45 truncate">{nextLine}</p>
           )}
         </button>
-      )}
+      ) : isQishui ? (
+        // No lyrics yet — the couplet collapses, so give a reachable entry to
+        // the lyrics overlay (where the Fetch Lyrics button lives).
+        <button
+          type="button"
+          onClick={() => setShowLyrics(true)}
+          className="mt-5 mx-auto flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-sm font-medium text-white/80 transition-colors"
+        >
+          <Music size={14} /> Fetch Lyrics
+        </button>
+      ) : null}
 
       {/* Stats + actions row */}
       <div className="mt-6 flex items-center">
@@ -354,13 +417,19 @@ export function MobileAudioScreen({
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
                 <div className="absolute right-0 top-full mt-1 z-40 min-w-[160px] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1">
-                  {onDownloadAudio && (
+                  {/* Per-asset actions (audio + cover), each Download/Fetch/Retry
+                      gated on its own status — mirrors the PC menu. */}
+                  {assetMenuItems.map(({ key, label, Icon, color, onClick }) => (
                     <button
-                      onClick={() => { setShowMenu(false); onDownloadAudio(); }}
+                      key={key}
+                      onClick={() => { setShowMenu(false); onClick(); }}
                       className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
                     >
-                      <Download size={13} className="text-amber-400" /> Download
+                      <Icon size={13} className={color} /> {label}
                     </button>
+                  ))}
+                  {assetMenuItems.length > 0 && (canShare && onShare || (video.original_url && onCopyLink) || video.original_url) && (
+                    <div className="border-t border-zinc-700 my-1" />
                   )}
                   {canShare && onShare && (
                     <button
@@ -485,7 +554,8 @@ export function MobileAudioScreen({
           subtitle={video.author || undefined}
           coverUrl={coverUrl}
           theme={t}
-          onClose={() => setShowLyrics(false)}
+          onClose={() => { setShowLyrics(false); reloadLyrics(); }}
+          sourcePlatform={video.source_platform}
         />
       )}
     </div>

@@ -96,7 +96,16 @@ export function DownloadMenuDropdown({
             <button onClick={() => onDownload('cover')} className={btnClass}>
               <ImageIcon size={13} className="text-emerald-400" /> Cover
             </button>
-          ) : isQishui ? null : isPending(coverStatus) ? (
+          ) : isQishui ? (
+            // qishui covers can't be fetched via the douyin/yt-dlp generic path;
+            // re-run the soda download, which tops up a missing cover (#474).
+            onFetchSodaAudio ? (
+              <button onClick={onFetchSodaAudio} className={btnClass}>
+                <CloudDownload size={13} className={isFailed(coverStatus) ? 'text-red-400' : 'text-emerald-400'} />{' '}
+                {isFailed(coverStatus) ? 'Retry Cover' : 'Fetch Cover'}
+              </button>
+            ) : null
+          ) : isPending(coverStatus) ? (
             <button disabled className={disabledClass}>
               <Loader2 size={13} className="text-emerald-400 animate-spin" /> Cover Downloading...
             </button>
