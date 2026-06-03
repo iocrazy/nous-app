@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
+from app.workflows.download import download_user_queue
 from app.workflows.parse import parse_user_queue
 from app.workflows.soda_download import soda_download_queue
-from app.workflows.download import download_user_queue
 
 
 @pytest.mark.parametrize(

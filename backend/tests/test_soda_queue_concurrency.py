@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.workflows.soda_download import soda_download_queue, set_soda_concurrency
+from app.workflows.soda_download import set_soda_concurrency, soda_download_queue
 
 
 @pytest.fixture(autouse=True)
