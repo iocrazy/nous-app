@@ -241,6 +241,14 @@ class YtdlpService:
             "mp4",
             "--no-playlist",
             "--no-warnings",
+            # Re-download must REPLACE, not skip. When a video.mp4 already
+            # exists in the output dir (e.g. an old 480p file downloaded while
+            # the user's cookie was expired), yt-dlp prints "has already been
+            # downloaded" and SKIPS — so a re-download keeps the stale low-res
+            # file forever. --force-overwrites makes it re-fetch + overwrite,
+            # so the format selector actually delivers the high-res stream.
+            # (2026-06-03: confirmed plain→480p [skip], --force-overwrites→4K.)
+            "--force-overwrites",
             "--newline",
             # 2026-05-13: without these, yt-dlp uses the internal
             # requests 20s read-timeout and no retries, so a slow
