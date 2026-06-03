@@ -423,6 +423,22 @@ def set_bounds_registry(registry: Optional[Any]) -> None:
     _bounds_registry = registry
 
 
+# Gateway enqueue routing: task_types that need per-user queue partitioning
+# (fairness — one user's backlog can't starve others) map to a named
+# partitioned queue. Everything else falls to the shared default queue.
+_PARTITIONED_QUEUE = {
+    "parse": "parse_user",
+    "download": "download_user",
+    "soda_download": "soda_download",
+}
+
+
+def _queue_for_task(task_type: str) -> tuple[str, bool]:
+    """Resolve the named queue + whether it's user-partitioned for a task_type."""
+    q = _PARTITIONED_QUEUE.get(task_type)
+    return (q, True) if q else ("dbos_dispatch", False)
+
+
 async def start_workflow_routed(
     task_type: str,
     *,
@@ -499,6 +515,44 @@ async def start_workflow_routed(
     # GET /api/v1/workflows can filter by user. Requires user_id
     # in workflow kwargs.
     user_id = kwargs.get("user_id")
+
+    # Gateway enqueue-only path (dormant): when a DBOSClient is wired, the
+    # gateway only opens DB connections to enqueue into a NAMED queue — it
+    # never runs the workflow in-process. The worker dequeues + executes.
+    # `_client` is None everywhere today, so this branch is not taken; it
+    # exists ready for when the gateway constructs the client.
+    if _client is not None:
+        from dbos import EnqueueOptions
+
+        wf_name = getattr(dbos_workflow_callable, "__qualname__", None) or getattr(
+            dbos_workflow_callable, "__name__", ""
+        )
+        queue_name, partitioned = _queue_for_task(task_type)
+        opts: dict[str, Any] = dict(
+            workflow_name=wf_name,
+            queue_name=queue_name,
+            app_version=_resolve_pinned_app_version(),
+        )
+        if workflow_id:
+            opts["workflow_id"] = workflow_id
+        if user_id:
+            opts["authenticated_user"] = user_id
+        if partitioned:
+            if not user_id:
+                raise RuntimeError(
+                    f"partitioned queue {queue_name} requires user_id "
+                    f"(task_type={task_type})"
+                )
+            opts["queue_partition_key"] = str(user_id)
+        handle = _client.enqueue(EnqueueOptions(**opts), **kwargs)
+        return {
+            "mode": "dbos",
+            "task_type": task_type,
+            "dbos_workflow_id": handle.workflow_id,
+        }
+
+    # In-process path (combined / worker, `_client is None`): start the
+    # workflow directly via the DBOS singleton.
     auth_ctx = DBOSContextSetAuth(user=user_id, roles=[]) if user_id else nullcontext()
     with auth_ctx:
         if workflow_id:
