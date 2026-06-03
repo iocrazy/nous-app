@@ -832,14 +832,21 @@ class UnifiedTaskManager:
             return {"action": "created", "dedup_key": dedup_key}
 
         client = await self._get_client()
-        active_result = await (
-            client.table("task_tracking")
-            .select("id, phase, subscribers")
-            .eq("dedup_key", dedup_key)
-            .in_("phase", ["queued", "dedup_check", "processing"])
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
+        active_result = (
+            await (
+                client.table("task_tracking")
+                # task_tracking's PK is dbos_workflow_id (D8-A rename); there is no
+                # `id` column, so selecting it 42703'd and the WHOLE dedup query
+                # threw → "[Download/Dedup] dedup failed, proceeding" every time =
+                # dedup silently disabled (duplicate downloads never coalesced).
+                # Downstream already reads task["dbos_workflow_id"].
+                .select("dbos_workflow_id, phase, subscribers")
+                .eq("dedup_key", dedup_key)
+                .in_("phase", ["queued", "dedup_check", "processing"])
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
         )
 
         if active_result.data:
