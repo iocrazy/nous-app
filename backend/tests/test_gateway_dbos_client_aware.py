@@ -149,8 +149,16 @@ def _install_fake_dbos(monkeypatch, record: list[tuple[str, tuple, dict]]):
             record.append(("resume_workflow_async", (workflow_id,), {}))
 
         @staticmethod
-        async def fork_workflow_async(workflow_id, start_step):
-            record.append(("fork_workflow_async", (workflow_id, start_step), {}))
+        async def fork_workflow_async(
+            workflow_id, start_step, *, application_version=None
+        ):
+            record.append(
+                (
+                    "fork_workflow_async",
+                    (workflow_id, start_step),
+                    {"application_version": application_version},
+                )
+            )
 
             class _H:
                 workflow_id = "forked-wf"
@@ -264,7 +272,8 @@ async def test_cancel_resume_route(monkeypatch):
 @pytest.mark.asyncio
 async def test_fork_positional_start_step(monkeypatch):
     """fork_workflow_async(workflow_id, start_step) takes start_step
-    positionally — the client call must pass 1 positionally."""
+    positionally — the client call must pass 1 positionally — and the pinned
+    application_version is threaded through (None here = no build-info in test)."""
     fc = _FakeClient()
     monkeypatch.setattr(dbos_orchestrator, "_client", fc)
     handle = await wr._fork("wf-1")
@@ -272,7 +281,7 @@ async def test_fork_positional_start_step(monkeypatch):
     call = fc.calls[0]
     assert call[0] == "fork_workflow_async"
     assert call[1] == ("wf-1", 1)  # start_step passed positionally as 1
-    assert call[2] == {}  # no kwargs
+    assert call[2] == {"application_version": None}  # pinned version threaded
 
     record: list = []
     _install_fake_dbos(monkeypatch, record)
@@ -280,6 +289,7 @@ async def test_fork_positional_start_step(monkeypatch):
     await wr._fork("wf-1")
     assert record[0][0] == "fork_workflow_async"
     assert record[0][1] == ("wf-1", 1)
+    assert record[0][2] == {"application_version": None}
 
 
 # ── admin.celery_router ──────────────────────────────────────────────
