@@ -44,7 +44,7 @@ MIME_BY_EXT = {"flac": "audio/flac", "m4a": "audio/mp4", "mp3": "audio/mpeg"}
 SODA_DOWNLOAD_CONCURRENCY = int(os.environ.get("SODA_DOWNLOAD_CONCURRENCY", "3"))
 soda_download_queue = Queue(
     "soda_download",
-    concurrency=SODA_DOWNLOAD_CONCURRENCY,
+    worker_concurrency=SODA_DOWNLOAD_CONCURRENCY,
     partition_queue=True,
 )
 
@@ -54,7 +54,7 @@ def set_soda_concurrency(n: int) -> None:
     the `config.parse_concurrency` lifecycle subscriber on Settings save."""
     try:
         n = max(1, min(20, int(n)))
-        soda_download_queue.concurrency = n
+        soda_download_queue.worker_concurrency = n
         logger.info(f"[soda_queue] per-user concurrency set to {n}")
     except Exception as e:
         logger.warning(f"[soda_queue] set concurrency failed: {e}")
@@ -196,7 +196,7 @@ async def soda_download_workflow(
     """
     manager = get_task_manager()
     wf_id = DBOS.workflow_id
-    await manager.start(wf_id)
+    await manager.start(wf_id, user_id=user_id)
 
     # 1. Resolve the media row (always fetch so the skip-guard can inspect it).
     row = await MediaRepository().get_by_platform_id(platform_id)
@@ -245,7 +245,9 @@ async def soda_download_workflow(
                 logger.warning("soda_download: could not mark cover failed: {}", exc)
         await manager.complete(
             wf_id,
-            subtitle=f"Cover updated {title}" if cover_ok else f"Already downloaded {title}",
+            subtitle=(
+                f"Cover updated {title}" if cover_ok else f"Already downloaded {title}"
+            ),
         )
         return {
             "platform_id": platform_id,

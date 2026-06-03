@@ -127,4 +127,4 @@ def test_soda_download_queue_is_partitioned_with_configured_concurrency():
 
     assert soda_download_queue.name == "soda_download"
     assert soda_download_queue.partition_queue is True
-    assert soda_download_queue.concurrency == SODA_DOWNLOAD_CONCURRENCY
+    assert soda_download_queue.worker_concurrency == SODA_DOWNLOAD_CONCURRENCY
