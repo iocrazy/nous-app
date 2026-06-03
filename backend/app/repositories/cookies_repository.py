@@ -7,6 +7,7 @@
 使用异步 Supabase 客户端。
 """
 
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from loguru import logger
@@ -97,6 +98,11 @@ class CookiesRepository:
                 "platform": platform,
                 "is_valid": True,
                 "error_message": None,
+                # Refresh on every save — the upsert has no on-update default,
+                # so without this updated_at stayed frozen at first-insert time
+                # even when cookie content changed, making "is my cookie fresh?"
+                # checks lie (observed: 1082→1172-byte update, ts stuck on 4/15).
+                "updated_at": datetime.now(timezone.utc).isoformat(),
                 **data,
             }
 
