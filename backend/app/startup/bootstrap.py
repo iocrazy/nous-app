@@ -125,44 +125,91 @@ async def _bg_liveness_reconcile() -> None:
         logger.warning(f"liveness reconcile on startup failed: {exc!r}")
 
 
-async def _bg_reap_internal_queue() -> None:
-    """Cancel stranded `_dbos_internal_queue` PENDING/ENQUEUED rows (path C).
+def build_reap_predicates() -> dict[str, str]:
+    """Return the two WHERE-clause predicates the internal-queue reaper uses.
 
-    Every backend restart abandons whatever scheduled housekeeping
-    workflows were enqueued at the time. They sit forever in
-    dbos.workflow_status with status='PENDING' on _dbos_internal_queue,
-    eventually polluting any code that introspects the queue. This sweep
-    marks anything older than 5 minutes as CANCELLED so the table stops
-    growing across restarts. User-queued workflows are left alone.
+    Pure (no I/O) so it is unit-testable. Each value is a parenthesised SQL
+    boolean expression intended to be OR-joined inside the reaper UPDATE.
+
+    - **dead_gateway** (any age, provably-dead): the gateway is FORCED by DBOS
+      to consume `_dbos_internal_queue` even with `listen_queues([])`. It
+      dequeues worker-enqueued ticks, stamps them PENDING with
+      `executor_id='gateway'`, but cannot execute them (it never imports
+      `_scheduled_bundle`) and DBOS recovery is executor-scoped, so the worker
+      never reclaims a 'gateway' row. Any such row is dead regardless of age.
+      A real long-running task runs on the worker (`executor_id != 'gateway'`)
+      or has `queue_name` NULL (start_workflow_routed), so it is never matched.
+    - **stale_sched** (age-gated, sched-* only): stateless scheduled ticks
+      superseded by newer ticks. Age is used ONLY for sched-* ticks, never for
+      arbitrary user workflows. Uses the same created_at-epoch-millis shape the
+      reaper has always used for the age gate.
     """
-    try:
-        import os
+    return {
+        "dead_gateway": (
+            "queue_name = '_dbos_internal_queue' "
+            "AND status = 'PENDING' "
+            "AND executor_id = 'gateway'"
+        ),
+        "stale_sched": (
+            "queue_name = '_dbos_internal_queue' "
+            "AND status = 'ENQUEUED' "
+            "AND name LIKE 'sched-%' "
+            "AND created_at < "
+            "(EXTRACT(EPOCH FROM NOW() - INTERVAL '5 minutes') * 1000)::bigint"
+        ),
+    }
 
-        import psycopg
 
-        dsn = os.environ.get("DBOS_DATABASE_URL")
-        if not dsn:
-            return
-        with psycopg.connect(dsn, autocommit=True) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE dbos.workflow_status
-                       SET status='CANCELLED'
-                     WHERE queue_name='_dbos_internal_queue'
-                       AND status IN ('PENDING','ENQUEUED')
-                       AND created_at <
-                           (EXTRACT(EPOCH FROM NOW() - INTERVAL '5 minutes') * 1000)::bigint
-                    """
-                )
-                affected = cur.rowcount or 0
-        if affected:
-            logger.info(
-                f"reap_internal_queue: cancelled {affected} stranded "
-                f"_dbos_internal_queue PENDING/ENQUEUED rows"
-            )
-    except Exception as exc:
-        logger.warning(f"reap_internal_queue startup sweep failed: {exc!r}")
+async def _bg_reap_internal_queue() -> None:
+    """Periodically cancel provably-dead `_dbos_internal_queue` rows (path C).
+
+    Two predicates (see `build_reap_predicates`):
+    - dead_gateway: gateway-stranded PENDING ticks (any age — the gateway can
+      never execute a dequeued workflow, so these are provably dead).
+    - stale_sched: sched-* ENQUEUED ticks older than 5 minutes (superseded by
+      newer ticks).
+
+    Neither predicate ever age-guesses an arbitrary user workflow: a live long
+    task runs on the worker (executor_id != 'gateway') or has queue_name NULL.
+
+    Runs once promptly on start, then every DBOS_REAP_INTERVAL_SECONDS (default
+    120s). Each iteration is independently guarded so one failed sweep does not
+    kill the loop.
+    """
+    import asyncio
+    import os
+
+    import psycopg
+
+    interval = int(os.environ.get("DBOS_REAP_INTERVAL_SECONDS", "120"))
+    preds = build_reap_predicates()
+    where_clause = f"({preds['dead_gateway']}) OR ({preds['stale_sched']})"
+
+    while True:
+        try:
+            dsn = os.environ.get("DBOS_DATABASE_URL")
+            if dsn:
+                with psycopg.connect(dsn, autocommit=True) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""
+                            UPDATE dbos.workflow_status
+                               SET status = 'CANCELLED',
+                                   updated_at =
+                                       (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+                             WHERE {where_clause}
+                            RETURNING workflow_uuid
+                            """
+                        )
+                        affected = len(cur.fetchall())
+                if affected:
+                    logger.info(
+                        f"reap_internal_queue: cancelled {affected} provably-dead "
+                        f"_dbos_internal_queue rows (gateway-stranded + stale sched-*)"
+                    )
+        except Exception as exc:
+            logger.warning(f"reap_internal_queue sweep failed: {exc!r}")
+        await asyncio.sleep(interval)
 
 
 def install_background_bootstrap(app: FastAPI) -> None:
