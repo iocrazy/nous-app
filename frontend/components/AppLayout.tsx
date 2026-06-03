@@ -171,8 +171,8 @@ function AppLayoutInner() {
   // mobile uses natural scroll (no h-screen) so infinite scroll works
   const mainContentClass = `flex-1 ${sidebarCollapsed ? 'sm:ml-20' : 'sm:ml-64'} w-full transition-[margin] duration-300 ${
     view === 'resources'
-      ? `${isDetailPage ? 'pt-[max(env(safe-area-inset-top),16px)] pb-0' : 'pt-12 pb-28'} sm:h-screen sm:p-8 sm:pt-20 sm:pb-8 sm:overflow-hidden`
-      : `${isDetailPage ? 'pt-[max(env(safe-area-inset-top),16px)] pb-0' : 'px-4 pt-12 pb-28'} sm:px-8 sm:pt-20 sm:pb-8`
+      ? `${isDetailPage ? 'pt-0 pb-0' : 'pt-12 pb-28'} sm:h-screen sm:p-8 sm:pt-20 sm:pb-8 sm:overflow-hidden`
+      : `${isDetailPage ? 'pt-0 pb-0' : 'px-4 pt-12 pb-28'} sm:px-8 sm:pt-20 sm:pb-8`
   }`;
 
   // Helper: build team-scoped path
@@ -210,7 +210,7 @@ function AppLayoutInner() {
     <ConfirmProvider>
     <TaskManagerProvider>
     <UploadProvider>
-    <div className="flex min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+    <div className="flex min-h-[100dvh] bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
 
       {/* User Profile Modal */}
       <UserProfileModal
