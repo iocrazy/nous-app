@@ -61,6 +61,7 @@ async def collect_retryable_downloads_step() -> dict[str, Any]:
     retry_failed_downloads_workflow), mirroring download.py / parse.py.
     """
     from app.core.enums import DownloadStatus
+    from app.db import engine as db_engine
     from app.repositories.media_repository import get_media_repository
 
     repo = get_media_repository()
@@ -95,17 +96,21 @@ async def collect_retryable_downloads_step() -> dict[str, Any]:
         if 0 < max_attempts <= retry_count:
             skipped_exhausted += 1
             continue
-        # Reset to PENDING + bump the attempt counter (durable, in-step). If
-        # the dispatch in the workflow body fails, the row stays PENDING and is
-        # re-collected next hour — idempotent. The counter persists across the
-        # download's failure (download_workflow only touches the status), so it
-        # accumulates until the cap.
-        await repo.update(
-            platform_id,
+        # Reset to PENDING + bump the attempt counter. Write through the
+        # committing engine (eng.begin), NOT repo.update — the asyncpg
+        # MediaRepository.update runs UPDATE...RETURNING on a non-committing
+        # eng.connect() and silently rolls back, so the counter never
+        # accumulated (the whole reason the cap looked broken). db_engine.execute
+        # commits, so the counter survives the download's later writes and
+        # climbs to the cap. NULL error_message keeps the UI clean.
+        await db_engine.execute(
+            "UPDATE parsed_media SET video_download_status = :pending, "
+            "error_message = NULL, download_retry_count = :cnt, "
+            "updated_at = now() WHERE platform_id = :pid",
             {
-                "video_download_status": DownloadStatus.PENDING.value,
-                "error_message": None,
-                "download_retry_count": retry_count + 1,
+                "pending": DownloadStatus.PENDING.value,
+                "cnt": retry_count + 1,
+                "pid": platform_id,
             },
         )
         specs.append(
