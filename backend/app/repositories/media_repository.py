@@ -432,6 +432,38 @@ class MediaRepository:
             logger.error(f"获取待下载列表失败: {e}")
             return []
 
+    async def get_media_owner_map(self, media_ids: List[Any]) -> Dict[str, str]:
+        """Map parsed_media.id -> resources.creator_id (the download owner).
+
+        parsed_media is a global table with no user_id column (dropped in the
+        scope-1 refactor); ownership lives in resources.creator_id, joined via
+        resources.media_id -> parsed_media.id. Returns {media_id_str:
+        creator_id_str} for non-trashed resources only. A media id with no
+        backing resource is omitted (genuine orphan: legacy/system download)
+        so callers can skip it.
+        """
+        if not media_ids:
+            return {}
+        try:
+            client = await self._get_client()
+            res = (
+                await client.table("resources")
+                .select("media_id, creator_id")
+                .in_("media_id", [str(m) for m in media_ids])
+                .eq("is_trashed", False)
+                .execute()
+            )
+            owner_map: Dict[str, str] = {}
+            for row in res.data or []:
+                mid = row.get("media_id")
+                cid = row.get("creator_id")
+                if mid is not None and cid and str(mid) not in owner_map:
+                    owner_map[str(mid)] = str(cid)
+            return owner_map
+        except Exception as e:
+            logger.error(f"get_media_owner_map failed: {e}")
+            return {}
+
     async def get_all(
         self,
         skip: int = 0,
