@@ -25,7 +25,6 @@ class _FakeRepo:
     def __init__(self, failed, owner_map):
         self._failed = failed
         self._owner_map = owner_map
-        self.updated = []
 
     async def get_pending_downloads(self, status, limit=50):
         return self._failed
@@ -34,8 +33,19 @@ class _FakeRepo:
         wanted = {str(m) for m in media_ids}
         return {k: v for k, v in self._owner_map.items() if k in wanted}
 
-    async def update(self, platform_id, fields):
-        self.updated.append((platform_id, fields))
+
+def _patch_engine_execute(monkeypatch):
+    """Capture collect's committing writes (db_engine.execute) — collect uses
+    the engine, NOT repo.update, because the asyncpg repo.update doesn't
+    commit. Returns the list of (sql, params) the step wrote."""
+    writes = []
+
+    async def _fake_execute(sql, params=None):
+        writes.append((sql, params or {}))
+        return 1
+
+    monkeypatch.setattr("app.db.engine.execute", _fake_execute)
+    return writes
 
 
 # --- collect step: owner resolution + reset-to-pending --------------------
@@ -53,6 +63,7 @@ async def test_collect_resolves_owner_and_resets_pending(monkeypatch):
     monkeypatch.setattr(
         "app.repositories.media_repository.get_media_repository", lambda: repo
     )
+    writes = _patch_engine_execute(monkeypatch)
 
     out = await recovery.collect_retryable_downloads_step()
 
@@ -60,18 +71,13 @@ async def test_collect_resolves_owner_and_resets_pending(monkeypatch):
     assert out["skipped_orphan"] == 1
     assert out["skipped_exhausted"] == 0
     assert out["specs"] == [{"platform_id": "p1", "user_id": "u1", "media_type": 0}]
-    # only the owned one was reset to pending + retry counter bumped 0->1;
-    # orphan left alone
-    assert repo.updated == [
-        (
-            "p1",
-            {
-                "video_download_status": "pending",
-                "error_message": None,
-                "download_retry_count": 1,
-            },
-        )
-    ]
+    # only the owned one was reset to pending + retry counter bumped 0->1 via
+    # the committing engine; orphan left alone
+    assert len(writes) == 1
+    sql, params = writes[0]
+    assert params["pid"] == "p1"
+    assert params["cnt"] == 1
+    assert params["pending"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -86,6 +92,7 @@ async def test_collect_genuine_orphans_skipped(monkeypatch):
     monkeypatch.setattr(
         "app.repositories.media_repository.get_media_repository", lambda: repo
     )
+    writes = _patch_engine_execute(monkeypatch)
 
     out = await recovery.collect_retryable_downloads_step()
 
@@ -95,7 +102,7 @@ async def test_collect_genuine_orphans_skipped(monkeypatch):
         "skipped_orphan": 2,
         "skipped_exhausted": 0,
     }
-    assert repo.updated == []
+    assert writes == []
 
 
 @pytest.mark.asyncio
@@ -146,6 +153,7 @@ async def test_collect_skips_exhausted_downloads(monkeypatch):
     monkeypatch.setattr(
         "app.repositories.media_repository.get_media_repository", lambda: repo
     )
+    writes = _patch_engine_execute(monkeypatch)
 
     out = await recovery.collect_retryable_downloads_step()
 
@@ -153,16 +161,9 @@ async def test_collect_skips_exhausted_downloads(monkeypatch):
     assert out["skipped_orphan"] == 0
     # only the under-cap one dispatches, with counter bumped 2->3
     assert out["specs"] == [{"platform_id": "fresh", "user_id": "u1", "media_type": 0}]
-    assert repo.updated == [
-        (
-            "fresh",
-            {
-                "video_download_status": "pending",
-                "error_message": None,
-                "download_retry_count": 3,
-            },
-        )
-    ]
+    assert len(writes) == 1
+    assert writes[0][1]["pid"] == "fresh"
+    assert writes[0][1]["cnt"] == 3
 
 
 @pytest.mark.asyncio
@@ -182,12 +183,13 @@ async def test_collect_cap_disabled_retries_forever(monkeypatch):
     monkeypatch.setattr(
         "app.repositories.media_repository.get_media_repository", lambda: repo
     )
+    writes = _patch_engine_execute(monkeypatch)
 
     out = await recovery.collect_retryable_downloads_step()
 
     assert out["skipped_exhausted"] == 0
     assert len(out["specs"]) == 1
-    assert repo.updated[0][1]["download_retry_count"] == 100
+    assert writes[0][1]["cnt"] == 100
 
 
 # --- dispatch helper: must NOT be a @DBOS.step ----------------------------
