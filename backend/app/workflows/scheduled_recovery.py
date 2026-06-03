@@ -33,7 +33,12 @@ from app.workflows.workflow_health_sweeper import _dbos_claims_workflow  # noqa:
 @DBOS.step()
 async def retry_failed_downloads_step() -> dict[str, Any]:
     """Find FAILED downloads, reset to PENDING, re-dispatch download task.
-    Skips orphan rows (user_id IS NULL) per CLAUDE.md regression notes.
+
+    Owner resolution: parsed_media has no user_id column (dropped in scope-1),
+    so the download owner is read from resources.creator_id via
+    get_media_owner_map. A failed download with no backing resource is a
+    genuine orphan (legacy/system download) and is skipped — re-dispatching
+    without an owner would spam user_logs/user_settings with 23502/22P02.
 
     PR-D7 phase 2: dispatch goes through start_workflow_routed so the
     routing table picks DBOS / celery / shadow per task_type."""
@@ -52,12 +57,16 @@ async def retry_failed_downloads_step() -> dict[str, Any]:
             "skipped_orphan": 0,
         }
 
+    # Resolve media_id -> owner (resources.creator_id) in one batch.
+    media_ids = [v.get("id") for v in failed if v.get("id") is not None]
+    owner_map = await repo.get_media_owner_map(media_ids)
+
     retried = 0
     skipped_orphan = 0
     for video in failed:
         platform_id = video.get("platform_id")
         media_type = video.get("media_type", 0)
-        user_id = video.get("user_id")
+        user_id = owner_map.get(str(video.get("id")))
 
         if not user_id:
             skipped_orphan += 1
