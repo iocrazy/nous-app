@@ -1,4 +1,5 @@
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
+import { classifyFailure } from '../../utils/taskFailure';
 
 // Pure presentation logic for a task-center row. Kept separate from the React
 // component so the branching (which actions/affordances a row exposes) is unit
@@ -24,7 +25,7 @@ export interface TaskRowActions {
 
 /** Which actions a row exposes, derived purely from task state. */
 export function taskRowActions(
-  task: Pick<UnifiedTask, 'status' | 'resource_id'>,
+  task: Pick<UnifiedTask, 'status' | 'resource_id' | 'error_msg'>,
 ): TaskRowActions {
   const hasResource = !!task.resource_id;
   const running = task.status === 'pending' || task.status === 'processing';
@@ -34,7 +35,9 @@ export function taskRowActions(
     // the resource itself rather than on success.
     open: hasResource && !running,
     download: hasResource && !running,
-    retry: retryable,
+    // Hide Retry on permanent failures (source unavailable / not found) —
+    // re-running the same input fails identically, so the button misleads.
+    retry: retryable && !classifyFailure(task.error_msg).permanent,
     cancel: running,
   };
 }
