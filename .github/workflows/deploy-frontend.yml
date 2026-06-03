@@ -1,0 +1,67 @@
+# Frontend deploy verification (Vercel).
+#
+# Vercel auto-deploys the frontend on every push to master via its native
+# git integration — this workflow does NOT deploy. It brings that deploy
+# under CI discipline by VERIFYING it landed: it polls the live
+# /version.json for this commit's short SHA and fails loudly if the prod
+# alias never picks up the new build.
+#
+# Why: 2026-06 prod alias stuck on an old version ("force redeploy"
+# commit) — Vercel promoted the wrong/old build and nothing caught it.
+# This is the frontend twin of deploy-backend.yml's "Verify deploy" step.
+#
+# Safe to add as-is: it changes NOTHING about how Vercel deploys (no
+# secrets, auto-promote untouched). The full serialized-promote (disable
+# Vercel auto-promote + CI-driven `vercel deploy --prod`) is a follow-up
+# that needs VERCEL_TOKEN/ORG_ID/PROJECT_ID — see the version-display spec
+# Part 3. The verify step is skipped unless the PROD_FRONTEND_VERSION_URL
+# repo variable is set, so it's a no-op on forks / until configured.
+
+name: Verify Frontend Deploy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'frontend/**'
+  workflow_dispatch:
+
+# Serialize so a later push's verify cancels an in-flight older one — the
+# last commit to master is the one that must be live.
+concurrency:
+  group: deploy-frontend-prod
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Poll prod version.json for this build
+    runs-on: ubuntu-latest
+    if: vars.PROD_FRONTEND_VERSION_URL != ''
+    steps:
+      - name: Poll /version.json for this commit SHA
+        env:
+          PROD_FRONTEND_VERSION_URL: ${{ vars.PROD_FRONTEND_VERSION_URL }}
+          EXPECTED_SHA_FULL: ${{ github.sha }}
+        run: |
+          # version.json stamps commitSha = VERCEL_GIT_COMMIT_SHA sliced to
+          # 7 chars (see frontend/vite.config.ts emit-version-json plugin).
+          EXPECTED_SHA_SHORT="${EXPECTED_SHA_FULL:0:7}"
+          echo "⏳ Polling $PROD_FRONTEND_VERSION_URL for commitSha=$EXPECTED_SHA_SHORT..."
+          # 15-min budget: Vercel build (~1.5min) + promote + CDN propagate,
+          # matching the backend verify step's headroom.
+          DEADLINE=$(( $(date +%s) + 900 ))
+          ATTEMPT=0
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            RESPONSE=$(curl -fsS -m 8 "$PROD_FRONTEND_VERSION_URL?t=$(date +%s)" 2>/dev/null || echo "")
+            ACTUAL_SHA=$(echo "$RESPONSE" | jq -r '.commitSha // ""' 2>/dev/null || echo "")
+            if [ -n "$ACTUAL_SHA" ] && [ "$ACTUAL_SHA" = "$EXPECTED_SHA_SHORT" ]; then
+              echo "✅ prod is on $ACTUAL_SHA after $ATTEMPT probe(s)"
+              echo "- **Verified prod frontend SHA:** \`$ACTUAL_SHA\` ✅" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "  attempt $ATTEMPT: prod on '${ACTUAL_SHA:-<unreachable>}', want '$EXPECTED_SHA_SHORT'"
+            sleep 15
+          done
+          echo "::error::Frontend deploy verify timed out after 15 min — prod /version.json never reported $EXPECTED_SHA_SHORT. The Vercel production alias may be stuck on an older build; check the Vercel dashboard and re-promote."
+          exit 1
