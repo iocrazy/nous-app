@@ -18,9 +18,9 @@ from app.workflows.download import download_user_queue, set_download_concurrency
 
 @pytest.fixture(autouse=True)
 def _restore_concurrency():
-    original = download_user_queue.concurrency
+    original = download_user_queue.worker_concurrency
     yield
-    download_user_queue.concurrency = original
+    download_user_queue.worker_concurrency = original
 
 
 def test_queue_is_partitioned():
@@ -33,20 +33,20 @@ def test_queue_name():
 
 def test_set_concurrency_applies_live():
     set_download_concurrency(7)
-    assert download_user_queue.concurrency == 7
+    assert download_user_queue.worker_concurrency == 7
 
 
 def test_set_concurrency_clamps_low():
     set_download_concurrency(0)
-    assert download_user_queue.concurrency == 1
+    assert download_user_queue.worker_concurrency == 1
 
 
 def test_set_concurrency_clamps_high():
     set_download_concurrency(99)
-    assert download_user_queue.concurrency == 20
+    assert download_user_queue.worker_concurrency == 20
 
 
 def test_set_concurrency_bad_input_is_non_fatal():
     set_download_concurrency(7)
     set_download_concurrency("nope")  # type: ignore[arg-type]
-    assert download_user_queue.concurrency == 7
+    assert download_user_queue.worker_concurrency == 7

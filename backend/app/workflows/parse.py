@@ -46,7 +46,7 @@ MAX_PARSE_CONCURRENCY_DEFAULT = int(
 )
 parse_user_queue = Queue(
     "parse_user",
-    concurrency=MAX_PARSE_CONCURRENCY_DEFAULT,
+    worker_concurrency=MAX_PARSE_CONCURRENCY_DEFAULT,
     partition_queue=True,
 )
 
@@ -60,7 +60,7 @@ def set_parse_concurrency(n: int) -> None:
     """
     try:
         n = max(1, min(int(n), 20))
-        parse_user_queue.concurrency = n
+        parse_user_queue.worker_concurrency = n
         logger.info(f"[parse_queue] per-user concurrency set to {n}")
     except Exception as e:
         logger.warning(f"[parse_queue] set concurrency failed: {e}")

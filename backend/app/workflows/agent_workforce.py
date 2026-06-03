@@ -46,7 +46,7 @@ _DEFAULT_CONCURRENCY = int(os.environ.get("WORKFORCE_QUEUE_CONCURRENCY", "8"))
 # partition.
 agent_workforce_queue = Queue(
     "agent_workforce",
-    concurrency=_DEFAULT_CONCURRENCY,
+    worker_concurrency=_DEFAULT_CONCURRENCY,
     partition_queue=True,
 )
 

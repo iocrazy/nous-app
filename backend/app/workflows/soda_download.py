@@ -44,7 +44,7 @@ MIME_BY_EXT = {"flac": "audio/flac", "m4a": "audio/mp4", "mp3": "audio/mpeg"}
 SODA_DOWNLOAD_CONCURRENCY = int(os.environ.get("SODA_DOWNLOAD_CONCURRENCY", "3"))
 soda_download_queue = Queue(
     "soda_download",
-    concurrency=SODA_DOWNLOAD_CONCURRENCY,
+    worker_concurrency=SODA_DOWNLOAD_CONCURRENCY,
     partition_queue=True,
 )
 
@@ -54,7 +54,7 @@ def set_soda_concurrency(n: int) -> None:
     the `config.parse_concurrency` lifecycle subscriber on Settings save."""
     try:
         n = max(1, min(20, int(n)))
-        soda_download_queue.concurrency = n
+        soda_download_queue.worker_concurrency = n
         logger.info(f"[soda_queue] per-user concurrency set to {n}")
     except Exception as e:
         logger.warning(f"[soda_queue] set concurrency failed: {e}")
