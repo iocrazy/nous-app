@@ -42,3 +42,22 @@ async def test_get_phase_missing_row_returns_queued(mgr):
 
 async def test_start_missing_row_does_not_raise(mgr):
     await mgr.start("wf-does-not-exist")
+
+
+async def test_start_missing_row_selfheals_create(monkeypatch):
+    """When start() finds no row, it creates a minimal one so downstream
+    update_progress/complete have a row to update."""
+    created = {}
+
+    m = UnifiedTaskManager()
+    async def _client():
+        return _Query()  # phase lookup returns data=None (0 rows)
+    monkeypatch.setattr(m, "_get_client", _client)
+
+    async def _fake_create(**kwargs):
+        created.update(kwargs)
+        return kwargs.get("dbos_workflow_id")
+    monkeypatch.setattr(m, "create", _fake_create)
+
+    await m.start("wf-missing")
+    assert created.get("dbos_workflow_id") == "wf-missing"

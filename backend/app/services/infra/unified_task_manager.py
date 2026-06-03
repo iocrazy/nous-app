@@ -197,6 +197,22 @@ class UnifiedTaskManager:
             "dbos_workflow_id", task_id
         ).execute()
 
+    async def _row_exists(self, task_id: str) -> bool:
+        """Return True if a task_tracking row exists for this workflow id.
+
+        Uses ``maybe_single()`` so 0 rows return ``data=None`` rather than
+        raising PGRST116.
+        """
+        client = await self._get_client()
+        result = (
+            await client.table("task_tracking")
+            .select("dbos_workflow_id")
+            .eq("dbos_workflow_id", task_id)
+            .maybe_single()
+            .execute()
+        )
+        return bool(result and result.data)
+
     # ── Lifecycle: create ─────────────────────────────────────────────
 
     async def create(
@@ -302,7 +318,29 @@ class UnifiedTaskManager:
 
         Idempotent: already-PROCESSING or terminal tasks are silently skipped.
         Allows transitions from QUEUED or DEDUP_CHECK.
+
+        Self-healing: if no task_tracking row exists (e.g. the pre-create in
+        the dispatcher was swallowed), create a minimal one so downstream
+        ``update_progress``/``complete`` have a row to update instead of
+        no-op'ing forever. The self-heal never crashes the workflow.
         """
+        if not await self._row_exists(task_id):
+            try:
+                await self.create(
+                    user_id="",
+                    task_type="download",
+                    title="(recovered)",
+                    dbos_workflow_id=task_id,
+                )
+                logger.warning(
+                    f"[TaskManager] start() self-healed missing task_tracking row "
+                    f"for {task_id}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[TaskManager] start() self-heal create failed for {task_id} "
+                    f"(continuing): {e!r}"
+                )
         current = await self._get_phase(task_id)
         if current == TaskPhase.PROCESSING:
             return  # already processing

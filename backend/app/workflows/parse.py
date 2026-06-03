@@ -295,7 +295,10 @@ def dispatch_soda_download_step(
                 flow_id=flow_id,
             )
         except Exception as e:
-            logger.warning(f"[parse] pre-create soda download task_tracking: {e}")
+            logger.error(
+                f"[parse] pre-create soda download task_tracking FAILED "
+                f"(wf={wf_id}, will self-heal in workflow.start): {e!r}"
+            )
 
         # Enqueue on the per-user partitioned soda queue (combined audio+UGC
         # cap) instead of start_workflow_routed — this bounds the qishui API
