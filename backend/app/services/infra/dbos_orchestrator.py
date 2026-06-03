@@ -102,6 +102,44 @@ def _resolve_pinned_app_version() -> str | None:
         return None
 
 
+def _build_dbos_config(
+    db_url: str, executor_id: str | None, db_pool_size: int
+) -> dict[str, Any]:
+    """Build the DBOSConfig dict for the DBOS singleton (pure / no DB I/O).
+
+    Extracted from ``init_dbos`` so the config can be unit-tested without
+    instantiating ``DBOS(config=...)`` (which would require a live database).
+
+    ``max_recovery_attempts``: a backend restart makes DBOS recovery bump every
+    in-flight workflow's ``recovery_attempts``. A deploy / Watchtower / crash-
+    loop restart sequence can push an in-flight workflow past the cap, at which
+    point DBOS marks it terminally failed (MaxRecoveryAttemptsExceeded ->
+    ERROR) and the lifecycle trigger mirrors that to ``task_tracking`` as
+    failed — wrongly killing a recoverable task. We set a HIGH cap so routine
+    restart churn never trips it. Env-overridable via DBOS_MAX_RECOVERY_ATTEMPTS
+    (default 100). NOTE: DBOS enforces this per-``@DBOS.workflow()`` decorator,
+    not from DBOSConfig; this key is carried for explicitness / future use and
+    is harmlessly ignored by ``translate_dbos_config_to_config_file`` if unread.
+    """
+    cfg: dict[str, Any] = {
+        "name": "mediahub",
+        "application_database_url": db_url,
+        "system_database_url": db_url,
+        "db_engine_kwargs": {
+            "pool_size": db_pool_size,
+            "max_overflow": 0,
+            "pool_pre_ping": True,
+            "pool_recycle": 300,  # 5 min — drop stale tunneled connections
+        },
+        "max_recovery_attempts": int(
+            os.environ.get("DBOS_MAX_RECOVERY_ATTEMPTS", "100")
+        ),
+    }
+    if executor_id:
+        cfg["executor_id"] = executor_id
+    return cfg
+
+
 def init_dbos(executor_id: str | None = None) -> None:
     """Initialize the DBOS singleton (idempotent). Called from FastAPI lifespan
     BEFORE workflow modules are imported (decorators register against the
@@ -125,7 +163,7 @@ def init_dbos(executor_id: str | None = None) -> None:
         logger.warning("[dbos] DBOS_DATABASE_URL not set; DBOS orchestrator disabled")
         return
 
-    from dbos import DBOS, DBOSConfig
+    from dbos import DBOS
 
     # Co-locate DBOS sys tables (workflow_status, operation_outputs,
     # workflow_events, etc.) in the SAME database as the app, in the
@@ -143,19 +181,7 @@ def init_dbos(executor_id: str | None = None) -> None:
     # to bump back up if needed.
     db_pool_size = int(os.environ.get("DBOS_DB_POOL_SIZE", "5"))
 
-    cfg: DBOSConfig = {
-        "name": "mediahub",
-        "application_database_url": db_url,
-        "system_database_url": db_url,
-        "db_engine_kwargs": {
-            "pool_size": db_pool_size,
-            "max_overflow": 0,
-            "pool_pre_ping": True,
-            "pool_recycle": 300,  # 5 min — drop stale tunneled connections
-        },
-    }
-    if executor_id:
-        cfg["executor_id"] = executor_id
+    cfg = _build_dbos_config(db_url, executor_id, db_pool_size)
     # Pin a SHARED application_version across gateway + worker. DBOS dequeues
     # queued workflows filtered by application_version; gateway and worker
     # register different workflow sets (gateway skips _scheduled_bundle), so
