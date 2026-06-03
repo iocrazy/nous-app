@@ -206,6 +206,16 @@ export function MobileAudioScreen({
     return () => { cancelled = true; };
   }, [mediaId]);
 
+  // Re-pull lyrics after the overlay closes — the overlay can Fetch lyrics for a
+  // track that had none, and this keeps the couplet/entry in sync (otherwise the
+  // "Fetch Lyrics" entry lingers even after a successful fetch).
+  const reloadLyrics = useCallback(() => {
+    if (!mediaId) return;
+    getMediaLyrics(mediaId)
+      .then((data) => setLyricLines(data.lines))
+      .catch((err) => console.error('Failed to reload lyrics:', err));
+  }, [mediaId]);
+
   let activeIndex = 0;
   if (typeof currentTime === 'number' && currentTime > 0) {
     for (let i = 0; i < lyricLines.length; i++) {
@@ -544,7 +554,7 @@ export function MobileAudioScreen({
           subtitle={video.author || undefined}
           coverUrl={coverUrl}
           theme={t}
-          onClose={() => setShowLyrics(false)}
+          onClose={() => { setShowLyrics(false); reloadLyrics(); }}
           sourcePlatform={video.source_platform}
         />
       )}

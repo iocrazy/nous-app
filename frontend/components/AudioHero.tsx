@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Music } from 'lucide-react';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { LyricsOverlay } from './LyricsOverlay';
@@ -85,6 +85,15 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
     return () => {
       cancelled = true;
     };
+  }, [mediaId]);
+
+  // Re-pull after the overlay closes (it can Fetch lyrics for a track that had
+  // none) so the inline preview reflects the freshly-fetched lyrics.
+  const reloadLyrics = useCallback(() => {
+    if (!mediaId) return;
+    getMediaLyrics(mediaId)
+      .then((data) => setLyricLines(data.lines))
+      .catch((err) => console.error('Failed to reload lyrics:', err));
   }, [mediaId]);
 
   // Active line = last line whose start time has passed; fallback 0 when no
@@ -185,7 +194,7 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
           subtitle={subtitle}
           coverUrl={coverUrl}
           theme={t}
-          onClose={() => setShowLyrics(false)}
+          onClose={() => { setShowLyrics(false); reloadLyrics(); }}
           sourcePlatform={sourcePlatform}
         />
       )}
