@@ -66,8 +66,10 @@ async def lifespan(app: FastAPI):
     init_dbos(app)
 
     # PR-D8 Phase 3: WorkforceScheduler removed — inbox/outbox dispatch
-    # is now @DBOS.scheduled in workflows/workforce_dispatch.py (imported
-    # transitively via `from app import workflows` in init_dbos).
+    # is now @DBOS.scheduled in workflows/workforce_dispatch.py, imported via
+    # `from app import workflows` in init_dbos on the worker/combined roles.
+    # (The gateway is enqueue-only — init_dbos returns early before that import
+    # and runs no schedulers; see reference_gateway_dbos_client.)
 
     await start_ssrf_proxy(app)
     await install_agent_primitives(app)
