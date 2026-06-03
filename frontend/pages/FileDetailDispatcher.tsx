@@ -79,10 +79,16 @@ export function FileDetailDispatcher() {
     );
   }
 
-  // Downloaded from platform → DownloadDetailPage (download detail view)
+  // Downloaded from platform → DownloadDetailPage (download detail view).
+  // `key={resourceId}` forces a full remount when navigating between two detail
+  // pages (same `/resources/file/:resourceId` route, different param) — without
+  // it React reuses the instance, so mount-only effects (the iOS reflow-kick)
+  // never re-run and the inner scroller keeps the previous page's scrollTop,
+  // which is exactly why the 2nd-and-later detail opened "jammed at the top".
   if (sourceType === 'web' && mediaId) {
     return (
       <DownloadDetailPage
+        key={resourceId}
         resourceId={resourceId}
         mediaId={mediaId}
         preloaded={preloaded}
@@ -91,5 +97,5 @@ export function FileDetailDispatcher() {
   }
 
   // Uploaded/imported → ResourceDetailPage (resource management view)
-  return <ResourceDetailPage resourceId={resourceId} />;
+  return <ResourceDetailPage key={resourceId} resourceId={resourceId} />;
 }
