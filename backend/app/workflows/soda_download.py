@@ -68,6 +68,24 @@ def already_downloaded(media_row: dict, base_dir: str) -> bool:
     return (Path(base_dir) / rel).exists()
 
 
+def needs_cover_topup(media_row: dict) -> bool:
+    """True when the cover is still missing/failed but a cover URL exists.
+
+    Per-asset model: when the audio is already downloaded we must NOT skip the
+    whole chain — a one-off cover failure would otherwise be unrecoverable. A
+    re-fetch should top up just the cover (fetch what's missing). Returns False
+    when the cover is done OR there's no url_cover to fetch.
+    """
+    row = media_row or {}
+    cover_done = bool(row.get("cover_download_path")) or (
+        row.get("cover_download_status") == "completed"
+    )
+    has_url_cover = bool(
+        ((row.get("metadata") or {}).get("album") or {}).get("url_cover")
+    )
+    return has_url_cover and not cover_done
+
+
 def build_audio_dest(*, media_id: str, ext: str, base_dir: str) -> tuple[Path, str]:
     """Return ``(full_path, relative_path)`` for the decrypted audio file."""
     rel = f"global/resources/web/qishui/{media_id}/audio.{ext}"
@@ -189,11 +207,52 @@ async def soda_download_workflow(
             )
         media_id = row["id"]
 
-    # 1b. Skip re-download when the audio file is already on disk.
+    # 1b. Audio already on disk: don't re-download it. But stay per-asset — if
+    #     the cover is still missing/failed, top up JUST the cover (a one-off
+    #     cover timeout would otherwise be stuck forever, since this guard used
+    #     to skip the whole chain). The cover only needs the stored
+    #     metadata.album.url_cover, so no fresh parse/PlayAuth is required.
     base_dir = Utils.get_download_base_path()
     if already_downloaded(row, base_dir):
-        await manager.complete(wf_id, subtitle=f"Already downloaded {title}")
-        return {"platform_id": platform_id, "media_id": media_id, "skipped": True}
+        if not needs_cover_topup(row):
+            await manager.complete(wf_id, subtitle=f"Already downloaded {title}")
+            return {"platform_id": platform_id, "media_id": media_id, "skipped": True}
+
+        await manager.update_progress(wf_id, 50, subtitle="Fetching cover")
+        res_repo = ResourcesRepository()
+        existing = await res_repo.get_resource_by_media_id_and_creator(
+            str(media_id), user_id
+        )
+        cover_ok = False
+        try:
+            cover_ok = await _download_cover(
+                parsed=row,
+                media_id=str(media_id),
+                platform_id=platform_id,
+                user_id=user_id,
+                base_dir=base_dir,
+                res_repo=res_repo,
+                existing=existing,
+            )
+        except Exception as exc:  # noqa: BLE001 — cover is non-critical
+            logger.warning("soda_download: cover top-up failed (non-fatal): {}", exc)
+        if not cover_ok:
+            try:
+                await MediaRepository().update(
+                    platform_id, {"cover_download_status": "failed"}
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("soda_download: could not mark cover failed: {}", exc)
+        await manager.complete(
+            wf_id,
+            subtitle=f"Cover updated {title}" if cover_ok else f"Already downloaded {title}",
+        )
+        return {
+            "platform_id": platform_id,
+            "media_id": media_id,
+            "skipped_audio": True,
+            "cover_ok": cover_ok,
+        }
 
     # 2. Fresh cookie for this user.
     cookie = await get_soda_cookie(user_id)

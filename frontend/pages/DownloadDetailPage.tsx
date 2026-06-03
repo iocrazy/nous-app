@@ -389,10 +389,13 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             /* LOCKED mobile-audio layout — ONE continuous gradient surface.
                Replaces the player-column / detail-panel split for mobile audio
                only; desktop + mobile-video are untouched. */
-            (video.music_download_path || video.extract_audio_path) ? (
-              <MobileAudioScreen
+            <MobileAudioScreen
                 video={video}
-                src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
+                src={(video.music_download_path || video.extract_audio_path)
+                  ? `${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`
+                  : ''}
+                hasAudio={!!(video.music_download_path || video.extract_audio_path)}
+                onFetchAudio={video.source_platform === 'qishui' ? handleFetchSodaAudio : undefined}
                 coverUrl={audioCoverUrl}
                 theme={sodaTheme}
                 mediaId={String(video.id)}
@@ -418,18 +421,6 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                 } : undefined}
                 canShare={!!resourceId}
               />
-            ) : (
-              <div
-                className="w-full min-h-[78vh] flex flex-col items-center justify-center gap-3 px-6"
-                style={{ background: sodaTheme?.gradientCss }}
-              >
-                <Music size={48} className="text-white/40" />
-                <p className="text-white/80 text-sm font-medium">Audio not available</p>
-                <p className="text-white/50 text-xs max-w-[300px] text-center">
-                  This audio hasn't been downloaded yet. Use the Download button to fetch the audio file.
-                </p>
-              </div>
-            )
           ) : (
           <>
           {/* Video Player — main area */}
