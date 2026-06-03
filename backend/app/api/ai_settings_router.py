@@ -82,10 +82,10 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
         if body.task_assignment is not None:
             ai_settings["task_assignment"] = body.task_assignment
 
-        settings_json[_AI_SETTINGS_KEY] = ai_settings
-
-        # Persist
-        await repo.upsert(auth.user_id, {"settings_json": settings_json})
+        # Patch only the ai_settings subtree — repo merges it into the shared
+        # blob, leaving every other top-level key (parse_mode, General settings)
+        # untouched. The nested merge above preserves sibling ai_settings fields.
+        await repo.patch_settings_json(auth.user_id, {_AI_SETTINGS_KEY: ai_settings})
 
         return AISettingsResponse(
             ai_providers=ai_settings.get("ai_providers", {}),
