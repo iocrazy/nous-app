@@ -74,6 +74,33 @@ def enqueue_parse_for_user(*, user_id: str, workflow_id: str, kwargs: dict) -> s
     past the cap). `parse_workflow` is a module-level @DBOS.workflow referenced
     at call-time, so define order doesn't matter.
     """
+    # Gateway→DBOSClient path (DORMANT): when a DBOSClient handle exists
+    # (gateway role, future), enqueue cross-process via the client onto the
+    # same `parse_user` partitioned queue the worker dequeues from. Today
+    # `get_dbos_client()` returns None everywhere → the existing singleton
+    # `parse_user_queue.enqueue` path below runs → zero behavior change.
+    from app.services.infra.dbos_orchestrator import (
+        _resolve_pinned_app_version,
+        get_dbos_client,
+    )
+
+    client = get_dbos_client()
+    if client is not None:
+        from dbos import EnqueueOptions
+
+        opts: dict[str, Any] = dict(
+            workflow_name="parse_workflow",
+            queue_name="parse_user",
+            queue_partition_key=str(user_id),
+            workflow_id=workflow_id,
+            authenticated_user=str(user_id),
+        )
+        version = _resolve_pinned_app_version()
+        if version:
+            opts["app_version"] = version
+        client.enqueue(EnqueueOptions(**opts), **kwargs)
+        return workflow_id
+
     from dbos import SetEnqueueOptions, SetWorkflowID
 
     with (
