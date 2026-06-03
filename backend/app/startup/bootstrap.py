@@ -16,7 +16,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from loguru import logger
 
+from app.agent_framework.role import role_from_env
 from app.lifespan_helpers import BackgroundTaskRegistry
+from app.startup.stall_detector import _bg_stall_detector
 
 
 async def _bg_schema_probe() -> None:
@@ -237,3 +239,10 @@ def install_background_bootstrap(app: FastAPI) -> None:
     app.state.bg_tasks.spawn("deployment_log", _bg_deployment_log())
     app.state.bg_tasks.spawn("liveness_reconcile", _bg_liveness_reconcile())
     app.state.bg_tasks.spawn("reap_internal_queue", _bg_reap_internal_queue())
+    # Worker-stall detector: only on the HTTP-serving process (gateway /
+    # combined), which stays healthy during a worker dequeue stall and can
+    # observe the backlog + alert. Plain asyncio (not @DBOS.scheduled) so it
+    # can't be stalled by the same queue it watches. Single observer avoids
+    # double alerts in the gateway/worker split.
+    if role_from_env().serves_http_api:
+        app.state.bg_tasks.spawn("stall_detector", _bg_stall_detector())
