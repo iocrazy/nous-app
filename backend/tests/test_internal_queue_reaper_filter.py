@@ -14,7 +14,7 @@ def test_dead_gateway_rows_any_age():
 
 def test_stale_sched_is_age_gated_and_sched_only():
     sql = build_reap_predicates()["stale_sched"]
-    assert "name LIKE 'sched-%'" in sql
+    assert "workflow_uuid LIKE 'sched-%'" in sql
     assert "status = 'ENQUEUED'" in sql
     assert "INTERVAL '5 minutes'" in sql
 
