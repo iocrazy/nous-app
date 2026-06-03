@@ -168,9 +168,13 @@ class UnifiedTaskManager:
             client.table("task_tracking")
             .select("phase")
             .eq("dbos_workflow_id", task_id)
-            .single()
+            .maybe_single()
             .execute()
         )
+        # A missing task_tracking row (0 rows) must not crash the workflow:
+        # treat it as QUEUED rather than raising PGRST116.
+        if result is None or result.data is None:
+            return TaskPhase.QUEUED
         raw = result.data.get("phase", "queued")
         try:
             return TaskPhase(raw)
