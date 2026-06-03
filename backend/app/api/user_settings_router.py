@@ -20,6 +20,22 @@ from app.repositories.user_settings_repository import UserSettingsRepository
 router = APIRouter(prefix="/settings", tags=["用户设置"])
 
 
+def merge_settings_json(
+    existing: Optional[Dict[str, Any]], incoming: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Shallow-merge ``incoming`` over ``existing``, preserving untouched keys.
+
+    settings_json is a SHARED column: General settings write top-level keys
+    here, while ai_settings_router writes ``settings_json['ai_settings']``.
+    The save endpoint used to REPLACE the whole column with the request body,
+    so saving a General setting (e.g. maxConcurrentDownloads) wiped the AI
+    provider config that lived under the same column — real data loss on
+    2026-06-02. Every writer must merge, not replace. Incoming keys win; keys
+    absent from incoming (e.g. 'ai_settings') are preserved.
+    """
+    return {**(existing or {}), **(incoming or {})}
+
+
 # ============================================
 # 请求/响应模型
 # ============================================
@@ -105,7 +121,14 @@ async def update_user_settings(request: UserSettingsRequest, auth: AuthDep):
         if request.download_path is not None:
             update_data["download_path"] = request.download_path
         if request.settings_json is not None:
-            update_data["settings_json"] = request.settings_json
+            # Merge, never replace — settings_json is shared with ai_settings
+            # (see merge_settings_json). A bare replace clobbered AI provider
+            # config on 2026-06-02.
+            existing = await repo.get_by_user_id(auth.user_id)
+            existing_json = (existing or {}).get("settings_json") or {}
+            update_data["settings_json"] = merge_settings_json(
+                existing_json, request.settings_json
+            )
 
         if not update_data:
             raise HTTPException(status_code=400, detail="没有提供要更新的数据")
