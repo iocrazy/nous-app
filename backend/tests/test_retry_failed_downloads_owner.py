@@ -58,10 +58,19 @@ async def test_collect_resolves_owner_and_resets_pending(monkeypatch):
 
     assert out["total_failed"] == 2
     assert out["skipped_orphan"] == 1
+    assert out["skipped_exhausted"] == 0
     assert out["specs"] == [{"platform_id": "p1", "user_id": "u1", "media_type": 0}]
-    # only the owned one was reset to pending; orphan left alone
+    # only the owned one was reset to pending + retry counter bumped 0->1;
+    # orphan left alone
     assert repo.updated == [
-        ("p1", {"video_download_status": "pending", "error_message": None})
+        (
+            "p1",
+            {
+                "video_download_status": "pending",
+                "error_message": None,
+                "download_retry_count": 1,
+            },
+        )
     ]
 
 
@@ -80,7 +89,12 @@ async def test_collect_genuine_orphans_skipped(monkeypatch):
 
     out = await recovery.collect_retryable_downloads_step()
 
-    assert out == {"specs": [], "total_failed": 2, "skipped_orphan": 2}
+    assert out == {
+        "specs": [],
+        "total_failed": 2,
+        "skipped_orphan": 2,
+        "skipped_exhausted": 0,
+    }
     assert repo.updated == []
 
 
@@ -92,7 +106,88 @@ async def test_collect_no_failed_short_circuits(monkeypatch):
     )
 
     out = await recovery.collect_retryable_downloads_step()
-    assert out == {"specs": [], "total_failed": 0, "skipped_orphan": 0}
+    assert out == {
+        "specs": [],
+        "total_failed": 0,
+        "skipped_orphan": 0,
+        "skipped_exhausted": 0,
+    }
+
+
+# --- max-retry give-up ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_collect_skips_exhausted_downloads(monkeypatch):
+    """A download that has hit DOWNLOAD_MAX_RETRY_ATTEMPTS is left 'failed'
+    (not reset, not dispatched) so a dead source stops churning hourly."""
+    monkeypatch.setenv("DOWNLOAD_MAX_RETRY_ATTEMPTS", "5")
+    failed = [
+        {
+            "id": "m1",
+            "platform_id": "fresh",
+            "media_type": 0,
+            "download_retry_count": 2,
+        },
+        {
+            "id": "m2",
+            "platform_id": "exhausted",
+            "media_type": 0,
+            "download_retry_count": 5,
+        },
+        {
+            "id": "m3",
+            "platform_id": "way_over",
+            "media_type": 0,
+            "download_retry_count": 9,
+        },
+    ]
+    repo = _FakeRepo(failed, owner_map={"m1": "u1", "m2": "u2", "m3": "u3"})
+    monkeypatch.setattr(
+        "app.repositories.media_repository.get_media_repository", lambda: repo
+    )
+
+    out = await recovery.collect_retryable_downloads_step()
+
+    assert out["skipped_exhausted"] == 2
+    assert out["skipped_orphan"] == 0
+    # only the under-cap one dispatches, with counter bumped 2->3
+    assert out["specs"] == [{"platform_id": "fresh", "user_id": "u1", "media_type": 0}]
+    assert repo.updated == [
+        (
+            "fresh",
+            {
+                "video_download_status": "pending",
+                "error_message": None,
+                "download_retry_count": 3,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collect_cap_disabled_retries_forever(monkeypatch):
+    """DOWNLOAD_MAX_RETRY_ATTEMPTS=0 disables the cap — even a high-count
+    download is retried (legacy behavior)."""
+    monkeypatch.setenv("DOWNLOAD_MAX_RETRY_ATTEMPTS", "0")
+    failed = [
+        {
+            "id": "m1",
+            "platform_id": "p1",
+            "media_type": 0,
+            "download_retry_count": 99,
+        },
+    ]
+    repo = _FakeRepo(failed, owner_map={"m1": "u1"})
+    monkeypatch.setattr(
+        "app.repositories.media_repository.get_media_repository", lambda: repo
+    )
+
+    out = await recovery.collect_retryable_downloads_step()
+
+    assert out["skipped_exhausted"] == 0
+    assert len(out["specs"]) == 1
+    assert repo.updated[0][1]["download_retry_count"] == 100
 
 
 # --- dispatch helper: must NOT be a @DBOS.step ----------------------------

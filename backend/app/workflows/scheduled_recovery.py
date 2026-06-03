@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -28,6 +29,18 @@ from loguru import logger
 # Shared DBOS-ownership decision (G3) — single source of truth so the
 # sweeper and the reaper never drift on what "DBOS still owns it" means.
 from app.workflows.workflow_health_sweeper import _dbos_claims_workflow  # noqa: F401
+
+
+def _max_download_retry_attempts() -> int:
+    """Give-up threshold for retry_failed_downloads. Past this many attempts a
+    FAILED download is no longer re-dispatched (it stays 'failed') so a
+    permanently-unrecoverable source — deleted slides, dead media — doesn't
+    churn the worker every hour. Env-overridable; default 5 (≈5h at hourly
+    cadence). 0 or negative disables the cap (retry forever, legacy behavior)."""
+    try:
+        return int(os.environ.get("DOWNLOAD_MAX_RETRY_ATTEMPTS", "5"))
+    except (TypeError, ValueError):
+        return 5
 
 
 @DBOS.step()
@@ -53,28 +66,46 @@ async def collect_retryable_downloads_step() -> dict[str, Any]:
     repo = get_media_repository()
     failed = await repo.get_pending_downloads(status=DownloadStatus.FAILED, limit=50)
     if not failed:
-        return {"specs": [], "total_failed": 0, "skipped_orphan": 0}
+        return {
+            "specs": [],
+            "total_failed": 0,
+            "skipped_orphan": 0,
+            "skipped_exhausted": 0,
+        }
 
     # Resolve media_id -> owner (resources.creator_id) in one batch.
     media_ids = [v.get("id") for v in failed if v.get("id") is not None]
     owner_map = await repo.get_media_owner_map(media_ids)
 
+    max_attempts = _max_download_retry_attempts()
+
     specs: list[dict[str, Any]] = []
     skipped_orphan = 0
+    skipped_exhausted = 0
     for video in failed:
         platform_id = video.get("platform_id")
         user_id = owner_map.get(str(video.get("id")))
         if not user_id:
             skipped_orphan += 1
             continue
-        # Reset to PENDING now (durable, in-step). If the dispatch in the
-        # workflow body fails, the row stays PENDING and is re-collected next
-        # hour — idempotent.
+        # Give up on permanently-unrecoverable downloads: past the cap, leave
+        # the row 'failed' and stop re-dispatching it every hour. max_attempts
+        # <= 0 disables the cap (retry forever).
+        retry_count = int(video.get("download_retry_count") or 0)
+        if 0 < max_attempts <= retry_count:
+            skipped_exhausted += 1
+            continue
+        # Reset to PENDING + bump the attempt counter (durable, in-step). If
+        # the dispatch in the workflow body fails, the row stays PENDING and is
+        # re-collected next hour — idempotent. The counter persists across the
+        # download's failure (download_workflow only touches the status), so it
+        # accumulates until the cap.
         await repo.update(
             platform_id,
             {
                 "video_download_status": DownloadStatus.PENDING.value,
                 "error_message": None,
+                "download_retry_count": retry_count + 1,
             },
         )
         specs.append(
@@ -89,6 +120,7 @@ async def collect_retryable_downloads_step() -> dict[str, Any]:
         "specs": specs,
         "total_failed": len(failed),
         "skipped_orphan": skipped_orphan,
+        "skipped_exhausted": skipped_exhausted,
     }
 
 
@@ -335,8 +367,9 @@ async def retry_failed_downloads_workflow(
         "total_failed": collected.get("total_failed", 0),
         "retried": retried,
         "skipped_orphan": collected.get("skipped_orphan", 0),
+        "skipped_exhausted": collected.get("skipped_exhausted", 0),
     }
-    if retried or collected.get("skipped_orphan"):
+    if retried or collected.get("skipped_orphan") or collected.get("skipped_exhausted"):
         logger.info(f"[retry_failed_downloads] {result}")
 
 
