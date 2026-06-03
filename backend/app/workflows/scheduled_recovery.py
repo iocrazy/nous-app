@@ -105,9 +105,10 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     from app.workflows.sweep_guard import within_boot_grace
 
     # G2: right after a deploy/restart, in-flight tasks look stale across the
-    # gap; DBOS is recovering them. Skip the task-tracking reap during the
-    # boot grace window (resource AI-status reaping below is independent of
-    # the restart gap — it's gated on its own 1h staleness — so it still runs).
+    # gap; DBOS is recovering them. Skip ALL reaping during the boot grace
+    # window — this early return short-circuits the whole step, so the resource
+    # AI-status pass below is also deferred. That's fine: it's gated on its own
+    # 1h staleness, so a ≤grace (≤300s default) delay is immaterial.
     if within_boot_grace():
         return {
             "status": "success",
