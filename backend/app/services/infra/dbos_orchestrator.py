@@ -531,8 +531,13 @@ async def start_workflow_routed(
         opts: dict[str, Any] = dict(
             workflow_name=wf_name,
             queue_name=queue_name,
-            app_version=_resolve_pinned_app_version(),
         )
+        # Only pin app_version when we actually have one (build-info present).
+        # A NULL app_version would let a version-pinned worker skip the row →
+        # the orphan/"lost" failure init_dbos warns about. Mirror its `if pinned`.
+        pinned_version = _resolve_pinned_app_version()
+        if pinned_version:
+            opts["app_version"] = pinned_version
         if workflow_id:
             opts["workflow_id"] = workflow_id
         if user_id:
