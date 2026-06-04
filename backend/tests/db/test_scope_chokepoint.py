@@ -580,3 +580,42 @@ async def test_plain_model_bulk_dml_unaffected(seeded_tables: _Ids):
             select(_PlainRow).where(_PlainRow.id == plain_id)
         )
         assert result.scalar_one().payload == "plain_update"
+
+
+# ── Known-open bypass (pinned, not yet fixed) ────────────────────────────
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "writable-CTE DML bypasses both write-forbid and SELECT-injection; "
+        "fixed in the SELECT full-statement-traversal task"
+    ),
+)
+async def test_writable_cte_dml_bypass_is_pinned(seeded_tables: _Ids):
+    """DEMONSTRATES the cross-tenant write bypass via a writable CTE.
+
+    A DML statement nested in a CTE under a top-level SELECT reports as a SELECT
+    (``is_select`` True, ``is_update`` False), so it slips past the bulk-DML
+    write-forbid; and the SELECT injection only scopes the OUTER select, not the
+    CTE's UPDATE — so under user A's scope this still mutates user B's row.
+
+    The assertion below is what SHOULD hold once the SELECT full-statement
+    traversal task closes the hole. It does NOT hold today, so the body fails →
+    ``xfail(strict=True)`` records XFAIL; it will flip to XPASS-fail (alerting
+    us) the moment the traversal fix lands.
+    """
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    cte = (
+        update(_ScopedRow)
+        .where(_ScopedRow.id == ids.other_row)  # victim row owned by another user
+        .values(payload="HIJACKED")
+        .returning(_ScopedRow.id)
+        .cte("u")
+    )
+
+    with pytest.raises(UnscopedQueryError):
+        async with user_session(scope) as session:
+            await session.execute(select(cte.c.id))

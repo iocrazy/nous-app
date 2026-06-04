@@ -25,6 +25,12 @@ forgets to scope = data leak. This module makes "no-scope user-facing query"
             insert for another user). Core ``insert()`` does NOT flow through
             this event; it is caught by the Layer-2 write-path forbid instead.
 
+OUT OF REACH (known gaps): raw ``text()`` DML bypasses the ORM events entirely
+(escape hatch — see decisions doc §4 "raw SQL is a reviewed exception"), and
+writable-CTE-nested DML (e.g. a SELECT over an ``update(...).cte()``) reports as
+a SELECT, slipping past the bulk-DML forbid — that case is closed by the
+follow-on SELECT full-statement-traversal task.
+
 Scope binding is per-asyncio-task: ``ContextVar`` copies on task creation and
 propagates across ``await``, so the scope binds to the *task*, not the pooled
 connection. That makes it Supavisor-pooling-safe — a checked-out connection
@@ -89,7 +95,14 @@ ScopeValue = Union[Scope, _SystemSentinel]
 
 
 class UnscopedQueryError(Exception):
-    """Raised when a SELECT touches a scoped model but no scope is set.
+    """Raised when a scoped model is touched without a valid scope, or when a
+    bulk/Core write that cannot be safely governed is attempted under a user
+    scope.
+
+    Covers three fail-closed cases: a SELECT or write on a scoped model with no
+    scope set; an instance INSERT for a user other than the active scope; and a
+    bulk/Core UPDATE/DELETE/INSERT on a scoped model under a real ``Scope``
+    (forbidden because it can't be tenant-filtered / owner-stamped).
 
     Fail-closed by construction: forgetting to open a user_session/
     system_session around tenant access surfaces immediately instead of
@@ -200,7 +213,7 @@ async def user_read_session(scope: Scope) -> AsyncIterator[AsyncSession]:
 # ── Scoped-model introspection helpers ──────────────────────────────────
 
 
-def _scoped_mappers(state: Any) -> list:
+def _scoped_mappers(state: Any) -> list[Mapper]:
     """Mappers in the statement whose class inherits a scope marker mixin."""
     return [
         m
