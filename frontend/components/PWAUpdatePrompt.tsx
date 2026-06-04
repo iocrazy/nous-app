@@ -22,12 +22,45 @@ export default function PWAUpdatePrompt() {
     }
   }, [offlineReady, showUpdate, dismissUpdate]);
 
-  const onUpdate = () => {
-    // needRefresh → SW has a waiting worker; applyUpdate() activates + reloads.
-    // version-mismatch only → a plain reload pulls the fresh bundle (the
-    // autoUpdate SW's skipWaiting/clientsClaim already took over).
-    if (needRefresh) applyUpdate();
-    else window.location.reload();
+  const onUpdate = async () => {
+    // needRefresh → SW already surfaced a waiting worker; applyUpdate() activates + reloads.
+    if (needRefresh) {
+      applyUpdate();
+      return;
+    }
+    // version-mismatch only (the common autoUpdate path — onNeedRefresh never
+    // fires). A PLAIN reload is the bug: it's answered by the OLD service
+    // worker from its precached app shell, so __APP_VERSION__ never advances
+    // and this banner re-appears immediately ("Update Now does nothing /
+    // stuck"). We must force the SW to fetch + activate the new build first.
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      if (reg) {
+        await reg.update(); // re-check origin for a new sw.js + precache manifest
+        // A freshly-installed worker may be `waiting`, or still `installing`.
+        const fresh =
+          reg.waiting ||
+          (await new Promise<ServiceWorker | null>((resolve) => {
+            const sw = reg.installing;
+            if (!sw) return resolve(null);
+            sw.addEventListener('statechange', () =>
+              resolve(sw.state === 'installed' ? sw : null),
+            );
+            setTimeout(() => resolve(null), 4000); // don't hang the button
+          }));
+        if (fresh) {
+          // applyUpdate() = updateSW(true): posts skipWaiting + reloads the
+          // page on `controllerchange`, so the new precache serves the reload.
+          applyUpdate();
+          return;
+        }
+      }
+    } catch (err) {
+      console.error('[PWAUpdatePrompt] service worker update failed:', err);
+    }
+    // No waiting worker (already current, or transient deploy skew) → fall back
+    // to a plain reload. Safe: without a stale waiting worker this won't loop.
+    window.location.reload();
   };
 
   const onDismiss = () => {
