@@ -55,7 +55,11 @@ def _rmw_repo(existing, sink, monkeypatch):
 
 
 def _atomic_repo(sink, monkeypatch, return_row):
-    """Repo forced onto the atomic path (engine on), execute_returning_one faked."""
+    """Repo forced onto the Core (db_engine) atomic path (engine on, ORM flag
+    off), execute_returning_one faked."""
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "USE_ORM_USER_SETTINGS", False)
     monkeypatch.setattr(db_engine, "is_configured", lambda: True)
     repo = UserSettingsRepository()
 
@@ -93,6 +97,9 @@ async def test_atomic_merge_uses_single_jsonb_concat_statement(monkeypatch):
 @pytest.mark.asyncio
 async def test_atomic_path_falls_back_to_rmw_on_db_error(monkeypatch):
     """If the atomic statement throws, the save still lands via RMW — not dropped."""
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "USE_ORM_USER_SETTINGS", False)
     monkeypatch.setattr(db_engine, "is_configured", lambda: True)
 
     async def _boom(sql, params):
@@ -117,6 +124,55 @@ async def test_atomic_path_falls_back_to_rmw_on_db_error(monkeypatch):
     written = sink["written"]["settings_json"]
     assert written["parse_mode"] == "y"
     assert written["ai_settings"]["keep"] == 1  # fallback still merged, not replaced
+
+
+# ── ORM atomic path (USE_ORM_USER_SETTINGS on) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_orm_path_runs_same_merge_sql_in_write_scope(monkeypatch):
+    """With the ORM flag on (+ engine configured), patch_settings_json routes
+    to the write_scope() session and runs the SAME ``|| CAST(:patch AS jsonb)``
+    merge — never a replace. Mocks the session so no real DB is needed."""
+    from contextlib import asynccontextmanager
+
+    from app.core.config import settings as app_settings
+    from app.db import session as db_session
+
+    monkeypatch.setattr(app_settings, "USE_ORM_USER_SETTINGS", True)
+    monkeypatch.setattr(db_engine, "is_configured", lambda: True)
+
+    sink: dict = {}
+
+    class _FakeResult:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return {"user_id": "u1", "settings_json": json.dumps({"parse_mode": "x"})}
+
+    class _FakeSession:
+        async def execute(self, stmt, params=None):
+            sink["sql"] = str(stmt)
+            sink["params"] = params
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def _fake_write_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr(db_session, "write_scope", _fake_write_scope)
+
+    repo = UserSettingsRepository()
+    out = await repo.patch_settings_json("u1", {"parse_mode": "x"})
+
+    sql = sink["sql"]
+    assert "ON CONFLICT (user_id) DO UPDATE" in sql
+    assert "|| CAST(:patch AS jsonb)" in sql  # merge, never replace
+    assert ":patch::jsonb" not in sql  # the bind-parser footgun is avoided
+    assert json.loads(sink["params"]["patch"]) == {"parse_mode": "x"}
+    # jsonb string normalized back to a dict for callers
+    assert out["settings_json"] == {"parse_mode": "x"}
 
 
 # ── RMW fallback (engine NOT configured) ───────────────────────────────────

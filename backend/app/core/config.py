@@ -102,6 +102,18 @@ class Settings(BaseSettings):
         "Covers parsed_media CRUD + lists + search + statistics; the 9 "
         "wrapper methods route through the ORM overrides via Python MRO)",
     )
+    USE_ORM_USER_SETTINGS: bool = Field(
+        default=False,
+        description="Route UserSettingsRepository reads + the settings_json "
+        "atomic merge through the SQLAlchemy 2.0 ORM session layer (Task 5.4). "
+        "Reads run on read_scope() + select(UserSettings); the canonical "
+        "settings_json merge runs the SAME COALESCE(existing,'{}'::jsonb) || "
+        "CAST(:patch AS jsonb) ON CONFLICT statement inside write_scope() "
+        "(committing) instead of db_engine.execute_returning_one. The "
+        "merge-not-replace guarantee (the #485 shared-blob clobber P0) is "
+        "preserved byte-for-byte. The PostgREST read-merge-write path stays "
+        "as the engine-not-configured fallback",
+    )
 
     # ============================================
     # 下载设置
