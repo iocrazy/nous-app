@@ -4,7 +4,7 @@ import { usePWA } from '../hooks/usePWA';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 
 export default function PWAUpdatePrompt() {
-  const { needRefresh, offlineReady, applyUpdate, dismissUpdate } = usePWA();
+  const { needRefresh, offlineReady, dismissUpdate } = usePWA();
   // version.json self-check is the reliable signal under registerType:'autoUpdate'
   // (where onNeedRefresh never fires). It also gives us the real version numbers.
   const { currentVersion, latestVersion, updateAvailable } = useVersionCheck();
@@ -22,44 +22,12 @@ export default function PWAUpdatePrompt() {
     }
   }, [offlineReady, showUpdate, dismissUpdate]);
 
-  const onUpdate = async () => {
-    // needRefresh → SW already surfaced a waiting worker; applyUpdate() activates + reloads.
-    if (needRefresh) {
-      applyUpdate();
-      return;
-    }
-    // version-mismatch only (the common autoUpdate path — onNeedRefresh never
-    // fires). A PLAIN reload is the bug: it's answered by the OLD service
-    // worker from its precached app shell, so __APP_VERSION__ never advances
-    // and this banner re-appears immediately ("Update Now does nothing /
-    // stuck"). We must force the SW to fetch + activate the new build first.
-    try {
-      const reg = await navigator.serviceWorker?.getRegistration();
-      if (reg) {
-        await reg.update(); // re-check origin for a new sw.js + precache manifest
-        // A freshly-installed worker may be `waiting`, or still `installing`.
-        const fresh =
-          reg.waiting ||
-          (await new Promise<ServiceWorker | null>((resolve) => {
-            const sw = reg.installing;
-            if (!sw) return resolve(null);
-            sw.addEventListener('statechange', () =>
-              resolve(sw.state === 'installed' ? sw : null),
-            );
-            setTimeout(() => resolve(null), 4000); // don't hang the button
-          }));
-        if (fresh) {
-          // applyUpdate() = updateSW(true): posts skipWaiting + reloads the
-          // page on `controllerchange`, so the new precache serves the reload.
-          applyUpdate();
-          return;
-        }
-      }
-    } catch (err) {
-      console.error('[PWAUpdatePrompt] service worker update failed:', err);
-    }
-    // No waiting worker (already current, or transient deploy skew) → fall back
-    // to a plain reload. Safe: without a stale waiting worker this won't loop.
+  const onUpdate = () => {
+    // The SW uses registerType:'autoUpdate' (skipWaiting + clientsClaim), so a
+    // freshly deployed build takes control on the next navigation — a plain
+    // reload reliably loads it (a manual browser refresh already upgrades).
+    // Keep this dead simple: the earlier reg.update()/await dance could stall
+    // on iOS Safari and make the button feel dead. Update Now === a refresh.
     window.location.reload();
   };
 
