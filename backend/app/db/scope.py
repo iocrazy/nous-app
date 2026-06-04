@@ -27,23 +27,41 @@ forgets to scope = data leak. This module makes "no-scope user-facing query"
 
 SELECT full-statement traversal (closes the C2 / join-shaped leaks): the SELECT
 injection alone only sees entities in the *columns clause* (``all_mappers``), so a
-scoped table reached purely via a JOIN, a WHERE/IN subquery, a raw
-``from_statement`` text, or a writable CTE's nested DML used to slip through with
-NO tenant predicate. ``_enforce_scope`` now ALSO walks the whole statement tree
-(FROM list, JOINs, scalar/IN subqueries, CTE elements incl. writable-CTE-nested
-``UPDATE``/``DELETE``/``INSERT``) and collects every reference to a scoped table.
-A scoped table is "covered" iff its mapper is in the injectable set
-(``_scoped_mappers``) AND the statement is not ``is_from_statement`` (raw text
-that ``with_loader_criteria`` cannot reach). Any scoped table referenced anywhere
-but NOT covered → ``UnscopedQueryError`` (fail-closed) naming the table(s). This
-deliberately makes some join-shaped reads raise: restructure to query the scoped
-entity directly so it is injectable, or use ``system_session(reason=...)``.
+scoped table reached purely via a JOIN, a WHERE/IN subquery, or a writable CTE's
+nested DML used to slip through with NO tenant predicate. ``_enforce_scope`` now
+walks the whole statement tree (FROM list, JOINs, scalar/IN subqueries, CTE
+elements incl. writable-CTE-nested ``UPDATE``/``DELETE``/``INSERT``) and collects
+every referenced scoped table. The model is INJECT-WHERE-INJECTABLE, RAISE-ON-
+RESIDUE:
+
+  * INJECT — ``with_loader_criteria(cls, criteria, include_aliases=True)`` is
+    added for every referenced scoped class. Empirically (against dev PG) this
+    DOES filter the foreign tenant's rows out of: a bare select, an ``aliased``
+    entity, an INNER JOIN target, an IN-subquery, and a correlated scalar
+    subquery — the loader criteria attaches to the scoped table wherever it is a
+    real FROM/entity, including inside subqueries.
+  * RAISE (fail-closed) — the residue positions where the injected criteria
+    provably does NOT exclude the foreign row: an OUTER-JOIN target (the
+    predicate lands in the row-preserving ON clause, so the unmatched foreign row
+    survives), a raw ``from_statement`` (loader criteria is a no-op against the
+    opaque text), a writable-CTE-nested DML on a scoped table, and an ``EXISTS``
+    subquery referencing a scoped table (a bare ``exists().where(col == col)``
+    correlation is NOT injected — and it cannot be distinguished pre-compile from
+    the idiomatic ``exists(select(Scoped))`` form, so BOTH fail closed). These
+    each raise ``UnscopedQueryError`` naming the offending table(s): restructure
+    to an injectable shape (INNER JOIN / IN-subquery) or use
+    ``system_session(reason=...)``.
+
+  ``None`` scope + any referenced scoped table → raise (unchanged). ``SYSTEM`` →
+  never inject / never raise (unchanged). The traversal cost scales with the
+  statement's node count (``visitors.iterate``); it is a no-op when no model is
+  scoped (the scoped-table-name set is empty — the prod state today).
 
 OUT OF REACH (known gap): raw ``text()`` SQL that does not flow through a mapped
 entity bypasses the ORM events entirely (escape hatch — see decisions doc §4
 "raw SQL is a reviewed exception"; governed by the forthcoming ``scoped_sql``
-helper). Everything that touches a *mapped* scoped table — even via JOIN /
-subquery / writable CTE — is now either injected or fail-closed.
+helper). Everything that touches a *mapped* scoped table — via JOIN / subquery /
+writable CTE — is now either injected or fail-closed.
 
 Scope binding is per-asyncio-task: ``ContextVar`` copies on task creation and
 propagates across ``await``, so the scope binds to the *task*, not the pooled
@@ -70,7 +88,9 @@ from sqlalchemy import event, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapper, Session, mapperlib, with_loader_criteria
 from sqlalchemy.sql import visitors
+from sqlalchemy.sql.dml import UpdateBase
 from sqlalchemy.sql.schema import Table
+from sqlalchemy.sql.selectable import Exists
 
 from app.db.orm_base import ProjectScoped, TeamScoped, UserScoped
 from app.db.session import get_sessionmaker
@@ -243,44 +263,51 @@ def _scoped_mappers(state: Any) -> list[Mapper]:
     return [m for m in state.all_mappers if issubclass(m.class_, _SCOPE_MIXINS)]
 
 
-# ── Scoped-table-name registry (across ALL declarative registries) ──────
+# ── Scoped-table registry (table name → mapped class, across ALL registries) ──
 #
-# The traversal below intersects the tables a statement references against the
-# set of *scoped* table names. A scoped table = the mapped table of any class
-# inheriting a scope mixin, in ANY registry — prod ``Base`` AND the test
-# ``_TestBase`` the choke-point tests map onto. We enumerate the process-wide
-# mapper registries (mapperlib._mapper_registries) rather than a single Base so
-# newly-declared test models are seen. The result is cached and invalidated
-# whenever a new mapper is configured (a test model maps in), so we pay the scan
-# once per model-set, not per query.
+# The traversal intersects the tables a statement references against the set of
+# *scoped* table names; injection then needs the mapped CLASS for a scoped table
+# found only in a JOIN/subquery (to build its per-axis criteria). A scoped table
+# = the mapped table of any class inheriting a scope mixin, in ANY registry —
+# prod ``Base`` AND the test ``_TestBase`` the choke-point tests map onto. We
+# enumerate the process-wide mapper registries (mapperlib._mapper_registries)
+# rather than a single Base so newly-declared test models are seen. The map is
+# cached and invalidated whenever a new mapper is configured (a test model maps
+# in), so we pay the scan once per model-set, not per query.
 
-_scoped_table_names_cache: frozenset[str] | None = None
+_scoped_table_map_cache: dict[str, type] | None = None
 
 
 def _invalidate_scoped_table_cache(*_args: Any, **_kwargs: Any) -> None:
     """``mapper_configured`` listener: drop the cache when a new model maps in
     (e.g. a test model on ``_TestBase``), so the next query recomputes it."""
-    global _scoped_table_names_cache
-    _scoped_table_names_cache = None
+    global _scoped_table_map_cache
+    _scoped_table_map_cache = None
 
 
-def _scoped_table_names() -> frozenset[str]:
-    """Names of every table mapped by a scope-mixin class, across all registries.
+def _scoped_table_map() -> dict[str, type]:
+    """Map of ``table name → mapped class`` for every scope-mixin class, across
+    all registries.
 
-    Generic by construction: returns ``frozenset()`` when no model is scoped
-    (the prod state today → the traversal becomes a no-op and the choke point
-    stays inert). Cached; invalidated on ``mapper_configured``.
+    Generic by construction: returns ``{}`` when no model is scoped (the prod
+    state today → the traversal becomes a no-op and the choke point stays inert).
+    Cached; invalidated on ``mapper_configured``.
     """
-    global _scoped_table_names_cache
-    if _scoped_table_names_cache is not None:
-        return _scoped_table_names_cache
-    names: set[str] = set()
+    global _scoped_table_map_cache
+    if _scoped_table_map_cache is not None:
+        return _scoped_table_map_cache
+    mapping: dict[str, type] = {}
     for registry in list(mapperlib._mapper_registries):
         for mapper in registry.mappers:
             if issubclass(mapper.class_, _SCOPE_MIXINS):
-                names.add(mapper.local_table.name)
-    _scoped_table_names_cache = frozenset(names)
-    return _scoped_table_names_cache
+                mapping[mapper.local_table.name] = mapper.class_
+    _scoped_table_map_cache = mapping
+    return _scoped_table_map_cache
+
+
+def _scoped_table_names() -> frozenset[str]:
+    """Names of every table mapped by a scope-mixin class (keys of the map)."""
+    return frozenset(_scoped_table_map().keys())
 
 
 def _referenced_scoped_tables(statement: Any) -> set[str]:
@@ -386,29 +413,63 @@ def _forbid_scoped_bulk_dml(orm_execute_state: Any) -> bool:
     )
 
 
-def _columns_clause_scoped_tables(orm_execute_state: Any) -> set[str]:
-    """Scoped table names whose mapper is in the columns clause (the injectable
-    set). These ARE referenced; whether they are *covered* additionally depends
-    on ``is_from_statement`` (see ``_enforce_scope``)."""
-    return {m.local_table.name for m in _scoped_mappers(orm_execute_state)}
+def _label(table_name: str) -> str:
+    """``ClassName(table)`` for a scoped table, falling back to the bare name.
+    Keeps error messages greppable by both the developer-facing class name and
+    the physical table the traversal flagged."""
+    cls = _scoped_table_map().get(table_name)
+    return f"{cls.__name__}({table_name})" if cls is not None else table_name
 
 
-def _label(table_name: str, orm_execute_state: Any) -> str:
-    """``ClassName(table)`` for a referenced scoped table, falling back to the
-    bare table name. Keeps error messages greppable by both the developer-facing
-    class name and the physical table the traversal flagged."""
-    for mapper in _scoped_mappers(orm_execute_state):
-        if mapper.local_table.name == table_name:
-            return f"{mapper.class_.__name__}({table_name})"
-    return table_name
+def _residue_scoped_tables(statement: Any, scoped_names: frozenset[str]) -> set[str]:
+    """Scoped tables in *non-filtering* positions where ``with_loader_criteria``
+    provably does NOT exclude the foreign tenant's row (verified against dev PG).
+
+    These are the fail-closed residue — restructure to an injectable shape (INNER
+    JOIN / IN-subquery) or use ``system_session``:
+
+      * OUTER-JOIN target — the tenant predicate moves to the row-preserving ON
+        clause, so the unmatched foreign row survives. Detected via each
+        select-like node's ORM ``_setup_joins`` directive with ``isouter=True``.
+      * writable-CTE-nested DML — an ``UPDATE``/``DELETE``/``INSERT`` (an
+        ``UpdateBase``) on a scoped table embedded in a CTE under a top-level
+        SELECT (reports is_select, so the write-forbid skips it).
+      * ``EXISTS`` referencing a scoped table — a bare
+        ``exists().where(col == col)`` correlation is NOT injected, and it cannot
+        be distinguished pre-compile from the idiomatic ``exists(select(Scoped))``
+        form, so BOTH are treated as residue (conservative fail-closed).
+    """
+    residue: set[str] = set()
+    for el in visitors.iterate(statement):
+        setup_joins = getattr(el, "_setup_joins", None)
+        if setup_joins:
+            for join in setup_joins:
+                flags = join[-1] if isinstance(join[-1], dict) else {}
+                if flags.get("isouter"):
+                    residue |= _scoped_tables_under(join[0], scoped_names)
+        elif isinstance(el, UpdateBase):
+            residue |= _scoped_tables_under(el, scoped_names)
+        elif isinstance(el, Exists):
+            residue |= _scoped_tables_under(el, scoped_names)
+    return residue
+
+
+def _scoped_tables_under(node: Any, scoped_names: frozenset[str]) -> set[str]:
+    """Scoped table names reachable under a clause node."""
+    return {
+        el.name
+        for el in visitors.iterate(node)
+        if isinstance(el, Table) and el.name in scoped_names
+    }
 
 
 def _enforce_scope(orm_execute_state: Any) -> None:
     """``do_orm_execute`` handler: forbid bulk/Core DML on scoped models under a
-    user scope, inject the tenant filter on SELECTs whose scoped entity is in the
-    columns clause, and fail-closed on any scoped table referenced elsewhere in
-    the statement (JOIN / subquery / from_statement / writable CTE) that the
-    injection cannot reach. Inert until a model inherits a scope mixin."""
+    user scope, INJECT the tenant filter for every referenced scoped class
+    (columns clause, aliases, INNER joins, IN/scalar subqueries), and fail-closed
+    on the residue positions where injection does not exclude the foreign row
+    (OUTER joins, raw from_statement, writable-CTE DML, EXISTS). Inert until a
+    model inherits a scope mixin."""
     if _forbid_scoped_bulk_dml(orm_execute_state):
         return  # handled (or allowed) as a write statement
 
@@ -419,14 +480,18 @@ def _enforce_scope(orm_execute_state: Any) -> None:
     if not (orm_execute_state.is_select or orm_execute_state.is_from_statement):
         return
 
-    # Every scoped table referenced ANYWHERE: the full-statement traversal (FROM
-    # / JOIN / subquery / CTE) UNION the columns-clause mappers. The union is
-    # needed because a raw ``from_statement`` references the scoped table only as
-    # a mapper (the SQL text is opaque to the tree walk), so traversal alone
-    # would miss it. Empty (the prod state today) → nothing to enforce.
-    referenced = _referenced_scoped_tables(
-        orm_execute_state.statement
-    ) | _columns_clause_scoped_tables(orm_execute_state)
+    scoped_names = _scoped_table_names()
+    if not scoped_names:
+        return  # no model is scoped (prod today) — inert short-circuit, no walk
+
+    statement = orm_execute_state.statement
+    # Every scoped table referenced ANYWHERE: full-statement traversal (FROM /
+    # JOIN / subquery / CTE) UNION the columns-clause mappers. The union is needed
+    # because a raw ``from_statement`` references the scoped table only as a mapper
+    # (the SQL text is opaque to the tree walk), so traversal alone would miss it.
+    referenced = _referenced_scoped_tables(statement) | {
+        m.local_table.name for m in _scoped_mappers(orm_execute_state)
+    }
     if not referenced:
         return  # no scoped table touched anywhere — nothing to enforce
 
@@ -434,48 +499,53 @@ def _enforce_scope(orm_execute_state: Any) -> None:
     if scope is SYSTEM:
         return  # explicit cross-user / system access — no injection, no raise
 
-    labels = sorted(_label(t, orm_execute_state) for t in referenced)
     if scope is None:
         # Fail-closed: a scoped table touched (anywhere) with no scope set.
         raise UnscopedQueryError(
-            f"SELECT references scoped table(s) {labels} but no scope is set. "
-            "Open a user_session(scope) or system_session(reason) first."
+            f"SELECT references scoped table(s) {sorted(_label(t) for t in referenced)} "
+            "but no scope is set. Open a user_session(scope) or "
+            "system_session(reason) first."
         )
 
-    # A real Scope. The scoped tables we can actually inject into are the ones in
-    # the columns clause — EXCEPT under ``is_from_statement``, where the loader
-    # criteria is a silent no-op against raw text (so it covers nothing). Any
-    # OTHER referenced scoped table (join-only, subquery, from_statement,
-    # writable-CTE-nested DML) cannot be reached by ``with_loader_criteria`` and
-    # would leak — fail-closed on those.
-    covered: set[str] = (
-        set()
+    # A real Scope. Determine the residue: scoped tables in non-filtering
+    # positions where injection would NOT exclude the foreign row. A raw
+    # from_statement is wholesale residue (loader criteria no-ops against opaque
+    # text); otherwise it is the structural residue (OUTER joins / writable-CTE
+    # DML / EXISTS).
+    residue = (
+        set(referenced)
         if orm_execute_state.is_from_statement
-        else _columns_clause_scoped_tables(orm_execute_state)
+        else _residue_scoped_tables(statement, scoped_names)
     )
-    uncovered = referenced - covered
-    if uncovered:
-        bad = sorted(_label(t, orm_execute_state) for t in uncovered)
+    if residue:
+        bad = sorted(_label(t) for t in residue)
         raise UnscopedQueryError(
-            f"SELECT references scoped table(s) {bad} that the tenant filter "
-            "cannot be injected into (reached via a JOIN, subquery, raw "
-            "from_statement, or writable CTE — not the columns clause). Query the "
-            "scoped entity directly so it can be injected, use "
-            "system_session(reason=...) for deliberate cross-user access, or (for "
-            f"raw SQL) the scoped_sql helper. Offending table(s): {bad}."
+            f"SELECT references scoped table(s) {bad} in a position the tenant "
+            "filter cannot be injected into so it would leak (an OUTER JOIN's "
+            "row-preserving ON clause, an EXISTS correlation, a raw "
+            "from_statement, or a writable CTE). Restructure to an injectable "
+            "shape (INNER JOIN / IN-subquery), use system_session(reason=...) for "
+            "deliberate cross-user access, or (for raw SQL) the scoped_sql helper. "
+            f"Offending table(s): {bad}."
         )
 
-    # Inject per-class OR-combined criteria for the covered scoped mappers. One
-    # with_loader_criteria per scoped class (each may declare different axes).
+    # Inject per-class OR-combined criteria for EVERY referenced scoped class —
+    # not just the columns-clause mappers. ``with_loader_criteria`` filters the
+    # scoped table wherever it is a real FROM/entity (columns clause, aliases,
+    # INNER joins, IN/scalar subqueries). One option per scoped class (each may
+    # declare different axes).
     #
     # The criteria is passed as a PRE-BUILT expression (not a lambda): a lambda
     # closing over `scope` trips with_loader_criteria's lambda-cache analysis
     # ("closure variable not a cacheable SQL element"). A concrete expression
     # carries its bound values directly and caches fine — and we *want* a fresh
     # expression per scope anyway (the filter values differ per user).
+    table_map = _scoped_table_map()
     options = []
-    for mapper in _scoped_mappers(orm_execute_state):
-        cls = mapper.class_
+    for table_name in referenced:
+        cls = table_map.get(table_name)
+        if cls is None:
+            continue
         criteria = _axis_criteria(cls, scope)
         if criteria is None:
             continue
