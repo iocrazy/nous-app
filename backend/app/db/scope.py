@@ -40,16 +40,20 @@ PROVABLY filtered, else it fails closed.
   2. Build ``with_loader_criteria(cls, criteria, include_aliases=True)`` for every
      referenced scoped class and ask SQLAlchemy itself whether the filter
      attaches: compile the option-bearing statement (with a unique sentinel
-     tenant value per table) against the session dialect and check the sentinel
-     actually rendered for that table. This is the POSITIVE, authoritative signal
-     — no re-derivation of the loader-criteria attachment rules. A scoped table
-     whose sentinel did not render (``count(*)`` subquery, ``count(*)`` over a
-     Core join, a correlated ``exists().where(...)``, a raw ``from_statement``)
-     is NOT injectable.
-  3. A scoped table is POSITIVELY-INJECTABLE iff its sentinel rendered AND it is
-     not in a position that renders-but-does-not-filter — i.e. an OUTER-JOIN
-     target (predicate lands in the row-preserving ON clause → unmatched foreign
-     row survives) or a writable-CTE-nested DML (renders, but is a write).
+     tenant value per table) and check whether the sentinel survived into the
+     compiled BOUND-PARAMETER values (NOT a substring match of the SQL text —
+     that can be defeated by a user literal containing the sentinel digit-run, a
+     cross-tenant leak; and ``literal_binds`` would CompileError on JSONB/ARRAY
+     filters, a false fail-closed). This is the POSITIVE, authoritative signal —
+     no re-derivation of the loader-criteria attachment rules. A scoped table
+     whose sentinel is absent from the params (``count(*)`` subquery, ``count(*)``
+     over a Core join, a correlated ``exists().where(...)``, a raw
+     ``from_statement``) is NOT injectable.
+  3. A scoped table is POSITIVELY-INJECTABLE iff its sentinel survived into the
+     params AND it is not in a position that binds-but-does-not-filter — i.e. an
+     OUTER-JOIN target (predicate lands in the row-preserving ON clause →
+     unmatched foreign row survives) or a writable-CTE-nested DML (binds, but is a
+     write).
   4. INJECT (real criteria) for the positively-injectable set; RAISE
      ``UnscopedQueryError`` for EVERY other referenced scoped table. When in
      doubt → RAISE. Restructure to an injectable shape (INNER JOIN / IN-subquery,
@@ -474,14 +478,30 @@ def _compile_filtered_tables(
     reaches a filtering position). For each candidate we attach a
     ``with_loader_criteria`` built from a per-table sentinel scope (the sentinel
     populates ALL of that table's axes, so it works for user/team/project-scoped
-    models alike), compile the statement against the live dialect, and check the
-    sentinel rendered. A scoped table reached only via ``count(*)`` / a Core
-    ``count`` join / a correlated ``exists().where(...)`` / a raw
-    ``from_statement`` yields NO predicate → it is NOT in the returned set → it
-    fails closed upstream.
+    models alike), compile the statement, and check whether the sentinel survived
+    into the compiled BOUND-PARAMETER values. A scoped table reached only via
+    ``count(*)`` / a Core ``count`` join / a correlated ``exists().where(...)`` /
+    a raw ``from_statement`` yields NO loader-criteria predicate → its sentinel is
+    absent from the params → it is NOT in the returned set → it fails closed
+    upstream.
 
-    Fail-closed by construction: any compile error → return ``set()`` (treat all
-    candidates as non-injectable, i.e. raise).
+    Detection is on the BOUND PARAMETER VALUES, NOT the SQL text:
+
+      * Correctness must not depend on the sentinel being collision-free. A text
+        substring match against ``literal_binds`` SQL can be defeated by a
+        user-influenced literal that happens to contain the sentinel digit-run
+        (e.g. ``.where(payload == "...<sentinel>...")`` on a count(*) subquery),
+        which would wrongly classify a no-op shape as injectable → cross-tenant
+        leak. Loader-criteria bind values are ours, not the caller's.
+      * Compiling WITHOUT ``literal_binds`` also lets JSONB/ARRAY filters
+        (``meta == {...}`` / ``meta.contains({...})`` / array equality) compile —
+        ``literal_binds`` cannot render dict/list values and would raise
+        ``CompileError``, wrongly failing-closed on a legitimate injectable read.
+
+    The sentinel lands as a scalar (user axis ``user_id == sentinel``) or inside a
+    list (team/project axis ``... IN (sentinel,)``), so we check both. The
+    ``except Exception → set()`` is a true last-resort (e.g. a genuinely
+    un-compilable statement), NOT the path JSONB/ARRAY filters routinely hit.
     """
     options = []
     sentinels: dict[str, int] = {}
@@ -504,14 +524,23 @@ def _compile_filtered_tables(
     if not options:
         return set()
     try:
-        rendered = str(
-            statement.options(*options).compile(
-                dialect=dialect, compile_kwargs={"literal_binds": True}
-            )
-        )
-    except Exception:  # noqa: BLE001 - fail closed: any compile issue → raise
+        compiled = statement.options(*options).compile(dialect=dialect)
+    except Exception:  # noqa: BLE001 - true last-resort: fail closed → raise
         return set()
-    return {name for name, sentinel in sentinels.items() if str(sentinel) in rendered}
+    param_values = list(compiled.params.values())
+
+    def _sentinel_in_params(sentinel: int) -> bool:
+        # The loader-criteria value lands as a scalar (== axis) or inside a list
+        # (IN axis). Matched against OUR bind values, never the caller's literals.
+        return any(
+            sentinel == value
+            or (isinstance(value, (list, tuple)) and sentinel in value)
+            for value in param_values
+        )
+
+    return {
+        name for name, sentinel in sentinels.items() if _sentinel_in_params(sentinel)
+    }
 
 
 def _enforce_scope(orm_execute_state: Any) -> None:

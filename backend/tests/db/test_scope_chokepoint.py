@@ -44,6 +44,7 @@ import pytest
 from sqlalchemy import (
     BigInteger,
     String,
+    Text,
     delete,
     exists,
     func,
@@ -54,6 +55,7 @@ from sqlalchemy import (
     union_all,
     update,
 )
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, aliased, mapped_column
 
 from app.db.orm_base import TeamScoped, UserScoped
@@ -79,6 +81,9 @@ _PLAIN_TABLE = f"_scope_plain_test_{_PID}"
 # to exercise the indirect-scope JOIN/subquery leak cases (the parsed_media →
 # resources pattern: media has no owner col, scope comes from the resources JOIN).
 _MEDIA_TABLE = f"_scope_media_test_{_PID}"
+# TEAM-ONLY scoped table (no user axis) — exercises the sentinel-in-a-list
+# (``team_id IN (...)``) branch of the compile-probe's param-value detection.
+_TEAM_TABLE = f"_scope_team_test_{_PID}"
 
 
 # ── TEST-ONLY mapped models (never a production table) ──────────────────
@@ -98,6 +103,11 @@ class _ScopedRow(_TestBase, UserScoped, TeamScoped):
     """Throwaway model for the choke-point test: user + team axes.
 
     UserScoped.__tenant_user_col__ stays the default 'user_id'.
+
+    Carries a JSONB ``meta`` and an ARRAY ``tags`` column so the compile-probe is
+    exercised against filters whose bound values cannot be rendered with
+    ``literal_binds`` — these must still INJECT (the probe must not fail-closed on
+    them).
     """
 
     __tablename__ = _SCOPED_TABLE
@@ -107,6 +117,8 @@ class _ScopedRow(_TestBase, UserScoped, TeamScoped):
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     team_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     payload: Mapped[str] = mapped_column(String, nullable=True)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=True)
+    tags: Mapped[list] = mapped_column(ARRAY(Text), nullable=True)
 
 
 class _PlainRow(_TestBase):
@@ -134,6 +146,22 @@ class _PlainMedia(_TestBase):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     scoped_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    payload: Mapped[str] = mapped_column(String, nullable=True)
+
+
+class _TeamOnlyRow(_TestBase, TeamScoped):
+    """TEAM-ONLY scoped model (no UserScoped mixin → no ``__tenant_user_col__``).
+
+    Exercises (a) the axis-agnostic compile-probe — the sentinel is only on the
+    team axis, which renders as ``team_id IN (sentinel,)``, a LIST bound value, so
+    param-value detection must look inside lists; and (b) that a team-only model
+    injects correctly (filters to the scope's teams)."""
+
+    __tablename__ = _TEAM_TABLE
+    __table_args__ = {"extend_existing": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    team_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     payload: Mapped[str] = mapped_column(String, nullable=True)
 
 
@@ -196,7 +224,9 @@ async def seeded_tables(patched_engine):
                     id      bigint PRIMARY KEY,
                     user_id bigint,
                     team_id bigint,
-                    payload text
+                    payload text,
+                    meta    jsonb,
+                    tags    text[]
                 )
                 """
             )
@@ -222,21 +252,57 @@ async def seeded_tables(patched_engine):
                 """
             )
         )
+        await conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS {_TEAM_TABLE} (
+                    id      bigint PRIMARY KEY,
+                    team_id bigint,
+                    payload text
+                )
+                """
+            )
+        )
 
     ids = _Ids()
     async with engine.begin() as conn:
+        # meta/tags carry the SAME values on owned and foreign rows so a JSONB /
+        # ARRAY filter matches BOTH — proving it is the TENANT filter (not the
+        # JSONB filter) that excludes the foreign row in the probe tests below.
         await conn.execute(
             text(
-                f"INSERT INTO {_SCOPED_TABLE} (id, user_id, team_id, payload) "
-                "VALUES (:id, :uid, :tid, :p)"
+                f"INSERT INTO {_SCOPED_TABLE} "
+                "(id, user_id, team_id, payload, meta, tags) "
+                "VALUES (:id, :uid, :tid, :p, CAST(:meta AS jsonb), :tags)"
             ),
             [
                 # owned by the test user
-                {"id": ids.own, "uid": ids.user, "tid": None, "p": "own"},
+                {
+                    "id": ids.own,
+                    "uid": ids.user,
+                    "tid": None,
+                    "p": "own",
+                    "meta": '{"k": "v"}',
+                    "tags": ["a", "b"],
+                },
                 # shared to the test user's team, owned by someone else
-                {"id": ids.team, "uid": ids.other, "tid": ids.team_id, "p": "team"},
+                {
+                    "id": ids.team,
+                    "uid": ids.other,
+                    "tid": ids.team_id,
+                    "p": "team",
+                    "meta": '{"k": "v"}',
+                    "tags": ["a", "b"],
+                },
                 # owned by another user, not shared → invisible
-                {"id": ids.other_row, "uid": ids.other, "tid": None, "p": "other"},
+                {
+                    "id": ids.other_row,
+                    "uid": ids.other,
+                    "tid": None,
+                    "p": "other",
+                    "meta": '{"k": "v"}',
+                    "tags": ["a", "b"],
+                },
             ],
         )
         # Two media rows, each pointing at a scoped row (one owned, one foreign).
@@ -250,6 +316,17 @@ async def seeded_tables(patched_engine):
                 {"id": ids.media_other, "sid": ids.other_row, "p": "media_other"},
             ],
         )
+        # Team-only rows: one in the test user's team, one in another team.
+        await conn.execute(
+            text(
+                f"INSERT INTO {_TEAM_TABLE} (id, team_id, payload) "
+                "VALUES (:id, :tid, :p)"
+            ),
+            [
+                {"id": ids.team_own, "tid": ids.team_id, "p": "team_own"},
+                {"id": ids.team_other, "tid": ids.other, "p": "team_other"},
+            ],
+        )
 
     yield ids
 
@@ -257,6 +334,7 @@ async def seeded_tables(patched_engine):
         await conn.execute(text(f"DROP TABLE IF EXISTS {_SCOPED_TABLE}"))
         await conn.execute(text(f"DROP TABLE IF EXISTS {_PLAIN_TABLE}"))
         await conn.execute(text(f"DROP TABLE IF EXISTS {_MEDIA_TABLE}"))
+        await conn.execute(text(f"DROP TABLE IF EXISTS {_TEAM_TABLE}"))
 
 
 class _Ids:
@@ -272,6 +350,9 @@ class _Ids:
         # media rows pointing at the owned + the foreign scoped row
         self.media_own = _pk()
         self.media_other = _pk()
+        # team-only rows: in-team vs other-team
+        self.team_own = _pk()
+        self.team_other = _pk()
 
 
 def _pk() -> int:
@@ -824,6 +905,116 @@ async def test_count_star_select_from_core_join_raises(seeded_tables: _Ids):
                     )
                 )
             )
+
+
+async def test_count_star_with_sentinel_colliding_literal_raises(
+    seeded_tables: _Ids,
+):
+    """ISSUE 1 (substring-collision LEAK → RAISE): a no-op count(*) subquery that
+    ALSO carries a user literal CONTAINING the probe sentinel's digit-run. The old
+    text-substring detection (``str(sentinel) in literal_binds_sql``) saw the
+    sentinel in the caller's literal and wrongly classified the table injectable →
+    ran → leaked the foreign tenant's count. Param-value detection ignores the
+    caller's literal (it only matches the loader-criteria's OWN bind values) → the
+    no-op shape is correctly NOT injectable → fail-closed RAISE.
+
+    The literal is built from the live ``_SENTINEL_BASE`` so it would have
+    substring-collided under the old mechanism — proving the fix."""
+    from app.db.scope import _SENTINEL_BASE
+
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    poison_literal = f"prefix_{_SENTINEL_BASE}_suffix"  # contains the sentinel run
+    sub = (
+        select(func.count())
+        .where(_ScopedRow.id == _PlainMedia.scoped_id)
+        .scalar_subquery()
+    )
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with user_session(scope) as session:
+            await session.execute(
+                select(_PlainMedia.id, sub.label("cnt")).where(
+                    _PlainMedia.payload == poison_literal
+                )
+            )
+
+
+async def test_jsonb_filter_injects_excludes_foreign(seeded_tables: _Ids):
+    """ISSUE 2 (JSONB false-positive → INJECT): a JSONB equality / containment
+    filter has a dict bound value that ``literal_binds`` CANNOT render — the old
+    probe raised CompileError and was swallowed → the legit injectable read wrongly
+    FAILED-CLOSED. Compiling without ``literal_binds`` lets it through, and the
+    tenant filter still INJECTS → only the owner's row returns (the foreign row,
+    which has the SAME meta, is excluded by the TENANT filter, not the JSONB one).
+    """
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    async with user_session(scope) as session:
+        eq_rows = (
+            (
+                await session.execute(
+                    select(_ScopedRow).where(_ScopedRow.meta == {"k": "v"})
+                )
+            )
+            .scalars()
+            .all()
+        )
+        contains_rows = (
+            (
+                await session.execute(
+                    select(_ScopedRow).where(_ScopedRow.meta.contains({"k": "v"}))
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    eq_ids = {r.id for r in eq_rows}
+    contains_ids = {r.id for r in contains_rows}
+    assert eq_ids == {ids.own}, f"JSONB == leaked/failed-closed: {eq_ids}"
+    assert contains_ids == {ids.own}, f"JSONB @> leaked/failed-closed: {contains_ids}"
+
+
+async def test_array_filter_injects_excludes_foreign(seeded_tables: _Ids):
+    """ISSUE 2 (ARRAY variant): an ARRAY containment filter (``tags @> ['a']``)
+    also carries a list bound value un-renderable by ``literal_binds`` — must
+    INJECT (owner-only), not fail-closed. (Uses ``contains`` rather than ``==`` to
+    avoid the ``text[] = varchar[]`` operator-type mismatch, which is orthogonal
+    to the scope mechanism.)"""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    async with user_session(scope) as session:
+        rows = (
+            (
+                await session.execute(
+                    select(_ScopedRow).where(_ScopedRow.tags.contains(["a"]))
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    got = {r.id for r in rows}
+    assert got == {ids.own}, f"ARRAY filter leaked/failed-closed: {got}"
+
+
+async def test_team_only_model_injects_via_list_param(seeded_tables: _Ids):
+    """Spot-check the sentinel-in-a-LIST detection branch: a TEAM-ONLY scoped
+    model has only ``team_id IN (sentinel,)`` (a list bound value, no scalar user
+    axis). The compile-probe must detect the sentinel INSIDE that list, classify
+    the table injectable, and inject → only the in-team row returns (the other
+    team's row is excluded)."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user, team_ids=frozenset({ids.team_id}))
+
+    async with user_session(scope) as session:
+        rows = (await session.execute(select(_TeamOnlyRow))).scalars().all()
+
+    got = {r.payload for r in rows}
+    assert got == {"team_own"}, f"team-only list-param detection failed: {got}"
 
 
 # ── C2 — RAISE-ON-RESIDUE (structural): row-preserving / opaque / write
