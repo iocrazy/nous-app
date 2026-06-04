@@ -41,7 +41,19 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import BigInteger, String, delete, exists, insert, select, text, update
+from sqlalchemy import (
+    BigInteger,
+    String,
+    delete,
+    exists,
+    func,
+    insert,
+    join,
+    select,
+    text,
+    union_all,
+    update,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, aliased, mapped_column
 
 from app.db.orm_base import TeamScoped, UserScoped
@@ -635,21 +647,13 @@ async def test_plain_model_bulk_dml_unaffected(seeded_tables: _Ids):
         assert result.scalar_one().payload == "plain_update"
 
 
-# ── C2 — full-statement traversal: scoped table reached via JOIN / subquery /
-#    from_statement / writable CTE must FAIL-CLOSED (it cannot be injected) ─────
-#
-# These are the indirect-scope leak shapes the columns-clause-only injection
-# missed: the scoped table is referenced but NOT a queried entity, so
-# with_loader_criteria never reaches it. Policy = raise (accepted cost; the
-# owning repo restructures to an injectable shape or uses system_session).
-
-
-# ── C2 — INJECT-WHERE-INJECTABLE: scoped table reached via INNER JOIN / IN- /
-#    scalar-subquery is TENANT-FILTERED, and the FOREIGN row is ACTUALLY EXCLUDED
-#    end-to-end (NOT merely "did not raise"). This is the whole point: a shape in
-#    the inject path where with_loader_criteria silently no-ops would be a SILENT
-#    cross-tenant LEAK. Every test below asserts user B's data is gone from the
-#    result set. ────────────────────────────────────────────────────────────────
+# ── C2 — DENY-BY-DEFAULT. A scoped table referenced ANYWHERE must be PROVABLY
+#    filtered (compile-verified) else it fails closed. Two test groups below:
+#    (1) INJECT shapes — assert the FOREIGN (other-user) row is ACTUALLY EXCLUDED
+#        end-to-end (NOT merely "did not raise"); a silent no-op would be a LEAK.
+#    (2) RAISE shapes — positions where injection cannot be PROVEN to exclude the
+#        foreign row (count(*)/aggregate, EXISTS, OUTER join, from_statement,
+#        writable CTE) must fail closed. ──────────────────────────────────────────
 
 
 async def test_join_scoped_table_injects_excludes_foreign(seeded_tables: _Ids):
@@ -709,8 +713,121 @@ async def test_scalar_subquery_scoped_injects_excludes_foreign(seeded_tables: _I
     )
 
 
-# ── C2 — RAISE-ON-RESIDUE: positions where with_loader_criteria provably does
-#    NOT exclude the foreign row (verified end-to-end below) → fail-closed. ──────
+async def test_aggregate_over_scoped_column_injects_excludes_foreign(
+    seeded_tables: _Ids,
+):
+    """INJECT: an aggregate that projects a SCOPED COLUMN — count(_ScopedRow.id) /
+    max(_ScopedRow.payload) — is filtered (the criteria attaches to the scoped
+    table) so the aggregate covers ONLY the owner's rows (the foreign row is not
+    counted). Contrast with the count(*) leak below (no scoped column → no
+    anchor)."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)  # owns exactly one scoped row (ids.own)
+
+    async with user_session(scope) as session:
+        count = await session.scalar(select(func.count(_ScopedRow.id)))
+        top = await session.scalar(select(func.max(_ScopedRow.payload)))
+
+    assert count == 1, f"count(_ScopedRow.id) leaked foreign rows: got {count}"
+    assert top == "own", f"max(_ScopedRow.payload) leaked foreign payload: {top!r}"
+
+
+async def test_union_all_scoped_injects_excludes_foreign(seeded_tables: _Ids):
+    """INJECT: a UNION ALL of two scoped selects is filtered in each leg → only
+    the owner's payload appears, B's 'other' is EXCLUDED."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    stmt = union_all(
+        select(_ScopedRow.payload),
+        select(_ScopedRow.payload).where(_ScopedRow.id == ids.own),
+    )
+    async with user_session(scope) as session:
+        payloads = {p for (p,) in (await session.execute(stmt)).all()}
+
+    assert payloads == {"own"}, f"union_all leaked foreign payload: {payloads}"
+
+
+async def test_readonly_cte_scoped_entity_injects_excludes_foreign(
+    seeded_tables: _Ids,
+):
+    """INJECT: a read-only CTE selecting the _ScopedRow ENTITY then selecting from
+    it is filtered → only the owner's row flows out of the CTE."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    cte = select(_ScopedRow).cte("c")
+    async with user_session(scope) as session:
+        payloads = {p for (p,) in (await session.execute(select(cte.c.payload))).all()}
+
+    assert payloads == {"own"}, f"read-only CTE leaked foreign payload: {payloads}"
+
+
+async def test_scoped_driving_inner_join_injects_excludes_foreign(
+    seeded_tables: _Ids,
+):
+    """INJECT: select(_ScopedRow).join(_PlainMedia) — the scoped entity DRIVES the
+    join and is in the columns clause → filtered to the owner's rows; B's scoped
+    row (and its media) is EXCLUDED."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    async with user_session(scope) as session:
+        result = await session.execute(
+            select(_ScopedRow).join(_PlainMedia, _ScopedRow.id == _PlainMedia.scoped_id)
+        )
+        rows = result.scalars().all()
+
+    got = {r.id for r in rows}
+    assert got == {ids.own}, f"scoped-driving join leaked foreign row: {got}"
+
+
+# ── C2 — RAISE-ON-RESIDUE: positions where the tenant filter cannot be PROVEN to
+#    exclude the foreign row (compile-verified absent, or row-preserving) → raise.
+#    Includes the count(*)/aggregate-with-no-scoped-column leaks (the 3rd review
+#    finding). ──────────────────────────────────────────────────────────────────
+
+
+async def test_count_star_correlated_subquery_raises(seeded_tables: _Ids):
+    """LEAK→RAISE (3rd review finding): a correlated count(*) scalar subquery over
+    _ScopedRow projects NO scoped column, so with_loader_criteria has no anchor and
+    silently no-ops — count=1 for B's media leaked the EXISTENCE of B's row. It is
+    not Exists/outerjoin/UpdateBase/from_statement, so only DENY-BY-DEFAULT (the
+    compile-probe finds no rendered predicate) catches it → fail-closed RAISE."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    sub = (
+        select(func.count())
+        .where(_ScopedRow.id == _PlainMedia.scoped_id)
+        .scalar_subquery()
+    )
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with user_session(scope) as session:
+            await session.execute(select(_PlainMedia.id, sub.label("cnt")))
+
+
+async def test_count_star_select_from_core_join_raises(seeded_tables: _Ids):
+    """LEAK→RAISE (3rd review finding): select(func.count()).select_from(join(...))
+    — a Core INNER JOIN counted with count(*) projects NO scoped column, so the
+    rendered SQL has no tenant predicate and counts BOTH tenants' rows. Caught only
+    by DENY-BY-DEFAULT → fail-closed RAISE."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with user_session(scope) as session:
+            await session.execute(
+                select(func.count()).select_from(
+                    join(
+                        _PlainMedia, _ScopedRow, _PlainMedia.scoped_id == _ScopedRow.id
+                    )
+                )
+            )
+
+
+# ── C2 — RAISE-ON-RESIDUE (structural): row-preserving / opaque / write
+#    positions that RENDER a predicate but do not filter, or cannot be probed. ───
 
 
 async def test_outerjoin_scoped_table_raises(seeded_tables: _Ids):
