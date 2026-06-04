@@ -11,6 +11,11 @@ Coverage:
   * unset scope + SELECT on a scoped model → UnscopedQueryError (fail-closed).
   * system_session: SELECT returns ALL rows (no injection).
   * before_insert: stamps user_id from scope when unset; raises on mismatch.
+  * bulk/Core DML (update/delete/insert) on a scoped table under a real Scope
+    fail-closed (forbid-by-default — load-then-modify is the safe path); the
+    same statements succeed under system_session and fail-closed under no scope.
+  * the sanctioned instance-flush write path (session.add / dirty update /
+    session.delete) still works under a real scope (forbid must NOT over-reach).
   * a plain (non-scoped) model is unaffected by the event.
   * ContextVar isolation: scope set in one task does not leak to a sibling.
 
@@ -30,7 +35,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import BigInteger, String, select
+from sqlalchemy import BigInteger, String, delete, insert, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.db.orm_base import TeamScoped, UserScoped
@@ -365,3 +370,213 @@ async def test_contextvar_scope_isolation_across_tasks(seeded_tables: _Ids):
     assert seen["b_after"] == scope_b, "task b's scope was clobbered by task a"
     # The launching task never set a scope → still None.
     assert current_scope() is None
+
+
+# ── Write-path forbid: bulk/Core DML under a user scope (C1 / C3) ────────
+#
+# A real Scope must FORBID bulk UPDATE/DELETE and Core/bulk INSERT on a scoped
+# table — these statements run through do_orm_execute but cannot be safely
+# WHERE-injected/owner-stamped, so we fail-closed and force load-then-modify or
+# an explicit system_session. SYSTEM is trusted to write its own WHERE/owner.
+
+
+async def test_bulk_update_under_user_scope_raises(seeded_tables: _Ids):
+    """C1: a Core bulk UPDATE on a scoped table under a real scope must raise —
+    otherwise it would mutate every user's rows with no tenant filter."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user, team_ids=frozenset({ids.team_id}))
+
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with user_session(scope) as session:
+            await session.execute(update(_ScopedRow).values(payload="hijacked"))
+
+
+async def test_orm_enabled_update_synchronize_fetch_under_scope_raises(
+    seeded_tables: _Ids,
+):
+    """C1: the ORM-enabled update().where().execution_options(
+    synchronize_session='fetch') form must also raise (still a Core-style
+    statement, no per-row owner check)."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with user_session(scope) as session:
+            await session.execute(
+                update(_ScopedRow)
+                .where(_ScopedRow.id == ids.other_row)
+                .values(payload="hijacked")
+                .execution_options(synchronize_session="fetch")
+            )
+
+
+async def test_bulk_delete_under_user_scope_raises(seeded_tables: _Ids):
+    """C1: a Core bulk DELETE on a scoped table under a real scope must raise —
+    otherwise it would delete other users' rows."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with user_session(scope) as session:
+            await session.execute(delete(_ScopedRow))
+
+
+async def test_core_insert_under_user_scope_raises(seeded_tables: _Ids):
+    """C3: a Core insert().values(...) bypasses before_insert owner-stamping, so
+    under a real scope it must raise (a user could otherwise insert rows owned
+    by another user)."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with user_session(scope) as session:
+            await session.execute(
+                insert(_ScopedRow).values(
+                    id=_pk(), user_id=ids.other, payload="foreign"
+                )
+            )
+
+
+async def test_bulk_insert_under_user_scope_raises(seeded_tables: _Ids):
+    """C3: bulk insert (insert() + list of param dicts) is also a Core insert
+    that bypasses owner-stamping → must raise under a real scope."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with user_session(scope) as session:
+            await session.execute(
+                insert(_ScopedRow),
+                [
+                    {"id": _pk(), "user_id": ids.other, "payload": "a"},
+                    {"id": _pk(), "user_id": ids.other, "payload": "b"},
+                ],
+            )
+
+
+async def test_system_session_allows_bulk_dml(seeded_tables: _Ids):
+    """system_session is trusted: the SAME update/delete/insert statements that
+    raise under a user scope must SUCCEED (system code writes its own WHERE)."""
+    ids = seeded_tables
+    new_id = _pk()
+
+    async with system_session("test: cross-user bulk DML") as session:
+        # Core insert succeeds.
+        await session.execute(
+            insert(_ScopedRow).values(
+                id=new_id, user_id=ids.other, payload="sys_insert"
+            )
+        )
+        # Bulk update succeeds (touches that row).
+        await session.execute(
+            update(_ScopedRow)
+            .where(_ScopedRow.id == new_id)
+            .values(payload="sys_update")
+        )
+        # Bulk delete of the row we just made succeeds.
+        await session.execute(delete(_ScopedRow).where(_ScopedRow.id == new_id))
+
+    # Confirm the row is gone (all three statements actually ran).
+    async with system_session("test: verify") as session:
+        result = await session.execute(
+            select(_ScopedRow).where(_ScopedRow.id == new_id)
+        )
+        assert result.scalars().all() == []
+
+
+async def test_no_scope_bulk_dml_raises(seeded_tables: _Ids):
+    """Fail-closed: bulk UPDATE/DELETE/INSERT on a scoped table with NO scope
+    established must also raise (same posture as the unset-scope SELECT)."""
+    ids = seeded_tables
+
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with read_scope() as session:
+            await session.execute(update(_ScopedRow).values(payload="x"))
+
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with read_scope() as session:
+            await session.execute(delete(_ScopedRow))
+
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with read_scope() as session:
+            await session.execute(
+                insert(_ScopedRow).values(id=_pk(), user_id=ids.user, payload="x")
+            )
+
+
+# ── Regression: the sanctioned instance-flush path must STILL work ───────
+
+
+async def test_instance_update_under_scope_still_works(seeded_tables: _Ids):
+    """REGRESSION: load a row under scope, mutate an attribute, commit. This is
+    the sanctioned safe path (governed by the scoped SELECT that loaded it +
+    the UoW flush) — it must NOT be caught by the bulk-DML forbid."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    async with user_session(scope) as session:
+        result = await session.execute(
+            select(_ScopedRow).where(_ScopedRow.id == ids.own)
+        )
+        row = result.scalar_one()
+        row.payload = "mutated"  # dirty-instance update → flush, not do_orm_execute
+
+    # Re-read: the mutation persisted.
+    async with user_session(scope) as session:
+        result = await session.execute(
+            select(_ScopedRow).where(_ScopedRow.id == ids.own)
+        )
+        assert result.scalar_one().payload == "mutated"
+
+
+async def test_instance_delete_under_scope_still_works(seeded_tables: _Ids):
+    """REGRESSION: session.delete(loaded_instance) is the sanctioned delete
+    path (governed by the scoped SELECT that loaded it) → must NOT raise."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+    new_id = _pk()
+
+    # First insert a row owned by the scope via the sanctioned add path.
+    async with user_session(scope) as session:
+        session.add(_ScopedRow(id=new_id, payload="to_delete"))
+
+    # Load it, then delete the instance.
+    async with user_session(scope) as session:
+        result = await session.execute(
+            select(_ScopedRow).where(_ScopedRow.id == new_id)
+        )
+        await session.delete(result.scalar_one())
+
+    # Confirm gone.
+    async with user_session(scope) as session:
+        result = await session.execute(
+            select(_ScopedRow).where(_ScopedRow.id == new_id)
+        )
+        assert result.scalars().all() == []
+
+
+async def test_plain_model_bulk_dml_unaffected(seeded_tables: _Ids):
+    """REGRESSION: bulk UPDATE/INSERT on a NON-scoped model must NOT be caught
+    by the forbid even with no scope set — the choke point ignores it."""
+    plain_id = _pk()
+    async with read_scope() as session:
+        # Core insert on a plain model: no raise.
+        await session.execute(
+            insert(_PlainRow).values(id=plain_id, payload="plain_insert")
+        )
+        await session.commit()
+
+    async with read_scope() as session:
+        # Bulk update on a plain model: no raise.
+        await session.execute(
+            update(_PlainRow)
+            .where(_PlainRow.id == plain_id)
+            .values(payload="plain_update")
+        )
+        await session.commit()
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(_PlainRow).where(_PlainRow.id == plain_id)
+        )
+        assert result.scalar_one().payload == "plain_update"

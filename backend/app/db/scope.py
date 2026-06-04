@@ -14,10 +14,16 @@ forgets to scope = data leak. This module makes "no-scope user-facing query"
   Layer 2 — a ``do_orm_execute`` event injects the tenant filter on every
             SELECT that touches a scoped model. Unset scope + scoped model =
             ``UnscopedQueryError`` (fail-closed; blows up in dev/test, never
-            silently full-scans).
+            silently full-scans). The SAME event FORBIDS bulk/Core DML
+            (UPDATE / DELETE / INSERT) on a scoped model under a real ``Scope``:
+            these statements cannot be safely WHERE-injected / owner-stamped, so
+            we fail-closed and force the sanctioned load-then-modify path (or an
+            explicit ``system_session``). See ``_enforce_scope``.
   Layer 3 — a ``before_insert`` mapper event stamps the owner column from the
-            active scope (asserts equality if already set — can't insert for
-            another user).
+            active scope on the ORM unit-of-work flush of a mapped *instance*
+            (``session.add(obj)``) — asserts equality if already set (can't
+            insert for another user). Core ``insert()`` does NOT flow through
+            this event; it is caught by the Layer-2 write-path forbid instead.
 
 Scope binding is per-asyncio-task: ``ContextVar`` copies on task creation and
 propagates across ``await``, so the scope binds to the *task*, not the pooled
@@ -229,12 +235,71 @@ def _axis_criteria(cls: type, scope: Scope):
     return or_(*clauses)
 
 
-# ── Layer 2 — SELECT-time tenant injection ──────────────────────────────
+# ── Layer 2 — SELECT-time tenant injection + write-path forbid ───────────
+
+
+def _forbid_scoped_bulk_dml(orm_execute_state: Any) -> bool:
+    """Fail-closed guard for bulk/Core DML on scoped models.
+
+    Statement-level UPDATE / DELETE / INSERT (``session.execute(update(...))``,
+    ``delete(...)``, ``insert(...)``, including the bulk and
+    ``synchronize_session='fetch'`` forms) flow through ``do_orm_execute`` but
+    cannot be safely governed the way SELECTs are: rewriting an arbitrary
+    WHERE-tree to inject a tenant predicate is fragile, and a Core ``insert()``
+    never reaches the ``before_insert`` owner-stamping event. So under a real
+    ``Scope`` we FORBID them outright and force the sanctioned safe path
+    (load-then-modify via ``session.add()`` / dirty-instance update /
+    ``session.delete(instance)``, whose flush IS governed) or a deliberate
+    ``system_session(reason=...)``.
+
+    NB: the instance-flush write path does NOT come through ``do_orm_execute``
+    (it uses the persistence API directly), so this never fires on it.
+
+    Returns ``True`` if the statement was a write that this guard handled
+    (so the caller can stop), ``False`` if it was not a write (fall through to
+    the SELECT logic). Raises ``UnscopedQueryError`` on a forbidden write.
+    """
+    if not (
+        orm_execute_state.is_update
+        or orm_execute_state.is_delete
+        or orm_execute_state.is_insert
+    ):
+        return False  # not a write statement — let SELECT handling decide
+
+    scoped = _scoped_mappers(orm_execute_state)
+    if not scoped:
+        return True  # write, but no scoped model touched — allow, nothing to do
+
+    scope = _scope.get()
+    if scope is SYSTEM:
+        return True  # system code is trusted to write its own WHERE / owner
+
+    names = [m.class_.__name__ for m in scoped]
+    if scope is None:
+        raise UnscopedQueryError(
+            f"Bulk/Core DML touches scoped model(s) {names} but no scope is "
+            "set. Open a user_session(scope) or system_session(reason) first."
+        )
+
+    # A real Scope: forbid-by-default. Do not try to inject a WHERE into an
+    # arbitrary UPDATE/DELETE tree or owner-stamp a Core INSERT — point the
+    # caller at the governed safe path instead.
+    raise UnscopedQueryError(
+        f"Bulk/Core DML on scoped model(s) {names} is forbidden under a user "
+        "scope: it cannot be safely tenant-filtered / owner-stamped. Load the "
+        "instance(s) then mutate via session.add() / attribute update / "
+        "session.delete(instance) (the unit-of-work flush is governed), or use "
+        "system_session(reason=...) for a deliberate cross-user write."
+    )
 
 
 def _enforce_scope(orm_execute_state: Any) -> None:
-    """``do_orm_execute`` handler: inject the tenant filter on SELECTs that
-    touch a scoped model. Inert until a model inherits a scope mixin."""
+    """``do_orm_execute`` handler: forbid bulk/Core DML on scoped models under a
+    user scope and inject the tenant filter on SELECTs that touch a scoped
+    model. Inert until a model inherits a scope mixin."""
+    if _forbid_scoped_bulk_dml(orm_execute_state):
+        return  # handled (or allowed) as a write statement
+
     if not orm_execute_state.is_select:
         return
 
