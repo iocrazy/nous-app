@@ -35,8 +35,8 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import BigInteger, String, delete, insert, select, update
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import BigInteger, String, delete, insert, select, text, update
+from sqlalchemy.orm import DeclarativeBase, Mapped, aliased, mapped_column
 
 from app.db.orm_base import TeamScoped, UserScoped
 from app.db.scope import (
@@ -57,6 +57,10 @@ _TEST_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()
 _PID = os.getpid()
 _SCOPED_TABLE = f"_scope_chokepoint_test_{_PID}"
 _PLAIN_TABLE = f"_scope_plain_test_{_PID}"
+# UNSCOPED media-like table with a media_id/scoped_id FK into _ScopedRow. Used
+# to exercise the indirect-scope JOIN/subquery leak cases (the parsed_media →
+# resources pattern: media has no owner col, scope comes from the resources JOIN).
+_MEDIA_TABLE = f"_scope_media_test_{_PID}"
 
 
 # ── TEST-ONLY mapped models (never a production table) ──────────────────
@@ -95,6 +99,21 @@ class _PlainRow(_TestBase):
     __table_args__ = {"extend_existing": True}
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    payload: Mapped[str] = mapped_column(String, nullable=True)
+
+
+class _PlainMedia(_TestBase):
+    """UNSCOPED media-like model (no scope mixin) carrying a ``scoped_id`` FK
+    into ``_ScopedRow`` — mirrors ``parsed_media`` whose tenancy is indirect via
+    ``resources.media_id``. Reading it via a JOIN/subquery on the scoped table is
+    the C2 leak shape: the scoped table is referenced but NOT in the columns
+    clause, so the loader criteria never reaches it → must fail-closed."""
+
+    __tablename__ = _MEDIA_TABLE
+    __table_args__ = {"extend_existing": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    scoped_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     payload: Mapped[str] = mapped_column(String, nullable=True)
 
 
@@ -172,6 +191,17 @@ async def seeded_tables(patched_engine):
                 """
             )
         )
+        await conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS {_MEDIA_TABLE} (
+                    id        bigint PRIMARY KEY,
+                    scoped_id bigint,
+                    payload   text
+                )
+                """
+            )
+        )
 
     ids = _Ids()
     async with engine.begin() as conn:
@@ -189,12 +219,24 @@ async def seeded_tables(patched_engine):
                 {"id": ids.other_row, "uid": ids.other, "tid": None, "p": "other"},
             ],
         )
+        # Two media rows, each pointing at a scoped row (one owned, one foreign).
+        await conn.execute(
+            text(
+                f"INSERT INTO {_MEDIA_TABLE} (id, scoped_id, payload) "
+                "VALUES (:id, :sid, :p)"
+            ),
+            [
+                {"id": ids.media_own, "sid": ids.own, "p": "media_own"},
+                {"id": ids.media_other, "sid": ids.other_row, "p": "media_other"},
+            ],
+        )
 
     yield ids
 
     async with engine.begin() as conn:
         await conn.execute(text(f"DROP TABLE IF EXISTS {_SCOPED_TABLE}"))
         await conn.execute(text(f"DROP TABLE IF EXISTS {_PLAIN_TABLE}"))
+        await conn.execute(text(f"DROP TABLE IF EXISTS {_MEDIA_TABLE}"))
 
 
 class _Ids:
@@ -207,6 +249,9 @@ class _Ids:
         self.own = _pk()
         self.team = _pk()
         self.other_row = _pk()
+        # media rows pointing at the owned + the foreign scoped row
+        self.media_own = _pk()
+        self.media_other = _pk()
 
 
 def _pk() -> int:
@@ -249,9 +294,9 @@ async def test_user_session_empty_teams_only_owned(seeded_tables: _Ids):
         rows = result.scalars().all()
 
     got_ids = {r.id for r in rows}
-    assert got_ids == {
-        ids.own
-    }, f"empty team_ids should yield only the owned row, got {got_ids}"
+    assert got_ids == {ids.own}, (
+        f"empty team_ids should yield only the owned row, got {got_ids}"
+    )
 
 
 async def test_unset_scope_raises_unscoped_query_error(seeded_tables: _Ids):
@@ -287,9 +332,9 @@ async def test_before_insert_stamps_user_id_when_unset(seeded_tables: _Ids):
         session.add(row)
         await session.flush()
         # after flush the before_insert event has fired
-        assert (
-            row.user_id == ids.user
-        ), f"before_insert did not stamp user_id (got {row.user_id!r})"
+        assert row.user_id == ids.user, (
+            f"before_insert did not stamp user_id (got {row.user_id!r})"
+        )
 
     # Re-read under the same scope: the stamped row is now visible (proves it
     # was persisted with the scope's user_id).
@@ -582,28 +627,85 @@ async def test_plain_model_bulk_dml_unaffected(seeded_tables: _Ids):
         assert result.scalar_one().payload == "plain_update"
 
 
-# ── Known-open bypass (pinned, not yet fixed) ────────────────────────────
+# ── C2 — full-statement traversal: scoped table reached via JOIN / subquery /
+#    from_statement / writable CTE must FAIL-CLOSED (it cannot be injected) ─────
+#
+# These are the indirect-scope leak shapes the columns-clause-only injection
+# missed: the scoped table is referenced but NOT a queried entity, so
+# with_loader_criteria never reaches it. Policy = raise (accepted cost; the
+# owning repo restructures to an injectable shape or uses system_session).
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "writable-CTE DML bypasses both write-forbid and SELECT-injection; "
-        "fixed in the SELECT full-statement-traversal task"
-    ),
-)
+async def test_join_only_scoped_table_raises(seeded_tables: _Ids):
+    """C2: select(_PlainMedia).join(_ScopedRow) — scoped table is join-only, not
+    in the columns clause → must raise (otherwise unscoped media leaks every
+    user's rows). This is the parsed_media-via-resources-JOIN shape."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user, team_ids=frozenset({ids.team_id}))
+
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with user_session(scope) as session:
+            await session.execute(
+                select(_PlainMedia).join(
+                    _ScopedRow, _PlainMedia.scoped_id == _ScopedRow.id
+                )
+            )
+
+
+async def test_outerjoin_scoped_table_raises(seeded_tables: _Ids):
+    """C2: outerjoin form is the same leak — scoped table referenced, not
+    injectable → raise."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with user_session(scope) as session:
+            await session.execute(
+                select(_PlainMedia).outerjoin(
+                    _ScopedRow, _PlainMedia.scoped_id == _ScopedRow.id
+                )
+            )
+
+
+async def test_in_subquery_scoped_table_raises(seeded_tables: _Ids):
+    """C2: scoped entity hidden in an IN-subquery — referenced but not in the
+    outer columns clause → raise."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with user_session(scope) as session:
+            await session.execute(
+                select(_PlainMedia).where(
+                    _PlainMedia.scoped_id.in_(select(_ScopedRow.id))
+                )
+            )
+
+
+async def test_from_statement_raw_text_scoped_raises(seeded_tables: _Ids):
+    """C2: select(_ScopedRow).from_statement(text(...)) — the scoped mapper IS
+    in all_mappers, but with_loader_criteria is a silent no-op against raw
+    from_statement text (is_from_statement=True), so it would leak → raise."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with user_session(scope) as session:
+            await session.execute(
+                select(_ScopedRow).from_statement(
+                    text(f"SELECT * FROM {_SCOPED_TABLE}")
+                )
+            )
+
+
 async def test_writable_cte_dml_bypass_is_pinned(seeded_tables: _Ids):
-    """DEMONSTRATES the cross-tenant write bypass via a writable CTE.
+    """C2: a DML statement nested in a CTE under a top-level SELECT reports as a
+    SELECT (is_select True, is_update False), so it slips past the bulk-DML
+    write-forbid; the columns-clause injection never sees the CTE's UPDATE
+    target. The full-statement traversal now reaches into the CTE element and
+    finds the scoped table → must raise (closing the cross-tenant WRITE bypass).
 
-    A DML statement nested in a CTE under a top-level SELECT reports as a SELECT
-    (``is_select`` True, ``is_update`` False), so it slips past the bulk-DML
-    write-forbid; and the SELECT injection only scopes the OUTER select, not the
-    CTE's UPDATE — so under user A's scope this still mutates user B's row.
-
-    The assertion below is what SHOULD hold once the SELECT full-statement
-    traversal task closes the hole. It does NOT hold today, so the body fails →
-    ``xfail(strict=True)`` records XFAIL; it will flip to XPASS-fail (alerting
-    us) the moment the traversal fix lands.
+    (Was xfail-strict before the traversal fix; now a normal must-PASS test.)
     """
     ids = seeded_tables
     scope = Scope(user_id=ids.user)
@@ -616,6 +718,165 @@ async def test_writable_cte_dml_bypass_is_pinned(seeded_tables: _Ids):
         .cte("u")
     )
 
-    with pytest.raises(UnscopedQueryError):
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
         async with user_session(scope) as session:
             await session.execute(select(cte.c.id))
+
+    # And prove the victim row was NOT mutated (the statement never ran).
+    async with system_session("test: verify victim untouched") as session:
+        result = await session.execute(
+            select(_ScopedRow).where(_ScopedRow.id == ids.other_row)
+        )
+        assert result.scalar_one().payload == "other", "victim row was hijacked!"
+
+
+async def test_no_scope_join_scoped_table_raises(seeded_tables: _Ids):
+    """C2 + fail-closed: with NO scope, a JOIN onto a scoped table must raise too
+    (the None-scope fail-closed extends to the whole traversal set, not just the
+    columns clause)."""
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with read_scope() as session:
+            await session.execute(
+                select(_PlainMedia).join(
+                    _ScopedRow, _PlainMedia.scoped_id == _ScopedRow.id
+                )
+            )
+
+
+async def test_no_scope_in_subquery_scoped_table_raises(seeded_tables: _Ids):
+    """C2 + fail-closed: with NO scope, a scoped table in an IN-subquery must
+    raise."""
+    with pytest.raises(UnscopedQueryError, match=_SCOPED_TABLE):
+        async with read_scope() as session:
+            await session.execute(
+                select(_PlainMedia).where(
+                    _PlainMedia.scoped_id.in_(select(_ScopedRow.id))
+                )
+            )
+
+
+# ── GREEN-PIN: genuinely-injectable shapes must still INJECT (not raise) ─────
+#
+# These reference the scoped entity IN THE COLUMNS CLAUSE, so the loader
+# criteria reaches them. They must keep returning owned+team rows only — the
+# traversal must NOT over-reach and raise on them.
+
+
+async def test_aliased_scoped_entity_still_injects(seeded_tables: _Ids):
+    """GREEN-PIN: aliased(_ScopedRow) is in the columns clause (covered) → the
+    filter is injected via include_aliases=True → owned+team only, no raise."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user, team_ids=frozenset({ids.team_id}))
+
+    al = aliased(_ScopedRow)
+    async with user_session(scope) as session:
+        result = await session.execute(select(al))
+        rows = result.scalars().all()
+
+    got = {r.id for r in rows}
+    assert got == {ids.own, ids.team}, f"aliased injection leaked/over-filtered: {got}"
+
+
+async def test_system_session_join_sees_all(seeded_tables: _Ids):
+    """GREEN-PIN: under system_session the same join that RAISES under a user
+    scope must SUCCEED and see all media (no injection, no raise)."""
+    ids = seeded_tables
+    async with system_session("test: cross-user join") as session:
+        result = await session.execute(
+            select(_PlainMedia).join(_ScopedRow, _PlainMedia.scoped_id == _ScopedRow.id)
+        )
+        media = result.scalars().all()
+
+    got = {m.id for m in media}
+    assert {ids.media_own, ids.media_other} <= got, f"system join missed rows: {got}"
+
+
+async def test_plain_media_alone_untouched(seeded_tables: _Ids):
+    """GREEN-PIN / inertness guard: select(_PlainMedia) alone references NO
+    scoped table → no scope needed, no raise, ALL media rows returned. Proves
+    the traversal does not false-positive on unscoped-only statements (the vast
+    majority of prod queries)."""
+    ids = seeded_tables
+    async with read_scope() as session:
+        result = await session.execute(select(_PlainMedia))
+        media = result.scalars().all()
+
+    got = {m.id for m in media}
+    assert {ids.media_own, ids.media_other} <= got, f"plain media untouched: {got}"
+
+
+# ── session.get(): PK-based load is the most common access pattern ───────────
+#
+# session.get(Model, pk) emits a SELECT-by-PK that flows through do_orm_execute
+# as a real SELECT (is_select=True) with the scoped mapper in the columns clause,
+# so the existing tenant injection covers it: a foreign-PK get returns None
+# (NOT the other tenant's row), an owned-PK get returns the row, no-scope raises,
+# and system_session gets any row by PK. These pin that behaviour so a future
+# change to the enforcement gate cannot silently reopen the PK-get leak.
+
+
+async def test_get_foreign_pk_returns_none(seeded_tables: _Ids):
+    """A get() for ANOTHER user's PK under a real scope must return None (the
+    injected tenant filter makes the SELECT-by-PK match nothing) — NOT leak the
+    foreign row. PK-get is the single most common access pattern in the repos."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user, team_ids=frozenset({ids.team_id}))
+
+    async with user_session(scope) as session:
+        got = await session.get(_ScopedRow, ids.other_row)
+
+    assert got is None, f"foreign-PK get leaked another user's row: {got!r}"
+
+
+async def test_get_owned_pk_returns_row(seeded_tables: _Ids):
+    """A get() for the scope's OWN PK returns the row (injection must not
+    over-filter the legitimately-owned row)."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    async with user_session(scope) as session:
+        got = await session.get(_ScopedRow, ids.own)
+
+    assert got is not None and got.payload == "own", f"owned-PK get failed: {got!r}"
+
+
+async def test_get_foreign_pk_after_owned_load_still_none(seeded_tables: _Ids):
+    """Identity-map edge: loading the owned row first must NOT pull the foreign
+    row into the session, so a subsequent foreign-PK get() in the same session
+    still returns None (the scoped query never loaded the foreign row)."""
+    ids = seeded_tables
+    scope = Scope(user_id=ids.user)
+
+    async with user_session(scope) as session:
+        await session.execute(select(_ScopedRow).where(_ScopedRow.id == ids.own))
+        got = await session.get(_ScopedRow, ids.other_row)
+
+    assert got is None, f"foreign-PK get leaked after owned load: {got!r}"
+
+
+async def test_get_no_scope_on_scoped_raises(seeded_tables: _Ids):
+    """Fail-closed: a get() on a scoped model with NO scope established must
+    raise (the SELECT-by-PK touches the scoped table with no scope)."""
+    ids = seeded_tables
+    with pytest.raises(UnscopedQueryError, match="_ScopedRow"):
+        async with read_scope() as session:
+            await session.get(_ScopedRow, ids.own)
+
+
+async def test_get_system_session_any_pk(seeded_tables: _Ids):
+    """system_session: get() returns any row by PK (no injection)."""
+    ids = seeded_tables
+    async with system_session("test: cross-user get") as session:
+        got = await session.get(_ScopedRow, ids.other_row)
+
+    assert got is not None and got.payload == "other", f"system get failed: {got!r}"
+
+
+async def test_get_plain_model_unaffected(seeded_tables: _Ids):
+    """A get() on the UNSCOPED _PlainMedia is unaffected: no scope needed, the
+    row comes back by PK with no injection or raise."""
+    ids = seeded_tables
+    async with read_scope() as session:
+        got = await session.get(_PlainMedia, ids.media_own)
+
+    assert got is not None and got.payload == "media_own", f"plain get failed: {got!r}"
