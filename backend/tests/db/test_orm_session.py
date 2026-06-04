@@ -354,3 +354,62 @@ async def test_read_scope_sees_inflight_uow_writes(test_table: str):
         "(expected same-session visibility before commit)"
     )
     assert rows[0]["label"] == "inflight_visibility"
+
+
+async def test_nested_unit_of_work_requires_new(test_table: str):
+    """Nesting unit_of_work() inside an active UoW = REQUIRES_NEW.
+
+    The inner UoW opens a SEPARATE transaction that commits independently;
+    it is NOT rolled back when the OUTER transaction rolls back. Proven via
+    DB state (no get_ambient_session() helper exists):
+
+      - outer UoW writes row A (joins the outer txn via write_scope)
+      - nested UoW writes row B + exits cleanly → commits independently
+      - outer UoW then raises → outer txn (with row A) rolls back
+
+    After everything: row B present (inner committed), row A absent (outer
+    rolled back). If nesting shared one transaction, B would also be gone.
+    """
+    from app.db.session import read_scope, unit_of_work, write_scope
+
+    id_a = _pk()
+    id_b = _pk()
+
+    with pytest.raises(RuntimeError, match="outer intentional rollback"):
+        async with unit_of_work():
+            # Row A joins the OUTER transaction.
+            async with write_scope() as session:
+                await session.execute(
+                    text(f"INSERT INTO {_TABLE} (id, label) VALUES (:id, :label)"),
+                    {"id": id_a, "label": "nested_outer_a"},
+                )
+
+            # Nested UoW = REQUIRES_NEW: row B commits in its own txn on clean
+            # exit, independent of the outer transaction's fate.
+            async with unit_of_work():
+                async with write_scope() as session:
+                    await session.execute(
+                        text(f"INSERT INTO {_TABLE} (id, label) VALUES (:id, :label)"),
+                        {"id": id_b, "label": "nested_inner_b"},
+                    )
+
+            # Now blow up the OUTER transaction → row A must roll back.
+            raise RuntimeError("outer intentional rollback")
+
+    # Fresh session: B survives (inner committed), A is gone (outer rolled back).
+    async with read_scope() as session:
+        result = await session.execute(
+            text(f"SELECT id, label FROM {_TABLE} WHERE id = ANY(:ids)"),
+            {"ids": [id_a, id_b]},
+        )
+        found = {r["id"]: r["label"] for r in result.mappings().all()}
+
+    assert id_b in found, (
+        "nested unit_of_work did NOT commit independently: row B missing "
+        "(REQUIRES_NEW semantics broken — inner shared the outer txn)"
+    )
+    assert found[id_b] == "nested_inner_b"
+    assert id_a not in found, (
+        "outer unit_of_work did NOT roll back: row A is present after the "
+        "outer raise (nesting wrongly shares one transaction)"
+    )

@@ -63,6 +63,15 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     return _sessionmaker
 
 
+def dispose_sessionmaker() -> None:
+    """Reset the session factory singleton so the next get_sessionmaker()
+    rebuilds against a fresh engine. Call after dispose_engine() in teardown
+    to keep the engine/session lifecycle symmetric (avoids a stale factory
+    pointing at a disposed engine on startup→teardown→startup re-entry)."""
+    global _sessionmaker
+    _sessionmaker = None
+
+
 @asynccontextmanager
 async def read_scope() -> AsyncIterator[AsyncSession]:
     """Read-only session — no commit. Joins an ambient unit_of_work if present

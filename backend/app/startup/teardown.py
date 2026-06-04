@@ -58,8 +58,13 @@ async def shutdown_all(app: FastAPI) -> None:
     # that pg_pool is retired. No-op when not created / Supavisor unset.
     try:
         from app.db.engine import dispose_engine
+        from app.db.session import dispose_sessionmaker
 
         await dispose_engine()
+        # Reset the session factory too — keeps the engine/session lifecycle
+        # symmetric so a startup→teardown→startup re-entry doesn't reuse a
+        # stale factory bound to the now-disposed engine.
+        dispose_sessionmaker()
         logger.info("SQLAlchemy async engine disposed (Supavisor)")
     except Exception as e:
         logger.warning(f"Failed to dispose SQLAlchemy engine: {e}")
