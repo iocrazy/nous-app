@@ -86,6 +86,7 @@ changes no existing behaviour (the existing unscoped repos keep working).
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -208,19 +209,45 @@ async def user_session(scope: Scope) -> AsyncIterator[AsyncSession]:
         _scope.reset(token)
 
 
+def _audit_caller() -> str:
+    """``module:function:line`` of the code that opened a ``system_session``.
+
+    Walks up from this frame past the contextmanager machinery (this helper, the
+    ``system_session`` generator body, and contextlib's ``__aenter__`` wrapper) to
+    the first frame OUTSIDE both this module and ``contextlib`` — the real call
+    site of the cross-user access. Falls back to ``"<unknown>"`` if the stack is
+    shorter than expected (never raises; the audit line must always render).
+    """
+    _skip = (__name__, "contextlib")
+    frame = sys._getframe(1) if hasattr(sys, "_getframe") else None
+    while frame is not None:
+        if frame.f_globals.get("__name__") not in _skip:
+            code = frame.f_code
+            module = frame.f_globals.get("__name__", code.co_filename)
+            return f"{module}:{code.co_name}:{frame.f_lineno}"
+        frame = frame.f_back
+    return "<unknown>"
+
+
 @asynccontextmanager
 async def system_session(reason: str) -> AsyncIterator[AsyncSession]:
     """Open a committing write session with NO tenant injection (cross-user /
     system access).
 
     ``reason`` is mandatory for audit + greppability ("why is this query
-    allowed to see every user's rows?"). It is logged at debug so the call
-    site is recoverable from logs/telemetry. Use for sweepers, admin
-    analytics, migrations, and other deliberately cross-user work.
+    allowed to see every user's rows?"). It is logged at INFO — every loguru
+    sink in this project (stderr, file, the ``application_logs`` DB sink) is
+    registered at ``level="INFO"``, so a DEBUG line would be silently dropped and
+    leave cross-user access with no runtime trail. The line carries the immediate
+    caller (``module:function:line``) so the audit trail identifies WHERE the
+    access originated. Use for sweepers, admin analytics, migrations, and other
+    deliberately cross-user work.
     """
     from app.db.session import _request_session  # local: avoid import cycle
 
-    logger.debug("[scope] system_session opened: {}", reason)
+    logger.info(
+        "[scope] system_session opened: {} (caller={})", reason, _audit_caller()
+    )
     token = _scope.set(SYSTEM)
     try:
         existing = _request_session.get()
