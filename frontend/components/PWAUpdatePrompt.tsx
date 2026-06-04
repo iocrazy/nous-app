@@ -22,13 +22,32 @@ export default function PWAUpdatePrompt() {
     }
   }, [offlineReady, showUpdate, dismissUpdate]);
 
-  const onUpdate = () => {
-    // The SW uses registerType:'autoUpdate' (skipWaiting + clientsClaim), so a
-    // freshly deployed build takes control on the next navigation — a plain
-    // reload reliably loads it (a manual browser refresh already upgrades).
-    // Keep this dead simple: the earlier reg.update()/await dance could stall
-    // on iOS Safari and make the button feel dead. Update Now === a refresh.
-    window.location.reload();
+  const [updating, setUpdating] = useState(false);
+
+  const onUpdate = async () => {
+    // A stuck service worker keeps serving its OLD precached app shell, so a
+    // plain reload is answered from that cache and NEVER escapes — observed in
+    // the wild: a tab pinned to an old version across multiple deploys, with
+    // both the button and manual refresh failing to upgrade. The only reliable
+    // escape is to unregister the SW + delete all caches, THEN reload: with no
+    // controller and no cache, the browser fetches the fresh build from origin
+    // and re-registers a clean SW. These ops are fast (unlike reg.update(),
+    // which can stall on iOS Safari), and the reload always runs in finally.
+    setUpdating(true);
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister().catch(() => false)));
+      }
+      if (typeof caches !== 'undefined') {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k).catch(() => false)));
+      }
+    } catch (err) {
+      console.error('[PWAUpdatePrompt] SW/cache reset failed:', err);
+    } finally {
+      window.location.reload();
+    }
   };
 
   const onDismiss = () => {
@@ -63,9 +82,10 @@ export default function PWAUpdatePrompt() {
             <div className="flex gap-2 mt-3 ml-8">
               <button
                 onClick={onUpdate}
-                className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
+                disabled={updating}
+                className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white rounded-lg transition-colors"
               >
-                Update Now
+                {updating ? 'Updating…' : 'Update Now'}
               </button>
               <button
                 onClick={onDismiss}
