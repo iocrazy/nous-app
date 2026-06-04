@@ -31,6 +31,8 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from uuid import UUID
 
 import asyncpg
 import pytest
@@ -240,7 +242,10 @@ async def test_monthly_usage_projection_shape(
     rows = await _repo().monthly_usage_by_agent(
         month_start=month_start, month_end=month_end
     )
-    ours = [r for r in rows if r["agent_id"] == agent_id]
+    # Filter via the STRING contract (PostgREST renders uuid as a JSON str) —
+    # NOT `r["agent_id"] == agent_id` (UUID==UUID would pass even if the repo
+    # leaked native UUIDs, masking the consumer-path regression).
+    ours = [r for r in rows if r["agent_id"] == str(agent_id)]
     assert len(ours) == 1
     row = ours[0]
     assert set(row.keys()) == {
@@ -259,6 +264,64 @@ async def test_monthly_usage_projection_shape(
     # total_tokens is a Computed column (prompt + completion).
     assert row["total_tokens"] == 15
     assert type(row["status"]) is str
+
+
+async def test_monthly_usage_matches_rest_value_types_consumer_path(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """REST→ORM value-type parity for the /usage consumer's PYTHON-level
+    type-sensitive ops (ai_library_router.get_usage). The live baseline is the
+    REST (supabase-py/PostgREST) base, which renders uuid/numeric/bigint as JSON
+    STRINGS — the consumer relies on that:
+
+      - line 1378:  r.get("user_id") == str(user_uuid)   → needs user_id to be str
+      - line 1412:  UUID(r["agent_id"])                  → needs agent_id parseable
+
+    If the repo leaks native uuid.UUID / Decimal, the user-scope filter silently
+    returns ZERO rows and agent enrichment silently drops. This test exercises
+    those exact ops (not just dict-key shape)."""
+    cost = Decimal("0.50")
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        agent_id, user_id = await _seed_agent_and_user(conn)
+        await _insert_run(
+            conn,
+            agent_id,
+            user_id,
+            started_at=datetime.now(timezone.utc),
+            prompt_tokens=100,
+            completion_tokens=50,
+            cost_cents=cost,
+        )
+    finally:
+        await conn.close()
+
+    month_start = datetime.now(timezone.utc) - timedelta(days=1)
+    month_end = datetime.now(timezone.utc) + timedelta(days=1)
+    rows = await _repo().monthly_usage_by_agent(
+        month_start=month_start, month_end=month_end
+    )
+    ours = [r for r in rows if str(r.get("agent_id")) == str(agent_id)]
+    assert len(ours) == 1
+    row = ours[0]
+
+    # 1378 consumer path: user_id must be a bare str that equals str(user_uuid).
+    assert type(row["user_id"]) is str, (
+        f"user_id leaked {type(row['user_id']).__name__} — the user-scope "
+        f"filter (r['user_id'] == str(user_uuid)) returns ZERO for every user."
+    )
+    assert row["user_id"] == str(user_id)
+
+    # 1412 consumer path: UUID(agent_id) must parse (PostgREST returns str).
+    assert type(row["agent_id"]) is str
+    assert UUID(row["agent_id"]) == agent_id  # would raise on a native UUID
+
+    # cost_cents: PostgREST renders numeric as a JSON str; float() must still
+    # work (the consumer does float(r["cost_cents"])).
+    assert type(row["cost_cents"]) is str, (
+        "cost_cents must match the REST numeric→str contract"
+    )
+    assert float(row["cost_cents"]) == 0.5
 
 
 # ─── Writes (committing — fixes the P0) ─────────────────────────────────

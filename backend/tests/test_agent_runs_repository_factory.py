@@ -1,7 +1,10 @@
 """Task 5.3 tests — get_agent_runs_repository factory + parity (ORM).
 
 Pins the same contracts the asyncpg pilot suite did, retargeted at the
-SQLAlchemy 2.0 ORM implementation that REPLACED the asyncpg agent_runs path:
+SQLAlchemy 2.0 ORM implementation that supersedes the (never-prod-live) asyncpg
+agent_runs path. NB: the effective prod baseline is the REST base, so the
+value-type parity that matters on flip is REST→ORM — exercised in the
+integration suite (test_agent_runs_repository_orm.py), not here:
 
   1. The factory routes correctly on ``USE_ORM_AGENT_RUNS`` AND the
      SQLAlchemy engine being configured (``app.db.engine.is_configured``).
@@ -15,8 +18,8 @@ SQLAlchemy 2.0 ORM implementation that REPLACED the asyncpg agent_runs path:
   3. For each migrated method, signature parity holds — same parameter
      names — so kwargs callers don't silently break.
 
-There is NO tri-state: the ORM path REPLACES asyncpg. Flag off → legacy
-supabase-py; flag on + engine configured → ORM.
+There is NO tri-state: the ORM path supersedes asyncpg. Flag off → legacy
+supabase-py (REST); flag on + engine configured → ORM.
 """
 
 from __future__ import annotations

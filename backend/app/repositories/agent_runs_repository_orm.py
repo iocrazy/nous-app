@@ -7,6 +7,14 @@ multiple-inheritance pattern as ``MediaRepositoryOrm`` / ``ResourcesRepositoryOr
 ``app.db.session`` instead of ``db_engine.fetch_one`` / ``fetch_all`` on a bare
 ``connect()``.
 
+FRAMING NOTE: although this file lands as the asyncpg file's successor, the
+``USE_ASYNCPG_AGENT_RUNS`` path was never live in prod — the effective baseline
+the /usage consumer was built against is the REST (supabase-py/PostgREST) base.
+So the on-flip comparison that matters for VALUE-TYPE parity is REST→ORM, not
+asyncpg→ORM: PostgREST renders uuid/numeric/bigint as JSON STRINGS, and the
+``monthly_usage_by_agent`` consumer relies on that (see that method + the
+``_usage_row_to_dict`` coercion below).
+
 THE P0 FIX
 ==========
 The asyncpg path ran the two write methods (``request_cancel`` /
@@ -21,12 +29,18 @@ read-back connection.
 
 Fidelity contract (the swap must be invisible to all call sites):
   - dict at the boundary — never leak ORM ``AgentRuns`` objects. Same exact
-    dict shapes as the asyncpg/legacy impls (SELECT * for list_*/get_by_id,
-    the 9-column projection for monthly_usage_by_agent).
+    dict shapes as the REST/legacy impl (SELECT * for list_*/get_by_id, the
+    9-column projection for monthly_usage_by_agent).
   - ``_bigint()`` coercion on str-snowflake ids (``id`` / ``parent_run_id`` are
     BIGINT — migration 232) before binding (asyncpg int8 codec is strict).
-  - ``agent_id`` / ``user_id`` are UUID columns; passed through as-is (the
-    callers already hold ``uuid.UUID`` instances).
+  - VALUE-TYPE parity for ``monthly_usage_by_agent`` ONLY: its uuid / bigint /
+    numeric columns are coerced to str (``_usage_row_to_dict``) to match the
+    REST baseline, because that row dict has a Python-level type-sensitive
+    consumer (ai_library_router.get_usage). The other reads (list_*/get_by_id)
+    are NOT stringified — they leave the HTTP boundary via FastAPI
+    ``jsonable_encoder`` (UUID→str, datetime→ISO), so native uuid.UUID /
+    datetime in the dict produces byte-identical HTTP responses; blanket
+    stringifying them would be wrong.
   - datetimes bound as tz-aware ``datetime`` objects, never isoformat strings.
   - return shapes: dict for list_by_agent, dict|None for get_by_id, list[dict]
     for list_children/monthly_usage_by_agent, bool for request_cancel, int for
@@ -71,7 +85,7 @@ from app.repositories.agent_runs_repository import AgentRunsRepository
 _AGENT_RUNS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(AgentRuns)
 
 # The 9-column projection monthly_usage_by_agent returns. Pinned here so the ORM
-# select returns EXACTLY the columns the asyncpg/legacy impls did.
+# select returns EXACTLY the columns the REST/legacy impl did.
 _USAGE_COLS = (
     "agent_id",
     "user_id",
@@ -83,6 +97,34 @@ _USAGE_COLS = (
     "total_tokens",
     "cost_cents",
 )
+
+# Columns of the usage projection whose VALUE TYPE must match what the live REST
+# (supabase-py/PostgREST) baseline returned, because the /usage consumer
+# (ai_library_router.get_usage) does Python-level type-sensitive ops on them
+# (``r["user_id"] == str(uuid)``, ``UUID(r["agent_id"])``, ``float(cost_cents)``).
+# PostgREST renders these PG types as JSON STRINGS:
+#   - agent_id / user_id  : uuid    → str
+#   - team_id / project_id : bigint  → str (or null)
+#   - cost_cents          : numeric → str (or null)
+# The ORM returns native ``uuid.UUID`` / ``Decimal`` / ``int``; coerce the four
+# str-rendered columns so the swap stays invisible to the consumer. The token
+# counts (int4) and ``status`` (text) already match REST (number / str) — left
+# as-is. NULLs pass through unchanged (PostgREST emits JSON null for them too).
+_USAGE_STR_COLS = ("agent_id", "user_id", "team_id", "project_id", "cost_cents")
+
+
+def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
+    """One monthly_usage_by_agent row → dict with REST value-type parity.
+
+    Coerces the uuid / bigint / numeric columns to str (matching PostgREST's
+    JSON rendering) so the /usage consumer's type-sensitive ops keep working.
+    NULLs stay None."""
+    out = dict(row)
+    for col in _USAGE_STR_COLS:
+        val = out.get(col)
+        if val is not None:
+            out[col] = str(val)
+    return out
 
 
 def _agent_run_to_dict(obj: Any) -> Dict[str, Any]:
@@ -231,7 +273,14 @@ class AgentRunsRepositoryOrm(AsyncpgRepository, AgentRunsRepository):
         month_end: datetime,
     ) -> List[Dict[str, Any]]:
         """Raw rows (9-column projection) for [month_start, month_end). Caller
-        groups in Python — matches legacy. Datetimes bound as ``datetime``."""
+        (ai_library_router.get_usage) groups in Python — matches the REST
+        baseline. Datetimes bound as ``datetime``.
+
+        VALUE-TYPE PARITY: the uuid / bigint / numeric columns are coerced to
+        str (see ``_usage_row_to_dict``) so they match what the live REST
+        baseline (PostgREST JSON) returned — the consumer does
+        ``r["user_id"] == str(uuid)`` / ``UUID(r["agent_id"])`` /
+        ``float(cost_cents)`` and breaks on native ``uuid.UUID`` / ``Decimal``."""
         try:
             cols = [getattr(AgentRuns, name) for name in _USAGE_COLS]
             async with read_scope() as session:
@@ -240,7 +289,7 @@ class AgentRunsRepositoryOrm(AsyncpgRepository, AgentRunsRepository):
                     .where(AgentRuns.started_at >= month_start)
                     .where(AgentRuns.started_at < month_end)
                 )
-                return [dict(r) for r in result.mappings().all()]
+                return [_usage_row_to_dict(r) for r in result.mappings().all()]
         except Exception as e:
             logger.error(f"Failed to load monthly usage: {e}")
             return []

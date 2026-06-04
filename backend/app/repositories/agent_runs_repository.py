@@ -6,9 +6,15 @@ supabase-py implementation (this file) or the SQLAlchemy 2.0 ORM one
 flag. Call sites import the factory instead of the class so the swap is
 invisible to them.
 
-Task 5.3 of the ORM-2.0 migration REPLACED the earlier asyncpg path (no
-tri-state): the ORM path commits writes via ``write_scope()``, fixing the
-silent-rollback P0 that the bare-``connect()`` asyncpg writes carried.
+Task 5.3 of the ORM-2.0 migration removed the (never-prod-live)
+``USE_ASYNCPG_AGENT_RUNS`` path in favour of the ORM one (no tri-state): the
+ORM path commits writes via ``write_scope()``, fixing the silent-rollback P0.
+
+Framing: the effective prod baseline the ``monthly_usage_by_agent`` consumer
+was built against is THIS REST (supabase-py/PostgREST) base, not the asyncpg
+one — so when ``USE_ORM_AGENT_RUNS`` flips, value-type parity is checked
+REST→ORM (PostgREST renders uuid/numeric/bigint as JSON strings; the ORM repo
+coerces the usage projection to match).
 """
 
 from __future__ import annotations
