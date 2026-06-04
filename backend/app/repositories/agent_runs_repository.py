@@ -1,23 +1,29 @@
 """Repository for agent_runs table — read paths only (writes go through RunRecorder).
 
-Phase 2 of the supabase-py → asyncpg migration installs a
-``get_agent_runs_repository()`` factory that returns either the
-legacy supabase-py implementation (this file) or the new asyncpg
-one (``agent_runs_repository_asyncpg.py``) depending on the
-``USE_ASYNCPG_AGENT_RUNS`` flag. Call sites import the factory
-instead of the class so the swap is invisible to them.
+The ``get_agent_runs_repository()`` factory returns either the legacy
+supabase-py implementation (this file) or the SQLAlchemy 2.0 ORM one
+(``agent_runs_repository_orm.py``) depending on the ``USE_ORM_AGENT_RUNS``
+flag. Call sites import the factory instead of the class so the swap is
+invisible to them.
+
+Task 5.3 of the ORM-2.0 migration REPLACED the earlier asyncpg path (no
+tri-state): the ORM path commits writes via ``write_scope()``, fixing the
+silent-rollback P0 that the bare-``connect()`` asyncpg writes carried.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from loguru import logger
 
 from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.agent_runs_repository_orm import AgentRunsRepositoryOrm
 
 
 class AgentRunsRepository:
@@ -230,33 +236,32 @@ class AgentRunsRepository:
 # ─── Factory ──────────────────────────────────────────────────────────
 
 
-def get_agent_runs_repository() -> (
-    Union[AgentRunsRepository, "AgentRunsRepositoryAsyncpg"]
-):
+def get_agent_runs_repository() -> Union[AgentRunsRepository, "AgentRunsRepositoryOrm"]:
     """Return the active AgentRunsRepository implementation.
 
-    Routing:
-      - ``settings.USE_ASYNCPG_AGENT_RUNS=True`` AND Supavisor configured
-        → asyncpg + Supavisor implementation
+    Routing (no tri-state — the ORM path REPLACED asyncpg, Task 5.3):
+      - ``settings.USE_ORM_AGENT_RUNS=True`` AND the SQLAlchemy engine
+        configured (``app.db.engine.is_configured``)
+        → SQLAlchemy 2.0 ORM implementation (committing writes)
       - else → legacy supabase-py implementation (this file)
 
     Both classes expose the same public method signatures, so call sites
     just do ``repo = get_agent_runs_repository()`` and use it the same
     way regardless of backend.
     """
-    if settings.USE_ASYNCPG_AGENT_RUNS:
+    if settings.USE_ORM_AGENT_RUNS:
         from app.db.engine import is_configured
 
         if is_configured():
-            from app.repositories.agent_runs_repository_asyncpg import (
-                AgentRunsRepositoryAsyncpg,
+            from app.repositories.agent_runs_repository_orm import (
+                AgentRunsRepositoryOrm,
             )
 
-            return AgentRunsRepositoryAsyncpg()
-        # Flag on but URL missing — log once + fall back so a
+            return AgentRunsRepositoryOrm()
+        # Flag on but engine missing — log once + fall back so a
         # half-configured deploy doesn't crash.
         logger.warning(
-            "USE_ASYNCPG_AGENT_RUNS=true but SUPAVISOR_DATABASE_URL "
+            "USE_ORM_AGENT_RUNS=true but SUPAVISOR_DATABASE_URL "
             "is empty — falling back to supabase-py path"
         )
     return AgentRunsRepository()

@@ -77,9 +77,13 @@ class Settings(BaseSettings):
     # path. Set true on a single repo to A/B-test the asyncpg version
     # without affecting the rest. After a repo is proven stable for a
     # week in prod the default flips and the legacy code is removed.
-    USE_ASYNCPG_AGENT_RUNS: bool = Field(
+    USE_ORM_AGENT_RUNS: bool = Field(
         default=False,
-        description="Route AgentRunsRepository through asyncpg + Supavisor",
+        description="Route AgentRunsRepository through the SQLAlchemy 2.0 ORM "
+        "session layer (Task 5.3 — replaces the asyncpg agent_runs path; fixes "
+        "the silent-rollback P0 by committing writes via write_scope(). Covers "
+        "list_by_agent / get_by_id / list_children reads + request_cancel / "
+        "mark_heartbeat_lost writes + monthly_usage_by_agent aggregation)",
     )
     USE_ORM_RESOURCES: bool = Field(
         default=False,
