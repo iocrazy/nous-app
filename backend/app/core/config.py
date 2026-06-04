@@ -81,11 +81,14 @@ class Settings(BaseSettings):
         default=False,
         description="Route AgentRunsRepository through asyncpg + Supavisor",
     )
-    USE_ASYNCPG_RESOURCES: bool = Field(
+    USE_ORM_RESOURCES: bool = Field(
         default=False,
-        description="Route ResourcesRepository through asyncpg + Supavisor "
-        "(Phase 3a — covers the 10 methods on the resources table; "
-        "items / versions / folders still use legacy supabase-py)",
+        description="Route ResourcesRepository through the SQLAlchemy 2.0 ORM "
+        "session layer (Task 5.2 — replaces the asyncpg resources path; fixes "
+        "the silent-rollback P0 by committing writes via write_scope() and "
+        "running folder cascades atomically in one write_scope(). Covers "
+        "resources / resource_items / resource_versions / folders; the "
+        "resource_tags + smart-folder methods inherit legacy via MRO)",
     )
     USE_ORM_MEDIA: bool = Field(
         default=False,

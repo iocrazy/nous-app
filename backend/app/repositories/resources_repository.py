@@ -1658,36 +1658,41 @@ class ResourcesRepository:
             raise
 
 
-# ─── asyncpg + Supavisor migration factory ─────────────────────────────
+# ─── SQLAlchemy ORM migration factory (Task 5.2) ───────────────────────
 #
-# Phase 3a of the supabase-py → asyncpg cutover (Bug C #194). Routes
-# ``ResourcesRepository`` through the asyncpg subclass when both
-# ``USE_ASYNCPG_RESOURCES=true`` and ``SUPAVISOR_DATABASE_URL`` are
-# configured. Half-configured deploys (flag on, URL missing) fall back
-# to the legacy path with a single warning so a misconfigured env
-# never crashes the worker.
+# The supabase-py → SQLAlchemy 2.0 ORM cutover for the resources surface.
+# This REPLACES the earlier asyncpg path (no tri-state): routes
+# ``ResourcesRepository`` through the ORM subclass when both
+# ``USE_ORM_RESOURCES=true`` and the SQLAlchemy engine is configured
+# (``app.db.engine.is_configured``). Half-configured deploys (flag on,
+# engine missing) fall back to the legacy supabase-py path with a single
+# warning so a misconfigured env never crashes the worker.
+#
+# The ORM path fixes the silent-rollback P0: every write commits via
+# ``write_scope()`` and each folder cascade runs atomically in one
+# ``write_scope()`` session.
 #
 # Call sites should use ``get_resources_repository()`` rather than
 # ``ResourcesRepository()`` directly. Existing ``ResourcesRepository()``
-# constructors keep working — they bypass the flag and stay on the
-# legacy supabase-py path. New code goes through the factory.
+# constructors keep working — they bypass the flag and stay on the legacy
+# supabase-py path. New code goes through the factory.
 
 
 def get_resources_repository():
     """Return the right ResourcesRepository implementation per env."""
     from app.core.config import settings
 
-    if settings.USE_ASYNCPG_RESOURCES:
+    if settings.USE_ORM_RESOURCES:
         from app.db.engine import is_configured
 
         if is_configured():
-            from app.repositories.resources_repository_asyncpg import (
-                ResourcesRepositoryAsyncpg,
+            from app.repositories.resources_repository_orm import (
+                ResourcesRepositoryOrm,
             )
 
-            return ResourcesRepositoryAsyncpg()
+            return ResourcesRepositoryOrm()
         logger.warning(
-            "USE_ASYNCPG_RESOURCES=true but SUPAVISOR_DATABASE_URL is empty "
+            "USE_ORM_RESOURCES=true but SUPAVISOR_DATABASE_URL is empty "
             "— falling back to supabase-py path"
         )
     return ResourcesRepository()
