@@ -1,21 +1,22 @@
-"""Phase 4a tests — get_media_repository factory + parity.
+"""Task 5.1 tests — get_media_repository factory + parity (ORM).
 
-Pins the same three contracts as the ResourcesRepository test suite:
+Pins the same three contracts the asyncpg suite did, retargeted at the
+SQLAlchemy ORM implementation that replaced the asyncpg media path:
 
   1. The factory routes correctly on
-     ``USE_ASYNCPG_MEDIA`` AND ``SUPAVISOR_DATABASE_URL``.
-     Half-configured deploys (flag on, URL missing) fall back to
-     legacy with a warning, never raise.
+     ``USE_ORM_MEDIA`` AND ``SUPAVISOR_DATABASE_URL`` (via
+     ``app.db.engine.is_configured``). Half-configured deploys (flag on,
+     engine missing) fall back to legacy with a warning, never raise.
 
-  2. ``MediaRepositoryAsyncpg`` exposes the same public method
-     surface as ``MediaRepository`` so existing call sites work
-     without per-method special-casing.
+  2. ``MediaRepositoryOrm`` exposes the same public method surface as
+     ``MediaRepository`` so existing call sites work without per-method
+     special-casing.
 
-  3. For each migrated method, signature parity holds — same
-     parameter names — so kwargs callers don't silently break.
+  3. For each migrated method, signature parity holds — same parameter
+     names — so kwargs callers don't silently break.
 
-Live integration tests against a real Supavisor are deferred — that's
-what the prod canary on the feature flag is for.
+There is NO tri-state: the ORM path REPLACES asyncpg. Flag off → legacy
+supabase-py; flag on + engine configured → ORM.
 """
 
 from __future__ import annotations
@@ -33,33 +34,33 @@ def test_factory_returns_legacy_when_flag_off():
         get_media_repository,
     )
 
-    with patch("app.core.config.settings.USE_ASYNCPG_MEDIA", False):
+    with patch("app.core.config.settings.USE_ORM_MEDIA", False):
         repo = get_media_repository()
     assert isinstance(repo, MediaRepository)
-    # Critical: must NOT be the asyncpg subclass (the asyncpg subclass
-    # would also pass isinstance via inheritance).
+    # Critical: must NOT be the ORM subclass (which would also pass
+    # isinstance via inheritance).
     assert type(repo).__name__ == "MediaRepository"
 
 
-def test_factory_returns_asyncpg_when_flag_on_and_pool_configured():
-    """Both knobs on → asyncpg subclass."""
+def test_factory_returns_orm_when_flag_on_and_engine_configured():
+    """Both knobs on → ORM subclass."""
     from app.repositories.media_repository import get_media_repository
-    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
+    from app.repositories.media_repository_orm import MediaRepositoryOrm
 
     with (
-        patch("app.core.config.settings.USE_ASYNCPG_MEDIA", True),
+        patch("app.core.config.settings.USE_ORM_MEDIA", True),
         patch("app.db.engine.is_configured", return_value=True),
     ):
         repo = get_media_repository()
-    assert isinstance(repo, MediaRepositoryAsyncpg)
+    assert isinstance(repo, MediaRepositoryOrm)
 
 
-def test_factory_falls_back_when_flag_on_but_pool_missing():
+def test_factory_falls_back_when_flag_on_but_engine_missing():
     """Half-configured deploy must NOT crash — fall back to legacy."""
     from app.repositories.media_repository import get_media_repository
 
     with (
-        patch("app.core.config.settings.USE_ASYNCPG_MEDIA", True),
+        patch("app.core.config.settings.USE_ORM_MEDIA", True),
         patch("app.db.engine.is_configured", return_value=False),
     ):
         repo = get_media_repository()
@@ -69,88 +70,79 @@ def test_factory_falls_back_when_flag_on_but_pool_missing():
 # ─── API parity check ──────────────────────────────────────────────────
 
 
-def test_asyncpg_repo_has_same_public_methods_as_legacy():
-    """asyncpg impl must not be MISSING any legacy public method
-    (extras inherited from AsyncpgRepository base are fine)."""
+def test_orm_repo_has_same_public_methods_as_legacy():
+    """ORM impl must not be MISSING any legacy public method (extras
+    inherited from AsyncpgRepository base are fine)."""
     from app.repositories.media_repository import MediaRepository
-    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
+    from app.repositories.media_repository_orm import MediaRepositoryOrm
 
     legacy_methods = {
         name
         for name in dir(MediaRepository)
         if not name.startswith("_") and callable(getattr(MediaRepository, name))
     }
-    asyncpg_methods = {
+    orm_methods = {
         name
-        for name in dir(MediaRepositoryAsyncpg)
-        if not name.startswith("_") and callable(getattr(MediaRepositoryAsyncpg, name))
+        for name in dir(MediaRepositoryOrm)
+        if not name.startswith("_") and callable(getattr(MediaRepositoryOrm, name))
     }
-    missing = legacy_methods - asyncpg_methods
+    missing = legacy_methods - orm_methods
     assert not missing, (
-        f"asyncpg impl is missing legacy methods: {sorted(missing)}. "
+        f"ORM impl is missing legacy methods: {sorted(missing)}. "
         f"Add them, or feature-flag the call site."
     )
 
 
-# Migrated methods — keep this list in sync with
-# MediaRepositoryAsyncpg overrides. Phase 4a is CRUD, Phase 4b is
-# bulk + lists, Phase 4c is search + statistics. After Phase 4c
-# lands, the only methods inherited from legacy are the wrappers
-# (check_*, mark_*, get_music_data) which test below pins via MRO.
+# Migrated (overridden) methods — keep in sync with MediaRepositoryOrm.
 _MIGRATED_METHODS = [
-    # Phase 4a
-    "create",
+    # reads
     "get_by_platform_id",
     "get_by_id",
-    "update",
-    "delete",
     "get_downloaded_by_platform_id",
-    # Phase 4b
-    "mark_stale_downloads_failed",
     "get_pending_downloads",
     "get_all",
     "get_user_media_list",
-    # Phase 4c
     "search",
     "get_statistics",
+    # writes (committing — fixes the P0)
+    "create",
+    "update",
+    "delete",
+    "mark_stale_downloads_failed",
 ]
 
 
 @pytest.mark.parametrize("method_name", _MIGRATED_METHODS)
-def test_asyncpg_signature_matches_legacy(method_name):
-    """Per-method signature parity — catches accidental kwarg
-    renames that would silently no-op."""
+def test_orm_signature_matches_legacy(method_name):
+    """Per-method signature parity — catches accidental kwarg renames
+    that would silently no-op."""
     from app.repositories.media_repository import MediaRepository
-    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
+    from app.repositories.media_repository_orm import MediaRepositoryOrm
 
     legacy_sig = inspect.signature(getattr(MediaRepository, method_name))
-    asyncpg_sig = inspect.signature(getattr(MediaRepositoryAsyncpg, method_name))
+    orm_sig = inspect.signature(getattr(MediaRepositoryOrm, method_name))
 
     legacy_params = set(legacy_sig.parameters.keys())
-    asyncpg_params = set(asyncpg_sig.parameters.keys())
+    orm_params = set(orm_sig.parameters.keys())
 
-    assert legacy_params == asyncpg_params, (
+    assert legacy_params == orm_params, (
         f"{method_name} signature drift: legacy={sorted(legacy_params)}, "
-        f"asyncpg={sorted(asyncpg_params)}"
+        f"orm={sorted(orm_params)}"
     )
 
 
-def test_wrapper_methods_get_asyncpg_routing_via_mro():
-    """check_*, mark_*, get_music_data are NOT overridden in the
-    asyncpg subclass, but they call self.get_by_platform_id / self.update
-    — Python MRO resolves those to the asyncpg overrides at runtime.
+def test_wrapper_methods_get_orm_routing_via_mro():
+    """check_*, mark_*, get_music_data are NOT overridden in the ORM
+    subclass, but they call self.get_by_platform_id / self.update — Python
+    MRO resolves those to the ORM overrides at runtime.
 
-    This test pins that contract: when these wrappers are called on
-    a MediaRepositoryAsyncpg instance, they go through asyncpg, not
-    via a leaked supabase-py client. Without this test the overrides
-    could silently break (e.g. if someone renamed get_by_platform_id
-    on the asyncpg side without updating the legacy wrappers)."""
+    This pins that contract: when these wrappers are called on a
+    MediaRepositoryOrm instance, they go through the ORM (committing)
+    path, not a leaked supabase-py client."""
     from app.repositories.media_repository import MediaRepository
-    from app.repositories.media_repository_asyncpg import MediaRepositoryAsyncpg
+    from app.repositories.media_repository_orm import MediaRepositoryOrm
 
-    # Wrappers exist on the legacy class only — they should NOT be
-    # in the asyncpg subclass's own __dict__.
-    asyncpg_own = set(MediaRepositoryAsyncpg.__dict__.keys())
+    orm_own = set(MediaRepositoryOrm.__dict__.keys())
     for wrapper in (
         "check_media_existence",
         "check_media_downloaded",
@@ -162,15 +154,10 @@ def test_wrapper_methods_get_asyncpg_routing_via_mro():
         "mark_download_failed",
         "get_music_data",
     ):
-        assert wrapper not in asyncpg_own, (
+        assert wrapper not in orm_own, (
             f"{wrapper} should inherit from MediaRepository, not be "
-            f"overridden on the asyncpg subclass. The wrappers benefit "
+            f"overridden on the ORM subclass. The wrappers benefit "
             f"automatically via MRO when get_by_platform_id / update "
             f"are migrated."
         )
-        # Sanity: the inherited resolution still points at the legacy
-        # (uncomment below to verify behaviorally — kept commented to
-        # avoid coupling to method identity which mypy might mangle).
-        assert getattr(MediaRepositoryAsyncpg, wrapper) is getattr(
-            MediaRepository, wrapper
-        )
+        assert getattr(MediaRepositoryOrm, wrapper) is getattr(MediaRepository, wrapper)

@@ -87,12 +87,13 @@ class Settings(BaseSettings):
         "(Phase 3a — covers the 10 methods on the resources table; "
         "items / versions / folders still use legacy supabase-py)",
     )
-    USE_ASYNCPG_MEDIA: bool = Field(
+    USE_ORM_MEDIA: bool = Field(
         default=False,
-        description="Route MediaRepository through asyncpg + Supavisor "
-        "(Phase 4a/4b/4c — covers parsed_media CRUD + lists + search + "
-        "statistics; the 9 wrapper methods route through the asyncpg "
-        "overrides automatically via Python MRO)",
+        description="Route MediaRepository through the SQLAlchemy 2.0 ORM "
+        "session layer (Task 5.1 — replaces the asyncpg media path; fixes "
+        "the silent-rollback P0 by committing writes via write_scope(). "
+        "Covers parsed_media CRUD + lists + search + statistics; the 9 "
+        "wrapper methods route through the ORM overrides via Python MRO)",
     )
 
     # ============================================
