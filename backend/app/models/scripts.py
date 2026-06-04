@@ -175,8 +175,8 @@ class ProjectWorkflows(Base):
         nullable=False,
         server_default=text("now()"),
     )
-    is_default: Mapped[Optional[bool]] = mapped_column(
-        Boolean, server_default=text("false")
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
 
 
