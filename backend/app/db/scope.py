@@ -457,13 +457,18 @@ def _walk_scoped_refs(
     return referenced, non_filtering
 
 
-# A sentinel tenant value that is vanishingly unlikely to collide with a real
-# bound parameter or literal, used only to probe — by compiling the option-bearing
-# statement — whether ``with_loader_criteria`` actually rendered a predicate for a
-# given scoped table. Distinct per table via an index suffix, and the SAME value
+# A sentinel tenant value, used only to probe — by compiling the option-bearing
+# statement — whether ``with_loader_criteria`` actually bound a predicate value for
+# a given scoped table. Distinct per table via an index suffix, and the SAME value
 # is used across every axis (user/team/project) of that table so the probe is
 # axis-agnostic (a team-only or project-only scoped model has no user column).
-_SENTINEL_BASE = 987654321_000000000
+#
+# NEGATIVE on purpose: detection matches the sentinel against the compiled bound
+# parameter VALUES, so a caller binding a value exactly equal to the sentinel would
+# be misclassified injectable. Every legitimate caller-bound tenant-ish value in
+# this codebase is non-negative (snowflake IDs, counts, offsets, limits, epoch
+# timestamps), so a negative sentinel makes that collision domain provably empty.
+_SENTINEL_BASE = -987654321_000000000
 
 
 def _compile_filtered_tables(
