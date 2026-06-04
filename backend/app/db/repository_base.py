@@ -100,7 +100,12 @@ class AsyncpgRepository:
             yield conn
 
     async def fetch_one(self, sql: str, *args: Any) -> Optional[dict]:
-        """SELECT one row → plain dict, or None when no row."""
+        """SELECT one row → plain dict, or None when no row.
+
+        READ ONLY. Runs on ``connect()`` (no transaction). Do NOT pass an
+        ``INSERT/UPDATE/DELETE ... RETURNING`` here — it executes but SILENTLY
+        ROLLS BACK on connection close (the #498 class). For writes that need a
+        row back use ``db_engine.execute_returning_one``."""
         named, params = _to_named(sql, args)
         return await db_engine.fetch_one(named, params)
 
@@ -110,13 +115,23 @@ class AsyncpgRepository:
         return await db_engine.fetch_all(named, params)
 
     async def fetch_value(self, sql: str, *args: Any) -> Any:
-        """SELECT one column from one row (COUNT / EXISTS / scalar)."""
+        """SELECT one column from one row (COUNT / EXISTS / scalar).
+
+        READ ONLY. Runs on ``connect()`` (no transaction). Do NOT pass an
+        ``INSERT/UPDATE/DELETE ... RETURNING`` here — it SILENTLY ROLLS BACK
+        (the #498 class). For a writing RETURNING scalar use
+        ``db_engine.execute_returning_val``."""
         named, params = _to_named(sql, args)
         return await db_engine.fetch_val(named, params)
 
     async def execute(self, sql: str, *args: Any) -> int:
         """INSERT / UPDATE / DELETE → affected row count (auto-committed).
-        For INSERT ... RETURNING use fetch_one with a RETURNING clause.
+
+        For INSERT/UPDATE/DELETE ... RETURNING use
+        ``db_engine.execute_returning_one`` / ``execute_returning_val``
+        (both committing). NEVER ``fetch_one`` / ``fetch_val`` for a write —
+        those run on ``connect()`` (no transaction) and SILENTLY ROLL BACK the
+        write (the #498 silent-rollback class).
 
         NOTE: returns an int rowcount (SQLAlchemy), NOT the asyncpg status
         tag string the previous raw-asyncpg base returned."""
@@ -152,7 +167,11 @@ class AsyncpgRepository:
             f'INSERT INTO "{self.TABLE}" ({col_list}) '
             f"VALUES ({placeholders}) RETURNING *"
         )
-        row = await self.fetch_one(sql, *fields.values())
+        # COMMITTING path: execute_returning_one runs on eng.begin() (auto-commit).
+        # NEVER self.fetch_one here — fetch_one runs on eng.connect() (no txn) and
+        # SILENTLY ROLLS BACK the write (the #498 silent-rollback P0 class).
+        named, params = _to_named(sql, tuple(fields.values()))
+        row = await db_engine.execute_returning_one(named, params)
         if row is None:
             raise RuntimeError(f"INSERT into {self.TABLE} returned no row")
         return row
@@ -174,7 +193,10 @@ class AsyncpgRepository:
             f'UPDATE "{self.TABLE}" SET {set_pairs} '
             f'WHERE "{id_column}" = {id_placeholder} RETURNING *'
         )
-        return await self.fetch_one(sql, *fields.values(), row_id)
+        # COMMITTING path (eng.begin auto-commit). NEVER self.fetch_one — it runs
+        # on eng.connect() (no txn) and SILENTLY ROLLS BACK (the #498 class).
+        named, params = _to_named(sql, (*fields.values(), row_id))
+        return await db_engine.execute_returning_one(named, params)
 
     async def get_by_id(self, row_id: Any, *, id_column: str = "id") -> Optional[dict]:
         """SELECT one row by primary key. Returns None when not found."""
