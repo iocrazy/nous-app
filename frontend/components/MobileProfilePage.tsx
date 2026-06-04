@@ -1,7 +1,8 @@
-import React from 'react';
-import { Check, ChevronRight, User } from 'lucide-react';
+import React, { useState } from 'react';
+import { Check, ChevronRight, RefreshCw, User } from 'lucide-react';
 import { ViewState } from '../types';
 import { VersionBadge } from './VersionBadge';
+import { resetServiceWorkerAndReload } from '../utils/swReset';
 
 // ---------------------------------------------------------------------------
 // MobileProfilePage — Figma-style Settings page for mobile
@@ -40,9 +41,20 @@ export function MobileProfilePage({
   onSettings,
   onLogout,
 }: MobileProfilePageProps) {
+  const [clearing, setClearing] = useState(false);
+
   if (!isOpen) return null;
 
   const otherTeams = teams.filter((t) => String(t.id) !== personalTeamId);
+
+  const onClearCache = async () => {
+    if (clearing) return;
+    setClearing(true);
+    // Hard escape for a stuck service worker: unregister SW + clear caches +
+    // reload. Normal updates apply silently in the background; this is the
+    // manual fallback. The reload navigates away, so no need to reset state.
+    await resetServiceWorkerAndReload();
+  };
 
   return (
     <div className="sm:hidden fixed inset-0 z-50 bg-zinc-950 flex flex-col">
@@ -145,6 +157,19 @@ export function MobileProfilePage({
         >
           <span className="text-[15px] text-zinc-300">Preferences</span>
           <ChevronRight size={18} className="text-zinc-600" />
+        </button>
+        <button
+          onClick={onClearCache}
+          disabled={clearing}
+          className="w-full flex items-center justify-between px-5 py-3.5 active:bg-zinc-800/40 disabled:opacity-60 transition-colors"
+        >
+          <span className="text-[15px] text-zinc-300">
+            {clearing ? 'Clearing…' : 'Clear Cache & Reload'}
+          </span>
+          <RefreshCw
+            size={18}
+            className={`text-zinc-600 ${clearing ? 'animate-spin' : ''}`}
+          />
         </button>
 
         <div className="h-px bg-zinc-800/80 mx-5 mt-2" />
