@@ -41,18 +41,18 @@ Idempotency (for the controller's DBOS-step validation step):
 
 from __future__ import annotations
 
-import enum
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, insert, inspect, or_, select, update
+from sqlalchemy import func, insert, or_, select, update
 
 from app.core.enums import DownloadStatus
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
 from app.models import ParsedMedia, Resources
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
 from app.repositories.media_repository import MediaRepository
 
 # ParsedMedia DB-column-name → mapped-attribute-name. Built once from the
@@ -60,11 +60,8 @@ from app.repositories.media_repository import MediaRepository
 # mapped to the Python attribute ``metadata_`` (SQLAlchemy reserves
 # ``metadata`` on declarative classes for the MetaData registry), so reading
 # ``getattr(obj, "metadata")`` would return the MetaData object, not the row
-# value. Always resolve via this map.
-_PM_NAME_TO_ATTR: Dict[str, str] = {
-    prop.columns[0].name: prop.key
-    for prop in inspect(ParsedMedia).column_attrs
-}
+# value. Always resolve via this map (see ``_name_to_attr``).
+_PM_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ParsedMedia)
 
 # Whitelist of column names safe to use in ORDER BY. Anything outside the
 # set falls back to ``created_at``. (The ORM ``order_by`` takes a column
@@ -130,21 +127,6 @@ def _safe_order(order_by: str, allowed: set, default: str = "created_at") -> str
     return order_by if order_by in allowed else default
 
 
-def _plain(value: Any) -> Any:
-    """Coerce a value to its plain-Python form at the read dict boundary.
-
-    The ORM types the 5 ``*_download_status`` columns as ``Enum(DownloadStatus)``
-    so reads return ``DownloadStatus`` members, whereas the retired asyncpg /
-    legacy supabase-py impls returned bare ``str``. Enum members ARE str
-    subclasses, so ``==`` and ``json.dumps`` look fine — but ``str(x)`` /
-    f-strings yield ``"DownloadStatus.COMPLETED"`` instead of ``"completed"``,
-    silently breaking parity for the 65 callers. Unwrap any Enum to ``.value``
-    so every status field returns exactly the bare string the prior impls did."""
-    if isinstance(value, enum.Enum):
-        return value.value
-    return value
-
-
 def _pm_card_dict(row: Any) -> Dict[str, Any]:
     """Build a CARD_SELECT-shaped plain dict from a ParsedMedia ORM row.
 
@@ -195,7 +177,7 @@ class MediaRepositoryOrm(AsyncpgRepository, MediaRepository):
                 .limit(1)
             )
             row = result.scalars().first()
-            return _orm_obj_to_dict(row) if row else None
+            return _orm_obj_to_dict(row, _PM_NAME_TO_ATTR) if row else None
 
     async def get_by_id(self, media_id: str) -> Optional[Dict[str, Any]]:
         """Lookup by primary key. ``parsed_media.id`` is BIGINT (Snowflake).
@@ -207,7 +189,7 @@ class MediaRepositoryOrm(AsyncpgRepository, MediaRepository):
                 .limit(1)
             )
             row = result.scalars().first()
-            return _orm_obj_to_dict(row) if row else None
+            return _orm_obj_to_dict(row, _PM_NAME_TO_ATTR) if row else None
 
     async def update(
         self, platform_id: str, data: Dict[str, Any]
@@ -368,7 +350,10 @@ class MediaRepositoryOrm(AsyncpgRepository, MediaRepository):
                     stmt = stmt.where(exists_subq)
                 stmt = stmt.limit(limit)
                 result = await session.execute(stmt)
-                return [_orm_obj_to_dict(r) for r in result.scalars().all()]
+                return [
+                    _orm_obj_to_dict(r, _PM_NAME_TO_ATTR)
+                    for r in result.scalars().all()
+                ]
         except Exception as e:
             logger.error(f"获取待下载列表失败: {e}")
             return []
@@ -557,24 +542,6 @@ class MediaRepositoryOrm(AsyncpgRepository, MediaRepository):
                 "total_storage_bytes": 0,
                 "unique_authors": 0,
             }
-
-
-def _orm_obj_to_dict(obj: Any) -> Dict[str, Any]:
-    """Convert a full ParsedMedia ORM object to a plain dict keyed by DB
-    column NAME (SELECT * parity).
-
-    The dict is keyed by DB column name but the *value* must be read via the
-    mapped Python attribute, which is NOT always the column name: the JSONB
-    ``metadata`` column is mapped to the attribute ``metadata_`` (SQLAlchemy
-    reserves ``metadata`` on declarative classes for the MetaData registry).
-    Reading ``getattr(obj, "metadata")`` would hand back the MetaData object,
-    not the row value — so we resolve the attribute name via ``_PM_NAME_TO_ATTR``.
-    Enum-typed status columns are unwrapped to bare strings (see ``_plain``) so
-    the dict matches the legacy supabase-py / asyncpg SELECT * shape exactly."""
-    out: Dict[str, Any] = {}
-    for name, attr in _PM_NAME_TO_ATTR.items():
-        out[name] = _plain(getattr(obj, attr))
-    return out
 
 
 __all__ = ["MediaRepositoryOrm"]

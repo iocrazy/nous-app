@@ -39,66 +39,28 @@ Fidelity contract (the swap must be invisible to all call sites):
 
 from __future__ import annotations
 
-import enum
 import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, insert, inspect, select, text, update
+from sqlalchemy import func, insert, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
 from app.models import Folders, ResourceItems, Resources, ResourceVersions
+from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
 from app.repositories.resources_repository import (
     _AI_STATUS_COMPLETED,
     _AI_STATUS_FIELDS,
     ResourcesRepository,
 )
 
-
-def _name_to_attr(model: Any) -> Dict[str, str]:
-    """Build a DB-column-name → mapped-attribute-name map from the mapper.
-
-    For most columns ``name == key``, but a column declared
-    ``mapped_column("dbname")`` with a different Python attribute (e.g. a
-    JSONB ``metadata`` column mapped to ``metadata_`` because SQLAlchemy
-    reserves ``metadata`` on declarative classes for the MetaData registry)
-    has ``name != key``. Reading ``getattr(obj, name)`` for such a column
-    would hand back the wrong object (the MetaData registry), so we always
-    resolve the value via the mapped attribute name."""
-    return {prop.columns[0].name: prop.key for prop in inspect(model).column_attrs}
-
-
 _RESOURCES_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(Resources)
 _RESOURCE_ITEMS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ResourceItems)
 _RESOURCE_VERSIONS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ResourceVersions)
 _FOLDERS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(Folders)
-
-
-def _plain(value: Any) -> Any:
-    """Coerce a value to its plain-Python form at the read dict boundary.
-
-    The ORM types the 3 ``resources`` status columns as
-    ``Enum(AiTaskStatus)`` so reads return ``AiTaskStatus`` members,
-    whereas the retired asyncpg / legacy supabase-py impls returned bare
-    ``str``. Enum members ARE str subclasses, so ``==`` and ``json.dumps``
-    look fine — but ``str(x)`` / f-strings yield ``"AiTaskStatus.NONE"``
-    instead of ``"none"``, silently breaking parity. Unwrap any Enum to
-    ``.value`` so every status field returns exactly the bare string the
-    prior impls did."""
-    if isinstance(value, enum.Enum):
-        return value.value
-    return value
-
-
-def _orm_obj_to_dict(obj: Any, name_to_attr: Dict[str, str]) -> Dict[str, Any]:
-    """Convert a full ORM row object to a plain dict keyed by DB column NAME
-    (SELECT * parity). Values are read via the mapped attribute (NOT the
-    column name — see ``_name_to_attr``) and enum-typed columns are unwrapped
-    to bare strings (see ``_plain``)."""
-    return {name: _plain(getattr(obj, attr)) for name, attr in name_to_attr.items()}
 
 
 def _resources_row_to_dict(obj: Any) -> Dict[str, Any]:
