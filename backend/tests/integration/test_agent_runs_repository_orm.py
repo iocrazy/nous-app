@@ -269,17 +269,25 @@ async def test_monthly_usage_projection_shape(
 async def test_monthly_usage_matches_rest_value_types_consumer_path(
     integration_db_url, patched_engine, cleanup_test_rows
 ):
-    """REST→ORM value-type parity for the /usage consumer's PYTHON-level
-    type-sensitive ops (ai_library_router.get_usage). The live baseline is the
-    REST (supabase-py/PostgREST) base, which renders uuid/numeric/bigint as JSON
-    STRINGS — the consumer relies on that:
+    """REST→ORM value-type parity for the /usage USER-scope consumer's
+    PYTHON-level type-sensitive ops (ai_library_router.get_usage). The live
+    baseline is the REST (supabase-py/PostgREST) base; the consumer relies on:
 
-      - line 1378:  r.get("user_id") == str(user_uuid)   → needs user_id to be str
-      - line 1412:  UUID(r["agent_id"])                  → needs agent_id parseable
+      - user-scope filter:  str(r.get("user_id")) == str(user_uuid)
+                            → needs user_id comparable to a uuid str
+      - agent enrichment:   UUID(str(r["agent_id"]))
+                            → needs agent_id parseable as a uuid
+      - cost rollup:        float(r["cost_cents"])
+                            → REST renders numeric as a JSON str; float() works
 
-    If the repo leaks native uuid.UUID / Decimal, the user-scope filter silently
-    returns ZERO rows and agent enrichment silently drops. This test exercises
-    those exact ops (not just dict-key shape)."""
+    PostgREST renders uuid as a JSON str and numeric as a JSON str, so the repo
+    coerces user_id / agent_id / cost_cents to str. If it instead leaked native
+    uuid.UUID / Decimal the user-scope filter / enrichment would silently break.
+    This test exercises those exact ops (not just dict-key shape).
+
+    NOTE: team_id / project_id are deliberately NOT covered here — they are
+    bigint and the REST base returned them as native int; see
+    ``test_monthly_usage_team_project_scope_int_parity``."""
     cost = Decimal("0.50")
     conn = await asyncpg.connect(integration_db_url)
     try:
@@ -322,6 +330,64 @@ async def test_monthly_usage_matches_rest_value_types_consumer_path(
         "cost_cents must match the REST numeric→str contract"
     )
     assert float(row["cost_cents"]) == 0.5
+
+
+async def test_monthly_usage_team_project_scope_int_parity(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """REST→ORM value-type parity for the /usage TEAM and PROJECT scopes.
+
+    The consumer endpoint declares ``team_id: int | None`` / ``project_id: int
+    | None`` and filters with a BARE int compare (NO str() wrapping, unlike the
+    user_id line):
+
+        elif scope == "team":    rows = [r for r in rows if r.get("team_id") == team_id]
+        else:                    rows = [r for r in rows if r.get("project_id") == project_id]
+
+    team_id / project_id are bigint; the backend supabase-py base returned them
+    as native Python int (JSON number → int — the bigint→str precision concern
+    is a FRONTEND/JS issue via bigIntSafeFetch, not backend). So the repo must
+    surface them as int. If they're coerced to str, ``"123" == 123`` is False
+    and the team/project usage dashboards return ZERO. This pins the int type +
+    the int equality the consumer's filter performs."""
+    team_id = 123456789012345
+    project_id = 987654321098765
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        agent_id, user_id = await _seed_agent_and_user(conn)
+        await _insert_run(
+            conn,
+            agent_id,
+            user_id,
+            started_at=datetime.now(timezone.utc),
+            team_id=team_id,
+            project_id=project_id,
+        )
+    finally:
+        await conn.close()
+
+    month_start = datetime.now(timezone.utc) - timedelta(days=1)
+    month_end = datetime.now(timezone.utc) + timedelta(days=1)
+    rows = await _repo().monthly_usage_by_agent(
+        month_start=month_start, month_end=month_end
+    )
+    ours = [r for r in rows if str(r.get("agent_id")) == str(agent_id)]
+    assert len(ours) == 1
+    row = ours[0]
+
+    # team-scope filter: r.get("team_id") == team_id (int == int).
+    assert type(row["team_id"]) is int, (
+        f"team_id leaked {type(row['team_id']).__name__} — the team-scope "
+        f"filter (r['team_id'] == team_id:int) returns ZERO; bigint must stay int."
+    )
+    assert row["team_id"] == team_id  # the consumer's exact bare-int compare
+
+    # project-scope filter: r.get("project_id") == project_id (int == int).
+    assert type(row["project_id"]) is int, (
+        f"project_id leaked {type(row['project_id']).__name__} — the "
+        f"project-scope filter returns ZERO; bigint must stay int."
+    )
+    assert row["project_id"] == project_id
 
 
 # ─── Writes (committing — fixes the P0) ─────────────────────────────────

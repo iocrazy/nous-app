@@ -33,14 +33,17 @@ Fidelity contract (the swap must be invisible to all call sites):
     9-column projection for monthly_usage_by_agent).
   - ``_bigint()`` coercion on str-snowflake ids (``id`` / ``parent_run_id`` are
     BIGINT — migration 232) before binding (asyncpg int8 codec is strict).
-  - VALUE-TYPE parity for ``monthly_usage_by_agent`` ONLY: its uuid / bigint /
-    numeric columns are coerced to str (``_usage_row_to_dict``) to match the
-    REST baseline, because that row dict has a Python-level type-sensitive
-    consumer (ai_library_router.get_usage). The other reads (list_*/get_by_id)
-    are NOT stringified — they leave the HTTP boundary via FastAPI
-    ``jsonable_encoder`` (UUID→str, datetime→ISO), so native uuid.UUID /
-    datetime in the dict produces byte-identical HTTP responses; blanket
-    stringifying them would be wrong.
+  - VALUE-TYPE parity for ``monthly_usage_by_agent`` ONLY: its uuid (agent_id /
+    user_id) + numeric (cost_cents) columns are coerced to str
+    (``_usage_row_to_dict``) to match the REST baseline, because that row dict
+    has Python-level type-sensitive consumers (ai_library_router.get_usage +
+    agent_runs_sweeper). team_id / project_id (bigint) are LEFT as native int —
+    the backend REST base returned them as int and the team/project-scope filter
+    is a bare int compare; coercing them to str silently zeroes those scopes.
+    The other reads (list_*/get_by_id) are NOT stringified — they leave the HTTP
+    boundary via FastAPI ``jsonable_encoder`` (UUID→str, datetime→ISO), so native
+    uuid.UUID / datetime in the dict produces byte-identical HTTP responses;
+    blanket stringifying them would be wrong.
   - datetimes bound as tz-aware ``datetime`` objects, never isoformat strings.
   - return shapes: dict for list_by_agent, dict|None for get_by_id, list[dict]
     for list_children/monthly_usage_by_agent, bool for request_cancel, int for
@@ -99,26 +102,32 @@ _USAGE_COLS = (
 )
 
 # Columns of the usage projection whose VALUE TYPE must match what the live REST
-# (supabase-py/PostgREST) baseline returned, because the /usage consumer
-# (ai_library_router.get_usage) does Python-level type-sensitive ops on them
-# (``r["user_id"] == str(uuid)``, ``UUID(r["agent_id"])``, ``float(cost_cents)``).
-# PostgREST renders these PG types as JSON STRINGS:
-#   - agent_id / user_id  : uuid    → str
-#   - team_id / project_id : bigint  → str (or null)
-#   - cost_cents          : numeric → str (or null)
-# The ORM returns native ``uuid.UUID`` / ``Decimal`` / ``int``; coerce the four
-# str-rendered columns so the swap stays invisible to the consumer. The token
-# counts (int4) and ``status`` (text) already match REST (number / str) — left
-# as-is. NULLs pass through unchanged (PostgREST emits JSON null for them too).
-_USAGE_STR_COLS = ("agent_id", "user_id", "team_id", "project_id", "cost_cents")
+# (supabase-py/PostgREST) backend baseline returned, because the /usage consumer
+# (ai_library_router.get_usage) does Python-level type-sensitive ops on them.
+# Coerce EXACTLY these three (the ORM returns native uuid.UUID / Decimal):
+#   - agent_id : uuid    → str   (consumer does UUID(str(agent_id)) + dict key)
+#   - user_id  : uuid    → str   (consumer does str(r["user_id"]) == str(uuid))
+#   - cost_cents : numeric → str (REST renders numeric as a JSON str; consumer
+#                                 does float(cost_cents) — str works)
+# DO NOT coerce team_id / project_id: they are bigint, and the *backend*
+# supabase-py base returned bigint as a native Python int (JSON number → int —
+# the bigint→str precision concern is a FRONTEND/JS issue via bigIntSafeFetch,
+# not backend). The consumer filters with a BARE int compare
+# (``r.get("team_id") == team_id`` where team_id is an ``int`` query param), so
+# stringifying them makes ``"123" == 123`` False → team/project usage returns
+# ZERO. Tokens (int4) and status (text) already match REST — left as-is. NULLs
+# pass through unchanged.
+_USAGE_STR_COLS = ("agent_id", "user_id", "cost_cents")
 
 
 def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
     """One monthly_usage_by_agent row → dict with REST value-type parity.
 
-    Coerces the uuid / bigint / numeric columns to str (matching PostgREST's
-    JSON rendering) so the /usage consumer's type-sensitive ops keep working.
-    NULLs stay None."""
+    Coerces the uuid (agent_id / user_id) and numeric (cost_cents) columns to
+    str (matching PostgREST's JSON rendering) so the /usage consumer's
+    type-sensitive ops keep working. team_id / project_id (bigint) stay native
+    int to match the backend REST base + the consumer's bare-int filter. NULLs
+    stay None."""
     out = dict(row)
     for col in _USAGE_STR_COLS:
         val = out.get(col)
@@ -276,11 +285,13 @@ class AgentRunsRepositoryOrm(AsyncpgRepository, AgentRunsRepository):
         (ai_library_router.get_usage) groups in Python — matches the REST
         baseline. Datetimes bound as ``datetime``.
 
-        VALUE-TYPE PARITY: the uuid / bigint / numeric columns are coerced to
-        str (see ``_usage_row_to_dict``) so they match what the live REST
-        baseline (PostgREST JSON) returned — the consumer does
-        ``r["user_id"] == str(uuid)`` / ``UUID(r["agent_id"])`` /
-        ``float(cost_cents)`` and breaks on native ``uuid.UUID`` / ``Decimal``."""
+        VALUE-TYPE PARITY: agent_id / user_id (uuid) + cost_cents (numeric) are
+        coerced to str (see ``_usage_row_to_dict``) to match the live REST
+        baseline — the consumer does ``str(r["user_id"]) == str(uuid)`` /
+        ``UUID(str(r["agent_id"]))`` / ``float(cost_cents)`` and breaks on a
+        native ``uuid.UUID`` / ``Decimal``. team_id / project_id (bigint) stay
+        native int (REST backend returned int; the scope filter is a bare int
+        compare — stringifying them silently zeroes team/project scopes)."""
         try:
             cols = [getattr(AgentRuns, name) for name in _USAGE_COLS]
             async with read_scope() as session:
