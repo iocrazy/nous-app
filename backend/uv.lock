@@ -599,18 +599,6 @@ wheels = [
 ]
 
 [[package]]
-name = "datarecorder"
-version = "3.6.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "openpyxl" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b4/a1/43d52eada4e1364f8d1a5da99b855798f945228ffb7dfb199f675c1d2c2b/DataRecorder-3.6.2.tar.gz", hash = "sha256:8c9024736692af68b947fd884589e685c4f27bc29d031b81164457b09c60e1e5", size = 29567, upload-time = "2024-10-15T08:58:36.923Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/05/f0064d93a0b922ea7ad5d40a0dfaac45de37f783a85a2900e6ce8a01dbc3/DataRecorder-3.6.2-py3-none-any.whl", hash = "sha256:41ad022c4c1db58a0f4236f6a4991d1f98cd76ec049484b172bbb3040455e5ff", size = 37539, upload-time = "2024-10-15T08:58:35.419Z" },
-]
-
-[[package]]
 name = "dbos"
 version = "2.19.0"
 source = { registry = "https://pypi.org/simple" }
@@ -688,35 +676,48 @@ wheels = [
 ]
 
 [[package]]
-name = "downloadkit"
-version = "2.0.7"
+name = "drissionget"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "datarecorder" },
+    { name = "drissionrecord" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6b/35/9bbaed54f5d170b1fd8bcfdd3ce5e24ea71f4cac5026a37e6b21ab69726e/DownloadKit-2.0.7.tar.gz", hash = "sha256:601e423d1d4d0bd3e933524d06c913e744577d455990ec20afc3fb1f79aea9a7", size = 17488, upload-time = "2024-11-30T01:24:30.539Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2f/76/d54e14ff6c4ab968e3006b70aeabbe52b745a68b2840727117ee9a17026f/drissionget-1.2.0.tar.gz", hash = "sha256:5b5c15de8025224caa611d8f643cac2e122af200a3efd56955e65cc929521a2e", size = 18023, upload-time = "2026-06-03T16:20:07.53Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/89/979ad2407eb8e0a2ac67461b7bec7db8627218fe3ba287db49636ca0a60c/DownloadKit-2.0.7-py3-none-any.whl", hash = "sha256:55b142d26b4e7ae01fff2181991c92aca9b895f75e2cd8a54f4a3b48c50b90b4", size = 21706, upload-time = "2024-11-30T01:24:17.599Z" },
+    { url = "https://files.pythonhosted.org/packages/36/2f/b1622e3bf3ca77af6c7dea864cf9555a090102d4d9fa6f5af040a2911c3f/drissionget-1.2.0-py3-none-any.whl", hash = "sha256:a908a0e1c2f2ba1ac3b620339fbcfa628d43252c16bdf8d6dc2274abb341f8a1", size = 22206, upload-time = "2026-06-03T16:20:06.439Z" },
 ]
 
 [[package]]
 name = "drissionpage"
-version = "4.1.1.2"
+version = "4.1.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "cssselect" },
-    { name = "downloadkit" },
+    { name = "drissionget" },
+    { name = "drissionrecord" },
     { name = "lxml" },
     { name = "psutil" },
     { name = "requests" },
     { name = "tldextract" },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/12/b3/26bb358f3c7019bba0a2e27a636382a4226780628c30ab315537524809fb/drissionpage-4.1.1.2.tar.gz", hash = "sha256:e4375d3536519a1d24430270e2871de3015836b301cbdfb96583234e6d6ef4c1", size = 208034, upload-time = "2025-07-31T07:00:36.24Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/12/bf/872f23aff6181a2456dc94f955e43c5dff1bcaa2e4c64ed886df0bbbeee6/drissionpage-4.1.1.4.tar.gz", hash = "sha256:4c624485cbc576e1477edb77cd92a3184704f7d6d0fd01928c944a5e66ba4719", size = 207960, upload-time = "2026-05-27T01:49:10.846Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/31/05834b38c12a222012f998d5c2f104f228cf8aaa37747f989c9b29e81d5d/DrissionPage-4.1.1.2-py3-none-any.whl", hash = "sha256:c8b58a8d495550142c10499ce7128655b2baf8f38f46604ba0ce951a148d88e8", size = 257497, upload-time = "2025-07-31T07:00:34.531Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/98/6411ae36a9c103e4cf78e2674643c6c0f6aeb394ea84544c2bcff7f3f27f/drissionpage-4.1.1.4-py3-none-any.whl", hash = "sha256:d1d066e732031c16b00bdc88a2f450e8400da46362597a23c8c6144e4cbb768d", size = 258240, upload-time = "2026-05-27T01:49:08.774Z" },
+]
+
+[[package]]
+name = "drissionrecord"
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "openpyxl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/9c/c691bf126f924973ca48f38a3ec7a3a059ca18c6b211d30b981313a0d424/drissionrecord-2.0.1.tar.gz", hash = "sha256:863305bc09aec58158045f45eb6935e15ba9ac15e358920105b20f4a730b2ed7", size = 43311, upload-time = "2026-04-13T06:33:12.488Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/bd/d6489d2056fd2cfd5535c726e4d1e95e2d20d8a86593e83768eff7e1c3d0/drissionrecord-2.0.1-py3-none-any.whl", hash = "sha256:b6efb09268ca2b5fb5e2942d3bfb75d70fe6c936770aaac02fca16e6960fe9ee", size = 57734, upload-time = "2026-04-13T06:33:11.174Z" },
 ]
 
 [[package]]
@@ -1347,6 +1348,7 @@ dependencies = [
     { name = "notion-client" },
     { name = "openai" },
     { name = "passlib", extra = ["bcrypt"] },
+    { name = "pgvector" },
     { name = "pillow" },
     { name = "pydantic", extra = ["email"] },
     { name = "pydantic-settings", extra = ["yaml"] },
@@ -1415,6 +1417,7 @@ requires-dist = [
     { name = "notion-client", specifier = ">=2.3.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7.4" },
+    { name = "pgvector", specifier = ">=0.4.2" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.11.3" },
     { name = "pydantic-settings", extras = ["yaml"], specifier = ">=2.9.1" },
@@ -1822,6 +1825,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/4c/b2/bb8e495d5262bfec41ab5cb18f522f1012933347fb5d9e62452d446baca2/pathspec-1.0.3.tar.gz", hash = "sha256:bac5cf97ae2c2876e2d25ebb15078eb04d76e4b98921ee31c6f85ade8b59444d", size = 130841, upload-time = "2026-01-09T15:46:46.009Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/32/2b/121e912bd60eebd623f873fd090de0e84f322972ab25a7f9044c056804ed/pathspec-1.0.3-py3-none-any.whl", hash = "sha256:e80767021c1cc524aa3fb14bedda9c34406591343cc42797b386ce7b9354fb6c", size = 55021, upload-time = "2026-01-09T15:46:44.652Z" },
+]
+
+[[package]]
+name = "pgvector"
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/25/6c/6d8b4b03b958c02fa8687ec6063c49d952a189f8c91ebbe51e877dfab8f7/pgvector-0.4.2.tar.gz", hash = "sha256:322cac0c1dc5d41c9ecf782bd9991b7966685dee3a00bc873631391ed949513a", size = 31354, upload-time = "2025-12-05T01:07:17.87Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/26/6cee8a1ce8c43625ec561aff19df07f9776b7525d9002c86bceb3e0ac970/pgvector-0.4.2-py3-none-any.whl", hash = "sha256:549d45f7a18593783d5eec609ea1684a724ba8405c4cb182a0b2b08aeff04e08", size = 27441, upload-time = "2025-12-05T01:07:16.536Z" },
 ]
 
 [[package]]
