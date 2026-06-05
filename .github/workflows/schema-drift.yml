@@ -1,0 +1,209 @@
+# Schema-Drift Gate — reflect the LIVE applied (prod) schema and diff it
+# against the 107 SQLAlchemy ORM models.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# WHAT THIS DOES
+# ─────────────────────────────────────────────────────────────────────────
+# Runs backend/tests/db/test_schema_drift.py against PRODUCTION (read-only).
+# The test reflects information_schema and asserts every ORM model matches
+# the live schema across 5 gates: tables / columns / nullability / types /
+# unmapped-tables. Models were generated from prod via sqlacodegen, so
+# against prod the test is GREEN BY CONSTRUCTION — it goes RED only when a
+# migration changed the applied schema WITHOUT regenerating the models
+# (i.e. real model↔DB drift). The daily run catches post-deploy drift
+# within 24h; the PR run catches it the moment models/migrations change.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# PRAGMATIC vs. RIGOROUS (this is the pragmatic check)
+# ─────────────────────────────────────────────────────────────────────────
+# This gate checks the *applied* prod schema. The more rigorous gate —
+# spinning up an ephemeral Postgres FROM supabase/migrations/** and diffing
+# the models against THAT (catching migrations that were written but never
+# applied, before they ever reach prod) — is DEFERRED. This applied-schema
+# check is the pragmatic first line of defense.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# SECURITY — READS PROD, READ-ONLY
+# ─────────────────────────────────────────────────────────────────────────
+# The test only reflects information_schema (catalog metadata); it performs
+# NO writes. It connects over an SSH tunnel to the NAS prod DB container.
+# Use a read-only / least-privilege DB role if one exists. Secrets are never
+# echoed; the SSH keyfile is written 0600 and removed on exit.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# SECRETS / VARS
+# ─────────────────────────────────────────────────────────────────────────
+# Reused (already configured, see run-migration.yml / deploy-backend.yml):
+#   secrets.NAS_HOST     — NAS SSH host (publicly reachable from runners)
+#   secrets.NAS_PORT     — NAS SSH port
+#   secrets.NAS_USER     — NAS SSH user
+#   secrets.NAS_SSH_KEY  — NAS SSH private key
+#
+# NEW — must be added to run against prod (Settings → Secrets/Variables):
+#   secrets.PROD_DB_PASSWORD  (REQUIRED) — password for the prod DB role.
+#                              When ABSENT the job SKIPS GRACEFULLY (no fail).
+#   vars.PROD_DB_USER  (optional, default: supabase_admin)
+#   vars.PROD_DB_NAME  (optional, default: postgres)
+#   vars.PROD_DB_HOST_PORT (optional, default: 55436) — host-side port the
+#                          prod DB container (mediahub-sb-prod-db, internal
+#                          55434) is published on. Per docker/.env.example
+#                          this is 55436.
+#
+# GRACEFUL SKIP: with no NAS_SSH_KEY (forks / unwired) a probe step emits
+# have_nas=false and every subsequent step is skipped — the job reports
+# success, not failure. (GitHub forbids referencing `secrets` in a job-level
+# `if:`, so the gate lives in a step output instead.) With NAS access but no
+# PROD_DB_PASSWORD, the run step does NOT export INTEGRATION_DATABASE_URL, so
+# pytest skips all 5 tests and exits 0 (the test's own DSN gate). Missing
+# secrets are never a hard failure.
+
+name: Schema Drift (prod applied-schema)
+
+on:
+  schedule:
+    # Daily 06:00 UTC — catches model drift introduced by a migration that
+    # deployed in the prior 24h without the models being regenerated.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/app/models/**'
+      - 'supabase/migrations/**'
+      - 'backend/tests/db/test_schema_drift.py'
+      - '.github/workflows/schema-drift.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: schema-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Reflect prod & diff ORM models
+    runs-on: ubuntu-latest
+
+    steps:
+      # GitHub disallows referencing `secrets` in a JOB-level `if:` (the
+      # secrets context isn't available there). So we probe secret presence
+      # in a step, emit a boolean output, and gate the NAS-touching steps on
+      # it. On forks / before SSH is wired this is a graceful no-op (the job
+      # reports success), never a hard failure.
+      - name: Probe NAS secret availability
+        id: gate
+        env:
+          NAS_SSH_KEY: ${{ secrets.NAS_SSH_KEY }}
+        run: |
+          if [ -n "${NAS_SSH_KEY:-}" ]; then
+            echo "have_nas=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_nas=false" >> "$GITHUB_OUTPUT"
+            echo "NAS_SSH_KEY not configured (fork or unwired) — skipping prod drift check."
+          fi
+
+      - name: Checkout repository
+        if: steps.gate.outputs.have_nas == 'true'
+        uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        if: steps.gate.outputs.have_nas == 'true'
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.have_nas == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        if: steps.gate.outputs.have_nas == 'true'
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Open SSH tunnel to NAS prod DB
+        id: tunnel
+        if: steps.gate.outputs.have_nas == 'true'
+        env:
+          NAS_HOST: ${{ secrets.NAS_HOST }}
+          NAS_PORT: ${{ secrets.NAS_PORT }}
+          NAS_USER: ${{ secrets.NAS_USER }}
+          NAS_SSH_KEY: ${{ secrets.NAS_SSH_KEY }}
+          # Host-side port the prod DB container is published on.
+          PROD_DB_HOST_PORT: ${{ vars.PROD_DB_HOST_PORT || '55436' }}
+        run: |
+          set -euo pipefail
+
+          # Write the SSH key to a 0600 temp file (same pattern the other
+          # workflows rely on via appleboy/ssh-action). Never echo it.
+          KEYFILE=$(mktemp /tmp/nas_key-XXXXXX)
+          chmod 600 "$KEYFILE"
+          printf '%s\n' "$NAS_SSH_KEY" > "$KEYFILE"
+          echo "keyfile=$KEYFILE" >> "$GITHUB_OUTPUT"
+
+          # Background, non-interactive local-forward tunnel:
+          #   runner 127.0.0.1:55436 -> (over SSH) -> NAS 127.0.0.1:<prod port>
+          # -fN = no remote command, fork to background once forwarding is up.
+          # StrictHostKeyChecking=accept-new pins the host on first contact
+          # without an interactive prompt (and without disabling verification
+          # outright).
+          ssh -i "$KEYFILE" -p "$NAS_PORT" \
+            -o StrictHostKeyChecking=accept-new \
+            -o ExitOnForwardFailure=yes \
+            -o ServerAliveInterval=15 \
+            -fN -L "55436:127.0.0.1:${PROD_DB_HOST_PORT}" \
+            "${NAS_USER}@${NAS_HOST}"
+
+          # Wait (up to ~30s) for the forwarded port to accept connections
+          # before handing off to pytest, so the test never races the tunnel.
+          for i in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/55436) 2>/dev/null; then
+              exec 3>&- 3<&- || true
+              echo "Tunnel ready on 127.0.0.1:55436 after ${i}s"
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::SSH tunnel to NAS prod DB did not become ready within 30s"
+          exit 1
+
+      - name: Run schema-drift test against prod (read-only)
+        if: steps.gate.outputs.have_nas == 'true'
+        env:
+          PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+          PROD_DB_USER: ${{ vars.PROD_DB_USER || 'supabase_admin' }}
+          PROD_DB_NAME: ${{ vars.PROD_DB_NAME || 'postgres' }}
+        working-directory: backend
+        run: |
+          set -euo pipefail
+
+          # GRACEFUL SKIP: no prod DB password configured → don't export the
+          # DSN. The test's own gate then skips all 5 cases and exits 0.
+          if [ -z "${PROD_DB_PASSWORD:-}" ]; then
+            echo "PROD_DB_PASSWORD not configured — skipping drift check (no-op, exit 0)."
+            echo "Add the PROD_DB_PASSWORD secret to enable the prod schema-drift gate."
+            uv run pytest tests/db/test_schema_drift.py -v
+            exit 0
+          fi
+
+          # asyncpg.connect() takes a plain libpq DSN — NOT the SQLAlchemy
+          # 'postgresql+asyncpg://' form (test_schema_drift uses asyncpg
+          # directly). Connect through the local end of the tunnel.
+          export INTEGRATION_DATABASE_URL="postgresql://${PROD_DB_USER}:${PROD_DB_PASSWORD}@127.0.0.1:55436/${PROD_DB_NAME}"
+
+          # Drift → test fails → this step (and the job) fails: the gate.
+          uv run pytest tests/db/test_schema_drift.py -v
+
+      - name: Tear down tunnel & keyfile
+        if: always()
+        env:
+          KEYFILE: ${{ steps.tunnel.outputs.keyfile }}
+        run: |
+          # Kill the backgrounded forward and shred the key. Best-effort:
+          # never fail the job on cleanup.
+          pkill -f 'ssh .* -L 55436:127.0.0.1' 2>/dev/null || true
+          if [ -n "${KEYFILE:-}" ] && [ -f "$KEYFILE" ]; then
+            rm -f "$KEYFILE"
+          fi
+          echo "Cleanup done."
