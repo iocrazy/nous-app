@@ -599,15 +599,35 @@ class ResourcesService:
 
         # 2. Physical file + media cleanup
         if media_id:
-            remaining = await self.repo.count_resources_by_media_id(media_id)
-            if remaining == 0:
-                self._delete_physical_files(resource)
-                await self._delete_media_record(media_id)
-            else:
-                logger.info(
-                    f"Skipping file/media cleanup for media {media_id}: "
-                    f"{remaining} resource(s) still reference it"
+            # The refcount drives a DESTRUCTIVE decision on SHARED files: if it
+            # raises (transient DB error), we must NOT delete — a fabricated
+            # "0 references" would wipe files other users still reference. The
+            # DB row is already deleted (fine, idempotent), so we preserve the
+            # delete return contract and SKIP the shared-file/media GC. NOTE: no
+            # scheduled sweeper reclaims these — the orphan sweeper only walks
+            # teams/{scope}/uploads/{resource_id}, not the global download tree
+            # _delete_physical_files handles nor the parsed_media row — they leak
+            # until a later successful permanent_delete or manual cleanup.
+            # Accepted: leaking on a rare transient count error beats deleting
+            # files another user still references.
+            try:
+                remaining = await self.repo.count_resources_by_media_id(media_id)
+            except Exception as e:
+                logger.error(
+                    f"Reference count failed for media {media_id} during "
+                    f"permanent_delete of {resource_id}; SKIPPING shared-file/"
+                    f"media GC (files + parsed_media leak until a later "
+                    f"successful permanent_delete or manual cleanup): {e}"
                 )
+            else:
+                if remaining == 0:
+                    self._delete_physical_files(resource)
+                    await self._delete_media_record(media_id)
+                else:
+                    logger.info(
+                        f"Skipping file/media cleanup for media {media_id}: "
+                        f"{remaining} resource(s) still reference it"
+                    )
         else:
             # No media_id (direct upload) — always delete physical files
             self._delete_physical_files(resource)
@@ -675,7 +695,13 @@ class ResourcesService:
                 media_id = resource.get("media_id")
                 await self.repo.delete_resource(resource["id"])
 
-                # Only delete files + media when last reference is gone
+                # Only delete files + media when last reference is gone.
+                # count_resources_by_media_id RE-RAISES on a DB error (A4): the
+                # per-resource try/except below catches it, so a count failure
+                # SKIPS this resource's shared-file/media GC (the destructive
+                # _delete_* calls sit AFTER the count and never run on failure)
+                # and does NOT abort the whole sweep — the next resource is
+                # still processed. Never GC on an uncertain refcount.
                 if media_id:
                     remaining = await self.repo.count_resources_by_media_id(media_id)
                     if remaining == 0:

@@ -490,3 +490,145 @@ async def test_flag_on_no_scope_count_works(
     ids = seeded
     n = await repo.count_resources_by_media_id(str(ids.media_shared))
     assert n == 2, f"count must work with no ambient scope (SYSTEM-wrapped), got {n}"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# A4 Item 1 — count_resources_by_media_id RE-RAISES on error (never 0)
+# ════════════════════════════════════════════════════════════════════════
+
+
+async def test_count_reraises_on_error_never_returns_zero(
+    repo: ResourcesRepositoryOrm,
+):
+    """DATA-LOSS HARDENING: a DB error inside the refcount query must PROPAGATE
+    (re-raise), NOT be swallowed into a fabricated ``0`` — a fake 0 would let the
+    GC delete shared files. We force the query to fail (the read_scope session's
+    scalar raises) and assert the exception propagates."""
+
+    class _Boom(Exception):
+        pass
+
+    async def _raise_scalar(*_a, **_k):
+        raise _Boom("simulated DB error")
+
+    # Patch the session.scalar used inside the count query to raise. The method
+    # must re-raise (not return 0).
+    import app.repositories.resources_repository_orm as orm_mod
+
+    real_read_scope = orm_mod.read_scope
+
+    class _FakeCtx:
+        async def __aenter__(self):
+            class _S:
+                scalar = staticmethod(_raise_scalar)
+
+            return _S()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    with patch.object(orm_mod, "read_scope", lambda: _FakeCtx()):
+        with pytest.raises(_Boom):
+            await repo.count_resources_by_media_id("123")
+
+    # restore guard (patch.object already restores, this is a no-op sanity)
+    assert orm_mod.read_scope is real_read_scope
+
+
+# ════════════════════════════════════════════════════════════════════════
+# A4 Item 4 — CONSOLIDATED lifecycle-under-both-flags regression
+# ════════════════════════════════════════════════════════════════════════
+#
+# The per-method tests above cover each operation in isolation. This single
+# end-to-end test walks the WHOLE resource lifecycle (create → read-by-id →
+# update → count → delete) under BOTH flag states back-to-back, proving:
+#   * FLAG OFF — every step behaves byte-for-byte like legacy (cross-user rows
+#     visible to count, no raises, update/delete by id regardless of owner).
+#   * FLAG ON + USER scope A — own create ok; B's row blocked on read/update/
+#     delete (None / {} / no-op); count stays GLOBAL (sees B); no-scope writes
+#     fail-closed.
+# It is the "inert guarantee + enforcement" lifecycle smoke that a future flip
+# can point at as the single regression gate.
+
+
+async def test_lifecycle_under_both_flags(seeded: _Ids, repo: ResourcesRepositoryOrm):
+    ids = seeded
+
+    # ─── FLAG OFF: full lifecycle, legacy byte-for-byte ──────────────────
+    with patch.object(scope_mod.settings, "SCOPE_ENFORCE_RESOURCES", False):
+        off_id = _pk()
+        ids.extra_resource_ids.append(off_id)  # type: ignore[attr-defined]
+
+        # create (owner B, NO scope — legacy allows)
+        created = await repo.create_resource(
+            {
+                "id": off_id,
+                "creator_id": ids.user_b,
+                "source_type": "web",
+                "filename": "lifecycle_off",
+                "media_id": ids.media_shared,
+            }
+        )
+        assert created.get("id") == off_id
+
+        # read-by-id (no injection — visible regardless of owner)
+        got = await repo.get_resource_by_id(str(off_id))
+        assert got is not None and got["id"] == off_id
+
+        # update by id (legacy allows any owner)
+        upd = await repo.update_resource(str(off_id), {"filename": "off_renamed"})
+        assert upd.get("filename") == "off_renamed"
+
+        # count is cross-user: A's + B's seeded rows + this new one = 3
+        n_off = await repo.count_resources_by_media_id(str(ids.media_shared))
+        assert n_off == 3, f"flag-off count must be cross-user (=3), got {n_off}"
+
+        # delete (legacy allows)
+        assert await repo.delete_resource(str(off_id)) is True
+        assert await _row_in_db(off_id) is None
+
+    # ─── FLAG ON + USER scope A: enforcement ─────────────────────────────
+    with patch.object(scope_mod.settings, "SCOPE_ENFORCE_RESOURCES", True):
+        on_id = _pk()
+        ids.extra_resource_ids.append(on_id)  # type: ignore[attr-defined]
+
+        # create own (creator A under scope A) — ok
+        async with request_scope(Scope(user_id=ids.user_a)):
+            created = await repo.create_resource(
+                {
+                    "id": on_id,
+                    "creator_id": ids.user_a,
+                    "source_type": "web",
+                    "filename": "lifecycle_on",
+                    "media_id": ids.media_shared,
+                }
+            )
+            assert created.get("id") == on_id
+
+            # read-by-id of A's own row — visible
+            own = await repo.get_resource_by_id(str(on_id))
+            assert own is not None and own["id"] == on_id
+
+            # read-by-id of B's row — injected creator==A → None
+            foreign = await repo.get_resource_by_id(str(ids.res_b))
+            assert foreign is None, "B's row leaked to scope A on read-by-id"
+
+            # update B's row — loads None → {} → unchanged
+            blocked = await repo.update_resource(str(ids.res_b), {"filename": "hijack"})
+            assert blocked == {}, f"cross-user update must be {{}}, got {blocked!r}"
+
+            # delete B's row — no-op, returns True
+            assert await repo.delete_resource(str(ids.res_b)) is True
+
+            # count is GLOBAL even under USER scope: A's seeded + B's + this new
+            # one = 3 (B's was a no-op delete, still present)
+            n_on = await repo.count_resources_by_media_id(str(ids.media_shared))
+            assert n_on == 3, f"count must stay global under USER scope, got {n_on}"
+
+        # B's row survived the cross-user delete attempt.
+        assert await _row_in_db(ids.res_b) is not None
+
+        # no-scope write fails closed (fail-closed inert-guarantee end of the
+        # lifecycle).
+        with pytest.raises(UnscopedQueryError):
+            await repo.update_resource(str(ids.res_a), {"filename": "x"})

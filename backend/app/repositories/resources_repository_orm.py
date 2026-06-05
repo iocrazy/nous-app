@@ -412,7 +412,23 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
         the old ``func.count()`` + ``select_from`` — so the statement is
         well-formed (a bare ``count(*)`` over a scoped table with no projected
         scoped column is deny-by-default RAISE; here SYSTEM scope means no
-        injection either way, but the projected form is the canonical shape)."""
+        injection either way, but the projected form is the canonical shape).
+
+        A4 — RE-RAISE ON ERROR (data-loss hardening): this method must NEVER
+        fabricate a ``0``. A transient DB error returning 0 is the DANGEROUS
+        value — the GC callers (``permanent_delete`` / ``cleanup_expired_trash``)
+        read ``remaining == 0`` to decide whether to delete the SHARED physical
+        files + parsed_media record, so a fake 0 would delete files other users
+        still reference. We log and RE-RAISE; the callers catch and SKIP the
+        physical-file/media GC on uncertainty (never GC on a count failure).
+        NOTE: no scheduled sweeper reclaims those skipped files — the only orphan
+        sweeper (``scheduled_cleanup._sweep_orphan_upload_dirs``) walks ONLY the
+        ``teams/{scope}/uploads/{resource_id}/`` tree by resource_id, NOT the
+        ``global/resources/.../{media_id}/`` download tree that
+        ``_delete_physical_files`` handles, nor the parsed_media row — so they
+        leak until a later successful permanent_delete or manual cleanup.
+        Accepted: leaking files on a rare transient count error beats deleting
+        files another user still references."""
         try:
             async with system_request_scope(reason="media-refcount-gc"):
                 async with read_scope() as session:
@@ -423,8 +439,10 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     )
             return int(count or 0)
         except Exception as e:
+            # NEVER return a fabricated 0 — a count failure must abort the
+            # caller's shared-file GC, not silently green-light it.
             logger.error(f"Failed to count resources for media {media_id}: {e}")
-            return 0
+            raise
 
     # ── Hash-based duplicate lookup ─────────────────────────────────
 

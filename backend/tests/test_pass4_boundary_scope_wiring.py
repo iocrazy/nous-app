@@ -346,6 +346,137 @@ async def test_chain_summary_for_tags_propagates_scope_through_run_async():
     assert current_scope() is None
 
 
+# ── A4 Item 2: WORKFLOW-LEVEL wrap — drive the real @DBOS.workflow bodies ──
+#
+# Pass 4b only exercised the SYNC chain helpers directly (above), so the
+# `async with request_scope(...)` INSIDE extract_audio_workflow /
+# ai_transcription_workflow was never driven by a test — it could be deleted
+# without any failure. These two tests close that gap: they ``inspect.unwrap``
+# the @DBOS.workflow wrapper (the decorator refuses to run before DBOS.launch()
+# but preserves the inner coroutine via @wraps — same approach as
+# test_transcode_thumbnail_scope_wiring.py), patch every step + the chain
+# helper, and assert the ambient USER scope (correct user_id) is set AT THE
+# POINT the chain call runs. Removing the workflow-body wrap → recorded scope
+# becomes None → these FAIL. INERT wrt SCOPE_ENFORCE_RESOURCES.
+
+
+@pytest.mark.asyncio
+async def test_extract_audio_workflow_body_wraps_chain_in_user_scope():
+    """Drive ``extract_audio_workflow`` body: all steps stubbed, the SYNC chain
+    helper patched to record ``current_scope()``. The workflow body's
+    ``async with request_scope(Scope(user_id=...))`` must establish the USER
+    scope when chain_transcript_summary_for_tags runs, and reset after."""
+    import inspect
+
+    from app.workflows import extract_audio as ea
+
+    recorded: dict[str, object] = {}
+
+    async def _noop_status(*_a, **_k):
+        return None
+
+    async def _noop_processing(*_a, **_k):
+        return None
+
+    async def _noop_log(*_a, **_k):
+        return None
+
+    def _ok_extract(_platform_id):
+        return True
+
+    def _rec_chain(platform_id, user_id, **_kw):
+        # Runs synchronously inside the workflow body's request_scope wrap.
+        recorded["scope"] = current_scope()
+
+    assert current_scope() is None
+    with (
+        patch.object(ea, "mark_extract_audio_processing_step", _noop_processing),
+        patch.object(ea, "mark_extract_audio_status_step", _noop_status),
+        patch.object(ea, "run_extract_audio_step", _ok_extract),
+        patch.object(ea, "log_extract_audio_outcome_step", _noop_log),
+        patch(
+            "app.tasks.download_helpers.chain_transcript_summary_for_tags",
+            _rec_chain,
+        ),
+    ):
+        body = inspect.unwrap(ea.extract_audio_workflow)
+        result = await body("p-1", _USER, video_title="Clip")
+
+    assert result == {"status": "success", "platform_id": "p-1"}
+    assert getattr(recorded.get("scope"), "user_id", None) == _USER, (
+        "extract_audio_workflow must wrap the chain call in "
+        "request_scope(Scope(user_id)) — workflow-body wrap regression."
+    )
+    assert current_scope() is None, "ambient scope leaked after the workflow"
+
+
+@pytest.mark.asyncio
+async def test_ai_transcription_workflow_body_wraps_chain_in_user_scope():
+    """Drive ``ai_transcription_workflow`` body: load/whisper/mark steps stubbed,
+    the SYNC chain helper patched to record ``current_scope()``. The post-success
+    ``async with request_scope(Scope(user_id=...))`` must establish the USER
+    scope when chain_summary_for_tags runs, and reset after."""
+    import inspect
+
+    from app.workflows import ai_transcription as at
+
+    recorded: dict[str, object] = {}
+
+    async def _fake_load(_pid, _uid):
+        return {
+            "audio_path": "a.wav",
+            "resource_id": "res-1",
+            "platform_id": "p-1",
+            "provider_key": "openai",
+            "provider_config": {},
+            "language": "auto",
+            "task_assignment": "",
+        }
+
+    def _fake_assert(audio_path):
+        return audio_path
+
+    async def _fake_whisper(*_a, **_k):
+        return {
+            "language": "en",
+            "duration_seconds": 1.0,
+            "text_len": 3,
+            "segments_count": 1,
+        }
+
+    async def _fake_mark(_pid):
+        return None
+
+    class _FakeManager:
+        async def update_progress(self, *_a, **_k):
+            return None
+
+    def _rec_chain(parsed_media_id, user_id, **_kw):
+        recorded["scope"] = current_scope()
+
+    assert current_scope() is None
+    with (
+        patch.object(at, "load_transcribe_inputs", _fake_load),
+        patch.object(at, "assert_audio_present_step", _fake_assert),
+        patch.object(at, "run_whisper", _fake_whisper),
+        patch.object(at, "mark_transcript_completed", _fake_mark),
+        patch(
+            "app.services.infra.unified_task_manager.get_task_manager",
+            lambda: _FakeManager(),
+        ),
+        patch("app.tasks.download_helpers.chain_summary_for_tags", _rec_chain),
+    ):
+        body = inspect.unwrap(at.ai_transcription_workflow)
+        result = await body(12345, _USER)
+
+    assert result["parsed_media_id"] == 12345
+    assert getattr(recorded.get("scope"), "user_id", None) == _USER, (
+        "ai_transcription_workflow must wrap the summary chain call in "
+        "request_scope(Scope(user_id)) — workflow-body wrap regression."
+    )
+    assert current_scope() is None, "ambient scope leaked after the workflow"
+
+
 # ── Sanity: the running loop genuinely forces run_async branch 2 ─────────
 
 
