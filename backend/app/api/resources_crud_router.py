@@ -23,7 +23,9 @@ from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_dep import ScopedRequestDep
 from app.core.scope_guards import verify_scope_access
+from app.db.scope import Scope, request_scope, system_request_scope
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.resources import (
     ResourceMoveRequest,
@@ -50,6 +52,7 @@ _ALLOWED_SOCIAL_COMBINE = {"and", "or"}
 @router.get("")
 async def list_resources(
     auth: AuthDep,
+    _tenant_scope: ScopedRequestDep,
     scope_id: str = Query(...),
     _scope_guard: None = Depends(verify_scope_access),
     folder_id: Optional[str] = Query(None),
@@ -279,6 +282,7 @@ async def list_resources(
 @router.get("/trash")
 async def list_trashed_resources(
     auth: AuthDep,
+    _tenant_scope: ScopedRequestDep,
     scope_id: str = Query(...),
     _scope_guard: None = Depends(verify_scope_access),
 ):
@@ -295,6 +299,7 @@ async def list_trashed_resources(
 @router.get("/trash/folders")
 async def list_trashed_folders(
     auth: AuthDep,
+    _tenant_scope: ScopedRequestDep,
     scope_id: str = Query(...),
     _scope_guard: None = Depends(verify_scope_access),
 ):
@@ -309,7 +314,7 @@ async def list_trashed_folders(
 
 
 @router.post("/transcode/batch")
-async def batch_transcode(auth: AuthDep):
+async def batch_transcode(auth: AuthDep, _scope: ScopedRequestDep):
     """Queue HLS transcoding for all video versions with NULL transcode_status."""
     try:
         repo = ResourcesRepository()
@@ -346,7 +351,7 @@ async def batch_transcode(auth: AuthDep):
 
 
 @router.get("/{resource_id}")
-async def get_resource(resource_id: str, auth: AuthDep):
+async def get_resource(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Get a single resource by ID (creator or team member only)."""
     from app.api.media_permissions import check_media_access
 
@@ -405,34 +410,45 @@ async def serve_resource_file(
         if not await check_media_access(resource_id, user_id, share_token):
             raise HTTPException(status_code=403, detail="Access denied")
 
-        repo = ResourcesRepository()
-        resource = await repo.get_resource_by_id(resource_id)
-        if not resource:
-            raise HTTPException(status_code=404, detail="Resource not found")
+        # Hybrid auth: an authenticated caller gets a USER tenant Scope; a
+        # share-token-only (no auth) caller gets SYSTEM (cross-user public
+        # serve). Establish the matching ambient scope around the resources
+        # access. Inert until SCOPE_ENFORCE_RESOURCES flips on.
+        if user_id is not None:
+            _scope_cm = request_scope(Scope(user_id=user_id))
+        else:
+            _scope_cm = system_request_scope(reason="public-share-serve")
 
-        file_path = resource.get("file_path")
-        # PR-B: parsed-media-backed resources don't carry the shared
-        # file path on the resources row. Fall through to parsed_media.
-        if not file_path:
-            media_id = resource.get("media_id")
-            if media_id:
-                from app.db.supabase_client import get_async_supabase_admin
+        async with _scope_cm:
+            repo = ResourcesRepository()
+            resource = await repo.get_resource_by_id(resource_id)
+            if not resource:
+                raise HTTPException(status_code=404, detail="Resource not found")
 
-                client = await get_async_supabase_admin()
-                try:
-                    pm_res = (
-                        await client.table("parsed_media")
-                        .select("download_path")
-                        .eq("id", media_id)
-                        .maybe_single()
-                        .execute()
-                    )
-                    if pm_res.data and pm_res.data.get("download_path"):
-                        file_path = pm_res.data["download_path"]
-                except Exception as e:
-                    logger.warning(
-                        f"parsed_media file lookup failed for media_id={media_id}: {e}"
-                    )
+            file_path = resource.get("file_path")
+            # PR-B: parsed-media-backed resources don't carry the shared
+            # file path on the resources row. Fall through to parsed_media.
+            if not file_path:
+                media_id = resource.get("media_id")
+                if media_id:
+                    from app.db.supabase_client import get_async_supabase_admin
+
+                    client = await get_async_supabase_admin()
+                    try:
+                        pm_res = (
+                            await client.table("parsed_media")
+                            .select("download_path")
+                            .eq("id", media_id)
+                            .maybe_single()
+                            .execute()
+                        )
+                        if pm_res.data and pm_res.data.get("download_path"):
+                            file_path = pm_res.data["download_path"]
+                    except Exception as e:
+                        logger.warning(
+                            f"parsed_media file lookup failed for "
+                            f"media_id={media_id}: {e}"
+                        )
         if not file_path:
             raise HTTPException(status_code=404, detail="No file available")
 
@@ -474,8 +490,11 @@ async def serve_resource_cover(resource_id: str):
     cover-only).
     """
     try:
-        repo = ResourcesRepository()
-        resource = await repo.get_resource_by_id(resource_id)
+        # Public (no-auth) serve → SYSTEM scope for the resources lookup
+        # (deliberate cross-user access). Inert until SCOPE_ENFORCE_RESOURCES.
+        async with system_request_scope(reason="public-share-serve"):
+            repo = ResourcesRepository()
+            resource = await repo.get_resource_by_id(resource_id)
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
@@ -556,8 +575,11 @@ async def serve_resource_cover(resource_id: str):
 async def serve_preview_sprite(resource_id: str):
     """Serve preview sprite sheet for hover scrub (no auth required)."""
     try:
-        repo = ResourcesRepository()
-        resource = await repo.get_resource_by_id(resource_id)
+        # Public (no-auth) serve → SYSTEM scope for the resources lookup
+        # (deliberate cross-user access). Inert until SCOPE_ENFORCE_RESOURCES.
+        async with system_request_scope(reason="public-share-serve"):
+            repo = ResourcesRepository()
+            resource = await repo.get_resource_by_id(resource_id)
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
 
@@ -585,7 +607,12 @@ async def serve_preview_sprite(resource_id: str):
 
 
 @router.patch("/{resource_id}")
-async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep):
+async def update_resource(
+    resource_id: str,
+    data: ResourceUpdate,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
     """Update resource metadata. Use DELETE endpoint for trashing."""
     try:
         repo = ResourcesRepository()
@@ -616,6 +643,7 @@ async def update_resource(resource_id: str, data: ResourceUpdate, auth: AuthDep)
 async def trash_resource_by_platform_id(
     platform_id: str,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
     scope_id: Optional[str] = Query(None),
 ):
     """Move a resource to trash or unlink from a team scope.
@@ -670,6 +698,7 @@ async def trash_resource_by_platform_id(
 async def trash_resource_by_media_id(
     media_id: str,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
     scope_id: Optional[str] = Query(None),
 ):
     """Move a resource to trash or unlink from a scope, by parsed_media.id.
@@ -720,6 +749,7 @@ async def trash_resource_by_media_id(
 async def unlink_resource_by_platform_id(
     platform_id: str,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
     scope_id: Optional[str] = Query(None),
 ):
     """Remove a downloaded video from the user's library by platform_id.
@@ -776,6 +806,7 @@ async def unlink_resource_by_platform_id(
 async def delete_resource(
     resource_id: str,
     auth: AuthDep,
+    _tenant_scope: ScopedRequestDep,
     scope_id: str = Query(...),
     _scope_guard: None = Depends(verify_scope_access),
     folder_id: Optional[str] = Query(None),
@@ -802,7 +833,7 @@ async def delete_resource(
 
 
 @router.post("/{resource_id}/restore")
-async def restore_resource(resource_id: str, auth: AuthDep):
+async def restore_resource(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Restore a trashed resource."""
     try:
         svc = ResourcesService()
@@ -818,7 +849,11 @@ async def restore_resource(resource_id: str, auth: AuthDep):
 
 
 @router.delete("/{resource_id}/permanent")
-async def permanent_delete_resource(resource_id: str, auth: AuthDep):
+async def permanent_delete_resource(
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
     """Permanently delete a resource."""
     try:
         svc = ResourcesService()
@@ -841,7 +876,12 @@ async def permanent_delete_resource(resource_id: str, auth: AuthDep):
 
 
 @router.post("/{resource_id}/move")
-async def move_resource(resource_id: str, data: ResourceMoveRequest, auth: AuthDep):
+async def move_resource(
+    resource_id: str,
+    data: ResourceMoveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
     """Move a resource to a different folder."""
     try:
         svc = ResourcesService()
@@ -865,7 +905,7 @@ async def move_resource(resource_id: str, data: ResourceMoveRequest, auth: AuthD
 
 
 @router.get("/{resource_id}/tags")
-async def list_resource_tags(resource_id: str, auth: AuthDep):
+async def list_resource_tags(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Get all tags for a resource."""
     try:
         repo = ResourcesRepository()
@@ -877,7 +917,12 @@ async def list_resource_tags(resource_id: str, auth: AuthDep):
 
 
 @router.post("/{resource_id}/tags")
-async def add_resource_tag(resource_id: str, data: ResourceTagRequest, auth: AuthDep):
+async def add_resource_tag(
+    resource_id: str,
+    data: ResourceTagRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
     """Add a tag to a resource."""
     try:
         repo = ResourcesRepository()
@@ -899,7 +944,12 @@ async def add_resource_tag(resource_id: str, data: ResourceTagRequest, auth: Aut
 
 
 @router.delete("/{resource_id}/tags/{tag_id}")
-async def remove_resource_tag(resource_id: str, tag_id: str, auth: AuthDep):
+async def remove_resource_tag(
+    resource_id: str,
+    tag_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
     """Remove a tag from a resource."""
     try:
         repo = ResourcesRepository()

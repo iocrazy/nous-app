@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.resources_repository import ResourcesRepository
@@ -23,7 +24,9 @@ from app.schemas.resources import (
 )
 from app.services.library.resources_service import ResourcesService
 
-router = APIRouter(prefix="/resources")
+# All endpoints require auth (AuthDep) and are resources-dedicated → establish
+# the ambient tenant Scope at the ROUTER level. Inert until SCOPE_ENFORCE_RESOURCES.
+router = APIRouter(prefix="/resources", dependencies=[Depends(scoped_request)])
 
 
 # ============================================

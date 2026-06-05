@@ -8,13 +8,21 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import AuthDep
+from app.core.scope_dep import scoped_request
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.ai._mime_kind import kind_from_mime
 
-router = APIRouter(prefix="/resources", tags=["resources"])
+# All endpoints here require auth (AuthDep) and are resources-dedicated, so the
+# ambient tenant Scope is established at the ROUTER level. Inert until
+# SCOPE_ENFORCE_RESOURCES flips on (the choke point ignores _scope while off).
+router = APIRouter(
+    prefix="/resources",
+    tags=["resources"],
+    dependencies=[Depends(scoped_request)],
+)
 
 
 @router.get("/search")

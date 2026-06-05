@@ -29,6 +29,7 @@ from app.api.media_slides_router import router as slides_router
 from app.api.media_soda_router import router as soda_router
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
+from app.core.scope_dep import ScopedRequestDep
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
 
@@ -113,7 +114,7 @@ async def list_videos(
 
 
 @router.get("/{platform_id}", tags=TAGS_VIDEOS)
-async def get_video(platform_id: str, auth: AuthDep):
+async def get_video(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """
     Get video details
 

@@ -12,13 +12,16 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.library.permission_service import PermissionService
 from app.services.library.resources_service import ResourcesService
 from app.services.media.render.thumbnail_service import ThumbnailService
 
-router = APIRouter(prefix="/resources")
+# All endpoints require auth (AuthDep) and are resources-dedicated → establish
+# the ambient tenant Scope at the ROUTER level. Inert until SCOPE_ENFORCE_RESOURCES.
+router = APIRouter(prefix="/resources", dependencies=[Depends(scoped_request)])
 
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 

@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.deps import AuthDep, get_team_id_for_user
+from app.core.scope_dep import ScopedRequestDep
 from app.db.supabase_client import get_async_supabase_admin as _get_admin
 from app.repositories.ai_repository import AIRepository
 from app.repositories.analysis_repository import AnalysisRepository
@@ -72,7 +73,9 @@ def _format_duration_short(seconds: float) -> str:
 
 
 @router.post("/transcribe/resource/{resource_id}")
-async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
+async def trigger_transcription_by_resource(
+    resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
+):
     """Trigger AI transcription by resource_id."""
     resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
@@ -253,7 +256,9 @@ async def trigger_transcription_by_resource(resource_id: str, auth: AuthDep):
 
 
 @router.post("/summarize/resource/{resource_id}")
-async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
+async def trigger_summary_by_resource(
+    resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
+):
     """Trigger AI summary by resource_id."""
     resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
 
@@ -398,7 +403,9 @@ async def trigger_summary_by_resource(resource_id: str, auth: AuthDep):
 
 
 @router.post("/analyze/resource/{resource_id}")
-async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
+async def trigger_visual_analysis_by_resource(
+    resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
+):
     """Manually trigger L1 cover analysis (analyze_l1_workflow).
 
     Mirrors the trigger_summary_by_resource pattern: dedup → pre-create
@@ -495,7 +502,9 @@ async def trigger_visual_analysis_by_resource(resource_id: str, auth: AuthDep):
 
 
 @router.post("/transcribe/{platform_id}")
-async def trigger_transcription(platform_id: str, auth: AuthDep):
+async def trigger_transcription(
+    platform_id: str, auth: AuthDep, _scope: ScopedRequestDep
+):
     """Manually trigger transcription for a video (legacy, platform_id-based).
 
     Queues the extract_audio -> transcribe chain via Celery.
@@ -620,7 +629,7 @@ async def trigger_transcription(platform_id: str, auth: AuthDep):
 
 
 @router.post("/summarize/{platform_id}")
-async def trigger_summary(platform_id: str, auth: AuthDep):
+async def trigger_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Manually trigger summary generation for a video (legacy, platform_id-based).
 
     Requires an existing transcript. If no transcript exists,
@@ -792,7 +801,9 @@ async def trigger_visual_analysis(platform_id: str, auth: AuthDep):
 
 
 @router.get("/transcript/resource/{resource_id}", response_model=TranscriptResponse)
-async def get_transcript_by_resource(resource_id: str, auth: AuthDep):
+async def get_transcript_by_resource(
+    resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
+):
     """Get transcript for a resource.
 
     "Resource not transcribed yet" returns 200 with full_text=None — NOT
@@ -825,7 +836,7 @@ async def get_transcript_by_resource(resource_id: str, auth: AuthDep):
 
 
 @router.get("/transcript/{platform_id}", response_model=TranscriptResponse)
-async def get_transcript(platform_id: str, auth: AuthDep):
+async def get_transcript(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Get transcript for a media item (legacy, resolves resource from media)."""
     media = await _get_media_or_404(platform_id)
     media_id = media["id"]
@@ -856,7 +867,9 @@ async def get_transcript(platform_id: str, auth: AuthDep):
 
 
 @router.get("/summary/resource/{resource_id}", response_model=SummaryResponse)
-async def get_summary_by_resource(resource_id: str, auth: AuthDep):
+async def get_summary_by_resource(
+    resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
+):
     """Get summary for a resource."""
     # Ownership check
     res_repo = ResourcesRepository()
@@ -882,7 +895,9 @@ async def get_summary_by_resource(resource_id: str, auth: AuthDep):
 
 
 @router.get("/analysis/resource/{resource_id}", response_model=VisualAnalysisResponse)
-async def get_analysis_by_resource(resource_id: str, auth: AuthDep):
+async def get_analysis_by_resource(
+    resource_id: str, auth: AuthDep, _scope: ScopedRequestDep = None
+):
     """Get the L1 visual (cover) analysis for a resource.
 
     Returns 200 with null fields (NOT 404) when the resource hasn't been
@@ -912,7 +927,7 @@ async def get_analysis_by_resource(resource_id: str, auth: AuthDep):
 
 
 @router.get("/summary/{platform_id}", response_model=SummaryResponse)
-async def get_summary(platform_id: str, auth: AuthDep):
+async def get_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Get summary for a media item (legacy, resolves resource from media)."""
     media = await _get_media_or_404(platform_id)
     media_id = media["id"]
