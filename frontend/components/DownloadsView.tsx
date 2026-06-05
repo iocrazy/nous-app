@@ -1118,7 +1118,7 @@ export const DownloadsView: React.FC = () => {
 
       {/* Mobile Search Overlay */}
       {libraryViewMode !== 'feed' && createPortal(
-        <div className="md:hidden fixed top-2.5 right-3 z-40 flex justify-end items-start pointer-events-none">
+        <div className="md:hidden fixed top-[calc(env(safe-area-inset-top,0px)+10px)] right-3 z-40 flex justify-end items-start pointer-events-none">
           <div className="pointer-events-auto flex items-center justify-end">
             {isMobileSearchOpen ? (
               <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-[calc(100vw-80px)] max-w-sm animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
