@@ -26,6 +26,31 @@ html, body {
   text-size-adjust: 100%;
 }
 
+/* Interactive controls must behave like buttons on touch, NOT selectable text.
+   Without this, long-pressing a button on iOS selects its label and pops the
+   Copy / Look Up / Translate callout instead of firing the action. Inputs /
+   textarea / [contenteditable] are intentionally NOT matched, so forms and
+   real copyable text still work. Add the `.selectable` class to opt a specific
+   text node (e.g. a filename the user wants to copy) back into selection. */
+button,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="menuitemradio"],
+[role="option"],
+[role="switch"],
+label {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 /* Prevent iOS Safari auto-zoom on input focus (triggers when font-size < 16px) */
 @media screen and (max-width: 767px) {
   input, select, textarea {
