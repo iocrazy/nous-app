@@ -46,8 +46,8 @@ from app.models.media import (
     Folders,
     ParsedMedia,
     ResourceItems,
-    ResourceVersions,
     Resources,
+    ResourceVersions,
 )
 from app.models.users import UserSettings
 from app.repositories._orm_helpers import _name_to_attr

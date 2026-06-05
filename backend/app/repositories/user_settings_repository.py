@@ -105,8 +105,8 @@ class UserSettingsRepository:
         import datetime
         import uuid
 
-        from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
         from app.models import UserSettings
+        from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
         raw = _orm_obj_to_dict(obj, _name_to_attr(UserSettings))
         out: Dict[str, Any] = {}
