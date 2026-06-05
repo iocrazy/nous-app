@@ -255,6 +255,54 @@ async def test_flag_off_select_under_ambient_scope_unfiltered(
     assert got == {ids.res_a, ids.res_b}, f"flag-off ignores scope, got {got}"
 
 
+async def test_flag_off_orm_insert_no_scope_no_raise(
+    seeded_resources: _Ids, enforce_off
+):
+    """FLAG OFF: an ORM-instance insert (``session.add(Resources(...))`` + flush)
+    with NO scope established must NOT raise — the ``before_insert`` owner-stamp
+    must be gated by ``_is_enforced`` so a non-enforced scoped-by-class table
+    plain-inserts with ``creator_id`` used AS-GIVEN (byte-for-byte legacy).
+
+    (Write-side analogue of the SELECT enforced-set gate. Against 984f8ac6 the
+    ungated ``before_insert`` would raise UnscopedQueryError on the None scope.)
+    """
+    ids = seeded_resources
+    from app.db.engine import get_engine
+    from app.db.session import write_scope
+
+    new_id = _pk()
+    try:
+        async with write_scope() as session:
+            # creator_id set explicitly to a DIFFERENT existing user (user_b):
+            # with the gate OFF this must be inserted as-is, NOT stamped/asserted
+            # against any scope (there is none) — proving the legacy plain path.
+            session.add(
+                Resources(
+                    id=new_id,
+                    creator_id=ids.user_b,
+                    source_type="web",
+                    filename="orm_insert_flag_off",
+                )
+            )
+            await session.flush()  # before_insert fires here — must NOT raise
+
+        # The row persisted with creator_id used as-given (no stamp/assert).
+        async with system_request_scope("test: verify flag-off orm insert"):
+            async with read_scope() as session:
+                got = await session.get(Resources, new_id)
+        assert got is not None, "flag-off ORM insert did not persist"
+        assert (
+            str(got.creator_id) == ids.user_b
+        ), f"creator_id was not used as-given: {got.creator_id!r}"
+    finally:
+        # Explicit cleanup — this row is outside the seeded_resources teardown set.
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM resources WHERE id = :id"), {"id": new_id}
+            )
+
+
 # ── FLAG ON + ambient user scope: own-only reads, foreign excluded ──────
 
 

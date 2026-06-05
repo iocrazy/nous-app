@@ -160,7 +160,12 @@ class Scope:
     mid-request; build a new one to change identity.
     """
 
-    user_id: int
+    # Carries the tenant owner key AS-IS: a uuid string for uuid-keyed owner
+    # columns (resources.creator_id → auth.users.id) or a bigint int for
+    # snowflake-keyed ones. NO code may coerce it — the choke point binds it
+    # directly via ``col == scope.user_id`` (int()/_bigint() would break uuid
+    # scoping).
+    user_id: int | str
     team_ids: frozenset[int] = field(default_factory=frozenset)
     project_ids: frozenset[int] = field(default_factory=frozenset)
 
@@ -803,9 +808,18 @@ def _stamp_user_on_insert(mapper: Any, connection: Any, target: Any) -> None:
     explicitly). Under no scope (None): raise — inserting a tenant row with no
     identity is the write-side equivalent of the fail-closed SELECT, and
     silently NULL-stamping would corrupt ownership.
+
+    FLAG-GATED (write-side analogue of the SELECT enforced-set gate): a
+    scoped-by-class table whose enforcement flag is OFF (``resources`` with
+    ``SCOPE_ENFORCE_RESOURCES=false``) is treated as UNSCOPED here — a plain
+    legacy insert with ``creator_id`` used as-given, no stamp, no raise — so the
+    byte-for-byte-legacy invariant holds even for ORM-instance inserts during the
+    flag-off window. Only ENFORCED tables get the stamp/assert.
     """
     if not isinstance(target, UserScoped):
         return
+    if not _is_enforced(type(target).__tablename__):
+        return  # scoped-by-class but enforcement off → legacy plain insert
 
     scope = _scope.get()
     if scope is SYSTEM:
