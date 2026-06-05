@@ -48,6 +48,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
+from app.db.scope import system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import Folders, ResourceItems, Resources, ResourceVersions
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
@@ -90,15 +91,36 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
     # ── Resources CRUD ──────────────────────────────────────────────
 
     async def create_resource(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """INSERT a resource as an ORM instance (the flip-safe write path).
+
+        A2.5: replaced the Core ``insert(Resources).values().returning()`` —
+        which the scope choke point FORBIDS under a user scope (``_forbid_
+        scoped_bulk_dml``: a Core INSERT never reaches ``before_insert`` so it
+        can't be owner-stamped) — with a ``session.add(instance)`` flush. The
+        instance flush DOES flow through ``before_insert`` (``_stamp_user_on_
+        insert``): under a USER scope it stamps/asserts ``creator_id ==
+        scope.user_id``; under SYSTEM it leaves the owner as-given; with the
+        flag OFF it is a plain legacy insert (no stamp / no raise). The post-
+        flush ``refresh`` reloads the server-default columns (snowflake ``id``,
+        ``created_at``, the 3 ai-status enums, …) so the returned dict matches
+        the old RETURNING-row shape exactly — it is wrapped in
+        ``system_request_scope`` because ``session.refresh`` (and lazy-load of
+        the post-flush-expired columns by ``_resources_row_to_dict``) issues a
+        ``from_statement`` PK reload that the choke point treats as
+        non-injectable (deny-by-default RAISE under a USER scope). Reading back
+        the row we JUST wrote — whose ownership ``before_insert`` already
+        verified equals the active scope — to materialize server defaults is a
+        safe, owner-agnostic internal read."""
         try:
             async with write_scope() as session:
-                result = await session.execute(
-                    insert(Resources)
-                    .values(**data)
-                    .returning(*Resources.__table__.columns)
+                obj = Resources(
+                    **{_RESOURCES_NAME_TO_ATTR.get(k, k): v for k, v in data.items()}
                 )
-                row = result.mappings().first()
-                created = _mappings_dict(row) if row else {}
+                session.add(obj)
+                await session.flush()  # before_insert fires (stamp/assert)
+                async with system_request_scope(reason="orm-refresh-own-write"):
+                    await session.refresh(obj)  # load server-default columns
+                    created = _resources_row_to_dict(obj)
             logger.info(f"Created resource: {data.get('filename')}")
             return created
         except Exception as e:
@@ -275,17 +297,37 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
     async def update_resource(
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """UPDATE a resource by id, COMMITTING via write_scope (the P0 fix)."""
+        """UPDATE a resource by id via load-then-modify, COMMITTING via
+        write_scope (the P0 fix).
+
+        A2.5: replaced the Core ``update(Resources).where().values().
+        returning()`` — FORBIDDEN under a user scope (``_forbid_scoped_bulk_
+        dml``: a bulk UPDATE tree can't be safely tenant-filtered) — with the
+        sanctioned load-then-modify pattern. ``session.get`` flows through the
+        SELECT injection: under a USER scope the choke point injects
+        ``creator_id == scope.user_id``, so a row owned by another user loads
+        as None (correct fail-closed isolation) and we return ``{}`` —
+        preserving the legacy "update of a nonexistent id → {}" contract. The
+        dirty-instance flush is governed by the unit-of-work, no Core DML.
+
+        The post-flush ``refresh`` (re-materializing server-managed columns
+        like ``updated_at`` for the returned dict) is wrapped in
+        ``system_request_scope`` for the same reason as ``create_resource``: a
+        ``from_statement`` PK reload is non-injectable → deny-by-default RAISE
+        under a USER scope. The row's ownership was already proven by the
+        injected ``session.get`` above, so reading it back is owner-agnostic-
+        safe."""
         try:
             async with write_scope() as session:
-                result = await session.execute(
-                    update(Resources)
-                    .where(Resources.id == self._bigint(resource_id))
-                    .values(**data)
-                    .returning(*Resources.__table__.columns)
-                )
-                row = result.mappings().first()
-                updated = _mappings_dict(row) if row else {}
+                obj = await session.get(Resources, self._bigint(resource_id))
+                if obj is None:
+                    return {}
+                for k, v in data.items():
+                    setattr(obj, _RESOURCES_NAME_TO_ATTR.get(k, k), v)
+                await session.flush()
+                async with system_request_scope(reason="orm-refresh-own-write"):
+                    await session.refresh(obj)
+                    updated = _resources_row_to_dict(obj)
             logger.info(f"Updated resource {resource_id}")
             return updated
         except Exception as e:
@@ -293,13 +335,30 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
             raise
 
     async def delete_resource(self, resource_id: str) -> bool:
+        """DELETE a resource by id via load-then-delete, COMMITTING via
+        write_scope.
+
+        A2.5: replaced the Core ``delete(Resources).where()`` — FORBIDDEN
+        under a user scope (``_forbid_scoped_bulk_dml``) — with a
+        load-then-``session.delete(instance)``. ``session.get`` flows through
+        the SELECT injection: under a USER scope it injects ``creator_id ==
+        scope.user_id``, so a CROSS-USER id loads None → no-op → still returns
+        ``True``. Returning True on not-found / not-owned keeps the boolean
+        interface stable (idempotent delete) AND is the correct isolation
+        behaviour: a user cannot observe (or delete) another user's row, and a
+        cross-user delete is silently a no-op rather than an error."""
         try:
             async with write_scope() as session:
-                await session.execute(
-                    sa_delete(Resources).where(
-                        Resources.id == self._bigint(resource_id)
-                    )
-                )
+                obj = await session.get(Resources, self._bigint(resource_id))
+                if obj is not None:
+                    await session.delete(obj)
+                    # Not load-bearing: write_scope commits (and thus flushes)
+                    # at block exit. Kept only to surface any FK/constraint
+                    # error inside this try (so it is logged + re-raised here)
+                    # rather than at the outer commit. Contrast create/update,
+                    # where flush IS required (before_insert / dirty-UPDATE
+                    # must hit the DB before the subsequent refresh).
+                    await session.flush()
             logger.info(f"Deleted resource {resource_id}")
             return True
         except Exception as e:
@@ -307,13 +366,35 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
             raise
 
     async def count_resources_by_media_id(self, media_id: str) -> int:
+        """Count how many resources (across ALL users) reference a parsed_media.
+
+        A2.5 — DATA-LOSS FIX + well-formed projection. This is a CROSS-USER GC
+        reference count: callers (``resources_service.permanent_delete`` /
+        ``cleanup_expired_trash``) use ``remaining == 0`` to decide whether to
+        delete the SHARED physical files + parsed_media record. Under
+        enforcement, if this count were user-scoped, user A deleting their
+        resource would NOT see user B's resource for the same media_id → it
+        would delete files B still needs. So we make it ALWAYS GLOBAL by
+        wrapping the query in ``system_request_scope`` (owner-agnostic
+        regardless of the caller's ambient scope — it is semantically "does ANY
+        user still reference this media"). Nesting SYSTEM inside the already-
+        SYSTEM ``cleanup_expired_trash`` path is a no-op set/reset; inside the
+        USER ``permanent_delete`` path it temporarily sets SYSTEM for this read
+        then resets to USER.
+
+        Also projects a scoped column — ``func.count(Resources.id)`` instead of
+        the old ``func.count()`` + ``select_from`` — so the statement is
+        well-formed (a bare ``count(*)`` over a scoped table with no projected
+        scoped column is deny-by-default RAISE; here SYSTEM scope means no
+        injection either way, but the projected form is the canonical shape)."""
         try:
-            async with read_scope() as session:
-                count = await session.scalar(
-                    select(func.count())
-                    .select_from(Resources)
-                    .where(Resources.media_id == self._bigint(media_id))
-                )
+            async with system_request_scope(reason="media-refcount-gc"):
+                async with read_scope() as session:
+                    count = await session.scalar(
+                        select(func.count(Resources.id)).where(
+                            Resources.media_id == self._bigint(media_id)
+                        )
+                    )
             return int(count or 0)
         except Exception as e:
             logger.error(f"Failed to count resources for media {media_id}: {e}")
