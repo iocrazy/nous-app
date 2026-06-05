@@ -216,6 +216,7 @@ async def finalize_post_download_step(
 
     Mirrors the legacy task's post-download bookkeeping verbatim
     except the task_tracking lifecycle calls (DBOS owns those now)."""
+    from app.db.scope import Scope, request_scope
     from app.repositories.media_repository import get_media_repository
     from app.repositories.resources_repository import get_resources_repository
 
@@ -226,87 +227,95 @@ async def finalize_post_download_step(
     if resource_id:
         res_repo = get_resources_repository()
 
-        fresh_media = await media_repo.get_by_platform_id(platform_id)
-        if fresh_media:
-            fresh_download_path = fresh_media.get("download_path")
-            actual_size = (
-                fresh_media.get("storage_size")
-                or fresh_media.get("datasize_bytes")
-                or 0
-            )
-            if actual_size > 0:
-                # File is already on disk + parsed_media row carries the
-                # canonical size; the resources.file_size_bytes mirror is
-                # a UI nicety. Don't let a transient PostgREST hiccup
-                # here promote a successful download to a failed task —
-                # downstream `mark_task_user_visible_complete_step`
-                # would never get a chance to run, and 资源库 already
-                # shows the file the user wanted.
-                try:
-                    await res_repo.update_resource(
-                        resource_id, {"file_size_bytes": actual_size}
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "[download.finalize] file_size mirror failed "
-                        "(non-fatal, file is already on disk) "
-                        "resource_id=%s actual_size=%d err=%s: %r",
-                        resource_id,
-                        actual_size,
-                        type(e).__name__,
-                        e,
-                    )
-
-            # Mirror resolution from parsed_media → resources so the library
-            # grid / Justified view can size by aspect ratio. The download
-            # path previously only stored resolution on parsed_media, leaving
-            # resources.resolution NULL (the download *detail* reads
-            # parsed_media, so it looked fine there). Non-fatal.
-            resolution = fresh_media.get("resolution")
-            if resolution:
-                try:
-                    await res_repo.update_resource(
-                        resource_id, {"resolution": resolution}
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "[download.finalize] resolution mirror failed "
-                        "(non-fatal) resource_id=%s err=%s: %r",
-                        resource_id,
-                        type(e).__name__,
-                        e,
-                    )
-
-        try:
-            existing_versions = await res_repo.get_versions(resource_id)
-            if not existing_versions and fresh_download_path:
-                file_path = fresh_download_path
-                filename = (
-                    file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+        # A2 pass 2: establish the ambient USER tenant scope for the
+        # resources-repo access below (update_resource / get_versions /
+        # create_version / update_version all act ON BEHALF OF this download's
+        # user). `user_id` is a required step kwarg (uuid string) — always
+        # present — so no system-scope fallback is needed. INERT until
+        # SCOPE_ENFORCE_RESOURCES flips. The interleaved media_repo (parsed_media)
+        # calls are harmless inside the scope (parsed_media is not enforced).
+        async with request_scope(Scope(user_id=user_id)):
+            fresh_media = await media_repo.get_by_platform_id(platform_id)
+            if fresh_media:
+                fresh_download_path = fresh_media.get("download_path")
+                actual_size = (
+                    fresh_media.get("storage_size")
+                    or fresh_media.get("datasize_bytes")
+                    or 0
                 )
-                mime_type = "video/mp4"
-                if filename.endswith(".webm"):
-                    mime_type = "video/webm"
-                elif filename.endswith(".mkv"):
-                    mime_type = "video/x-matroska"
-                version_data = {
-                    "resource_id": resource_id,
-                    "version_number": 1,
-                    "filename": filename,
-                    "file_path": file_path,
-                    "file_size_bytes": actual_size if actual_size > 0 else None,
-                    "mime_type": mime_type,
-                    "uploaded_by": user_id,
-                }
-                await res_repo.create_version(version_data)
-            elif existing_versions and actual_size > 0:
-                for ver in existing_versions:
-                    if not ver.get("file_size_bytes"):
-                        await res_repo.update_version(
-                            ver["id"], {"file_size_bytes": actual_size}
+                if actual_size > 0:
+                    # File is already on disk + parsed_media row carries the
+                    # canonical size; the resources.file_size_bytes mirror is
+                    # a UI nicety. Don't let a transient PostgREST hiccup
+                    # here promote a successful download to a failed task —
+                    # downstream `mark_task_user_visible_complete_step`
+                    # would never get a chance to run, and 资源库 already
+                    # shows the file the user wanted.
+                    try:
+                        await res_repo.update_resource(
+                            resource_id, {"file_size_bytes": actual_size}
                         )
-        except Exception as ve:
-            logger.warning(f"[download.finalize] resource_version backfill: {ve}")
+                    except Exception as e:
+                        logger.warning(
+                            "[download.finalize] file_size mirror failed "
+                            "(non-fatal, file is already on disk) "
+                            "resource_id=%s actual_size=%d err=%s: %r",
+                            resource_id,
+                            actual_size,
+                            type(e).__name__,
+                            e,
+                        )
+
+                # Mirror resolution from parsed_media → resources so the library
+                # grid / Justified view can size by aspect ratio. The download
+                # path previously only stored resolution on parsed_media, leaving
+                # resources.resolution NULL (the download *detail* reads
+                # parsed_media, so it looked fine there). Non-fatal.
+                resolution = fresh_media.get("resolution")
+                if resolution:
+                    try:
+                        await res_repo.update_resource(
+                            resource_id, {"resolution": resolution}
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "[download.finalize] resolution mirror failed "
+                            "(non-fatal) resource_id=%s err=%s: %r",
+                            resource_id,
+                            type(e).__name__,
+                            e,
+                        )
+
+            try:
+                existing_versions = await res_repo.get_versions(resource_id)
+                if not existing_versions and fresh_download_path:
+                    file_path = fresh_download_path
+                    filename = (
+                        file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+                    )
+                    mime_type = "video/mp4"
+                    if filename.endswith(".webm"):
+                        mime_type = "video/webm"
+                    elif filename.endswith(".mkv"):
+                        mime_type = "video/x-matroska"
+                    version_data = {
+                        "resource_id": resource_id,
+                        "version_number": 1,
+                        "filename": filename,
+                        "file_path": file_path,
+                        "file_size_bytes": actual_size if actual_size > 0 else None,
+                        "mime_type": mime_type,
+                        "uploaded_by": user_id,
+                    }
+                    await res_repo.create_version(version_data)
+                elif existing_versions and actual_size > 0:
+                    for ver in existing_versions:
+                        if not ver.get("file_size_bytes"):
+                            await res_repo.update_version(
+                                ver["id"], {"file_size_bytes": actual_size}
+                            )
+            except Exception as ve:
+                logger.warning(f"[download.finalize] resource_version backfill: {ve}")
 
         # parsed_media status fallback
         pm_status_updates: dict[str, str] = {}

@@ -25,6 +25,7 @@ from loguru import logger
 
 from app.boundary import safe_async_client
 from app.core.utils import Utils
+from app.db.scope import Scope, request_scope
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.infra.unified_task_manager import get_task_manager
@@ -170,11 +171,15 @@ async def _download_cover(
         {"cover_download_path": rel, "cover_download_status": "completed"},
     )
 
-    res_row = existing or await res_repo.get_resource_by_media_id_and_creator(
-        media_id, user_id
-    )
-    if res_row:
-        await res_repo.update_resource(res_row["id"], {"cover_image_path": rel})
+    # A2 pass 2: ambient USER tenant scope for the resources-repo access — this
+    # cover persist acts ON BEHALF OF `user_id` (a required uuid-string arg here,
+    # always present). INERT until SCOPE_ENFORCE_RESOURCES flips.
+    async with request_scope(Scope(user_id=user_id)):
+        res_row = existing or await res_repo.get_resource_by_media_id_and_creator(
+            media_id, user_id
+        )
+        if res_row:
+            await res_repo.update_resource(res_row["id"], {"cover_image_path": rel})
     return True
 
 
@@ -220,9 +225,13 @@ async def soda_download_workflow(
 
         await manager.update_progress(wf_id, 50, subtitle="Fetching cover")
         res_repo = ResourcesRepository()
-        existing = await res_repo.get_resource_by_media_id_and_creator(
-            str(media_id), user_id
-        )
+        # A2 pass 2: ambient USER scope for the resources read acting on behalf
+        # of `user_id` (required arg, always present). _download_cover below
+        # self-wraps. INERT until SCOPE_ENFORCE_RESOURCES flips.
+        async with request_scope(Scope(user_id=user_id)):
+            existing = await res_repo.get_resource_by_media_id_and_creator(
+                str(media_id), user_id
+            )
         cover_ok = False
         try:
             cover_ok = await _download_cover(
@@ -299,20 +308,24 @@ async def soda_download_workflow(
     fields = build_resource_fields(
         file_path=rel, ext=plan.ext, size_bytes=size, title=title
     )
-    existing = await res_repo.get_resource_by_media_id_and_creator(
-        str(media_id), user_id
-    )
-    if existing:
-        await res_repo.update_resource(existing["id"], fields)
-    else:
-        await res_repo.create_resource(
-            {
-                "creator_id": user_id,
-                "media_id": str(media_id),
-                "source_type": "web",
-                **fields,
-            }
+    # A2 pass 2: ambient USER scope for the resources read/upsert acting on
+    # behalf of `user_id` (required arg, always present). INERT until
+    # SCOPE_ENFORCE_RESOURCES flips.
+    async with request_scope(Scope(user_id=user_id)):
+        existing = await res_repo.get_resource_by_media_id_and_creator(
+            str(media_id), user_id
         )
+        if existing:
+            await res_repo.update_resource(existing["id"], fields)
+        else:
+            await res_repo.create_resource(
+                {
+                    "creator_id": user_id,
+                    "media_id": str(media_id),
+                    "source_type": "web",
+                    **fields,
+                }
+            )
 
     # 6. Best-effort cover download (douyinpic.com blocks browser hot-linking,
     #    so the assembled remote URL 404s in the UI). The audio already
