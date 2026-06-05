@@ -169,3 +169,56 @@ async def test_thumbnail_workflow_establishes_system_scope():
         f"{captured.get('scope')!r} — system-thumbnail wrap regression."
     )
     assert current_scope() is None, "ambient scope leaked after the workflow"
+
+
+# ─── 4. version-upload background thumbnail helper → USER scope ────────────
+#
+# Fix 1 (epic-A review): the version-upload endpoint dispatches the thumbnail via
+# ``background_tasks.add_task`` — which FastAPI runs AFTER the response, i.e. AFTER
+# the request's ``ScopedRequestDep`` ``finally`` has reset the ambient scope. The
+# ``_scoped_generate_thumbnail`` helper re-establishes a USER scope INSIDE the
+# background coroutine so the ORM ``resources`` write (``update_resource``) has an
+# ambient scope once the flag flips. This pins that the helper sets the right
+# USER scope at the moment ``generate_thumbnail`` runs, and resets it after.
+
+
+async def test_version_upload_thumbnail_helper_establishes_user_scope():
+    """``_scoped_generate_thumbnail(svc, user_id, **kwargs)`` runs
+    ``svc.generate_thumbnail`` under ``request_scope(Scope(user_id=user_id))``.
+
+    A fake svc records ``current_scope()`` at the point generate_thumbnail runs;
+    assert it is a USER ``Scope`` for the uploader and resets to ``None`` after."""
+    from app.api.resources_versions_router import _scoped_generate_thumbnail
+
+    captured: dict[str, object] = {}
+
+    class _FakeSvc:
+        async def generate_thumbnail(self, **kwargs):
+            captured["scope"] = current_scope()
+            captured["kwargs"] = kwargs
+            return "thumb.webp"
+
+    await _scoped_generate_thumbnail(
+        _FakeSvc(),
+        _USER,
+        resource_id="r1",
+        file_path="teams/u/uploads/r1/v.mp4",
+        mime_type="video/mp4",
+        scope_id="s1",
+    )
+
+    scope = captured.get("scope")
+    assert scope is not SYSTEM, "expected USER scope, got SYSTEM"
+    assert isinstance(scope, Scope), (
+        f"ambient scope not set during background thumbnail: {scope!r}. "
+        "request_scope wiring regression on _scoped_generate_thumbnail."
+    )
+    assert scope.user_id == _USER, f"scope user_id mismatch: {scope.user_id!r}"
+    # The generate_thumbnail kwargs were forwarded verbatim.
+    assert captured["kwargs"] == {
+        "resource_id": "r1",
+        "file_path": "teams/u/uploads/r1/v.mp4",
+        "mime_type": "video/mp4",
+        "scope_id": "s1",
+    }
+    assert current_scope() is None, "ambient scope leaked after the background task"

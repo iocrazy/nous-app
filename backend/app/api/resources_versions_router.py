@@ -36,6 +36,23 @@ router = APIRouter(prefix="/resources")
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 
 
+async def _scoped_generate_thumbnail(svc: ThumbnailService, user_id, **kwargs) -> None:
+    """Run ``generate_thumbnail`` under its OWN ambient USER scope.
+
+    FastAPI ``BackgroundTasks`` run AFTER the response is sent — i.e. AFTER the
+    request's ``ScopedRequestDep`` generator ``finally`` has already reset the
+    ambient scope. ``generate_thumbnail`` then issues an ORM write on
+    ``resources`` (``ThumbnailService.update_resource``); with no ambient scope it
+    would hit ``UnscopedQueryError`` once ``SCOPE_ENFORCE_RESOURCES`` flips (and be
+    swallowed by generate_thumbnail's try/except → thumbnail silently not
+    persisted on version upload). So we re-establish the scope INSIDE the
+    background coroutine — the contextvar must be set in the task's OWN execution,
+    not at dispatch time. We use a USER scope from the uploader's identity (it is
+    the user's own resource — tighter than SYSTEM). Inert until the flag flips."""
+    async with request_scope(Scope(user_id=user_id)):
+        await svc.generate_thumbnail(**kwargs)
+
+
 @router.get("/{resource_id}/versions")
 async def list_versions(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """List all versions of a resource."""
@@ -89,7 +106,9 @@ async def upload_version(
             item = await repo.get_first_resource_item(resource_id)
             if item:
                 background_tasks.add_task(
-                    thumbnail_svc.generate_thumbnail,
+                    _scoped_generate_thumbnail,
+                    thumbnail_svc,
+                    auth.user_id,
                     resource_id=resource_id,
                     file_path=result["file_path"],
                     mime_type=result.get("mime_type", ""),
