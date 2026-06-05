@@ -102,6 +102,20 @@ class Settings(BaseSettings):
         "Covers parsed_media CRUD + lists + search + statistics; the 9 "
         "wrapper methods route through the ORM overrides via Python MRO)",
     )
+    SCOPE_ENFORCE_RESOURCES: bool = Field(
+        default=False,
+        description="Activate the app-layer tenant-scope choke point "
+        "(app/db/scope.py) for the `resources` table (epic A / A1). The "
+        "`Resources` model ALWAYS mixes in `UserScoped(creator_id)` for a stable "
+        "class hierarchy, but the choke point ENFORCES resources only when this "
+        "flag is on: off (default) = fully legacy/inert (resources behaves "
+        "exactly as an unscoped table — no tenant injection, no fail-closed "
+        "raise, no compile overhead); on = deny-by-default tenant isolation "
+        "(reads injected with `creator_id == scope.user_id`, cross-user bulk "
+        "DML forbidden, unscoped access fail-closed). Default-off so the mixin "
+        "and all callers can land BEFORE enforcement flips on. Instant rollback "
+        "= flip back to false.",
+    )
     USE_ORM_USER_SETTINGS: bool = Field(
         default=False,
         description="Route UserSettingsRepository reads + the settings_json "

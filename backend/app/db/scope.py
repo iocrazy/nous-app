@@ -77,17 +77,23 @@ propagates across ``await``, so the scope binds to the *task*, not the pooled
 connection. That makes it Supavisor-pooling-safe — a checked-out connection
 carries no scope state; the task does.
 
-INERTNESS: the events are registered against the ``Session`` class on import,
-but they are no-ops until a *production* model inherits one of the marker
-mixins in app/db/orm_base.py (``UserScoped`` / ``TeamScoped`` /
-``ProjectScoped``). No prod model is mixed in yet, so registering the events
-changes no existing behaviour (the existing unscoped repos keep working).
+INERTNESS / FLAG-GATED ENFORCEMENT: the events are registered against the
+``Session`` class on import, but a scoped-by-class model is only ENFORCED when
+its per-table enforcement gate is on (see ``_ENFORCEMENT_OVERRIDES`` /
+``_is_enforced``). The first prod opt-in is ``Resources`` (``UserScoped`` on
+``creator_id``), gated by ``settings.SCOPE_ENFORCE_RESOURCES`` (default false):
+with the flag off, ``resources`` is absent from the enforced-table set, so
+``_enforce_scope`` hits the ``if not scoped_names: return`` short-circuit and
+behaves byte-for-byte like the pre-mixin state (no injection, no raise, no
+compile overhead — the existing unscoped repos keep working). Test models on
+``_TestBase`` have no override entry → they default to ENFORCED, so the
+choke-point test suite needs no flag.
 """
 
 from __future__ import annotations
 
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -101,11 +107,46 @@ from sqlalchemy.sql import visitors
 from sqlalchemy.sql.dml import UpdateBase
 from sqlalchemy.sql.schema import Table
 
+from app.core.config import settings
 from app.db.orm_base import ProjectScoped, TeamScoped, UserScoped
 from app.db.session import get_sessionmaker
 
 # Marker mixins whose presence makes a mapped class "scoped" (one per axis).
 _SCOPE_MIXINS: tuple[type, ...] = (UserScoped, TeamScoped, ProjectScoped)
+
+# ── Flag-gated ENFORCEMENT registry ─────────────────────────────────────
+#
+# A class inheriting a scope mixin is SCOPED-BY-CLASS. Whether the choke point
+# actually ENFORCES it (injects the tenant filter / fails closed / forbids
+# cross-user DML) is a separate, runtime, per-table decision so a production
+# model can carry the mixin for a stable class hierarchy while enforcement is
+# rolled out behind a flag (cover-all-callers-then-flip — see the A1 plan).
+#
+#   table name → predicate. A scoped-by-class table is ENFORCED iff its
+#   predicate returns True. Tables NOT in this map default to ENFORCED (so the
+#   choke-point TEST models and any future always-on table work with no entry).
+#
+# The predicate reads ``settings`` live (a cheap attribute access), so flipping
+# the flag — or a test ``patch``-ing it — takes effect on the very next query
+# with no cache to invalidate (the enforcement filter is intentionally NOT
+# cached; only the raw scoped-by-class map is, on ``mapper_configured``).
+_ENFORCEMENT_OVERRIDES: dict[str, Callable[[], bool]] = {
+    "resources": lambda: settings.SCOPE_ENFORCE_RESOURCES,
+}
+
+
+def _is_enforced(tablename: str) -> bool:
+    """Whether the choke point ENFORCES a scoped-by-class table right now.
+
+    Tables in ``_ENFORCEMENT_OVERRIDES`` are gated by their predicate (a live
+    settings read); every other scoped-by-class table defaults to enforced. With
+    ``SCOPE_ENFORCE_RESOURCES=false`` (prod default) ``resources`` is NOT enforced
+    → it behaves byte-for-byte like an unscoped table (no injection, no raise, no
+    compile overhead), preserving the inert guarantee while the model still
+    carries the ``UserScoped`` mixin.
+    """
+    return _ENFORCEMENT_OVERRIDES.get(tablename, lambda: True)()
+
 
 # ── Scope value object + sentinels ──────────────────────────────────────
 
@@ -284,18 +325,76 @@ async def user_read_session(scope: Scope) -> AsyncIterator[AsyncSession]:
         _scope.reset(token)
 
 
+# ── Ambient request/task scope entry (no DB session) ────────────────────
+
+
+@asynccontextmanager
+async def request_scope(scope: Scope) -> AsyncIterator[None]:
+    """Establish the ambient ``Scope`` for the current request/task WITHOUT
+    opening a DB session.
+
+    The entry-ambient threading model (plan D1): a request/task boundary sets the
+    ``_scope`` ContextVar ONCE; repo methods keep calling ``read_scope()`` /
+    ``write_scope()`` (which do NOT touch ``_scope``), so the choke point reads
+    whatever ambient scope this entry established. Unlike ``user_session`` this
+    opens NO session and begins NO transaction — it is purely the scope boundary
+    (the FastAPI dependency below and DBOS workflow/task entries use it).
+
+    Sets ``_scope`` on enter, resets it in ``finally`` so it never leaks to a
+    sibling task (ContextVar copy-on-task semantics + explicit reset).
+    """
+    token = _scope.set(scope)
+    try:
+        yield
+    finally:
+        _scope.reset(token)
+
+
+@asynccontextmanager
+async def system_request_scope(reason: str) -> AsyncIterator[None]:
+    """Ambient SYSTEM-scope boundary (no DB session) — the session-less analogue
+    of ``system_session``.
+
+    Sets ``_scope = SYSTEM`` for the block so every scoped query inside is treated
+    as deliberate cross-user / system access (no injection, no fail-closed raise).
+    ``reason`` is mandatory and logged at INFO for the same audit/greppability
+    reason as ``system_session`` (every loguru sink is registered at INFO). Use at
+    a system task entry (sweeper / scheduled workflow) where repo methods then use
+    plain ``read_scope()`` / ``write_scope()``.
+    """
+    logger.info(
+        "[scope] system_request_scope opened: {} (caller={})",
+        reason,
+        _audit_caller(),
+    )
+    token = _scope.set(SYSTEM)
+    try:
+        yield
+    finally:
+        _scope.reset(token)
+
+
 # ── Scoped-model introspection helpers ──────────────────────────────────
 
 
 def _scoped_mappers(state: Any) -> list[Mapper]:
-    """Mappers in the statement whose class inherits a scope marker mixin.
+    """Mappers in the statement whose class inherits a scope marker mixin AND is
+    currently ENFORCED (flag-gated — see ``_is_enforced``).
 
     ``state.all_mappers`` only contains entities in the *columns clause* — these
     are the mappers ``with_loader_criteria`` can actually inject into (the
     "injectable set"). Scoped tables reached only via a JOIN / subquery / CTE are
     NOT here; those are caught by the full-statement traversal instead.
+
+    A scoped-by-class table whose enforcement flag is OFF (e.g. ``resources``
+    with ``SCOPE_ENFORCE_RESOURCES=false``) is excluded here → it is invisible to
+    the write-forbid and the columns-clause injection, i.e. treated as unscoped.
     """
-    return [m for m in state.all_mappers if issubclass(m.class_, _SCOPE_MIXINS)]
+    return [
+        m
+        for m in state.all_mappers
+        if issubclass(m.class_, _SCOPE_MIXINS) and _is_enforced(m.local_table.name)
+    ]
 
 
 # ── Scoped-table registry (table name → mapped class, across ALL registries) ──
@@ -347,9 +446,31 @@ def _scoped_table_map() -> dict[str, type]:
     return _scoped_table_map_cache
 
 
+def _enforced_scoped_table_map() -> dict[str, type]:
+    """The ENFORCED subset of ``_scoped_table_map()`` — scoped-by-class tables
+    whose enforcement flag is currently on (``_is_enforced``).
+
+    The raw map is cached (recomputed only on ``mapper_configured``); the
+    enforcement filter is applied FRESH on every call (a cheap settings read per
+    scoped table) so flipping ``SCOPE_ENFORCE_RESOURCES`` — or a test patching it
+    — takes effect on the next query with no cache to invalidate. Every
+    enforcement decision in this module flows through this filtered view (or
+    ``_scoped_mappers``), never the raw ``issubclass`` map.
+    """
+    return {
+        name: cls for name, cls in _scoped_table_map().items() if _is_enforced(name)
+    }
+
+
 def _scoped_table_names() -> frozenset[str]:
-    """Names of every table mapped by a scope-mixin class (keys of the map)."""
-    return frozenset(_scoped_table_map().keys())
+    """Names of every ENFORCED scoped table (keys of the enforced map).
+
+    With no enforcement flag on (prod default, ``resources`` gated off), this is
+    empty even though ``Resources`` carries the ``UserScoped`` mixin → the
+    ``_enforce_scope`` short-circuit (``if not scoped_names: return``) keeps the
+    choke point fully inert.
+    """
+    return frozenset(_enforced_scoped_table_map().keys())
 
 
 def _axis_criteria(cls: type, scope: Scope):
