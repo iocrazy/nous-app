@@ -17,7 +17,7 @@ owner column ``UserScoped`` names) is a Postgres ``uuid`` holding the Supabase
 auth ``sub``. ``AuthContext.user_id`` is that UUID *string*. We therefore pass it
 THROUGH UNCHANGED — we do NOT apply the ``_bigint`` snowflake-string→int coercion
 used for bigint id columns; SQLAlchemy/asyncpg binds the UUID string against the
-``uuid`` column directly. (The ``Scope.user_id: int`` annotation is nominal — the
+``uuid`` column directly. (The ``Scope.user_id: int | str`` annotation is nominal — the
 frozen dataclass does no runtime validation — and the tenant axis here is a UUID.)
 """
 

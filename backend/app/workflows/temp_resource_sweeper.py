@@ -20,6 +20,7 @@ from typing import AsyncIterator, Tuple
 from dbos import DBOS  # type: ignore[import-not-found]
 from loguru import logger
 
+from app.db.scope import system_request_scope
 from app.services.library.chat_upload import TEMP_FOLDER_NAME
 from app.services.library.temp_ttl_settings import get_chat_temp_ttl_days
 
@@ -114,19 +115,25 @@ async def sweep_temp_resources() -> dict:
 
     Errors in individual scopes are logged and skipped so one bad scope
     never prevents the rest from being swept.
+
+    A2 pass 3: the entire sweep body runs under SYSTEM scope so that flipping
+    ``SCOPE_ENFORCE_RESOURCES`` later finds an ambient scope already established
+    at every repo call (``get_folders``, ``list_resources_in_folder``,
+    ``soft_delete_resource``). INERT until the flag is on.
     """
     started = datetime.now(timezone.utc)
     total_deleted = 0
     scopes_swept = 0
 
-    async for scope_type, scope_id in _iter_scopes():
-        try:
-            total_deleted += await _sweep_scope(scope_type, scope_id)
-            scopes_swept += 1
-        except Exception as exc:
-            logger.exception(
-                f"[temp_sweeper] {scope_type}/{scope_id} sweep failed: {exc}"
-            )
+    async with system_request_scope(reason="temp-resource-sweep"):
+        async for scope_type, scope_id in _iter_scopes():
+            try:
+                total_deleted += await _sweep_scope(scope_type, scope_id)
+                scopes_swept += 1
+            except Exception as exc:
+                logger.exception(
+                    f"[temp_sweeper] {scope_type}/{scope_id} sweep failed: {exc}"
+                )
 
     duration_s = (datetime.now(timezone.utc) - started).total_seconds()
     logger.info(
