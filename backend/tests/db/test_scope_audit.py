@@ -84,9 +84,9 @@ async def test_system_session_audit_includes_caller_context(captured_records) ->
     assert matching, "no system_session audit record reached the INFO sink"
     message = matching[0].record["message"]
     # Caller context = THIS module's helper, not scope.py / contextlib internals.
-    assert "test_scope_audit" in message, (
-        f"caller context missing from audit line: {message!r}"
-    )
-    assert "_open_and_close_system_session" in message, (
-        f"caller function missing from audit line: {message!r}"
-    )
+    assert (
+        "test_scope_audit" in message
+    ), f"caller context missing from audit line: {message!r}"
+    assert (
+        "_open_and_close_system_session" in message
+    ), f"caller function missing from audit line: {message!r}"

@@ -89,8 +89,7 @@ def test_orm_repo_has_same_public_methods_as_legacy():
     orm_methods = {
         name
         for name in dir(ResourcesRepositoryOrm)
-        if not name.startswith("_")
-        and callable(getattr(ResourcesRepositoryOrm, name))
+        if not name.startswith("_") and callable(getattr(ResourcesRepositoryOrm, name))
     }
 
     # ORM can have EXTRA methods (inherited from AsyncpgRepository base —

@@ -395,9 +395,9 @@ async def test_user_session_empty_teams_only_owned(seeded_tables: _Ids):
         rows = result.scalars().all()
 
     got_ids = {r.id for r in rows}
-    assert got_ids == {ids.own}, (
-        f"empty team_ids should yield only the owned row, got {got_ids}"
-    )
+    assert got_ids == {
+        ids.own
+    }, f"empty team_ids should yield only the owned row, got {got_ids}"
 
 
 async def test_unset_scope_raises_unscoped_query_error(seeded_tables: _Ids):
@@ -433,9 +433,9 @@ async def test_before_insert_stamps_user_id_when_unset(seeded_tables: _Ids):
         session.add(row)
         await session.flush()
         # after flush the before_insert event has fired
-        assert row.user_id == ids.user, (
-            f"before_insert did not stamp user_id (got {row.user_id!r})"
-        )
+        assert (
+            row.user_id == ids.user
+        ), f"before_insert did not stamp user_id (got {row.user_id!r})"
 
     # Re-read under the same scope: the stamped row is now visible (proves it
     # was persisted with the scope's user_id).
@@ -789,9 +789,9 @@ async def test_scalar_subquery_scoped_injects_excludes_foreign(seeded_tables: _I
         rows = {mid: sp for mid, sp in result.all()}
 
     assert rows[ids.media_own] == "own", f"owned scalar value wrong: {rows}"
-    assert rows[ids.media_other] is None, (
-        f"FOREIGN scoped payload LEAKED via scalar subquery: {rows}"
-    )
+    assert (
+        rows[ids.media_other] is None
+    ), f"FOREIGN scoped payload LEAKED via scalar subquery: {rows}"
 
 
 async def test_aggregate_over_scoped_column_injects_excludes_foreign(

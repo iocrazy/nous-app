@@ -326,9 +326,9 @@ async def test_monthly_usage_matches_rest_value_types_consumer_path(
 
     # cost_cents: PostgREST renders numeric as a JSON str; float() must still
     # work (the consumer does float(r["cost_cents"])).
-    assert type(row["cost_cents"]) is str, (
-        "cost_cents must match the REST numeric→str contract"
-    )
+    assert (
+        type(row["cost_cents"]) is str
+    ), "cost_cents must match the REST numeric→str contract"
     assert float(row["cost_cents"]) == 0.5
 
 
