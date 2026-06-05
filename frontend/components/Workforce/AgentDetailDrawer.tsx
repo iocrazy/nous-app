@@ -126,7 +126,7 @@ export const AgentDetailDrawer: React.FC<AgentDetailDrawerProps> = ({
       />
       {/* Panel */}
       <aside className="fixed top-0 right-0 z-50 h-full w-full max-w-2xl bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl">
-        <header className="flex items-center justify-between px-5 py-4 border-b border-zinc-800/60">
+        <header className="flex items-center justify-between px-5 pt-[max(env(safe-area-inset-top),16px)] pb-4 border-b border-zinc-800/60">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-100 truncate">
               {detail?.agent.name ?? slug}
