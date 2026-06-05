@@ -40,6 +40,7 @@ Fidelity contract (the swap must be invisible to all call sites):
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -48,7 +49,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
-from app.db.scope import scoped_sql, system_request_scope
+from app.db.scope import is_enforced, scoped_sql, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import Folders, ResourceItems, Resources, ResourceVersions
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
@@ -110,7 +111,13 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
         non-injectable (deny-by-default RAISE under a USER scope). Reading back
         the row we JUST wrote — whose ownership ``before_insert`` already
         verified equals the active scope — to materialize server defaults is a
-        safe, owner-agnostic internal read."""
+        safe, owner-agnostic internal read.
+
+        ENFORCEMENT-GATED (inert guarantee): the ``system_request_scope`` wrap is
+        applied ONLY when ``resources`` is enforced (``is_enforced``). Flag-off the
+        refresh can't raise (no injection) so no wrap is needed — and skipping it
+        avoids emitting a spurious ``orm-refresh-own-write`` audit log + DB row on
+        every create, keeping the flag-off path byte-for-byte legacy."""
         try:
             async with write_scope() as session:
                 obj = Resources(
@@ -118,7 +125,12 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                 )
                 session.add(obj)
                 await session.flush()  # before_insert fires (stamp/assert)
-                async with system_request_scope(reason="orm-refresh-own-write"):
+                refresh_cm = (
+                    system_request_scope(reason="orm-refresh-own-write")
+                    if is_enforced("resources")
+                    else nullcontext()
+                )
+                async with refresh_cm:
                     await session.refresh(obj)  # load server-default columns
                     created = _resources_row_to_dict(obj)
             logger.info(f"Created resource: {data.get('filename')}")
@@ -342,7 +354,13 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
         ``from_statement`` PK reload is non-injectable → deny-by-default RAISE
         under a USER scope. The row's ownership was already proven by the
         injected ``session.get`` above, so reading it back is owner-agnostic-
-        safe."""
+        safe.
+
+        ENFORCEMENT-GATED (inert guarantee): the ``system_request_scope`` wrap is
+        applied ONLY when ``resources`` is enforced (``is_enforced``). Flag-off the
+        refresh can't raise (no injection) so no wrap is needed — and skipping it
+        avoids a spurious ``orm-refresh-own-write`` audit log + DB row on every
+        update, keeping the flag-off path byte-for-byte legacy."""
         try:
             async with write_scope() as session:
                 obj = await session.get(Resources, self._bigint(resource_id))
@@ -351,7 +369,12 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                 for k, v in data.items():
                     setattr(obj, _RESOURCES_NAME_TO_ATTR.get(k, k), v)
                 await session.flush()
-                async with system_request_scope(reason="orm-refresh-own-write"):
+                refresh_cm = (
+                    system_request_scope(reason="orm-refresh-own-write")
+                    if is_enforced("resources")
+                    else nullcontext()
+                )
+                async with refresh_cm:
                     await session.refresh(obj)
                     updated = _resources_row_to_dict(obj)
             logger.info(f"Updated resource {resource_id}")
@@ -428,9 +451,24 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
         ``_delete_physical_files`` handles, nor the parsed_media row — so they
         leak until a later successful permanent_delete or manual cleanup.
         Accepted: leaking files on a rare transient count error beats deleting
-        files another user still references."""
+        files another user still references.
+
+        ENFORCEMENT-GATED (inert guarantee): the ``system_request_scope`` wrap that
+        forces this count GLOBAL is applied ONLY when ``resources`` is enforced
+        (``is_enforced``). Flag-off the choke point does not inject the tenant
+        filter into this query anyway (it is already a cross-user count regardless
+        of ambient scope), so the wrap is a no-op for correctness — skipping it
+        avoids a spurious ``media-refcount-gc`` audit log + DB row on every GC
+        refcount, keeping the flag-off path byte-for-byte legacy. Flag-on the wrap
+        applies, keeping the count global under a USER scope (the data-loss
+        regression guard)."""
         try:
-            async with system_request_scope(reason="media-refcount-gc"):
+            count_cm = (
+                system_request_scope(reason="media-refcount-gc")
+                if is_enforced("resources")
+                else nullcontext()
+            )
+            async with count_cm:
                 async with read_scope() as session:
                     count = await session.scalar(
                         select(func.count(Resources.id)).where(

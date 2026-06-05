@@ -632,3 +632,134 @@ async def test_lifecycle_under_both_flags(seeded: _Ids, repo: ResourcesRepositor
         # lifecycle).
         with pytest.raises(UnscopedQueryError):
             await repo.update_resource(str(ids.res_a), {"filename": "x"})
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Fix 2 (epic-A review) — internal SYSTEM wraps are ENFORCEMENT-GATED
+# ════════════════════════════════════════════════════════════════════════
+#
+# A2.5 wrapped create/update's post-flush ``session.refresh`` and the GC
+# ``count_resources_by_media_id`` in ``system_request_scope`` UNCONDITIONALLY.
+# That logs INFO → an ``application_logs`` row PER create/update/count even
+# flag-OFF, breaking the byte-for-byte-legacy inert guarantee (a real log-volume
+# amplification once ``USE_ORM_RESOURCES`` is on but ``SCOPE_ENFORCE_RESOURCES``
+# is still off). Fix 2 gates all three wraps on ``is_enforced("resources")``.
+#
+# These tests SPY on the module-local ``system_request_scope`` symbol (the repo
+# does ``from app.db.scope import system_request_scope`` → bound in the orm
+# module namespace) and assert it is NOT entered flag-OFF and IS entered flag-ON.
+# They need no DSN (they patch the wrap + the session), so they run in the unit
+# suite — proving the inert restoration without a live DB.
+
+
+class _SpyCm:
+    """Records whether it was entered. Stands in for ``system_request_scope``."""
+
+    def __init__(self, log: list, reason: str) -> None:
+        self._log = log
+        self._reason = reason
+
+    async def __aenter__(self):
+        self._log.append(self._reason)
+        return None
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeSession:
+    """Minimal session: ``refresh`` is a no-op, ``scalar`` returns a fixed count,
+    ``get`` returns a sentinel object so update's load-then-modify proceeds."""
+
+    def __init__(self, get_obj=None, count=7) -> None:
+        self._get_obj = get_obj
+        self._count = count
+
+    def add(self, _obj):  # create path
+        pass
+
+    async def flush(self):
+        pass
+
+    async def refresh(self, _obj):
+        pass
+
+    async def get(self, _model, _pk):
+        return self._get_obj
+
+    async def scalar(self, _stmt):
+        return self._count
+
+
+class _FakeScopeCtx:
+    """Async ctx yielding a ``_FakeSession`` — stands in for write_scope/read_scope."""
+
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.mark.parametrize("enforced", [False, True])
+async def test_internal_system_wrap_gated_on_enforcement(
+    repo: ResourcesRepositoryOrm, enforced: bool
+):
+    """Flag-OFF: NONE of create/update/count enter ``system_request_scope`` (no
+    ``orm-refresh-own-write`` / ``media-refcount-gc`` audit log). Flag-ON: all
+    three DO enter it — the A2.5 behaviour is preserved exactly when enforced."""
+    import app.repositories.resources_repository_orm as orm_mod
+
+    entered: list[str] = []
+
+    def _spy_system_request_scope(reason: str):
+        return _SpyCm(entered, reason)
+
+    # Stub out the real wrap, the row-to-dict (avoid needing a real ORM row), and
+    # the session scopes (avoid a DB). Patch is_enforced to drive both arms.
+    # ``Resources`` is NOT patched — its real ctor + ``.id`` column (used by the
+    # count's ``func.count(Resources.id)``) are needed; only the DB round-trips are
+    # faked away.
+    with (
+        patch.object(orm_mod, "system_request_scope", _spy_system_request_scope),
+        patch.object(orm_mod, "is_enforced", lambda _t: enforced),
+        patch.object(orm_mod, "_resources_row_to_dict", lambda _o: {"id": 1}),
+    ):
+        # create_resource — exercises the refresh wrap
+        with patch.object(
+            orm_mod, "write_scope", lambda: _FakeScopeCtx(_FakeSession())
+        ):
+            await repo.create_resource({"filename": "x"})
+
+        # update_resource — exercises the refresh wrap (get returns a sentinel obj)
+        sentinel_obj = type("R", (), {})()
+        with patch.object(
+            orm_mod,
+            "write_scope",
+            lambda: _FakeScopeCtx(_FakeSession(get_obj=sentinel_obj)),
+        ):
+            await repo.update_resource("123", {"filename": "y"})
+
+        # count_resources_by_media_id — exercises the GC wrap
+        with patch.object(
+            orm_mod, "read_scope", lambda: _FakeScopeCtx(_FakeSession(count=7))
+        ):
+            n = await repo.count_resources_by_media_id("456")
+            assert n == 7
+
+    if enforced:
+        # All three wraps applied (create-refresh, update-refresh, count-GC).
+        assert entered == [
+            "orm-refresh-own-write",
+            "orm-refresh-own-write",
+            "media-refcount-gc",
+        ], f"flag-ON must enter all three SYSTEM wraps, got {entered!r}"
+    else:
+        # INERT GUARANTEE: no wrap → no audit log → byte-for-byte legacy.
+        assert entered == [], (
+            "flag-OFF must NOT enter system_request_scope on any of "
+            f"create/update/count — inert-guarantee regression. Got {entered!r}"
+        )

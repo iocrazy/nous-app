@@ -148,6 +148,17 @@ def _is_enforced(tablename: str) -> bool:
     return _ENFORCEMENT_OVERRIDES.get(tablename, lambda: True)()
 
 
+def is_enforced(tablename: str) -> bool:
+    """Public alias of :func:`_is_enforced` — the canonical enforcement gate.
+
+    Callers OUTSIDE this module (e.g. repos that need to conditionally wrap an
+    internal read in ``system_request_scope`` only when enforcement is on) should
+    use this rather than reading ``settings.SCOPE_ENFORCE_*`` directly, so the
+    per-table flag logic lives in exactly one place (``_ENFORCEMENT_OVERRIDES``).
+    """
+    return _is_enforced(tablename)
+
+
 # ── Scope value object + sentinels ──────────────────────────────────────
 
 
