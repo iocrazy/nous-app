@@ -170,8 +170,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       {/* Modal — wider, fixed height */}
       <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-6xl md:mx-4 h-dvh md:h-[82vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
-        {/* Mobile Header */}
-        <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950/50">
+        {/* Mobile Header — pt respects iOS safe-area so the avatar/name + tab
+            bar below clear the status bar / Dynamic Island (full-screen modal
+            starts at y=0). */}
+        <div className="md:hidden flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800 bg-zinc-950/50">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
               {user.avatarUrl ? (

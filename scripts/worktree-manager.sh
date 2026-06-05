@@ -53,13 +53,27 @@ JSONEOF
 }
 
 next_available_slot() {
-    init_registry
-    # Find first unused slot from 1..15
+    # Derive occupied slots from the REAL worktree env files, NOT the registry.
+    # The old registry-based logic was broken: cmd_create's hand-rolled sed
+    # append never recorded new slots (malformed/mis-nested JSON), so the
+    # registry stayed stuck at {0,1} and every create got slot 2 — 11 worktrees
+    # ended up colliding on port 5177. The filesystem is the source of truth:
+    # each worktree's .worktree.env carries its FRONTEND_PORT, and
+    # slot = FRONTEND_PORT - BASE_FRONTEND_PORT. Slot 0 is master (always taken).
+    local used=" 0 "
+    local f fp
+    for f in "$WORKTREE_DIR"/*/.worktree.env; do
+        [ -f "$f" ] || continue
+        fp=$(grep -E '^FRONTEND_PORT=' "$f" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '[:space:]')
+        [ -n "$fp" ] || continue
+        used="${used}$((fp - BASE_FRONTEND_PORT)) "
+    done
+    local slot
     for slot in $(seq 1 15); do
-        if ! grep -q "\"$slot\":" "$REGISTRY_FILE" 2>/dev/null; then
-            echo "$slot"
-            return
-        fi
+        case "$used" in
+            *" $slot "*) ;;             # slot taken by a live worktree
+            *) echo "$slot"; return ;;  # first free slot
+        esac
     done
     echo -e "${RED}ERROR: All 15 slots used. Remove a worktree first.${NC}" >&2
     exit 1

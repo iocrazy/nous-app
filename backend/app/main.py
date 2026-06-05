@@ -21,6 +21,7 @@ from app.api.ws_router import router as ws_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.utils import Utils
+from app.db.schema_assertions import assert_critical_schema_on_boot
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.startup import healthz_lite as _healthz_lite
 from app.startup.agent_framework_init import (
@@ -59,6 +60,14 @@ async def lifespan(app: FastAPI):
     app.state.healthz_lite_server = _healthz_lite.start(port=_hl_port)
 
     await load_persisted_transcode_settings()
+
+    # Fail-fast schema gate (ORM 2.0 §3.3): verify the live DB has the
+    # tables/columns the ORM-active repos map BEFORE serving traffic. Crashes
+    # boot on a confirmed mismatch (code deployed ahead of migration); the
+    # not-configured / connection-error paths warn + return (DB-less local/CI
+    # boot never crashes). Disable in an emergency via SCHEMA_ASSERT_ON_BOOT=false.
+    await assert_critical_schema_on_boot()
+
     install_background_bootstrap(app)
 
     install_process_role(app)
@@ -414,8 +423,7 @@ try:
 
         try:
             rows = await db_engine.fetch_all(
-                "SELECT scope_id FROM public.resource_items "
-                "WHERE resource_id = :rid",
+                "SELECT scope_id FROM public.resource_items WHERE resource_id = :rid",
                 {"rid": resource_id},
             )
             return tuple(str(r["scope_id"]) for r in rows if r.get("scope_id"))

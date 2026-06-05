@@ -389,8 +389,7 @@ async def create_agent(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
-                    f"user is not the owner or a member of project "
-                    f"{payload.project_id}"
+                    f"user is not the owner or a member of project {payload.project_id}"
                 ),
             )
 
@@ -665,8 +664,7 @@ async def create_skill(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
-                    f"user is not the owner or a member of project "
-                    f"{payload.project_id}"
+                    f"user is not the owner or a member of project {payload.project_id}"
                 ),
             )
 
@@ -1375,7 +1373,10 @@ async def get_usage(
 
     user_uuid = _coerce_user_uuid(auth.user_id)
     if scope == "user":
-        rows = [r for r in rows if r.get("user_id") == str(user_uuid)]
+        # str() both sides: REST renders user_id as a JSON str, but an ORM-backed
+        # repo could hand back a native uuid.UUID — type-tolerant compare so the
+        # user-scope filter never silently returns zero rows.
+        rows = [r for r in rows if str(r.get("user_id")) == str(user_uuid)]
     elif scope == "team":
         rows = [r for r in rows if r.get("team_id") == team_id]
     else:
@@ -1409,7 +1410,10 @@ async def get_usage(
     enriched: list[Dict[str, Any]] = []
     for aid, bucket in per_agent.items():
         try:
-            agent = await agent_repo.get_by_id(UUID(aid))
+            # UUID(str(aid)): aid is a REST str, but an ORM repo could pass a
+            # native uuid.UUID — UUID(uuid_obj) raises AttributeError (swallowed
+            # below → enrichment silently dropped). str() first is idempotent.
+            agent = await agent_repo.get_by_id(UUID(str(aid)))
             if agent:
                 bucket["agent_slug"] = agent.get("slug")
                 bucket["agent_name"] = agent.get("name")
@@ -2196,8 +2200,7 @@ async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, A
     if ext not in _ALLOWED_EXTS:
         raise HTTPException(
             status_code=415,
-            detail=f"unsupported file type {ext!r}; allowed: "
-            f"{sorted(_ALLOWED_EXTS)}",
+            detail=f"unsupported file type {ext!r}; allowed: {sorted(_ALLOWED_EXTS)}",
         )
 
     # Reject oversize before reading the body fully (defensive — also

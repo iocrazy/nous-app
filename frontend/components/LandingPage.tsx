@@ -15,7 +15,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
     <div className="min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
       
       {/* Navbar */}
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-black/50 backdrop-blur-xl">
+      {/* pt = iOS safe-area inset so the Log in / Get Started row clears the
+          status bar / Dynamic Island (otherwise it sits at y=0 and is not
+          tappable on mobile). max(...,12px) guards the first-frame env()=0. */}
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-black/50 backdrop-blur-xl pt-[max(env(safe-area-inset-top),12px)]">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">

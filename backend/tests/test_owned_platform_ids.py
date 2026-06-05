@@ -6,8 +6,8 @@ set)? Used by the Soda playlist endpoint to mark already-owned tracks so
 the user only re-downloads new ones.
 
 The must-have here is the empty-input short-circuit (no DB hit) on both
-the asyncpg (prod) path and the supabase-py (fallback) path. Live
-JOIN behaviour is covered by the integration suite (gated on a real DB).
+the ORM (prod) path and the supabase-py (fallback) path. Live JOIN
+behaviour is covered by the integration suite (gated on a real DB).
 """
 
 from __future__ import annotations
@@ -15,19 +15,24 @@ from __future__ import annotations
 import asyncio
 
 
-def test_asyncpg_empty_input_no_db_hit():
-    """Empty platform_ids → set() WITHOUT touching the DB."""
-    from app.repositories.resources_repository_asyncpg import (
-        ResourcesRepositoryAsyncpg,
-    )
+def test_orm_empty_input_no_db_hit():
+    """Empty platform_ids → set() WITHOUT opening a session."""
+    from app.repositories import resources_repository_orm as orm_mod
+    from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
 
-    repo = ResourcesRepositoryAsyncpg()
+    repo = ResourcesRepositoryOrm()
 
-    async def _boom(*args, **kwargs):  # pragma: no cover - must never run
-        raise AssertionError("fetch_all must not be called for empty input")
+    def _boom(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("read_scope must not be opened for empty input")
 
-    repo.fetch_all = _boom  # type: ignore[assignment]
-    result = asyncio.run(repo.get_owned_platform_ids([], "user-1"))
+    # Patch the module-level read_scope the repo uses; the short-circuit
+    # must return before any session is opened.
+    original = orm_mod.read_scope
+    orm_mod.read_scope = _boom  # type: ignore[assignment]
+    try:
+        result = asyncio.run(repo.get_owned_platform_ids([], "user-1"))
+    finally:
+        orm_mod.read_scope = original  # type: ignore[assignment]
     assert result == set()
 
 
@@ -45,28 +50,51 @@ def test_supabase_empty_input_no_db_hit():
     assert result == set()
 
 
-def test_asyncpg_returns_subset_from_rows():
-    """asyncpg path returns exactly the platform_ids the query yields."""
-    from app.repositories.resources_repository_asyncpg import (
-        ResourcesRepositoryAsyncpg,
-    )
+def test_orm_returns_subset_from_rows():
+    """ORM path returns exactly the platform_ids the query yields, and binds
+    creator_id + the vid list as named params on the file_path-gated SQL."""
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, MagicMock
 
-    repo = ResourcesRepositoryAsyncpg()
+    from app.repositories import resources_repository_orm as orm_mod
+    from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
+
+    repo = ResourcesRepositoryOrm()
     captured = {}
 
-    async def _fake_fetch_all(sql, *params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return [{"platform_id": "vid_a"}, {"platform_id": "vid_c"}]
+    class _Mappings:
+        def all(self):
+            return [{"platform_id": "vid_a"}, {"platform_id": "vid_c"}]
 
-    repo.fetch_all = _fake_fetch_all  # type: ignore[assignment]
-    result = asyncio.run(
-        repo.get_owned_platform_ids(["vid_a", "vid_b", "vid_c"], "user-9")
-    )
+    class _Result:
+        def mappings(self):
+            return _Mappings()
+
+    fake_session = MagicMock()
+
+    async def _execute(stmt, params):
+        captured["sql"] = str(stmt)
+        captured["params"] = params
+        return _Result()
+
+    fake_session.execute = AsyncMock(side_effect=_execute)
+
+    @asynccontextmanager
+    async def _fake_read_scope():
+        yield fake_session
+
+    original = orm_mod.read_scope
+    orm_mod.read_scope = _fake_read_scope  # type: ignore[assignment]
+    try:
+        result = asyncio.run(
+            repo.get_owned_platform_ids(["vid_a", "vid_b", "vid_c"], "user-9")
+        )
+    finally:
+        orm_mod.read_scope = original  # type: ignore[assignment]
+
     assert result == {"vid_a", "vid_c"}
-    # creator_id is bound first, the vid list second.
-    assert captured["params"][0] == "user-9"
-    assert captured["params"][1] == ["vid_a", "vid_b", "vid_c"]
+    assert captured["params"]["creator_id"] == "user-9"
+    assert captured["params"]["pids"] == ["vid_a", "vid_b", "vid_c"]
     assert "file_path IS NOT NULL" in captured["sql"]
 
 
