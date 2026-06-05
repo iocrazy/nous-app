@@ -2,6 +2,7 @@
 
 import asyncio
 import concurrent.futures
+import contextvars
 
 
 def run_async(coro):
@@ -64,5 +65,17 @@ def run_async(coro):
     # Running loop on this thread — isolate via a worker that gets its own
     # fresh loop. ``_runner`` builds the coroutine here; it is awaited (and
     # drained) inside the worker's loop.
+    #
+    # ContextVars do NOT cross a raw thread hop: the pool worker starts with a
+    # FRESH default context, so the ambient ``_scope`` (app.db.scope, set at a
+    # request/task entry boundary) would evaporate before reaching a downstream
+    # resource repo call — a fail-closed UnscopedQueryError once
+    # SCOPE_ENFORCE_RESOURCES is on, or a silent cross-tenant gap. Capture the
+    # caller's context once and run the worker UNDER it: ``ctx.run(asyncio.run,
+    # coro)`` executes ``asyncio.run`` inside a copy of the caller's context on
+    # the worker thread, so the Task ``asyncio.run`` creates inherits ``ctx``
+    # (including ``_scope``). The leak-drain still runs — it lives inside
+    # ``_runner``, which ``asyncio.run`` awaits regardless.
+    ctx = contextvars.copy_context()
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, _runner()).result()
+        return pool.submit(ctx.run, asyncio.run, _runner()).result()
