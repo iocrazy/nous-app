@@ -68,60 +68,83 @@ async def test_insert_requires_at_least_one_field():
 
 
 async def test_insert_builds_parameterized_sql():
-    """insert() must build $1, $2, ... placeholders (no string
+    """insert() must build parameterized placeholders (no string
     interpolation of values). This is the SQL injection guard —
     pin the pattern so a future "let me concat the values" diff
-    breaks loudly."""
+    breaks loudly. It must also route through the COMMITTING
+    ``execute_returning_one`` (eng.begin), NOT the non-committing
+    ``fetch_one`` (eng.connect → silent rollback, the #498 class)."""
+    from app.db import engine as db_engine
     from app.db.repository_base import AsyncpgRepository
 
     class FooRepo(AsyncpgRepository):
         TABLE = "foos"
 
     captured_sql = []
-    captured_args = []
+    captured_params = []
 
-    async def fake_fetch_one(self, sql, *args):
+    async def fake_execute_returning_one(sql, params=None):
         captured_sql.append(sql)
-        captured_args.append(args)
+        captured_params.append(params)
         return {"id": 1, "name": "x", "kind": "y"}
 
-    with patch.object(AsyncpgRepository, "fetch_one", fake_fetch_one):
+    # fetch_one (non-committing) must NOT be touched — fail loudly if it is.
+    async def forbidden_fetch_one(self, sql, *args):  # pragma: no cover
+        raise AssertionError("insert() routed a write through non-committing fetch_one")
+
+    with (
+        patch.object(db_engine, "execute_returning_one", fake_execute_returning_one),
+        patch.object(AsyncpgRepository, "fetch_one", forbidden_fetch_one),
+    ):
         repo = FooRepo()
         result = await repo.insert(name="x", kind="y")
 
     assert result == {"id": 1, "name": "x", "kind": "y"}
-    assert "$1" in captured_sql[0] and "$2" in captured_sql[0]
+    # $N → :pN conversion happens before the committing helper.
+    assert ":p1" in captured_sql[0] and ":p2" in captured_sql[0]
     assert "INSERT INTO" in captured_sql[0]
     assert "RETURNING *" in captured_sql[0]
-    assert captured_args[0] == ("x", "y")
+    # Values bound by name, in order — never interpolated into the SQL text.
+    assert captured_params[0] == {"p1": "x", "p2": "y"}
 
 
 async def test_update_by_id_uses_id_column_param():
     """update_by_id supports non-'id' PKs (parsed_media keys on
     platform_id, etc). Pin the SQL shape so the parameterization
-    stays correct."""
+    stays correct, and confirm it routes through the COMMITTING
+    ``execute_returning_one`` (not the non-committing ``fetch_one``)."""
+    from app.db import engine as db_engine
     from app.db.repository_base import AsyncpgRepository
 
     class MediaRepo(AsyncpgRepository):
         TABLE = "parsed_media"
 
     captured_sql = []
-    captured_args = []
+    captured_params = []
 
-    async def fake_fetch_one(self, sql, *args):
+    async def fake_execute_returning_one(sql, params=None):
         captured_sql.append(sql)
-        captured_args.append(args)
+        captured_params.append(params)
         return {"platform_id": "abc", "title": "new"}
 
-    with patch.object(AsyncpgRepository, "fetch_one", fake_fetch_one):
+    async def forbidden_fetch_one(self, sql, *args):  # pragma: no cover
+        raise AssertionError(
+            "update_by_id() routed a write through non-committing fetch_one"
+        )
+
+    with (
+        patch.object(db_engine, "execute_returning_one", fake_execute_returning_one),
+        patch.object(AsyncpgRepository, "fetch_one", forbidden_fetch_one),
+    ):
         repo = MediaRepo()
         result = await repo.update_by_id("abc", id_column="platform_id", title="new")
 
     assert result["title"] == "new"
-    assert '"platform_id" = $2' in captured_sql[0]
-    assert '"title" = $1' in captured_sql[0]
-    # Args order: SET values first, then ID — pin the convention
-    assert captured_args[0] == ("new", "abc")
+    # $N → :pN: SET value is $1→:p1, the id predicate is $2→:p2.
+    assert '"platform_id" = :p2' in captured_sql[0]
+    assert '"title" = :p1' in captured_sql[0]
+    # Params order: SET values first, then ID — pin the convention.
+    assert captured_params[0] == {"p1": "new", "p2": "abc"}
 
 
 async def test_delete_by_id_returns_bool_from_rowcount():

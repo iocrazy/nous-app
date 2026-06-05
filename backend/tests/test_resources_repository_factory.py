@@ -1,21 +1,22 @@
-"""Phase 3a tests — get_resources_repository factory + parity.
+"""Task 5.2 tests — get_resources_repository factory + parity (ORM).
 
-Pins three contracts:
+Pins the same contracts the asyncpg suite did, retargeted at the
+SQLAlchemy ORM implementation that REPLACED the asyncpg resources path:
 
-  1. The factory routes correctly on
-     ``USE_ASYNCPG_RESOURCES`` AND ``SUPAVISOR_DATABASE_URL``.
-     Half-configured deploys (flag on, URL missing) fall back to
-     legacy with a warning, never raise.
+  1. The factory routes correctly on ``USE_ORM_RESOURCES`` AND the
+     SQLAlchemy engine being configured (``app.db.engine.is_configured``).
+     Half-configured deploys (flag on, engine missing) fall back to legacy
+     with a warning, never raise.
 
-  2. ``ResourcesRepositoryAsyncpg`` exposes the same public method
-     surface as ``ResourcesRepository`` so the existing call sites
-     work without per-method special-casing.
+  2. ``ResourcesRepositoryOrm`` exposes the same public method surface as
+     ``ResourcesRepository`` so existing call sites work without per-method
+     special-casing.
 
-  3. For each of the 10 migrated methods, signature parity holds —
-     same parameter names — so kwargs callers don't silently break.
+  3. For each migrated method, signature parity holds — same parameter
+     names — so kwargs callers don't silently break.
 
-Live integration tests against a real Supavisor are deferred — that's
-what the prod canary on the feature flag is for.
+There is NO tri-state: the ORM path REPLACES asyncpg. Flag off → legacy
+supabase-py; flag on + engine configured → ORM.
 """
 
 from __future__ import annotations
@@ -27,59 +28,42 @@ import pytest
 
 
 def test_factory_returns_legacy_when_flag_off():
-    """Default state: flag false → legacy supabase-py path. Every
-    existing deploy gets this until ops flips the env."""
+    """Default state: flag false → legacy supabase-py path. Every existing
+    deploy gets this until ops flips the env."""
     from app.repositories.resources_repository import (
         ResourcesRepository,
         get_resources_repository,
     )
 
-    with patch(
-        "app.core.config.settings.USE_ASYNCPG_RESOURCES",
-        False,
-    ):
+    with patch("app.core.config.settings.USE_ORM_RESOURCES", False):
         repo = get_resources_repository()
     assert isinstance(repo, ResourcesRepository)
-    # Critical: must NOT be the asyncpg subclass (the asyncpg subclass
-    # would also pass isinstance via inheritance).
+    # Critical: must NOT be the ORM subclass (which would also pass
+    # isinstance via inheritance).
     assert type(repo).__name__ == "ResourcesRepository"
 
 
-def test_factory_returns_asyncpg_when_flag_on_and_pool_configured():
-    """Both knobs on → asyncpg subclass. Post-canary state once the
-    pilot is proven in prod."""
-    from app.repositories.resources_repository import (
-        get_resources_repository,
-    )
-    from app.repositories.resources_repository_asyncpg import (
-        ResourcesRepositoryAsyncpg,
-    )
+def test_factory_returns_orm_when_flag_on_and_engine_configured():
+    """Both knobs on → ORM subclass. Post-canary state once the pilot is
+    proven in prod."""
+    from app.repositories.resources_repository import get_resources_repository
+    from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
 
     with (
-        patch(
-            "app.core.config.settings.USE_ASYNCPG_RESOURCES",
-            True,
-        ),
+        patch("app.core.config.settings.USE_ORM_RESOURCES", True),
         patch("app.db.engine.is_configured", return_value=True),
     ):
         repo = get_resources_repository()
-    assert isinstance(repo, ResourcesRepositoryAsyncpg)
+    assert isinstance(repo, ResourcesRepositoryOrm)
 
 
-def test_factory_falls_back_when_flag_on_but_pool_missing():
-    """Half-configured deploy (flag flipped, env var missing) must
-    NOT crash — fall back to legacy with a warning. Avoids the
-    failure mode where a flag flips in one env file and the URL
-    is forgotten in another."""
-    from app.repositories.resources_repository import (
-        get_resources_repository,
-    )
+def test_factory_falls_back_when_flag_on_but_engine_missing():
+    """Half-configured deploy (flag flipped, engine missing) must NOT crash
+    — fall back to legacy with a warning."""
+    from app.repositories.resources_repository import get_resources_repository
 
     with (
-        patch(
-            "app.core.config.settings.USE_ASYNCPG_RESOURCES",
-            True,
-        ),
+        patch("app.core.config.settings.USE_ORM_RESOURCES", True),
         patch("app.db.engine.is_configured", return_value=False),
     ):
         repo = get_resources_repository()
@@ -89,42 +73,37 @@ def test_factory_falls_back_when_flag_on_but_pool_missing():
 # ─── API parity check ──────────────────────────────────────────────────
 
 
-def test_asyncpg_repo_has_same_public_methods_as_legacy():
-    """If the asyncpg impl drops or renames a method the call sites
-    will silently pick up the wrong shape via the factory. Pin the
-    full surface — including methods we did NOT migrate (they should
-    inherit from legacy via MRO)."""
+def test_orm_repo_has_same_public_methods_as_legacy():
+    """If the ORM impl drops or renames a method the call sites will
+    silently pick up the wrong shape via the factory. Pin the full surface
+    — including methods we did NOT migrate (they should inherit from legacy
+    via MRO)."""
     from app.repositories.resources_repository import ResourcesRepository
-    from app.repositories.resources_repository_asyncpg import (
-        ResourcesRepositoryAsyncpg,
-    )
+    from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
 
     legacy_methods = {
         name
         for name in dir(ResourcesRepository)
         if not name.startswith("_") and callable(getattr(ResourcesRepository, name))
     }
-    asyncpg_methods = {
+    orm_methods = {
         name
-        for name in dir(ResourcesRepositoryAsyncpg)
-        if not name.startswith("_")
-        and callable(getattr(ResourcesRepositoryAsyncpg, name))
+        for name in dir(ResourcesRepositoryOrm)
+        if not name.startswith("_") and callable(getattr(ResourcesRepositoryOrm, name))
     }
 
-    # asyncpg can have EXTRA methods (inherited from AsyncpgRepository
-    # base — fetch_one, fetch_all, etc.) but must not be MISSING any
-    # legacy method.
-    missing = legacy_methods - asyncpg_methods
+    # ORM can have EXTRA methods (inherited from AsyncpgRepository base —
+    # fetch_one, fetch_all, etc.) but must not be MISSING any legacy method.
+    missing = legacy_methods - orm_methods
     assert not missing, (
-        f"asyncpg impl is missing legacy methods: {sorted(missing)}. "
+        f"ORM impl is missing legacy methods: {sorted(missing)}. "
         f"Add them, or feature-flag the call site."
     )
 
 
-# Migrated methods — keep this list in sync with
-# ResourcesRepositoryAsyncpg overrides. Grouped by phase for readability.
-_PHASE_3A_METHODS = [
-    # resources table
+# Migrated (overridden) methods — keep in sync with ResourcesRepositoryOrm.
+# Grouped by table for readability.
+_RESOURCES_METHODS = [
     "create_resource",
     "get_resource_by_id",
     "get_resource_by_media_id",
@@ -137,8 +116,7 @@ _PHASE_3A_METHODS = [
     "count_resources_by_media_id",
     "find_by_hash",
 ]
-_PHASE_3B_METHODS = [
-    # resource_items table + trash listings (+ get_resource_items added in Phase 3e)
+_RESOURCE_ITEMS_METHODS = [
     "find_resource_item",
     "create_resource_item",
     "_resource_ids_for_platforms",
@@ -149,12 +127,11 @@ _PHASE_3B_METHODS = [
     "update_resource_item",
     "delete_resource_item",
     "count_resource_items",
-    "get_resource_items",  # Phase 3e — 22-arg dynamic-filter listing
+    "get_resource_items",
     "get_expired_trashed_resources",
     "get_trashed_resources",
 ]
-_PHASE_3C_METHODS = [
-    # resource_versions table
+_RESOURCE_VERSIONS_METHODS = [
     "create_version",
     "get_versions",
     "get_version_by_id",
@@ -164,8 +141,7 @@ _PHASE_3C_METHODS = [
     "get_untranscoded_video_versions",
     "get_next_version_number",
 ]
-_PHASE_3D_METHODS = [
-    # folders table
+_FOLDERS_METHODS = [
     "create_folder",
     "get_trashed_folders",
     "get_folders",
@@ -178,73 +154,60 @@ _PHASE_3D_METHODS = [
     "trash_folder_cascade",
 ]
 _MIGRATED_METHODS = (
-    _PHASE_3A_METHODS + _PHASE_3B_METHODS + _PHASE_3C_METHODS + _PHASE_3D_METHODS
+    _RESOURCES_METHODS
+    + _RESOURCE_ITEMS_METHODS
+    + _RESOURCE_VERSIONS_METHODS
+    + _FOLDERS_METHODS
 )
 
 
 @pytest.mark.parametrize("method_name", _MIGRATED_METHODS)
-def test_asyncpg_signature_matches_legacy(method_name):
-    """For each migrated method, the asyncpg impl's signature must
-    match the legacy. Catches accidental kwarg renames that would
-    silently no-op (Python accepts wrong **kwargs as args at call
-    time)."""
+def test_orm_signature_matches_legacy(method_name):
+    """For each migrated method, the ORM impl's signature must match the
+    legacy. Catches accidental kwarg renames that would silently no-op."""
     from app.repositories.resources_repository import ResourcesRepository
-    from app.repositories.resources_repository_asyncpg import (
-        ResourcesRepositoryAsyncpg,
-    )
+    from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
 
     legacy_sig = inspect.signature(getattr(ResourcesRepository, method_name))
-    asyncpg_sig = inspect.signature(getattr(ResourcesRepositoryAsyncpg, method_name))
+    orm_sig = inspect.signature(getattr(ResourcesRepositoryOrm, method_name))
 
     legacy_params = set(legacy_sig.parameters.keys())
-    asyncpg_params = set(asyncpg_sig.parameters.keys())
+    orm_params = set(orm_sig.parameters.keys())
 
-    assert legacy_params == asyncpg_params, (
+    assert legacy_params == orm_params, (
         f"{method_name} signature drift: legacy={sorted(legacy_params)}, "
-        f"asyncpg={sorted(asyncpg_params)}"
+        f"orm={sorted(orm_params)}"
     )
 
 
 def test_bigint_helper_coerces_str_input():
-    """Lock in the str→int coercion at the asyncpg boundary.
+    """Lock in the str→int coercion at the boundary.
 
     asyncpg's int8 codec is strict — passing a str to a bigint column
-    raises ``DataError: 'str' object cannot be interpreted``. API
-    path params and legacy supabase-py callers send Snowflake IDs as
-    str. The ``_bigint`` helper bridges that boundary; without it,
-    every method that takes a str id raises at runtime."""
+    raises ``DataError``. API path params and legacy supabase-py callers
+    send Snowflake IDs as str. The ``_bigint`` helper bridges that
+    boundary; without it, every method that takes a str id raises."""
     from app.db.repository_base import AsyncpgRepository
 
-    # Strings that look like ints get coerced.
     assert AsyncpgRepository._bigint("12345") == 12345
     assert AsyncpgRepository._bigint("-1") == -1
-    # Ints pass through.
     assert AsyncpgRepository._bigint(12345) == 12345
-    # Non-numeric strings pass through (caller's problem).
     assert AsyncpgRepository._bigint("not-a-number") == "not-a-number"
-    # None passes through.
     assert AsyncpgRepository._bigint(None) is None
-    # List variant covers ANY($1::bigint[]) bindings.
     assert AsyncpgRepository._bigint_list(["1", 2, "3"]) == [1, 2, 3]
     assert AsyncpgRepository._bigint_list(None) == []
     assert AsyncpgRepository._bigint_list([]) == []
 
 
 def test_unmigrated_methods_inherit_from_legacy():
-    """Strangler fig sanity check: a method we did NOT migrate (e.g.
-    ``get_resource_tags``) should resolve to the LEGACY implementation
-    via MRO, not raise NotImplementedError. Catches the failure mode
-    where multiple inheritance breaks unexpectedly."""
+    """Strangler-fig sanity check: a method we did NOT migrate (e.g.
+    ``get_resource_tags``) should resolve to the LEGACY implementation via
+    MRO, not raise. Catches a broken multiple-inheritance setup."""
     from app.repositories.resources_repository import ResourcesRepository
-    from app.repositories.resources_repository_asyncpg import (
-        ResourcesRepositoryAsyncpg,
-    )
+    from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
 
-    # Pick one representative unmigrated method. ``get_resource_tags``
-    # is part of the resource_tags surface (add/remove/get) which
-    # isn't on the asyncpg hot path yet — Phase 3f material.
+    # get_resource_tags is part of the resource_tags surface (add/remove/get)
+    # which was not migrated — it must resolve to the legacy impl.
     legacy_method = ResourcesRepository.get_resource_tags
-    asyncpg_method = ResourcesRepositoryAsyncpg.get_resource_tags
-    # MRO: since the asyncpg subclass doesn't override get_resource_tags,
-    # the resolved attr should be the legacy implementation itself.
-    assert asyncpg_method is legacy_method
+    orm_method = ResourcesRepositoryOrm.get_resource_tags
+    assert orm_method is legacy_method

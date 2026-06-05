@@ -77,22 +77,42 @@ class Settings(BaseSettings):
     # path. Set true on a single repo to A/B-test the asyncpg version
     # without affecting the rest. After a repo is proven stable for a
     # week in prod the default flips and the legacy code is removed.
-    USE_ASYNCPG_AGENT_RUNS: bool = Field(
+    USE_ORM_AGENT_RUNS: bool = Field(
         default=False,
-        description="Route AgentRunsRepository through asyncpg + Supavisor",
+        description="Route AgentRunsRepository through the SQLAlchemy 2.0 ORM "
+        "session layer (Task 5.3 — replaces the asyncpg agent_runs path; fixes "
+        "the silent-rollback P0 by committing writes via write_scope(). Covers "
+        "list_by_agent / get_by_id / list_children reads + request_cancel / "
+        "mark_heartbeat_lost writes + monthly_usage_by_agent aggregation)",
     )
-    USE_ASYNCPG_RESOURCES: bool = Field(
+    USE_ORM_RESOURCES: bool = Field(
         default=False,
-        description="Route ResourcesRepository through asyncpg + Supavisor "
-        "(Phase 3a — covers the 10 methods on the resources table; "
-        "items / versions / folders still use legacy supabase-py)",
+        description="Route ResourcesRepository through the SQLAlchemy 2.0 ORM "
+        "session layer (Task 5.2 — replaces the asyncpg resources path; fixes "
+        "the silent-rollback P0 by committing writes via write_scope() and "
+        "running folder cascades atomically in one write_scope(). Covers "
+        "resources / resource_items / resource_versions / folders; the "
+        "resource_tags + smart-folder methods inherit legacy via MRO)",
     )
-    USE_ASYNCPG_MEDIA: bool = Field(
+    USE_ORM_MEDIA: bool = Field(
         default=False,
-        description="Route MediaRepository through asyncpg + Supavisor "
-        "(Phase 4a/4b/4c — covers parsed_media CRUD + lists + search + "
-        "statistics; the 9 wrapper methods route through the asyncpg "
-        "overrides automatically via Python MRO)",
+        description="Route MediaRepository through the SQLAlchemy 2.0 ORM "
+        "session layer (Task 5.1 — replaces the asyncpg media path; fixes "
+        "the silent-rollback P0 by committing writes via write_scope(). "
+        "Covers parsed_media CRUD + lists + search + statistics; the 9 "
+        "wrapper methods route through the ORM overrides via Python MRO)",
+    )
+    USE_ORM_USER_SETTINGS: bool = Field(
+        default=False,
+        description="Route UserSettingsRepository reads + the settings_json "
+        "atomic merge through the SQLAlchemy 2.0 ORM session layer (Task 5.4). "
+        "Reads run on read_scope() + select(UserSettings); the canonical "
+        "settings_json merge runs the SAME COALESCE(existing,'{}'::jsonb) || "
+        "CAST(:patch AS jsonb) ON CONFLICT statement inside write_scope() "
+        "(committing) instead of db_engine.execute_returning_one. The "
+        "merge-not-replace guarantee (the #485 shared-blob clobber P0) is "
+        "preserved byte-for-byte. The PostgREST read-merge-write path stays "
+        "as the engine-not-configured fallback",
     )
 
     # ============================================

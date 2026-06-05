@@ -667,32 +667,35 @@ class MediaRepository:
             }
 
 
-# ─── asyncpg + Supavisor migration factory ─────────────────────────────
+# ─── SQLAlchemy ORM migration factory (Task 5.1) ───────────────────────
 #
-# Phase 4 of the supabase-py → asyncpg cutover (Bug C #194). Same
-# Strangler Fig pattern as ResourcesRepository: factory routes
-# MediaRepository through the asyncpg subclass when both
-# USE_ASYNCPG_MEDIA=true and SUPAVISOR_DATABASE_URL is configured.
-# Half-configured deploys (flag on, URL missing) fall back to the
-# legacy path with a warning so a misconfigured env never crashes
-# the worker.
+# Strangler Fig: the factory routes MediaRepository through the ORM
+# subclass when both USE_ORM_MEDIA=true and the SQLAlchemy engine is
+# configured (SUPAVISOR_DATABASE_URL set). The ORM path REPLACES the
+# retired asyncpg media path — no tri-state (no REST/asyncpg/ORM switch).
+# Half-configured deploys (flag on, engine unconfigured) fall back to the
+# legacy supabase-py path with a warning so a misconfigured env never
+# crashes the worker.
+#
+# The ORM update() commits via write_scope(), fixing the silent-rollback
+# P0 that the asyncpg fetch_one("UPDATE…RETURNING")-on-connect() path had.
 
 
 def get_media_repository():
     """Return the right MediaRepository implementation per env."""
     from app.core.config import settings
 
-    if settings.USE_ASYNCPG_MEDIA:
+    if settings.USE_ORM_MEDIA:
         from app.db.engine import is_configured
 
         if is_configured():
-            from app.repositories.media_repository_asyncpg import (
-                MediaRepositoryAsyncpg,
+            from app.repositories.media_repository_orm import (
+                MediaRepositoryOrm,
             )
 
-            return MediaRepositoryAsyncpg()
+            return MediaRepositoryOrm()
         logger.warning(
-            "USE_ASYNCPG_MEDIA=true but SUPAVISOR_DATABASE_URL is empty "
+            "USE_ORM_MEDIA=true but SUPAVISOR_DATABASE_URL is empty "
             "— falling back to supabase-py path"
         )
     return MediaRepository()

@@ -217,5 +217,53 @@ execution not relay.
 
 ---
 
+## 7. Resolutions — open decisions #1 & #3 (feature-orm-2-migration session, 2026-06-04)
+
+Resolved against the live schema (107 in-scope `public` tables; full scoping-column map below). The `TenantScoped` model in §4 assumed a single `user_id` column — reality is **multi-column, multi-axis**, so the design is generalized.
+
+### 7.1 Decision #1 — scope boundary = **multi-axis, marker-mixin, fail-closed**
+
+`Scope` carries three axes, populated at entry (HTTP middleware from JWT / DBOS task entry from payload):
+```python
+@dataclass(frozen=True)
+class Scope:
+    user_id: int
+    team_ids: frozenset[int]      # user's team memberships
+    project_ids: frozenset[int]   # user's project memberships
+SYSTEM = object()   # system_session sentinel
+```
+Three **marker mixins**; a model mixes in the one(s) matching its tenancy. The `do_orm_execute` event injects, per declared axis, **OR-combined** (a row is visible if the user owns it OR it's shared to a team/project they belong to):
+- **`UserScoped`** — per-user owner column; declares `__tenant_user_col__` (one of `user_id`/`creator_id`/`created_by`/`owner_id`). Injects `owner_col == scope.user_id`.
+- **`TeamScoped`** — `team_id`. Injects `team_id IN scope.team_ids`.
+- **`ProjectScoped`** — `project_id`. Injects `project_id IN scope.project_ids`.
+
+Rules: unset scope + any scoped table → `UnscopedQueryError` (fail-closed). `system_session` → no injection (cross-user/system, audited/greppable). `before_insert` stamps `user_id` from scope on `UserScoped` tables (asserts `== scope` if set). Multi-axis tables (e.g. `agent_runs` = user+team+project) inject the OR of their axes. Index-friendly (`user_id`/`team_id` indexes), zero RLS role-switch tax.
+
+**Phasing:** infra (Scope/ContextVar/`user_session`/`system_session`/event/3 mixins/`before_insert`) lands as a unit. Tables get the mixin **as their repo migrates** — so the already-migrated A-class tables get it now; B-class (team/project) tables get `TeamScoped`/`ProjectScoped` as Phases 2–7 reach them. Raw `text()` on scoped tables = reviewed exception + manual scope (or crown-jewel RLS).
+
+### 7.2 Table classification (the boundary, by mechanism)
+
+- **A. UserScoped (direct, single-col) — choke point covers as-is:**
+  - `user_id`: access_overrides, admin_table_preferences, smart_collections, tags, task_flows, user_notifications, user_schedules, user_tag_preferences (+ the user-axis crown jewels)
+  - `creator_id`: **resources** ‖ `created_by`: **folders, libraries**, skill_versions, skill_file_versions ‖ `owner_id`: teams
+  - **`parsed_media` has NO owner col** → scoped indirectly via `resources.media_id`/`resources.creator_id` (the 5.1 JOIN). Not directly mixed-in; access through resources.
+- **B. Team/Project-scoped (TeamScoped/ProjectScoped, membership IN-list):** collections, projects, issues, shares, project_files, project_members, project_folders, project_collections, project_tasks, project_workflows, storyboard_{assets,characters,edges,frames,nodes,video_assets,projects}, script_projects, team_{members,invites,plans,quotas}, member_quotas, style_templates, notifications, skills, ai_agents, ai_sessions, agent_runs (the last several are multi-axis = user+team+project).
+- **C. Logs/audit (UserScoped for user-facing reads; admin/analytics via `system_session`):** api_request_logs, frontend_error_logs, user_logs, search_logs, resource_access_logs, boundary_audit, ai_usage_logs.
+- **D. Agent-runtime (user_id±agent_id; mostly `system_session`):** agent_memories, agent_runs, agent_tasks, agent_commitments, agent_approval_requests, task_tracking.
+- **E. Shared/system/global (NO injection):** ai_model_prices, nous_models, system_settings, system_status, credit_pricing, point_pricing, point_packages, authors, ai_messages, agent_skills, agent_state_history, agent_workers, ai_agent_versions, application_logs, api_key_logs, audit_logs, deployment_logs, … (~39 no-scope-col tables).
+
+### 7.3 Decision #3 — crown-jewel RLS backstop = **12 tables, 2 tiers**
+
+Pay the RLS tax only where blast radius justifies (secrets / money):
+- **Tier-1 secrets/identity:** `user_cookies` (session hijack), `user_settings` (AI provider API keys in settings_json), `api_keys`, `temp_tokens` (token hijack).
+- **Tier-2 money/quota:** `user_credits`, `credit_transactions`, `point_transactions`, `orders`, `daily_point_gifts`, `member_quotas`, `team_quotas`, `team_plans`.
+
+(Extends the §4 candidate set {cookies, settings, billing, api_keys} with `temp_tokens` + the team-billing tables.) RLS enforced via session-factory/event hook (not per-query); a crown-jewel path needing `authenticated` uses the existing `execute_as_service_role` / `SET LOCAL ROLE` mechanism.
+
+### 7.4 Decision #2 (raw-SQL governance) — deferred but noted
+`scoped_sql(scope, ...)` helper that forces a scope param for perf raw SQL on tenant tables + a review checklist; crown-jewel RLS is the backstop. Finalize when the first perf raw-SQL path appears.
+
+---
+
 _Master-session memory mirror: `feedback_design_for_100k_scale`,
 `project_db_layer_sqlalchemy`. Keep both in sync as decisions land._
