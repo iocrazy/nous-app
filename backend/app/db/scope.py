@@ -221,6 +221,105 @@ def current_scope() -> ScopeValue | None:
     return _scope.get()
 
 
+# ── Raw-SQL tenant guard (the text() backstop) ──────────────────────────
+#
+# The ORM choke point (``_enforce_scope`` on ``do_orm_execute``) governs only
+# statements that flow through the ORM — ``select(Model)`` / ``session.get`` /
+# Core DML against a mapped entity. A raw ``text()`` statement is OPAQUE to that
+# event: it bypasses injection AND fail-closed entirely (decisions doc §4 — "raw
+# SQL is a reviewed exception"). ``scoped_sql`` is the explicit backstop for raw
+# reads that touch a ``UserScoped`` table: it binds the ambient tenant value into
+# the caller's named param and fail-closes when no identity is present, so a raw
+# read on the scoped table is no longer a silent enforcement gap.
+
+# The single named bind param the built tenant predicate references. Kept as a
+# constant so the helper, the SQL authors, and the CI guard all agree on the
+# exact token.
+SCOPE_USER_PARAM = "scope_user_id"
+
+
+def _tenant_predicate(creator_col: str) -> str:
+    """The ONE canonical tenant predicate shape, built (never hand-written).
+
+    ``(CAST(:scope_user_id AS uuid) IS NULL OR <creator_col> = CAST(... AS uuid))``
+    — the ``IS NULL`` branch lets a SYSTEM (NULL) bind open the full table while a
+    USER bind filters to the owner. The ``CAST(... AS uuid)`` is load-bearing:
+    asyncpg cannot type-infer a bare ``$1 IS NULL`` (no column on that branch) and
+    raises ``AmbiguousParameterError`` without it; ``resources.creator_id`` is a
+    uuid column. Centralized here so the shape is identical across callers and the
+    CI guard can match it exactly.
+    """
+    bind = f"CAST(:{SCOPE_USER_PARAM} AS uuid)"
+    return f"({bind} IS NULL OR {creator_col} = {bind})"
+
+
+def scoped_sql(creator_col: str, params: dict | None = None) -> tuple[str, dict]:
+    """Build the ambient tenant predicate + bind for a raw ``text()`` read of a
+    ``UserScoped`` table, returning ``(predicate_sql, params)``.
+
+    The CALLER does NOT hand-write the tenant filter — this helper OWNS the
+    predicate shape, so a token can never be parked in a non-filtering position
+    (SELECT list, ``:scope_user_id = :scope_user_id`` tautology, ``OR 1=1``). The
+    caller AND-splices ``predicate_sql`` into its WHERE clause and passes
+    ``params`` straight to ``session.execute(text(sql), params)``::
+
+        pred, params = scoped_sql("r.creator_id", {"url": url})
+        sql = f"SELECT ... FROM resources r ... WHERE {pred} AND p.original_url = :url"
+
+    ``creator_col`` is the QUALIFIED owner column (e.g. ``"r.creator_id"``) — a
+    hardcoded literal at the call site, never user input. The f-string splice is
+    safe because both ``predicate_sql`` (helper-built) and ``creator_col`` are
+    trusted; user values still travel only through bound ``params``.
+
+    Behaviour:
+      * no ambient scope (``None``) → raise :class:`UnscopedQueryError`
+        (fail-closed: a raw read on a scoped table with no identity is forbidden —
+        the text() analogue of the choke point's no-scope SELECT raise);
+      * USER scope with a falsy ``user_id`` (``None`` or ``""``) → raise: a user
+        scope with no identity is nonsensical, and binding ``None`` would open the
+        ``IS NULL`` branch → a full-table cross-tenant read under what looks like a
+        user scope (fail-closed). NB: a precise ``is None or == ""`` check — a
+        legitimate ``0`` / bigint owner key is NOT rejected;
+      * USER scope → binds ``scope.user_id`` AS-IS (uuid str or bigint, never
+        coerced, mirroring ``_axis_criteria``);
+      * SYSTEM scope → binds ``None`` (the ``IS NULL`` branch opens the full table
+        — deliberate cross-user access, e.g. a GC / system reader).
+
+    Immutable: the returned dict is a fresh copy; the input ``params`` is never
+    mutated.
+    """
+    scope = current_scope()
+    if scope is None:
+        raise UnscopedQueryError(
+            "scoped_sql() called with no scope set: a raw text() read on a "
+            "UserScoped table requires an ambient scope. Open a request_scope("
+            "scope) / user_session(scope) — or system_request_scope(reason) / "
+            "system_session(reason) for deliberate cross-user access — first."
+        )
+
+    if scope is SYSTEM:
+        # SYSTEM binds NULL → the IS NULL branch opens the full table (deliberate).
+        bound_value: int | str | None = None
+    else:
+        # A real USER scope MUST carry an identity. A falsy user_id would bind
+        # NULL → open the full table under a user scope (a DB-proven cross-tenant
+        # leak); fail-closed. Precise check so a 0/bigint owner key is allowed.
+        if scope.user_id is None or scope.user_id == "":
+            raise UnscopedQueryError(
+                "scoped_sql() under a USER scope with an empty user_id "
+                f"({scope.user_id!r}): a user scope must carry an identity. "
+                "Binding it would open the IS NULL branch → a full-table "
+                "cross-tenant read. Fail-closed — fix the scope at its entry "
+                "boundary, or use system_request_scope(reason) for a deliberate "
+                "cross-user read."
+            )
+        bound_value = scope.user_id
+
+    new_params = dict(params or {})  # copy — never mutate the caller's dict
+    new_params[SCOPE_USER_PARAM] = bound_value
+    return _tenant_predicate(creator_col), new_params
+
+
 # ── Entry context managers (Layer 1) ────────────────────────────────────
 
 

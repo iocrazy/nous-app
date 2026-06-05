@@ -48,7 +48,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
-from app.db.scope import system_request_scope
+from app.db.scope import scoped_sql, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import Folders, ResourceItems, Resources, ResourceVersions
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
@@ -211,23 +211,39 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
 
         Returns the same nested shape as legacy: ``{id, media_id,
         parsed_media: {id, platform_id, original_url, ...}}`` so call sites
-        read the inner dict the same way."""
+        read the inner dict the same way.
+
+        A3: the tenant predicate is BUILT by ``scoped_sql`` (the ambient-scope
+        raw-SQL choke-point backstop) and AND-spliced into the WHERE, NOT the
+        passed-in ``:creator_id`` bind. The ``creator_id`` arg stays in the
+        signature for interface stability but is SUPERSEDED by the ambient scope
+        (on every real call path the acting user IS ``creator_id``, so the bound
+        value is identical — verified by the flag-off parity test). Under SYSTEM
+        the predicate opens to all owners; under no scope (or an empty-identity
+        user scope) ``scoped_sql`` fail-closes."""
         try:
+            # scoped_sql owns the predicate shape (CAST(:scope_user_id AS uuid)
+            # IS NULL OR r.creator_id = ...): the caller can only AND it in, never
+            # park a bare token in a non-filtering position. The f-string splice
+            # is safe — ``pred`` is helper-built and "r.creator_id" is a hardcoded
+            # literal; the user value travels only via the bound :scope_user_id
+            # param. Built INSIDE the try so a fail-closed raise (no scope / empty
+            # identity) degrades to None here rather than propagating — preserving
+            # the legacy "probe failure is non-fatal" contract of this L2 dedup.
+            pred, params = scoped_sql("r.creator_id", {"url": url})
+            sql = (
+                "SELECT r.id AS r_id, r.media_id AS r_media_id, "
+                "       p.id AS p_id, p.platform_id, p.original_url, "
+                "       p.video_download_status, p.image_download_status, "
+                "       p.media_type "
+                "FROM resources r "
+                "INNER JOIN parsed_media p ON r.media_id = p.id "
+                f"WHERE {pred} "
+                "  AND p.original_url = :url "
+                "LIMIT 1"
+            )
             async with read_scope() as session:
-                result = await session.execute(
-                    text(
-                        "SELECT r.id AS r_id, r.media_id AS r_media_id, "
-                        "       p.id AS p_id, p.platform_id, p.original_url, "
-                        "       p.video_download_status, p.image_download_status, "
-                        "       p.media_type "
-                        "FROM resources r "
-                        "INNER JOIN parsed_media p ON r.media_id = p.id "
-                        "WHERE r.creator_id = :creator_id "
-                        "  AND p.original_url = :url "
-                        "LIMIT 1"
-                    ),
-                    {"creator_id": creator_id, "url": url},
-                )
+                result = await session.execute(text(sql), params)
                 row = result.mappings().first()
             if not row:
                 return None
@@ -270,22 +286,32 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
         """Of the given vids (parsed_media.platform_id), return the subset this
         user has already downloaded (a resources row with file_path set). ONE
         batched query for the whole list — no N+1. Empty input short-circuits
-        to ``set()`` without a query."""
+        to ``set()`` without a query.
+
+        A3: the tenant predicate is BUILT by ``scoped_sql`` and AND-spliced in,
+        NOT the passed-in ``:creator_id`` bind. The ``creator_id`` arg is kept for
+        interface stability but SUPERSEDED by the ambient scope (acting user ==
+        creator_id on every real path; identical bound value — see flag-off
+        parity test). SYSTEM opens to all owners; no scope (or empty-identity user
+        scope) fail-closes."""
         if not platform_ids:
             return set()
         try:
+            # scoped_sql owns the predicate shape (see get_completed_resource_by_
+            # url_and_creator). Safe f-string splice: helper-built pred + literal
+            # column. Built INSIDE the try so a fail-closed raise (no scope /
+            # empty identity) degrades to set() rather than propagating.
+            pred, params = scoped_sql("r.creator_id", {"pids": list(platform_ids)})
+            sql = (
+                "SELECT DISTINCT p.platform_id "
+                "FROM resources r "
+                "INNER JOIN parsed_media p ON r.media_id = p.id "
+                f"WHERE {pred} "
+                "  AND p.platform_id = ANY(:pids) "
+                "  AND r.file_path IS NOT NULL"
+            )
             async with read_scope() as session:
-                result = await session.execute(
-                    text(
-                        "SELECT DISTINCT p.platform_id "
-                        "FROM resources r "
-                        "INNER JOIN parsed_media p ON r.media_id = p.id "
-                        "WHERE r.creator_id = :creator_id "
-                        "  AND p.platform_id = ANY(:pids) "
-                        "  AND r.file_path IS NOT NULL"
-                    ),
-                    {"creator_id": creator_id, "pids": list(platform_ids)},
-                )
+                result = await session.execute(text(sql), params)
                 return {r["platform_id"] for r in result.mappings().all()}
         except Exception as e:
             logger.error(

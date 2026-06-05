@@ -52,10 +52,15 @@ def test_supabase_empty_input_no_db_hit():
 
 def test_orm_returns_subset_from_rows():
     """ORM path returns exactly the platform_ids the query yields, and binds
-    creator_id + the vid list as named params on the file_path-gated SQL."""
+    the AMBIENT scope (A3: ``scope_user_id`` via scoped_sql, NOT the legacy
+    ``creator_id``) + the vid list as named params on the file_path-gated SQL.
+
+    The method now requires an ambient scope (scoped_sql fail-closes otherwise),
+    so the call is wrapped in ``request_scope``."""
     from contextlib import asynccontextmanager
     from unittest.mock import AsyncMock, MagicMock
 
+    from app.db.scope import Scope, request_scope
     from app.repositories import resources_repository_orm as orm_mod
     from app.repositories.resources_repository_orm import ResourcesRepositoryOrm
 
@@ -83,17 +88,23 @@ def test_orm_returns_subset_from_rows():
     async def _fake_read_scope():
         yield fake_session
 
+    async def _run():
+        async with request_scope(Scope(user_id="user-9")):
+            return await repo.get_owned_platform_ids(
+                ["vid_a", "vid_b", "vid_c"], "user-9"
+            )
+
     original = orm_mod.read_scope
     orm_mod.read_scope = _fake_read_scope  # type: ignore[assignment]
     try:
-        result = asyncio.run(
-            repo.get_owned_platform_ids(["vid_a", "vid_b", "vid_c"], "user-9")
-        )
+        result = asyncio.run(_run())
     finally:
         orm_mod.read_scope = original  # type: ignore[assignment]
 
     assert result == {"vid_a", "vid_c"}
-    assert captured["params"]["creator_id"] == "user-9"
+    # A3: the tenant value is now bound under the ambient-scope param, AS-IS.
+    assert captured["params"]["scope_user_id"] == "user-9"
+    assert "creator_id" not in captured["params"], "legacy :creator_id bind lingered"
     assert captured["params"]["pids"] == ["vid_a", "vid_b", "vid_c"]
     assert "file_path IS NOT NULL" in captured["sql"]
 
