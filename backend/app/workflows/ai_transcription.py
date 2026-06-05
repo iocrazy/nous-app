@@ -316,9 +316,17 @@ async def ai_transcription_workflow(
         # transcript" because transcript wasn't written yet. QA 2026-05-17
         # task #24.) Best-effort; transcript success is what counts.
         try:
+            from app.db.scope import Scope, request_scope
             from app.tasks.download_helpers import chain_summary_for_tags
 
-            chain_summary_for_tags(parsed_media_id, user_id)
+            # A2 pass 4b: chain_summary_for_tags is SYNC and reads `resources`
+            # via run_async (get_resource_by_media_id_and_creator). Set the
+            # ambient USER scope HERE at the async caller; pass-4a's
+            # copy_context wrap carries it down through run_async's thread hop
+            # into that resource read. `user_id` is a required workflow arg
+            # (always present). INERT until SCOPE_ENFORCE_RESOURCES flips.
+            async with request_scope(Scope(user_id=user_id)):
+                chain_summary_for_tags(parsed_media_id, user_id)
         except Exception as e:
             logger.warning(
                 f"[ai_transcription] post-success summary chain failed for "

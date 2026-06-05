@@ -480,17 +480,27 @@ async def chain_followups_step(
             logger.warning(f"[download.chain] extract_audio: {type(e).__name__}: {e!r}")
 
     try:
+        from app.db.scope import Scope, request_scope
         from app.tasks.download_helpers import (
             maybe_chain_ai_pipeline,
             maybe_chain_transcode,
         )
 
-        maybe_chain_transcode(
-            platform_id, user_id, flow_id=flow_id, video_title=video_title
-        )
-        maybe_chain_ai_pipeline(
-            platform_id, user_id, flow_id=flow_id, video_title=video_title
-        )
+        # A2 pass 4b: both chain helpers are SYNC and read `resources` via
+        # run_async (get_resource_by_platform_id / get_resource_by_media_id_and_creator).
+        # We cannot `async with` inside a sync helper, so set the ambient USER
+        # scope HERE at the async caller; pass-4a's copy_context wrap carries
+        # it down through run_async's thread hop into those resource reads.
+        # `user_id` is a required step kwarg (always present). INERT until
+        # SCOPE_ENFORCE_RESOURCES flips. Kept inside the existing try/except so
+        # the best-effort guarantee is preserved.
+        async with request_scope(Scope(user_id=user_id)):
+            maybe_chain_transcode(
+                platform_id, user_id, flow_id=flow_id, video_title=video_title
+            )
+            maybe_chain_ai_pipeline(
+                platform_id, user_id, flow_id=flow_id, video_title=video_title
+            )
     except Exception as e:
         logger.warning(
             f"[download.chain] transcode/ai chain: {type(e).__name__}: {e!r}"
