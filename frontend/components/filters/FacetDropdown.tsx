@@ -161,12 +161,14 @@ export function FacetDropdown({
             key={r.key}
             type="button"
             onClick={r.onToggle}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm ${
-              r.selected ? 'text-white' : 'text-zinc-300'
+            className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors ${
+              r.selected ? 'text-white bg-indigo-500/10' : 'text-zinc-300'
             } active:bg-zinc-700`}
           >
             <span className="w-4 shrink-0 text-indigo-400">
-              {r.selected && <Check size={15} />}
+              {r.selected && (
+                <Check size={15} className="animate-in zoom-in-50 duration-150" />
+              )}
             </span>
             <span className="flex-1 truncate">{r.label}</span>
           </button>
