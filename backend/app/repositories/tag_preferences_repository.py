@@ -1,6 +1,25 @@
-"""Repository for user tag picker preferences."""
+"""Repository for user tag picker preferences.
+
+ORM 2.0 migration (Batch L1): ``TagPreferencesRepository`` is the legacy
+supabase-py REST implementation; ``TagPreferencesRepositoryOrm`` (in
+``tag_preferences_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor.
+Call sites go through ``get_tag_preferences_repository()`` (bottom of this file)
+which picks the ORM subclass when ``USE_ORM_TAG_PREFERENCES`` is on AND the
+engine is configured.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Union
+
+from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.tag_preferences_repository_orm import (
+        TagPreferencesRepositoryOrm,
+    )
 
 
 class TagPreferencesRepository:
@@ -82,3 +101,30 @@ class TagPreferencesRepository:
         except Exception:
             # Table may not exist yet — return defaults
             return dict(self.DEFAULTS)
+
+
+def get_tag_preferences_repository() -> (
+    Union["TagPreferencesRepository", "TagPreferencesRepositoryOrm"]
+):
+    """Return the right TagPreferencesRepository implementation per env.
+
+    ORM when ``USE_ORM_TAG_PREFERENCES`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_TAG_PREFERENCES:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.tag_preferences_repository_orm import (
+                TagPreferencesRepositoryOrm,
+            )
+
+            return TagPreferencesRepositoryOrm()
+        logger.warning(
+            "USE_ORM_TAG_PREFERENCES=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return TagPreferencesRepository()

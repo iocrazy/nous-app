@@ -4,13 +4,24 @@
 Libraries Repository
 
 Data access layer for team libraries. Uses async Supabase admin client.
+
+ORM 2.0 migration (Batch L1): ``LibrariesRepository`` is the legacy supabase-py
+REST implementation; ``LibrariesRepositoryOrm`` (in
+``libraries_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call sites
+go through ``get_libraries_repository()`` (bottom of this file) which picks the
+ORM subclass when ``USE_ORM_LIBRARIES`` is on AND the engine is configured.
 """
 
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.libraries_repository_orm import LibrariesRepositoryOrm
 
 
 class LibrariesRepository:
@@ -95,3 +106,30 @@ class LibrariesRepository:
         except Exception as e:
             logger.error(f"Failed to delete library {library_id}: {e}")
             raise
+
+
+def get_libraries_repository() -> (
+    Union["LibrariesRepository", "LibrariesRepositoryOrm"]
+):
+    """Return the right LibrariesRepository implementation per env.
+
+    ORM when ``USE_ORM_LIBRARIES`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_LIBRARIES:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.libraries_repository_orm import (
+                LibrariesRepositoryOrm,
+            )
+
+            return LibrariesRepositoryOrm()
+        logger.warning(
+            "USE_ORM_LIBRARIES=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return LibrariesRepository()
