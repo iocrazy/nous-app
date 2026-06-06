@@ -84,10 +84,9 @@ def get_monitoring_repository() -> "MonitoringRepository":
     engine-missing deploy logs once and falls back to REST (never crashes).
     """
     from app.core.config import settings
+    from app.db.engine import is_configured
 
     if settings.USE_ORM_ADMIN_MONITORING:
-        from app.db.engine import is_configured
-
         if is_configured():
             from app.repositories.admin.monitoring_repository_orm import (
                 MonitoringRepositoryOrm,
@@ -100,4 +99,17 @@ def get_monitoring_repository() -> "MonitoringRepository":
             "USE_ORM_ADMIN_MONITORING=true but SUPAVISOR_DATABASE_URL is empty "
             "— falling back to supabase-py path"
         )
+
+    from app.db.shadow_compare import shadow_enabled
+
+    if shadow_enabled("admin_monitoring") and is_configured():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.monitoring_repository_orm import (
+            MonitoringRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            MonitoringRepository(), MonitoringRepositoryOrm(), "admin_monitoring"
+        )
+
     return MonitoringRepository()

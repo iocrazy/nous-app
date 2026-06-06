@@ -122,10 +122,9 @@ def get_admin_videos_repository() -> "AdminVideosRepository":
     engine-missing deploy logs once and falls back to REST (never crashes).
     """
     from app.core.config import settings
+    from app.db.engine import is_configured
 
     if settings.USE_ORM_ADMIN_VIDEOS:
-        from app.db.engine import is_configured
-
         if is_configured():
             from app.repositories.admin.videos_repository_orm import (
                 AdminVideosRepositoryOrm,
@@ -138,4 +137,17 @@ def get_admin_videos_repository() -> "AdminVideosRepository":
             "USE_ORM_ADMIN_VIDEOS=true but SUPAVISOR_DATABASE_URL is empty "
             "— falling back to supabase-py path"
         )
+
+    from app.db.shadow_compare import shadow_enabled
+
+    if shadow_enabled("admin_videos") and is_configured():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.videos_repository_orm import (
+            AdminVideosRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            AdminVideosRepository(), AdminVideosRepositoryOrm(), "admin_videos"
+        )
+
     return AdminVideosRepository()

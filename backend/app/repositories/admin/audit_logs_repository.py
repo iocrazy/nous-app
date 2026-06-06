@@ -77,10 +77,9 @@ def get_audit_logs_repository() -> "AuditLogsRepository":
     engine-missing deploy logs once and falls back to REST (never crashes).
     """
     from app.core.config import settings
+    from app.db.engine import is_configured
 
     if settings.USE_ORM_ADMIN_AUDIT_LOGS:
-        from app.db.engine import is_configured
-
         if is_configured():
             from app.repositories.admin.audit_logs_repository_orm import (
                 AuditLogsRepositoryOrm,
@@ -93,4 +92,17 @@ def get_audit_logs_repository() -> "AuditLogsRepository":
             "USE_ORM_ADMIN_AUDIT_LOGS=true but SUPAVISOR_DATABASE_URL is empty "
             "— falling back to supabase-py path"
         )
+
+    from app.db.shadow_compare import shadow_enabled
+
+    if shadow_enabled("admin_audit_logs") and is_configured():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.audit_logs_repository_orm import (
+            AuditLogsRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            AuditLogsRepository(), AuditLogsRepositoryOrm(), "admin_audit_logs"
+        )
+
     return AuditLogsRepository()

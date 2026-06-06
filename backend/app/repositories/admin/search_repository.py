@@ -118,10 +118,9 @@ def get_admin_search_repository() -> "AdminSearchRepository":
     engine-missing deploy logs once and falls back to REST (never crashes).
     """
     from app.core.config import settings
+    from app.db.engine import is_configured
 
     if settings.USE_ORM_ADMIN_SEARCH:
-        from app.db.engine import is_configured
-
         if is_configured():
             from app.repositories.admin.search_repository_orm import (
                 AdminSearchRepositoryOrm,
@@ -134,4 +133,17 @@ def get_admin_search_repository() -> "AdminSearchRepository":
             "USE_ORM_ADMIN_SEARCH=true but SUPAVISOR_DATABASE_URL is empty "
             "— falling back to supabase-py path"
         )
+
+    from app.db.shadow_compare import shadow_enabled
+
+    if shadow_enabled("admin_search") and is_configured():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.search_repository_orm import (
+            AdminSearchRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            AdminSearchRepository(), AdminSearchRepositoryOrm(), "admin_search"
+        )
+
     return AdminSearchRepository()

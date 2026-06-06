@@ -71,10 +71,9 @@ def get_system_settings_repository() -> "SystemSettingsRepository":
     engine-missing deploy logs once and falls back to REST (never crashes).
     """
     from app.core.config import settings
+    from app.db.engine import is_configured
 
     if settings.USE_ORM_ADMIN_SYSTEM_SETTINGS:
-        from app.db.engine import is_configured
-
         if is_configured():
             from app.repositories.admin.system_settings_repository_orm import (
                 SystemSettingsRepositoryOrm,
@@ -85,4 +84,19 @@ def get_system_settings_repository() -> "SystemSettingsRepository":
             "USE_ORM_ADMIN_SYSTEM_SETTINGS=true but SUPAVISOR_DATABASE_URL is "
             "empty — falling back to supabase-py path"
         )
+
+    from app.db.shadow_compare import shadow_enabled
+
+    if shadow_enabled("admin_system_settings") and is_configured():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.system_settings_repository_orm import (
+            SystemSettingsRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            SystemSettingsRepository(),
+            SystemSettingsRepositoryOrm(),
+            "admin_system_settings",
+        )
+
     return SystemSettingsRepository()
