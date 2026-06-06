@@ -939,6 +939,32 @@ class Settings(BaseSettings):
         "the router's None-guard is dead for missing rows — NOT repaired, inert "
         "discipline). No date-range filter. Inert; flip false to revert.",
     )
+    USE_ORM_ADMIN_CREDITS: bool = Field(
+        default=False,
+        description="Route AdminCreditsRepository (admin CREDIT-ADMINISTRATION "
+        "console on point_packages / point_pricing / point_transactions / orders / "
+        "teams / team_quotas) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave — "
+        "★ MONEY ★). ALL money columns are Integer/BigInteger → NATIVE int (the 5.3 "
+        "trap): points_balance / amount / balance_after / amount_cents / "
+        "points_amount / points_cost / price_cents / storage_*_bytes — consumers "
+        "sum/abs/+= them. point_transactions.duration_seconds (the ONLY Numeric) → "
+        "str (REST JSON-string shape; no admin consumer does decimal math). ⚠️ "
+        "DICT-KEY UUID TRAPS: point_transactions.user_id / orders.user_id → str "
+        "(batch_get_user_auth_info str-keyed email enrichment); orders.package_id → "
+        "str (get_package_names str-keyed map); teams.owner_id / pricing+package ids "
+        "→ str. bigint ids (teams.id / team_id / txn+order id) → native int. "
+        "timestamptz (orders.paid_at / created_at) → ISO str (the router reparses "
+        "paid_at via datetime.fromisoformat). PR-E quirk: is_personal DERIVED from "
+        "teams.kind=='personal' (kind is plain Text, not Enum) and injected. READ "
+        "date filter orders_by_status/revenue_chart bind a tz-aware datetime (v3); "
+        "WRITE update_order coerces ISO-str paid_at/updated_at → datetime (v3 "
+        "mirror, asyncpg strict timestamptz codec). WRITES (package/pricing CRUD + "
+        "update_order) COMMIT via write_scope(); NONE touch a balance column (the "
+        "grant/adjust/refund money flows live in the router → PointsService, behind "
+        "USE_ORM_POINTS). ⚠️ CONCERN (pre-existing, NOT fixed): confirm_order/"
+        "refund_order do update_order THEN add_points as two un-transactioned awaits "
+        "— cross-repo non-atomic; flagged for a human. Inert; flip false to revert.",
+    )
 
     # ============================================
     # 下载设置
