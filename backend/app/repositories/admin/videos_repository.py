@@ -112,3 +112,30 @@ class AdminVideosRepository:
             .execute()
         )
         return bool(result.data)
+
+
+def get_admin_videos_repository() -> "AdminVideosRepository":
+    """Return the right AdminVideosRepository implementation per env.
+
+    ORM when ``USE_ORM_ADMIN_VIDEOS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ADMIN_VIDEOS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.admin.videos_repository_orm import (
+                AdminVideosRepositoryOrm,
+            )
+
+            return AdminVideosRepositoryOrm()
+        from loguru import logger
+
+        logger.warning(
+            "USE_ORM_ADMIN_VIDEOS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AdminVideosRepository()

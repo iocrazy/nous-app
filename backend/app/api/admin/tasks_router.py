@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.tasks_repository import AdminTasksRepository
+from app.repositories.admin.tasks_repository import get_admin_tasks_repository
 from app.schemas.admin import (
     AdminTaskListResponse,
     AdminTaskResponse,
@@ -34,7 +34,7 @@ VALID_SORT_FIELDS = {"created_at", "started_at", "completed_at", "status"}
 @router.get("/stats", response_model=AdminTaskStatsResponse)
 async def get_task_stats(auth: AdminAuthDep):
     """Get task status distribution counts."""
-    repo = AdminTasksRepository()
+    repo = get_admin_tasks_repository()
 
     # Run the 6 counter queries concurrently so the stats page returns in
     # one network round-trip worth of Supabase latency instead of six.
@@ -69,7 +69,7 @@ async def list_tasks(
     sort_order: Optional[str] = Query("desc"),
 ):
     """List all tasks with pagination, filtering, and user email lookup."""
-    repo = AdminTasksRepository()
+    repo = get_admin_tasks_repository()
 
     status_param = status_filter if status_filter in VALID_STATUSES else None
     type_param = task_type if task_type in VALID_TASK_TYPES else None
@@ -132,7 +132,7 @@ async def cancel_task(
     request: Request,
 ):
     """Cancel a pending or processing task."""
-    repo = AdminTasksRepository()
+    repo = get_admin_tasks_repository()
 
     task = await repo.get(task_id)
     if not task:
@@ -179,7 +179,7 @@ async def retry_task(
     request: Request,
 ):
     """Retry a failed task by resetting its status."""
-    repo = AdminTasksRepository()
+    repo = get_admin_tasks_repository()
 
     task = await repo.get(task_id)
     if not task:

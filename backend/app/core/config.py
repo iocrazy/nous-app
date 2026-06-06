@@ -785,6 +785,91 @@ class Settings(BaseSettings):
         "flip false to revert.",
     )
 
+    # ── Phase 2 admin wave pass 2 (search / alerts / logs / tasks / videos) ──
+    USE_ORM_ADMIN_SEARCH: bool = Field(
+        default=False,
+        description="Route AdminSearchRepository (admin cross-log search + request "
+        "trace over api_request_logs / application_logs / frontend_error_logs / "
+        "admin_audit_logs) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). "
+        "Strategy C: all timestamptz (timestamp / logged_at / created_at) → ISO str "
+        "(CONSUMED — the router feeds them to fromisoformat via _parse_ts and stores "
+        "them on str fields); id (BIGINT) → native int (router str()s it); no uuid "
+        "in any real projection. JSONB filter extra->>request_id reproduced via "
+        "extra['request_id'].astext. Time bounds (ISO str) coerced to NATIVE "
+        "tz-aware datetimes before binding (v3 rule). TWO PRE-EXISTING BROKEN "
+        "endpoints reproduced (NOT repaired — inert): frontend_logs() selects "
+        "nonexistent column stack_trace (real col is stack) → PG 42703; audit_logs() "
+        "queries nonexistent table admin_audit_logs → PG 42P01. Reads only. Inert.",
+    )
+    USE_ORM_ADMIN_ALERT_RULES: bool = Field(
+        default=False,
+        description="Route AlertRulesRepository (admin alert rules + alert history "
+        "on alert_rules / alert_history) through the SQLAlchemy 2.0 ORM (Phase 2 "
+        "admin wave). NO ORM MODEL exists for either table (mig 094, never "
+        "sqlacodegen'd) → reproduced via PARAMETERIZED text() inside read/write "
+        "scopes (no new models added to the shared package in this inert wave). "
+        "Strategy C: created_by (uuid) → str (AlertRuleItem.created_by:str); "
+        "created_at / updated_at / mute_until / resolved_at (timestamptz) → ISO str "
+        "(CONSUMED — str Pydantic fields; mute_until fed to fromisoformat); "
+        "threshold / metric_value (float8) → native float; id / rule_id (BIGINT) → "
+        "native int (str Pydantic fields coerce). WRITES (create/update/delete/"
+        "insert_history/resolve_history) COMMIT via write_scope(); update_rule "
+        "stamps updated_at=now() and guards against phantom keys via a column "
+        "allow-list. list_history date filters bind NATIVE tz-aware datetimes (v3). "
+        "Inert; flip false to revert.",
+    )
+    USE_ORM_ADMIN_REQUEST_LOGS: bool = Field(
+        default=False,
+        description="Route the three admin-console log repositories "
+        "(RequestLogsRepository / FrontendErrorLogsRepository / AppLogsRepository — "
+        "api_request_logs / frontend_error_logs / application_logs) through the "
+        "SQLAlchemy 2.0 ORM (Phase 2 admin wave). SELECT * via _orm_obj_to_dict "
+        "(FrontendErrorLogs has a renamed metadata→metadata_ — keyed back as "
+        "'metadata'). Strategy C: timestamp / created_at / logged_at (timestamptz) "
+        "→ ISO str (CONSUMED — str Pydantic fields; stats does ts[:13] slicing); id "
+        "(BIGINT) → native int (router str()s it); status_code / response_time_ms / "
+        "line (int) → native int; user_id (uuid) → str (in SELECT * but not a "
+        "dict-key here); jsonb → native dict. has_exception True → exception IS NOT "
+        "NULL / False → IS NULL (legacy parity); NOISE_MODULES exclusion preserved. "
+        "Date-range filters bind NATIVE tz-aware datetimes (v3 — many windows). "
+        "Reads only. Inert; flip false to revert.",
+    )
+    USE_ORM_ADMIN_TASKS: bool = Field(
+        default=False,
+        description="Route AdminTasksRepository (admin Task Center on task_tracking) "
+        "through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). COLUMN-SUBSET "
+        "projection (LIST_COLUMNS). Strategy C: user_id (uuid) → str (DICT-KEY trap "
+        "— the router uses email_map.get(str(user_id)); a native UUID would silently "
+        "miss); created_at / started_at / completed_at (timestamptz) → ISO str (str "
+        "Pydantic fields); metadata (renamed metadata_) → native dict keyed as "
+        "'metadata'; status / phase are plain text (NOT Enum); progress / speed / "
+        "total_bytes / cost_cents (int) → native int; COUNT → native int. or_ search "
+        "reproduced (incl. metadata->>original_url ilike + digit media_id/resource_id "
+        "eq). ⚠️ update() WRITES the EXACT changes dict verbatim incl. TRIGGER-OWNED "
+        "columns (status/phase/progress/started_at/completed_at/error_msg) — this "
+        "REPRODUCES a PRE-EXISTING task_tracking-discipline violation in the legacy "
+        "admin cancel/retry path (NOT introduced / NOT repaired here; flagged as a "
+        "CONCERN); COMMITS via write_scope(). No date-range filter. Inert; flip false.",
+    )
+    USE_ORM_ADMIN_VIDEOS: bool = Field(
+        default=False,
+        description="Route AdminVideosRepository (admin video management on "
+        "parsed_media) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). SELECT * "
+        "via _orm_obj_to_dict. Strategy C: video/music/cover_download_status are "
+        "SQLAlchemy Enum(DownloadStatus) → unwrapped to bare .value via _plain "
+        "(CONSUMED — str Pydantic fields + status=='completed' compares); id / "
+        "datasize_bytes / counts (int/bigint) → native int; COUNT → native int; "
+        "sum_storage_bytes pushes SUM to PG → native int; created_at / download_time "
+        "/ updated_at (timestamptz) → ISO str (datetime Pydantic fields parse it); "
+        "jsonb → native list. parsed_media has NO uuid column (user_id dropped mig "
+        "083) so no uuid coercion is load-bearing; THIS repo never selects user_id "
+        "(no broken endpoint here — the stats repo owns that one). or_ search "
+        "(title/platform_id ilike) reproduced; sort validated vs ALLOWED_SORT_FIELDS. "
+        "WRITES delete() + reset_for_retry() COMMIT via write_scope() and return "
+        "bool(rowcount) via RETURNING id (REST bool(result.data) parity). No "
+        "date-range filter. Inert; flip false to revert.",
+    )
+
     # ============================================
     # 下载设置
     # ============================================

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.videos_repository import AdminVideosRepository
+from app.repositories.admin.videos_repository import get_admin_videos_repository
 from app.schemas.admin import (
     AdminVideoDetailResponse,
     AdminVideoListResponse,
@@ -27,7 +27,7 @@ router = APIRouter()
 @router.get("/stats", response_model=AdminVideoStatsResponse)
 async def get_video_stats(auth: AdminAuthDep):
     """Get video status distribution statistics."""
-    repo = AdminVideosRepository()
+    repo = get_admin_videos_repository()
 
     # Fetch total + per-status counts + storage sum concurrently; on the
     # stats page this is the entire payload, so the latency win is visible.
@@ -137,7 +137,7 @@ async def list_videos(
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
 ):
     """List all videos with pagination and filters."""
-    repo = AdminVideosRepository()
+    repo = get_admin_videos_repository()
     rows, total = await repo.list_with_filters(
         page=page,
         page_size=page_size,
@@ -166,7 +166,7 @@ async def get_video(
     auth: AdminAuthDep,
 ):
     """Get detailed information about a specific video."""
-    repo = AdminVideosRepository()
+    repo = get_admin_videos_repository()
     row = await repo.get_by_id(video_id)
     if not row:
         raise HTTPException(
@@ -183,7 +183,7 @@ async def delete_video(
     request: Request,
 ):
     """Delete a video by its database ID."""
-    repo = AdminVideosRepository()
+    repo = get_admin_videos_repository()
     existing = await repo.get_by_id(video_id)
     if not existing:
         raise HTTPException(
@@ -222,7 +222,7 @@ async def retry_video(
     request: Request,
 ):
     """Retry a failed video download by resetting its status to pending."""
-    repo = AdminVideosRepository()
+    repo = get_admin_videos_repository()
     existing = await repo.get_by_id(video_id)
     if not existing:
         raise HTTPException(
