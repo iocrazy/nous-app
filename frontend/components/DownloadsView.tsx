@@ -23,6 +23,8 @@ import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
 import { FilterChipBar } from './filters/FilterChipBar';
 import { FacetPickerSheet } from './filters/FacetPickerSheet';
 import type { ChipId } from './resources/filter/types';
+import { DownloadsBatchToolbar } from './DownloadsView/DownloadsBatchToolbar';
+import { BatchTagSheet } from './DownloadsView/BatchTagSheet';
 import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
@@ -39,7 +41,7 @@ import {
 import { SearchScopePicker, loadSearchScope } from './SearchScopePicker';
 import { useToast } from './Toast';
 import { trashResourceByPlatformId, updateResource } from '../services/resourceService';
-import { createTag } from '../services/unifiedTagService';
+import { createTag, addResourceTag } from '../services/unifiedTagService';
 import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { useAuth } from '../contexts/AuthContext';
@@ -164,6 +166,9 @@ export const DownloadsView: React.FC = () => {
   // ─── Pull-to-refresh (mobile) ───
   const contentScrollRef = useRef<HTMLDivElement>(null);
   const pullStartY = useRef(0);
+  // Long-press to enter multi-select on mobile (iOS Photos pattern).
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressFiredRef = useRef(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
 
@@ -411,6 +416,7 @@ export const DownloadsView: React.FC = () => {
   const [shareTargetName, setShareTargetName] = useState<string>('');
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [openFacet, setOpenFacet] = useState<ChipId | null>(null);
+  const [batchTagOpen, setBatchTagOpen] = useState(false);
   const [mobileSearchQuery, setMobileSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
@@ -484,6 +490,15 @@ export const DownloadsView: React.FC = () => {
       return;
     }
     if (isMobileDevice) {
+      // A long-press just toggled selection — swallow the trailing click.
+      if (longPressFiredRef.current) {
+        longPressFiredRef.current = false;
+        return;
+      }
+      if (multiSelectMode) {
+        handleToggleSelect(item.platform_id, e as React.MouseEvent);
+        return;
+      }
       handleNavigateToDetail(item);
       return;
     }
@@ -500,7 +515,28 @@ export const DownloadsView: React.FC = () => {
         setLastClickedId(item.platform_id);
       }
     }, 250);
-  }, [selectedVideo, handleToggleSelect, isMobileDevice, handleNavigateToDetail]);
+  }, [selectedVideo, handleToggleSelect, isMobileDevice, handleNavigateToDetail, multiSelectMode]);
+
+  const startLongPress = useCallback((item: Video) => {
+    longPressFiredRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressFiredRef.current = true;
+      setMultiSelectMode(true);
+      setSelectedIds((prev) => {
+        const n = new Set(prev);
+        n.add(item.platform_id);
+        return n;
+      });
+      try { navigator.vibrate?.(10); } catch { /* no-op */ }
+    }, 450);
+  }, []);
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
 
   const handleVideoDoubleClick = useCallback((item: Video) => {
     if (clickTimerRef.current) {
@@ -535,6 +571,92 @@ export const DownloadsView: React.FC = () => {
       addToast(`Failed to remove ${platformIds.length - trashedIds.size} item(s)`, 'error');
     }
   }, [selectedIds, selectedVideo, addToast, setLibrary, t]);
+
+  // ─── Batch: Download / Share / Tag / Cancel ─────────────
+  const handleBatchCancel = useCallback(() => {
+    setSelectedIds(new Set());
+    setMultiSelectMode(false);
+  }, []);
+
+  const handleBatchDownload = useCallback(async () => {
+    const byId = new Map(library.map((v) => [v.platform_id, v]));
+    const vids = Array.from(selectedIds)
+      .map((pid) => byId.get(pid))
+      .filter((v): v is Video => !!v);
+    if (vids.length === 0) return;
+    addToast(`Downloading ${vids.length} item(s)…`, 'info');
+    for (const v of vids) {
+      const baseName = (v.title || v.platform_id || 'media')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .trim()
+        .slice(0, 100);
+      try {
+        if (
+          v.download_path &&
+          v.video_download_status?.toLowerCase() === 'completed' &&
+          v.platform_id
+        ) {
+          const ok = await downloadWithAuth(
+            getDownloadUrl(v.platform_id),
+            `${baseName}.mp4`,
+            {},
+          );
+          if (ok) continue;
+        }
+        const url = getVideoUrl(v, mediaToken ?? undefined);
+        if (url) await downloadFile(url, `${baseName}.mp4`, {});
+      } catch (err) {
+        console.error('Batch download failed for', v.platform_id, err);
+      }
+    }
+  }, [library, selectedIds, addToast, mediaToken]);
+
+  const handleBatchShare = useCallback(() => {
+    if (selectedIds.size !== 1) {
+      addToast('Select a single item to share', 'info');
+      return;
+    }
+    const pid = Array.from(selectedIds)[0];
+    const v = library.find((x) => x.platform_id === pid);
+    if (!v) return;
+    const rid = resourceIdMap[String(v.id)];
+    if (rid) {
+      setShareTargetResourceId(rid);
+      setShareTargetName(v.title || v.description || 'Shared Media');
+    } else {
+      addToast('Cannot share: no resource linked', 'error');
+    }
+  }, [selectedIds, library, resourceIdMap, addToast]);
+
+  const handleBatchTagApply = useCallback(
+    async (tagIds: string[]) => {
+      const vids = Array.from(selectedIds)
+        .map((pid) => library.find((v) => v.platform_id === pid))
+        .filter((v): v is Video => !!v);
+      let tagged = 0;
+      let skipped = 0;
+      for (const v of vids) {
+        const rid = resourceIdMap[String(v.id)];
+        if (!rid) {
+          skipped += 1;
+          continue;
+        }
+        for (const tid of tagIds) {
+          try {
+            await addResourceTag(rid, tid);
+          } catch (err) {
+            console.error('Batch tag failed', rid, tid, err);
+          }
+        }
+        tagged += 1;
+      }
+      addToast(
+        `Tagged ${tagged} item(s)` + (skipped ? `, ${skipped} skipped` : ''),
+        'success',
+      );
+    },
+    [selectedIds, library, resourceIdMap, addToast],
+  );
 
   // ─── Keyboard shortcuts ────────────────────────────────
   useEffect(() => {
@@ -947,21 +1069,28 @@ export const DownloadsView: React.FC = () => {
             {libraryViewMode === 'grid' && (
               <div className="grid grid-cols-2 gap-3 downloads-grid">
                 {filteredLibrary.map((item) => (
-                  <CompactMediaCard
+                  <div
                     key={item.platform_id}
-                    data={item}
-                    resourceId={resourceIdMap[item.id]}
-                    aiStatus={aiStatusMap[item.id]}
-                    onClick={(e) => handleVideoClick(item, e)}
-                    onDoubleClick={() => handleVideoDoubleClick(item)}
-                    onContextMenu={handleContextMenu}
-                    isShared={sharedVideoIds.includes(item.platform_id)}
-                    isSelected={selectedVideo?.platform_id === item.platform_id}
-                    selectable
-                    isChecked={selectedIds.has(item.platform_id)}
-                    onToggleSelect={(e) => handleToggleSelect(item.platform_id, e)}
-                    forceShowCheckbox={multiSelectMode}
-                  />
+                    onTouchStart={() => startLongPress(item)}
+                    onTouchMove={cancelLongPress}
+                    onTouchEnd={cancelLongPress}
+                    onTouchCancel={cancelLongPress}
+                  >
+                    <CompactMediaCard
+                      data={item}
+                      resourceId={resourceIdMap[item.id]}
+                      aiStatus={aiStatusMap[item.id]}
+                      onClick={(e) => handleVideoClick(item, e)}
+                      onDoubleClick={() => handleVideoDoubleClick(item)}
+                      onContextMenu={handleContextMenu}
+                      isShared={sharedVideoIds.includes(item.platform_id)}
+                      isSelected={selectedVideo?.platform_id === item.platform_id}
+                      selectable
+                      isChecked={selectedIds.has(item.platform_id)}
+                      onToggleSelect={(e) => handleToggleSelect(item.platform_id, e)}
+                      forceShowCheckbox={multiSelectMode}
+                    />
+                  </div>
                 ))}
               </div>
             )}
@@ -1223,6 +1352,23 @@ export const DownloadsView: React.FC = () => {
         allTags={allTags}
         availablePlatforms={availablePlatforms}
         onCreateTag={handleCreateTagForFilter}
+      />
+
+      {/* Mobile batch-action bar (Pixcall-style) — shown when items selected */}
+      <DownloadsBatchToolbar
+        count={selectedIds.size}
+        onDownload={handleBatchDownload}
+        onTag={() => setBatchTagOpen(true)}
+        onShare={handleBatchShare}
+        onDelete={handleBatchDelete}
+        onCancel={handleBatchCancel}
+      />
+      <BatchTagSheet
+        open={batchTagOpen}
+        count={selectedIds.size}
+        allTags={allTags}
+        onApply={handleBatchTagApply}
+        onClose={() => setBatchTagOpen(false)}
       />
 
       {/* Share Modal */}
