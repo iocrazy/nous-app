@@ -9,7 +9,7 @@ from loguru import logger
 from app.core.admin_deps import AdminAuthDep
 from app.core.modules import ALL_MODULE_KEYS, MODULE_DEFINITIONS, validate_module_keys
 from app.core.team_permissions import ASSIGNABLE_ROLES, get_role_info
-from app.repositories.admin.teams_repository import AdminTeamsRepository
+from app.repositories.admin.teams_repository import get_admin_teams_repository
 from app.schemas.admin import (
     AdminModuleDefinition,
     AdminTeamListResponse,
@@ -56,7 +56,7 @@ async def list_teams(
     - **page_size**: Number of items per page (max 100)
     - **search**: Search by team name
     """
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
     offset = (page - 1) * page_size
     rows, total = await repo.list_teams(search=search, offset=offset, limit=page_size)
 
@@ -109,7 +109,7 @@ async def get_team(
     auth: AdminAuthDep,
 ):
     """Get detailed information about a specific team."""
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
     team = await repo.get(team_id)
     if not team:
         raise HTTPException(
@@ -146,7 +146,7 @@ async def get_team_members(
     auth: AdminAuthDep,
 ):
     """Get all members of a specific team."""
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
 
     if not await repo.get(team_id):
         raise HTTPException(
@@ -190,7 +190,7 @@ async def transfer_team_ownership(
 
     - **new_owner_id**: User ID of the new owner (must be an existing team member)
     """
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
 
     team = await repo.get(team_id)
     if not team:
@@ -251,7 +251,7 @@ async def delete_team(
     - Unlink collections (set team_id to null)
     - Delete the team
     """
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
 
     team = await repo.get(team_id)
     if not team:
@@ -305,7 +305,7 @@ async def update_member_role(
             detail=f"Role must be one of: {', '.join(ASSIGNABLE_ROLES)}",
         )
 
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
 
     team = await repo.get(team_id)
     if not team:
@@ -365,7 +365,7 @@ async def remove_member(
 
     - Cannot remove the team owner
     """
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
 
     team = await repo.get(team_id)
     if not team:
@@ -415,7 +415,7 @@ async def get_team_modules(
     auth: AdminAuthDep,
 ):
     """Get current module settings for a team."""
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
     team = await repo.get(team_id)
     if not team:
         raise HTTPException(
@@ -452,7 +452,7 @@ async def update_team_modules(
             detail=f"Invalid module keys: {', '.join(invalid_keys)}. Valid keys: {', '.join(ALL_MODULE_KEYS)}",
         )
 
-    repo = AdminTeamsRepository()
+    repo = get_admin_teams_repository()
 
     team = await repo.get(team_id)
     if not team:

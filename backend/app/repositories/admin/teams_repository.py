@@ -134,3 +134,30 @@ class AdminTeamsRepository:
         return {
             str(r["team_id"]): r.get("points_balance", 0) for r in (result.data or [])
         }
+
+
+def get_admin_teams_repository() -> "AdminTeamsRepository":
+    """Return the right AdminTeamsRepository implementation per env.
+
+    ORM when ``USE_ORM_ADMIN_TEAMS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ADMIN_TEAMS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.admin.teams_repository_orm import (
+                AdminTeamsRepositoryOrm,
+            )
+
+            return AdminTeamsRepositoryOrm()
+        from loguru import logger
+
+        logger.warning(
+            "USE_ORM_ADMIN_TEAMS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AdminTeamsRepository()

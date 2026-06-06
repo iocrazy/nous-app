@@ -869,6 +869,76 @@ class Settings(BaseSettings):
         "bool(rowcount) via RETURNING id (REST bool(result.data) parity). No "
         "date-range filter. Inert; flip false to revert.",
     )
+    USE_ORM_ADMIN_TAGS: bool = Field(
+        default=False,
+        description="Route AdminTagsRepository (admin tags + tag_groups console on "
+        "tags / tag_groups / resource_tags) through the SQLAlchemy 2.0 ORM (Phase 2 "
+        "admin wave). Strategy C: tags.id / tag_groups.id / group_id / "
+        "resource_tags.tag_id are ALL BIGINT (NOT uuid — checked) → native int (the "
+        "5.3 trap; consumers str() at dict-key lookup boundaries, str(int) "
+        "round-trips). The only uuid column, tags.user_id, → str (generic sweep; "
+        "list_tags returns the row dict RAW to the JSON encoder, REST emitted a "
+        "string). created_at (timestamptz) → ISO str; type is plain String + DB "
+        "CHECK (NOT Enum). The PostgREST embed select('*, tag_groups(name)') is "
+        "reproduced via a LEFT OUTER JOIN attaching the nested {'tag_groups': "
+        "{'name': ...} | None} shape. WRITES (create/update/delete/batch/reorder for "
+        "tags + groups) COMMIT via write_scope(); delete cascades resource_tags "
+        "first (verbatim legacy order); bool returns mirror REST bool(result.data) "
+        "via RETURNING. No date-range filter. Inert; flip false to revert.",
+    )
+    USE_ORM_ADMIN_TRANSCODE: bool = Field(
+        default=False,
+        description="Route AdminTranscodeRepository (HLS transcode admin console on "
+        "resource_versions / resources / parsed_media + system_settings) through the "
+        "SQLAlchemy 2.0 ORM (Phase 2 admin wave). Strategy C: ALL ids/FKs are BIGINT "
+        "(resource_versions.id/.resource_id, resources.id/.media_id, parsed_media.id) "
+        "→ native int (the 5.3 trap; the consumed maps str() their keys). NO uuid is "
+        "selected in ANY path (uploaded_by / creator_id / updated_by never "
+        "projected) so uuid coercion is not load-bearing (defensive sweep kept). "
+        "created_at / transcode_at (timestamptz) → ISO str; transcode_status is "
+        "plain String (NOT Enum); cover_urls (jsonb) → native; COUNT → native int. "
+        "No NUMERIC columns selected. LIST filters (mime_type LIKE 'video/%', "
+        "status null/eq, min_size_mb gte) + VALID_SORT_FIELDS reproduced. WRITES: "
+        "mark_pending UPDATE + upsert_setting (pg_insert ON CONFLICT (key) DO UPDATE) "
+        "COMMIT via write_scope(). No date-range filter. Inert; flip false to revert.",
+    )
+    USE_ORM_ADMIN_USERS: bool = Field(
+        default=False,
+        description="Route AdminUsersRepository (admin user-management console on "
+        "user_profiles) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). "
+        "SELECT * via _orm_obj_to_dict. ⚠️ DICT-KEY UUID TRAP (M-tier core): "
+        "user_profiles.id (uuid) → str — the router builds user_ids from rows and "
+        "looks email/count enrichment up via batch helpers that key on the passed "
+        "id AND feed it to Supabase .eq filters / auth-admin; id is also compared "
+        "user_id==auth.user_id (str). A native UUID would diverge from the REST str "
+        "shape → silent enrichment miss / dead self-modify guard. role is "
+        "Enum(UserRole) → unwrapped to bare .value via _plain (CONSUMED: router does "
+        "str(role); str(UserRole.ADMIN) would yield 'UserRole.ADMIN' not 'admin'). "
+        "created_at / updated_at (timestamptz) → ISO str; display_id (bigint) → "
+        "native int. WRITES (update / set_banned) COMMIT via write_scope() and "
+        "RETURN the full row (REST result.data[0] parity). No date-range filter. "
+        "Inert; flip false to revert.",
+    )
+    USE_ORM_ADMIN_TEAMS: bool = Field(
+        default=False,
+        description="Route AdminTeamsRepository (admin team-management console on "
+        "teams / team_members / team_quotas / collections) through the SQLAlchemy "
+        "2.0 ORM (Phase 2 admin wave). ⚠️ DICT-KEY UUID TRAP (M-tier core): "
+        "teams.owner_id (uuid) → str (router does set(owner_ids) + "
+        "owner_info.get(oid) email enrichment AND new_owner_id==old_owner_id compare "
+        "— a native UUID breaks set membership / makes the 'same owner' 400 guard "
+        "never fire); team_members.user_id (uuid) → str (user_ids → batch_get_user_info "
+        "→ user_info.get(uid) enrichment). teams.id / team_id (bigint) → native int "
+        "(the 5.3 trap; batch_points_balances keys str(team_id), router does "
+        "member_counts.get(tid) + points_balances.get(str(tid)) — str(int) "
+        "round-trips). created_at / joined_at (timestamptz) → ISO str; settings_json "
+        "/ enabled_modules (jsonb) → native dict; kind is plain String (NOT Enum; "
+        "router: kind=='personal'). WRITES (update / delete / unlink_collections / "
+        "update_member_role / delete_member) COMMIT via write_scope(). get / "
+        "get_member reproduce the legacy .single() RAISE-on-0-rows quirk (HTTP 500; "
+        "the router's None-guard is dead for missing rows — NOT repaired, inert "
+        "discipline). No date-range filter. Inert; flip false to revert.",
+    )
 
     # ============================================
     # 下载设置

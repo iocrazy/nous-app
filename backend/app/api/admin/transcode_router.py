@@ -9,7 +9,9 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
-from app.repositories.admin.transcode_repository import AdminTranscodeRepository
+from app.repositories.admin.transcode_repository import (
+    get_admin_transcode_repository,
+)
 from app.schemas.admin import (
     AdminTranscodeListResponse,
     AdminTranscodeSettingsResponse,
@@ -51,7 +53,7 @@ def _scan_hls_tiers(hls_path: str) -> dict[str, bool]:
 @router.get("/stats", response_model=AdminTranscodeStatsResponse)
 async def get_transcode_stats(auth: AdminAuthDep):
     """Get transcode status distribution for video resource versions."""
-    repo = AdminTranscodeRepository()
+    repo = get_admin_transcode_repository()
 
     # Total + 4 status counts concurrently instead of 5 sequential queries.
     total, status_counts = await asyncio.gather(
@@ -86,7 +88,7 @@ async def list_transcode_versions(
     # Route status_filter through the repo's validator set
     resolved_status = status_filter if status_filter in VALID_STATUSES else None
 
-    repo = AdminTranscodeRepository()
+    repo = get_admin_transcode_repository()
     rows, total = await repo.list_video_versions(
         page=page,
         page_size=page_size,
@@ -162,7 +164,7 @@ async def retry_transcode(
     request: Request,
 ):
     """Retry HLS transcode for a specific resource version."""
-    repo = AdminTranscodeRepository()
+    repo = get_admin_transcode_repository()
 
     version = await repo.get_version(version_id)
     if not version:
@@ -218,7 +220,7 @@ async def batch_transcode(
     action: str = Query(..., pattern="^(retry_failed|transcode_new)$"),
 ):
     """Batch transcode operations: retry failed or transcode new (untranscoded)."""
-    repo = AdminTranscodeRepository()
+    repo = get_admin_transcode_repository()
     versions = await repo.list_versions_for_batch(action)
     queued = 0
 
@@ -286,7 +288,7 @@ VALID_PRESETS = {
 
 async def _load_transcode_settings_from_db() -> dict:
     """Load transcode settings from system_settings table."""
-    repo = AdminTranscodeRepository()
+    repo = get_admin_transcode_repository()
     db_map = await repo.load_settings()
     return {
         "transcode_enabled": db_map.get(
@@ -356,7 +358,7 @@ async def update_transcode_settings(
         )
 
     # Save to database
-    repo = AdminTranscodeRepository()
+    repo = get_admin_transcode_repository()
     changes = {}
     field_to_db_key = {
         "transcode_enabled": "transcode_enabled",

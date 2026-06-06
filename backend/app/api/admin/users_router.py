@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.users_repository import AdminUsersRepository
+from app.repositories.admin.users_repository import get_admin_users_repository
 from app.schemas.admin import (
     AdminUserBanRequest,
     AdminUserListResponse,
@@ -47,7 +47,7 @@ async def list_users(
     - **search**: Search by username
     - **role**: Filter by role (admin, user, test)
     """
-    repo = AdminUsersRepository()
+    repo = get_admin_users_repository()
     rows, total = await repo.list_with_filters(
         page=page,
         page_size=page_size,
@@ -102,7 +102,7 @@ async def get_user(
     auth: AdminAuthDep,
 ):
     """Get detailed information about a specific user."""
-    repo = AdminUsersRepository()
+    repo = get_admin_users_repository()
     u = await repo.get_by_id(user_id)
 
     if not u:
@@ -145,7 +145,7 @@ async def update_user(
     - **role**: New role (admin, user, test)
     - **is_banned**: Whether user is banned
     """
-    repo = AdminUsersRepository()
+    repo = get_admin_users_repository()
 
     if not await repo.exists(user_id):
         raise HTTPException(
@@ -216,7 +216,7 @@ async def ban_user(
     - **is_banned**: True to ban, False to unban
     - **reason**: Optional reason for the ban
     """
-    repo = AdminUsersRepository()
+    repo = get_admin_users_repository()
 
     if not await repo.exists(user_id):
         raise HTTPException(
@@ -272,7 +272,7 @@ async def delete_user(
     Note: This does not actually delete the user, but bans them instead.
     For full deletion, use Supabase Admin Console.
     """
-    repo = AdminUsersRepository()
+    repo = get_admin_users_repository()
 
     if not await repo.exists(user_id):
         raise HTTPException(

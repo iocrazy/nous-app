@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.tags_repository import AdminTagsRepository
+from app.repositories.admin.tags_repository import get_admin_tags_repository
 
 router = APIRouter()
 
@@ -66,7 +66,7 @@ class TagReorder(BaseModel):
 @router.get("/groups")
 async def list_groups(auth: AdminAuthDep):
     """List all tag groups with tag counts."""
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
 
     groups = await repo.list_groups()
     all_tags = await repo.all_tag_group_ids()
@@ -94,7 +94,7 @@ async def list_groups(auth: AdminAuthDep):
 @router.post("/groups")
 async def create_group(body: TagGroupCreate, auth: AdminAuthDep):
     """Create a new tag group."""
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     max_order = await repo.max_group_sort_order()
     group = await repo.create_group(body.name, max_order + 1)
     if not group:
@@ -109,7 +109,7 @@ async def update_group(group_id: str, body: TagGroupUpdate, auth: AdminAuthDep):
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
 
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     group = await repo.update_group(group_id, update_data)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -119,7 +119,7 @@ async def update_group(group_id: str, body: TagGroupUpdate, auth: AdminAuthDep):
 @router.delete("/groups/{group_id}")
 async def delete_group(group_id: str, auth: AdminAuthDep):
     """Delete a tag group. Tags become uncategorized."""
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     if not await repo.delete_group(group_id):
         raise HTTPException(status_code=404, detail="Group not found")
     return {"success": True}
@@ -128,7 +128,7 @@ async def delete_group(group_id: str, auth: AdminAuthDep):
 @router.post("/groups/reorder")
 async def reorder_groups(body: TagGroupReorder, auth: AdminAuthDep):
     """Bulk reorder groups. IDs list defines the new order."""
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     await repo.reorder_groups(body.ids)
     return {"success": True}
 
@@ -151,7 +151,7 @@ async def list_tags(
     sort_order: Optional[str] = Query(None, pattern="^(asc|desc)$"),
 ):
     """List all tags with pagination, search, and group filtering."""
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     rows, total = await repo.list_tags(
         page=page,
         page_size=page_size,
@@ -194,7 +194,7 @@ async def create_tag(body: TagCreate, auth: AdminAuthDep):
     if body.group_id:
         insert_data["group_id"] = body.group_id
 
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     tag = await repo.create_tag(insert_data)
     if not tag:
         raise HTTPException(status_code=500, detail="Failed to create tag")
@@ -217,7 +217,7 @@ async def update_tag(tag_id: str, body: TagUpdate, auth: AdminAuthDep):
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
 
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     tag = await repo.update_tag(tag_id, update_data)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -227,7 +227,7 @@ async def update_tag(tag_id: str, body: TagUpdate, auth: AdminAuthDep):
 @router.delete("/{tag_id}")
 async def delete_tag(tag_id: str, auth: AdminAuthDep):
     """Delete a tag and its resource associations."""
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     if not await repo.delete_tag(tag_id):
         raise HTTPException(status_code=404, detail="Tag not found")
     return {"success": True}
@@ -236,7 +236,7 @@ async def delete_tag(tag_id: str, auth: AdminAuthDep):
 @router.post("/batch")
 async def batch_action(body: TagBatchAction, auth: AdminAuthDep):
     """Batch operations on tags: move, delete, or change color."""
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
 
     if body.action == "move":
         gid = body.group_id if body.group_id else None
@@ -265,6 +265,6 @@ async def batch_action(body: TagBatchAction, auth: AdminAuthDep):
 @router.post("/reorder")
 async def reorder_tags(body: TagReorder, auth: AdminAuthDep):
     """Reorder tags within a group."""
-    repo = AdminTagsRepository()
+    repo = get_admin_tags_repository()
     await repo.reorder_tags(body.tag_ids)
     return {"success": True}

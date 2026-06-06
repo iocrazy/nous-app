@@ -77,3 +77,30 @@ class AdminUsersRepository:
         self, user_id: str, is_banned: bool
     ) -> Optional[dict[str, Any]]:
         return await self.update(user_id, {"is_banned": is_banned})
+
+
+def get_admin_users_repository() -> "AdminUsersRepository":
+    """Return the right AdminUsersRepository implementation per env.
+
+    ORM when ``USE_ORM_ADMIN_USERS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ADMIN_USERS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.admin.users_repository_orm import (
+                AdminUsersRepositoryOrm,
+            )
+
+            return AdminUsersRepositoryOrm()
+        from loguru import logger
+
+        logger.warning(
+            "USE_ORM_ADMIN_USERS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AdminUsersRepository()
