@@ -263,9 +263,13 @@ class ABogusDouyinParser:
         extras: dict[str, str] = {}
         cookie = ""
         try:
-            from app.repositories.cookies_repository import CookiesRepository
+            from app.repositories.cookies_repository import (
+                get_cookies_repository,
+            )
 
-            row = await CookiesRepository().get_by_user_and_platform(user_id, "douyin")
+            row = await get_cookies_repository().get_by_user_and_platform(
+                user_id, "douyin"
+            )
             if not row:
                 return "", {}
 

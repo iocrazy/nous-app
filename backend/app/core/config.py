@@ -569,6 +569,64 @@ class Settings(BaseSettings):
         "stuck pending). Inert — flip back to false to roll back.",
     )
 
+    USE_ORM_COOKIES: bool = Field(
+        default=False,
+        description="Route CookiesRepository (SECRET — platform login cookies: "
+        "the user_cookies table) through the SQLAlchemy 2.0 ORM (Phase 2 H batch "
+        "— secret). SECRET-HANDLING: the cookie (cookie_text/cookie_file/"
+        "custom_headers, all Text) is stored and returned in PLAINTEXT — the "
+        "legacy does NO encryption and NO masking (no crypto helper imported), so "
+        "the ORM reproduces raw-write / raw-read identically (consumers — "
+        "abogus/ies/ytdlp/soda parsers — need the raw cookie to drive sessions). "
+        "Plaintext-at-rest is a reported CONCERN, NOT changed here. UUID sweep: "
+        "user_id → str on every return path (legacy supabase-py shape; consumers "
+        "index by platform so no authz == on the returned dict, but str() keeps "
+        "the dict byte-identical and is the WHERE-filter bind, adapted str→uuid). "
+        "id (bigint, server_default generate_snowflake_id()) → native int (5.3 "
+        "trap). is_valid (bool) native; created_at/updated_at → ISO str. NO Enum, "
+        "NO JSONB, NO renamed column, NO date RANGE filter (all WHERE are user_id/"
+        "platform equality). upsert reproduces ON CONFLICT (user_id, platform) DO "
+        "UPDATE (backed by user_cookies_user_id_platform_key) forcing is_valid="
+        "True + error_message=None + a fresh updated_at (native datetime, binds "
+        "directly); a stray data key is filtered to a silent no-op (phantom "
+        "screen). Reads return None/[]; writes commit via write_scope(); every "
+        "method swallows to the legacy fallback. Inert — flip back to false.",
+    )
+
+    USE_ORM_API_KEY: bool = Field(
+        default=False,
+        description="Route ApiKeyRepository (SECRET — API bearer keys: the "
+        "api_keys table) through the SQLAlchemy 2.0 ORM (Phase 2 H batch — "
+        "secret). SECRET-HANDLING: HASH-ON-WRITE / LOOKUP-BY-HASH reproduced "
+        "exactly — create() calls the base generate_key() static (UNCHANGED "
+        "crypto) storing key_hash=SHA-256(full_key) + key_prefix (masked display) "
+        "+ key_value (FULL PLAINTEXT, migration 039 'persistent full key access') "
+        "and reveals the full key ONCE via secret_key. validate_key (inherited) "
+        "does hash_key(full_key)→get_by_key_hash. EXPOSURE parity: reads return "
+        "the raw SELECT * incl. key_value (plaintext) + key_hash — IDENTICAL to "
+        "the legacy; the router surfaces key_value on list/get/update "
+        "(ApiKeyResponse.key_value). ⚠️ plaintext key at rest + returned on list "
+        "is a pre-existing over-exposure — reported as a CONCERN, reproduced "
+        "UNCHANGED (NOT narrowed/widened; narrowing breaks the UI re-copy). NO "
+        "encryption added (inert; would orphan existing plaintext rows). UUID "
+        "AUTHZ HOT SPOT: user_id → str on every read (get_api_key does "
+        "``key_data['user_id'] != auth.user_id`` str-compare; deps builds "
+        "AuthContext(user_id: str)). status is Enum(ApiKeyStatus) on the model → "
+        "_plain-unwrapped to bare str ('active'/'revoked'/'expired') so "
+        "validate_key's ``status != 'active'`` and the router str field match; "
+        "WHERE binds use the bare string literal. id (bigint) native int (5.3 "
+        "trap); scopes (jsonb array) native list; usage_count/rate_limit int; "
+        "timestamps → ISO str on reads. v3 temporal: NO SQL expiry filter "
+        "(validate_key checks expires_at in PYTHON on the ISO str — inherited, "
+        "unchanged); WRITE-BINDING — create/update _coerce_temporal(ISO-str→aware "
+        "datetime) for expires_at, update stamps updated_at=now(utc) native. "
+        "update_usage reproduces the SECURITY DEFINER atomic-increment RPC "
+        "increment_api_key_usage(key_id) (migration 003) via SELECT inside "
+        "write_scope() — no read-modify-write race; failure swallowed. Phantom "
+        "screen filters update data to mapped attrs. Writes commit via "
+        "write_scope(). Inert — flip back to false to roll back.",
+    )
+
     # ============================================
     # 下载设置
     # ============================================

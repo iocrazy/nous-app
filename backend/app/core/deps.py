@@ -200,9 +200,9 @@ async def _validate_api_key(request: Request, api_key: str) -> AuthContext:
         HTTPException: 验证失败或权限不足
     """
     # 延迟导入避免循环依赖
-    from app.repositories.api_key_repository import ApiKeyRepository
+    from app.repositories.api_key_repository import get_api_key_repository
 
-    repo = ApiKeyRepository()
+    repo = get_api_key_repository()
     key_data = await repo.validate_key(api_key)
 
     if not key_data:

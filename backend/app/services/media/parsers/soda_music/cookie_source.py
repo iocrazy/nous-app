@@ -17,9 +17,11 @@ async def get_soda_cookie(user_id: str | None, *, repo: Any | None = None) -> st
     if not user_id:
         return ""
     if repo is None:
-        from app.repositories.cookies_repository import CookiesRepository
+        from app.repositories.cookies_repository import (
+            get_cookies_repository,
+        )
 
-        repo = CookiesRepository()
+        repo = get_cookies_repository()
     row = await repo.get_by_user_and_platform(user_id, SODA_COOKIE_PLATFORM)
     if not row:
         return ""

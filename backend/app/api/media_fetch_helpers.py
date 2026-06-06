@@ -391,9 +391,11 @@ async def mark_cookie_if_auth_failure(user_id: str, platform: str, error: str) -
     auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
     if any(kw in error.lower() for kw in auth_keywords):
         try:
-            from app.repositories.cookies_repository import CookiesRepository
+            from app.repositories.cookies_repository import (
+                get_cookies_repository,
+            )
 
-            repo = CookiesRepository()
+            repo = get_cookies_repository()
             await repo.mark_invalid(user_id, platform, error[:200])
             logger.info(
                 f"[Cookie] Marked {platform} cookie as invalid for user {user_id}: "

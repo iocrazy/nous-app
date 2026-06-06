@@ -14,12 +14,14 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
-from app.repositories.cookies_repository import CookiesRepository
-from app.repositories.user_settings_repository import (
+from app.repositories.cookies_repository import get_cookies_repository
+
+# merge_settings_json is re-exported here: the canonical shared-column merge lives
+# in the repo (every writer goes through UserSettingsRepository), but it's kept
+# importable from this module for existing callers/tests (e.g.
+# tests/test_user_settings_merge.py imports it from here). noqa: not unused.
+from app.repositories.user_settings_repository import (  # noqa: F401
     UserSettingsRepository,
-    # Re-exported: the canonical shared-column merge now lives in the repo so the
-    # guarantee is structural (every writer goes through UserSettingsRepository).
-    # Kept importable here for existing callers/tests.
     merge_settings_json,
 )
 
@@ -326,7 +328,7 @@ async def list_cookies(auth: AuthDep):
     Requires authentication: Bearer Token or API Key
     """
     try:
-        repo = CookiesRepository()
+        repo = get_cookies_repository()
         rows = await repo.get_all_by_user(auth.user_id)
 
         # Index existing rows by platform for quick lookup
@@ -386,7 +388,7 @@ async def set_cookie(platform: str, request: CookieUpsertRequest, auth: AuthDep)
         )
 
     try:
-        repo = CookiesRepository()
+        repo = get_cookies_repository()
 
         data: Dict[str, Any] = {}
         if request.cookie_text is not None:
@@ -443,7 +445,7 @@ async def delete_cookie(platform: str, auth: AuthDep):
         )
 
     try:
-        repo = CookiesRepository()
+        repo = get_cookies_repository()
         success = await repo.delete(auth.user_id, platform)
 
         if not success:
@@ -474,7 +476,7 @@ async def get_headers(platform: str, auth: AuthDep):
     if platform not in SUPPORTED_PLATFORMS:
         raise HTTPException(status_code=400, detail="Unsupported platform")
     try:
-        repo = CookiesRepository()
+        repo = get_cookies_repository()
         row = await repo.get_by_user_and_platform(auth.user_id, platform)
         return {
             "platform": platform,
@@ -491,7 +493,7 @@ async def set_headers(platform: str, request: HeadersUpsertRequest, auth: AuthDe
     if platform not in SUPPORTED_PLATFORMS:
         raise HTTPException(status_code=400, detail="Unsupported platform")
     try:
-        repo = CookiesRepository()
+        repo = get_cookies_repository()
         await repo.upsert(
             auth.user_id, platform, {"custom_headers": request.headers_text}
         )
