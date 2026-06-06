@@ -61,3 +61,28 @@ class SystemSettingsRepository:
         if not result.data:
             return None
         return result.data[0]
+
+
+def get_system_settings_repository() -> "SystemSettingsRepository":
+    """Return the right SystemSettingsRepository implementation per env.
+
+    ORM when ``USE_ORM_ADMIN_SYSTEM_SETTINGS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ADMIN_SYSTEM_SETTINGS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.admin.system_settings_repository_orm import (
+                SystemSettingsRepositoryOrm,
+            )
+
+            return SystemSettingsRepositoryOrm()
+        logger.warning(
+            "USE_ORM_ADMIN_SYSTEM_SETTINGS=true but SUPAVISOR_DATABASE_URL is "
+            "empty — falling back to supabase-py path"
+        )
+    return SystemSettingsRepository()

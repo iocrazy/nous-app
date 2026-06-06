@@ -9,7 +9,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.monitoring_repository import MonitoringRepository
+from app.repositories.admin.monitoring_repository import get_monitoring_repository
 
 router = APIRouter()
 
@@ -131,7 +131,7 @@ async def get_monitoring_stats(
     end_date: Optional[datetime] = Query(None),
 ):
     """Get aggregated monitoring statistics for the admin dashboard."""
-    repo = MonitoringRepository()
+    repo = get_monitoring_repository()
     start, end, bucket_minutes = get_time_range(period, start_date, end_date)
 
     # Run the three log queries concurrently; latency-bound, so gather() saves

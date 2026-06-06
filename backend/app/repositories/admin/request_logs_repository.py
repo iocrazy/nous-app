@@ -163,3 +163,56 @@ class AppLogsRepository:
 
         result = await query.execute()
         return result.data or [], result.count or 0
+
+
+def _use_orm_request_logs() -> bool:
+    """True iff USE_ORM_ADMIN_REQUEST_LOGS is set AND the engine is configured.
+    A flag-on but engine-missing deploy logs once and falls back to REST."""
+    from app.core.config import settings
+
+    if not settings.USE_ORM_ADMIN_REQUEST_LOGS:
+        return False
+    from app.db.engine import is_configured
+
+    if is_configured():
+        return True
+    from loguru import logger
+
+    logger.warning(
+        "USE_ORM_ADMIN_REQUEST_LOGS=true but SUPAVISOR_DATABASE_URL is empty "
+        "— falling back to supabase-py path"
+    )
+    return False
+
+
+def get_request_logs_repository() -> "RequestLogsRepository":
+    """Return the right RequestLogsRepository implementation per env."""
+    if _use_orm_request_logs():
+        from app.repositories.admin.request_logs_repository_orm import (
+            RequestLogsRepositoryOrm,
+        )
+
+        return RequestLogsRepositoryOrm()
+    return RequestLogsRepository()
+
+
+def get_frontend_error_logs_repository() -> "FrontendErrorLogsRepository":
+    """Return the right FrontendErrorLogsRepository implementation per env."""
+    if _use_orm_request_logs():
+        from app.repositories.admin.request_logs_repository_orm import (
+            FrontendErrorLogsRepositoryOrm,
+        )
+
+        return FrontendErrorLogsRepositoryOrm()
+    return FrontendErrorLogsRepository()
+
+
+def get_app_logs_repository() -> "AppLogsRepository":
+    """Return the right AppLogsRepository implementation per env."""
+    if _use_orm_request_logs():
+        from app.repositories.admin.request_logs_repository_orm import (
+            AppLogsRepositoryOrm,
+        )
+
+        return AppLogsRepositoryOrm()
+    return AppLogsRepository()

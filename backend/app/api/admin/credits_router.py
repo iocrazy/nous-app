@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.credits_repository import AdminCreditsRepository
+from app.repositories.admin.credits_repository import get_admin_credits_repository
 from app.schemas.admin import (
     AdminBatchGiftRequest,
     AdminConsumptionChartItem,
@@ -57,7 +57,7 @@ async def _get_team_name_map(team_ids: list[str]) -> dict[str, str]:
     """Fetch display names for a list of team_ids."""
     if not team_ids:
         return {}
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
     teams = await repo.get_teams_by_ids(team_ids)
     entries = await asyncio.gather(*[_get_team_display_name(t) for t in teams])
     return {str(teams[i]["id"]): entries[i] for i in range(len(teams))}
@@ -71,7 +71,7 @@ async def _get_team_name_map(team_ids: list[str]) -> dict[str, str]:
 @router.get("/stats", response_model=AdminCreditsStatsResponse)
 async def get_credits_stats(auth: AdminAuthDep):
     """System-wide credits statistics."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     quotas = await repo.all_quotas_balances()
     total_points = sum((r.get("points_balance") or 0) for r in quotas)
@@ -113,7 +113,7 @@ async def get_revenue_chart(
     days: int = Query(30, ge=7, le=365),
 ):
     """Revenue trend data grouped by period."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     since = datetime.now(timezone.utc) - timedelta(days=days)
     rows = await repo.revenue_chart_rows(since.isoformat())
@@ -145,7 +145,7 @@ async def get_revenue_chart(
 @router.get("/consumption-chart", response_model=list[AdminConsumptionChartItem])
 async def get_consumption_chart(auth: AdminAuthDep):
     """Consumption distribution by action type."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     rows = await repo.transactions_by_type("consume", columns="description, amount")
 
@@ -168,7 +168,7 @@ async def get_top_teams(
     limit: int = Query(10, ge=1, le=50),
 ):
     """Top consuming teams."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     rows = await repo.transactions_by_type("consume", columns="team_id, amount")
 
@@ -210,7 +210,7 @@ async def list_transactions(
     sort_order: Optional[str] = Query("desc"),
 ):
     """List credit transactions with filtering and pagination."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     valid_sort_fields = {"created_at", "amount", "type"}
     if sort_by not in valid_sort_fields:
@@ -277,7 +277,7 @@ async def list_orders(
     sort_order: Optional[str] = Query("desc"),
 ):
     """List orders with filtering and pagination."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     valid_sort_fields = {
         "created_at",
@@ -346,7 +346,7 @@ async def confirm_order(
     request: Request,
 ):
     """Manually confirm payment for a pending order."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     order = await repo.get_order(order_id)
     if not order:
@@ -404,7 +404,7 @@ async def refund_order(
     request: Request,
 ):
     """Refund a paid order (deduct points, mark as refunded)."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     order = await repo.get_order(order_id)
     if not order:
@@ -459,7 +459,7 @@ async def refund_order(
 @router.get("/packages")
 async def list_packages(auth: AdminAuthDep):
     """List all point packages (active and inactive)."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
     return await repo.list_packages()
 
 
@@ -470,7 +470,7 @@ async def create_package(
     request: Request,
 ):
     """Create a new point package."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     payload = {
         "name": body.name,
@@ -502,7 +502,7 @@ async def update_package(
     request: Request,
 ):
     """Update an existing point package."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     payload = {
         "name": body.name,
@@ -538,7 +538,7 @@ async def delete_package(
     request: Request,
 ):
     """Delete a point package."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
     await repo.delete_package(package_id)
 
     await create_audit_log(
@@ -560,7 +560,7 @@ async def delete_package(
 @router.get("/pricing")
 async def list_pricing(auth: AdminAuthDep):
     """List all action pricing rules."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
     return await repo.list_pricing()
 
 
@@ -572,7 +572,7 @@ async def update_pricing(
     request: Request,
 ):
     """Update pricing for a specific action type."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     payload: dict = {"points_cost": body.points_cost}
     if body.description is not None:
@@ -682,7 +682,7 @@ async def get_team_detail(
     auth: AdminAuthDep,
 ):
     """Get detailed credits info for a single team."""
-    repo = AdminCreditsRepository()
+    repo = get_admin_credits_repository()
 
     team = await repo.get_team(team_id)
     if not team:

@@ -74,3 +74,30 @@ class MonitoringRepository:
             .execute()
         )
         return result.count or 0
+
+
+def get_monitoring_repository() -> "MonitoringRepository":
+    """Return the right MonitoringRepository implementation per env.
+
+    ORM when ``USE_ORM_ADMIN_MONITORING`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ADMIN_MONITORING:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.admin.monitoring_repository_orm import (
+                MonitoringRepositoryOrm,
+            )
+
+            return MonitoringRepositoryOrm()
+        from loguru import logger
+
+        logger.warning(
+            "USE_ORM_ADMIN_MONITORING=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return MonitoringRepository()

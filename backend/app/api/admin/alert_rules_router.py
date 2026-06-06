@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.alert_rules_repository import AlertRulesRepository
+from app.repositories.admin.alert_rules_repository import get_alert_rules_repository
 
 router = APIRouter()
 
@@ -92,7 +92,7 @@ class AlertCheckResult(BaseModel):
 @router.get("/rules", response_model=AlertRuleListResponse)
 async def list_alert_rules(auth: AdminAuthDep):
     """List all alert rules."""
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     rows, total = await repo.list_rules()
     return AlertRuleListResponse(data=rows, total=total)
 
@@ -100,7 +100,7 @@ async def list_alert_rules(auth: AdminAuthDep):
 @router.post("/rules", response_model=AlertRuleItem)
 async def create_alert_rule(body: AlertRuleCreate, auth: AdminAuthDep):
     """Create a new alert rule."""
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     created = await repo.create_rule(
         {
             "name": body.name,
@@ -118,7 +118,7 @@ async def create_alert_rule(body: AlertRuleCreate, auth: AdminAuthDep):
 @router.patch("/rules/{rule_id}", response_model=AlertRuleItem)
 async def update_alert_rule(rule_id: str, body: AlertRuleUpdate, auth: AdminAuthDep):
     """Update an alert rule."""
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     updated = await repo.update_rule(rule_id, body.model_dump(exclude_none=True))
     return updated
 
@@ -126,7 +126,7 @@ async def update_alert_rule(rule_id: str, body: AlertRuleUpdate, auth: AdminAuth
 @router.delete("/rules/{rule_id}")
 async def delete_alert_rule(rule_id: str, auth: AdminAuthDep):
     """Delete an alert rule."""
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     await repo.delete_rule(rule_id)
     return {"ok": True}
 
@@ -144,7 +144,7 @@ async def mute_alert_rule(
 ):
     """Mute an alert rule for a specified duration."""
     mute_until = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     await repo.update_rule(
         rule_id,
         {"is_muted": True, "mute_until": mute_until.isoformat()},
@@ -155,7 +155,7 @@ async def mute_alert_rule(
 @router.post("/rules/{rule_id}/unmute")
 async def unmute_alert_rule(rule_id: str, auth: AdminAuthDep):
     """Unmute an alert rule."""
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     await repo.update_rule(rule_id, {"is_muted": False, "mute_until": None})
     return {"ok": True}
 
@@ -176,7 +176,7 @@ async def list_alert_history(
     end_date: Optional[datetime] = Query(None),
 ):
     """List alert history with pagination and filters."""
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     rows, total = await repo.list_history(
         page=page,
         page_size=pageSize,
@@ -191,7 +191,7 @@ async def list_alert_history(
 @router.post("/history/{alert_id}/resolve")
 async def resolve_alert(alert_id: str, auth: AdminAuthDep):
     """Mark an alert as resolved."""
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     await repo.resolve_history(alert_id)
     return {"ok": True}
 
@@ -213,7 +213,7 @@ CONDITION_OPS = {
 @router.post("/check", response_model=AlertCheckResult)
 async def check_alerts(auth: AdminAuthDep):
     """Manually check all active alert rules against current metrics."""
-    repo = AlertRulesRepository()
+    repo = get_alert_rules_repository()
     now = datetime.now(timezone.utc)
 
     rules = await repo.list_active_rules()

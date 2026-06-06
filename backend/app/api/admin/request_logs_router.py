@@ -8,9 +8,9 @@ from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.request_logs_repository import (
-    AppLogsRepository,
-    FrontendErrorLogsRepository,
-    RequestLogsRepository,
+    get_app_logs_repository,
+    get_frontend_error_logs_repository,
+    get_request_logs_repository,
 )
 from app.utils.admin_helpers import batch_get_user_info
 
@@ -136,7 +136,7 @@ async def list_request_logs(
     end_date: Optional[datetime] = Query(None),
 ):
     """List API request logs with filtering and pagination."""
-    repo = RequestLogsRepository()
+    repo = get_request_logs_repository()
     rows, total = await repo.list_with_filters(
         page=page,
         page_size=page_size,
@@ -193,7 +193,7 @@ async def get_request_log_stats(
     hours: int = Query(24, ge=1, le=168, description="Number of hours to include"),
 ):
     """Get aggregated request log statistics."""
-    repo = RequestLogsRepository()
+    repo = get_request_logs_repository()
     start_time = datetime.utcnow() - timedelta(hours=hours)
     logs = await repo.stats_since(start_time)
 
@@ -275,7 +275,7 @@ async def list_frontend_errors(
     end_date: Optional[datetime] = Query(None),
 ):
     """List frontend error reports."""
-    repo = FrontendErrorLogsRepository()
+    repo = get_frontend_error_logs_repository()
     rows, total = await repo.list_with_filters(
         page=page,
         page_size=page_size,
@@ -337,7 +337,7 @@ async def list_app_logs(
     Excludes infrastructure noise (httpx, uvicorn.access, celery.beat)
     by default to show only business logic logs.
     """
-    repo = AppLogsRepository()
+    repo = get_app_logs_repository()
     rows, total = await repo.list_with_filters(
         page=page,
         page_size=page_size,

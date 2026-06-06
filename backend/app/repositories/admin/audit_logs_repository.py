@@ -67,3 +67,30 @@ class AuditLogsRepository:
             .execute()
         )
         return result.data or []
+
+
+def get_audit_logs_repository() -> "AuditLogsRepository":
+    """Return the right AuditLogsRepository implementation per env.
+
+    ORM when ``USE_ORM_ADMIN_AUDIT_LOGS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ADMIN_AUDIT_LOGS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.admin.audit_logs_repository_orm import (
+                AuditLogsRepositoryOrm,
+            )
+
+            return AuditLogsRepositoryOrm()
+        from loguru import logger
+
+        logger.warning(
+            "USE_ORM_ADMIN_AUDIT_LOGS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AuditLogsRepository()

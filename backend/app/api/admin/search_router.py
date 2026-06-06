@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.search_repository import AdminSearchRepository
+from app.repositories.admin.search_repository import get_admin_search_repository
 
 router = APIRouter()
 
@@ -156,7 +156,7 @@ async def search_logs(
     page_size: int = Query(50, ge=1, le=200),
 ):
     """Search across all log tables with unified results."""
-    repo = AdminSearchRepository()
+    repo = get_admin_search_repository()
 
     # Compute time range
     now = datetime.now(timezone.utc)
@@ -369,7 +369,7 @@ async def get_request_trace(
     request_id: str,
 ):
     """Get all logs correlated with a specific request_id."""
-    repo = AdminSearchRepository()
+    repo = get_admin_search_repository()
 
     req_log = await repo.get_request_log(request_id)
 

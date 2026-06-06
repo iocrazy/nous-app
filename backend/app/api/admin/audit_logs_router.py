@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.audit_logs_repository import AuditLogsRepository
+from app.repositories.admin.audit_logs_repository import get_audit_logs_repository
 from app.schemas.admin import (
     AuditLogListResponse,
     AuditLogResponse,
@@ -83,7 +83,7 @@ async def list_audit_logs(
     - **start_date**: Filter logs from this date
     - **end_date**: Filter logs until this date
     """
-    repo = AuditLogsRepository()
+    repo = get_audit_logs_repository()
     rows, total = await repo.list(
         page=page,
         page_size=page_size,
@@ -137,7 +137,7 @@ async def get_audit_actions(
 
     Returns a list of all unique action types that have been logged.
     """
-    repo = AuditLogsRepository()
+    repo = get_audit_logs_repository()
     return await repo.list_distinct_actions()
 
 
@@ -158,7 +158,7 @@ async def get_audit_stats(
     - Target type
     - Day
     """
-    repo = AuditLogsRepository()
+    repo = get_audit_logs_repository()
     start_date = datetime.utcnow() - timedelta(days=days)
     logs = await repo.list_since(start_date)
 

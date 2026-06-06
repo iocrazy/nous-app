@@ -7,9 +7,14 @@ direct queries and are staged for later migration.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from app.db import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.admin.credits_repository_orm import (
+        AdminCreditsRepositoryOrm,
+    )
 
 
 class AdminCreditsRepository:
@@ -282,3 +287,32 @@ class AdminCreditsRepository:
             .execute()
         )
         return result.data or []
+
+
+def get_admin_credits_repository() -> (
+    Union["AdminCreditsRepository", "AdminCreditsRepositoryOrm"]
+):
+    """Return the right AdminCreditsRepository implementation per env.
+
+    ORM when ``USE_ORM_ADMIN_CREDITS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ADMIN_CREDITS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.admin.credits_repository_orm import (
+                AdminCreditsRepositoryOrm,
+            )
+
+            return AdminCreditsRepositoryOrm()
+        from loguru import logger
+
+        logger.warning(
+            "USE_ORM_ADMIN_CREDITS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AdminCreditsRepository()
