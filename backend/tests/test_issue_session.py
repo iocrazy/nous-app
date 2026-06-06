@@ -49,7 +49,7 @@ async def test_creates_and_backfills_when_absent(monkeypatch):
     monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
     agent_repo = AsyncMock()
     agent_repo.get_by_id = AsyncMock(return_value={"slug": "writer"})
-    monkeypatch.setattr(m, "AgentRepository", lambda: agent_repo)
+    monkeypatch.setattr(m, "get_agent_repository", lambda: agent_repo)
 
     created = {}
 

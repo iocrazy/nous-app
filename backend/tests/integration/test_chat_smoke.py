@@ -167,7 +167,7 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
             AsyncMock(return_value=client),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository",
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo,
         ),
         patch(
