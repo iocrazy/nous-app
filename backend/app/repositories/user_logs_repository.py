@@ -5,13 +5,28 @@
 
 提供用户操作日志的存储和查询功能。
 使用异步 Supabase 客户端。
+
+ORM 2.0 migration (Batch L2): ``UserLogsRepository`` is the legacy supabase-py
+REST implementation; ``UserLogsRepositoryOrm`` (in
+``user_logs_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call sites
+(and the module-level ``log_user_action`` helper) go through
+``get_user_logs_repository()`` which picks the ORM subclass when
+``USE_ORM_USER_LOGS`` is on AND the engine is configured.
+
+NOTE: the ``user_logs`` table is ALSO served by ``LogsRepository`` (the
+user-facing viewer/export) — disjoint method sets, both live.
 """
 
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.user_logs_repository_orm import UserLogsRepositoryOrm
 
 
 class UserLogsRepository:
@@ -244,6 +259,31 @@ class UserLogsRepository:
             return []
 
 
+def get_user_logs_repository() -> Union["UserLogsRepository", "UserLogsRepositoryOrm"]:
+    """Return the right UserLogsRepository implementation per env.
+
+    ORM when ``USE_ORM_USER_LOGS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_USER_LOGS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.user_logs_repository_orm import (
+                UserLogsRepositoryOrm,
+            )
+
+            return UserLogsRepositoryOrm()
+        logger.warning(
+            "USE_ORM_USER_LOGS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return UserLogsRepository()
+
+
 # 便捷的日志记录函数
 async def log_user_action(
     user_id: str,
@@ -254,7 +294,7 @@ async def log_user_action(
     details: Optional[Dict[str, Any]] = None,
 ) -> None:
     """便捷的日志记录函数"""
-    repo = UserLogsRepository()
+    repo = get_user_logs_repository()
     await repo.create(
         user_id=user_id,
         action=action,

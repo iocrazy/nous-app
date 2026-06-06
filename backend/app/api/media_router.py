@@ -31,7 +31,10 @@ from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
 from app.core.scope_dep import ScopedRequestDep
 from app.repositories.media_repository import MediaRepository
-from app.repositories.user_logs_repository import UserLogsRepository, log_user_action
+from app.repositories.user_logs_repository import (
+    get_user_logs_repository,
+    log_user_action,
+)
 
 router = APIRouter(prefix="/media")
 
@@ -311,7 +314,7 @@ async def get_user_logs(
     Get user action logs (paginated)
     """
     try:
-        repo = UserLogsRepository()
+        repo = get_user_logs_repository()
         result = await repo.get_paginated(
             user_id=auth.user_id,
             page=page,
