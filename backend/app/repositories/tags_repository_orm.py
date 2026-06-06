@@ -573,30 +573,18 @@ class TagsRepositoryOrm(TagsRepository):
     ) -> List[dict]:
         """Fallback tag counts without the RPC.
 
-        ★ INERT-DISCIPLINE CONCERN — DO NOT REPAIR ★
-        The legacy fallback does ``client.table("resources").select("id").eq(
-        "user_id", user_id)`` — but the ``resources`` table has NO ``user_id``
-        column (its owner column is ``creator_id``; verified against the live
-        schema + the Resources model). Under PostgREST that ``.eq("user_id", …)``
-        emits a PG **42703 undefined_column** error → the fallback RAISES (it is
-        NOT wrapped in try/except), propagating to the router's own try
-        (tags_router.get_tag_statistics), which returns an empty stats response.
-        In practice this path is essentially never hit because the
-        ``get_user_tag_counts`` RPC DOES exist (migrations 027/059) and the
-        primary path returns first.
+        The ``resources`` owner column is ``creator_id`` (a uuid), NOT ``user_id``
+        — verified against the live schema + the Resources model. This formerly
+        referenced the nonexistent ``user_id`` column and raised PG 42703; it now
+        correctly filters on ``creator_id``, so the fallback returns the user's tag
+        counts.
 
-        Faithfully REPRODUCING this (NOT repairing it): we run the same broken
-        ``user_id`` reference via raw SQL so PG raises the identical 42703 the
-        REST path raised. Switching to ``creator_id`` here would SILENTLY REPAIR a
-        latent prod bug on flag-flip — forbidden by the inert-migration rule. The
-        bug is reported up as a CONCERN, not fixed inside this migration."""
+        NOTE: the primary path's ``get_user_tag_counts`` RPC (the half of
+        ``get_tag_counts`` above this fallback) is addressed separately in
+        migration 256 — do NOT touch the RPC call here."""
         async with read_scope() as session:
-            # Same broken column reference as the legacy → PG 42703 on a real DB
-            # (parity with the PostgREST failure). asyncpg surfaces it as an
-            # UndefinedColumnError; the caller's try (router) handles it exactly
-            # as it handled the REST exception.
             result = await session.execute(
-                text("SELECT id FROM resources WHERE user_id = CAST(:uid AS uuid)"),
+                text("SELECT id FROM resources WHERE creator_id = CAST(:uid AS uuid)"),
                 {"uid": str(user_id)},
             )
             resource_ids = [r[0] for r in result.all()]

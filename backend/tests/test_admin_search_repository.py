@@ -105,14 +105,14 @@ async def test_frontend_logs_uses_created_at(
 
 
 @pytest.mark.asyncio
-async def test_audit_logs_uses_admin_audit_logs_table(
+async def test_audit_logs_uses_audit_logs_table(
     repo: AdminSearchRepository, fake_query: _FakeQuery
 ) -> None:
     fake_query._data = []
     await repo.audit_logs("a", "b")
 
     tables = [c for c in fake_query.calls if c[0] == "table"]
-    assert tables[0][1] == ("admin_audit_logs",)
+    assert tables[0][1] == ("audit_logs",)
 
 
 @pytest.mark.asyncio

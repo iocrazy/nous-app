@@ -11,7 +11,7 @@ class AdminSearchRepository:
     REQUEST_LOGS_TABLE = "api_request_logs"
     APP_LOGS_TABLE = "application_logs"
     FRONTEND_LOGS_TABLE = "frontend_error_logs"
-    AUDIT_LOGS_TABLE = "admin_audit_logs"
+    AUDIT_LOGS_TABLE = "audit_logs"
 
     async def _client(self):
         return await get_async_supabase_admin()
@@ -57,7 +57,7 @@ class AdminSearchRepository:
         client = await self._client()
         result = await (
             client.table(self.FRONTEND_LOGS_TABLE)
-            .select("id,error_type,message,stack_trace,url,created_at")
+            .select("id,error_type,message,stack,url,created_at")
             .gte("created_at", start_iso)
             .lte("created_at", end_iso)
             .order("created_at", desc=True)
@@ -72,7 +72,7 @@ class AdminSearchRepository:
         client = await self._client()
         result = await (
             client.table(self.AUDIT_LOGS_TABLE)
-            .select("id,action,target_type,target_id,admin_email,details,created_at")
+            .select("id,action,target_type,target_id,admin_id,details,created_at")
             .gte("created_at", start_iso)
             .lte("created_at", end_iso)
             .order("created_at", desc=True)

@@ -179,15 +179,25 @@ class ClassificationService:
             title=title, description=description, original_tags=original_tags
         )
 
-        added_tags = []
+        added_tags: List[dict] = []
         repo = get_tags_repository()
+
+        # Tags attach to the resource row, not parsed_media directly. Resolve the
+        # media_id → resource_id ONCE (not per-tag) to avoid duplicate lookups.
+        resource_id = await repo.resolve_media_id_to_resource_id(str(media_id))
+        if resource_id is None:
+            logger.warning(
+                f"auto_tag_media: no resource exists for media {media_id} yet — "
+                "skipping auto-tagging"
+            )
+            return added_tags
 
         # Get the system tag
         primary_tag = await repo.get_tag_by_name(result.primary_tag)
 
         if primary_tag and result.confidence >= min_confidence:
-            await repo.add_tag_to_media(
-                media_id=media_id,
+            await repo.add_tag_to_resource(
+                resource_id=resource_id,
                 tag_id=primary_tag["id"],
                 confidence=result.confidence,
                 source=result.source,
@@ -204,8 +214,8 @@ class ClassificationService:
                 secondary_confidence = round(
                     result.confidence * 0.7, 2
                 )  # Lower confidence for secondary
-                await repo.add_tag_to_media(
-                    media_id=media_id,
+                await repo.add_tag_to_resource(
+                    resource_id=resource_id,
                     tag_id=secondary_tag["id"],
                     confidence=secondary_confidence,
                     source=result.source,

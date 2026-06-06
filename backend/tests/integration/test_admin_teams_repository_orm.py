@@ -8,7 +8,7 @@ Proves REST → ORM swap invisibility + strategy-C parity:
   - created_at / joined_at (timestamptz) → ISO STR; jsonb → native dict
   - kind plain str (NOT Enum)
   - update / delete / update_member_role / delete_member WRITE + COMMIT
-  - get() / get_member() RAISE on absent (.single() parity)
+  - get() / get_member() return None on absent (router None-guard → 404)
   - factory on/off
 
     source /tmp/orm2_integration.env
@@ -155,12 +155,10 @@ async def test_list_members_dict_key(integration_db_url, patched_engine, seed_te
     assert user_info.get(m["user_id"]) == ("e", "u")
 
 
-async def test_get_absent_raises(integration_db_url, patched_engine):
-    """get() reproduces .single() RAISE-on-0-rows (NoResultFound)."""
-    from sqlalchemy.exc import NoResultFound
-
-    with pytest.raises(NoResultFound):
-        await _repo().get(999999999999999999)
+async def test_get_absent_returns_none(integration_db_url, patched_engine):
+    """get() returns None on a 0-row result (one_or_none) so the router's
+    None-guard fires and returns 404 instead of 500."""
+    assert await _repo().get(999999999999999999) is None
 
 
 async def test_update_and_delete_member_commit(
