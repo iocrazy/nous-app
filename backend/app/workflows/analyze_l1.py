@@ -56,7 +56,7 @@ async def call_analyze_l1(
     PR #237 audit: was sync ``def`` with ``asyncio.run(_analyze())``
     inside. Now async — same fix as workflow_health_sweeper / sweeper."""
     from app.repositories.analysis_repository import AnalysisRepository
-    from app.repositories.tags_repository import TagsRepository
+    from app.repositories.tags_repository import get_tags_repository
     from app.services.ai.providers.embedding_service import EmbeddingService
     from app.services.ai.visual.visual_analysis_service import VisualAnalysisService
 
@@ -65,7 +65,7 @@ async def call_analyze_l1(
     )
     embedding_service = EmbeddingService()
     analysis_repo = AnalysisRepository()
-    tags_repo = TagsRepository()
+    tags_repo = get_tags_repository()
 
     result = await analysis_service.analyze_l1(cover_url, user_id=user_id)
     if not result:

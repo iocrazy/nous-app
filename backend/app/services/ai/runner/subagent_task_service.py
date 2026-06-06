@@ -180,7 +180,7 @@ class SubAgentTaskService:
         try:
             from app.core.config import settings
             from app.repositories.agent_repository import get_agent_repository
-            from app.repositories.skill_repository import SkillRepository
+            from app.repositories.skill_repository import get_skill_repository
             from app.services.ai.adapters.factory import provider_key_for_model
             from app.services.ai.chat.ai_library_chat_wiring import (
                 build_agent_runner_stack,
@@ -220,7 +220,7 @@ class SubAgentTaskService:
                 "cannot spawn self as sub-agent; refactor as a plan step"
             )
 
-        skill_repo = SkillRepository()
+        skill_repo = get_skill_repository()
 
         try:
             stack = await build_agent_runner_stack(

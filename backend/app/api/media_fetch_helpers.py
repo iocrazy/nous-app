@@ -14,7 +14,7 @@ from pydantic import BaseModel, field_validator
 
 from app.boundary import ValidatedURL
 from app.core.deps import AuthDep
-from app.repositories.tags_repository import TagsRepository
+from app.repositories.tags_repository import get_tags_repository
 from app.repositories.user_logs_repository import log_user_action
 from app.repositories.user_settings_repository import UserSettingsRepository
 from app.services.media.parsers.douyin_parse.drissionpage_parser import (
@@ -118,7 +118,7 @@ async def resolve_tag_names_to_ids(tag_names: list[str], user_id: str) -> list[s
     """Resolve tag names to IDs, auto-creating any that don't exist yet.
     Does NOT attach to a resource — use when you only need the ids (e.g. to
     forward to a workflow before the resource exists)."""
-    repo = TagsRepository()
+    repo = get_tags_repository()
     tag_ids: list[str] = []
     for name in tag_names:
         name = name.strip()
@@ -135,7 +135,7 @@ async def resolve_and_attach_tags(
     resource_id: str, tag_names: list[str], user_id: str
 ) -> list[str]:
     """Resolve tag names to IDs (auto-create if missing) and attach to resource."""
-    repo = TagsRepository()
+    repo = get_tags_repository()
     tag_ids = await resolve_tag_names_to_ids(tag_names, user_id)
     if tag_ids:
         await repo.bulk_add_tags_to_resource(resource_id, tag_ids, source="manual")

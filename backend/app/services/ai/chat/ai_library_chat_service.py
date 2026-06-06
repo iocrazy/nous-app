@@ -25,7 +25,7 @@ from loguru import logger
 from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import get_agent_repository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.chat.resource_ref_resolver import resolve_resource_refs
@@ -454,7 +454,7 @@ class AILibraryChatService:
         # then build the full runner stack (HookRegistry pre-populated,
         # fallback chain wrapping adapter, memory recall pre-fetched).
         agent_repo = get_agent_repository()
-        skill_repo = SkillRepository()
+        skill_repo = get_skill_repository()
         agent_record = await agent_repo.get_by_slug(agent_slug)
         if not agent_record:
             raise HTTPException(

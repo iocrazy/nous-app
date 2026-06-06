@@ -14,12 +14,15 @@ exceptions and return None/[], writes log + re-raise.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from loguru import logger
 
 from app.repositories.base_repository import BaseRepository
+
+if TYPE_CHECKING:
+    from app.repositories.skill_repository_orm import SkillRepositoryOrm
 
 # Columns returned in list queries (excludes content_md, output_format for performance)
 _SUMMARY_COLUMNS = (
@@ -525,3 +528,26 @@ class SkillRepository(BaseRepository):
             client.table("skill_files").update(patch).eq("id", current["id"]).execute()
         )
         return {**current, **patch}
+
+
+def get_skill_repository() -> Union["SkillRepository", "SkillRepositoryOrm"]:
+    """Return the right SkillRepository implementation per env.
+
+    ORM when ``USE_ORM_SKILL`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_SKILL:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.skill_repository_orm import SkillRepositoryOrm
+
+            return SkillRepositoryOrm()
+        logger.warning(
+            "USE_ORM_SKILL=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return SkillRepository()

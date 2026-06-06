@@ -409,6 +409,49 @@ class Settings(BaseSettings):
         "Writes commit via write_scope(). Inert — flip back to false to roll "
         "back.",
     )
+    USE_ORM_TAGS: bool = Field(
+        default=False,
+        description="Route TagsRepository (the tag system — tags table CRUD + the "
+        "resource_tags M:N junction + tag_groups embed + RPC-backed counts) "
+        "through the SQLAlchemy 2.0 ORM session layer (Phase 2 M batch). ID-TYPE "
+        "FINDING: contrary to the brief's hint, tags.id is BIGINT (Snowflake), NOT "
+        "uuid — so every tag id stays NATIVE int (the 5.3 trap; every consumer "
+        "str()s it at the boundary / routes it through the SnowflakeId response "
+        "type). resource_tags PK is composite (resource_id, tag_id) BIGINT → no "
+        "mixed-PK bulk_upsert hazard; add/bulk_add reproduce the PostgREST ON "
+        "CONFLICT DO UPDATE via pg_insert().on_conflict_do_update in one "
+        "write_scope(). The ONLY uuid is tags.user_id → str (TagResponse.user_id "
+        "is a str field; pydantic rejects native UUID). created_at → ISO str; "
+        "confidence (double) native float; type is CHECK-text NOT Enum (no _plain "
+        "unwrap). get_all_tags / get_tag_counts reproduce the get_tag_counts_by_ids "
+        "/ get_user_tag_counts RPCs (DB-side GROUP BY) with the legacy fallback. "
+        "CONCERN (NOT repaired): the legacy _get_tag_counts_fallback selects a "
+        "non-existent resources.user_id column (real col is creator_id) → PG 42703; "
+        "the ORM faithfully reproduces that 42703 via raw SQL rather than silently "
+        "repairing it (the RPC primary path means this branch is ~never hit). No "
+        "date range filters. Reads return []/None; create raises; writes commit via "
+        "write_scope(). Inert — flip back to false to roll back.",
+    )
+    USE_ORM_SKILL: bool = Field(
+        default=False,
+        description="Route SkillRepository (the AI-Library skill surface — skills "
+        "CRUD + skill_files multi-file CRUD + skill_versions/skill_file_versions "
+        "snapshots + the agent_skills reverse index) through the SQLAlchemy 2.0 "
+        "ORM session layer (Phase 2 M batch). 15 callsites, all routed through "
+        "get_skill_repository(). ID TYPES: skills.id is BIGINT → native int (5.3 "
+        "trap; every consumer int()s it). skill_files.id is UUID → str for SHAPE "
+        "parity (SkillFileOut.id: UUID accepts str or native; NO consumer does "
+        "UUID()/==/dict-key on a file id — audited). skills.created_by / "
+        "default_agent_id (uuid) → str. timestamps → ISO str; frontmatter_json / "
+        "input_schema (jsonb) → native dict; trigger_keywords (text[]) → native "
+        "list; status/category/file_type are CHECK-text NOT Enum (no _plain). "
+        "upsert_file reproduces the (skill_id,path) ON CONFLICT DO UPDATE "
+        "(ux_skill_files_path); the versioned writes keep the legacy "
+        "snapshot-then-update two-step (now inside one write_scope() — no "
+        "half-commit, behavior preserved, documented non-atomicity not 'repaired'). "
+        "No date range filters. Reads swallow + return None/[]; writes raise. "
+        "Writes commit via write_scope(). Inert — flip back to false to roll back.",
+    )
 
     # ============================================
     # 下载设置

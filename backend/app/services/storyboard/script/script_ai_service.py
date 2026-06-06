@@ -31,7 +31,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters import get_adapter
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
@@ -76,7 +76,7 @@ class ScriptAIService:
     # ------------------------------------------------------------------
 
     def _build_composer(self) -> PromptComposer:
-        return PromptComposer(get_agent_repository(), SkillRepository())
+        return PromptComposer(get_agent_repository(), get_skill_repository())
 
     def _build_runner(self, model: str = "") -> AgentRunner:
         # Pick adapter based on the agent's configured model. Empty / unknown-to-
@@ -86,7 +86,7 @@ class ScriptAIService:
         # global settings, so agents can declare their own provider in DB.
         adapter = get_adapter(model, settings)
         return AgentRunner(
-            adapter=adapter, skill_tool=SkillToolService(SkillRepository())
+            adapter=adapter, skill_tool=SkillToolService(get_skill_repository())
         )
 
     async def _run_agent(

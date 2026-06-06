@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep, get_team_id_for_user, require_team_id
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import get_skill_repository
 from app.schemas.skill import SkillCreate, SkillUpdate
 
 router = APIRouter(prefix="/skills")
@@ -18,7 +18,7 @@ VALID_CATEGORIES = ["script", "storyboard", "copywriting", "general"]
 async def create_skill(auth: AuthDep, body: SkillCreate) -> Dict[str, Any]:
     """Create a new skill (requires auth + team membership)."""
     try:
-        repo = SkillRepository()
+        repo = get_skill_repository()
         team_id = await require_team_id(auth.user_id)
         data = {
             **body.model_dump(exclude_none=True),
@@ -43,7 +43,7 @@ async def list_skills(
 ) -> Dict[str, Any]:
     """List skills: own team's + system presets + public. Returns summary (no content_md)."""
     try:
-        repo = SkillRepository()
+        repo = get_skill_repository()
         team_id = await get_team_id_for_user(auth.user_id)
         skills = await repo.list_skills(
             team_id=team_id,
@@ -66,7 +66,7 @@ async def list_categories() -> Dict[str, Any]:
 async def get_skill(auth: AuthDep, skill_id: str) -> Dict[str, Any]:
     """Get full skill detail (includes content_md)."""
     try:
-        repo = SkillRepository()
+        repo = get_skill_repository()
         skill = await repo.get_by_id(skill_id)
         if not skill:
             raise HTTPException(status_code=404, detail="Skill not found")
@@ -84,7 +84,7 @@ async def update_skill(
 ) -> Dict[str, Any]:
     """Update a skill (owner only)."""
     try:
-        repo = SkillRepository()
+        repo = get_skill_repository()
         existing = await repo.get_by_id(skill_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Skill not found")
@@ -107,7 +107,7 @@ async def update_skill(
 async def delete_skill(auth: AuthDep, skill_id: str) -> Dict[str, Any]:
     """Archive a skill (owner only, system presets protected)."""
     try:
-        repo = SkillRepository()
+        repo = get_skill_repository()
         existing = await repo.get_by_id(skill_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Skill not found")

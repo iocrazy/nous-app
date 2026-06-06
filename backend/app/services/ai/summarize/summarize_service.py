@@ -25,7 +25,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.adapters.factory import (
     get_adapter_for_user,
@@ -143,7 +143,7 @@ class SummarizeService:
         if not transcript:
             return None
 
-        composer = PromptComposer(get_agent_repository(), SkillRepository())
+        composer = PromptComposer(get_agent_repository(), get_skill_repository())
         request_instructions = (
             "Summarize the following transcript per your AGENT spec. "
             "Output JSON ONLY (no markdown fences, no preamble)."
@@ -161,7 +161,7 @@ class SummarizeService:
         adapter = self._build_adapter(composed.model or self.model)
         runner = AgentRunner(
             adapter=adapter,
-            skill_tool=SkillToolService(SkillRepository()),
+            skill_tool=SkillToolService(get_skill_repository()),
         )
 
         # Cap transcript length so we don't push 100k tokens at the LLM

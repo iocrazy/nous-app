@@ -33,7 +33,10 @@ from typing import Any
 
 from app.agent_framework.context_engine import ContextPayload
 from app.repositories.agent_repository import AgentRepository, get_agent_repository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import (
+    SkillRepository,
+    get_skill_repository,
+)
 from app.services.ai.prompts.prompt_composer import (
     ComposerInput,
     PromptComposer,
@@ -63,7 +66,7 @@ class ChatContextEngine:
         if composer is None:
             composer = PromptComposer(
                 agent_repo=agent_repo or get_agent_repository(),
-                skill_repo=skill_repo or SkillRepository(),
+                skill_repo=skill_repo or get_skill_repository(),
             )
         self._composer = composer
 

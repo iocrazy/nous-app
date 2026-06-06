@@ -11,7 +11,7 @@ from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.tag_preferences_repository import (
     get_tag_preferences_repository,
 )
-from app.repositories.tags_repository import TagsRepository
+from app.repositories.tags_repository import get_tags_repository
 from app.schemas.tag_preferences import (
     TagPreferencesResponse,
     TagPreferencesUpdate,
@@ -172,7 +172,7 @@ async def list_tags(
     Pass enabled_only=true to filter out disabled tags.
     """
     user_id = auth.user_id
-    repo = TagsRepository()
+    repo = get_tags_repository()
     tags = await repo.get_all_tags(user_id, enabled_only=enabled_only)
 
     if type_filter:
@@ -191,7 +191,7 @@ async def get_tag_statistics(
     Returns top tags sorted by video count.
     """
     user_id = auth.user_id
-    repo = TagsRepository()
+    repo = get_tags_repository()
 
     try:
         tag_counts = await repo.get_tag_counts(user_id, limit)
@@ -217,7 +217,7 @@ async def create_tag(
     System tags cannot be created via API.
     """
     user_id = auth.user_id
-    repo = TagsRepository()
+    repo = get_tags_repository()
 
     # Check if tag with same name exists
     existing = await repo.get_tag_by_name(tag.name, user_id)
@@ -266,7 +266,7 @@ async def get_tag(
     tag_id: str,
 ):
     """Get a specific tag by ID."""
-    repo = TagsRepository()
+    repo = get_tags_repository()
     tag = await repo.get_tag_by_id(tag_id)
 
     if not tag:
@@ -295,7 +295,7 @@ async def update_tag(
     - For system tags: can only update enabled (visibility toggle)
     """
     user_id = auth.user_id
-    repo = TagsRepository()
+    repo = get_tags_repository()
 
     existing = await repo.get_tag_by_id(tag_id)
     if not existing:
@@ -344,7 +344,7 @@ async def delete_tag(
     Only user tags can be deleted. System tags cannot be deleted.
     """
     user_id = auth.user_id
-    repo = TagsRepository()
+    repo = get_tags_repository()
 
     existing = await repo.get_tag_by_id(tag_id)
     if not existing:

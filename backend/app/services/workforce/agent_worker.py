@@ -51,7 +51,7 @@ from uuid import UUID
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.agent_workforce_repository import AgentWorkforceRepository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
@@ -114,7 +114,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
 
     # Resolve the agent record for model + budget + identity.
     agent_repo = get_agent_repository()
-    skill_repo = SkillRepository()
+    skill_repo = get_skill_repository()
     agent = await agent_repo.get_by_id(agent_id)
     if not agent:
         logger.error(f"[agent-worker] agent {agent_id} not found for task {task_id}")

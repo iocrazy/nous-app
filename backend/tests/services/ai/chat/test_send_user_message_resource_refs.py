@@ -168,7 +168,7 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
         ) as mock_agent_repo_cls,
         patch(
-            "app.services.ai.chat.ai_library_chat_service.SkillRepository",
+            "app.services.ai.chat.ai_library_chat_service.get_skill_repository",
         ),
         # Patch PromptComposer / ContextEngine path to return our fake composed
         patch(
@@ -303,7 +303,7 @@ async def test_ref_warnings_prepended_to_user_message():
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository"
         ) as mock_agent_repo_cls,
-        patch("app.services.ai.chat.ai_library_chat_service.SkillRepository"),
+        patch("app.services.ai.chat.ai_library_chat_service.get_skill_repository"),
         patch(
             "app.services.ai.chat.ai_library_chat_service.PromptComposer"
         ) as mock_composer_cls,
@@ -414,7 +414,7 @@ async def test_binary_attachments_still_use_existing_resolver():
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository"
         ) as mock_agent_repo_cls,
-        patch("app.services.ai.chat.ai_library_chat_service.SkillRepository"),
+        patch("app.services.ai.chat.ai_library_chat_service.get_skill_repository"),
         patch(
             "app.services.ai.chat.ai_library_chat_service.PromptComposer"
         ) as mock_composer_cls,
@@ -570,7 +570,7 @@ async def test_split_loop_handles_pydantic_attachment_request():
         patch(
             "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
         ) as mock_agent_repo_cls,
-        patch("app.services.ai.chat.ai_library_chat_service.SkillRepository"),
+        patch("app.services.ai.chat.ai_library_chat_service.get_skill_repository"),
         patch(
             "app.services.ai.chat.ai_library_chat_service.PromptComposer",
         ) as mock_composer_cls,
