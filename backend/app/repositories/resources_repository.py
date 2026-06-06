@@ -305,7 +305,17 @@ class ResourcesRepository:
             raise
 
     async def count_resources_by_media_id(self, media_id: str) -> int:
-        """Count how many resources reference a given parsed_media ID."""
+        """Count how many resources reference a given parsed_media ID.
+
+        A4 — RE-RAISE ON ERROR (data-loss hardening, mirrors the ORM repo): this
+        is a CROSS-USER GC reference count whose result drives a DESTRUCTIVE
+        decision on SHARED files (``permanent_delete`` / ``cleanup_expired_trash``
+        delete the shared physical files + parsed_media row when ``remaining ==
+        0``). A transient error returning a fabricated ``0`` would wipe files
+        other users still reference, so we log and RE-RAISE — never fabricate 0.
+        The service-layer callers catch this and SKIP the shared-file/media GC on
+        uncertainty. This path is the LIVE prod default (``USE_ORM_RESOURCES``
+        false), so the fix here closes the exposure independent of the ORM swap."""
         try:
             client = await self._get_client()
             result = await (
@@ -316,8 +326,10 @@ class ResourcesRepository:
             )
             return result.count or 0
         except Exception as e:
+            # NEVER return a fabricated 0 — a count failure must abort the
+            # caller's shared-file GC, not silently green-light it.
             logger.error(f"Failed to count resources for media {media_id}: {e}")
-            return 0
+            raise
 
     # ------------------------------------------------------------------ #
     # Hash-based duplicate lookup

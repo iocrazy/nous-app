@@ -792,66 +792,73 @@ class DownloaderService:
             resource_dir_relative: Relative path to resource folder
             video_data: parsed_media record dict
         """
+        from app.db.scope import Scope, request_scope
         from app.repositories.resources_repository import ResourcesRepository
 
         resources_repo = ResourcesRepository()
 
-        existing = await resources_repo.get_resource_by_media_id_and_creator(
-            media_id, user_id
-        )
-        if existing:
-            logger.info(
-                f"[Carousel/Resource] Resource already exists for media {media_id} "
-                f"(user {user_id})"
+        # A2 pass 4b: this ASYNC function reads + creates the per-user
+        # `resources` row (and its resource_item), so the ambient USER scope
+        # must be set around the resource work. Wrapped in its own body (self-
+        # contained — does not depend on pass-4a). `user_id` is a required
+        # param. INERT until SCOPE_ENFORCE_RESOURCES flips.
+        async with request_scope(Scope(user_id=user_id)):
+            existing = await resources_repo.get_resource_by_media_id_and_creator(
+                media_id, user_id
             )
-            return
+            if existing:
+                logger.info(
+                    f"[Carousel/Resource] Resource already exists for media {media_id} "
+                    f"(user {user_id})"
+                )
+                return
 
-        # Shared assets — cover_image_path, *_download_status — live on
-        # parsed_media. ``file_path`` for carousel slides points at the
-        # resource_dir; parsed_media.image_download_path covers the same
-        # files but the resource needs a path to materialise the per-user
-        # row, so this one stays as a per-user file pointer (matches the
-        # shared dir, but written via a different lifecycle than the
-        # mirror writes we removed elsewhere).
-        resource_data = {
-            "creator_id": user_id,
-            "media_id": media_id,
-            "source_type": "web",
-            "file_path": resource_dir_relative,
-            "mime_type": "image/jpeg",
-            "filename": f"{platform_id}_slides",
-            "file_type": video_data.get("media_type", "2"),
-        }
-        try:
-            resource = await resources_repo.create_resource(resource_data)
-            resource_id = resource.get("id") if resource else None
-            logger.info(
-                f"[Carousel/Resource] Created resource {resource_id} for media {media_id}"
-            )
-
-            # Create resource_item for user's personal scope.
-            # scope_id MUST be the personal-team snowflake (bigint), not the
-            # user UUID — resource_items.scope_id became bigint in PR-E 4c-3,
-            # so writing the raw UUID now fails 22P02 and silently orphans the
-            # downloaded resource from the owner's library.
-            if resource_id and user_id:
-                from app.services.library.resources_service import (
-                    _resolve_personal_team_id,
+            # Shared assets — cover_image_path, *_download_status — live on
+            # parsed_media. ``file_path`` for carousel slides points at the
+            # resource_dir; parsed_media.image_download_path covers the same
+            # files but the resource needs a path to materialise the per-user
+            # row, so this one stays as a per-user file pointer (matches the
+            # shared dir, but written via a different lifecycle than the
+            # mirror writes we removed elsewhere).
+            resource_data = {
+                "creator_id": user_id,
+                "media_id": media_id,
+                "source_type": "web",
+                "file_path": resource_dir_relative,
+                "mime_type": "image/jpeg",
+                "filename": f"{platform_id}_slides",
+                "file_type": video_data.get("media_type", "2"),
+            }
+            try:
+                resource = await resources_repo.create_resource(resource_data)
+                resource_id = resource.get("id") if resource else None
+                logger.info(
+                    f"[Carousel/Resource] Created resource {resource_id} for media {media_id}"
                 )
 
-                scope_id = await _resolve_personal_team_id(user_id)
-                await resources_repo.create_resource_item(
-                    {
-                        "resource_id": resource_id,
-                        # PR-E 4b: scope_type no longer written.
-                        "scope_id": scope_id,
-                        "added_by": user_id,
-                    }
+                # Create resource_item for user's personal scope.
+                # scope_id MUST be the personal-team snowflake (bigint), not the
+                # user UUID — resource_items.scope_id became bigint in PR-E 4c-3,
+                # so writing the raw UUID now fails 22P02 and silently orphans the
+                # downloaded resource from the owner's library.
+                if resource_id and user_id:
+                    from app.services.library.resources_service import (
+                        _resolve_personal_team_id,
+                    )
+
+                    scope_id = await _resolve_personal_team_id(user_id)
+                    await resources_repo.create_resource_item(
+                        {
+                            "resource_id": resource_id,
+                            # PR-E 4b: scope_type no longer written.
+                            "scope_id": scope_id,
+                            "added_by": user_id,
+                        }
+                    )
+            except Exception as e:
+                logger.error(
+                    f"[Carousel/Resource] Failed to create resource for media {media_id}: {e}"
                 )
-        except Exception as e:
-            logger.error(
-                f"[Carousel/Resource] Failed to create resource for media {media_id}: {e}"
-            )
 
     @staticmethod
     async def download_images_by_platform_id(

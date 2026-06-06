@@ -476,20 +476,34 @@ class MediaService:
                 message = f"Media {platform_id} metadata created"
 
             # ── Write to resources (per-user) ──
+            #
+            # A2 pass 4b: _ensure_user_resource reads + creates the per-user
+            # `resources` row, so the ambient USER scope must be set around it.
+            # This is an ASYNC function, so we wrap the resource work in its own
+            # body (self-contained — does not depend on pass-4a's thread-hop
+            # propagation). Wrapped ONLY when `user_id` is truthy — the existing
+            # `if user_id and media_id:` gate already skips the resource branch
+            # entirely when user_id is None, so a None-owner resource is never
+            # written here (the parsed_media writes above are global, not scoped,
+            # so they stay outside the scope). INERT until
+            # SCOPE_ENFORCE_RESOURCES flips.
             resource_id = None
             if user_id and media_id:
-                resource_id = await MediaService._ensure_user_resource(
-                    resources_repo=resources_repo,
-                    media_id=media_id,
-                    user_id=user_id,
-                    parsed_data=parsed_data,
-                    need_download_video=need_download_video,
-                    need_download_music=need_download_music,
-                    need_download_cover=need_download_cover,
-                    is_image_type=is_image_type,
-                    dedup_hit=dedup_hit,
-                    existing_media=existing,
-                )
+                from app.db.scope import Scope, request_scope
+
+                async with request_scope(Scope(user_id=user_id)):
+                    resource_id = await MediaService._ensure_user_resource(
+                        resources_repo=resources_repo,
+                        media_id=media_id,
+                        user_id=user_id,
+                        parsed_data=parsed_data,
+                        need_download_video=need_download_video,
+                        need_download_music=need_download_music,
+                        need_download_cover=need_download_cover,
+                        is_image_type=is_image_type,
+                        dedup_hit=dedup_hit,
+                        existing_media=existing,
+                    )
 
             logger.info(message)
             return {

@@ -21,6 +21,7 @@ from app.api.media_fetch_helpers import (
 )
 from app.boundary import BoundaryError, validate_url_async
 from app.core.deps import AuthDep
+from app.core.scope_dep import ScopedRequestDep
 from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import log_user_action
@@ -47,6 +48,7 @@ async def fetch_video(
     request: MediaFetchRequest,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
     raw_request: Request,
 ):
     """
@@ -169,6 +171,7 @@ async def fetch_media_by_type(
     request: MediaTypeFetchRequest,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
 ):
     """
     Fetch specific media types for an already-parsed video.

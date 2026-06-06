@@ -40,6 +40,7 @@ Fidelity contract (the swap must be invisible to all call sites):
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +49,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
+from app.db.scope import is_enforced, scoped_sql, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import Folders, ResourceItems, Resources, ResourceVersions
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
@@ -90,15 +92,47 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
     # ── Resources CRUD ──────────────────────────────────────────────
 
     async def create_resource(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """INSERT a resource as an ORM instance (the flip-safe write path).
+
+        A2.5: replaced the Core ``insert(Resources).values().returning()`` —
+        which the scope choke point FORBIDS under a user scope (``_forbid_
+        scoped_bulk_dml``: a Core INSERT never reaches ``before_insert`` so it
+        can't be owner-stamped) — with a ``session.add(instance)`` flush. The
+        instance flush DOES flow through ``before_insert`` (``_stamp_user_on_
+        insert``): under a USER scope it stamps/asserts ``creator_id ==
+        scope.user_id``; under SYSTEM it leaves the owner as-given; with the
+        flag OFF it is a plain legacy insert (no stamp / no raise). The post-
+        flush ``refresh`` reloads the server-default columns (snowflake ``id``,
+        ``created_at``, the 3 ai-status enums, …) so the returned dict matches
+        the old RETURNING-row shape exactly — it is wrapped in
+        ``system_request_scope`` because ``session.refresh`` (and lazy-load of
+        the post-flush-expired columns by ``_resources_row_to_dict``) issues a
+        ``from_statement`` PK reload that the choke point treats as
+        non-injectable (deny-by-default RAISE under a USER scope). Reading back
+        the row we JUST wrote — whose ownership ``before_insert`` already
+        verified equals the active scope — to materialize server defaults is a
+        safe, owner-agnostic internal read.
+
+        ENFORCEMENT-GATED (inert guarantee): the ``system_request_scope`` wrap is
+        applied ONLY when ``resources`` is enforced (``is_enforced``). Flag-off the
+        refresh can't raise (no injection) so no wrap is needed — and skipping it
+        avoids emitting a spurious ``orm-refresh-own-write`` audit log + DB row on
+        every create, keeping the flag-off path byte-for-byte legacy."""
         try:
             async with write_scope() as session:
-                result = await session.execute(
-                    insert(Resources)
-                    .values(**data)
-                    .returning(*Resources.__table__.columns)
+                obj = Resources(
+                    **{_RESOURCES_NAME_TO_ATTR.get(k, k): v for k, v in data.items()}
                 )
-                row = result.mappings().first()
-                created = _mappings_dict(row) if row else {}
+                session.add(obj)
+                await session.flush()  # before_insert fires (stamp/assert)
+                refresh_cm = (
+                    system_request_scope(reason="orm-refresh-own-write")
+                    if is_enforced("resources")
+                    else nullcontext()
+                )
+                async with refresh_cm:
+                    await session.refresh(obj)  # load server-default columns
+                    created = _resources_row_to_dict(obj)
             logger.info(f"Created resource: {data.get('filename')}")
             return created
         except Exception as e:
@@ -189,23 +223,39 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
 
         Returns the same nested shape as legacy: ``{id, media_id,
         parsed_media: {id, platform_id, original_url, ...}}`` so call sites
-        read the inner dict the same way."""
+        read the inner dict the same way.
+
+        A3: the tenant predicate is BUILT by ``scoped_sql`` (the ambient-scope
+        raw-SQL choke-point backstop) and AND-spliced into the WHERE, NOT the
+        passed-in ``:creator_id`` bind. The ``creator_id`` arg stays in the
+        signature for interface stability but is SUPERSEDED by the ambient scope
+        (on every real call path the acting user IS ``creator_id``, so the bound
+        value is identical — verified by the flag-off parity test). Under SYSTEM
+        the predicate opens to all owners; under no scope (or an empty-identity
+        user scope) ``scoped_sql`` fail-closes."""
         try:
+            # scoped_sql owns the predicate shape (CAST(:scope_user_id AS uuid)
+            # IS NULL OR r.creator_id = ...): the caller can only AND it in, never
+            # park a bare token in a non-filtering position. The f-string splice
+            # is safe — ``pred`` is helper-built and "r.creator_id" is a hardcoded
+            # literal; the user value travels only via the bound :scope_user_id
+            # param. Built INSIDE the try so a fail-closed raise (no scope / empty
+            # identity) degrades to None here rather than propagating — preserving
+            # the legacy "probe failure is non-fatal" contract of this L2 dedup.
+            pred, params = scoped_sql("r.creator_id", {"url": url})
+            sql = (
+                "SELECT r.id AS r_id, r.media_id AS r_media_id, "
+                "       p.id AS p_id, p.platform_id, p.original_url, "
+                "       p.video_download_status, p.image_download_status, "
+                "       p.media_type "
+                "FROM resources r "
+                "INNER JOIN parsed_media p ON r.media_id = p.id "
+                f"WHERE {pred} "
+                "  AND p.original_url = :url "
+                "LIMIT 1"
+            )
             async with read_scope() as session:
-                result = await session.execute(
-                    text(
-                        "SELECT r.id AS r_id, r.media_id AS r_media_id, "
-                        "       p.id AS p_id, p.platform_id, p.original_url, "
-                        "       p.video_download_status, p.image_download_status, "
-                        "       p.media_type "
-                        "FROM resources r "
-                        "INNER JOIN parsed_media p ON r.media_id = p.id "
-                        "WHERE r.creator_id = :creator_id "
-                        "  AND p.original_url = :url "
-                        "LIMIT 1"
-                    ),
-                    {"creator_id": creator_id, "url": url},
-                )
+                result = await session.execute(text(sql), params)
                 row = result.mappings().first()
             if not row:
                 return None
@@ -248,22 +298,32 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
         """Of the given vids (parsed_media.platform_id), return the subset this
         user has already downloaded (a resources row with file_path set). ONE
         batched query for the whole list — no N+1. Empty input short-circuits
-        to ``set()`` without a query."""
+        to ``set()`` without a query.
+
+        A3: the tenant predicate is BUILT by ``scoped_sql`` and AND-spliced in,
+        NOT the passed-in ``:creator_id`` bind. The ``creator_id`` arg is kept for
+        interface stability but SUPERSEDED by the ambient scope (acting user ==
+        creator_id on every real path; identical bound value — see flag-off
+        parity test). SYSTEM opens to all owners; no scope (or empty-identity user
+        scope) fail-closes."""
         if not platform_ids:
             return set()
         try:
+            # scoped_sql owns the predicate shape (see get_completed_resource_by_
+            # url_and_creator). Safe f-string splice: helper-built pred + literal
+            # column. Built INSIDE the try so a fail-closed raise (no scope /
+            # empty identity) degrades to set() rather than propagating.
+            pred, params = scoped_sql("r.creator_id", {"pids": list(platform_ids)})
+            sql = (
+                "SELECT DISTINCT p.platform_id "
+                "FROM resources r "
+                "INNER JOIN parsed_media p ON r.media_id = p.id "
+                f"WHERE {pred} "
+                "  AND p.platform_id = ANY(:pids) "
+                "  AND r.file_path IS NOT NULL"
+            )
             async with read_scope() as session:
-                result = await session.execute(
-                    text(
-                        "SELECT DISTINCT p.platform_id "
-                        "FROM resources r "
-                        "INNER JOIN parsed_media p ON r.media_id = p.id "
-                        "WHERE r.creator_id = :creator_id "
-                        "  AND p.platform_id = ANY(:pids) "
-                        "  AND r.file_path IS NOT NULL"
-                    ),
-                    {"creator_id": creator_id, "pids": list(platform_ids)},
-                )
+                result = await session.execute(text(sql), params)
                 return {r["platform_id"] for r in result.mappings().all()}
         except Exception as e:
             logger.error(
@@ -275,17 +335,48 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
     async def update_resource(
         self, resource_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """UPDATE a resource by id, COMMITTING via write_scope (the P0 fix)."""
+        """UPDATE a resource by id via load-then-modify, COMMITTING via
+        write_scope (the P0 fix).
+
+        A2.5: replaced the Core ``update(Resources).where().values().
+        returning()`` — FORBIDDEN under a user scope (``_forbid_scoped_bulk_
+        dml``: a bulk UPDATE tree can't be safely tenant-filtered) — with the
+        sanctioned load-then-modify pattern. ``session.get`` flows through the
+        SELECT injection: under a USER scope the choke point injects
+        ``creator_id == scope.user_id``, so a row owned by another user loads
+        as None (correct fail-closed isolation) and we return ``{}`` —
+        preserving the legacy "update of a nonexistent id → {}" contract. The
+        dirty-instance flush is governed by the unit-of-work, no Core DML.
+
+        The post-flush ``refresh`` (re-materializing server-managed columns
+        like ``updated_at`` for the returned dict) is wrapped in
+        ``system_request_scope`` for the same reason as ``create_resource``: a
+        ``from_statement`` PK reload is non-injectable → deny-by-default RAISE
+        under a USER scope. The row's ownership was already proven by the
+        injected ``session.get`` above, so reading it back is owner-agnostic-
+        safe.
+
+        ENFORCEMENT-GATED (inert guarantee): the ``system_request_scope`` wrap is
+        applied ONLY when ``resources`` is enforced (``is_enforced``). Flag-off the
+        refresh can't raise (no injection) so no wrap is needed — and skipping it
+        avoids a spurious ``orm-refresh-own-write`` audit log + DB row on every
+        update, keeping the flag-off path byte-for-byte legacy."""
         try:
             async with write_scope() as session:
-                result = await session.execute(
-                    update(Resources)
-                    .where(Resources.id == self._bigint(resource_id))
-                    .values(**data)
-                    .returning(*Resources.__table__.columns)
+                obj = await session.get(Resources, self._bigint(resource_id))
+                if obj is None:
+                    return {}
+                for k, v in data.items():
+                    setattr(obj, _RESOURCES_NAME_TO_ATTR.get(k, k), v)
+                await session.flush()
+                refresh_cm = (
+                    system_request_scope(reason="orm-refresh-own-write")
+                    if is_enforced("resources")
+                    else nullcontext()
                 )
-                row = result.mappings().first()
-                updated = _mappings_dict(row) if row else {}
+                async with refresh_cm:
+                    await session.refresh(obj)
+                    updated = _resources_row_to_dict(obj)
             logger.info(f"Updated resource {resource_id}")
             return updated
         except Exception as e:
@@ -293,13 +384,30 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
             raise
 
     async def delete_resource(self, resource_id: str) -> bool:
+        """DELETE a resource by id via load-then-delete, COMMITTING via
+        write_scope.
+
+        A2.5: replaced the Core ``delete(Resources).where()`` — FORBIDDEN
+        under a user scope (``_forbid_scoped_bulk_dml``) — with a
+        load-then-``session.delete(instance)``. ``session.get`` flows through
+        the SELECT injection: under a USER scope it injects ``creator_id ==
+        scope.user_id``, so a CROSS-USER id loads None → no-op → still returns
+        ``True``. Returning True on not-found / not-owned keeps the boolean
+        interface stable (idempotent delete) AND is the correct isolation
+        behaviour: a user cannot observe (or delete) another user's row, and a
+        cross-user delete is silently a no-op rather than an error."""
         try:
             async with write_scope() as session:
-                await session.execute(
-                    sa_delete(Resources).where(
-                        Resources.id == self._bigint(resource_id)
-                    )
-                )
+                obj = await session.get(Resources, self._bigint(resource_id))
+                if obj is not None:
+                    await session.delete(obj)
+                    # Not load-bearing: write_scope commits (and thus flushes)
+                    # at block exit. Kept only to surface any FK/constraint
+                    # error inside this try (so it is logged + re-raised here)
+                    # rather than at the outer commit. Contrast create/update,
+                    # where flush IS required (before_insert / dirty-UPDATE
+                    # must hit the DB before the subsequent refresh).
+                    await session.flush()
             logger.info(f"Deleted resource {resource_id}")
             return True
         except Exception as e:
@@ -307,17 +415,72 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
             raise
 
     async def count_resources_by_media_id(self, media_id: str) -> int:
+        """Count how many resources (across ALL users) reference a parsed_media.
+
+        A2.5 — DATA-LOSS FIX + well-formed projection. This is a CROSS-USER GC
+        reference count: callers (``resources_service.permanent_delete`` /
+        ``cleanup_expired_trash``) use ``remaining == 0`` to decide whether to
+        delete the SHARED physical files + parsed_media record. Under
+        enforcement, if this count were user-scoped, user A deleting their
+        resource would NOT see user B's resource for the same media_id → it
+        would delete files B still needs. So we make it ALWAYS GLOBAL by
+        wrapping the query in ``system_request_scope`` (owner-agnostic
+        regardless of the caller's ambient scope — it is semantically "does ANY
+        user still reference this media"). Nesting SYSTEM inside the already-
+        SYSTEM ``cleanup_expired_trash`` path is a no-op set/reset; inside the
+        USER ``permanent_delete`` path it temporarily sets SYSTEM for this read
+        then resets to USER.
+
+        Also projects a scoped column — ``func.count(Resources.id)`` instead of
+        the old ``func.count()`` + ``select_from`` — so the statement is
+        well-formed (a bare ``count(*)`` over a scoped table with no projected
+        scoped column is deny-by-default RAISE; here SYSTEM scope means no
+        injection either way, but the projected form is the canonical shape).
+
+        A4 — RE-RAISE ON ERROR (data-loss hardening): this method must NEVER
+        fabricate a ``0``. A transient DB error returning 0 is the DANGEROUS
+        value — the GC callers (``permanent_delete`` / ``cleanup_expired_trash``)
+        read ``remaining == 0`` to decide whether to delete the SHARED physical
+        files + parsed_media record, so a fake 0 would delete files other users
+        still reference. We log and RE-RAISE; the callers catch and SKIP the
+        physical-file/media GC on uncertainty (never GC on a count failure).
+        NOTE: no scheduled sweeper reclaims those skipped files — the only orphan
+        sweeper (``scheduled_cleanup._sweep_orphan_upload_dirs``) walks ONLY the
+        ``teams/{scope}/uploads/{resource_id}/`` tree by resource_id, NOT the
+        ``global/resources/.../{media_id}/`` download tree that
+        ``_delete_physical_files`` handles, nor the parsed_media row — so they
+        leak until a later successful permanent_delete or manual cleanup.
+        Accepted: leaking files on a rare transient count error beats deleting
+        files another user still references.
+
+        ENFORCEMENT-GATED (inert guarantee): the ``system_request_scope`` wrap that
+        forces this count GLOBAL is applied ONLY when ``resources`` is enforced
+        (``is_enforced``). Flag-off the choke point does not inject the tenant
+        filter into this query anyway (it is already a cross-user count regardless
+        of ambient scope), so the wrap is a no-op for correctness — skipping it
+        avoids a spurious ``media-refcount-gc`` audit log + DB row on every GC
+        refcount, keeping the flag-off path byte-for-byte legacy. Flag-on the wrap
+        applies, keeping the count global under a USER scope (the data-loss
+        regression guard)."""
         try:
-            async with read_scope() as session:
-                count = await session.scalar(
-                    select(func.count())
-                    .select_from(Resources)
-                    .where(Resources.media_id == self._bigint(media_id))
-                )
+            count_cm = (
+                system_request_scope(reason="media-refcount-gc")
+                if is_enforced("resources")
+                else nullcontext()
+            )
+            async with count_cm:
+                async with read_scope() as session:
+                    count = await session.scalar(
+                        select(func.count(Resources.id)).where(
+                            Resources.media_id == self._bigint(media_id)
+                        )
+                    )
             return int(count or 0)
         except Exception as e:
+            # NEVER return a fabricated 0 — a count failure must abort the
+            # caller's shared-file GC, not silently green-light it.
             logger.error(f"Failed to count resources for media {media_id}: {e}")
-            return 0
+            raise
 
     # ── Hash-based duplicate lookup ─────────────────────────────────
 

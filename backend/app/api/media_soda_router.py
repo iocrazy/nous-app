@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from app.api.media_fetch_helpers import resolve_team_id
 from app.core.deps import AuthDep
+from app.core.scope_dep import ScopedRequestDep
 from app.repositories.resources_repository import get_resources_repository
 from app.services.billing.points_service import PointsService
 from app.services.infra.unified_task_manager import get_task_manager
@@ -226,6 +227,7 @@ def batch_plan(
 async def resolve_soda_playlist(
     request: SodaPlaylistRequest,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
 ) -> SodaPlaylistResponse:
     """Resolve a Soda playlist link and return its music tracks."""
     cookie = await get_soda_cookie(auth.user_id)

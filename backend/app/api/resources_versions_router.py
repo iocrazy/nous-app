@@ -24,7 +24,9 @@ from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_dep import ScopedRequestDep
 from app.core.scope_guards import verify_resource_write_access
+from app.db.scope import Scope, request_scope
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.library.resources_service import ResourcesService
 from app.services.media.render.thumbnail_service import ThumbnailService
@@ -34,8 +36,25 @@ router = APIRouter(prefix="/resources")
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 
 
+async def _scoped_generate_thumbnail(svc: ThumbnailService, user_id, **kwargs) -> None:
+    """Run ``generate_thumbnail`` under its OWN ambient USER scope.
+
+    FastAPI ``BackgroundTasks`` run AFTER the response is sent — i.e. AFTER the
+    request's ``ScopedRequestDep`` generator ``finally`` has already reset the
+    ambient scope. ``generate_thumbnail`` then issues an ORM write on
+    ``resources`` (``ThumbnailService.update_resource``); with no ambient scope it
+    would hit ``UnscopedQueryError`` once ``SCOPE_ENFORCE_RESOURCES`` flips (and be
+    swallowed by generate_thumbnail's try/except → thumbnail silently not
+    persisted on version upload). So we re-establish the scope INSIDE the
+    background coroutine — the contextvar must be set in the task's OWN execution,
+    not at dispatch time. We use a USER scope from the uploader's identity (it is
+    the user's own resource — tighter than SYSTEM). Inert until the flag flips."""
+    async with request_scope(Scope(user_id=user_id)):
+        await svc.generate_thumbnail(**kwargs)
+
+
 @router.get("/{resource_id}/versions")
-async def list_versions(resource_id: str, auth: AuthDep):
+async def list_versions(resource_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """List all versions of a resource."""
     try:
         repo = ResourcesRepository()
@@ -55,6 +74,7 @@ async def list_versions(resource_id: str, auth: AuthDep):
 async def upload_version(
     resource_id: str,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     notes: Optional[str] = Query(None),
@@ -86,7 +106,9 @@ async def upload_version(
             item = await repo.get_first_resource_item(resource_id)
             if item:
                 background_tasks.add_task(
-                    thumbnail_svc.generate_thumbnail,
+                    _scoped_generate_thumbnail,
+                    thumbnail_svc,
+                    auth.user_id,
                     resource_id=resource_id,
                     file_path=result["file_path"],
                     mime_type=result.get("mime_type", ""),
@@ -105,7 +127,12 @@ async def upload_version(
 
 
 @router.post("/{resource_id}/versions/{version_number}/set-current")
-async def set_current_version(resource_id: str, version_number: int, auth: AuthDep):
+async def set_current_version(
+    resource_id: str,
+    version_number: int,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
     """Set a specific version as the current active version."""
     try:
         svc = ResourcesService()
@@ -121,7 +148,12 @@ async def set_current_version(resource_id: str, version_number: int, auth: AuthD
 
 
 @router.delete("/{resource_id}/versions/{version_id}")
-async def delete_version(resource_id: str, version_id: str, auth: AuthDep):
+async def delete_version(
+    resource_id: str,
+    version_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
     """Delete a specific version (must keep at least one)."""
     try:
         svc = ResourcesService()
@@ -154,14 +186,20 @@ async def serve_hls_file(
         effective_auth = authorization
         if not effective_auth and not x_api_key and token:
             effective_auth = f"Bearer {token}"
-        await get_auth(request, effective_auth, x_api_key)
+        # Auth is required (no public branch); resolved manually because the
+        # endpoint accepts a ?token= query transport that a Depends(get_auth)
+        # would not see. Establish the ambient user Scope from the resolved
+        # identity (defensive: resource_versions is a sibling table — inert
+        # today, ready if it joins the enforced set). Inert until the flag flips.
+        _auth = await get_auth(request, effective_auth, x_api_key)
 
-        repo = ResourcesRepository()
-        version = await repo.get_version_by_id(version_id)
-        if not version or str(version.get("resource_id")) != resource_id:
-            raise HTTPException(status_code=404, detail="Version not found")
+        async with request_scope(Scope(user_id=_auth.user_id)):
+            repo = ResourcesRepository()
+            version = await repo.get_version_by_id(version_id)
+            if not version or str(version.get("resource_id")) != resource_id:
+                raise HTTPException(status_code=404, detail="Version not found")
 
-        hls_path = version.get("hls_path")
+            hls_path = version.get("hls_path")
         if not hls_path:
             raise HTTPException(status_code=404, detail="HLS not available")
 
@@ -217,6 +255,7 @@ async def retry_transcode(
     resource_id: str,
     version_id: str,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
 ):
     """Manually trigger or retry HLS transcoding for a version."""
     try:
@@ -271,14 +310,18 @@ async def serve_version_file(
         effective_auth = authorization
         if not effective_auth and not x_api_key and token:
             effective_auth = f"Bearer {token}"
-        await get_auth(request, effective_auth, x_api_key)
+        # Auth is required (no public branch); resolved manually for the ?token=
+        # transport. Establish the ambient user Scope from the resolved identity
+        # (defensive sibling-table wiring). Inert until SCOPE_ENFORCE_RESOURCES.
+        _auth = await get_auth(request, effective_auth, x_api_key)
 
-        repo = ResourcesRepository()
-        version = await repo.get_version_by_id(version_id)
-        if not version or str(version.get("resource_id")) != resource_id:
-            raise HTTPException(status_code=404, detail="Version not found")
+        async with request_scope(Scope(user_id=_auth.user_id)):
+            repo = ResourcesRepository()
+            version = await repo.get_version_by_id(version_id)
+            if not version or str(version.get("resource_id")) != resource_id:
+                raise HTTPException(status_code=404, detail="Version not found")
 
-        file_path = version.get("file_path")
+            file_path = version.get("file_path")
         if not file_path:
             raise HTTPException(status_code=404, detail="No file available")
 

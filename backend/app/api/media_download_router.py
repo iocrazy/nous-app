@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
+from app.core.scope_dep import ScopedRequestDep
 from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import log_user_action
@@ -76,6 +77,7 @@ async def retry_download(
     platform_id: str,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
     request: RetryDownloadRequest = RetryDownloadRequest(),
 ):
     """

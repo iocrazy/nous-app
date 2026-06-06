@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
+from app.core.scope_dep import ScopedRequestDep
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.agent_runs_repository import (
@@ -2167,7 +2168,9 @@ def _check_magic_bytes(ext: str, head: bytes) -> bool:
     "/chat-attachments/upload",
     summary="Upload a one-off chat attachment (image/video/pdf) as a temp resource",
 )
-async def upload_chat_attachment(auth: AuthDep, request: Request) -> Dict[str, Any]:
+async def upload_chat_attachment(
+    auth: AuthDep, request: Request, _scope: ScopedRequestDep = None
+) -> Dict[str, Any]:
     """Multipart upload for chat/issue attachments.
 
     The validated bytes are persisted as a temp resource on the shared
