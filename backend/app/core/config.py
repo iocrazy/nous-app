@@ -286,6 +286,61 @@ class Settings(BaseSettings):
         "hazard. The storyboard_frame_characters junction table has no consumer "
         "(nothing to migrate). Instant rollback = flip back to false.",
     )
+    USE_ORM_NOUS: bool = Field(
+        default=False,
+        description="Route NousRepository (admin-configured platform AI models "
+        "over nous_models) through the SQLAlchemy 2.0 ORM session layer (Phase 2 "
+        "M batch). Strategy C value-type parity: id (BIGINT snowflake) stays "
+        "NATIVE int (the 5.3 trap; every consumer does str(id) or passes it to a "
+        "response model — never int() math); created_at / updated_at → ISO str; "
+        "pricing_value (Numeric pricing/cost column) left NATIVE Decimal — the "
+        "numeric decision: every consumer wraps it in float() before any math "
+        "(float() works on both a REST str and a native Decimal), so no str() "
+        "coercion is needed. No uuid / jsonb columns. The legacy update injects "
+        "an 'updated_at=now()' string sentinel — the ORM drops it and sets "
+        "updated_at=func.now() (binding the literal string would error). Reads "
+        "swallow + return []/None; create/update swallow + return None (legacy "
+        "parity, NOT re-raise); delete returns False on failure. Writes commit "
+        "via write_scope(). Inert — flip back to false to roll back.",
+    )
+    USE_ORM_SESSION_MEMORY: bool = Field(
+        default=False,
+        description="Route SessionMemoryRepository (ai_session_memory — one "
+        "markdown-body row per ai_sessions row) through the SQLAlchemy 2.0 ORM "
+        "session layer (Phase 2 M batch). The repo returns a SessionMemoryRow "
+        "dataclass whose inherited _row_to_obj constructor already normalises "
+        "every field (session_id → str, last_updated_at → _parse_ts datetime, "
+        "counters → int), so strategy-C parity is handled by the dataclass — the "
+        "ORM just feeds it a native-typed row dict. The ONLY ORM-specific "
+        "coercion: session_id is a BIGINT (FK → ai_sessions.id snowflake) but "
+        "callers pass it as a str, so binds are int-coerced (_bigint) — asyncpg "
+        "int8 codec is strict. upsert reproduces ON CONFLICT (session_id) DO "
+        "UPDATE with the legacy load-then-bump-version logic; now() is written "
+        "native UTC datetime. No phantom columns, no date range filters. load / "
+        "upsert swallow + return None (must not crash the chat path); delete "
+        "returns False on failure. Writes commit via write_scope(). Inert — flip "
+        "back to false to roll back.",
+    )
+    USE_ORM_PERMISSION: bool = Field(
+        default=False,
+        description="Route PermissionRepository (the ReBAC effective-role read "
+        "surface: five read-only lookups over access_overrides / folders / "
+        "libraries / team_members / resource_items) through the SQLAlchemy 2.0 "
+        "ORM session layer (Phase 2 M batch). READ-ONLY repo → no write paths, "
+        "all reads on read_scope(). Strategy C value-type parity: bigint ids / "
+        "FKs (folders.id/parent_id/scope_id, resource_items.scope_id/folder_id, "
+        "libraries.id) stay NATIVE int (the 5.3 trap — folder.parent_id / "
+        "scope.folder_id recurse into bigint folders.id lookups); the ONLY "
+        "ORM-specific coercion is get_access_override str()ing its object_id "
+        "param (a TEXT column) so a native-int folder id binds — reproducing "
+        "PostgREST's int→text cast exactly. access_overrides.* uuids (id / "
+        "user_id / granted_by) → str for shape parity (consumer reads only "
+        "['role']); created_at → ISO str. libraries.scope_id is TEXT (native "
+        "str). visibility ('restricted') and role compares are str==str. No date "
+        "range filters → no timestamptz<VARCHAR hazard. Every method swallows + "
+        "returns None on failure (legacy parity). Inert — flip back to false to "
+        "roll back.",
+    )
 
     # ============================================
     # 下载设置

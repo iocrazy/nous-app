@@ -6,13 +6,23 @@ Permission Repository
 Data access layer for the ReBAC permission system.
 Queries access_overrides, folders, libraries, and team_members
 to resolve effective roles.
+
+ORM 2.0 migration (Phase 2, M batch): ``PermissionRepository`` is the legacy
+supabase-py REST implementation; ``PermissionRepositoryOrm`` (in
+``permission_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call
+sites go through ``get_permission_repository()`` (bottom of this file), which
+picks the ORM subclass when ``USE_ORM_PERMISSION`` is on AND the engine is
+configured.
 """
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.permission_repository_orm import PermissionRepositoryOrm
 
 
 class PermissionRepository:
@@ -120,3 +130,30 @@ class PermissionRepository:
         except Exception as e:
             logger.error(f"Failed to get resource scope for {resource_id}: {e}")
             return None
+
+
+def get_permission_repository() -> (
+    Union["PermissionRepository", "PermissionRepositoryOrm"]
+):
+    """Return the right PermissionRepository implementation per env.
+
+    ORM when ``USE_ORM_PERMISSION`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_PERMISSION:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.permission_repository_orm import (
+                PermissionRepositoryOrm,
+            )
+
+            return PermissionRepositoryOrm()
+        logger.warning(
+            "USE_ORM_PERMISSION=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return PermissionRepository()

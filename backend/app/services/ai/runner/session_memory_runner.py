@@ -18,7 +18,10 @@ from app.agent_framework.session_memory import (
     SessionMemoryService,
     SessionMemoryTrigger,
 )
-from app.repositories.session_memory_repository import SessionMemoryRepository
+from app.repositories.session_memory_repository import (
+    SessionMemoryRepository,
+    get_session_memory_repository,
+)
 
 
 # Cheap-summarizer prompt routed through the same OpenAI-compatible
@@ -69,7 +72,7 @@ async def maybe_update_session_memory(
 ) -> None:
     """Dispatch the session-memory updater. Best-effort. Never raises."""
     try:
-        repo = repo or SessionMemoryRepository()
+        repo = repo or get_session_memory_repository()
         svc = SessionMemoryService(
             repo=repo,
             summarizer=_default_summarizer,

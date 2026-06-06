@@ -992,7 +992,7 @@ class AILibraryChatService:
             import asyncio as _asyncio
 
             from app.repositories.session_memory_repository import (
-                SessionMemoryRepository,
+                get_session_memory_repository,
             )
             from app.services.ai.runner.session_memory_runner import (
                 maybe_update_session_memory,
@@ -1006,7 +1006,7 @@ class AILibraryChatService:
                     session_id=str(session_id),
                     messages=full_messages,
                     model=model,
-                    repo=SessionMemoryRepository(),
+                    repo=get_session_memory_repository(),
                 ),
                 name=f"session-memory-update-{session_id}",
             )
@@ -1152,10 +1152,10 @@ class AILibraryChatService:
         session_memory_loader = None
         if session_id is not None:
             from app.repositories.session_memory_repository import (
-                SessionMemoryRepository,
+                get_session_memory_repository,
             )
 
-            _sm_repo = SessionMemoryRepository()
+            _sm_repo = get_session_memory_repository()
 
             async def _load_session_memory() -> Optional[str]:
                 row = await _sm_repo.load(session_id)

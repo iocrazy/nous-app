@@ -15,7 +15,7 @@ from typing import Dict, List
 
 from loguru import logger
 
-from app.repositories.permission_repository import PermissionRepository
+from app.repositories.permission_repository import get_permission_repository
 
 # Role → capabilities mapping
 CAPABILITIES: Dict[str, List[str]] = {
@@ -55,7 +55,7 @@ class PermissionService:
     """ReBAC permission resolution service."""
 
     def __init__(self):
-        self._repo = PermissionRepository()
+        self._repo = get_permission_repository()
 
     async def get_effective_role(
         self,

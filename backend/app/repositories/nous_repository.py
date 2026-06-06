@@ -2,13 +2,22 @@
 
 """
 Repository for nous_models table — admin-configured platform AI models.
+
+ORM 2.0 migration (Phase 2, M batch): ``NousRepository`` is the legacy
+supabase-py REST implementation; ``NousRepositoryOrm`` (in
+``nous_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call sites go
+through ``get_nous_repository()`` (bottom of this file), which picks the ORM
+subclass when ``USE_ORM_NOUS`` is on AND the engine is configured.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.nous_repository_orm import NousRepositoryOrm
 
 
 class NousRepository:
@@ -116,3 +125,26 @@ class NousRepository:
         except Exception as e:
             logger.error(f"Failed to delete nous model {model_id}: {e}")
             return False
+
+
+def get_nous_repository() -> Union["NousRepository", "NousRepositoryOrm"]:
+    """Return the right NousRepository implementation per env.
+
+    ORM when ``USE_ORM_NOUS`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_NOUS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.nous_repository_orm import NousRepositoryOrm
+
+            return NousRepositoryOrm()
+        logger.warning(
+            "USE_ORM_NOUS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return NousRepository()

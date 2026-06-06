@@ -100,7 +100,7 @@ async def trigger_transcription_by_resource(
     # === Nous billing — only charge if user selected a nous-* model ===
     import math
 
-    from app.repositories.nous_repository import NousRepository
+    from app.repositories.nous_repository import get_nous_repository
     from app.repositories.user_settings_repository import UserSettingsRepository
 
     settings_repo = UserSettingsRepository()
@@ -116,7 +116,7 @@ async def trigger_transcription_by_resource(
 
     if _is_nous and _team_id:
         # Look up Nous model pricing
-        nous_repo = NousRepository()
+        nous_repo = get_nous_repository()
         nous_model = await nous_repo.get_by_name(selected_model)
         if not nous_model or not nous_model.get("is_enabled"):
             raise HTTPException(

@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.nous_repository import NousRepository
+from app.repositories.nous_repository import get_nous_repository
 from app.schemas.nous import (
     NousModelCreate,
     NousModelResponse,
@@ -51,7 +51,7 @@ def _to_response(row: dict) -> NousModelResponse:
 @router.get("", response_model=List[NousModelResponse])
 async def list_nous_models(auth: AdminAuthDep):
     """List all Nous models (including disabled)."""
-    repo = NousRepository()
+    repo = get_nous_repository()
     rows = await repo.list_all()
     return [_to_response(r) for r in rows]
 
@@ -59,7 +59,7 @@ async def list_nous_models(auth: AdminAuthDep):
 @router.post("", response_model=NousModelResponse)
 async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
     """Create a new Nous model."""
-    repo = NousRepository()
+    repo = get_nous_repository()
     row = await repo.create(body.model_dump())
     if not row:
         raise HTTPException(status_code=500, detail="Failed to create model")
@@ -70,7 +70,7 @@ async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
 @router.put("/{model_id}", response_model=NousModelResponse)
 async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAuthDep):
     """Update a Nous model."""
-    repo = NousRepository()
+    repo = get_nous_repository()
     updates = body.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -84,7 +84,7 @@ async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAut
 @router.delete("/{model_id}")
 async def delete_nous_model(model_id: str, auth: AdminAuthDep):
     """Delete a Nous model."""
-    repo = NousRepository()
+    repo = get_nous_repository()
     ok = await repo.delete(model_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Model not found")
