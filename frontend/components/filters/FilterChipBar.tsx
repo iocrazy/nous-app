@@ -62,7 +62,7 @@ export function FilterChipBar({
 
   return (
     <div
-      className={`sticky top-0 z-30 bg-zinc-950/95 backdrop-blur-sm ${className}`}
+      className={`sticky top-[var(--app-safe-top,0px)] z-30 bg-zinc-950/95 backdrop-blur-sm ${className}`}
     >
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-4 py-2">
         {/* ≡ summary chip */}
