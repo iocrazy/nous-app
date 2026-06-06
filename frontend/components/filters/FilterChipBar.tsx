@@ -61,7 +61,9 @@ export function FilterChipBar({
   const inactive = FACETS.filter((f) => !isChipActive(f.id));
 
   return (
-    <div className={`relative ${className}`}>
+    <div
+      className={`sticky top-0 z-30 bg-zinc-950/95 backdrop-blur-sm ${className}`}
+    >
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-4 py-2">
         {/* ≡ summary chip */}
         <button
