@@ -6,7 +6,7 @@
 // keeps its own focused screen so the unbounded Tags catalog never competes
 // for space with the bounded facets.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Check, Search, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -59,6 +59,10 @@ export function FacetPickerSheet({
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
+  // Swipe-down-to-dismiss (drag from the header/handle area).
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartY = useRef<number | null>(null);
 
   const { chipValues, setChipValue, clearChip, isChipActive } = config;
 
@@ -170,13 +174,41 @@ export function FacetPickerSheet({
     );
   };
 
+  const onDragStart = (e: React.TouchEvent) => {
+    dragStartY.current = e.touches[0].clientY;
+    setDragging(true);
+  };
+  const onDragMove = (e: React.TouchEvent) => {
+    if (dragStartY.current == null) return;
+    setDragY(Math.max(0, e.touches[0].clientY - dragStartY.current));
+  };
+  const onDragEnd = () => {
+    setDragging(false);
+    if (dragY > 90) onClose();
+    setDragY(0);
+    dragStartY.current = null;
+  };
+
   return createPortal(
-    <div className="md:hidden fixed inset-0 z-[70] bg-zinc-950 flex flex-col">
-      {/* Header */}
+    <div
+      className="md:hidden fixed inset-0 z-[70] bg-zinc-950 flex flex-col animate-in slide-in-from-bottom duration-300"
+      style={{
+        transform: dragY ? `translateY(${dragY}px)` : undefined,
+        transition: dragging ? 'none' : 'transform 0.2s ease',
+      }}
+    >
+      {/* Grab handle + header — drag down here to dismiss */}
       <div
-        className="px-4 py-3 flex items-center justify-between border-b border-zinc-800 shrink-0"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
+        onTouchStart={onDragStart}
+        onTouchMove={onDragMove}
+        onTouchEnd={onDragEnd}
+        className="shrink-0"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)' }}
       >
+        <div className="flex justify-center pb-1.5">
+          <div className="h-1 w-10 rounded-full bg-zinc-600" />
+        </div>
+        <div className="px-4 py-2.5 flex items-center justify-between border-b border-zinc-800">
         <button
           type="button"
           onClick={onClose}
@@ -207,6 +239,7 @@ export function FacetPickerSheet({
         >
           <Check size={18} />
         </button>
+        </div>
       </div>
 
       {/* Body */}

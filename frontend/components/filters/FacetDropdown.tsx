@@ -152,7 +152,7 @@ export function FacetDropdown({
   return createPortal(
     <div className="md:hidden fixed inset-0 z-[65]" onClick={onClose}>
       <div
-        className="absolute rounded-2xl bg-zinc-800/95 backdrop-blur border border-zinc-700 shadow-2xl overflow-hidden py-1"
+        className="absolute rounded-2xl bg-zinc-800/95 backdrop-blur border border-zinc-700 shadow-2xl overflow-hidden py-1 animate-in fade-in slide-in-from-top-1 duration-150"
         style={{ left, top, width: WIDTH, maxHeight: '60vh', overflowY: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
