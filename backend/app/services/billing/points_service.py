@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from app.repositories.points_repository import PointsRepository
+from app.repositories.points_repository import get_points_repository
 
 # Default welcome bonus for new teams
 FREE_WELCOME_POINTS = 500
@@ -25,7 +25,7 @@ class PointsService:
     """High-level business logic for the points capacity system (async)."""
 
     def __init__(self):
-        self.repo = PointsRepository()
+        self.repo = get_points_repository()
 
     # ------------------------------------------------------------------ #
     # Core: check + consume (atomic debit flow)

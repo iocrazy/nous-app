@@ -14,8 +14,8 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
-from app.repositories.payment_repository import PaymentRepository
-from app.repositories.points_repository import PointsRepository
+from app.repositories.payment_repository import get_payment_repository
+from app.repositories.points_repository import get_points_repository
 from app.services.billing.points_service import PointsService
 
 
@@ -23,8 +23,8 @@ class PaymentService:
     """High-level business logic for payment orders (async)."""
 
     def __init__(self):
-        self.payment_repo = PaymentRepository()
-        self.points_repo = PointsRepository()
+        self.payment_repo = get_payment_repository()
+        self.points_repo = get_points_repository()
         self.points_service = PointsService()
 
     # ------------------------------------------------------------------ #

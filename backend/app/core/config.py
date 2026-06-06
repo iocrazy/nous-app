@@ -513,6 +513,62 @@ class Settings(BaseSettings):
         "write_scope(). Inert — flip back to false to roll back.",
     )
 
+    USE_ORM_POINTS: bool = Field(
+        default=False,
+        description="Route PointsRepository (MONEY — the points capacity ledger: "
+        "point_pricing / point_packages / team_quotas / member_quotas / "
+        "point_transactions) through the SQLAlchemy 2.0 ORM (Phase 2 H batch — "
+        "money). NUMERIC-PRECISION DECISION: every point/money column here is "
+        "INTEGER/BigInteger (points_balance / amount / balance_after / "
+        "storage_*_bytes / points_cost / points_amount / *_this_month), NOT "
+        "Numeric — REST returned a JSON NUMBER for these, so they STAY NATIVE int "
+        "(the 5.3 trap) AND every consumer does exact int math on them "
+        "(check_quota's ``balance < cost``, add_points' ``balance + amount``, "
+        "reclaim's ``min``/``-``, admin_adjust's ``balance + amount``). str()ing "
+        "any would silently break the +/</min money math. The ONLY Numeric column "
+        "is point_transactions.duration_seconds → str()'d to match REST's "
+        "JSON-string shape (write-only/unread today; no exact-decimal consumer). "
+        "UUID sweep: point_pricing.id / point_packages.id / member_quotas.id+"
+        "user_id / point_transactions.user_id → str (default-str-all-uuid; "
+        "team_quotas has no uuid). ATOMIC MONEY: consume/refund go through the "
+        "SAME rpc_consume_team_points (mig 120/124) / rpc_refund_team_points_"
+        "idempotent (mig 123) SECURITY DEFINER functions via SELECT * FROM fn(...) "
+        "inside write_scope() (team_id→int BIGINT param, user_id str UUID param; "
+        "INTEGER return cols → native int) — a read_scope there would roll the "
+        "decrement back = LOST MONEY. CONCERN (reported, not repaired — inert "
+        "discipline): add_points / reclaim_daily_gift / admin_adjust(<0) / "
+        "increment_member_usage are PRE-EXISTING non-atomic read-then-write "
+        "balance paths; reproduced faithfully (no locking added). get_transactions"
+        "(days=N) binds a tz-aware datetime for ``created_at >= cutoff`` (v3 "
+        "rule). member_quotas upsert via ON CONFLICT (team_id,user_id). Writes "
+        "commit via write_scope(). Inert — flip back to false to roll back.",
+    )
+
+    USE_ORM_PAYMENT: bool = Field(
+        default=False,
+        description="Route PaymentRepository (MONEY — payment orders, the "
+        "purchase ledger: the orders table) through the SQLAlchemy 2.0 ORM "
+        "(Phase 2 H batch — money). NUMERIC-PRECISION DECISION: orders has NO "
+        "Numeric column — amount_cents / points_amount are INTEGER (REST returned "
+        "numbers → STAY NATIVE int; the 5.3 trap). points_amount feeds "
+        "points_service.add_points' ``balance + amount`` exact int math; str() "
+        "would break it. id / team_id are BigInteger → native int (order_id binds "
+        "to update_order's WHERE; team_id → add_points → int()). UUID sweep: "
+        "user_id / package_id → str (default-str-all-uuid; user_id flows into "
+        "add_points→create_transaction's Uuid write bind which accepts the str "
+        "form). payment_status/method/currency are CHECK/plain String NOT Enum "
+        "(handle_callback does ``status == 'paid'`` str==str — no _plain). "
+        "WRITE-BINDING (v3): the legacy .isoformat()'d paid_at/expired_at/created_"
+        "at/updated_at to ISO strings before REST; asyncpg REQUIRES native aware "
+        "datetimes, so the ORM does the INVERSE — _coerce_temporal(ISO-str→"
+        "datetime) at the write boundary; update_order + expire_pending_orders "
+        "use func.now() (DB clock) for updated_at and the ``expired_at < NOW()`` "
+        "filter (the legacy bound a naive-local string). create_order omits "
+        "created_at/updated_at (server_default now()). Writes commit via "
+        "write_scope() (a payment-state write silently rolled back = a paid order "
+        "stuck pending). Inert — flip back to false to roll back.",
+    )
+
     # ============================================
     # 下载设置
     # ============================================

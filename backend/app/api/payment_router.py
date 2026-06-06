@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.repositories.points_repository import PointsRepository
+from app.repositories.points_repository import get_points_repository
 from app.schemas.payment import CreateOrderRequest
 from app.services.billing.payment_service import PaymentService
 
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/payment")
 
 # Shared instances (lazy; each holds its own async client)
 _payment_service = PaymentService()
-_points_repo = PointsRepository()
+_points_repo = get_points_repository()
 
 
 # ---------------------------------------------------------------------- #

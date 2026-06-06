@@ -9,11 +9,14 @@ Uses async Supabase client.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.payment_repository_orm import PaymentRepositoryOrm
 
 
 class PaymentRepository:
@@ -197,3 +200,26 @@ class PaymentRepository:
         except Exception as e:
             logger.error(f"Failed to expire pending orders: {e}")
             return 0
+
+
+def get_payment_repository() -> Union["PaymentRepository", "PaymentRepositoryOrm"]:
+    """Return the right PaymentRepository implementation per env.
+
+    ORM when ``USE_ORM_PAYMENT`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_PAYMENT:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.payment_repository_orm import PaymentRepositoryOrm
+
+            return PaymentRepositoryOrm()
+        logger.warning(
+            "USE_ORM_PAYMENT=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return PaymentRepository()
