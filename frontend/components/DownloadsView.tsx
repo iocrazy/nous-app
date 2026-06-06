@@ -152,6 +152,14 @@ export const DownloadsView: React.FC = () => {
   const { resourceDataMap, setResourceDataMap, resourceIdMap, aiStatusMap } = useResourceDataMap(mediaIds);
   const tagSearchMap = useTagSearchMap(resourceDataMap);
   const { allTags, setAllTags } = useAllTags();
+  const handleCreateTagForFilter = useCallback(
+    async (name: string) => {
+      const tag = await createTag({ name, type: 'user' });
+      setAllTags((prev) => [...prev, tag]);
+      return tag;
+    },
+    [setAllTags],
+  );
 
   // ─── Pull-to-refresh (mobile) ───
   const contentScrollRef = useRef<HTMLDivElement>(null);
@@ -872,6 +880,7 @@ export const DownloadsView: React.FC = () => {
           className="md:hidden border-b border-zinc-800/60 shrink-0"
           config={filterBarConfig}
           allTags={allTags}
+          availablePlatforms={availablePlatforms}
           onOpenFacet={setOpenFacet}
         />
       )}
@@ -1213,6 +1222,7 @@ export const DownloadsView: React.FC = () => {
         config={filterBarConfig}
         allTags={allTags}
         availablePlatforms={availablePlatforms}
+        onCreateTag={handleCreateTagForFilter}
       />
 
       {/* Share Modal */}

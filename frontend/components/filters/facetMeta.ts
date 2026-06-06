@@ -49,6 +49,17 @@ export const FACETS: readonly FacetDef[] = [
   { id: 'duration', label: 'Duration', icon: Clock },
 ];
 
+/** Facets that warrant a full-screen picker: the unbounded Tags catalog and
+ *  the multi-control Social facet. Everything else is a handful of options →
+ *  a compact anchored dropdown (FacetDropdown) instead of a near-empty screen. */
+export const FULLSCREEN_FACETS: ReadonlySet<ChipId> = new Set<ChipId>([
+  'tags',
+  'social',
+]);
+export function facetIsFullscreen(id: ChipId): boolean {
+  return FULLSCREEN_FACETS.has(id);
+}
+
 // ─── Option tables (labels English per UI-language rule) ────────────────────
 
 export const TYPE_OPTIONS: ReadonlyArray<{ id: ResourceFilterType; label: string }> = [
