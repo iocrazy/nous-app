@@ -227,6 +227,34 @@ class Settings(BaseSettings):
         "preserved byte-for-byte. The PostgREST read-merge-write path stays "
         "as the engine-not-configured fallback",
     )
+    USE_ORM_PROJECTS: bool = Field(
+        default=False,
+        description="Route ProjectsRepository (the MediaTrack project system: "
+        "projects / project_files / project_folders / project_members / "
+        "project_tasks / file_versions / review_comments / parsed_media / "
+        "shares / project_collections — 10 tables) through the SQLAlchemy 2.0 "
+        "ORM session layer (Phase 2 L-solo). Strategy C value-type parity: ALL "
+        "bigint ids + FKs (project/file/folder/task/version/share/collection ids "
+        "+ project_id / media_id / folder_id / parent_id / file_id) stay NATIVE "
+        "int (the 5.3 trap — they flow into scope / membership / FK / dict-key "
+        "compares); uuid columns are coerced to str at the dict boundary to "
+        "match the REST baseline (CONSUMED: owner_id == user_id ownership checks, "
+        "project_members.user_id as an enrich-email dict key); timestamptz → ISO "
+        "str and date (project_tasks.due_date) → 'YYYY-MM-DD' str; numeric "
+        "(fps/timecode) left native. parsed_media Enum(DownloadStatus) columns "
+        "are unwrapped to bare strings and the renamed metadata_ → 'metadata' "
+        "column is resolved via the mapper. Writes commit via write_scope(). "
+        "Inert parity migration — NO endpoint changes behavior on flip. The "
+        "auth-admin methods (enrich_members_with_email / get_user_email), the "
+        "review_comments methods, and project_members update/delete all INHERIT "
+        "the legacy supabase path via MRO (auth-admin hits Supabase Auth not a "
+        "table; the other two are deferred product decisions over schema drift — "
+        "see the projects_repository_orm module docstring). projects.display_code "
+        "is a phantom column preserved as a graceful no-op (REST parity). "
+        "Co-fixed prod bug: the legacy get_members ordered by a phantom "
+        "created_at column (silently returned [] via swallowed PGRST 400) — now "
+        "orders by joined_at on both paths.",
+    )
 
     # ============================================
     # 下载设置
