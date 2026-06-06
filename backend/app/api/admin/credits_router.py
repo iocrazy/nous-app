@@ -409,22 +409,20 @@ async def refund_order(
             detail=f"Order status is '{order['payment_status']}', can only refund 'paid'",
         )
 
-    now = datetime.now(timezone.utc).isoformat()
-    await repo.update_order(order_id, {"payment_status": "refunded", "updated_at": now})
+    # Mark refunded AND debit points atomically (one idempotent RPC, CLAMP AT 0).
+    # Closes the old two-await crash gap AND the silent no-op deduct bug:
+    # add_points rejected the negative amount, so refunds previously marked the
+    # order refunded but NEVER clawed back the granted points.
+    result = await repo.refund_order_and_debit_atomic(order_id)
+    if result is None or not result.get("success"):
+        reason = (result or {}).get("reason") or "Failed to refund order"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=reason,
+        )
 
-    # Deduct points from team (negative amount)
-    from app.services.billing.points_service import PointsService
-
-    points_svc = PointsService()
-    points_amount = order.get("points_amount") or 0
-    await points_svc.add_points(
-        team_id=str(order["team_id"]),
-        amount=-points_amount,
-        type="refund",
-        description=f"Refund for order {order.get('order_no', order_id)}",
-        user_id=str(order["user_id"]) if order.get("user_id") else None,
-        reference_id=order_id,
-    )
+    already_refunded = bool(result.get("already_refunded"))
+    points_debited = result.get("points_debited") or 0
 
     await create_audit_log(
         admin_id=auth.user_id,
@@ -433,13 +431,19 @@ async def refund_order(
         target_id=order_id,
         details={
             "team_id": str(order["team_id"]),
-            "points_refunded": points_amount,
+            "points_refunded": points_debited,
+            "already_refunded": already_refunded,
         },
         ip_address=request.client.host if request.client else None,
     )
 
     logger.info(f"[Admin] Order {order_id} refunded by admin={auth.user_id}")
-    return {"ok": True, "message": "Order refunded and points deducted"}
+    message = (
+        "Order was already refunded"
+        if already_refunded
+        else "Order refunded and points deducted"
+    )
+    return {"ok": True, "message": message}
 
 
 # ============================================

@@ -522,6 +522,28 @@ class AdminCreditsRepositoryOrm(AdminCreditsRepository):
             )
             return None
 
+    async def refund_order_and_debit_atomic(
+        self, order_id: Any
+    ) -> Optional[dict[str, Any]]:
+        # Calls the SAME rpc_refund_order_and_debit SECURITY DEFINER function
+        # (mig 261) the REST path uses. write_scope() owns the commit (a
+        # read_scope would silently roll the debit back). The TABLE return comes
+        # back via mappings() — INTEGER cols -> native int. CLAMP AT 0 +
+        # idempotency live in the RPC, not here.
+        from loguru import logger
+
+        try:
+            stmt = text("SELECT * FROM rpc_refund_order_and_debit(:p_order_id)")
+            async with write_scope() as session:
+                result = await session.execute(stmt, {"p_order_id": int(order_id)})
+                row = result.mappings().first()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(
+                f"Atomic refund-and-debit RPC failed for order {order_id}: {e}"
+            )
+            return None
+
     # ─── Enrichment helpers ────────────────────────────────────────
 
     async def get_teams_by_ids(self, team_ids: list[str]) -> list[dict[str, Any]]:

@@ -183,6 +183,41 @@ class AdminCreditsRepository:
             )
             return None
 
+    async def refund_order_and_debit_atomic(
+        self, order_id: Any
+    ) -> Optional[dict[str, Any]]:
+        """Atomic, idempotent order-REFUND-and-debit via
+        rpc_refund_order_and_debit (migration 261). Sibling of
+        confirm_order_and_credit_atomic — no duplicated logic. Marks refunded +
+        debits team_quotas (CLAMP AT 0) + writes the ledger row in ONE
+        transaction. Fixes the old two-await gap AND the silent no-op deduct
+        (add_points rejected the negative amount, so points were never clawed
+        back).
+
+        Returns:
+            {success, already_refunded, points_debited, new_balance, reason} or
+            None on RPC failure (engine/REST unavailable).
+        """
+        from loguru import logger
+
+        try:
+            client = await self._client()
+            result = await client.rpc(
+                "rpc_refund_order_and_debit",
+                {"p_order_id": int(order_id)},
+            ).execute()
+            data = result.data
+            if isinstance(data, list) and data:
+                return data[0]
+            if isinstance(data, dict):
+                return data
+            return None
+        except Exception as e:
+            logger.error(
+                f"Atomic refund-and-debit RPC failed for order {order_id}: {e}"
+            )
+            return None
+
     # ─── Enrichment helpers ────────────────────────────────────────
 
     async def get_teams_by_ids(self, team_ids: list[str]) -> list[dict[str, Any]]:
