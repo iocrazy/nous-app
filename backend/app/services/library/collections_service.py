@@ -61,9 +61,9 @@ class CollectionsService:
             cache_age = datetime.utcnow() - datetime.fromisoformat(
                 cached_at.replace("Z", "+00:00").replace("+00:00", "")
             )
-            if cache_age < timedelta(minutes=5) and collection.get("cached_media_ids"):
+            if cache_age < timedelta(minutes=5) and collection.get("cached_video_ids"):
                 # Use cached media IDs
-                media_ids = collection["cached_media_ids"]
+                media_ids = collection["cached_video_ids"]
                 total = collection.get("cached_count", len(media_ids))
 
                 # Paginate
