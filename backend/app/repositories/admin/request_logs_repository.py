@@ -185,6 +185,15 @@ def _use_orm_request_logs() -> bool:
     return False
 
 
+def _shadow_request_logs() -> bool:
+    """True iff the ``admin_request_logs`` domain is in the shadow set AND the
+    engine is configured (so the ORM side can actually run)."""
+    from app.db.engine import is_configured
+    from app.db.shadow_compare import shadow_enabled
+
+    return shadow_enabled("admin_request_logs") and is_configured()
+
+
 def get_request_logs_repository() -> "RequestLogsRepository":
     """Return the right RequestLogsRepository implementation per env."""
     if _use_orm_request_logs():
@@ -193,6 +202,15 @@ def get_request_logs_repository() -> "RequestLogsRepository":
         )
 
         return RequestLogsRepositoryOrm()
+    if _shadow_request_logs():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.request_logs_repository_orm import (
+            RequestLogsRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            RequestLogsRepository(), RequestLogsRepositoryOrm(), "admin_request_logs"
+        )
     return RequestLogsRepository()
 
 
@@ -204,6 +222,17 @@ def get_frontend_error_logs_repository() -> "FrontendErrorLogsRepository":
         )
 
         return FrontendErrorLogsRepositoryOrm()
+    if _shadow_request_logs():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.request_logs_repository_orm import (
+            FrontendErrorLogsRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            FrontendErrorLogsRepository(),
+            FrontendErrorLogsRepositoryOrm(),
+            "admin_request_logs",
+        )
     return FrontendErrorLogsRepository()
 
 
@@ -215,4 +244,13 @@ def get_app_logs_repository() -> "AppLogsRepository":
         )
 
         return AppLogsRepositoryOrm()
+    if _shadow_request_logs():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.request_logs_repository_orm import (
+            AppLogsRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            AppLogsRepository(), AppLogsRepositoryOrm(), "admin_request_logs"
+        )
     return AppLogsRepository()

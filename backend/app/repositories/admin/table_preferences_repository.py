@@ -74,10 +74,9 @@ def get_admin_table_preferences_repository() -> "AdminTablePreferencesRepository
     engine-missing deploy logs once and falls back to REST (never crashes).
     """
     from app.core.config import settings
+    from app.db.engine import is_configured
 
     if settings.USE_ORM_ADMIN_TABLE_PREFERENCES:
-        from app.db.engine import is_configured
-
         if is_configured():
             from app.repositories.admin.table_preferences_repository_orm import (
                 AdminTablePreferencesRepositoryOrm,
@@ -90,4 +89,19 @@ def get_admin_table_preferences_repository() -> "AdminTablePreferencesRepository
             "USE_ORM_ADMIN_TABLE_PREFERENCES=true but SUPAVISOR_DATABASE_URL is "
             "empty — falling back to supabase-py path"
         )
+
+    from app.db.shadow_compare import shadow_enabled
+
+    if shadow_enabled("admin_table_preferences") and is_configured():
+        from app.db.shadow_compare import ShadowRepo
+        from app.repositories.admin.table_preferences_repository_orm import (
+            AdminTablePreferencesRepositoryOrm,
+        )
+
+        return ShadowRepo(
+            AdminTablePreferencesRepository(),
+            AdminTablePreferencesRepositoryOrm(),
+            "admin_table_preferences",
+        )
+
     return AdminTablePreferencesRepository()
