@@ -342,6 +342,74 @@ class Settings(BaseSettings):
         "roll back.",
     )
 
+    USE_ORM_INVITE: bool = Field(
+        default=False,
+        description="Route InviteRepository (team_invites + the team_members "
+        "membership checks accept/delete walk) through the SQLAlchemy 2.0 ORM "
+        "session layer (Phase 2 M batch). Strategy C value-type parity: id / "
+        "team_id (BIGINT snowflake) stay NATIVE int (the 5.3 trap; router wraps "
+        "them in str() for the str InviteResponse fields, accept_invite str()s "
+        "team_id at the AcceptInviteResponse boundary); created_by (uuid) → str "
+        "(REQUIRED — InviteResponse.created_by is a str field, pydantic v2 "
+        "rejects a native UUID); expires_at → ISO str (REQUIRED — the inherited "
+        "accept_invite expiry check calls .replace()/fromisoformat() on it, a "
+        "native datetime would AttributeError); created_at → ISO str; max_uses / "
+        "use_count native int. get_invite_by_code reproduces the PostgREST "
+        "teams(id,name) embed as a nested dict. Callers pass team_id as a STR → "
+        "_bigint int-coerces every bigint bind; created_by/user_id are uuid "
+        "strings (asyncpg Uuid codec accepts). No date range filters. Reads "
+        "return []/None; create_invite raises on failure; accept_invite raises "
+        "the same message strings the router pattern-matches (incl. the 23505 → "
+        "'Already a member' path). Writes commit via write_scope(). Inert — flip "
+        "back to false to roll back.",
+    )
+    USE_ORM_AI: bool = Field(
+        default=False,
+        description="Route AIRepository (resource_transcripts / "
+        "resource_summaries upsert-by-resource_id + the AI status columns on "
+        "resources) through the SQLAlchemy 2.0 ORM session layer (Phase 2 M "
+        "batch). Strategy C value-type parity: transcript/summary id (uuid) → "
+        "str (shape only — no consumer reads the row id); resource_id (bigint) "
+        "native int; created_at → ISO str (REQUIRED — Transcript/SummaryResponse "
+        ".created_at are typed Optional[str], pydantic rejects a native "
+        "datetime); segments / key_points / topics (jsonb) → native dict/list; "
+        "duration_seconds (double) → native float. resources.*_status are "
+        "Enum(AiTaskStatus) columns — writes bind the bare status string "
+        "(SQLAlchemy Enum accepts the matching value), filters compare to the "
+        "string; the get_videos_needing_* SELECTs don't project a status column "
+        "so no Enum read-unwrap. upsert reproduces ON CONFLICT (resource_id) DO "
+        "UPDATE. No date range filters. save_* / get_* swallow + return None; "
+        "update_media_ai_status returns False on failure; get_videos_* return [] "
+        "(both cold/uncalled in app today, migrated for completeness). Writes "
+        "commit via write_scope(). Inert — flip back to false to roll back.",
+    )
+    USE_ORM_ISSUE: bool = Field(
+        default=False,
+        description="Route IssueRepository (the issues table — top-level "
+        "user-visible 'thing') through the SQLAlchemy 2.0 ORM session layer "
+        "(Phase 2 M batch). THE M-BATCH UUID HOT SPOT: created_by_user_id and "
+        "assignee_user_id are str()'d because THREE app-layer call sites "
+        "(issues_router._assert_visibility, issue_messages_router."
+        "_assert_issue_visible, ws_router._resolve_issue_ws_user) compare them "
+        "==/in a STRING user_id for authz — a native uuid.UUID would compare "
+        "unequal forever (silent 404/4001 for the legitimate owner, no error/no "
+        "log). created_by_agent_id / assignee_agent_id → str for shape parity. "
+        "ai_session_id + all bigint ids/FKs (id / issue_number / team_id / "
+        "project_id / parent_id / goal_id) stay NATIVE int (5.3 trap; "
+        "ai_session_id is fed to a supabase .eq that coerces). status / priority "
+        "/ origin_kind are plain Text columns (CHECK-constrained, NOT SQLAlchemy "
+        "Enum) → native str, no _plain unwrap. timestamps → ISO str; "
+        "execution_state (jsonb) → native dict. atomic_create keeps the "
+        "counter-UPDATE+INSERT atomic by calling the SAME issue_create_atomic "
+        "SECURITY DEFINER proc (mig 173) via SELECT * FROM "
+        "issue_create_atomic(CAST(:payload AS jsonb)) inside write_scope(). "
+        "list_for_user reproduces the own-OR-assignee OR filter + count='exact'. "
+        "No date range filters. get_* return None; update raises ValueError on "
+        "not-found/no-op; atomic_create raises RuntimeError on empty result. "
+        "Writes commit via write_scope(). Inert — flip back to false to roll "
+        "back.",
+    )
+
     # ============================================
     # 下载设置
     # ============================================

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.repositories.invite_repository import InviteRepository
+from app.repositories.invite_repository import get_invite_repository
 from app.schemas.invite import (
     AcceptInviteRequest,
     AcceptInviteResponse,
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/invites", tags=["Invites"])
 @router.get("", response_model=InviteListResponse)
 async def list_invites(team_id: str, auth: AuthDep):
     """List all invites for a team."""
-    repo = InviteRepository()
+    repo = get_invite_repository()
 
     # Check permission
     can_manage = await repo.check_user_can_manage_invites(team_id, auth.user_id)
@@ -51,7 +51,7 @@ async def list_invites(team_id: str, auth: AuthDep):
 @router.post("", response_model=InviteResponse, status_code=status.HTTP_201_CREATED)
 async def create_invite(invite: InviteCreate, auth: AuthDep):
     """Create a new team invite."""
-    repo = InviteRepository()
+    repo = get_invite_repository()
 
     # Check permission
     can_manage = await repo.check_user_can_manage_invites(invite.team_id, auth.user_id)
@@ -89,7 +89,7 @@ async def create_invite(invite: InviteCreate, auth: AuthDep):
 @router.delete("/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_invite(invite_id: str, auth: AuthDep):
     """Delete an invite."""
-    repo = InviteRepository()
+    repo = get_invite_repository()
     deleted = await repo.delete_invite(invite_id, auth.user_id)
 
     if not deleted:
@@ -102,7 +102,7 @@ async def delete_invite(invite_id: str, auth: AuthDep):
 @router.post("/accept", response_model=AcceptInviteResponse)
 async def accept_invite(request: AcceptInviteRequest, auth: AuthDep):
     """Accept an invite and join the team."""
-    repo = InviteRepository()
+    repo = get_invite_repository()
 
     try:
         result = await repo.accept_invite(request.code, auth.user_id)

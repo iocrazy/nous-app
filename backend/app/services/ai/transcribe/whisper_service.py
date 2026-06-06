@@ -13,7 +13,7 @@ from typing import Optional
 
 from loguru import logger
 
-from app.repositories.ai_repository import AIRepository
+from app.repositories.ai_repository import get_ai_repository
 from app.services.ai.providers.ai_provider import AIProviderFactory, TranscriptResult
 
 
@@ -28,7 +28,7 @@ class WhisperService:
         """
         self._provider_key = provider_key
         self._provider_config = provider_config or {}
-        self._repo = AIRepository()
+        self._repo = get_ai_repository()
 
     async def transcribe(
         self,

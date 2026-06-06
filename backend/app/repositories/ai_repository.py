@@ -7,11 +7,14 @@ Handles CRUD operations for resource_transcripts, resource_summaries,
 and AI-related status fields on the resources table.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.ai_repository_orm import AIRepositoryOrm
 
 
 class AIRepository:
@@ -185,3 +188,26 @@ class AIRepository:
         except Exception as e:
             logger.error(f"Failed to get videos needing summary: {e}")
             return []
+
+
+def get_ai_repository() -> Union["AIRepository", "AIRepositoryOrm"]:
+    """Return the right AIRepository implementation per env.
+
+    ORM when ``USE_ORM_AI`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_AI:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.ai_repository_orm import AIRepositoryOrm
+
+            return AIRepositoryOrm()
+        logger.warning(
+            "USE_ORM_AI=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AIRepository()
