@@ -31,6 +31,8 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
+from app.db.scope import Scope, request_scope, system_request_scope
+
 
 @DBOS.step()
 async def resolve_resource_title_step(resource_id: str, version_id: str) -> str:
@@ -186,13 +188,27 @@ async def transcode_workflow(
     the same version short-circuits to the cached output (replaces the
     legacy `acquire_or_subscribe` dedup pattern).
     """
-    title = await resolve_resource_title_step(resource_id, version_id)
-    outcome = await transcode_to_hls_step(resource_id, version_id, user_id)
-    await log_transcode_outcome_step(
-        user_id=user_id,
-        resource_title=title,
-        resource_id=resource_id,
-        version_id=version_id,
-        outcome=outcome,
+    # Establish the ambient tenant Scope for every awaited step (they touch
+    # resources / resource_versions via get_resources_repository(); native-async
+    # @DBOS.step bodies share this task's ContextVar — no run_async hop here, so
+    # the wrap propagates directly into each step). user_id is a frozen workflow
+    # input, so a DBOS replay reconstructs the identical scope deterministically:
+    #   - on-behalf-of-user transcode (user_id truthy) → USER scope
+    #   - batch/admin transcode (user_id falsy)        → SYSTEM (owner-agnostic)
+    # INERT until SCOPE_ENFORCE_RESOURCES — the choke point ignores _scope today.
+    scope_cm = (
+        request_scope(Scope(user_id=user_id))
+        if user_id
+        else system_request_scope(reason="system-transcode")
     )
+    async with scope_cm:
+        title = await resolve_resource_title_step(resource_id, version_id)
+        outcome = await transcode_to_hls_step(resource_id, version_id, user_id)
+        await log_transcode_outcome_step(
+            user_id=user_id,
+            resource_title=title,
+            resource_id=resource_id,
+            version_id=version_id,
+            outcome=outcome,
+        )
     return outcome

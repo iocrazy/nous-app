@@ -28,7 +28,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.orm_base import Base
+from app.db.orm_base import Base, UserScoped
 from app.models._enums import AiTaskStatus, DownloadStatus
 
 
@@ -221,8 +221,20 @@ class ParsedMedia(Base):
     )
 
 
-class Resources(Base):
+class Resources(Base, UserScoped):
+    """Resource-library rows, owned per-user via ``creator_id`` (a UUID — the
+    Supabase auth ``sub``).
+
+    First production opt-in of the app-layer tenant-scope choke point
+    (app/db/scope.py). ``UserScoped`` names ``creator_id`` as the owner column so
+    the choke point can inject ``creator_id == scope.user_id`` on reads and
+    fail-closed on cross-user writes. The mixin is ALWAYS on (stable class
+    hierarchy), but enforcement is GATED by ``settings.SCOPE_ENFORCE_RESOURCES``
+    (default false): inert until the flag flips on (epic A). The mixin declares
+    NO column — ``creator_id`` already exists below."""
+
     __tablename__ = "resources"
+    __tenant_user_col__ = "creator_id"
     __table_args__ = (
         CheckConstraint("rating >= 0 AND rating <= 5", name="resources_rating_check"),
         CheckConstraint(

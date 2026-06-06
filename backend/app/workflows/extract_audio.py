@@ -174,11 +174,19 @@ async def extract_audio_workflow(
     # invoked from inside a step context. Best-effort — never fails this
     # workflow. No audio-ready gate needed: we just extracted it.
     try:
+        from app.db.scope import Scope, request_scope
         from app.tasks.download_helpers import chain_transcript_summary_for_tags
 
-        chain_transcript_summary_for_tags(
-            platform_id, user_id, flow_id=flow_id, video_title=video_title
-        )
+        # A2 pass 4b: chain_transcript_summary_for_tags is SYNC and reads
+        # `resources` via run_async (get_resource_by_media_id_and_creator). Set
+        # the ambient USER scope HERE at the async caller; pass-4a's
+        # copy_context wrap carries it down through run_async's thread hop into
+        # that resource read. `user_id` is a required workflow arg (always
+        # present). INERT until SCOPE_ENFORCE_RESOURCES flips.
+        async with request_scope(Scope(user_id=user_id)):
+            chain_transcript_summary_for_tags(
+                platform_id, user_id, flow_id=flow_id, video_title=video_title
+            )
     except Exception as e:
         logger.warning(
             f"[extract_audio] transcript/summary chain failed for "

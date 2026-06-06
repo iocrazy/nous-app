@@ -16,6 +16,7 @@ from app.api.media_fetch_helpers import (
 )
 from app.boundary import validate_url_async
 from app.core.deps import AuthDep
+from app.core.scope_dep import ScopedRequestDep
 from app.core.utils import Utils
 from app.repositories.tags_repository import TagsRepository
 from app.repositories.user_logs_repository import log_user_action
@@ -38,6 +39,7 @@ async def fetch_videos_batch(
     request: BatchFetchRequest,
     background_tasks: BackgroundTasks,
     auth: AuthDep,
+    _scope: ScopedRequestDep,
     raw_request: Request,
 ):
     """

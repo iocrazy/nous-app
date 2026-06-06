@@ -14,6 +14,7 @@ The only API surface change is the import path:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from typing import Any, Optional
 
 from loguru import logger
@@ -24,8 +25,19 @@ from app.services.ai.visual.classification_service import ClassificationService
 
 def _run_async(coro):
     """Run an async coroutine in a sync context. Mirrors
-    `app.tasks.utils.run_async`."""
-    return asyncio.run(coro)
+    `app.tasks.utils.run_async`.
+
+    Single-branch, no thread hop: ``asyncio.run`` already copies the calling
+    thread's current context (it creates its Task via ``loop.create_task``), so
+    the ambient ``_scope`` (app.db.scope) set on the calling thread already
+    reaches the coroutine. Wrapping in ``copy_context().run(...)`` is therefore
+    functionally REDUNDANT here — it cannot recover a scope that isn't already
+    in the calling thread's context. The explicit wrap is kept for symmetry with
+    ``run_async`` (whose branch-2 thread hop genuinely needs it) and to make the
+    context-capture point explicit/future-proof should a thread hop ever be
+    added. See the A2 pass 4a report for the no-op finding.
+    """
+    return contextvars.copy_context().run(asyncio.run, coro)
 
 
 def extract_url(url: str) -> str:

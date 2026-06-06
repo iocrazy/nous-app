@@ -14,6 +14,8 @@ from typing import Any
 from dbos import DBOS
 from loguru import logger
 
+from app.db.scope import system_request_scope
+
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
 async def generate_thumbnail_step(
@@ -40,5 +42,13 @@ async def generate_thumbnail_step(
 async def thumbnail_workflow(
     resource_id: str, file_path: str, mime_type: str
 ) -> dict[str, Any]:
-    success = await generate_thumbnail_step(resource_id, file_path, mime_type)
+    # Thumbnail regeneration is an owner-agnostic derived-asset write keyed by
+    # resource_id (the step → ThumbnailService writes resources.thumbnail_path).
+    # It is dispatched OUT-OF-BAND as its own DBOS workflow with no user_id and no
+    # ambient scope to inherit, so SYSTEM is the correct minimal treatment
+    # (consistent with transcode's None→SYSTEM branch and the sweepers). The
+    # constant SYSTEM is deterministic across DBOS replay. INERT until
+    # SCOPE_ENFORCE_RESOURCES — the choke point ignores _scope today.
+    async with system_request_scope(reason="system-thumbnail"):
+        success = await generate_thumbnail_step(resource_id, file_path, mime_type)
     return {"resource_id": resource_id, "success": success}

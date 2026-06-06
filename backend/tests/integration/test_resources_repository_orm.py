@@ -41,6 +41,8 @@ from unittest.mock import patch
 import asyncpg
 import pytest
 
+from app.db.scope import Scope, request_scope
+
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 _TEST_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()
@@ -262,9 +264,12 @@ async def test_get_completed_resource_l2_dedup_shape(
         finally:
             await conn.close()
 
-        result = await _repo().get_completed_resource_by_url_and_creator(
-            test_url, str(user_id)
-        )
+        # A3: the read now routes through scoped_sql → requires an ambient scope
+        # (it fail-closes with None when none is set). Acting user == creator_id.
+        async with request_scope(Scope(user_id=str(user_id))):
+            result = await _repo().get_completed_resource_by_url_and_creator(
+                test_url, str(user_id)
+            )
         assert result is not None, "L2 dedup probe failed to find seeded row"
         assert set(result.keys()) == {"id", "media_id", "parsed_media"}
         pm = result["parsed_media"]
@@ -291,9 +296,11 @@ async def test_get_owned_platform_ids_subset(
         finally:
             await conn.close()
 
-        owned = await _repo().get_owned_platform_ids(
-            [media["platform_id"], "__nope__"], str(user_id)
-        )
+        # A3: routes through scoped_sql → requires an ambient scope.
+        async with request_scope(Scope(user_id=str(user_id))):
+            owned = await _repo().get_owned_platform_ids(
+                [media["platform_id"], "__nope__"], str(user_id)
+            )
         assert media["platform_id"] in owned
         assert "__nope__" not in owned
 

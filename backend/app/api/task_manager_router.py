@@ -14,6 +14,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
+from app.core.scope_dep import ScopedRequestDep
 from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/task-manager")
@@ -190,7 +191,7 @@ async def extend_task_timeout(task_id: str, auth: AuthDep, minutes: int = 30):
 
 
 @router.post("/tasks/{task_id}/retry")
-async def retry_task(task_id: str, auth: AuthDep):
+async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     """Reset a failed/cancelled task for retry and re-dispatch the Celery job."""
     tracker = get_task_manager()
     task = await tracker.retry_task(task_id, auth.user_id)

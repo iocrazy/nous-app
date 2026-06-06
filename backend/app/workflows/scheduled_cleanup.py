@@ -23,6 +23,7 @@ from typing import Any
 from dbos import DBOS
 from loguru import logger
 
+from app.db.scope import system_request_scope
 from app.tasks.utils import run_async
 
 
@@ -99,12 +100,20 @@ def cleanup_old_task_tracking_step() -> dict[str, Any]:
 
 @DBOS.step()
 def cleanup_trashed_resources_step() -> dict[str, Any]:
-    """Permanently delete resources soft-deleted >15 days ago."""
+    """Permanently delete resources soft-deleted >15 days ago.
+
+    A2 pass 3: scope is set INSIDE ``_do`` (not at the sync-step level)
+    because ``run_async`` creates a fresh thread/event-loop that does NOT
+    inherit the caller's ContextVar. Setting the scope inside the coroutine
+    that ``run_async`` awaits ensures it lands in the correct context.
+    INERT until ``SCOPE_ENFORCE_RESOURCES`` is on.
+    """
     from app.services.library.resources_service import ResourcesService
 
     async def _do() -> int:
-        svc = ResourcesService()
-        return await svc.cleanup_expired_trash(older_than_days=15)
+        async with system_request_scope(reason="cleanup-trashed-resources"):
+            svc = ResourcesService()
+            return await svc.cleanup_expired_trash(older_than_days=15)
 
     cleaned = run_async(_do())
     return {"status": "success", "cleaned": cleaned}
@@ -250,8 +259,17 @@ def cleanup_orphan_storage_step() -> dict[str, Any]:
     async def _load_resource_ids() -> set[int]:
         from app.db import engine as db_engine
 
-        rows = await db_engine.fetch_all("SELECT id FROM public.resources")
-        return {row["id"] for row in rows if row.get("id") is not None}
+        # A2 pass 3: system_request_scope is set here (inside the coroutine
+        # run_async awaits) so the ContextVar lands in the correct event-loop
+        # context — run_async creates a fresh thread/loop that does not
+        # inherit the caller's ContextVar (Pass 4 will add copy_context;
+        # this wiring is independent of that fix).
+        # NOTE: db_engine.fetch_all is RAW SQL and currently bypasses the
+        # ORM choke point — this scope is a defensive entry-boundary
+        # annotation for consistency; the raw-SQL backstop lands in task A3.
+        async with system_request_scope(reason="cleanup-orphan-storage"):
+            rows = await db_engine.fetch_all("SELECT id FROM public.resources")
+            return {row["id"] for row in rows if row.get("id") is not None}
 
     valid_ids = run_async(_load_resource_ids())
     min_age_seconds = ORPHAN_STORAGE_MIN_AGE_DAYS * 86400.0
