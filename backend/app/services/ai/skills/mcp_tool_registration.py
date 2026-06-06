@@ -43,7 +43,7 @@ from app.agent_framework.mcp_descriptor import (
     agent_to_tool,
     skill_to_tool,
 )
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import AgentRepository, get_agent_repository
 from app.repositories.skill_repository import SkillRepository
 
 
@@ -107,7 +107,7 @@ async def build_mcp_registry(
     """
     registry = MCPToolRegistry()
     skill_repo = skill_repo or SkillRepository()
-    agent_repo = agent_repo or AgentRepository()
+    agent_repo = agent_repo or get_agent_repository()
 
     if include_skills:
         try:

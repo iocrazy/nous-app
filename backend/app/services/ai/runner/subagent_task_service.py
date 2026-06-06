@@ -179,7 +179,7 @@ class SubAgentTaskService:
         # the later compose step.
         try:
             from app.core.config import settings
-            from app.repositories.agent_repository import AgentRepository
+            from app.repositories.agent_repository import get_agent_repository
             from app.repositories.skill_repository import SkillRepository
             from app.services.ai.adapters.factory import provider_key_for_model
             from app.services.ai.chat.ai_library_chat_wiring import (
@@ -200,7 +200,7 @@ class SubAgentTaskService:
             logger.exception("[subagent_task] import wiring failed")
             return self._failed(f"import failed: {exc!s:.120}")
 
-        agent_repo = AgentRepository()
+        agent_repo = get_agent_repository()
 
         # Reject self-spawn — same agent should branch via plan/loop,
         # not by recursing on itself. Delegate also rejects this; we

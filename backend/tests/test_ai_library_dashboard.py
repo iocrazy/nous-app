@@ -82,7 +82,7 @@ def _client_for(tables: dict[str, list]):
 @pytest.mark.asyncio
 async def test_dashboard_404_when_slug_missing(client: AsyncClient) -> None:
     with patch(
-        "app.api.ai_library_router.AgentRepository",
+        "app.api.ai_library_router.get_agent_repository",
     ) as mock_cls:
         mock_cls.return_value.get_by_slug = AsyncMock(return_value=None)
         resp = await client.get(f"{BASE}/agents/missing/dashboard")
@@ -175,7 +175,7 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
     )
 
     with (
-        patch("app.api.ai_library_router.AgentRepository") as mock_repo,
+        patch("app.api.ai_library_router.get_agent_repository") as mock_repo,
         patch(
             "app.api.ai_library_router.get_async_supabase_admin",
             AsyncMock(return_value=fake_client),
@@ -240,7 +240,7 @@ async def test_dashboard_empty_agent_returns_zero_buckets(
     )
 
     with (
-        patch("app.api.ai_library_router.AgentRepository") as mock_repo,
+        patch("app.api.ai_library_router.get_agent_repository") as mock_repo,
         patch(
             "app.api.ai_library_router.get_async_supabase_admin",
             AsyncMock(return_value=fake_client),

@@ -32,7 +32,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent_framework.context_engine import ContextPayload
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import AgentRepository, get_agent_repository
 from app.repositories.skill_repository import SkillRepository
 from app.services.ai.prompts.prompt_composer import (
     ComposerInput,
@@ -62,7 +62,7 @@ class ChatContextEngine:
         # let us build the default one from the standard repo classes.
         if composer is None:
             composer = PromptComposer(
-                agent_repo=agent_repo or AgentRepository(),
+                agent_repo=agent_repo or get_agent_repository(),
                 skill_repo=skill_repo or SkillRepository(),
             )
         self._composer = composer

@@ -129,7 +129,7 @@ async def test_happy_path_queued_to_done_with_outbox():
             return_value=workforce,
         ),
         patch(
-            "app.services.workforce.agent_worker.AgentRepository",
+            "app.services.workforce.agent_worker.get_agent_repository",
             return_value=agent_repo,
         ),
         patch(
@@ -208,7 +208,7 @@ async def test_refuses_non_persistent_agent():
             return_value=workforce,
         ),
         patch(
-            "app.services.workforce.agent_worker.AgentRepository",
+            "app.services.workforce.agent_worker.get_agent_repository",
             return_value=agent_repo,
         ),
     ):
@@ -293,7 +293,7 @@ async def test_empty_prompt_fails_fast():
             return_value=workforce,
         ),
         patch(
-            "app.services.workforce.agent_worker.AgentRepository",
+            "app.services.workforce.agent_worker.get_agent_repository",
             return_value=agent_repo,
         ),
     ):
@@ -333,7 +333,7 @@ async def test_run_turn_exception_marks_failed():
             return_value=workforce,
         ),
         patch(
-            "app.services.workforce.agent_worker.AgentRepository",
+            "app.services.workforce.agent_worker.get_agent_repository",
             return_value=agent_repo,
         ),
         patch(
@@ -415,7 +415,7 @@ async def test_outbox_routes_to_agent_when_sender_kind_agent():
             return_value=workforce,
         ),
         patch(
-            "app.services.workforce.agent_worker.AgentRepository",
+            "app.services.workforce.agent_worker.get_agent_repository",
             return_value=agent_repo,
         ),
         patch(

@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from app.core.config import settings as app_settings
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import get_agent_repository
 from app.repositories.ai_repository import AIRepository
 from app.repositories.skill_repository import SkillRepository
 from app.services.ai.adapters.base import AIAdapter
@@ -126,7 +126,7 @@ class LLMAnalysisService:
     # ------------------------------------------------------------------
 
     def _build_composer(self) -> PromptComposer:
-        return PromptComposer(AgentRepository(), SkillRepository())
+        return PromptComposer(get_agent_repository(), SkillRepository())
 
     def _build_runner(self) -> AgentRunner:
         """Build a runner whose adapter is injected from the caller's
