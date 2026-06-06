@@ -7,11 +7,14 @@ Data access layer for the MediaTrack project system, covering projects
 and project files CRUD operations. Uses async Supabase client.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.projects_repository_orm import ProjectsRepositoryOrm
 
 
 class ProjectsRepository:
@@ -716,14 +719,22 @@ class ProjectsRepository:
     # ------------------------------------------------------------------ #
 
     async def get_members(self, project_id: str) -> List[Dict[str, Any]]:
-        """Get all members of a project."""
+        """Get all members of a project, ordered by joined_at.
+
+        NOTE: ordered by ``joined_at`` (the real column). It previously ordered
+        by ``created_at`` — a phantom column (migration 070's
+        ``ADD COLUMN IF NOT EXISTS created_at`` was a no-op over the 047 schema
+        that only has ``joined_at``), so PostgREST 400'd, the ``except``
+        swallowed it, and ``list_members`` silently returned ``[]`` in
+        production. Co-fixed here so both the REST and ORM paths return the real
+        member list ordered by joined_at."""
         try:
             client = await self._get_client()
             result = (
                 await client.table(self.TABLE_MEMBERS)
                 .select("*")
                 .eq("project_id", project_id)
-                .order("created_at")
+                .order("joined_at")
                 .execute()
             )
             return result.data or []
@@ -849,3 +860,26 @@ class ProjectsRepository:
         except Exception as e:
             logger.error(f"Failed to delete collection {collection_id}: {e}")
             raise
+
+
+def get_projects_repository() -> Union["ProjectsRepository", "ProjectsRepositoryOrm"]:
+    """Return the right ProjectsRepository implementation per env.
+
+    ORM when ``USE_ORM_PROJECTS`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_PROJECTS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.projects_repository_orm import ProjectsRepositoryOrm
+
+            return ProjectsRepositoryOrm()
+        logger.warning(
+            "USE_ORM_PROJECTS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return ProjectsRepository()

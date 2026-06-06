@@ -18,12 +18,12 @@ from fastapi import HTTPException
 from loguru import logger
 
 from app.repositories.storyboard_repository import (
-    StoryboardAssetRepository,
-    StoryboardCharacterRepository,
-    StoryboardEdgeRepository,
-    StoryboardFrameRepository,
-    StoryboardNodeRepository,
-    StoryboardProjectRepository,
+    get_storyboard_asset_repository,
+    get_storyboard_character_repository,
+    get_storyboard_edge_repository,
+    get_storyboard_frame_repository,
+    get_storyboard_node_repository,
+    get_storyboard_project_repository,
 )
 from app.schemas.storyboard import CanvasSyncRequest
 
@@ -43,12 +43,12 @@ class StoryboardService:
     """Orchestrates storyboard business logic across all sub-repositories."""
 
     def __init__(self) -> None:
-        self.project_repo = StoryboardProjectRepository()
-        self.node_repo = StoryboardNodeRepository()
-        self.edge_repo = StoryboardEdgeRepository()
-        self.frame_repo = StoryboardFrameRepository()
-        self.character_repo = StoryboardCharacterRepository()
-        self.asset_repo = StoryboardAssetRepository()
+        self.project_repo = get_storyboard_project_repository()
+        self.node_repo = get_storyboard_node_repository()
+        self.edge_repo = get_storyboard_edge_repository()
+        self.frame_repo = get_storyboard_frame_repository()
+        self.character_repo = get_storyboard_character_repository()
+        self.asset_repo = get_storyboard_asset_repository()
 
     # ------------------------------------------------------------------ #
     # Authorization

@@ -227,6 +227,65 @@ class Settings(BaseSettings):
         "preserved byte-for-byte. The PostgREST read-merge-write path stays "
         "as the engine-not-configured fallback",
     )
+    USE_ORM_PROJECTS: bool = Field(
+        default=False,
+        description="Route ProjectsRepository (the MediaTrack project system: "
+        "projects / project_files / project_folders / project_members / "
+        "project_tasks / file_versions / review_comments / parsed_media / "
+        "shares / project_collections — 10 tables) through the SQLAlchemy 2.0 "
+        "ORM session layer (Phase 2 L-solo). Strategy C value-type parity: ALL "
+        "bigint ids + FKs (project/file/folder/task/version/share/collection ids "
+        "+ project_id / media_id / folder_id / parent_id / file_id) stay NATIVE "
+        "int (the 5.3 trap — they flow into scope / membership / FK / dict-key "
+        "compares); uuid columns are coerced to str at the dict boundary to "
+        "match the REST baseline (CONSUMED: owner_id == user_id ownership checks, "
+        "project_members.user_id as an enrich-email dict key); timestamptz → ISO "
+        "str and date (project_tasks.due_date) → 'YYYY-MM-DD' str; numeric "
+        "(fps/timecode) left native. parsed_media Enum(DownloadStatus) columns "
+        "are unwrapped to bare strings and the renamed metadata_ → 'metadata' "
+        "column is resolved via the mapper. Writes commit via write_scope(). "
+        "Inert parity migration — NO endpoint changes behavior on flip. The "
+        "auth-admin methods (enrich_members_with_email / get_user_email), the "
+        "review_comments methods, and project_members update/delete all INHERIT "
+        "the legacy supabase path via MRO (auth-admin hits Supabase Auth not a "
+        "table; the other two are deferred product decisions over schema drift — "
+        "see the projects_repository_orm module docstring). projects.display_code "
+        "is a phantom column preserved as a graceful no-op (REST parity). "
+        "Co-fixed prod bug: the legacy get_members ordered by a phantom "
+        "created_at column (silently returned [] via swallowed PGRST 400) — now "
+        "orders by joined_at on both paths.",
+    )
+    USE_ORM_STORYBOARD: bool = Field(
+        default=False,
+        description="Route the SIX Storyboard Workbench repos (StoryboardProject"
+        " / Node / Edge / Frame / Character / Asset — over storyboard_projects / "
+        "_nodes / _edges / _frames / _characters / _assets) through the "
+        "SQLAlchemy 2.0 ORM session layer (Phase 2 L-solo). One flag gates all "
+        "six factories. Strategy C value-type parity: ALL ids + FKs are BIGINT "
+        "snowflake (the six ids + project_id / node_id / source_node_id / "
+        "target_node_id + storyboard_projects.team_id which FKs teams.id, NOT a "
+        "uuid) → stay NATIVE int (the 5.3 trap; team_id is CONSUMED by "
+        "verify_project_access's team_members eq filter + NAS-path str()). The "
+        "only uuid column is storyboard_projects.created_by → str for REST-shape "
+        "parity (response model declares created_by: str; no type-sensitive "
+        "consumer). timestamptz (created_at / updated_at) → ISO str; NO date "
+        "columns; numeric canvas coords (position_x/y, width, height, "
+        "duration_seconds — all Double) left NATIVE float (frontend does float "
+        "math); jsonb (data_json / viewport_json / settings_json / visual_traits "
+        "/ annotations_json / metadata_json) → native dict. No SQLAlchemy Enum "
+        "columns (status / node_type / edge_type / transition_type / source_type "
+        "are plain String + DB CheckConstraint) and no renamed columns. The "
+        "three bulk_upsert methods run row-by-row pg_insert ON CONFLICT (id) DO "
+        "UPDATE inside one write_scope() (atomic) to sidestep the mixed-PK "
+        "multi-VALUES CompileError; they pass row keys THROUGH (not filtered) so "
+        "the already-broken callers that write phantom columns "
+        "(script_ai_router node scene_number/camera_notes; both workflow frame "
+        "steps order_index/prompt/notes/status/source_image_path) RAISE exactly "
+        "as under REST today (inert parity — no repair). All writes commit via "
+        "write_scope(). No date/timestamp range filters → no timestamptz<VARCHAR "
+        "hazard. The storyboard_frame_characters junction table has no consumer "
+        "(nothing to migrate). Instant rollback = flip back to false.",
+    )
 
     # ============================================
     # 下载设置

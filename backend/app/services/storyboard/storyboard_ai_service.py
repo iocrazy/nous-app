@@ -26,7 +26,9 @@ from loguru import logger
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import SkillRepository
-from app.repositories.storyboard_repository import StoryboardCharacterRepository
+from app.repositories.storyboard_repository import (
+    get_storyboard_character_repository,
+)
 from app.services.ai.adapters import get_adapter
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
@@ -51,7 +53,7 @@ class StoryboardAIService:
 
     def __init__(self) -> None:
         self.storyboard_service = StoryboardService()
-        self.character_repo = StoryboardCharacterRepository()
+        self.character_repo = get_storyboard_character_repository()
 
     # ------------------------------------------------------------------ #
     # Agent prompt composition (Phase 2 PR 2.6 — DB-driven prompts)

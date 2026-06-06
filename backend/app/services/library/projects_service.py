@@ -23,14 +23,14 @@ from app.core.file_utils import (
     sniff_mime,
     stream_upload_to_disk,
 )
-from app.repositories.projects_repository import ProjectsRepository
+from app.repositories.projects_repository import get_projects_repository
 
 
 class ProjectsService:
     """MediaTrack projects business logic"""
 
     def __init__(self):
-        self.repo = ProjectsRepository()
+        self.repo = get_projects_repository()
 
     # ------------------------------------------------------------------ #
     # Projects

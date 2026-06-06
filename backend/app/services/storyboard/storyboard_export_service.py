@@ -31,11 +31,11 @@ from typing import Any, Dict, List, Optional
 from PIL import Image, ImageDraw, ImageFont
 
 from app.repositories.storyboard_repository import (
-    StoryboardAssetRepository,
-    StoryboardCharacterRepository,
-    StoryboardFrameRepository,
-    StoryboardNodeRepository,
-    StoryboardProjectRepository,
+    get_storyboard_asset_repository,
+    get_storyboard_character_repository,
+    get_storyboard_frame_repository,
+    get_storyboard_node_repository,
+    get_storyboard_project_repository,
 )
 from app.services.storyboard.storyboard_image_service import StoryboardImageService
 
@@ -145,11 +145,11 @@ class StoryboardExportService:
     """Generates PNG, PDF, and ZIP exports for a storyboard project."""
 
     def __init__(self) -> None:
-        self.project_repo = StoryboardProjectRepository()
-        self.node_repo = StoryboardNodeRepository()
-        self.frame_repo = StoryboardFrameRepository()
-        self.character_repo = StoryboardCharacterRepository()
-        self.asset_repo = StoryboardAssetRepository()
+        self.project_repo = get_storyboard_project_repository()
+        self.node_repo = get_storyboard_node_repository()
+        self.frame_repo = get_storyboard_frame_repository()
+        self.character_repo = get_storyboard_character_repository()
+        self.asset_repo = get_storyboard_asset_repository()
         self.image_service = StoryboardImageService()
 
     # ------------------------------------------------------------------ #
@@ -471,9 +471,11 @@ class StoryboardExportService:
 
         # Fetch edges separately (not in the standard gather above)
         try:
-            from app.repositories.storyboard_repository import StoryboardEdgeRepository
+            from app.repositories.storyboard_repository import (
+                get_storyboard_edge_repository,
+            )
 
-            edge_repo = StoryboardEdgeRepository()
+            edge_repo = get_storyboard_edge_repository()
             edges = await edge_repo.get_by_project(project_id)
         except Exception as exc:
             logger.warning("export_zip: could not fetch edges – %s", exc)

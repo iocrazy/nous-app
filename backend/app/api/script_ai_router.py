@@ -167,9 +167,11 @@ async def convert_to_storyboard(
         # 4. Create storyboard nodes if a target project is specified
         created_nodes = []
         if body.storyboard_project_id:
-            from app.repositories.storyboard_repository import StoryboardNodeRepository
+            from app.repositories.storyboard_repository import (
+                get_storyboard_node_repository,
+            )
 
-            node_repo = StoryboardNodeRepository()
+            node_repo = get_storyboard_node_repository()
             NODE_Y_SPACING = 300
 
             for scene in scenes:
