@@ -329,4 +329,29 @@ def _parse_ts(value: Any) -> Optional[datetime]:
     return None
 
 
-__all__ = ["CommitmentRepository"]
+def get_commitment_repository() -> "CommitmentRepository":
+    """Return the right CommitmentRepository implementation per env.
+
+    ORM when ``USE_ORM_COMMITMENT`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_COMMITMENT:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.commitment_repository_orm import (
+                CommitmentRepositoryOrm,
+            )
+
+            return CommitmentRepositoryOrm()
+        logger.warning(
+            "USE_ORM_COMMITMENT=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return CommitmentRepository()
+
+
+__all__ = ["CommitmentRepository", "get_commitment_repository"]

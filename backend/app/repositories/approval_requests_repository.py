@@ -203,4 +203,33 @@ class ApprovalRequestsRepository:
             return 0
 
 
-__all__ = ["ApprovalRequest", "ApprovalRequestsRepository"]
+def get_approval_requests_repository() -> "ApprovalRequestsRepository":
+    """Return the right ApprovalRequestsRepository implementation per env.
+
+    ORM when ``USE_ORM_APPROVAL`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_APPROVAL:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.approval_requests_repository_orm import (
+                ApprovalRequestsRepositoryOrm,
+            )
+
+            return ApprovalRequestsRepositoryOrm()
+        logger.warning(
+            "USE_ORM_APPROVAL=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return ApprovalRequestsRepository()
+
+
+__all__ = [
+    "ApprovalRequest",
+    "ApprovalRequestsRepository",
+    "get_approval_requests_repository",
+]

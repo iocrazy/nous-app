@@ -626,6 +626,61 @@ class Settings(BaseSettings):
         "screen filters update data to mapped attrs. Writes commit via "
         "write_scope(). Inert — flip back to false to roll back.",
     )
+    USE_ORM_COMMITMENT: bool = Field(
+        default=False,
+        description="Route CommitmentRepository (agent_commitments — cross-session "
+        "agent followups) through the SQLAlchemy 2.0 ORM (Phase 2 H batch — "
+        "FROZEN-DATACLASS parity). Returns the frozen ``Commitment`` value object, "
+        "NOT a dict. PARITY APPROACH = builder reuse: ORM rows → REST-shaped dict "
+        "(uuid→str, datetime→ISO str, bigint native int) → the UNCHANGED inherited "
+        "``_row_to_commitment(dict)`` reconstructs the dataclass byte-identically "
+        "(structurally guaranteed). UUID AUDIT: agent_id/user_id/session_id are "
+        "str()'d BY the builder → Commitment.user_id is str and the router "
+        "fulfill/cancel authz check ``existing.user_id != str(auth.user_id)`` is "
+        "str==str (a native UUID would 404 the owner). trigger_type/status are "
+        "plain Text columns (NOT Enum) → bare str → __post_init__ coerces to "
+        "TriggerType/CommitmentStatus enums (no _plain unwrap needed). "
+        "fulfillment_run_id is BIGINT on the column but STR on the dataclass — the "
+        "builder str()s it (kept native int by _rest_row). id (bigint) native int "
+        "(5.3 trap). v3 temporal: list_due_time / list_expired_pending bind the "
+        "NATIVE aware datetime cutoff (never the legacy ISO string) in the "
+        "trigger_at/expires_at range filter; create / _set_terminal_status "
+        "_coerce_temporal the inherited ISO-string timestamps (trigger_at / "
+        "expires_at / fulfilled_at) → aware datetime for the asyncpg bind. Phantom "
+        "screen: all insert/update keys are mapped columns. create raises on empty "
+        "row; _set_terminal_status returns None on no-pending-row; get_by_id "
+        "swallows→None; list_* raise. Writes commit via write_scope(). Inert — "
+        "flip back to false to roll back.",
+    )
+    USE_ORM_APPROVAL: bool = Field(
+        default=False,
+        description="Route ApprovalRequestsRepository (agent_approval_requests — "
+        "the human-in-loop approval-gate state machine) through the SQLAlchemy 2.0 "
+        "ORM (Phase 2 H batch — FROZEN-DATACLASS parity). Returns the frozen "
+        "``ApprovalRequest`` dataclass, NOT a dict. PARITY APPROACH = builder "
+        "reuse: ORM rows → REST-shaped dict (uuid→str, datetime→ISO str, bigint "
+        "native int) → the UNCHANGED inherited ``ApprovalRequest.from_row(dict)`` "
+        "reconstructs the dataclass byte-identically (wrapping the uuid strings "
+        "back to native ``UUID``). UUID AUDIT: id/user_id/agent_id/decided_by are "
+        "wrapped to native uuid.UUID BY the builder (the dataclass fields ARE typed "
+        "UUID) → the router approve/reject authz check ``existing.user_id != "
+        "user_uuid`` is UUID==UUID (str()ing them would BREAK parity here — the "
+        "INVERSE of most H repos). session_id/run_id are BIGINT columns but STR "
+        "dataclass fields (mig 231/232 snowflakes) — the builder str()s them (kept "
+        "native int by _rest_row). status is plain Text (NOT Enum) → bare str; "
+        "router ``existing.status != 'pending'`` is str==str. v3 temporal: "
+        "mark_expired binds the NATIVE aware datetime cutoff (never the legacy ISO "
+        "string) in the expires_at range filter; decide / mark_expired "
+        "_coerce_temporal the ISO-string decided_at → aware datetime. create binds "
+        "a native aware expires_at (now+ttl). CONCERN (NOT repaired — inert "
+        "discipline): decide() returns True UNCONDITIONALLY on a clean execute "
+        "(does not check rowcount), replicating the legacy quirk — a 0-row no-op "
+        "still returns True (the router's prior get_by_id guard is the real gate). "
+        "Phantom screen: all insert/update keys are mapped columns. create raises "
+        "on exception; get_by_id/list swallow→None/[]; decide→False on exception; "
+        "mark_expired→0 on exception. Writes commit via write_scope(). Inert — "
+        "flip back to false to roll back.",
+    )
 
     # ============================================
     # 下载设置

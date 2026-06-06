@@ -35,9 +35,9 @@ async def sweep_due_commitments_step(
     *, batch_limit: int = SWEEP_BATCH_LIMIT
 ) -> dict[str, Any]:
     """One sweep pass. Returns counts for telemetry."""
-    from app.repositories.commitment_repository import CommitmentRepository
+    from app.repositories.commitment_repository import get_commitment_repository
 
-    repo = CommitmentRepository()
+    repo = get_commitment_repository()
 
     # First: expire pending rows whose expires_at has passed.
     expired_count = 0

@@ -512,10 +512,10 @@ class AILibraryChatService:
         if is_first_turn and user_id:
             try:
                 from app.repositories.commitment_repository import (
-                    CommitmentRepository,
+                    get_commitment_repository,
                 )
 
-                _crepo = CommitmentRepository()
+                _crepo = get_commitment_repository()
                 pending = await _crepo.list_next_session(
                     agent_id=str(composed.agent_id),
                     user_id=str(user_id),
@@ -915,10 +915,10 @@ class AILibraryChatService:
         if result.get("awaiting_approval"):
             try:
                 from app.repositories.approval_requests_repository import (
-                    ApprovalRequestsRepository,
+                    get_approval_requests_repository,
                 )
 
-                _ar_repo = ApprovalRequestsRepository()
+                _ar_repo = get_approval_requests_repository()
                 _row = await _ar_repo.create(
                     user_id=user_id,
                     agent_id=composed.agent_id,
@@ -1020,7 +1020,7 @@ class AILibraryChatService:
             import asyncio as _asyncio
 
             from app.repositories.commitment_repository import (
-                CommitmentRepository,
+                get_commitment_repository,
             )
             from app.services.ai.runner.commitment_harvester import (
                 HarvestContext,
@@ -1034,7 +1034,7 @@ class AILibraryChatService:
                 session_id=str(session_id),
                 run_id=str(run_id) if run_id else None,
             )
-            commitment_repo = CommitmentRepository()
+            commitment_repo = get_commitment_repository()
 
             # Cheap-LLM extraction summarizer + persistor closures. Both
             # capture by name so the asyncio.create_task dispatch is clean.
