@@ -453,6 +453,66 @@ class Settings(BaseSettings):
         "Writes commit via write_scope(). Inert — flip back to false to roll back.",
     )
 
+    USE_ORM_REVIEW: bool = Field(
+        default=False,
+        description="Route ReviewRepository (the review system — review_comments "
+        "threaded comments/replies + review_annotations + review_status "
+        "approvals) through the SQLAlchemy 2.0 ORM session layer (Phase 2 H "
+        "batch — authz-sensitive). UUID AUTHZ HOT SPOT: review_comments.author_id "
+        "is str()'d because review_service.update_comment / delete_comment gate "
+        "on ``comment['author_id'] != user_id`` (a STRING auth subject) — a "
+        "native uuid.UUID would compare unequal forever (silent wrong-DENY: the "
+        "author locked out of their own comment, no error/log). "
+        "review_status.reviewer_id → str for shape parity (only consumed in a log "
+        "f-string, no ==/!= consumer). All bigint ids/FKs (id / resource_id / "
+        "parent_id / version_id / comment_id) stay NATIVE int (the 5.3 trap). "
+        "status is CHECK/plain VARCHAR NOT Enum (no _plain unwrap); timecode "
+        "(double) / frame_number (int) / data (jsonb) native; timestamps → ISO "
+        "str. TEMPORAL-WRITE: the legacy stamps updated_at='now()' (a PostgREST "
+        "sentinel) — the ORM substitutes datetime.now(utc) at the write boundary "
+        "(asyncpg can't bind the literal 'now()'). upsert_review_status "
+        "reproduces the read-then-branch upsert (no DB unique on the "
+        "resource/reviewer/version triple) inside one write_scope(). No date "
+        "range filters. Reads return None/[]; writes commit via write_scope(). "
+        "Inert — flip back to false to roll back.",
+    )
+
+    USE_ORM_TEAM: bool = Field(
+        default=False,
+        description="Route TeamRepository (CROWN JEWEL — the team authorization "
+        "surface: teams + team_members; the team_invites table is a separate "
+        "InviteRepository) through the SQLAlchemy 2.0 ORM session layer (Phase 2 "
+        "H batch — authz-sensitive). THE 'all-bigint = safe' TRAP: teams.id is "
+        "BIGINT but teams.owner_id and team_members.user_id are UUID. "
+        "team_members.user_id is str()'d because teams_router.update_member_role "
+        "does ``next(m for m in members if m['user_id'] == user_id)`` against the "
+        "STRING {user_id} path param — a native uuid.UUID == str is False forever "
+        "(silent 404 'Member not found' after a successful role update). "
+        "teams.owner_id → str for shape parity (TeamResponse.owner_id is a str "
+        "field); remove_member's owner-protection compares str(owner_id) == "
+        "str(target) explicitly (a SECOND real Python uuid compare — a native "
+        "UUID there would let the owner be removed). All bigint ids (teams.id / "
+        "team_members.team_id) stay NATIVE int (the 5.3 trap; router str()s them "
+        "for the response). role is CHECK/plain VARCHAR NOT Enum (str membership "
+        "checks, no _plain). settings_json/enabled_modules (jsonb) native; "
+        "created_at/joined_at → ISO str. create_team relies on the "
+        "teams_invite_code_trigger (mig 009) to fill invite_code and uses "
+        "RETURNING to read it + the snowflake id back; the owner membership is "
+        "added by the add_owner_as_member trigger (mig 009). PROD-BUG CO-FIX "
+        "(2026-06-06): the legacy ALSO explicitly inserted the owner member, "
+        "which collided with that trigger on the team_members PK (23505) → every "
+        "POST /teams 500'd; the redundant insert was DROPPED in BOTH the legacy "
+        "and ORM create_team so the trigger is the single source AND team "
+        "creation works. add_member returns None on 23505 (duplicate member), "
+        "re-raises other IntegrityErrors. No date range filters; no temporal "
+        "writes. KNOWN PRE-EXISTING FOLLOW-UP (not a parity issue, documented): "
+        "the router validates role in [admin/editor/reviewer/viewer] but the "
+        "team_members.role CHECK only allows [owner/admin/member] — writing the "
+        "others raises a CHECK violation under BOTH REST and ORM (a separate "
+        "product question, preserved faithfully). Writes commit via "
+        "write_scope(). Inert — flip back to false to roll back.",
+    )
+
     # ============================================
     # 下载设置
     # ============================================

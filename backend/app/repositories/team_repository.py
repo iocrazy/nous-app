@@ -1,8 +1,13 @@
 """Team repository for database operations."""
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
+from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.team_repository_orm import TeamRepositoryOrm
 
 
 class TeamRepository:
@@ -77,10 +82,12 @@ class TeamRepository:
         if not team.data:
             raise Exception("Failed to create team")
 
-        # Add owner as member with 'owner' role
-        await client.table("team_members").insert(
-            {"team_id": team.data["id"], "user_id": owner_id, "role": "owner"}
-        ).execute()
+        # Owner membership is added by the add_owner_as_member DB trigger
+        # (teams_add_owner_trigger, mig 009 — the canonical mechanism per mig
+        # 053/229). We do NOT insert it explicitly: the trigger already ran
+        # AFTER INSERT ON teams, so a second explicit insert collides on the
+        # team_members PK (23505) → every API team creation 500s. Dropping the
+        # redundant insert is the prod-bug fix.
 
         return team.data
 
@@ -281,3 +288,26 @@ class TeamRepository:
             raise Exception("Already a member of this team")
 
         return team
+
+
+def get_team_repository() -> Union["TeamRepository", "TeamRepositoryOrm"]:
+    """Return the right TeamRepository implementation per env.
+
+    ORM when ``USE_ORM_TEAM`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_TEAM:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.team_repository_orm import TeamRepositoryOrm
+
+            return TeamRepositoryOrm()
+        logger.warning(
+            "USE_ORM_TEAM=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return TeamRepository()
