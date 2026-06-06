@@ -119,7 +119,7 @@ class CollectionsRepository:
         result = (
             await table.update(
                 {
-                    "cached_media_ids": media_ids,
+                    "cached_video_ids": media_ids,
                     "cached_count": count,
                     "cached_at": datetime.utcnow().isoformat(),
                 }

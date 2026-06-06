@@ -19,6 +19,30 @@ from app.services.infra.cleanup_service import CleanupService
 router = APIRouter(prefix="/cleanup", tags=["Cleanup"])
 
 
+async def _delete_user_media(media_id: int, user_id: str) -> bool:
+    """Delete the calling user's resource for a parsed_media item.
+
+    parsed_media is a global content table (mig 083 dropped its user_id), so
+    "delete this user's media" maps to deleting THEIR resource. We resolve the
+    creator-owned resource (authorization gate) and route to
+    ``ResourcesService.permanent_delete``, the established creator_id-scoped
+    delete that also runs the shared-media GC (it only drops the global file +
+    parsed_media row when no resource of any user still references the media_id).
+
+    Returns True if a resource was deleted, False if the user owns no resource
+    for this media_id (→ 404 at the caller).
+    """
+    from app.services.library.resources_service import ResourcesService
+
+    service = ResourcesService()
+    resource = await service.repo.get_resource_by_media_id_and_creator(
+        str(media_id), user_id
+    )
+    if not resource:
+        return False
+    return await service.permanent_delete(str(resource["id"]), user_id)
+
+
 @router.get("/data", response_model=CleanupDataResponse)
 async def get_cleanup_data(
     auth: AuthDep,
@@ -167,21 +191,14 @@ async def take_cleanup_action(
         return {"message": "Suggestion dismissed", "media_id": media_id}
 
     elif action.action == "delete":
-        # Delete media
-        from app.db.supabase_client import get_async_supabase_admin
-
-        supabase = await get_async_supabase_admin()
-
-        result = (
-            await supabase.table("parsed_media")
-            .delete()
-            .eq("id", media_id)
-            .eq("user_id", auth.user_id)
-            .execute()
-        )
-
-        if result.data:
-            logger.info(f"Deleted media {media_id} via cleanup")
+        # parsed_media is global now (no user_id) — deleting "the user's media"
+        # means deleting THEIR resource for it. ResourcesService.permanent_delete
+        # is creator_id-scoped (authz gate) and runs the shared-media GC
+        # (count_resources_by_media_id → only drops the global file + parsed_media
+        # row when no resource of ANY user still references it).
+        deleted = await _delete_user_media(media_id, auth.user_id)
+        if deleted:
+            logger.info(f"Deleted user resource for media {media_id} via cleanup")
             return {"message": "Media deleted", "media_id": media_id}
 
         raise HTTPException(status_code=404, detail="Media not found")
@@ -208,17 +225,9 @@ async def batch_cleanup_action(
             if action.action == "keep_forever":
                 success = await service.mark_keep_forever(media_id, auth.user_id)
             elif action.action == "delete":
-                from app.db.supabase_client import get_async_supabase_admin
-
-                supabase = await get_async_supabase_admin()
-                result = (
-                    await supabase.table("parsed_media")
-                    .delete()
-                    .eq("id", media_id)
-                    .eq("user_id", auth.user_id)
-                    .execute()
-                )
-                success = len(result.data) > 0
+                # Creator-scoped resource delete + shared-media GC (see
+                # _delete_user_media / take_cleanup_action delete branch).
+                success = await _delete_user_media(media_id, auth.user_id)
             else:  # dismiss
                 success = True
 
@@ -281,11 +290,33 @@ async def get_storage_breakdown(auth: AuthDep):
 
     supabase = await get_async_supabase_admin()
 
-    # Get all videos with storage info
+    # parsed_media lost its user_id (mig 083) — per-user ownership now lives on
+    # resources.creator_id. Scope to the media the user actually owns via their
+    # non-trashed resources, then pull storage info from the (global) parsed_media
+    # rows for those media_ids.
+    owned = (
+        await supabase.table("resources")
+        .select("media_id")
+        .eq("creator_id", auth.user_id)
+        .eq("is_trashed", False)
+        .execute()
+    )
+    media_ids = list({r["media_id"] for r in (owned.data or []) if r.get("media_id")})
+
+    if not media_ids:
+        return {
+            "by_type": {"video": 0, "image": 0, "other": 0},
+            "by_month": [],
+            "largest_videos": [],
+            "total_bytes": 0,
+            "total_videos": 0,
+        }
+
+    # Get all owned media with storage info
     result = (
         await supabase.table("parsed_media")
         .select("id, storage_size, media_type, created_at")
-        .eq("user_id", auth.user_id)
+        .in_("id", media_ids)
         .execute()
     )
 

@@ -755,11 +755,22 @@ async def unlink_resource_by_platform_id(
     """Remove a downloaded video from the user's library by platform_id.
 
     1. If a resource_item exists in the given scope → unlink it.
-    2. Otherwise → delete the videos record (legacy / orphan case).
+    2. Otherwise, if the caller owns a resource for this media → unlink their
+       first item (the DB orphan-GC trigger auto-trashes the resource when no
+       references remain).
 
     PR-E Phase 3: the vestigial ``scope_type`` query param has been dropped;
     the scope is identified by ``scope_id`` (defaults to the caller's
     personal team).
+
+    NOTE (schema-drift sweep): the old fallback deleted the GLOBAL parsed_media
+    row gated on the now-dropped ``parsed_media.user_id`` (mig 083). That gate is
+    gone, so a raw global delete here would be an authz hole (any user could
+    purge any user's downloaded media by platform_id) AND it contradicts this
+    endpoint's documented contract — it must NOT delete parsed_media or physical
+    files (the orphan-GC trigger owns that). We now resolve the CALLER's own
+    resource (creator_id-scoped) and unlink it; a true orphan parsed_media row
+    with no owning resource yields 404 rather than a cross-user global delete.
     """
     try:
         svc = ResourcesService()
@@ -781,20 +792,34 @@ async def unlink_resource_by_platform_id(
                 await svc.repo.delete_resource_item(item["id"])
                 return {"success": True, "message": "Resource unlinked from library"}
 
-        # Fallback: no resource or no resource_item → delete video record
+        # Fallback: no item in the requested scope. Only act on a resource the
+        # CALLER owns (authz gate via creator_id) — never touch global
+        # parsed_media. Resolve the media_id from platform_id, then the caller's
+        # own resource, and unlink its first item (trigger GC handles the rest).
         from app.db.supabase_client import get_async_supabase_admin
 
         client = await get_async_supabase_admin()
-        result = await (
+        media_row = await (
             client.table("parsed_media")
-            .delete()
+            .select("id")
             .eq("platform_id", platform_id)
-            .eq("user_id", auth.user_id)
+            .limit(1)
             .execute()
         )
-        if not result.data:
-            raise ValueError("No video found for this platform_id")
-        return {"success": True, "message": "Video record deleted"}
+        if media_row.data:
+            owned = await svc.repo.get_resource_by_media_id_and_creator(
+                str(media_row.data[0]["id"]), auth.user_id
+            )
+            if owned:
+                item = await svc.repo.get_first_resource_item(str(owned["id"]))
+                if item:
+                    await svc.repo.delete_resource_item(item["id"])
+                    return {
+                        "success": True,
+                        "message": "Resource unlinked from library",
+                    }
+
+        raise ValueError("No resource found for this platform_id")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
