@@ -27,7 +27,10 @@ from uuid import UUID
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.agent_workforce_repository import AgentWorkforceRepository
+from app.repositories.agent_workforce_repository import (
+    AgentWorkforceRepository,
+    get_agent_workforce_repository,
+)
 from app.services.workforce.state_machine import (
     InvalidTransitionError,
     WorkerStateMachine,
@@ -51,7 +54,7 @@ class InboxProcessor:
         state_machine: Optional[WorkerStateMachine] = None,
         dispatcher: Optional[Any] = None,
     ) -> None:
-        self.repo = repo or AgentWorkforceRepository()
+        self.repo = repo or get_agent_workforce_repository()
         self.state_machine = state_machine or WorkerStateMachine(repo=self.repo)
         # M3: paperclip-style direct hand-off to AgentWorkerPool.
         # When set, every successfully-created task is dispatched to be

@@ -48,7 +48,10 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.repositories.agent_workforce_repository import AgentWorkforceRepository
+from app.repositories.agent_workforce_repository import (
+    AgentWorkforceRepository,
+    get_agent_workforce_repository,
+)
 
 # ─── states & transitions ────────────────────────────────────────────
 
@@ -143,7 +146,7 @@ class WorkerStateMachine:
         self,
         repo: Optional[AgentWorkforceRepository] = None,
     ) -> None:
-        self.repo = repo or AgentWorkforceRepository()
+        self.repo = repo or get_agent_workforce_repository()
 
     async def transition(
         self,

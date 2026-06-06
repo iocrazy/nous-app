@@ -681,6 +681,42 @@ class Settings(BaseSettings):
         "mark_expired→0 on exception. Writes commit via write_scope(). Inert — "
         "flip back to false to roll back.",
     )
+    USE_ORM_WORKFORCE: bool = Field(
+        default=False,
+        description="Route AgentWorkforceRepository (the M2 Persistent Workforce "
+        "bounded context — FIVE tables in one repo: agent_workers / agent_inbox / "
+        "task_tracking[agent_task rows] / agent_state_history / agent_outbox) "
+        "through the SQLAlchemy 2.0 ORM (Phase 2 H batch — highest-risk). "
+        "THE H-BATCH CRASHER HOT SPOT: ~17 bare UUID(row[...]) consumers across "
+        "app/services/workforce/* (agent_worker / inbox_processor / "
+        "outbox_dispatcher / delegate_tool). UUID(native_uuid) raises TypeError, "
+        "so EVERY returned uuid MUST be a str. Defense = the GENERIC _parity "
+        "sweep (any uuid.UUID→str, any datetime/date→ISO str) over every returned "
+        "dict — structurally guaranteeing every uuid column is a str so every "
+        "UUID(returned) consumer works. Audited columns: agent_inbox.id / "
+        "task.agent_id / task.user_id / agent_outbox.id+recipient_agent_id+"
+        "sender_agent_id / agent_state_history refs — all uuid→str. task PK "
+        "dbos_workflow_id is TEXT (already str). NO ==/!= silent-killer authz "
+        "compares in the workforce consumers (they route uuids through UUID() = "
+        "crash not silent; the ==/in checks are uuid-vs-uuid AFTER UUID() wrap). "
+        "NO SQLAlchemy Enum columns (all state/status/kind/phase are plain Text "
+        "+ CHECK) → no _plain unwrap; the ONE renamed col task_tracking.metadata→"
+        "metadata_ is handled by _name_to_attr. task_tracking DISCIPLINE: this "
+        "repo touches ONLY task_kind='agent_task' rows, which the "
+        "mirror_dbos_lifecycle_to_tracking trigger does NOT mirror (app code is "
+        "the lifecycle source of truth per the model comment) — so writing "
+        "phase/status/started_at/completed_at/error_msg on agent_task rows is "
+        "CORRECT and reproduced verbatim from the legacy (NOT a discipline "
+        "violation; workflow rows are never touched). v3 temporal: "
+        "list_stale_workers binds the NATIVE aware stale_before datetime in the "
+        "heartbeat_at < cutoff filter; all timestamptz column writes bind native "
+        "datetime objects (not ISO strings) for the asyncpg DateTime(True) bind. "
+        "upsert_worker reproduces the ON CONFLICT (agent_id) via "
+        "pg_insert().on_conflict_do_update. No batch inserts. Every method "
+        "soft-fails to the legacy fallback (None/False/[]/{items:[],total:0}) — "
+        "the sweeper/state-machine layers depend on it. Writes commit via "
+        "write_scope(). Inert — flip back to false to roll back.",
+    )
 
     # ============================================
     # 下载设置

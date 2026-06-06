@@ -40,6 +40,7 @@ from app.repositories.agent_repository import AgentRepository, get_agent_reposit
 from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
     AgentWorkforceRepository,
+    get_agent_workforce_repository,
     tt_row_to_task_shape,
 )
 
@@ -124,7 +125,7 @@ class DelegateToolService:
         self.parent_run_id = parent_run_id
         self.agent_depth = agent_depth
         self.agent_repo = agent_repo or get_agent_repository()
-        self.workforce_repo = workforce_repo or AgentWorkforceRepository()
+        self.workforce_repo = workforce_repo or get_agent_workforce_repository()
 
     async def execute(self, args: Dict[str, Any]) -> Dict[str, Any]:
         slug = (args.get("agent_slug") or args.get("agent") or "").strip()
