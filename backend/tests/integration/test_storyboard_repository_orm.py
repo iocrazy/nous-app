@@ -408,14 +408,22 @@ async def test_frame_create_bulk_reorder(
 
 # ─── Phantom-write parity guard (compile-time, NO DB needed) ────────────
 #
-# WHY THESE TESTS EXIST — they lock in the inert-migration parity for the
-# already-broken AI node/frame-generation surfaces. The legacy REST bulk_upsert
-# hands ALL row keys to PostgREST's .upsert(); a key that is not a real column
-# makes PostgREST 400 and the method re-raises → 500. The ORM bulk_upsert
-# reproduces that EXACTLY by passing row keys straight to
+# WHY THESE TESTS EXIST — they lock in the bulk_upsert parity INVARIANT: a
+# phantom (non-column) key on a row must RAISE, never be silently dropped. The
+# legacy REST bulk_upsert hands ALL row keys to PostgREST's .upsert(); a key that
+# is not a real column makes PostgREST 400 and the method re-raises → 500. The
+# ORM bulk_upsert reproduces that EXACTLY by passing row keys straight to
 # pg_insert(...).values(**row), so an unknown column raises a SQLAlchemy
 # CompileError ("Unconsumed column names") at statement COMPILE time = the same
 # observable 500.
+#
+# NOTE: the two AI-gen callers that USED to feed phantom columns (script_ai_router
+# node writes / both workflow persist-scene frame writes) have since been FIXED
+# (BUG 6 — they now write real columns + nest extras in data_json/annotations_json).
+# These guards therefore use SYNTHETIC phantom rows: they pin the parity
+# mechanism itself (so a future "cleanup" that routes bulk_upsert through
+# _known_only — silently dropping unknown keys — is caught), independent of any
+# specific caller.
 #
 # The whole parity argument rests on bulk_upsert NOT being routed through
 # _known_only (which would silently DROP the phantom keys and turn those 500s
@@ -431,17 +439,16 @@ async def test_frame_create_bulk_reorder(
 # the invariant. Compiling the statement directly needs neither a live DB nor
 # the engine fixtures, and pins the raise to the real parity mechanism. We also
 # assert _known_only WOULD have dropped the phantom key — proving the two paths
-# genuinely diverge (the exact regression this guards). Covers the Node path
-# (phantom scene_number, as script_ai_router writes) and the Frame path (phantom
-# order_index, as both workflow steps write); Edge shares the same
-# _bulk_upsert_rows code path.
+# genuinely diverge (the exact regression this guards). Synthetic phantom keys
+# (scene_number on the Node path, order_index on the Frame path) stand in for any
+# unknown column; Edge shares the same _bulk_upsert_rows code path.
 
 
 def test_node_bulk_upsert_phantom_column_compile_raises():
-    """A phantom column on a node upsert row (scene_number — what
-    script_ai_router writes against a schema that lacks it) raises CompileError
-    at statement build, NOT a silent key-drop. Pins the REST→ORM 500 parity for
-    the already-broken AI node-generation surface."""
+    """A phantom (non-column) key on a node upsert row raises CompileError at
+    statement build, NOT a silent key-drop. Pins the REST→ORM 500 parity
+    invariant for bulk_upsert (scene_number here is a synthetic stand-in; the
+    real script_ai_router caller no longer writes it — BUG 6 fixed)."""
     from sqlalchemy.dialects import postgresql
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.exc import CompileError
@@ -459,10 +466,10 @@ def test_node_bulk_upsert_phantom_column_compile_raises():
 
 
 def test_frame_bulk_upsert_phantom_column_compile_raises():
-    """A phantom column on a frame upsert row (order_index — what BOTH workflow
-    steps write against a schema that lacks it) raises CompileError at statement
-    build, NOT a silent key-drop. Pins the REST→ORM 500 parity for the
-    already-broken AI frame-generation surface."""
+    """A phantom (non-column) key on a frame upsert row raises CompileError at
+    statement build, NOT a silent key-drop. Pins the REST→ORM 500 parity
+    invariant for bulk_upsert (order_index here is a synthetic stand-in; the real
+    workflow persist-scene callers no longer write it — BUG 6 fixed)."""
     from sqlalchemy.dialects import postgresql
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.exc import CompileError

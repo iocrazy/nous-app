@@ -21,7 +21,7 @@ AGGREGATION REPRODUCTION
     the legacy's swallow-to-0 on any error (parity — the legacy never propagated).
   user_registrations_since → rows of {created_at} since the cutoff.
   video_status_history → rows of {created_at, video_download_status} since cutoff.
-  completed_videos_by_user → see BROKEN-ENDPOINT note below.
+  completed_videos_by_user → resource-centric (see RESOURCE-CENTRIC note below).
 
 STRATEGY-C VALUE-TYPE PARITY (per-field)
 ----------------------------------------
@@ -37,23 +37,23 @@ STRATEGY-C VALUE-TYPE PARITY (per-field)
   user_id (uuid) → **str** in completed_videos_by_user — see below: it is a DICT
     KEY in the storage endpoint (``user_video_counts[user_id]``) and returned in
     the response, so a native uuid would key inconsistently vs the REST str shape.
+    The value now comes from ``resources.creator_id`` (the resource-centric fix).
 
-★ BROKEN-ENDPOINT (DO-NOT-REPAIR — inert discipline) ★
-======================================================
-``completed_videos_by_user`` selects ``parsed_media.user_id`` — a column that was
-**DROPPED in migration 083** (``083_cleanup_parsed_media_user_fields.sql``;
+RESOURCE-CENTRIC completed_videos_by_user (FIXED — schema-drift repair)
+=======================================================================
+``completed_videos_by_user`` formerly selected ``parsed_media.user_id`` — a
+column DROPPED in migration 083 (``083_cleanup_parsed_media_user_fields.sql``;
 parsed_media became a global content table, per-user ownership moved to
-``resources``). Verified live: ``information_schema`` reports 0 such column.
+``resources``). That made the ``/storage`` admin endpoint 500 (PG 42703) under
+both REST and ORM.
 
-Under REST this query already FAILS: PostgREST returns PG error 42703 ("column
-parsed_media.user_id does not exist"), so the ``/storage`` admin endpoint 500s
-today. Per the migration's inert discipline, the ORM MUST NOT silently REPAIR a
-broken prod endpoint. We therefore reproduce the SAME failure faithfully: a raw
-``text("SELECT user_id, video_download_status FROM parsed_media ...")`` inside the
-read scope raises ``UndefinedColumnError`` (the asyncpg flavour of 42703) — the
-same class of error REST surfaces. We deliberately DO NOT route this through the
-``ParsedMedia`` model (which has no ``user_id`` attribute) and DO NOT substitute a
-working column. This is flagged as a CONCERN for follow-up, not fixed here.
+DECIDED FIX = resource-centric: count downloaded media per ``resources.creator_id``
+where ``is_trashed`` is false. We ``select(Resources.creator_id)`` over the
+``Resources`` model and emit one row per resource with a ``user_id`` key (aliased
+from creator_id, coerced to str). This reproduces the EXACT row shape the
+``/storage`` handler expects — it groups rows in Python by ``user_id`` into
+total_videos_downloaded / unique_users / top_users — so the endpoint output shape
+is unchanged. Both the legacy REST repo and this ORM repo apply the same fix.
 
 Model-quirk scan: the only Enum touched is ParsedMedia.video_download_status
 (handled via _plain). No renamed column is read here. No writes — READS ONLY.
@@ -68,10 +68,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, List
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
 from app.db.session import read_scope
-from app.models import ParsedMedia, Teams, UserLogs, UserProfiles
+from app.models import ParsedMedia, Resources, Teams, UserLogs, UserProfiles
 from app.repositories._orm_helpers import _plain
 from app.repositories.admin.stats_repository import AdminStatsRepository
 
@@ -157,30 +157,24 @@ class AdminStatsRepositoryOrm(AdminStatsRepository):
             ]
 
     async def completed_videos_by_user(self) -> List[dict[str, Any]]:
-        """BROKEN ENDPOINT — reproduced faithfully, NOT repaired.
+        """One row per non-trashed resource, keyed by owner (``creator_id`` → str
+        aliased to ``user_id``).
 
-        Selects ``parsed_media.user_id``, dropped in migration 083 (verified
-        absent live). REST returns PG 42703 here; we reproduce the SAME failure
-        via a raw text() select (raises UndefinedColumnError, the asyncpg 42703).
-        We deliberately do NOT route this through the ParsedMedia model (no
-        ``user_id`` attr) and do NOT substitute a working column — inert
-        discipline forbids repairing a broken prod endpoint. See the module
-        docstring's BROKEN-ENDPOINT note. user_id (uuid) → str would apply IF the
-        column existed (it is a dict key in the /storage router)."""
-        stmt = text(
-            "SELECT user_id, video_download_status FROM parsed_media "
-            "WHERE video_download_status = 'completed'"
-        )
+        Resource-centric ownership (DECIDED FIX, see module docstring): the old
+        ``parsed_media.user_id`` column was dropped in migration 083, so we count
+        downloaded media per ``resources.creator_id`` where ``is_trashed`` is
+        false. The ``/storage`` router groups these rows in Python by ``user_id``
+        and counts, so we reproduce the SAME row shape it expects (one row per
+        resource carrying a ``user_id`` key). creator_id (uuid) → str so it keys
+        consistently in ``user_video_counts[user_id]`` (REST str shape)."""
+        stmt = select(Resources.creator_id).where(Resources.is_trashed.is_(False))
         async with read_scope() as session:
             result = await session.execute(stmt)
-            rows = result.mappings().all()
-        return [
-            {
-                "user_id": str(r["user_id"]) if r["user_id"] is not None else None,
-                "video_download_status": _plain(r["video_download_status"]),
-            }
-            for r in rows
-        ]
+            return [
+                {"user_id": str(creator_id)}
+                for (creator_id,) in result.all()
+                if creator_id is not None
+            ]
 
 
 __all__ = ["AdminStatsRepositoryOrm"]

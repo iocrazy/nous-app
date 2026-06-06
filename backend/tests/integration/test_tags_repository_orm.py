@@ -273,6 +273,50 @@ async def test_resolve_media_id_none_when_missing(patched_engine):
     assert resolved is None or type(resolved) is str
 
 
+# ─── get_tag_counts fallback (resources.creator_id, formerly broken) ─────
+
+
+async def test_get_tag_counts_fallback_uses_creator_id(
+    integration_db_url, patched_engine, cleanup, auth_user
+):
+    """The fallback formerly filtered ``resources.user_id`` (a column that does
+    not exist) → PG 42703. It now filters the real ``creator_id`` column and
+    returns tag counts for that creator instead of raising.
+
+    We need a real resources row owned by ``auth_user`` plus a tag attached to it
+    so the fallback returns at least one count row."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        res_row = await conn.fetchrow(
+            "SELECT id FROM resources WHERE creator_id = $1 LIMIT 1", auth_user
+        )
+    finally:
+        await conn.close()
+    if res_row is None:
+        pytest.skip("no resources row owned by auth_user to exercise the fallback")
+    resource_id = res_row["id"]
+
+    tag = await _repo().create_tag(name=_name(), user_id=str(auth_user))
+    await _repo().add_tag_to_resource(str(resource_id), str(tag["id"]), source="manual")
+
+    try:
+        # Directly exercise the fallback (the RPC path returns first otherwise).
+        rows = await _repo()._get_tag_counts_fallback(str(auth_user), limit=50)
+        mine = [r for r in rows if r["id"] == tag["id"]]
+        assert mine, "fallback should return the tag attached to the creator's resource"
+        assert type(mine[0]["count"]) is int and mine[0]["count"] >= 1
+    finally:
+        conn = await asyncpg.connect(integration_db_url)
+        try:
+            await conn.execute(
+                "DELETE FROM resource_tags WHERE resource_id = $1 AND tag_id = $2",
+                resource_id,
+                tag["id"],
+            )
+        finally:
+            await conn.close()
+
+
 # ─── factory on/off ─────────────────────────────────────────────────────
 
 

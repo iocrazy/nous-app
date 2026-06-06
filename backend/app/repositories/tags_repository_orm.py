@@ -97,20 +97,23 @@ DB-side GROUP BY directly via an engine-native ``func.count()`` query (no RPC
 needed — same aggregate, byte-identical result), with the legacy client-side
 fallback shape kept.
 
-``get_tag_counts`` is a ★ DOUBLE-BROKEN endpoint (CONCERN — NOT repaired) ★:
-  1. Its primary RPC ``get_user_tag_counts`` is itself broken in the CURRENT
-     schema — the function body still references ``media_tags``, a table dropped
-     in migration 077 (merged into ``resource_tags``). Calling it raises
-     ``UndefinedTableError: relation "media_tags" does not exist`` — under REST
-     too (the legacy does NOT wrap the RPC ``.execute()``).
-  2. Its fallback ``_get_tag_counts_fallback`` selects the non-existent
-     ``resources.user_id`` column → PG 42703 (see that method).
-So under REST the legacy ``get_tag_counts`` ALWAYS raises and the router's
-``get_tag_statistics`` try/except returns an EMPTY stats response. We preserve
-that exact net behavior: the ORM wraps the (broken) RPC in try → logs → falls to
-the (broken) fallback → raises 42703 → router catch → empty stats. We do NOT
-repair either bug (would silently change a prod surface on flag-flip). Both are
-reported up as CONCERNs.
+``get_tag_counts`` was a ★ DOUBLE-BROKEN endpoint — BOTH halves are now FIXED ★:
+  1. Its primary RPC ``get_user_tag_counts`` was broken in the schema — the mig
+     066 function body JOINed ``media_tags`` (dropped in migration 077, merged
+     into ``resource_tags``) + ``parsed_media.user_id`` (dropped in migration
+     083), so every call raised ``relation "media_tags" does not exist``. FIXED
+     by **migration 256** (``256_fix_get_user_tag_counts.sql``): the RPC is
+     redefined resource-centric — JOIN ``resource_tags`` → ``resources`` and
+     filter ``resources.creator_id = p_user_id``, same signature, id return type
+     widened UUID → BIGINT to match the snowflake ``tags.id`` (post mig 051). NO
+     code change here — repos call the RPC by name and pick up the new body once
+     256 is applied.
+  2. Its fallback ``_get_tag_counts_fallback`` formerly selected the non-existent
+     ``resources.user_id`` column → PG 42703. FIXED in the prior commit to filter
+     on ``resources.creator_id`` (see that method).
+So the primary RPC path now returns the user's real tag counts; the fallback is
+only hit if the RPC is genuinely absent/empty, and it too returns correct counts.
+The router's ``get_tag_statistics`` try/except still guards both paths.
 
 No date columns and NO date/timestamptz RANGE filters in this repo (every WHERE is
 equality / ILIKE / IN), so there is no timestamptz<VARCHAR binding hazard.
@@ -573,30 +576,18 @@ class TagsRepositoryOrm(TagsRepository):
     ) -> List[dict]:
         """Fallback tag counts without the RPC.
 
-        ★ INERT-DISCIPLINE CONCERN — DO NOT REPAIR ★
-        The legacy fallback does ``client.table("resources").select("id").eq(
-        "user_id", user_id)`` — but the ``resources`` table has NO ``user_id``
-        column (its owner column is ``creator_id``; verified against the live
-        schema + the Resources model). Under PostgREST that ``.eq("user_id", …)``
-        emits a PG **42703 undefined_column** error → the fallback RAISES (it is
-        NOT wrapped in try/except), propagating to the router's own try
-        (tags_router.get_tag_statistics), which returns an empty stats response.
-        In practice this path is essentially never hit because the
-        ``get_user_tag_counts`` RPC DOES exist (migrations 027/059) and the
-        primary path returns first.
+        The ``resources`` owner column is ``creator_id`` (a uuid), NOT ``user_id``
+        — verified against the live schema + the Resources model. This formerly
+        referenced the nonexistent ``user_id`` column and raised PG 42703; it now
+        correctly filters on ``creator_id``, so the fallback returns the user's tag
+        counts.
 
-        Faithfully REPRODUCING this (NOT repairing it): we run the same broken
-        ``user_id`` reference via raw SQL so PG raises the identical 42703 the
-        REST path raised. Switching to ``creator_id`` here would SILENTLY REPAIR a
-        latent prod bug on flag-flip — forbidden by the inert-migration rule. The
-        bug is reported up as a CONCERN, not fixed inside this migration."""
+        NOTE: the primary path's ``get_user_tag_counts`` RPC (the half of
+        ``get_tag_counts`` above this fallback) is addressed separately in
+        migration 256 — do NOT touch the RPC call here."""
         async with read_scope() as session:
-            # Same broken column reference as the legacy → PG 42703 on a real DB
-            # (parity with the PostgREST failure). asyncpg surfaces it as an
-            # UndefinedColumnError; the caller's try (router) handles it exactly
-            # as it handled the REST exception.
             result = await session.execute(
-                text("SELECT id FROM resources WHERE user_id = CAST(:uid AS uuid)"),
+                text("SELECT id FROM resources WHERE creator_id = CAST(:uid AS uuid)"),
                 {"uid": str(user_id)},
             )
             resource_ids = [r[0] for r in result.all()]

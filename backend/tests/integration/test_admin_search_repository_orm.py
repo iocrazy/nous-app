@@ -8,9 +8,9 @@ cross-log search + request-trace correlation:
   - status_code / response_time_ms (int) → native int
   - id (BIGINT) → native int (router str()s it)
   - extra->>request_id JSONB filter reproduced
-  - TWO pre-existing BROKEN endpoints reproduced (NOT repaired): frontend_logs()
-    (nonexistent column stack_trace) and audit_logs() (nonexistent table
-    admin_audit_logs) both RAISE.
+  - TWO formerly-broken endpoints are now FIXED: frontend_logs() selects the real
+    ``stack`` column and audit_logs() queries the real ``audit_logs`` table with
+    the real ``admin_id`` column — both return rows instead of raising.
 
     source /tmp/orm2_integration.env
     uv run pytest tests/integration/test_admin_search_repository_orm.py -v
@@ -213,38 +213,105 @@ async def test_get_request_log_absent_returns_none(integration_db_url, patched_e
     assert log is None
 
 
-# ─── BROKEN ENDPOINTS — reproduced faithfully (must RAISE, not repaired) ───
+# ─── FORMERLY-BROKEN ENDPOINTS — now fixed (must RETURN, not raise) ───
 
 
-async def test_frontend_logs_broken_endpoint_raises(integration_db_url, patched_engine):
-    """frontend_logs() selects the nonexistent column stack_trace → PG 42703.
-    The ORM must reproduce the failure, NOT alias stack → stack_trace."""
+async def test_frontend_logs_returns_rows(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """frontend_logs() selects the real ``stack`` column now — no raise, returns
+    the inserted frontend error row with a ``stack`` key."""
     now = datetime.now(timezone.utc)
-    with pytest.raises(Exception) as exc:
-        await _repo().frontend_logs(
-            (now - timedelta(hours=1)).isoformat(), now.isoformat()
+    marker = f"{_PREFIX}{uuid.uuid4().hex[:8]}"
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        await conn.execute(
+            "INSERT INTO frontend_error_logs "
+            "(error_type, message, stack, url, created_at) "
+            "VALUES ($1,$2,$3,$4,$5)",
+            "TypeError",
+            marker,
+            "Error\n  at foo",
+            "https://example.test/page",
+            now,
         )
-    # asyncpg UndefinedColumnError (42703) — surfaced through SQLAlchemy.
-    assert (
-        "stack_trace" in str(exc.value)
-        or "42703" in str(exc.value)
-        or ("does not exist" in str(exc.value))
+    finally:
+        await conn.close()
+
+    rows = await _repo().frontend_logs(
+        (now - timedelta(hours=1)).isoformat(), (now + timedelta(hours=1)).isoformat()
     )
+    ours = [r for r in rows if r.get("message") == marker]
+    # cleanup
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        await conn.execute(
+            "DELETE FROM frontend_error_logs WHERE message LIKE $1", _PREFIX + "%"
+        )
+    finally:
+        await conn.close()
+    assert ours
+    r = ours[0]
+    assert r["stack"] == "Error\n  at foo"
+    assert set(r.keys()) == {
+        "id",
+        "error_type",
+        "message",
+        "stack",
+        "url",
+        "created_at",
+    }
 
 
-async def test_audit_logs_broken_endpoint_raises(integration_db_url, patched_engine):
-    """audit_logs() queries the nonexistent table admin_audit_logs → PG 42P01.
-    The ORM must reproduce the failure, NOT substitute the real audit_logs."""
+async def test_audit_logs_returns_rows(integration_db_url, patched_engine):
+    """audit_logs() queries the real ``audit_logs`` table with the real
+    ``admin_id`` column now — no raise, returns the inserted audit row."""
     now = datetime.now(timezone.utc)
-    with pytest.raises(Exception) as exc:
-        await _repo().audit_logs(
-            (now - timedelta(hours=1)).isoformat(), now.isoformat()
+    target = f"{_PREFIX}{uuid.uuid4().hex[:8]}"
+    # audit_logs.admin_id has an FK to auth.users — use a real user id.
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        row = await conn.fetchrow("SELECT id FROM auth.users LIMIT 1")
+        if row is None:
+            pytest.skip("no auth.users row to satisfy audit_logs.admin_id FK")
+        admin_id = row["id"]
+        await conn.execute(
+            "INSERT INTO audit_logs "
+            "(admin_id, action, target_type, target_id, created_at) "
+            "VALUES ($1,$2,$3,$4,$5)",
+            admin_id,
+            "test_action",
+            "setting",
+            target,
+            now,
         )
-    assert (
-        "admin_audit_logs" in str(exc.value)
-        or "42P01" in str(exc.value)
-        or ("does not exist" in str(exc.value))
+    finally:
+        await conn.close()
+
+    rows = await _repo().audit_logs(
+        (now - timedelta(hours=1)).isoformat(), (now + timedelta(hours=1)).isoformat()
     )
+    ours = [r for r in rows if r.get("target_id") == target]
+    # cleanup
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        await conn.execute(
+            "DELETE FROM audit_logs WHERE target_id LIKE $1", _PREFIX + "%"
+        )
+    finally:
+        await conn.close()
+    assert ours
+    r = ours[0]
+    assert str(r["admin_id"]) == str(admin_id)
+    assert set(r.keys()) == {
+        "id",
+        "action",
+        "target_type",
+        "target_id",
+        "admin_id",
+        "details",
+        "created_at",
+    }
 
 
 # ─── factory parity ─────────────────────────────────────────────────────

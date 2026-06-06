@@ -39,10 +39,10 @@ class AdminTeamsRepository:
             await client.table(self.TEAMS_TABLE)
             .select("*")
             .eq("id", team_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        return result.data
+        return result.data if result else None
 
     async def update(self, team_id: str, changes: dict[str, Any]) -> None:
         client = await self._client()
@@ -81,10 +81,10 @@ class AdminTeamsRepository:
             .select("*")
             .eq("team_id", team_id)
             .eq("user_id", user_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        return result.data
+        return result.data if result else None
 
     async def update_member_role(self, team_id: str, user_id: str, role: str) -> None:
         client = await self._client()

@@ -65,15 +65,13 @@ WRITES (the silent-rollback P0 lesson) — ALL commit via write_scope()
     user_id) composite. None of these return a value (legacy returns None) → no
     RETURNING needed. ALL commit via write_scope().
 
-GET semantics (preserved, NOT repaired): the legacy ``get`` / ``get_member`` use
-``.single()`` which RAISES on a 0-row result (supabase-py APIError → unhandled →
-HTTP 500). The routers wrap the result in ``if not team`` / ``if not await
-repo.get_member`` None-guards, but those branches are effectively DEAD for the
-missing-row case because ``.single()`` raises first. We reproduce this with
-``scalars().one()`` (raises ``NoResultFound`` → unhandled → HTTP 500) — the SAME
-observable outcome (500 on a missing team / member). This is a PRE-EXISTING quirk;
-it is NOT repaired here (inert discipline). list-style + batch reads use the
-None/empty-on-absent contract as the legacy did.
+GET semantics (FIXED): ``get`` / ``get_member`` formerly used ``.single()`` which
+RAISES on a 0-row result (supabase-py APIError → unhandled → HTTP 500), making the
+routers' ``if not team`` / ``if not await repo.get_member`` None-guards (which raise
+a proper 404) effectively DEAD for the missing-row case. Both now return ``None`` on
+0 rows — legacy via ``.maybe_single()``, ORM via ``scalars().one_or_none()`` — so the
+router None-guards fire and return 404 instead of 500. list-style + batch reads keep
+the None/empty-on-absent contract.
 
 No date/timestamp range filter exists → no timestamptz<VARCHAR hazard.
 """
@@ -148,15 +146,16 @@ class AdminTeamsRepositoryOrm(AdminTeamsRepository):
         return rows, (total or 0)
 
     async def get(self, team_id: str) -> Optional[dict[str, Any]]:
-        """SELECT * for one team. Reproduces the legacy ``.single()`` semantics:
-        RAISES on a 0-row result (NoResultFound → HTTP 500), preserving the
-        pre-existing quirk (the router's ``if not team`` guard is effectively dead
-        for missing rows — NOT repaired here)."""
+        """SELECT * for one team, or ``None`` on a 0-row result.
+
+        Formerly used ``.single()`` / ``scalars().one()`` which RAISED on a missing
+        team (→ HTTP 500, the router's ``if not team`` 404-guard was dead). Now
+        returns ``None`` via ``one_or_none()`` so the router returns a proper 404."""
         stmt = select(Teams).where(Teams.id == _bigint(team_id))
         async with read_scope() as session:
             result = await session.execute(stmt)
-            obj = result.scalars().one()
-        return _obj_dict(obj, _TEAMS_N2A)
+            obj = result.scalars().one_or_none()
+        return _obj_dict(obj, _TEAMS_N2A) if obj is not None else None
 
     async def update(self, team_id: str, changes: dict[str, Any]) -> None:
         if not changes:
@@ -192,15 +191,18 @@ class AdminTeamsRepositoryOrm(AdminTeamsRepository):
             return [_obj_dict(o, _MEMBERS_N2A) for o in result.scalars().all()]
 
     async def get_member(self, team_id: str, user_id: str) -> Optional[dict[str, Any]]:
-        """SELECT * for one (team_id, user_id) member. Reproduces ``.single()``:
-        RAISES on 0 rows (NoResultFound → 500) — pre-existing quirk, NOT repaired."""
+        """SELECT * for one (team_id, user_id) member, or ``None`` on 0 rows.
+
+        Formerly used ``.single()`` / ``scalars().one()`` which RAISED on a missing
+        member (→ HTTP 500). Now returns ``None`` via ``one_or_none()`` so the
+        router's None-guard returns a proper 404."""
         stmt = select(TeamMembers).where(
             TeamMembers.team_id == _bigint(team_id), TeamMembers.user_id == user_id
         )
         async with read_scope() as session:
             result = await session.execute(stmt)
-            obj = result.scalars().one()
-        return _obj_dict(obj, _MEMBERS_N2A)
+            obj = result.scalars().one_or_none()
+        return _obj_dict(obj, _MEMBERS_N2A) if obj is not None else None
 
     async def update_member_role(self, team_id: str, user_id: str, role: str) -> None:
         async with write_scope() as session:

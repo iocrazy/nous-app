@@ -366,7 +366,7 @@ class TagsRepository:
         resource_result = (
             await client.table("resources")
             .select("id")
-            .eq("user_id", user_id)
+            .eq("creator_id", user_id)
             .execute()
         )
         if not resource_result.data:

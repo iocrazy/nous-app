@@ -264,11 +264,21 @@ def persist_split_scenes_step(
             node = await node_repo.bulk_upsert(project_id, [node_data])
             node_id = node[0]["id"] if node else None
             if node_id:
+                # Map to real storyboard_frames columns (the old order_index /
+                # prompt / notes / status keys are not columns): order_index →
+                # frame_index, notes → note, prompt / status → annotations_json
+                # jsonb. project_id + node_id are required (NOT NULL) FKs.
                 frame_data = {
-                    "order_index": 0,
-                    "prompt": scene.get("image_prompt", scene.get("description", "")),
-                    "notes": scene.get("notes", ""),
-                    "status": "pending",
+                    "project_id": project_id,
+                    "node_id": node_id,
+                    "frame_index": 0,
+                    "note": scene.get("notes", ""),
+                    "annotations_json": {
+                        "prompt": scene.get(
+                            "image_prompt", scene.get("description", "")
+                        ),
+                        "status": "pending",
+                    },
                 }
                 await frame_repo.bulk_upsert(node_id, [frame_data])
                 created_nodes.append(node_id)
@@ -342,11 +352,21 @@ def persist_video_scenes_step(
             node = await node_repo.bulk_upsert(project_id, [node_data])
             node_id = node[0]["id"] if node else None
             if node_id:
+                # Map to real storyboard_frames columns (order_index / prompt /
+                # status / source_image_path are not columns): order_index →
+                # frame_index, source_image_path → image_url, prompt / status →
+                # annotations_json jsonb. project_id + node_id are required FKs.
                 frame_data = {
-                    "order_index": 0,
-                    "source_image_path": scene.get("image_path", ""),
-                    "prompt": scene.get("description", ""),
-                    "status": "completed" if scene.get("image_path") else "pending",
+                    "project_id": project_id,
+                    "node_id": node_id,
+                    "frame_index": 0,
+                    "image_url": scene.get("image_path", ""),
+                    "annotations_json": {
+                        "prompt": scene.get("description", ""),
+                        "status": (
+                            "completed" if scene.get("image_path") else "pending"
+                        ),
+                    },
                 }
                 await frame_repo.bulk_upsert(node_id, [frame_data])
                 created_nodes.append(node_id)

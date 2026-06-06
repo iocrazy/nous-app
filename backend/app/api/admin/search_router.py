@@ -321,7 +321,7 @@ async def search_logs(
                 "source": "audit",
                 "action": r.get("action"),
                 "target_type": r.get("target_type"),
-                "message": f"{r.get('action')} {r.get('target_type')} by {r.get('admin_email', 'unknown')}",
+                "message": f"{r.get('action')} {r.get('target_type')} by {r.get('admin_id', 'unknown')}",
                 "details": r.get("details"),
                 "timestamp": r.get("created_at", ""),
             }

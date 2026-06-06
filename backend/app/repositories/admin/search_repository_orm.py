@@ -9,9 +9,10 @@ MODELS
 ======
   api_request_logs    → ``app.models.ApiRequestLogs``    (reflected, verified)
   application_logs    → ``app.models.ApplicationLogs``   (reflected, verified)
-  frontend_error_logs → has a model, BUT the legacy projection selects a column
-    (``stack_trace``) that does not exist → BROKEN endpoint reproduced via text().
-  admin_audit_logs    → ★ NO MODEL, NO TABLE ★ — see BROKEN-ENDPOINT note below.
+  frontend_error_logs → ``app.models.FrontendErrorLogs``; the real column is
+    ``stack`` (NOT ``stack_trace``). Fixed: projection now selects ``stack``.
+  audit_logs          → ``app.models.AuditLogs``; the admin column is ``admin_id``
+    (uuid), NOT ``admin_email``. Fixed: table + column corrected.
 
 ★ UUID AUDIT (admin reads-across-all-users; service_role scope) ★
 =================================================================
@@ -39,7 +40,9 @@ STRATEGY-C VALUE-TYPE PARITY (per-field)
   status_code / response_time_ms (int) → native int (router compares / str()s).
   id (BigInteger) → native int (router str()s it itself).
   method / path / level / module / message / error_type / stack / url / action /
-    target_type / target_id / admin_email (text/varchar) → native str.
+    target_type / target_id (text/varchar) → native str. admin_id (uuid) → the
+    asyncpg row exposes it as a ``uuid.UUID``; the router only interpolates it into
+    a message string, so it str()s cleanly at the boundary.
   details / extra (jsonb) → native dict.
 
 DATE-RANGE FILTER BINDING (v3 rule)
@@ -59,24 +62,22 @@ text-extraction equality. We reproduce it via ``ApplicationLogs.extra["request_i
 .astext == request_id`` (the SQLAlchemy JSONB ``->>`` operator), preserving the
 exact filter semantics.
 
-★ BROKEN-ENDPOINTS (DO-NOT-REPAIR — inert discipline) — TWO of them ★
-====================================================================
-(1) ``frontend_logs()`` selects ``stack_trace`` from ``frontend_error_logs``, a
-column that does not exist (the real column is ``stack``). Under REST this raises
-PG 42703; the ORM reproduces the SAME failure via a raw text() select of the
-nonexistent column. NOT aliased to ``stack`` — inert discipline forbids repairing.
+FIXED PROD BUGS (formerly BROKEN-ENDPOINTS) — TWO of them
+=========================================================
+(1) ``frontend_logs()`` formerly selected ``stack_trace`` from
+``frontend_error_logs``, a column that does not exist (the real column is
+``stack``). Under REST this raised PG 42703 and the admin /search/frontend
+endpoint 500'd. FIXED: the projection now selects ``stack`` (and returns it under
+the ``stack`` result key). The router consumer never reads the stack field, so no
+consumer change was required.
 
-(2) ``audit_logs()`` queries ``AUDIT_LOGS_TABLE = "admin_audit_logs"`` — a table
-that
-DOES NOT EXIST (verified live: information_schema reports no such table; the real
-admin audit table is ``audit_logs`` with no ``admin_*`` prefix, and there is no
-``admin_audit_logs`` CREATE in supabase/migrations). Under REST this query already
-fails (PostgREST surfaces a missing-relation error). Per inert discipline the ORM
-MUST NOT silently REPAIR this by pointing at the real ``audit_logs`` table. We
-reproduce the SAME failure faithfully via a raw ``text()`` SELECT against
-``admin_audit_logs`` inside the read scope, which raises ``UndefinedTableError``
-(the asyncpg flavour of PG 42P01) — the same class of failure REST surfaces. This
-is flagged as a CONCERN for follow-up, NOT fixed here.
+(2) ``audit_logs()`` formerly queried ``AUDIT_LOGS_TABLE = "admin_audit_logs"`` —
+a table that does not exist (the real admin audit table is ``audit_logs``) — and
+selected ``admin_email``, a column that does not exist (the real column is
+``admin_id``, a uuid). Under REST this failed with a missing-relation / missing-
+column error. FIXED: ``AUDIT_LOGS_TABLE`` now points at ``audit_logs`` and the
+projection selects ``admin_id`` (returned under the ``admin_id`` result key). The
+router builds its audit message string from ``admin_id`` now.
 
 READS ONLY — there are no writes in this repo.
 """
@@ -184,21 +185,14 @@ class AdminSearchRepositoryOrm(AdminSearchRepository):
     async def frontend_logs(
         self, start_iso: str, end_iso: str, limit: int = 2000
     ) -> list[dict[str, Any]]:
-        """BROKEN ENDPOINT — reproduced faithfully, NOT repaired.
+        """frontend_error_logs in [start, end], newest-first, capped at ``limit``.
 
-        The legacy projection selects ``stack_trace``, but ``frontend_error_logs``
-        has NO ``stack_trace`` column — the actual column is ``stack`` (verified
-        live: information_schema lists ``stack``, not ``stack_trace``). Under REST
-        this query already FAILS with PG 42703 ("column
-        frontend_error_logs.stack_trace does not exist"), so the admin
-        /search/frontend endpoint 500s today. Per inert discipline the ORM MUST NOT
-        silently REPAIR this by aliasing ``stack`` → ``stack_trace``. We reproduce
-        the SAME failure via a raw text() SELECT of the nonexistent ``stack_trace``
-        column (raises UndefinedColumnError, the asyncpg 42703). Flagged as a
-        CONCERN; NOT fixed here. Newest-first, capped at ``limit``; tstz bounds
-        bound as NATIVE tz-aware datetimes (v3 rule)."""
+        The real column is ``stack`` (NOT ``stack_trace``). This formerly selected
+        the nonexistent ``stack_trace`` and 500'd under REST (PG 42703); it now
+        selects ``stack``. tstz bounds bound as NATIVE tz-aware datetimes (v3
+        rule)."""
         stmt = text(
-            f"SELECT id, error_type, message, stack_trace, url, created_at "
+            f"SELECT id, error_type, message, stack, url, created_at "
             f"FROM {self.FRONTEND_LOGS_TABLE} "
             "WHERE created_at >= :start AND created_at <= :end "
             "ORDER BY created_at DESC LIMIT :limit"
@@ -218,7 +212,7 @@ class AdminSearchRepositoryOrm(AdminSearchRepository):
                 "id": r["id"],
                 "error_type": r["error_type"],
                 "message": r["message"],
-                "stack_trace": r["stack_trace"],
+                "stack": r["stack"],
                 "url": r["url"],
                 "created_at": _iso(r["created_at"]),
             }
@@ -228,17 +222,14 @@ class AdminSearchRepositoryOrm(AdminSearchRepository):
     async def audit_logs(
         self, start_iso: str, end_iso: str, limit: int = 2000
     ) -> list[dict[str, Any]]:
-        """BROKEN ENDPOINT — reproduced faithfully, NOT repaired.
+        """audit_logs in [start, end], newest-first, capped at ``limit``.
 
-        Queries ``admin_audit_logs`` (self.AUDIT_LOGS_TABLE), a table that DOES
-        NOT EXIST (verified live; the real table is ``audit_logs``). REST surfaces
-        a missing-relation error here; we reproduce the SAME failure via a raw
-        text() SELECT against ``admin_audit_logs`` (raises UndefinedTableError, the
-        asyncpg 42P01). We deliberately DO NOT substitute the real ``audit_logs``
-        table — inert discipline forbids repairing a broken prod endpoint. See the
-        module docstring's BROKEN-ENDPOINT note (flagged as a CONCERN)."""
+        The real table is ``audit_logs`` (NOT ``admin_audit_logs``) and the admin
+        column is ``admin_id`` (uuid, NOT ``admin_email``). This formerly queried
+        the nonexistent table/column and failed under REST; both are now
+        corrected. tstz bounds bound as NATIVE tz-aware datetimes (v3 rule)."""
         stmt = text(
-            f"SELECT id, action, target_type, target_id, admin_email, details, "
+            f"SELECT id, action, target_type, target_id, admin_id, details, "
             f"created_at FROM {self.AUDIT_LOGS_TABLE} "
             "WHERE created_at >= :start AND created_at <= :end "
             "ORDER BY created_at DESC LIMIT :limit"
@@ -259,7 +250,7 @@ class AdminSearchRepositoryOrm(AdminSearchRepository):
                 "action": r["action"],
                 "target_type": r["target_type"],
                 "target_id": r["target_id"],
-                "admin_email": r["admin_email"],
+                "admin_id": r["admin_id"],
                 "details": r["details"],
                 "created_at": _iso(r["created_at"]),
             }
