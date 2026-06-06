@@ -57,7 +57,6 @@ from app.api.teams_router import router as teams_router
 from app.api.temp_token_router import router as temp_token_router
 from app.api.temp_ttl_router import router as temp_ttl_router
 from app.api.user_settings_router import router as settings_router
-from app.api.video_collections_router import router as video_collections_router
 from app.api.workforce_router import router as workforce_router
 
 api_router = APIRouter()
@@ -146,8 +145,6 @@ from app.api.issues_router import router as issues_router  # noqa: E402
 api_router.include_router(router=issues_router, tags=["Issues"])
 
 api_router.include_router(router=invites_router, tags=["Invites"])
-
-api_router.include_router(router=video_collections_router, tags=["Video Collections"])
 
 api_router.include_router(router=notifications_router, tags=["Notifications"])
 

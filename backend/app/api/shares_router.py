@@ -27,7 +27,6 @@ class ShareCommentCreate(BaseModel):
 
     content: str = Field(..., min_length=1, max_length=5000)
     timecode: Optional[float] = Field(None, ge=0, description="Timestamp in seconds")
-    visibility: str = Field("all", pattern="^(all|team|private)$")
 
 
 router = APIRouter(prefix="/shares")
@@ -640,7 +639,7 @@ async def get_share_comments(
     """
     Get comments for a shared resource (public endpoint).
 
-    Returns comments ordered by timestamp_seconds (if present) then created_at.
+    Returns review_comments for the share's resource, ordered by created_at.
     """
     try:
         client = await get_async_supabase_admin()
@@ -648,7 +647,7 @@ async def get_share_comments(
         # Look up share
         share_result = (
             await client.table("shares")
-            .select("id, status, share_type")
+            .select("id, status, share_type, resource_id")
             .eq("share_code", share_code)
             .execute()
         )
@@ -664,12 +663,20 @@ async def get_share_comments(
             raise HTTPException(
                 status_code=400, detail="Comments only available for review shares"
             )
+        if share.get("resource_id") is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot load comments: share has no associated resource",
+            )
 
-        # Fetch comments for this share
+        # Fetch comments for this share's resource
         comments_result = (
             await client.table("review_comments")
-            .select("id, content, timestamp_seconds, visibility, author_id, created_at")
-            .eq("share_id", share["id"])
+            .select(
+                "id, content, timecode, frame_number, status, "
+                "author_id, parent_id, created_at"
+            )
+            .eq("resource_id", share["resource_id"])
             .order("created_at", desc=False)
             .execute()
         )
@@ -692,7 +699,8 @@ async def create_share_comment(
     """
     Create a comment on a shared resource.
 
-    Supports both authenticated and anonymous comments.
+    Authenticated review-share members only (review_comments.author_id is
+    NOT NULL — anonymous posts are rejected with 401).
     Only available for review-type shares.
     """
     try:
@@ -701,7 +709,7 @@ async def create_share_comment(
         # Look up share
         share_result = (
             await client.table("shares")
-            .select("id, status, share_type, resource_id, project_file_id")
+            .select("id, status, share_type, resource_id")
             .eq("share_code", share_code)
             .execute()
         )
@@ -717,33 +725,25 @@ async def create_share_comment(
             raise HTTPException(
                 status_code=400, detail="Comments only available for review shares"
             )
-
-        # Build comment record
-        # file_id is required in DB; use project_file_id from share if available
-        file_id = share.get("project_file_id")
-        if not file_id:
+        if share.get("resource_id") is None:
             raise HTTPException(
                 status_code=400,
-                detail="Cannot add comments: share has no associated project file",
+                detail="Cannot add comments: share has no associated resource",
             )
 
-        comment_data = {
-            "file_id": file_id,
-            "share_id": share["id"],
-            "content": body.content,
-            "timestamp_seconds": body.timecode,
-            "visibility": body.visibility,
-            "author_id": auth.user_id if auth else None,
-        }
-
-        # Remove None author_id for anonymous
-        if comment_data["author_id"] is None:
-            # author_id is NOT NULL in DB, so anonymous comments need
-            # a sentinel value or we skip. For now, require auth.
+        # author_id is NOT NULL in DB, so anonymous comments are rejected.
+        if auth is None:
             raise HTTPException(
                 status_code=401,
                 detail="Authentication required to post comments",
             )
+
+        comment_data = {
+            "resource_id": share["resource_id"],
+            "author_id": auth.user_id,
+            "content": body.content,
+            "timecode": body.timecode,
+        }
 
         result = await client.table("review_comments").insert(comment_data).execute()
 

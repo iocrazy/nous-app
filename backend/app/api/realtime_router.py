@@ -78,45 +78,12 @@ class RealtimeManager:
                 }
                 await queue.put(event)
 
-            async def on_collection_change(payload):
-                """Handle collection_videos changes."""
-                event_type = payload.get("eventType", "unknown")
-                new_record = payload.get("new", {})
-                old_record = payload.get("old", {})
-
-                event = {
-                    "type": "collection_video",
-                    "event": event_type.lower(),
-                    "data": new_record if event_type != "DELETE" else old_record,
-                }
-                await queue.put(event)
-
-            async def on_tag_change(payload):
-                """Handle video_tags changes."""
-                event_type = payload.get("eventType", "unknown")
-                new_record = payload.get("new", {})
-                old_record = payload.get("old", {})
-
-                event = {
-                    "type": "video_tag",
-                    "event": event_type.lower(),
-                    "data": new_record if event_type != "DELETE" else old_record,
-                }
-                await queue.put(event)
-
             # Subscribe to tables
             channel.on_postgres_changes(
                 event="*",
                 schema="public",
                 table="parsed_media",
                 callback=on_video_change,
-            ).on_postgres_changes(
-                event="*",
-                schema="public",
-                table="video_collections",
-                callback=on_collection_change,
-            ).on_postgres_changes(
-                event="*", schema="public", table="video_tags", callback=on_tag_change
             )
 
             await channel.subscribe()
