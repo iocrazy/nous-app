@@ -15,10 +15,10 @@ DEFAULT_FORMAT_PRESET: Dict[str, Any] = {
 from loguru import logger
 
 from app.repositories.script_repository import (
-    ScriptAssetRepository,
-    ScriptChapterRepository,
-    ScriptProjectRepository,
-    ScriptStoryboardLinkRepository,
+    get_script_asset_repository,
+    get_script_chapter_repository,
+    get_script_project_repository,
+    get_script_storyboard_link_repository,
 )
 from app.services.library.display_code_service import generate_display_code
 
@@ -44,10 +44,10 @@ class ScriptService:
     """Orchestrates script project, chapter, asset, and link operations."""
 
     def __init__(self) -> None:
-        self.project_repo = ScriptProjectRepository()
-        self.chapter_repo = ScriptChapterRepository()
-        self.asset_repo = ScriptAssetRepository()
-        self.link_repo = ScriptStoryboardLinkRepository()
+        self.project_repo = get_script_project_repository()
+        self.chapter_repo = get_script_chapter_repository()
+        self.asset_repo = get_script_asset_repository()
+        self.link_repo = get_script_storyboard_link_repository()
 
     async def create_project(
         self,

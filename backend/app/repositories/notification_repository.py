@@ -1,11 +1,26 @@
-"""Notification repository for database operations."""
+"""Notification repository for database operations.
+
+ORM 2.0 migration (Batch L1b): ``NotificationRepository`` is the legacy
+supabase-py REST implementation; ``NotificationRepositoryOrm`` (in
+``notification_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call
+sites go through ``get_notification_repository()`` (bottom of this file) which
+picks the ORM subclass when ``USE_ORM_NOTIFICATIONS`` is on AND the engine is
+configured.
+"""
+
+from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.notification_repository_orm import (
+        NotificationRepositoryOrm,
+    )
 
 
 class NotificationRepository:
@@ -143,3 +158,30 @@ class NotificationRepository:
         except Exception as e:
             logger.error(f"Failed to delete notification: {e}")
             return False
+
+
+def get_notification_repository() -> (
+    Union["NotificationRepository", "NotificationRepositoryOrm"]
+):
+    """Return the right NotificationRepository implementation per env.
+
+    ORM when ``USE_ORM_NOTIFICATIONS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_NOTIFICATIONS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.notification_repository_orm import (
+                NotificationRepositoryOrm,
+            )
+
+            return NotificationRepositoryOrm()
+        logger.warning(
+            "USE_ORM_NOTIFICATIONS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return NotificationRepository()

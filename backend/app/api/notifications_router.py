@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException, status
 
 from app.core.deps import AuthDep
-from app.repositories.notification_repository import NotificationRepository
+from app.repositories.notification_repository import get_notification_repository
 from app.schemas.notification import (
     MarkReadResponse,
     NotificationListResponse,
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
 @router.get("", response_model=NotificationListResponse)
 async def list_notifications(auth: AuthDep):
     """List all notifications for the current user."""
-    repo = NotificationRepository()
+    repo = get_notification_repository()
     notifications = await repo.get_user_notifications(auth.user_id)
     unread_count = sum(1 for n in notifications if not n["read"])
 
@@ -42,7 +42,7 @@ async def list_notifications(auth: AuthDep):
 @router.put("/{notification_id}/read", response_model=MarkReadResponse)
 async def mark_as_read(notification_id: str, auth: AuthDep):
     """Mark a notification as read."""
-    repo = NotificationRepository()
+    repo = get_notification_repository()
     success = await repo.mark_as_read(notification_id, auth.user_id)
 
     if not success:
@@ -57,7 +57,7 @@ async def mark_as_read(notification_id: str, auth: AuthDep):
 @router.put("/read-all", response_model=MarkReadResponse)
 async def mark_all_as_read(auth: AuthDep):
     """Mark all notifications as read."""
-    repo = NotificationRepository()
+    repo = get_notification_repository()
     count = await repo.mark_all_as_read(auth.user_id)
 
     return MarkReadResponse(
@@ -68,7 +68,7 @@ async def mark_all_as_read(auth: AuthDep):
 @router.delete("/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_notification(notification_id: str, auth: AuthDep):
     """Delete (dismiss) a notification."""
-    repo = NotificationRepository()
+    repo = get_notification_repository()
     deleted = await repo.delete_notification(notification_id, auth.user_id)
 
     if not deleted:
@@ -81,7 +81,7 @@ async def delete_notification(notification_id: str, auth: AuthDep):
 @router.get("/unread-count")
 async def get_unread_count(auth: AuthDep):
     """Get count of unread notifications."""
-    repo = NotificationRepository()
+    repo = get_notification_repository()
     count = await repo.get_unread_count(auth.user_id)
 
     return {"unread_count": count}
