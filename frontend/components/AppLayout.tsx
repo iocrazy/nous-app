@@ -210,7 +210,11 @@ function AppLayoutInner() {
     <ConfirmProvider>
     <TaskManagerProvider>
     <UploadProvider>
-    <div className="flex min-h-[100dvh] bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+    {/* overflow-x-CLIP (not hidden): clip horizontal overflow WITHOUT becoming a
+        scroll container — `overflow-x:hidden` silently turns the y-axis into a
+        scroll container, which breaks `position: sticky` for everything inside
+        (the mobile filter chip bar wouldn't pin). */}
+    <div className="flex min-h-[100dvh] bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-clip">
 
       {/* User Profile Modal */}
       <UserProfileModal

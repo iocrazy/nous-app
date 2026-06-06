@@ -6,6 +6,7 @@
 // Rating-dropdown pattern). The unbounded Tags and the multi-control Social
 // facet use the full-screen FacetPickerSheet instead.
 
+import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -143,6 +144,15 @@ export function FacetDropdown({
 }) {
   const { t } = useTranslation();
   const rows = buildRows(facetId, config, availablePlatforms);
+
+  // Close on scroll — the dropdown is pinned to the chip's tap-time rect, so it
+  // would otherwise float orphaned once the grid scrolls under it.
+  useEffect(() => {
+    const close = () => onClose();
+    window.addEventListener('scroll', close, { passive: true, capture: true });
+    return () =>
+      window.removeEventListener('scroll', close, { capture: true });
+  }, [onClose]);
 
   const WIDTH = 240;
   const vw = typeof window !== 'undefined' ? window.innerWidth : 390;
