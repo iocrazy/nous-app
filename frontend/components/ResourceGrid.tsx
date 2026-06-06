@@ -36,6 +36,8 @@ import { Folder, ResourceItem, Tag } from '../types';
 import { useResourcesContext } from '../contexts/ResourcesContext';
 import type { SortBy } from '../contexts/ResourcesContext';
 import { FilterBar } from './resources/filter/FilterBar';
+import { FilterChipBar } from './filters/FilterChipBar';
+import { FacetPickerSheet } from './filters/FacetPickerSheet';
 import type { ChipId } from './resources/filter/types';
 import type { UseFilterBarConfigReturn } from '../hooks/useFilterBarConfig';
 import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
@@ -328,6 +330,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   const { visible: isFilterBarVisible, toggle: toggleFilterBar } = useFilterBarVisibility();
   const filterBarEligible = !isRecycleView && !isSharedView;
   const shouldRenderFilterBar = filterBarEligible && isFilterBarVisible;
+  const [openFacet, setOpenFacet] = useState<ChipId | null>(null);
 
   // Mobile search state
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
@@ -373,6 +376,24 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
   return (
     <div className="flex-1 min-w-0 flex flex-col md:h-full md:min-h-0">
+      {/* Mobile filter chip bar (Pixcall-style) — desktop keeps the FilterBar */}
+      {filterBarEligible && (
+        <FilterChipBar
+          className="md:hidden border-b border-zinc-800/60 shrink-0"
+          config={filterBarConfig}
+          allTags={allTags}
+          onOpenFacet={setOpenFacet}
+        />
+      )}
+      <FacetPickerSheet
+        open={openFacet !== null}
+        facetId={openFacet}
+        onClose={() => setOpenFacet(null)}
+        config={filterBarConfig}
+        allTags={allTags}
+        availablePlatforms={availablePlatforms}
+      />
+
       {/* Mobile breadcrumb navigation — hidden at root, shown inside folders */}
       {(selectedFolderId || isRecycleView) && (
         <div className="md:hidden px-3 py-2.5 min-h-[40px] flex items-center gap-2">
