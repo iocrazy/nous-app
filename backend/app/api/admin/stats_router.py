@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Query
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.admin.stats_repository import AdminStatsRepository
+from app.repositories.admin.stats_repository import get_admin_stats_repository
 from app.schemas.admin import AdminStatsResponse
 
 router = APIRouter()
@@ -15,7 +15,7 @@ router = APIRouter()
 @router.get("/overview", response_model=AdminStatsResponse)
 async def get_overview_stats(auth: AdminAuthDep):
     """Get dashboard overview statistics."""
-    repo = AdminStatsRepository()
+    repo = get_admin_stats_repository()
 
     today = datetime.utcnow().date()
     today_start = datetime.combine(today, datetime.min.time())
@@ -55,7 +55,7 @@ async def get_user_growth(
     days: int = Query(30, ge=7, le=365),
 ):
     """Get user registration growth over time."""
-    repo = AdminStatsRepository()
+    repo = get_admin_stats_repository()
     start_date = datetime.utcnow() - timedelta(days=days)
     rows = await repo.user_registrations_since(start_date)
 
@@ -81,7 +81,7 @@ async def get_video_stats(
     days: int = Query(30, ge=7, le=365),
 ):
     """Get video statistics over time."""
-    repo = AdminStatsRepository()
+    repo = get_admin_stats_repository()
     start_date = datetime.utcnow() - timedelta(days=days)
     rows = await repo.video_status_history(start_date)
 
@@ -114,7 +114,7 @@ async def get_video_stats(
 @router.get("/storage")
 async def get_storage_stats(auth: AdminAuthDep):
     """Get storage usage statistics."""
-    repo = AdminStatsRepository()
+    repo = get_admin_stats_repository()
     rows = await repo.completed_videos_by_user()
 
     user_video_counts: dict[str, int] = {}

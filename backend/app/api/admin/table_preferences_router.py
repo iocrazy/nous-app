@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.table_preferences_repository import (
-    AdminTablePreferencesRepository,
+    get_admin_table_preferences_repository,
 )
 from app.schemas.admin import (
     AdminTablePreferenceResponse,
@@ -37,7 +37,7 @@ def _validate_table_key(table_key: str) -> None:
 async def get_table_preferences(table_key: str, auth: AdminAuthDep):
     """Retrieve saved table preferences for the current admin user."""
     _validate_table_key(table_key)
-    repo = AdminTablePreferencesRepository()
+    repo = get_admin_table_preferences_repository()
     row = await repo.get(str(auth.user_id), table_key)
     if row:
         return AdminTablePreferenceResponse(**row)
@@ -52,7 +52,7 @@ async def upsert_table_preferences(
 ):
     """Create or update table preferences for the current admin user."""
     _validate_table_key(table_key)
-    repo = AdminTablePreferencesRepository()
+    repo = get_admin_table_preferences_repository()
     row = await repo.upsert(
         user_id=str(auth.user_id),
         table_key=table_key,
@@ -70,6 +70,6 @@ async def upsert_table_preferences(
 async def delete_table_preferences(table_key: str, auth: AdminAuthDep):
     """Delete saved table preferences for a specific table."""
     _validate_table_key(table_key)
-    repo = AdminTablePreferencesRepository()
+    repo = get_admin_table_preferences_repository()
     await repo.delete(str(auth.user_id), table_key)
     return {"ok": True}

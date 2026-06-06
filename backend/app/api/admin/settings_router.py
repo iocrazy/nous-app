@@ -5,7 +5,7 @@ from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.admin.system_settings_repository import (
-    SystemSettingsRepository,
+    get_system_settings_repository,
 )
 from app.schemas.admin import SystemSettingResponse, SystemSettingUpdate
 from app.utils.admin_helpers import create_audit_log
@@ -26,7 +26,7 @@ def _to_response(row: dict) -> SystemSettingResponse:
 @router.get("", response_model=list[SystemSettingResponse])
 async def list_settings(auth: AdminAuthDep):
     """List all system settings (excluding transcode_*, managed elsewhere)."""
-    repo = SystemSettingsRepository()
+    repo = get_system_settings_repository()
     rows = await repo.list_non_transcode()
     return [_to_response(r) for r in rows]
 
@@ -39,7 +39,7 @@ async def update_setting(
     request: Request,
 ):
     """Update a system setting by key."""
-    repo = SystemSettingsRepository()
+    repo = get_system_settings_repository()
 
     if not await repo.exists(key):
         raise HTTPException(

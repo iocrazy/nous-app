@@ -718,6 +718,73 @@ class Settings(BaseSettings):
         "write_scope(). Inert — flip back to false to roll back.",
     )
 
+    # ── Phase 2 admin wave (5 small logs/stats/settings repos) ──────────
+    USE_ORM_ADMIN_AUDIT_LOGS: bool = Field(
+        default=False,
+        description="Route AuditLogsRepository (admin activity trail on "
+        "audit_logs) through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). "
+        "Strategy C: id + admin_id (uuid) → str — admin_id is a DICT KEY in the "
+        "router (admin_info.get(aid)) and a str field on AuditLogResponse; id is "
+        "str()'d into the response. created_at (timestamptz) → ISO str (CONSUMED "
+        "— the /stats endpoint does created_at[:10] string-slicing). No "
+        "SQLAlchemy Enum / no renamed column on AuditLogs. Date-range filters "
+        "(start_date/end_date on created_at) bind NATIVE tz-aware datetimes (v3 "
+        "rule). Reads only — no writes in this repo. Inert; flip false to revert.",
+    )
+    USE_ORM_ADMIN_MONITORING: bool = Field(
+        default=False,
+        description="Route MonitoringRepository (admin monitoring dashboard — "
+        "reads api_request_logs / application_logs / frontend_error_logs) through "
+        "the SQLAlchemy 2.0 ORM (Phase 2 admin wave). COLUMN-SUBSET selects (not "
+        "SELECT *). Strategy C: timestamp / logged_at (timestamptz) → ISO str "
+        "(CONSUMED — the router does ts.replace('Z',...)+fromisoformat(ts) and "
+        "sets RecentErrorEntry.logged_at:str); status_code / response_time_ms "
+        "(int) stay native; frontend_error_count returns native int. No uuid in "
+        "any projection. Date-range filters bind NATIVE tz-aware datetimes (v3 "
+        "rule; these are the LOTS-of-date-windows surface). Reads only. Inert.",
+    )
+    USE_ORM_ADMIN_STATS: bool = Field(
+        default=False,
+        description="Route AdminStatsRepository (admin dashboard aggregations "
+        "over user_profiles / parsed_media / teams / user_logs) through the "
+        "SQLAlchemy 2.0 ORM (Phase 2 admin wave). COUNT(*) returns native int "
+        "(the 5.3 trap). distinct_active_users_since returns native int. "
+        "created_at (timestamptz) → ISO str (CONSUMED — the growth/video-stats "
+        "endpoints do created_at[:10] string-slicing). video_download_status is "
+        "a SQLAlchemy Enum(DownloadStatus) → unwrapped to its bare .value via "
+        "_plain (CONSUMED — the router does status == 'completed'). user_id "
+        "(uuid) → str (DICT KEY in the storage endpoint). since/date filters bind "
+        "NATIVE tz-aware datetimes (v3 rule). NOTE — completed_videos_by_user() "
+        "is a PRE-EXISTING BROKEN endpoint: it selects parsed_media.user_id, a "
+        "column DROPPED in migration 083. Under REST it raises PG 42703; the ORM "
+        "reproduces the SAME failure via a raw text() select (NOT repaired — "
+        "inert discipline). Reads only. Inert; flip false to revert.",
+    )
+    USE_ORM_ADMIN_SYSTEM_SETTINGS: bool = Field(
+        default=False,
+        description="Route SystemSettingsRepository (system_settings admin CRUD) "
+        "through the SQLAlchemy 2.0 ORM (Phase 2 admin wave). Strategy C: "
+        "updated_by (uuid) → str (SystemSettingResponse.updated_by:Optional[str]); "
+        "updated_at (timestamptz) → ISO str; value/options (jsonb) → native dict. "
+        "The 'exclude transcode_* from list' policy is preserved verbatim. "
+        "update() WRITES value + updated_by and COMMITS via write_scope() (the "
+        "silent-rollback P0 lesson); exists() uses maybe_single parity. No date "
+        "filters. No SQLAlchemy Enum / no renamed column. Inert; flip false.",
+    )
+    USE_ORM_ADMIN_TABLE_PREFERENCES: bool = Field(
+        default=False,
+        description="Route AdminTablePreferencesRepository "
+        "(admin_table_preferences — Notion-style per-user table config) through "
+        "the SQLAlchemy 2.0 ORM (Phase 2 admin wave). COLUMN-SUBSET selects "
+        "(table_key, filters, sorts, visible_columns, column_order) — NO uuid / "
+        "timestamptz in the projection, so no value-type coercion is needed. "
+        "filters/sorts (jsonb) → native dict/list, visible_columns/column_order "
+        "(text[]) → native list[str]. upsert() reproduces the legacy "
+        "on_conflict='user_id,table_key' via pg_insert().on_conflict_do_update "
+        "and COMMITS via write_scope(); delete() commits. No date filters. Inert; "
+        "flip false to revert.",
+    )
+
     # ============================================
     # 下载设置
     # ============================================
