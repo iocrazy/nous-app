@@ -25,7 +25,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import get_skill_repository
 from app.repositories.storyboard_repository import (
     get_storyboard_character_repository,
 )
@@ -82,7 +82,7 @@ class StoryboardAIService:
         Telemetry is best-effort: if user_id is None or RunRecorder.start
         fails, the run still goes through with a no-op recorder.
         """
-        composer = PromptComposer(get_agent_repository(), SkillRepository())
+        composer = PromptComposer(get_agent_repository(), get_skill_repository())
         composed = await composer.compose(
             ComposerInput(
                 agent_slug=self.AGENT_SLUG,
@@ -92,7 +92,7 @@ class StoryboardAIService:
         adapter = get_adapter(composed.model or "", settings)
         runner = AgentRunner(
             adapter=adapter,
-            skill_tool=SkillToolService(SkillRepository()),
+            skill_tool=SkillToolService(get_skill_repository()),
         )
         user_messages = [{"role": "user", "content": user_content}]
 
@@ -139,7 +139,7 @@ class StoryboardAIService:
         and carries any dynamic context (style guide, project characters,
         selected frame details, skill injection, etc.).
         """
-        composer = PromptComposer(get_agent_repository(), SkillRepository())
+        composer = PromptComposer(get_agent_repository(), get_skill_repository())
         composed = await composer.compose(
             ComposerInput(
                 agent_slug=self.AGENT_SLUG,

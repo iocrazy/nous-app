@@ -24,8 +24,8 @@ from loguru import logger
 
 from app.core.config import settings as app_settings
 from app.repositories.agent_repository import get_agent_repository
-from app.repositories.ai_repository import AIRepository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.ai_repository import get_ai_repository
+from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.adapters.factory import get_adapter_for_user
 from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
@@ -119,14 +119,14 @@ class LLMAnalysisService:
     ) -> None:
         self._provider_key = provider_key
         self._provider_config = provider_config or {}
-        self._repo = AIRepository()
+        self._repo = get_ai_repository()
 
     # ------------------------------------------------------------------
     # Shared plumbing — composer / runner wiring
     # ------------------------------------------------------------------
 
     def _build_composer(self) -> PromptComposer:
-        return PromptComposer(get_agent_repository(), SkillRepository())
+        return PromptComposer(get_agent_repository(), get_skill_repository())
 
     def _build_runner(self) -> AgentRunner:
         """Build a runner whose adapter is injected from the caller's
@@ -135,7 +135,7 @@ class LLMAnalysisService:
             self._provider_key, self._provider_config
         )
         return AgentRunner(
-            adapter=adapter, skill_tool=SkillToolService(SkillRepository())
+            adapter=adapter, skill_tool=SkillToolService(get_skill_repository())
         )
 
     async def _run_agent(

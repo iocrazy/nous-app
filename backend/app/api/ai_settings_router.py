@@ -137,8 +137,8 @@ async def list_nous_models(category: str = None):
     Returns models available for users to select in Task Assignment.
     If no models are configured, returns empty list.
     """
-    from app.repositories.nous_repository import NousRepository
+    from app.repositories.nous_repository import get_nous_repository
 
-    repo = NousRepository()
+    repo = get_nous_repository()
     models = await repo.list_enabled(category)
     return {"models": models}

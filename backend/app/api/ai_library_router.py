@@ -43,7 +43,10 @@ from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
     tt_row_to_task_shape,
 )
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import (
+    SkillRepository,
+    get_skill_repository,
+)
 from app.schemas.agent_runs import (
     RunDetail,
     RunListItem,
@@ -81,7 +84,7 @@ router = APIRouter(prefix="/ai-library", tags=["AI Library"])
 
 def _repos() -> tuple[AgentRepository, SkillRepository]:
     """Return a fresh (AgentRepository, SkillRepository) pair per request."""
-    return get_agent_repository(), SkillRepository()
+    return get_agent_repository(), get_skill_repository()
 
 
 def _coerce_user_uuid(user_id: str) -> UUID:

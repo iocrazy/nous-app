@@ -1,9 +1,14 @@
 """Invite repository for database operations."""
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
+from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.invite_repository_orm import InviteRepositoryOrm
 
 # Expiry time mapping in milliseconds
 EXPIRY_MAP = {
@@ -176,3 +181,26 @@ class InviteRepository:
             return False
 
         return membership.data[0]["role"] in ["owner", "admin"]
+
+
+def get_invite_repository() -> Union["InviteRepository", "InviteRepositoryOrm"]:
+    """Return the right InviteRepository implementation per env.
+
+    ORM when ``USE_ORM_INVITE`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_INVITE:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.invite_repository_orm import InviteRepositoryOrm
+
+            return InviteRepositoryOrm()
+        logger.warning(
+            "USE_ORM_INVITE=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return InviteRepository()

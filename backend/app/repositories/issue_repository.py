@@ -14,11 +14,14 @@ Atomic-create contract:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.issue_repository_orm import IssueRepositoryOrm
 
 
 class IssueRepository:
@@ -191,4 +194,32 @@ class IssueRepository:
         return await self.update(issue_id, patch)
 
 
-issue_repository = IssueRepository()
+def get_issue_repository() -> Union["IssueRepository", "IssueRepositoryOrm"]:
+    """Return the right IssueRepository implementation per env.
+
+    ORM when ``USE_ORM_ISSUE`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ISSUE:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.issue_repository_orm import IssueRepositoryOrm
+
+            return IssueRepositoryOrm()
+        logger.warning(
+            "USE_ORM_ISSUE=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return IssueRepository()
+
+
+# Module-level singleton routed through the factory so the three consumers
+# (issues_router / issue_messages_router / ws_router) that import
+# ``issue_repository`` pick up the ORM impl when USE_ORM_ISSUE is on. The flag
+# is read once at import (inert by default). Tests patch
+# ``...get_issue_repository`` or the per-module ``issue_repository`` symbol.
+issue_repository = get_issue_repository()

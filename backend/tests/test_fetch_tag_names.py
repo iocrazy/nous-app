@@ -22,7 +22,7 @@ async def test_resolves_existing_and_creates_missing():
     )
     repo.create_tag = AsyncMock(return_value={"id": 222})
 
-    with patch("app.api.media_fetch_helpers.TagsRepository", return_value=repo):
+    with patch("app.api.media_fetch_helpers.get_tags_repository", return_value=repo):
         ids = await resolve_tag_names_to_ids(["news", "ai"], "user-1")
 
     assert ids == ["111", "222"]
@@ -34,12 +34,14 @@ async def test_skips_blank_names():
     repo = AsyncMock()
     repo.get_tag_by_name = AsyncMock(return_value={"id": 5})
     repo.create_tag = AsyncMock(return_value={"id": 5})
-    with patch("app.api.media_fetch_helpers.TagsRepository", return_value=repo):
+    with patch("app.api.media_fetch_helpers.get_tags_repository", return_value=repo):
         ids = await resolve_tag_names_to_ids(["  ", "", "x"], "u")
     assert ids == ["5"]  # only "x" resolved
 
 
 @pytest.mark.asyncio
 async def test_empty_list_returns_empty():
-    with patch("app.api.media_fetch_helpers.TagsRepository", return_value=AsyncMock()):
+    with patch(
+        "app.api.media_fetch_helpers.get_tags_repository", return_value=AsyncMock()
+    ):
         assert await resolve_tag_names_to_ids([], "u") == []

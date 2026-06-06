@@ -2,18 +2,30 @@
 
 One row per ai_sessions row. Body is markdown source-of-truth + parsed
 sections_json for query convenience.
+
+ORM 2.0 migration (Phase 2, M batch): ``SessionMemoryRepository`` is the legacy
+supabase-py REST implementation; ``SessionMemoryRepositoryOrm`` (in
+``session_memory_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call
+sites go through ``get_session_memory_repository()`` (bottom of this file),
+which picks the ORM subclass when ``USE_ORM_SESSION_MEMORY`` is on AND the
+engine is configured.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 from uuid import UUID
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.session_memory_repository_orm import (
+        SessionMemoryRepositoryOrm,
+    )
 
 
 @dataclass
@@ -141,4 +153,35 @@ def _parse_ts(value: Any) -> Optional[datetime]:
     return None
 
 
-__all__ = ["SessionMemoryRepository", "SessionMemoryRow"]
+def get_session_memory_repository() -> (
+    Union["SessionMemoryRepository", "SessionMemoryRepositoryOrm"]
+):
+    """Return the right SessionMemoryRepository implementation per env.
+
+    ORM when ``USE_ORM_SESSION_MEMORY`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_SESSION_MEMORY:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.session_memory_repository_orm import (
+                SessionMemoryRepositoryOrm,
+            )
+
+            return SessionMemoryRepositoryOrm()
+        logger.warning(
+            "USE_ORM_SESSION_MEMORY=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return SessionMemoryRepository()
+
+
+__all__ = [
+    "SessionMemoryRepository",
+    "SessionMemoryRow",
+    "get_session_memory_repository",
+]

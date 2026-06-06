@@ -44,7 +44,10 @@ from app.agent_framework.mcp_descriptor import (
     skill_to_tool,
 )
 from app.repositories.agent_repository import AgentRepository, get_agent_repository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import (
+    SkillRepository,
+    get_skill_repository,
+)
 
 
 def _make_skill_handler(skill_row: dict[str, Any]):
@@ -106,7 +109,7 @@ async def build_mcp_registry(
     crashed stdio process.
     """
     registry = MCPToolRegistry()
-    skill_repo = skill_repo or SkillRepository()
+    skill_repo = skill_repo or get_skill_repository()
     agent_repo = agent_repo or get_agent_repository()
 
     if include_skills:

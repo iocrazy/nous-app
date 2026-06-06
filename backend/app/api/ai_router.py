@@ -16,7 +16,7 @@ from loguru import logger
 from app.core.deps import AuthDep, get_team_id_for_user
 from app.core.scope_dep import ScopedRequestDep
 from app.db.supabase_client import get_async_supabase_admin as _get_admin
-from app.repositories.ai_repository import AIRepository
+from app.repositories.ai_repository import get_ai_repository
 from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
@@ -100,7 +100,7 @@ async def trigger_transcription_by_resource(
     # === Nous billing — only charge if user selected a nous-* model ===
     import math
 
-    from app.repositories.nous_repository import NousRepository
+    from app.repositories.nous_repository import get_nous_repository
     from app.repositories.user_settings_repository import UserSettingsRepository
 
     settings_repo = UserSettingsRepository()
@@ -116,7 +116,7 @@ async def trigger_transcription_by_resource(
 
     if _is_nous and _team_id:
         # Look up Nous model pricing
-        nous_repo = NousRepository()
+        nous_repo = get_nous_repository()
         nous_model = await nous_repo.get_by_name(selected_model)
         if not nous_model or not nous_model.get("is_enabled"):
             raise HTTPException(
@@ -300,7 +300,7 @@ async def trigger_summary_by_resource(
         _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
-    ai_repo = AIRepository()
+    ai_repo = get_ai_repository()
     transcript = await ai_repo.get_transcript(resource_id)
 
     # Track unified_task so we can mark it failed if the Celery dispatch
@@ -661,7 +661,7 @@ async def trigger_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequest
     )
     _resource_id = str(resource["id"]) if resource else None
 
-    ai_repo = AIRepository()
+    ai_repo = get_ai_repository()
     transcript = await ai_repo.get_transcript(_resource_id) if _resource_id else None
 
     _orphan_task_id: str | None = None
@@ -821,7 +821,7 @@ async def get_transcript_by_resource(
     if resource.get("creator_id") != auth.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    ai_repo = AIRepository()
+    ai_repo = get_ai_repository()
     transcript = await ai_repo.get_transcript(resource_id) or {}
 
     return TranscriptResponse(
@@ -849,7 +849,7 @@ async def get_transcript(platform_id: str, auth: AuthDep, _scope: ScopedRequestD
     if not resource:
         raise HTTPException(status_code=404, detail="No resource linked to this media")
 
-    ai_repo = AIRepository()
+    ai_repo = get_ai_repository()
     transcript = await ai_repo.get_transcript(str(resource["id"])) or {}
 
     # 200 + nulls (not 404) when no transcript exists yet — same reason
@@ -879,7 +879,7 @@ async def get_summary_by_resource(
     if resource.get("creator_id") != auth.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    ai_repo = AIRepository()
+    ai_repo = get_ai_repository()
     summary = await ai_repo.get_summary(resource_id) or {}
 
     return SummaryResponse(
@@ -940,7 +940,7 @@ async def get_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequestDep)
     if not resource:
         raise HTTPException(status_code=404, detail="No resource linked to this media")
 
-    ai_repo = AIRepository()
+    ai_repo = get_ai_repository()
     summary = await ai_repo.get_summary(str(resource["id"])) or {}
 
     return SummaryResponse(

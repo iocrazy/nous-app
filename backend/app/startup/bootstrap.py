@@ -55,12 +55,12 @@ async def _bg_seed_loader() -> None:
         f"exists={seeds_root.exists()})"
     )
     from app.repositories.agent_repository import get_agent_repository
-    from app.repositories.skill_repository import SkillRepository
+    from app.repositories.skill_repository import get_skill_repository
     from app.services.ai.runner.seed_loader import SeedLoader
 
     seed_loader = SeedLoader(
         agent_repo=get_agent_repository(),
-        skill_repo=SkillRepository(),
+        skill_repo=get_skill_repository(),
         seeds_root=seeds_root,
     )
     seed_results = await seed_loader.load_all()

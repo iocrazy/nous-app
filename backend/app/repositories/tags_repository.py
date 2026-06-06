@@ -1,10 +1,20 @@
-"""Repository for Tags data access (异步)."""
+"""Repository for Tags data access (异步).
 
-from typing import List, Optional
+ORM 2.0 migration (Phase 2, M batch): ``TagsRepository`` is the legacy
+supabase-py REST implementation; ``TagsRepositoryOrm`` (in
+``tags_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call sites go
+through ``get_tags_repository()`` (bottom of this file) which picks the ORM
+subclass when ``USE_ORM_TAGS`` is on AND the engine is configured.
+"""
+
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.tags_repository_orm import TagsRepositoryOrm
 
 
 class TagsRepository:
@@ -397,3 +407,26 @@ class TagsRepository:
             tag_counts.values(), key=lambda x: x["count"], reverse=True
         )
         return sorted_tags[:limit]
+
+
+def get_tags_repository() -> Union["TagsRepository", "TagsRepositoryOrm"]:
+    """Return the right TagsRepository implementation per env.
+
+    ORM when ``USE_ORM_TAGS`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_TAGS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.tags_repository_orm import TagsRepositoryOrm
+
+            return TagsRepositoryOrm()
+        logger.warning(
+            "USE_ORM_TAGS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return TagsRepository()

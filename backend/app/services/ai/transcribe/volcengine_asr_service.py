@@ -18,7 +18,7 @@ from typing import Optional
 import httpx
 from loguru import logger
 
-from app.repositories.ai_repository import AIRepository
+from app.repositories.ai_repository import get_ai_repository
 from app.services.ai.providers.ai_provider import TranscriptResult, TranscriptSegment
 
 SUBMIT_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
@@ -46,7 +46,7 @@ class VolcengineASRService:
         self._app_id = app_id
         self._access_token = access_token
         self._asr_resource_id = asr_resource_id
-        self._repo = AIRepository()
+        self._repo = get_ai_repository()
 
     def _build_headers(self, request_id: str, include_sequence: bool = False) -> dict:
         headers = {

@@ -286,6 +286,172 @@ class Settings(BaseSettings):
         "hazard. The storyboard_frame_characters junction table has no consumer "
         "(nothing to migrate). Instant rollback = flip back to false.",
     )
+    USE_ORM_NOUS: bool = Field(
+        default=False,
+        description="Route NousRepository (admin-configured platform AI models "
+        "over nous_models) through the SQLAlchemy 2.0 ORM session layer (Phase 2 "
+        "M batch). Strategy C value-type parity: id (BIGINT snowflake) stays "
+        "NATIVE int (the 5.3 trap; every consumer does str(id) or passes it to a "
+        "response model — never int() math); created_at / updated_at → ISO str; "
+        "pricing_value (Numeric pricing/cost column) left NATIVE Decimal — the "
+        "numeric decision: every consumer wraps it in float() before any math "
+        "(float() works on both a REST str and a native Decimal), so no str() "
+        "coercion is needed. No uuid / jsonb columns. The legacy update injects "
+        "an 'updated_at=now()' string sentinel — the ORM drops it and sets "
+        "updated_at=func.now() (binding the literal string would error). Reads "
+        "swallow + return []/None; create/update swallow + return None (legacy "
+        "parity, NOT re-raise); delete returns False on failure. Writes commit "
+        "via write_scope(). Inert — flip back to false to roll back.",
+    )
+    USE_ORM_SESSION_MEMORY: bool = Field(
+        default=False,
+        description="Route SessionMemoryRepository (ai_session_memory — one "
+        "markdown-body row per ai_sessions row) through the SQLAlchemy 2.0 ORM "
+        "session layer (Phase 2 M batch). The repo returns a SessionMemoryRow "
+        "dataclass whose inherited _row_to_obj constructor already normalises "
+        "every field (session_id → str, last_updated_at → _parse_ts datetime, "
+        "counters → int), so strategy-C parity is handled by the dataclass — the "
+        "ORM just feeds it a native-typed row dict. The ONLY ORM-specific "
+        "coercion: session_id is a BIGINT (FK → ai_sessions.id snowflake) but "
+        "callers pass it as a str, so binds are int-coerced (_bigint) — asyncpg "
+        "int8 codec is strict. upsert reproduces ON CONFLICT (session_id) DO "
+        "UPDATE with the legacy load-then-bump-version logic; now() is written "
+        "native UTC datetime. No phantom columns, no date range filters. load / "
+        "upsert swallow + return None (must not crash the chat path); delete "
+        "returns False on failure. Writes commit via write_scope(). Inert — flip "
+        "back to false to roll back.",
+    )
+    USE_ORM_PERMISSION: bool = Field(
+        default=False,
+        description="Route PermissionRepository (the ReBAC effective-role read "
+        "surface: five read-only lookups over access_overrides / folders / "
+        "libraries / team_members / resource_items) through the SQLAlchemy 2.0 "
+        "ORM session layer (Phase 2 M batch). READ-ONLY repo → no write paths, "
+        "all reads on read_scope(). Strategy C value-type parity: bigint ids / "
+        "FKs (folders.id/parent_id/scope_id, resource_items.scope_id/folder_id, "
+        "libraries.id) stay NATIVE int (the 5.3 trap — folder.parent_id / "
+        "scope.folder_id recurse into bigint folders.id lookups); the ONLY "
+        "ORM-specific coercion is get_access_override str()ing its object_id "
+        "param (a TEXT column) so a native-int folder id binds — reproducing "
+        "PostgREST's int→text cast exactly. access_overrides.* uuids (id / "
+        "user_id / granted_by) → str for shape parity (consumer reads only "
+        "['role']); created_at → ISO str. libraries.scope_id is TEXT (native "
+        "str). visibility ('restricted') and role compares are str==str. No date "
+        "range filters → no timestamptz<VARCHAR hazard. Every method swallows + "
+        "returns None on failure (legacy parity). Inert — flip back to false to "
+        "roll back.",
+    )
+
+    USE_ORM_INVITE: bool = Field(
+        default=False,
+        description="Route InviteRepository (team_invites + the team_members "
+        "membership checks accept/delete walk) through the SQLAlchemy 2.0 ORM "
+        "session layer (Phase 2 M batch). Strategy C value-type parity: id / "
+        "team_id (BIGINT snowflake) stay NATIVE int (the 5.3 trap; router wraps "
+        "them in str() for the str InviteResponse fields, accept_invite str()s "
+        "team_id at the AcceptInviteResponse boundary); created_by (uuid) → str "
+        "(REQUIRED — InviteResponse.created_by is a str field, pydantic v2 "
+        "rejects a native UUID); expires_at → ISO str (REQUIRED — the inherited "
+        "accept_invite expiry check calls .replace()/fromisoformat() on it, a "
+        "native datetime would AttributeError); created_at → ISO str; max_uses / "
+        "use_count native int. get_invite_by_code reproduces the PostgREST "
+        "teams(id,name) embed as a nested dict. Callers pass team_id as a STR → "
+        "_bigint int-coerces every bigint bind; created_by/user_id are uuid "
+        "strings (asyncpg Uuid codec accepts). No date range filters. Reads "
+        "return []/None; create_invite raises on failure; accept_invite raises "
+        "the same message strings the router pattern-matches (incl. the 23505 → "
+        "'Already a member' path). Writes commit via write_scope(). Inert — flip "
+        "back to false to roll back.",
+    )
+    USE_ORM_AI: bool = Field(
+        default=False,
+        description="Route AIRepository (resource_transcripts / "
+        "resource_summaries upsert-by-resource_id + the AI status columns on "
+        "resources) through the SQLAlchemy 2.0 ORM session layer (Phase 2 M "
+        "batch). Strategy C value-type parity: transcript/summary id (uuid) → "
+        "str (shape only — no consumer reads the row id); resource_id (bigint) "
+        "native int; created_at → ISO str (REQUIRED — Transcript/SummaryResponse "
+        ".created_at are typed Optional[str], pydantic rejects a native "
+        "datetime); segments / key_points / topics (jsonb) → native dict/list; "
+        "duration_seconds (double) → native float. resources.*_status are "
+        "Enum(AiTaskStatus) columns — writes bind the bare status string "
+        "(SQLAlchemy Enum accepts the matching value), filters compare to the "
+        "string; the get_videos_needing_* SELECTs don't project a status column "
+        "so no Enum read-unwrap. upsert reproduces ON CONFLICT (resource_id) DO "
+        "UPDATE. No date range filters. save_* / get_* swallow + return None; "
+        "update_media_ai_status returns False on failure; get_videos_* return [] "
+        "(both cold/uncalled in app today, migrated for completeness). Writes "
+        "commit via write_scope(). Inert — flip back to false to roll back.",
+    )
+    USE_ORM_ISSUE: bool = Field(
+        default=False,
+        description="Route IssueRepository (the issues table — top-level "
+        "user-visible 'thing') through the SQLAlchemy 2.0 ORM session layer "
+        "(Phase 2 M batch). THE M-BATCH UUID HOT SPOT: created_by_user_id and "
+        "assignee_user_id are str()'d because THREE app-layer call sites "
+        "(issues_router._assert_visibility, issue_messages_router."
+        "_assert_issue_visible, ws_router._resolve_issue_ws_user) compare them "
+        "==/in a STRING user_id for authz — a native uuid.UUID would compare "
+        "unequal forever (silent 404/4001 for the legitimate owner, no error/no "
+        "log). created_by_agent_id / assignee_agent_id → str for shape parity. "
+        "ai_session_id + all bigint ids/FKs (id / issue_number / team_id / "
+        "project_id / parent_id / goal_id) stay NATIVE int (5.3 trap; "
+        "ai_session_id is fed to a supabase .eq that coerces). status / priority "
+        "/ origin_kind are plain Text columns (CHECK-constrained, NOT SQLAlchemy "
+        "Enum) → native str, no _plain unwrap. timestamps → ISO str; "
+        "execution_state (jsonb) → native dict. atomic_create keeps the "
+        "counter-UPDATE+INSERT atomic by calling the SAME issue_create_atomic "
+        "SECURITY DEFINER proc (mig 173) via SELECT * FROM "
+        "issue_create_atomic(CAST(:payload AS jsonb)) inside write_scope(). "
+        "list_for_user reproduces the own-OR-assignee OR filter + count='exact'. "
+        "No date range filters. get_* return None; update raises ValueError on "
+        "not-found/no-op; atomic_create raises RuntimeError on empty result. "
+        "Writes commit via write_scope(). Inert — flip back to false to roll "
+        "back.",
+    )
+    USE_ORM_TAGS: bool = Field(
+        default=False,
+        description="Route TagsRepository (the tag system — tags table CRUD + the "
+        "resource_tags M:N junction + tag_groups embed + RPC-backed counts) "
+        "through the SQLAlchemy 2.0 ORM session layer (Phase 2 M batch). ID-TYPE "
+        "FINDING: contrary to the brief's hint, tags.id is BIGINT (Snowflake), NOT "
+        "uuid — so every tag id stays NATIVE int (the 5.3 trap; every consumer "
+        "str()s it at the boundary / routes it through the SnowflakeId response "
+        "type). resource_tags PK is composite (resource_id, tag_id) BIGINT → no "
+        "mixed-PK bulk_upsert hazard; add/bulk_add reproduce the PostgREST ON "
+        "CONFLICT DO UPDATE via pg_insert().on_conflict_do_update in one "
+        "write_scope(). The ONLY uuid is tags.user_id → str (TagResponse.user_id "
+        "is a str field; pydantic rejects native UUID). created_at → ISO str; "
+        "confidence (double) native float; type is CHECK-text NOT Enum (no _plain "
+        "unwrap). get_all_tags / get_tag_counts reproduce the get_tag_counts_by_ids "
+        "/ get_user_tag_counts RPCs (DB-side GROUP BY) with the legacy fallback. "
+        "CONCERN (NOT repaired): the legacy _get_tag_counts_fallback selects a "
+        "non-existent resources.user_id column (real col is creator_id) → PG 42703; "
+        "the ORM faithfully reproduces that 42703 via raw SQL rather than silently "
+        "repairing it (the RPC primary path means this branch is ~never hit). No "
+        "date range filters. Reads return []/None; create raises; writes commit via "
+        "write_scope(). Inert — flip back to false to roll back.",
+    )
+    USE_ORM_SKILL: bool = Field(
+        default=False,
+        description="Route SkillRepository (the AI-Library skill surface — skills "
+        "CRUD + skill_files multi-file CRUD + skill_versions/skill_file_versions "
+        "snapshots + the agent_skills reverse index) through the SQLAlchemy 2.0 "
+        "ORM session layer (Phase 2 M batch). 15 callsites, all routed through "
+        "get_skill_repository(). ID TYPES: skills.id is BIGINT → native int (5.3 "
+        "trap; every consumer int()s it). skill_files.id is UUID → str for SHAPE "
+        "parity (SkillFileOut.id: UUID accepts str or native; NO consumer does "
+        "UUID()/==/dict-key on a file id — audited). skills.created_by / "
+        "default_agent_id (uuid) → str. timestamps → ISO str; frontmatter_json / "
+        "input_schema (jsonb) → native dict; trigger_keywords (text[]) → native "
+        "list; status/category/file_type are CHECK-text NOT Enum (no _plain). "
+        "upsert_file reproduces the (skill_id,path) ON CONFLICT DO UPDATE "
+        "(ux_skill_files_path); the versioned writes keep the legacy "
+        "snapshot-then-update two-step (now inside one write_scope() — no "
+        "half-commit, behavior preserved, documented non-atomicity not 'repaired'). "
+        "No date range filters. Reads swallow + return None/[]; writes raise. "
+        "Writes commit via write_scope(). Inert — flip back to false to roll back.",
+    )
 
     # ============================================
     # 下载设置

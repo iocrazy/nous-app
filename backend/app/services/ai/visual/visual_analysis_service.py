@@ -28,7 +28,7 @@ from loguru import logger
 from app.boundary import URLBlockedError, safe_async_client
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.adapters.factory import (
     get_adapter_for_user,
@@ -246,7 +246,7 @@ class VisualAnalysisService:
         wraps so agent_runs gets its row.
         """
         # Compose system prompt from the analyze agent's IDENTITY/SOUL/AGENT.
-        composer = PromptComposer(get_agent_repository(), SkillRepository())
+        composer = PromptComposer(get_agent_repository(), get_skill_repository())
         composed = await composer.compose(
             ComposerInput(
                 agent_slug=self.AGENT_SLUG,
@@ -257,7 +257,7 @@ class VisualAnalysisService:
         adapter = self._build_adapter(composed.model or self.model)
         runner = AgentRunner(
             adapter=adapter,
-            skill_tool=SkillToolService(SkillRepository()),
+            skill_tool=SkillToolService(get_skill_repository()),
         )
 
         # The user turn is a single message whose content is the array

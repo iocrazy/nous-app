@@ -490,11 +490,11 @@ def attach_tags_step(*, resource_id: str, tag_ids: list[str]) -> int:
     freshly-created resource. Without this step the tag_ids submitted
     in POST /api/v1/media/fetch were silently dropped, which broke the
     tag-driven AI chain (no Transcript tag → no transcription)."""
-    from app.repositories.tags_repository import TagsRepository
+    from app.repositories.tags_repository import get_tags_repository
 
     async def _do() -> int:
         try:
-            await TagsRepository().bulk_add_tags_to_resource(
+            await get_tags_repository().bulk_add_tags_to_resource(
                 resource_id, tag_ids, source="manual"
             )
             return len(tag_ids)

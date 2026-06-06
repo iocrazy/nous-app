@@ -25,7 +25,7 @@ from loguru import logger
 from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import get_agent_repository
-from app.repositories.skill_repository import SkillRepository
+from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.chat.resource_ref_resolver import resolve_resource_refs
@@ -454,7 +454,7 @@ class AILibraryChatService:
         # then build the full runner stack (HookRegistry pre-populated,
         # fallback chain wrapping adapter, memory recall pre-fetched).
         agent_repo = get_agent_repository()
-        skill_repo = SkillRepository()
+        skill_repo = get_skill_repository()
         agent_record = await agent_repo.get_by_slug(agent_slug)
         if not agent_record:
             raise HTTPException(
@@ -992,7 +992,7 @@ class AILibraryChatService:
             import asyncio as _asyncio
 
             from app.repositories.session_memory_repository import (
-                SessionMemoryRepository,
+                get_session_memory_repository,
             )
             from app.services.ai.runner.session_memory_runner import (
                 maybe_update_session_memory,
@@ -1006,7 +1006,7 @@ class AILibraryChatService:
                     session_id=str(session_id),
                     messages=full_messages,
                     model=model,
-                    repo=SessionMemoryRepository(),
+                    repo=get_session_memory_repository(),
                 ),
                 name=f"session-memory-update-{session_id}",
             )
@@ -1152,10 +1152,10 @@ class AILibraryChatService:
         session_memory_loader = None
         if session_id is not None:
             from app.repositories.session_memory_repository import (
-                SessionMemoryRepository,
+                get_session_memory_repository,
             )
 
-            _sm_repo = SessionMemoryRepository()
+            _sm_repo = get_session_memory_repository()
 
             async def _load_session_memory() -> Optional[str]:
                 row = await _sm_repo.load(session_id)

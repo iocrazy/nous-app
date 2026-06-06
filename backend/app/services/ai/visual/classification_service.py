@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 
 from loguru import logger
 
-from app.repositories.tags_repository import TagsRepository
+from app.repositories.tags_repository import get_tags_repository
 
 
 @dataclass
@@ -180,7 +180,7 @@ class ClassificationService:
         )
 
         added_tags = []
-        repo = TagsRepository()
+        repo = get_tags_repository()
 
         # Get the system tag
         primary_tag = await repo.get_tag_by_name(result.primary_tag)

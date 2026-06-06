@@ -133,7 +133,7 @@ async def test_happy_path_queued_to_done_with_outbox():
             return_value=agent_repo,
         ),
         patch(
-            "app.services.workforce.agent_worker.SkillRepository",
+            "app.services.workforce.agent_worker.get_skill_repository",
             return_value=MagicMock(),
         ),
         patch(
@@ -337,7 +337,7 @@ async def test_run_turn_exception_marks_failed():
             return_value=agent_repo,
         ),
         patch(
-            "app.services.workforce.agent_worker.SkillRepository",
+            "app.services.workforce.agent_worker.get_skill_repository",
             return_value=MagicMock(),
         ),
         patch(
@@ -419,7 +419,7 @@ async def test_outbox_routes_to_agent_when_sender_kind_agent():
             return_value=agent_repo,
         ),
         patch(
-            "app.services.workforce.agent_worker.SkillRepository",
+            "app.services.workforce.agent_worker.get_skill_repository",
             return_value=MagicMock(),
         ),
         patch(

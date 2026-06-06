@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.core.redis import get_async_redis
-from app.repositories.tags_repository import TagsRepository
+from app.repositories.tags_repository import get_tags_repository
 from app.schemas.tags import TagListResponse
 
 router = APIRouter(prefix="/auth/temp-token", tags=["Temp Token"])
@@ -122,7 +122,7 @@ async def get_tags_by_token(
             detail="Token does not have tags:read scope",
         )
 
-    repo = TagsRepository()
+    repo = get_tags_repository()
     tags = await repo.get_all_tags(data["user_id"], enabled_only=enabled_only)
 
     return TagListResponse(tags=tags, total=len(tags))
@@ -167,7 +167,7 @@ async def create_tag_by_token(token: str, request: CreateTagRequest):
             detail="Token does not have tags:write scope",
         )
 
-    repo = TagsRepository()
+    repo = get_tags_repository()
 
     # Check duplicate
     existing = await repo.get_tag_by_name(request.name, data["user_id"])
