@@ -379,7 +379,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       {/* Mobile filter chip bar (Pixcall-style) — desktop keeps the FilterBar */}
       {filterBarEligible && (
         <FilterChipBar
-          className="md:hidden border-b border-zinc-800/60 shrink-0"
           config={filterBarConfig}
           allTags={allTags}
           availablePlatforms={availablePlatforms}

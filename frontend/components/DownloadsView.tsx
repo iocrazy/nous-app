@@ -999,7 +999,6 @@ export const DownloadsView: React.FC = () => {
       {/* Mobile filter chip bar (Pixcall-style) — desktop keeps the FilterBar */}
       {libraryViewMode !== 'feed' && (
         <FilterChipBar
-          className="md:hidden border-b border-zinc-800/60 shrink-0"
           config={filterBarConfig}
           allTags={allTags}
           availablePlatforms={availablePlatforms}
