@@ -382,6 +382,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
           className="md:hidden border-b border-zinc-800/60 shrink-0"
           config={filterBarConfig}
           allTags={allTags}
+          availablePlatforms={availablePlatforms}
           onOpenFacet={setOpenFacet}
         />
       )}

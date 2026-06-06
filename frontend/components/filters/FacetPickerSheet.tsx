@@ -6,9 +6,9 @@
 // keeps its own focused screen so the unbounded Tags catalog never competes
 // for space with the bounded facets.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Check, Search } from 'lucide-react';
+import { X, Check, Search, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { UseFilterBarConfigReturn } from '../../hooks/useFilterBarConfig';
@@ -35,6 +35,9 @@ interface FacetPickerSheetProps {
   config: UseFilterBarConfigReturn;
   allTags: Tag[];
   availablePlatforms?: string[];
+  /** Create a new tag from the search box. When omitted, the create row is
+   *  hidden (e.g. scopes where the parent can't refresh its tag list). */
+  onCreateTag?: (name: string) => Promise<Tag>;
 }
 
 function toggleIn<T>(arr: readonly T[], v: T): T[] {
@@ -51,9 +54,15 @@ export function FacetPickerSheet({
   config,
   allTags,
   availablePlatforms = [],
+  onCreateTag,
 }: FacetPickerSheetProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
+  const [creating, setCreating] = useState(false);
+  // Swipe-down-to-dismiss (drag from the header/handle area).
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartY = useRef<number | null>(null);
 
   const { chipValues, setChipValue, clearChip, isChipActive } = config;
 
@@ -77,6 +86,22 @@ export function FacetPickerSheet({
       });
   }, [allTags, query, chipValues.tags.tag_ids]);
 
+  // Group the filtered tags by category; ungrouped ('') sorts last.
+  const groupedTags = useMemo(() => {
+    const map = new Map<string, Tag[]>();
+    for (const tag of tagRows) {
+      const g = tag.group_name || '';
+      const arr = map.get(g);
+      if (arr) arr.push(tag);
+      else map.set(g, [tag]);
+    }
+    return Array.from(map.entries()).sort((a, b) => {
+      if (a[0] === '') return 1;
+      if (b[0] === '') return -1;
+      return a[0].localeCompare(b[0]);
+    });
+  }, [tagRows]);
+
   if (!open || !facetId) return null;
 
   const facet = FACETS.find((f) => f.id === facetId);
@@ -98,13 +123,92 @@ export function FacetPickerSheet({
 
   const isTags = facetId === 'tags';
 
-  return createPortal(
-    <div className="md:hidden fixed inset-0 z-[70] bg-zinc-950 flex flex-col">
-      {/* Header */}
-      <div
-        className="px-4 py-3 flex items-center justify-between border-b border-zinc-800 shrink-0"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
+  const trimmed = query.trim();
+  const exactExists = trimmed
+    ? allTags.some((tg) => tg.name.toLowerCase() === trimmed.toLowerCase())
+    : true;
+  const showCreate = !!onCreateTag && trimmed.length > 0 && !exactExists;
+  const handleCreate = async () => {
+    if (!onCreateTag || creating) return;
+    const name = query.trim();
+    if (!name) return;
+    setCreating(true);
+    try {
+      const tag = await onCreateTag(name);
+      setChipValue('tags', {
+        tag_ids: [...chipValues.tags.tag_ids, tag.id],
+      });
+      setQuery('');
+    } catch (err) {
+      console.error('[FacetPickerSheet] create tag failed:', err);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const renderTagRow = (tag: Tag) => {
+    const checked = selectedTagSet.has(tag.id);
+    return (
+      <button
+        key={tag.id}
+        type="button"
+        onClick={() =>
+          setChipValue('tags', {
+            tag_ids: toggleIn(chipValues.tags.tag_ids, tag.id),
+          })
+        }
+        className={`w-full px-4 py-3 flex items-center gap-3 text-left border-b border-zinc-800/50 ${
+          checked ? 'bg-indigo-500/10' : 'active:bg-zinc-800/50'
+        }`}
       >
+        <span
+          className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
+            checked ? 'bg-indigo-500 text-white' : 'border border-zinc-600'
+          }`}
+        >
+          {checked && <Check size={13} />}
+        </span>
+        <span className="text-sm text-white flex-1 truncate">{tag.name}</span>
+        <span className="text-[11px] text-zinc-500 shrink-0">{tagCount(tag)}</span>
+      </button>
+    );
+  };
+
+  const onDragStart = (e: React.TouchEvent) => {
+    dragStartY.current = e.touches[0].clientY;
+    setDragging(true);
+  };
+  const onDragMove = (e: React.TouchEvent) => {
+    if (dragStartY.current == null) return;
+    setDragY(Math.max(0, e.touches[0].clientY - dragStartY.current));
+  };
+  const onDragEnd = () => {
+    setDragging(false);
+    if (dragY > 90) onClose();
+    setDragY(0);
+    dragStartY.current = null;
+  };
+
+  return createPortal(
+    <div
+      className="md:hidden fixed inset-0 z-[70] bg-zinc-950 flex flex-col animate-in slide-in-from-bottom duration-300"
+      style={{
+        transform: dragY ? `translateY(${dragY}px)` : undefined,
+        transition: dragging ? 'none' : 'transform 0.2s ease',
+      }}
+    >
+      {/* Grab handle + header — drag down here to dismiss */}
+      <div
+        onTouchStart={onDragStart}
+        onTouchMove={onDragMove}
+        onTouchEnd={onDragEnd}
+        className="shrink-0"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)' }}
+      >
+        <div className="flex justify-center pb-1.5">
+          <div className="h-1 w-10 rounded-full bg-zinc-600" />
+        </div>
+        <div className="px-4 py-2.5 flex items-center justify-between border-b border-zinc-800">
         <button
           type="button"
           onClick={onClose}
@@ -135,50 +239,45 @@ export function FacetPickerSheet({
         >
           <Check size={18} />
         </button>
+        </div>
       </div>
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
         {isTags ? (
           <div>
-            {tagRows.length === 0 ? (
+            {/* Create-new row (when the typed name doesn't already exist) */}
+            {showCreate && (
+              <button
+                type="button"
+                onClick={handleCreate}
+                disabled={creating}
+                className="w-full px-4 py-3 flex items-center gap-3 text-left border-b border-zinc-800/50 active:bg-zinc-800/50 disabled:opacity-50"
+              >
+                <span className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 bg-indigo-500 text-white">
+                  <Plus size={13} />
+                </span>
+                <span className="text-sm text-indigo-300 flex-1 truncate">
+                  {t('resources.filter.createTag', 'Create "{{name}}"', {
+                    name: trimmed,
+                  })}
+                </span>
+              </button>
+            )}
+
+            {tagRows.length === 0 && !showCreate ? (
               <div className="px-4 py-6 text-sm text-zinc-500">
                 {t('resources.filter.noTags', 'No matching tags')}
               </div>
             ) : (
-              tagRows.map((tag) => {
-                const checked = selectedTagSet.has(tag.id);
-                return (
-                  <button
-                    key={tag.id}
-                    type="button"
-                    onClick={() =>
-                      setChipValue('tags', {
-                        tag_ids: toggleIn(chipValues.tags.tag_ids, tag.id),
-                      })
-                    }
-                    className={`w-full px-4 py-3 flex items-center gap-3 text-left border-b border-zinc-800/50 ${
-                      checked ? 'bg-indigo-500/10' : 'active:bg-zinc-800/50'
-                    }`}
-                  >
-                    <span
-                      className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
-                        checked
-                          ? 'bg-indigo-500 text-white'
-                          : 'border border-zinc-600'
-                      }`}
-                    >
-                      {checked && <Check size={13} />}
-                    </span>
-                    <span className="text-sm text-white flex-1 truncate">
-                      {tag.name}
-                    </span>
-                    <span className="text-[11px] text-zinc-500 shrink-0">
-                      {tagCount(tag)}
-                    </span>
-                  </button>
-                );
-              })
+              groupedTags.map(([group, tags]) => (
+                <div key={group || '__ungrouped__'}>
+                  <div className="px-4 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                    {group || t('resources.filter.ungrouped', 'Ungrouped')}
+                  </div>
+                  {tags.map(renderTagRow)}
+                </div>
+              ))
             )}
           </div>
         ) : (
