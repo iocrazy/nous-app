@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.tag_preferences_repository import TagPreferencesRepository
+from app.repositories.tag_preferences_repository import (
+    get_tag_preferences_repository,
+)
 from app.repositories.tags_repository import TagsRepository
 from app.schemas.tag_preferences import (
     TagPreferencesResponse,
@@ -239,7 +241,7 @@ async def create_tag(
 @router.get("/preferences", response_model=TagPreferencesResponse)
 async def get_tag_preferences(auth: AuthDep):
     """Get current user's tag picker preferences."""
-    repo = TagPreferencesRepository()
+    repo = get_tag_preferences_repository()
     prefs = await repo.get_preferences(auth.user_id)
     return TagPreferencesResponse(**prefs)
 
@@ -250,7 +252,7 @@ async def update_tag_preferences(
     request: TagPreferencesUpdate,
 ):
     """Update tag picker preferences (partial merge)."""
-    repo = TagPreferencesRepository()
+    repo = get_tag_preferences_repository()
     updated = await repo.upsert_preferences(
         auth.user_id,
         request.model_dump(exclude_none=True),

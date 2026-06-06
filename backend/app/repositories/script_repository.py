@@ -1,10 +1,28 @@
-"""Script Repository Layer — data access for script_projects and script_chapters."""
+"""Script Repository Layer — data access for script_projects and script_chapters.
 
-from typing import Any, Dict, List, Optional
+ORM 2.0 migration (Batch L1b): the four ``Script*Repository`` classes are the
+legacy supabase-py REST implementations; their ``Script*RepositoryOrm``
+successors (in ``script_repository_orm.py``) run on SQLAlchemy 2.0. Call sites
+go through the ``get_script_*_repository()`` factories (bottom of this file)
+which pick the ORM subclass when ``USE_ORM_SCRIPTS`` is on AND the engine is
+configured.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.repositories.base_repository import BaseRepository
+
+if TYPE_CHECKING:
+    from app.repositories.script_repository_orm import (
+        ScriptAssetRepositoryOrm,
+        ScriptChapterRepositoryOrm,
+        ScriptProjectRepositoryOrm,
+        ScriptStoryboardLinkRepositoryOrm,
+    )
 
 
 class ScriptProjectRepository(BaseRepository):
@@ -178,3 +196,73 @@ class ScriptStoryboardLinkRepository(BaseRepository):
                 "Failed to list links for storyboard %s: %s", storyboard_project_id, e
             )
             return []
+
+
+# ─── SQLAlchemy ORM migration factories (Batch L1b) ────────────────────
+#
+# Each factory returns the ORM subclass when USE_ORM_SCRIPTS is set AND the
+# SQLAlchemy engine is configured; otherwise the legacy supabase-py REST path.
+# A flag-on but engine-missing deploy logs once and falls back (never crashes).
+# The four ORM subclasses are drop-ins (each IS-A its REST counterpart).
+
+
+def _orm_scripts_enabled() -> bool:
+    from app.core.config import settings
+
+    if not settings.USE_ORM_SCRIPTS:
+        return False
+    from app.db.engine import is_configured
+
+    if is_configured():
+        return True
+    logger.warning(
+        "USE_ORM_SCRIPTS=true but SUPAVISOR_DATABASE_URL is empty "
+        "— falling back to supabase-py path"
+    )
+    return False
+
+
+def get_script_project_repository() -> (
+    Union["ScriptProjectRepository", "ScriptProjectRepositoryOrm"]
+):
+    """Return the right ScriptProjectRepository per env (ORM or REST)."""
+    if _orm_scripts_enabled():
+        from app.repositories.script_repository_orm import ScriptProjectRepositoryOrm
+
+        return ScriptProjectRepositoryOrm()
+    return ScriptProjectRepository()
+
+
+def get_script_chapter_repository() -> (
+    Union["ScriptChapterRepository", "ScriptChapterRepositoryOrm"]
+):
+    """Return the right ScriptChapterRepository per env (ORM or REST)."""
+    if _orm_scripts_enabled():
+        from app.repositories.script_repository_orm import ScriptChapterRepositoryOrm
+
+        return ScriptChapterRepositoryOrm()
+    return ScriptChapterRepository()
+
+
+def get_script_asset_repository() -> (
+    Union["ScriptAssetRepository", "ScriptAssetRepositoryOrm"]
+):
+    """Return the right ScriptAssetRepository per env (ORM or REST)."""
+    if _orm_scripts_enabled():
+        from app.repositories.script_repository_orm import ScriptAssetRepositoryOrm
+
+        return ScriptAssetRepositoryOrm()
+    return ScriptAssetRepository()
+
+
+def get_script_storyboard_link_repository() -> (
+    Union["ScriptStoryboardLinkRepository", "ScriptStoryboardLinkRepositoryOrm"]
+):
+    """Return the right ScriptStoryboardLinkRepository per env (ORM or REST)."""
+    if _orm_scripts_enabled():
+        from app.repositories.script_repository_orm import (
+            ScriptStoryboardLinkRepositoryOrm,
+        )
+
+        return ScriptStoryboardLinkRepositoryOrm()
+    return ScriptStoryboardLinkRepository()

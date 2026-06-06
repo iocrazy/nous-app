@@ -7,7 +7,7 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import get_agent_repository
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
 
@@ -33,7 +33,7 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
     if not agent_id or not user_id:
         return None
 
-    agent = await AgentRepository().get_by_id(UUID(str(agent_id)))
+    agent = await get_agent_repository().get_by_id(UUID(str(agent_id)))
     if not agent:
         raise RuntimeError(f"assignee agent {agent_id} not found")
 

@@ -1,10 +1,25 @@
-"""Style Template Repository — data access for style_templates."""
+"""Style Template Repository — data access for style_templates.
 
-from typing import Any, Dict, List, Optional
+ORM 2.0 migration (Batch L1): ``StyleTemplateRepository`` is the legacy
+supabase-py REST implementation; ``StyleTemplateRepositoryOrm`` (in
+``style_template_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor.
+Call sites go through ``get_style_template_repository()`` (bottom of this file)
+which picks the ORM subclass when ``USE_ORM_STYLE_TEMPLATES`` is on AND the
+engine is configured.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.repositories.base_repository import BaseRepository
+
+if TYPE_CHECKING:
+    from app.repositories.style_template_repository_orm import (
+        StyleTemplateRepositoryOrm,
+    )
 
 
 class StyleTemplateRepository(BaseRepository):
@@ -51,3 +66,30 @@ class StyleTemplateRepository(BaseRepository):
         except Exception as e:
             logger.error(f"Failed to list style templates: {e}")
             return []
+
+
+def get_style_template_repository() -> (
+    Union["StyleTemplateRepository", "StyleTemplateRepositoryOrm"]
+):
+    """Return the right StyleTemplateRepository implementation per env.
+
+    ORM when ``USE_ORM_STYLE_TEMPLATES`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_STYLE_TEMPLATES:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.style_template_repository_orm import (
+                StyleTemplateRepositoryOrm,
+            )
+
+            return StyleTemplateRepositoryOrm()
+        logger.warning(
+            "USE_ORM_STYLE_TEMPLATES=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return StyleTemplateRepository()

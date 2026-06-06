@@ -49,7 +49,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.core.config import settings
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import get_agent_repository
 from app.repositories.agent_workforce_repository import AgentWorkforceRepository
 from app.repositories.skill_repository import SkillRepository
 from app.services.ai.adapters.factory import provider_key_for_model
@@ -113,7 +113,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         return {"task_id": str(task_id), "status": "skipped", "reason": "not_claimable"}
 
     # Resolve the agent record for model + budget + identity.
-    agent_repo = AgentRepository()
+    agent_repo = get_agent_repository()
     skill_repo = SkillRepository()
     agent = await agent_repo.get_by_id(agent_id)
     if not agent:

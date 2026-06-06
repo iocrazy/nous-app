@@ -214,7 +214,7 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
             AsyncMock(return_value=client),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository",
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo_instance,
         ),
         patch(
@@ -384,7 +384,7 @@ async def test_chat_persists_tool_calls_into_metadata_json() -> None:
             AsyncMock(return_value=client),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository",
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo_instance,
         ),
         patch(
@@ -547,7 +547,7 @@ async def test_chat_streams_chunks_via_callback() -> None:
             AsyncMock(return_value=client),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository",
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo_instance,
         ),
         patch(
@@ -716,7 +716,7 @@ async def test_chat_chunk_callback_failure_does_not_abort_turn() -> None:
             AsyncMock(return_value=client),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository",
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
             return_value=fake_agent_repo_instance,
         ),
         patch(

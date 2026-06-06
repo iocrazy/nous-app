@@ -24,7 +24,7 @@ from uuid import UUID
 from loguru import logger
 
 from app.core.config import settings
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import SkillRepository
 from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.adapters.factory import (
@@ -143,7 +143,7 @@ class SummarizeService:
         if not transcript:
             return None
 
-        composer = PromptComposer(AgentRepository(), SkillRepository())
+        composer = PromptComposer(get_agent_repository(), SkillRepository())
         request_instructions = (
             "Summarize the following transcript per your AGENT spec. "
             "Output JSON ONLY (no markdown fences, no preamble)."

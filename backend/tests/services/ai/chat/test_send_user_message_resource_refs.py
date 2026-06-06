@@ -165,7 +165,7 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
             new=AsyncMock(return_value=stack),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository",
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
         ) as mock_agent_repo_cls,
         patch(
             "app.services.ai.chat.ai_library_chat_service.SkillRepository",
@@ -301,7 +301,7 @@ async def test_ref_warnings_prepended_to_user_message():
             new=AsyncMock(return_value=stack),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository"
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository"
         ) as mock_agent_repo_cls,
         patch("app.services.ai.chat.ai_library_chat_service.SkillRepository"),
         patch(
@@ -412,7 +412,7 @@ async def test_binary_attachments_still_use_existing_resolver():
             new=AsyncMock(return_value=stack),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository"
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository"
         ) as mock_agent_repo_cls,
         patch("app.services.ai.chat.ai_library_chat_service.SkillRepository"),
         patch(
@@ -568,7 +568,7 @@ async def test_split_loop_handles_pydantic_attachment_request():
             new=AsyncMock(return_value=stack),
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_service.AgentRepository",
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
         ) as mock_agent_repo_cls,
         patch("app.services.ai.chat.ai_library_chat_service.SkillRepository"),
         patch(

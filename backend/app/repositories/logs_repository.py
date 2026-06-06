@@ -1,11 +1,27 @@
-"""Repository for User Logs data access."""
+"""Repository for User Logs data access.
+
+ORM 2.0 migration (Batch L2): ``LogsRepository`` is the legacy supabase-py REST
+implementation; ``LogsRepositoryOrm`` (in ``logs_repository_orm.py``) is the
+SQLAlchemy 2.0 ORM successor. Call sites go through ``get_logs_repository()``
+(bottom of this file) which picks the ORM subclass when ``USE_ORM_LOGS`` is on
+AND the engine is configured.
+
+NOTE: the ``user_logs`` table is ALSO served by ``UserLogsRepository`` (the
+append-only writer + distinct reads) — disjoint method sets, both live, each
+with its own ORM subclass.
+"""
+
+from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.logs_repository_orm import LogsRepositoryOrm
 
 
 class LogsRepository:
@@ -203,3 +219,26 @@ class LogsRepository:
         deleted_count = len(result.data) if result.data else 0
         logger.info(f"Deleted {deleted_count} logs for user {user_id}")
         return deleted_count
+
+
+def get_logs_repository() -> Union["LogsRepository", "LogsRepositoryOrm"]:
+    """Return the right LogsRepository implementation per env.
+
+    ORM when ``USE_ORM_LOGS`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_LOGS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.logs_repository_orm import LogsRepositoryOrm
+
+            return LogsRepositoryOrm()
+        logger.warning(
+            "USE_ORM_LOGS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return LogsRepository()

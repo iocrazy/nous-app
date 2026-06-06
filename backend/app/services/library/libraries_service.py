@@ -8,14 +8,14 @@ Business logic for team libraries: creation, listing, and management.
 
 from typing import Optional
 
-from app.repositories.libraries_repository import LibrariesRepository
+from app.repositories.libraries_repository import get_libraries_repository
 
 
 class LibrariesService:
     """Library business logic"""
 
     def __init__(self):
-        self.repo = LibrariesRepository()
+        self.repo = get_libraries_repository()
 
     async def create_library(
         self,

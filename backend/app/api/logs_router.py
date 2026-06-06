@@ -12,12 +12,9 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import get_current_user
-from app.repositories.logs_repository import LogsRepository
+from app.repositories.logs_repository import get_logs_repository
 
 router = APIRouter(prefix="/logs", tags=["Logs"])
-
-# Repository instance
-logs_repo = LogsRepository()
 
 
 # ============================================
@@ -151,7 +148,7 @@ async def get_logs(
             start_date, end_date = parse_date_range(date_range)
 
         # Query logs
-        logs, total = await logs_repo.get_logs(
+        logs, total = await get_logs_repository().get_logs(
             user_id=user_id,
             levels=levels,
             start_date=start_date,
@@ -218,7 +215,7 @@ async def export_logs(
             start_date, end_date = parse_date_range(date_range)
 
         # Get logs for export
-        logs = await logs_repo.get_logs_for_export(
+        logs = await get_logs_repository().get_logs_for_export(
             user_id=user_id,
             levels=levels,
             start_date=start_date,

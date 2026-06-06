@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from app.core.deps import get_current_user
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import get_agent_repository
 from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
     AgentWorkforceRepository,
@@ -51,7 +51,7 @@ _HEALTH_RECENT_WINDOW_S = 300
 async def _resolve_persistent_agent(slug: str) -> dict[str, Any]:
     """Look up a persistent agent by slug. Raises 404 / 400 cleanly so
     the admin-action endpoints don't have to repeat the boilerplate."""
-    repo = AgentRepository()
+    repo = get_agent_repository()
     agent = await repo.get_by_slug(slug)
     if not agent:
         raise HTTPException(status_code=404, detail=f"agent '{slug}' not found")
@@ -249,7 +249,7 @@ async def pause_agent(
     """
     agent = await _resolve_persistent_agent(slug)
     reason = (body.reason or "manual").strip()[:120]
-    repo = AgentRepository()
+    repo = get_agent_repository()
     await repo.update_fields(UUID(agent["id"]), {"paused_reason": reason})
     logger.info(f"[workforce] agent '{slug}' paused (reason={reason}) by user")
     return {"slug": slug, "paused_reason": reason, "status": "paused"}
@@ -262,7 +262,7 @@ async def resume_agent(
 ) -> dict[str, Any]:
     """Clear ``paused_reason`` so the agent accepts new runs again."""
     agent = await _resolve_persistent_agent(slug)
-    repo = AgentRepository()
+    repo = get_agent_repository()
     await repo.update_fields(UUID(agent["id"]), {"paused_reason": None})
     logger.info(f"[workforce] agent '{slug}' resumed by user")
     return {"slug": slug, "paused_reason": None, "status": "resumed"}

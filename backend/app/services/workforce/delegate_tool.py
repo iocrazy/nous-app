@@ -36,7 +36,7 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import AgentRepository, get_agent_repository
 from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
     AgentWorkforceRepository,
@@ -123,7 +123,7 @@ class DelegateToolService:
         self.caller_user_id = caller_user_id
         self.parent_run_id = parent_run_id
         self.agent_depth = agent_depth
-        self.agent_repo = agent_repo or AgentRepository()
+        self.agent_repo = agent_repo or get_agent_repository()
         self.workforce_repo = workforce_repo or AgentWorkforceRepository()
 
     async def execute(self, args: Dict[str, Any]) -> Dict[str, Any]:

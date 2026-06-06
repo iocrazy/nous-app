@@ -1,13 +1,23 @@
-"""Repository for ai_agents + agent_skills tables (AI Library Phase 1)."""
+"""Repository for ai_agents + agent_skills tables (AI Library Phase 1).
+
+ORM 2.0 migration (Phase 2 pilot): ``AgentRepository`` is the legacy
+supabase-py REST implementation; ``AgentRepositoryOrm`` (in
+``agent_repository_orm.py``) is the SQLAlchemy 2.0 ORM successor. Call sites
+go through ``get_agent_repository()`` (bottom of this file) which picks the
+ORM subclass when ``USE_ORM_AGENTS`` is on AND the engine is configured.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.agent_repository_orm import AgentRepositoryOrm
 
 
 class AgentRepository:
@@ -287,3 +297,41 @@ class AgentRepository:
             patch["current_version"] = current_version + 1
 
         await client.table(self.TABLE).update(patch).eq("id", str(agent_id)).execute()
+
+
+# ─── SQLAlchemy ORM migration factory (Phase 2 pilot) ──────────────────
+#
+# The supabase-py REST → SQLAlchemy 2.0 ORM cutover for the ai_agents
+# surface. Routes ``AgentRepository`` through the ORM subclass when both
+# ``USE_ORM_AGENTS=true`` and the SQLAlchemy engine is configured
+# (``app.db.engine.is_configured``). Half-configured deploys (flag on,
+# engine missing) fall back to the legacy supabase-py path with a single
+# warning so a misconfigured env never crashes the worker.
+#
+# Call sites use ``get_agent_repository()`` rather than ``AgentRepository()``
+# directly. The ORM subclass is a drop-in (``AgentRepositoryOrm`` IS-A
+# ``AgentRepository``), so existing type hints (``AgentRepository | None``)
+# keep accepting it.
+
+
+def get_agent_repository() -> Union["AgentRepository", "AgentRepositoryOrm"]:
+    """Return the right AgentRepository implementation per env.
+
+    ORM when ``USE_ORM_AGENTS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_AGENTS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.agent_repository_orm import AgentRepositoryOrm
+
+            return AgentRepositoryOrm()
+        logger.warning(
+            "USE_ORM_AGENTS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AgentRepository()

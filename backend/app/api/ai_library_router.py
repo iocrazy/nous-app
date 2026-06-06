@@ -35,7 +35,7 @@ from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import AgentRepository, get_agent_repository
 from app.repositories.agent_runs_repository import (
     get_agent_runs_repository,
 )
@@ -81,7 +81,7 @@ router = APIRouter(prefix="/ai-library", tags=["AI Library"])
 
 def _repos() -> tuple[AgentRepository, SkillRepository]:
     """Return a fresh (AgentRepository, SkillRepository) pair per request."""
-    return AgentRepository(), SkillRepository()
+    return get_agent_repository(), SkillRepository()
 
 
 def _coerce_user_uuid(user_id: str) -> UUID:
@@ -1908,7 +1908,7 @@ async def list_my_memories(
         q = q.eq("kind", kind)
     if agent_slug:
         # Resolve agent_id from slug
-        agent_repo = AgentRepository()
+        agent_repo = get_agent_repository()
         agent = await agent_repo.get_by_slug(agent_slug)
         if not agent:
             raise HTTPException(

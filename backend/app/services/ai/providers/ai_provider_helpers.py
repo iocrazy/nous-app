@@ -70,10 +70,10 @@ def resolve_analyze_provider_config(
     When ``user_id`` is None or the agent row is missing, returns empty
     config and lets the service route through the factory's default.
     """
-    from app.repositories.agent_repository import AgentRepository
+    from app.repositories.agent_repository import get_agent_repository
     from app.services.ai.adapters.factory import provider_key_for_model
 
-    agent_repo = AgentRepository()
+    agent_repo = get_agent_repository()
     agent = _run_async(agent_repo.get_by_slug("analyze"))
     model = ((agent or {}).get("model") or "").strip()
     if not model:

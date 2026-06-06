@@ -24,7 +24,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.agent_repository import AgentRepository
+from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import SkillRepository
 from app.services.ai.adapters.factory import get_adapter, provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
@@ -72,7 +72,7 @@ class AILibraryChatService:
         chat turns don't have to refetch, and so renaming the slug
         doesn't orphan sessions. Raises 404 when the agent is missing.
         """
-        agent = await AgentRepository().get_by_slug(agent_slug)
+        agent = await get_agent_repository().get_by_slug(agent_slug)
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -453,7 +453,7 @@ class AILibraryChatService:
         # M1.5 wiring: load agent record so we can read budget/fallback,
         # then build the full runner stack (HookRegistry pre-populated,
         # fallback chain wrapping adapter, memory recall pre-fetched).
-        agent_repo = AgentRepository()
+        agent_repo = get_agent_repository()
         skill_repo = SkillRepository()
         agent_record = await agent_repo.get_by_slug(agent_slug)
         if not agent_record:

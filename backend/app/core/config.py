@@ -85,6 +85,20 @@ class Settings(BaseSettings):
         "list_by_agent / get_by_id / list_children reads + request_cancel / "
         "mark_heartbeat_lost writes + monthly_usage_by_agent aggregation)",
     )
+    USE_ORM_AGENTS: bool = Field(
+        default=False,
+        description="Route AgentRepository through the SQLAlchemy 2.0 ORM "
+        "session layer (Phase 2 pilot — replaces the supabase-py REST path for "
+        "ai_agents / agent_skills / ai_agent_versions). Strategy C value-type "
+        "parity: uuid columns (id / user_id / created_by) are coerced to str at "
+        "the dict boundary to match the REST baseline (consumers do "
+        "UUID(agent['id']) / dict-key lookups / supabase inserts that break on a "
+        "native uuid.UUID); bigint team_id / project_id stay native int (REST "
+        "returned int; consumers do int(...) / bare-int compares). Covers "
+        "get_by_slug / get_by_id / list_persistent / list_accessible / "
+        "get_skill_ids reads + update_skill_bindings / update_fields / insert / "
+        "update_fields_versioned writes (writes commit via write_scope())",
+    )
     USE_ORM_RESOURCES: bool = Field(
         default=False,
         description="Route ResourcesRepository through the SQLAlchemy 2.0 ORM "
@@ -101,6 +115,91 @@ class Settings(BaseSettings):
         "the silent-rollback P0 by committing writes via write_scope(). "
         "Covers parsed_media CRUD + lists + search + statistics; the 9 "
         "wrapper methods route through the ORM overrides via Python MRO)",
+    )
+    USE_ORM_STYLE_TEMPLATES: bool = Field(
+        default=False,
+        description="Route StyleTemplateRepository through the SQLAlchemy 2.0 "
+        "ORM session layer (Batch L1 — replaces the supabase-py REST path for "
+        "the style_templates table). Strategy C: created_by uuid → str at the "
+        "dict boundary (REST-parity); bigint id / team_id stay native int; "
+        "created_at / updated_at → ISO str. Covers get_by_id / list_templates "
+        "reads + create / update / hard_delete writes (commit via "
+        "write_scope()). NOTE: style_templates_router is a 301 redirect to "
+        "/skills, so this repo has no live call sites today.",
+    )
+    USE_ORM_TAG_PREFERENCES: bool = Field(
+        default=False,
+        description="Route TagPreferencesRepository through the SQLAlchemy 2.0 "
+        "ORM session layer (Batch L1 — replaces the supabase-py REST path for "
+        "the user_tag_preferences table). Strategy C is a no-op: the public "
+        "return shape is a fixed 3-key defaults-merged dict "
+        "(starred_tag_ids list / picker_settings dict / panel_size dict) with "
+        "no uuid / datetime / bigint output field; user_id is an input only. "
+        "Covers get_preferences read + upsert_preferences write (ON CONFLICT "
+        "user_id, commits via write_scope()).",
+    )
+    USE_ORM_LIBRARIES: bool = Field(
+        default=False,
+        description="Route LibrariesRepository through the SQLAlchemy 2.0 ORM "
+        "session layer (Batch L1 — replaces the supabase-py REST path for the "
+        "libraries table). Strategy C: created_by uuid → str at the dict "
+        "boundary (REST-parity); bigint id stays native int; text "
+        "scope_id / scope_type stay str; created_at / updated_at → ISO str. "
+        "Covers get_by_id / list_by_scope reads + create / update / delete "
+        "writes (commit via write_scope(); create/update return {} on empty "
+        "per REST contract).",
+    )
+    USE_ORM_NOTIFICATIONS: bool = Field(
+        default=False,
+        description="Route NotificationRepository through the SQLAlchemy 2.0 "
+        "ORM session layer (Batch L1b — replaces the supabase-py REST path for "
+        "the notifications / user_notifications / team_members tables). "
+        "Strategy C: bigint id / notification_id / team_id stay native int (the "
+        "5.3 trap — the team-membership filter does `n['team_id'] in team_ids` "
+        "with int both sides); created_at → ISO str; created_by uuid → str for "
+        "shape parity (router serializes straight to HTTP; no type-sensitive "
+        "Python consumer). user_id is an input only. Covers get_user_"
+        "notifications (multi-table read + read-status join) / get_unread_count "
+        "/ mark_as_read / mark_all_as_read writes (upsert, commit via "
+        "write_scope()). delete_notification preserves the legacy graceful "
+        "no-op contract (writes a phantom dismissed_at column → returns False).",
+    )
+    USE_ORM_SCRIPTS: bool = Field(
+        default=False,
+        description="Route the four Script*Repository classes (ScriptProject / "
+        "ScriptChapter / ScriptAsset / ScriptStoryboardLink) through the "
+        "SQLAlchemy 2.0 ORM session layer (Batch L1b — replaces the supabase-py "
+        "REST path for script_projects / script_chapters / script_assets / "
+        "script_storyboard_links). Strategy C: all ids are bigint and stay "
+        "native int (the 5.3 trap); created_by uuid → str for shape parity; "
+        "created_at / updated_at → ISO str. Covers the BaseRepository CRUD "
+        "surface + list_by_project (paginated count) / bulk_upsert / "
+        "get_by_script / list_by_script / list_by_chapter / list_by_storyboard "
+        "(writes commit via write_scope()).",
+    )
+    USE_ORM_LOGS: bool = Field(
+        default=False,
+        description="Route LogsRepository (the user-facing user_logs viewer / "
+        "CSV export) through the SQLAlchemy 2.0 ORM session layer (Batch L2). "
+        "Strategy C: bigint id stays native int (the 5.3 trap); user_id uuid → "
+        "str for shape parity (the LogEntry response model has no user_id field "
+        "and no consumer reads it type-sensitively); created_at → ISO str "
+        "(CONSUMED — the CSV export does str(created_at)). Covers get_logs / "
+        "get_logs_for_export reads + create_log / delete_logs writes (commit "
+        "via write_scope()). NOTE: user_logs is also served by "
+        "UserLogsRepository (USE_ORM_USER_LOGS) — disjoint method sets, both "
+        "live.",
+    )
+    USE_ORM_USER_LOGS: bool = Field(
+        default=False,
+        description="Route UserLogsRepository (the append-only user_logs writer "
+        "+ get_recent / get_paginated / get_by_aweme_id reads) through the "
+        "SQLAlchemy 2.0 ORM session layer (Batch L2). Strategy C: bigint id "
+        "stays native int; user_id uuid → str (shape parity); created_at → ISO "
+        "str. PRESERVES the legacy create() soft-skip on a missing user_id "
+        "(Celery orphan-download NOT-NULL spam guard). Writes commit via "
+        "write_scope(). NOTE: shares the user_logs table with LogsRepository "
+        "(USE_ORM_LOGS).",
     )
     SCOPE_ENFORCE_RESOURCES: bool = Field(
         default=False,
