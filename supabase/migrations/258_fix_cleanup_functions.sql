@@ -10,7 +10,8 @@
 --     resources.creator_id). The mig 066 bodies filtered `pm.user_id =
 --     p_user_id` → `column pm.user_id does not exist`.
 --   * mig 086 dropped parsed_media.cover_url (cover URLs now live in the
---     cover_urls text[] array). The mig 066 bodies SELECTed `pm.cover_url`.
+--     cover_urls jsonb array — mig 004 ADD COLUMN cover_urls JSONB). The mig
+--     066 bodies SELECTed `pm.cover_url`.
 --   * mig 076 renamed media_analysis → resource_analysis AND its key column
 --     media_id → resource_id (now keyed on resources.id, not parsed_media.id).
 --     find_duplicate_videos JOINed the gone `media_analysis` on `media_id`.
@@ -29,7 +30,10 @@
 -- consumes media_id / title / cover_urls. That mismatch was masked because the
 -- RPC always raised and the service always used the fallback. We rename the
 -- return columns to what the service actually reads (and cover_url text →
--- cover_urls text[]) so the restored fast-path produces the SAME result the
+-- cover_urls jsonb -- pm.cover_urls is JSONB (mig 004), NOT text[]; declaring
+-- text[] would raise 42804 at RETURN QUERY time because plpgsql strictly
+-- type-checks the SELECT projection against the RETURNS TABLE column types) so
+-- the restored fast-path produces the SAME result the
 -- fallback does. Postgres forbids changing a RETURNS TABLE column set/type via
 -- CREATE OR REPLACE, so each function is DROP'd first with its exact live arg
 -- signature (mirrors mig 256 / 035 / 059). No _rollback.sql.
@@ -52,7 +56,7 @@ CREATE OR REPLACE FUNCTION find_duplicate_videos(
 RETURNS TABLE (
     media_id bigint,
     title text,
-    cover_urls text[],
+    cover_urls jsonb,
     author varchar(255),
     storage_size bigint,
     created_at timestamptz,
@@ -122,7 +126,7 @@ CREATE OR REPLACE FUNCTION get_cleanup_suggestions(
 RETURNS TABLE (
     media_id bigint,
     title text,
-    cover_urls text[],
+    cover_urls jsonb,
     author varchar(255),
     storage_size bigint,
     created_at timestamptz,
