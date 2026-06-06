@@ -16,9 +16,9 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.storyboard_repository import (
-    StoryboardEdgeRepository,
-    StoryboardFrameRepository,
-    StoryboardNodeRepository,
+    get_storyboard_edge_repository,
+    get_storyboard_frame_repository,
+    get_storyboard_node_repository,
 )
 from app.schemas.storyboard import (
     CanvasSyncRequest,
@@ -48,7 +48,7 @@ async def create_nodes(
     try:
         svc = StoryboardService()
         await svc.verify_project_access(project_id, auth.user_id)
-        node_repo = StoryboardNodeRepository()
+        node_repo = get_storyboard_node_repository()
         nodes = await node_repo.bulk_upsert(
             project_id,
             [n.model_dump() for n in body],
@@ -72,7 +72,7 @@ async def update_node(
 ) -> Dict[str, Any]:
     """Update position, size, or data of a single canvas node."""
     try:
-        node_repo = StoryboardNodeRepository()
+        node_repo = get_storyboard_node_repository()
         updated = await node_repo.update(node_id, body.model_dump(exclude_none=True))
         return {"success": True, "data": updated}
     except Exception as exc:
@@ -89,7 +89,7 @@ async def update_node(
 async def delete_node(auth: AuthDep, node_id: str) -> Dict[str, Any]:
     """Delete a single canvas node."""
     try:
-        node_repo = StoryboardNodeRepository()
+        node_repo = get_storyboard_node_repository()
         await node_repo.delete(node_id)
         return {"success": True}
     except Exception as exc:
@@ -142,7 +142,7 @@ async def create_edges(
     try:
         svc = StoryboardService()
         await svc.verify_project_access(project_id, auth.user_id)
-        edge_repo = StoryboardEdgeRepository()
+        edge_repo = get_storyboard_edge_repository()
         edges = await edge_repo.bulk_upsert(project_id, body)
         return {"success": True, "data": edges}
     except Exception as exc:
@@ -159,7 +159,7 @@ async def create_edges(
 async def delete_edge(auth: AuthDep, edge_id: str) -> Dict[str, Any]:
     """Delete a single canvas edge."""
     try:
-        edge_repo = StoryboardEdgeRepository()
+        edge_repo = get_storyboard_edge_repository()
         await edge_repo.delete(edge_id)
         return {"success": True}
     except Exception as exc:
@@ -181,7 +181,7 @@ async def get_frames(
 ) -> Dict[str, Any]:
     """Return paginated frames for a canvas node."""
     try:
-        frame_repo = StoryboardFrameRepository()
+        frame_repo = get_storyboard_frame_repository()
         all_frames = await frame_repo.get_by_node(node_id)
         total = len(all_frames)
         offset = (page - 1) * limit
@@ -213,7 +213,7 @@ async def update_frame(
 ) -> Dict[str, Any]:
     """Update cinematography metadata on a storyboard frame."""
     try:
-        frame_repo = StoryboardFrameRepository()
+        frame_repo = get_storyboard_frame_repository()
         updated = await frame_repo.update(frame_id, body.model_dump(exclude_none=True))
         return {"success": True, "data": updated}
     except Exception as exc:
@@ -240,7 +240,7 @@ async def reorder_frames(
     if not body:
         raise HTTPException(status_code=422, detail="Frame ID list must not be empty")
     try:
-        frame_repo = StoryboardFrameRepository()
+        frame_repo = get_storyboard_frame_repository()
         await frame_repo.reorder(body)
         return {"success": True}
     except Exception as exc:

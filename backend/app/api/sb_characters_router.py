@@ -13,7 +13,9 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.repositories.storyboard_repository import StoryboardCharacterRepository
+from app.repositories.storyboard_repository import (
+    get_storyboard_character_repository,
+)
 from app.schemas.storyboard import CharacterCreate, CharacterUpdate
 from app.services.storyboard.storyboard_service import StoryboardService
 
@@ -109,7 +111,7 @@ async def list_characters(
     try:
         svc = StoryboardService()
         await svc.verify_project_access(project_id, auth.user_id)
-        character_repo = StoryboardCharacterRepository()
+        character_repo = get_storyboard_character_repository()
         characters = await character_repo.list_by_project(project_id)
         return {"success": True, "data": characters}
     except Exception as exc:

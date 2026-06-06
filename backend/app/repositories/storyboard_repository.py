@@ -8,11 +8,21 @@ entities: projects, nodes, edges, frames, characters, and assets.
 All methods are async and use the Supabase admin client.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.storyboard_repository_orm import (
+        StoryboardAssetRepositoryOrm,
+        StoryboardCharacterRepositoryOrm,
+        StoryboardEdgeRepositoryOrm,
+        StoryboardFrameRepositoryOrm,
+        StoryboardNodeRepositoryOrm,
+        StoryboardProjectRepositoryOrm,
+    )
 
 # --------------------------------------------------------------------------- #
 # 1. StoryboardProjectRepository
@@ -853,3 +863,107 @@ class StoryboardAssetRepository:
         except Exception as e:
             logger.error(f"Failed to list assets for project {project_id}: {e}")
             return []
+
+
+# --------------------------------------------------------------------------- #
+# Factories — route each repo through the ORM when USE_ORM_STORYBOARD is set AND
+# the SQLAlchemy engine is configured; otherwise the legacy supabase-py REST
+# path. A flag-on but engine-missing deploy logs once and falls back to REST
+# (never crashes). All six share the single USE_ORM_STORYBOARD flag.
+# --------------------------------------------------------------------------- #
+
+
+def _storyboard_orm_enabled() -> bool:
+    """True iff USE_ORM_STORYBOARD is set AND the SQLAlchemy engine is
+    configured. Logs once on the flag-on-but-engine-missing fallback."""
+    from app.core.config import settings
+
+    if not settings.USE_ORM_STORYBOARD:
+        return False
+    from app.db.engine import is_configured
+
+    if is_configured():
+        return True
+    logger.warning(
+        "USE_ORM_STORYBOARD=true but SUPAVISOR_DATABASE_URL is empty "
+        "— falling back to supabase-py path"
+    )
+    return False
+
+
+def get_storyboard_project_repository() -> (
+    Union["StoryboardProjectRepository", "StoryboardProjectRepositoryOrm"]
+):
+    """Return the right StoryboardProjectRepository implementation per env."""
+    if _storyboard_orm_enabled():
+        from app.repositories.storyboard_repository_orm import (
+            StoryboardProjectRepositoryOrm,
+        )
+
+        return StoryboardProjectRepositoryOrm()
+    return StoryboardProjectRepository()
+
+
+def get_storyboard_node_repository() -> (
+    Union["StoryboardNodeRepository", "StoryboardNodeRepositoryOrm"]
+):
+    """Return the right StoryboardNodeRepository implementation per env."""
+    if _storyboard_orm_enabled():
+        from app.repositories.storyboard_repository_orm import (
+            StoryboardNodeRepositoryOrm,
+        )
+
+        return StoryboardNodeRepositoryOrm()
+    return StoryboardNodeRepository()
+
+
+def get_storyboard_edge_repository() -> (
+    Union["StoryboardEdgeRepository", "StoryboardEdgeRepositoryOrm"]
+):
+    """Return the right StoryboardEdgeRepository implementation per env."""
+    if _storyboard_orm_enabled():
+        from app.repositories.storyboard_repository_orm import (
+            StoryboardEdgeRepositoryOrm,
+        )
+
+        return StoryboardEdgeRepositoryOrm()
+    return StoryboardEdgeRepository()
+
+
+def get_storyboard_frame_repository() -> (
+    Union["StoryboardFrameRepository", "StoryboardFrameRepositoryOrm"]
+):
+    """Return the right StoryboardFrameRepository implementation per env."""
+    if _storyboard_orm_enabled():
+        from app.repositories.storyboard_repository_orm import (
+            StoryboardFrameRepositoryOrm,
+        )
+
+        return StoryboardFrameRepositoryOrm()
+    return StoryboardFrameRepository()
+
+
+def get_storyboard_character_repository() -> (
+    Union["StoryboardCharacterRepository", "StoryboardCharacterRepositoryOrm"]
+):
+    """Return the right StoryboardCharacterRepository implementation per env."""
+    if _storyboard_orm_enabled():
+        from app.repositories.storyboard_repository_orm import (
+            StoryboardCharacterRepositoryOrm,
+        )
+
+        return StoryboardCharacterRepositoryOrm()
+    return StoryboardCharacterRepository()
+
+
+def get_storyboard_asset_repository() -> (
+    Union["StoryboardAssetRepository", "StoryboardAssetRepositoryOrm"]
+):
+    """Return the right StoryboardAssetRepository implementation per env."""
+    if _storyboard_orm_enabled():
+        from app.repositories.storyboard_repository_orm import (
+            StoryboardAssetRepositoryOrm,
+        )
+
+        return StoryboardAssetRepositoryOrm()
+    return StoryboardAssetRepository()

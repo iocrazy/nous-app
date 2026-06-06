@@ -236,13 +236,13 @@ def persist_split_scenes_step(
     project_id: str, scenes: list[dict[str, Any]]
 ) -> list[str]:
     from app.repositories.storyboard_repository import (
-        StoryboardFrameRepository,
-        StoryboardNodeRepository,
+        get_storyboard_frame_repository,
+        get_storyboard_node_repository,
     )
 
     async def _do() -> list[str]:
-        node_repo = StoryboardNodeRepository()
-        frame_repo = StoryboardFrameRepository()
+        node_repo = get_storyboard_node_repository()
+        frame_repo = get_storyboard_frame_repository()
         created_nodes: list[str] = []
         for idx, scene in enumerate(scenes):
             position = _grid_position(idx)
@@ -316,13 +316,13 @@ def persist_video_scenes_step(
     project_id: str, scenes: list[dict[str, Any]]
 ) -> list[str]:
     from app.repositories.storyboard_repository import (
-        StoryboardFrameRepository,
-        StoryboardNodeRepository,
+        get_storyboard_frame_repository,
+        get_storyboard_node_repository,
     )
 
     async def _do() -> list[str]:
-        node_repo = StoryboardNodeRepository()
-        frame_repo = StoryboardFrameRepository()
+        node_repo = get_storyboard_node_repository()
+        frame_repo = get_storyboard_frame_repository()
         created_nodes: list[str] = []
         for idx, scene in enumerate(scenes):
             position = _grid_position(idx)

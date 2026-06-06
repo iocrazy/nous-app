@@ -255,6 +255,37 @@ class Settings(BaseSettings):
         "created_at column (silently returned [] via swallowed PGRST 400) — now "
         "orders by joined_at on both paths.",
     )
+    USE_ORM_STORYBOARD: bool = Field(
+        default=False,
+        description="Route the SIX Storyboard Workbench repos (StoryboardProject"
+        " / Node / Edge / Frame / Character / Asset — over storyboard_projects / "
+        "_nodes / _edges / _frames / _characters / _assets) through the "
+        "SQLAlchemy 2.0 ORM session layer (Phase 2 L-solo). One flag gates all "
+        "six factories. Strategy C value-type parity: ALL ids + FKs are BIGINT "
+        "snowflake (the six ids + project_id / node_id / source_node_id / "
+        "target_node_id + storyboard_projects.team_id which FKs teams.id, NOT a "
+        "uuid) → stay NATIVE int (the 5.3 trap; team_id is CONSUMED by "
+        "verify_project_access's team_members eq filter + NAS-path str()). The "
+        "only uuid column is storyboard_projects.created_by → str for REST-shape "
+        "parity (response model declares created_by: str; no type-sensitive "
+        "consumer). timestamptz (created_at / updated_at) → ISO str; NO date "
+        "columns; numeric canvas coords (position_x/y, width, height, "
+        "duration_seconds — all Double) left NATIVE float (frontend does float "
+        "math); jsonb (data_json / viewport_json / settings_json / visual_traits "
+        "/ annotations_json / metadata_json) → native dict. No SQLAlchemy Enum "
+        "columns (status / node_type / edge_type / transition_type / source_type "
+        "are plain String + DB CheckConstraint) and no renamed columns. The "
+        "three bulk_upsert methods run row-by-row pg_insert ON CONFLICT (id) DO "
+        "UPDATE inside one write_scope() (atomic) to sidestep the mixed-PK "
+        "multi-VALUES CompileError; they pass row keys THROUGH (not filtered) so "
+        "the already-broken callers that write phantom columns "
+        "(script_ai_router node scene_number/camera_notes; both workflow frame "
+        "steps order_index/prompt/notes/status/source_image_path) RAISE exactly "
+        "as under REST today (inert parity — no repair). All writes commit via "
+        "write_scope(). No date/timestamp range filters → no timestamptz<VARCHAR "
+        "hazard. The storyboard_frame_characters junction table has no consumer "
+        "(nothing to migrate). Instant rollback = flip back to false.",
+    )
 
     # ============================================
     # 下载设置

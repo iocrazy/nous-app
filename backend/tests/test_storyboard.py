@@ -214,7 +214,7 @@ class TestCharacterCRUD:
     async def test_list_characters(self, client: AsyncClient):
         with _svc_patch("verify_project_access"):
             with patch(
-                "app.api.sb_characters_router.StoryboardCharacterRepository"
+                "app.api.sb_characters_router.get_storyboard_character_repository"
             ) as MockRepo:
                 instance = MockRepo.return_value
                 instance.list_by_project = AsyncMock(return_value=[_FAKE_CHAR])
