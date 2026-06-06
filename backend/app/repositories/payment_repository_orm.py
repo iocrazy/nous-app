@@ -118,7 +118,7 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, text
 from sqlalchemy import update as sa_update
 
 from app.db.session import read_scope, write_scope
@@ -260,6 +260,29 @@ class PaymentRepositoryOrm(PaymentRepository):
         except Exception as e:
             logger.error(f"Failed to get orders for team {team_id}: {e}")
             return []
+
+    async def confirm_order_and_credit_atomic(
+        self, order_id: Any
+    ) -> Optional[Dict[str, Any]]:
+        # Same atomic-RPC pattern as points consume/refund — calls the SAME
+        # rpc_confirm_order_and_credit SECURITY DEFINER function (mig 260) the
+        # REST path used. write_scope() owns the surrounding transaction/commit
+        # (a read_scope here would silently roll the credit back: lost money).
+        # p_order_id is a BIGINT function param -> int(). The TABLE return
+        # (success/already_credited/points_added/new_balance/reason) comes back
+        # via mappings() — INTEGER cols -> native int, exactly the legacy
+        # rpc().execute() dict shape.
+        try:
+            stmt = text("SELECT * FROM rpc_confirm_order_and_credit(:p_order_id)")
+            async with write_scope() as session:
+                result = await session.execute(stmt, {"p_order_id": int(order_id)})
+                row = result.mappings().first()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(
+                f"Atomic confirm-and-credit RPC failed for order {order_id}: {e}"
+            )
+            return None
 
     async def expire_pending_orders(self) -> int:
         try:

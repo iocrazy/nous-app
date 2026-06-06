@@ -150,6 +150,39 @@ class AdminCreditsRepository:
             client.table(self.ORDERS_TABLE).update(payload).eq("id", order_id).execute()
         )
 
+    async def confirm_order_and_credit_atomic(
+        self, order_id: Any
+    ) -> Optional[dict[str, Any]]:
+        """Atomic, idempotent order-confirm-and-credit via
+        rpc_confirm_order_and_credit (migration 260). Just delegates to the same
+        SECURITY DEFINER RPC the payment-callback path uses — no duplicated
+        logic. Marks paid + credits team_quotas + writes the ledger row in ONE
+        transaction (closes the two-await crash gap + double-credit risk).
+
+        Returns:
+            {success, already_credited, points_added, new_balance, reason} or
+            None on RPC failure (engine/REST unavailable).
+        """
+        from loguru import logger
+
+        try:
+            client = await self._client()
+            result = await client.rpc(
+                "rpc_confirm_order_and_credit",
+                {"p_order_id": int(order_id)},
+            ).execute()
+            data = result.data
+            if isinstance(data, list) and data:
+                return data[0]
+            if isinstance(data, dict):
+                return data
+            return None
+        except Exception as e:
+            logger.error(
+                f"Atomic confirm-and-credit RPC failed for order {order_id}: {e}"
+            )
+            return None
+
     # ─── Enrichment helpers ────────────────────────────────────────
 
     async def get_teams_by_ids(self, team_ids: list[str]) -> list[dict[str, Any]]:

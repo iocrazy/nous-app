@@ -360,24 +360,15 @@ async def confirm_order(
             detail=f"Order status is '{order['payment_status']}', can only confirm 'pending'",
         )
 
-    now = datetime.now(timezone.utc).isoformat()
-    await repo.update_order(
-        order_id,
-        {"payment_status": "paid", "paid_at": now, "updated_at": now},
-    )
-
-    # Add points to team
-    from app.services.billing.points_service import PointsService
-
-    points_svc = PointsService()
-    await points_svc.add_points(
-        team_id=str(order["team_id"]),
-        amount=order.get("points_amount") or 0,
-        type="purchase",
-        description=f"Order {order.get('order_no', order_id)} confirmed by admin",
-        user_id=str(order["user_id"]) if order.get("user_id") else None,
-        reference_id=order_id,
-    )
+    # Mark paid AND credit points atomically (one idempotent RPC). Closes the
+    # old two-await crash gap (paid but uncredited) and the double-credit risk.
+    result = await repo.confirm_order_and_credit_atomic(order_id)
+    if result is None or not result.get("success"):
+        reason = (result or {}).get("reason") or "Failed to confirm order"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=reason,
+        )
 
     # Audit log
     await create_audit_log(
