@@ -172,17 +172,16 @@ class AnalysisRepository:
         return len(result.data) > 0
 
     async def get_analysis_stats(self) -> dict:
-        """Get statistics about video analysis coverage."""
-        client = await self._get_client()
+        """Get statistics about video analysis coverage.
+
+        Computed via a manual count over analysis_level. (A prior
+        ``get_analysis_stats`` Postgres RPC was never defined in any migration,
+        so the RPC round-trip always raised PGRST202 and fell through to this
+        path — it has been removed.)
+        """
         table = await self._get_table()
 
         # Count by analysis level
-        result = await client.rpc("get_analysis_stats").execute()
-
-        if result.data:
-            return result.data
-
-        # Fallback: manual count if RPC doesn't exist
         all_analysis = await table.select("analysis_level").execute()
 
         stats = {"none": 0, "L1": 0, "L2": 0, "L3": 0, "total": len(all_analysis.data)}
