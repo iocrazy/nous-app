@@ -222,7 +222,7 @@ import decimal as _decimal
 import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, text
 from sqlalchemy import update as sa_update
 
 from app.db.session import read_scope, write_scope
@@ -500,6 +500,27 @@ class AdminCreditsRepositoryOrm(AdminCreditsRepository):
             await session.execute(
                 sa_update(Orders).where(Orders.id == _bigint(order_id)).values(**values)
             )
+
+    async def confirm_order_and_credit_atomic(
+        self, order_id: Any
+    ) -> Optional[dict[str, Any]]:
+        # Calls the SAME rpc_confirm_order_and_credit SECURITY DEFINER function
+        # (mig 260) the REST path used. write_scope() owns the commit (a
+        # read_scope would silently roll the credit back: lost money). The TABLE
+        # return comes back via mappings() — INTEGER cols -> native int.
+        from loguru import logger
+
+        try:
+            stmt = text("SELECT * FROM rpc_confirm_order_and_credit(:p_order_id)")
+            async with write_scope() as session:
+                result = await session.execute(stmt, {"p_order_id": int(order_id)})
+                row = result.mappings().first()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(
+                f"Atomic confirm-and-credit RPC failed for order {order_id}: {e}"
+            )
+            return None
 
     # ─── Enrichment helpers ────────────────────────────────────────
 

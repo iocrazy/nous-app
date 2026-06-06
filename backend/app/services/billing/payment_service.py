@@ -186,48 +186,52 @@ class PaymentService:
                     "points_added": 0,
                 }
 
-            # 5. Payment succeeded -- mark paid and credit points
-            paid_at = datetime.now(timezone.utc)
-            await self.payment_repo.update_order(
-                order_id,
-                {
-                    "payment_status": "paid",
-                    "paid_at": paid_at,
-                },
-            )
+            # 5. Payment succeeded -- mark paid AND credit points atomically.
+            # One idempotent RPC closes the old two-await crash gap (paid but
+            # uncredited) and the duplicate-callback double-credit risk.
+            result = await self.payment_repo.confirm_order_and_credit_atomic(order_id)
 
-            points_amount = order.get("points_amount", 0)
-            team_id = order["team_id"]
-            user_id = order.get("user_id")
+            # RPC unavailable (engine/REST error) — leave the order untouched so
+            # a retry can complete it. Surface a 503-ish envelope.
+            if result is None:
+                logger.error(
+                    f"Order {order_id} (trade_no={trade_no}): confirm-and-credit "
+                    f"RPC unavailable; payment NOT confirmed"
+                )
+                return {
+                    "success": False,
+                    "message": "Payment processing temporarily unavailable",
+                    "points_added": 0,
+                }
 
-            # Credit points via PointsService
-            add_result = await self.points_service.add_points(
-                team_id=team_id,
-                amount=points_amount,
-                type="purchase",
-                description=(
-                    f"Purchased {points_amount} points "
-                    f"(order {order_id}, trade_no {trade_no})"
-                ),
-                user_id=user_id,
-                reference_id=order_id,
-            )
+            if not result.get("success"):
+                reason = result.get("reason") or "Failed to confirm order"
+                logger.warning(
+                    f"Order {order_id} (trade_no={trade_no}) not confirmed: {reason}"
+                )
+                return {
+                    "success": False,
+                    "message": reason,
+                    "points_added": 0,
+                }
 
-            if add_result.get("success"):
+            points_added = result.get("points_added") or 0
+            if result.get("already_credited"):
+                # Idempotent no-op: a prior callback already credited this order.
                 logger.info(
-                    f"Order {order_id} paid: credited {points_amount} points "
-                    f"to team {team_id}"
+                    f"Order {order_id} (trade_no={trade_no}): already credited "
+                    f"(idempotent no-op)"
                 )
             else:
-                logger.error(
-                    f"Order {order_id} paid but failed to credit points: "
-                    f"{add_result}"
+                logger.info(
+                    f"Order {order_id} paid: credited {points_added} points "
+                    f"(new_balance={result.get('new_balance')})"
                 )
 
             return {
                 "success": True,
                 "message": "Payment processed successfully",
-                "points_added": points_amount,
+                "points_added": points_added,
             }
 
         except Exception as e:

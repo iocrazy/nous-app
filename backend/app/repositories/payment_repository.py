@@ -135,6 +135,39 @@ class PaymentRepository:
             logger.error(f"Failed to update order {order_id}: {e}")
             raise
 
+    async def confirm_order_and_credit_atomic(
+        self, order_id: Union[int, str]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Atomic, idempotent order-confirm-and-credit via
+        rpc_confirm_order_and_credit (migration 260). Marks the order paid AND
+        credits team_quotas AND writes the ledger row in ONE transaction — closes
+        the two-await crash gap (paid-but-uncredited) and the duplicate-callback
+        double-credit risk (the partial-unique 'order' index enforces
+        at-most-one credit per order).
+
+        Returns:
+            {success, already_credited, points_added, new_balance, reason} or
+            None on RPC failure (engine/REST unavailable).
+        """
+        try:
+            client = await self._get_client()
+            result = await client.rpc(
+                "rpc_confirm_order_and_credit",
+                {"p_order_id": int(order_id)},
+            ).execute()
+            data = result.data
+            if isinstance(data, list) and data:
+                return data[0]
+            if isinstance(data, dict):
+                return data
+            return None
+        except Exception as e:
+            logger.error(
+                f"Atomic confirm-and-credit RPC failed for order {order_id}: {e}"
+            )
+            return None
+
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
