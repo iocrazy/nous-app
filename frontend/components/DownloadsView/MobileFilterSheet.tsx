@@ -1,13 +1,17 @@
 // frontend/components/DownloadsView/MobileFilterSheet.tsx
 //
-// Mobile-only bottom sheet that surfaces the full Eagle-style filter set
-// (the desktop FilterBar is `hidden md:block`, leaving phones with no filter
-// access). It is a thin UI shell over the SAME `useFilterBarConfig` instance
-// owned by DownloadsView — passed in via props, NOT re-instantiated — so every
-// edit flows straight back into the existing `libraryFilterParams` effect and
-// the server-side filtering already in place. Changes apply live (no Apply
-// button); "Reset" clears everything.
+// Mobile-only bottom sheet that surfaces the full Eagle-style filter set (the
+// desktop FilterBar is `hidden md:block`, leaving phones with no filter access).
+// It is a thin UI shell over the SAME `useFilterBarConfig` instance owned by
+// DownloadsView — passed in via props, NOT re-instantiated — so every edit flows
+// straight into the existing `libraryFilterParams` effect + the server-side
+// filtering already in place. Changes apply live (no Apply button).
+//
+// Sections are collapsible (accordion) so the sheet stays compact with 9
+// dimensions; the unbounded Tags dimension uses a searchable picker
+// (TagFilterSection) rather than a flat pill wall.
 
+import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Filter, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +26,8 @@ import type {
   SocialMetric,
 } from '../resources/filter/types';
 import { SOCIAL_METRICS } from '../resources/filter/types';
+import { Pill, CollapsibleSection } from './filterSheetUi';
+import { TagFilterSection } from './TagFilterSection';
 
 interface MobileFilterSheetProps {
   open: boolean;
@@ -102,49 +108,6 @@ const SOCIAL_LABELS: Record<SocialMetric, string> = {
   shares: 'Shares',
 };
 
-// ─── Small presentational pieces ────────────────────────────────────────────
-
-function Pill({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-        active
-          ? 'bg-indigo-500 border-indigo-400 text-white'
-          : 'bg-zinc-800 border-zinc-700 text-zinc-300 active:bg-zinc-700'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 mb-2">
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
-
 function toggleIn<T>(arr: readonly T[], v: T): T[] {
   return arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
 }
@@ -159,14 +122,31 @@ export function MobileFilterSheet({
   availablePlatforms = [],
 }: MobileFilterSheetProps) {
   const { t } = useTranslation();
+  // Hooks must run unconditionally — keep state above the early return.
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set());
+
+  const {
+    chipValues,
+    setChipValue,
+    clearAll,
+    clearChip,
+    hasActiveFilters,
+    activeFilterCount,
+  } = config;
+
+  const platforms = useMemo(
+    () => Array.from(new Set<string>([...KNOWN_PLATFORMS, ...availablePlatforms])),
+    [availablePlatforms],
+  );
+
   if (!open) return null;
 
-  const { chipValues, setChipValue, clearAll, hasActiveFilters, activeFilterCount } =
-    config;
-
-  const platforms = Array.from(
-    new Set<string>([...KNOWN_PLATFORMS, ...availablePlatforms]),
-  );
+  const toggleSection = (id: string) =>
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   const setSocialMetric = (
     m: SocialMetric,
@@ -179,6 +159,52 @@ export function MobileFilterSheet({
     });
   };
 
+  // ── Per-section collapsed-header summary (null = inactive) ──
+  const socialActive =
+    SOCIAL_METRICS.filter((m) => chipValues.social.metrics[m].enabled).length +
+    (chipValues.social.hasComments ? 1 : 0);
+  const aiActive = [
+    chipValues.ai_status.transcribed,
+    chipValues.ai_status.summarized,
+    chipValues.ai_status.analyzed,
+  ].filter(Boolean).length;
+  const summaries: Record<string, string | null> = {
+    type: chipValues.type.types.length ? `${chipValues.type.types.length}` : null,
+    source: chipValues.source.platforms.length
+      ? `${chipValues.source.platforms.length}`
+      : null,
+    ai_status: aiActive ? `${aiActive}` : null,
+    date_added: chipValues.date_added.preset
+      ? DATE_PRESETS.find((d) => d.id === chipValues.date_added.preset)?.label ?? '1'
+      : null,
+    social: socialActive ? `${socialActive}` : null,
+    tags: chipValues.tags.tag_ids.length ? `${chipValues.tags.tag_ids.length}` : null,
+    rating: chipValues.rating.min_rating
+      ? `≥${chipValues.rating.min_rating}★`
+      : null,
+    aspect: chipValues.aspect.buckets.length
+      ? `${chipValues.aspect.buckets.length}`
+      : null,
+    duration: chipValues.duration.preset
+      ? DURATION_PRESETS.find((d) => d.id === chipValues.duration.preset)?.label ?? '1'
+      : null,
+  };
+
+  const section = (
+    id: string,
+    title: string,
+    children: React.ReactNode,
+  ) => (
+    <CollapsibleSection
+      title={title}
+      summary={summaries[id]}
+      open={openSections.has(id)}
+      onToggle={() => toggleSection(id)}
+    >
+      {children}
+    </CollapsibleSection>
+  );
+
   return createPortal(
     <div
       className="md:hidden fixed inset-0 z-[60]"
@@ -186,13 +212,11 @@ export function MobileFilterSheet({
       aria-modal="true"
       aria-label={t('resources.filter.title', 'Filters')}
     >
-      {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
         onClick={onClose}
       />
 
-      {/* Panel */}
       <div
         className="absolute inset-x-0 bottom-0 bg-zinc-900 border-t border-zinc-700/80 rounded-t-2xl shadow-2xl max-h-[82vh] flex flex-col animate-in slide-in-from-bottom duration-200"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
@@ -235,10 +259,12 @@ export function MobileFilterSheet({
           </div>
         </div>
 
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+        {/* Scrollable body — collapsible sections */}
+        <div className="flex-1 overflow-y-auto px-4">
           {/* Type */}
-          <Section title={t('resources.filter.type', 'Type')}>
+          {section(
+            'type',
+            t('resources.filter.type', 'Type'),
             <div className="flex flex-wrap gap-2">
               {TYPE_OPTIONS.map((o) => (
                 <Pill
@@ -253,11 +279,13 @@ export function MobileFilterSheet({
                   {o.label}
                 </Pill>
               ))}
-            </div>
-          </Section>
+            </div>,
+          )}
 
           {/* Source / platform */}
-          <Section title={t('resources.filter.source', 'Source')}>
+          {section(
+            'source',
+            t('resources.filter.source', 'Source'),
             <div className="flex flex-wrap gap-2">
               {platforms.map((p) => (
                 <Pill
@@ -272,11 +300,29 @@ export function MobileFilterSheet({
                   {platformLabel(p)}
                 </Pill>
               ))}
-            </div>
-          </Section>
+            </div>,
+          )}
+
+          {/* Tags — searchable picker */}
+          {section(
+            'tags',
+            t('resources.filter.tags', 'Tags'),
+            <TagFilterSection
+              allTags={allTags}
+              selectedIds={chipValues.tags.tag_ids}
+              onToggle={(id) =>
+                setChipValue('tags', {
+                  tag_ids: toggleIn(chipValues.tags.tag_ids, id),
+                })
+              }
+              onClear={() => clearChip('tags')}
+            />,
+          )}
 
           {/* AI status */}
-          <Section title={t('resources.filter.aiStatus', 'AI status')}>
+          {section(
+            'ai_status',
+            t('resources.filter.aiStatus', 'AI status'),
             <div className="flex flex-wrap gap-2">
               {AI_FLAGS.map((f) => (
                 <Pill
@@ -292,11 +338,13 @@ export function MobileFilterSheet({
                   {f.label}
                 </Pill>
               ))}
-            </div>
-          </Section>
+            </div>,
+          )}
 
           {/* Date added */}
-          <Section title={t('resources.filter.dateAdded', 'Date added')}>
+          {section(
+            'date_added',
+            t('resources.filter.dateAdded', 'Date added'),
             <div className="flex flex-wrap gap-2">
               {DATE_PRESETS.map((d) => {
                 const active = chipValues.date_added.preset === d.id;
@@ -316,13 +364,14 @@ export function MobileFilterSheet({
                   </Pill>
                 );
               })}
-            </div>
-          </Section>
+            </div>,
+          )}
 
           {/* Social */}
-          <Section title={t('resources.filter.socialLabel', 'Social')}>
+          {section(
+            'social',
+            t('resources.filter.socialLabel', 'Social'),
             <div className="space-y-2">
-              {/* combine + hasComments */}
               <div className="flex items-center gap-2">
                 <Pill
                   active={chipValues.social.combine === 'and'}
@@ -354,7 +403,6 @@ export function MobileFilterSheet({
                   </Pill>
                 </div>
               </div>
-              {/* per-metric thresholds */}
               {SOCIAL_METRICS.map((m) => {
                 const entry = chipValues.social.metrics[m];
                 return (
@@ -386,32 +434,13 @@ export function MobileFilterSheet({
                   </div>
                 );
               })}
-            </div>
-          </Section>
-
-          {/* Tags */}
-          {allTags.length > 0 && (
-            <Section title={t('resources.filter.tags', 'Tags')}>
-              <div className="flex flex-wrap gap-2">
-                {allTags.map((tag) => (
-                  <Pill
-                    key={tag.id}
-                    active={chipValues.tags.tag_ids.includes(tag.id)}
-                    onClick={() =>
-                      setChipValue('tags', {
-                        tag_ids: toggleIn(chipValues.tags.tag_ids, tag.id),
-                      })
-                    }
-                  >
-                    {tag.name}
-                  </Pill>
-                ))}
-              </div>
-            </Section>
+            </div>,
           )}
 
           {/* Rating */}
-          <Section title={t('resources.filter.rating', 'Rating')}>
+          {section(
+            'rating',
+            t('resources.filter.rating', 'Rating'),
             <div className="flex flex-wrap gap-2">
               {[1, 2, 3, 4, 5].map((n) => {
                 const active = chipValues.rating.min_rating === n;
@@ -427,11 +456,13 @@ export function MobileFilterSheet({
                   </Pill>
                 );
               })}
-            </div>
-          </Section>
+            </div>,
+          )}
 
           {/* Aspect */}
-          <Section title={t('resources.filter.aspect', 'Aspect ratio')}>
+          {section(
+            'aspect',
+            t('resources.filter.aspect', 'Aspect ratio'),
             <div className="flex flex-wrap gap-2">
               {ASPECT_OPTIONS.map((o) => (
                 <Pill
@@ -446,11 +477,13 @@ export function MobileFilterSheet({
                   {o.label}
                 </Pill>
               ))}
-            </div>
-          </Section>
+            </div>,
+          )}
 
           {/* Duration */}
-          <Section title={t('resources.filter.duration', 'Duration')}>
+          {section(
+            'duration',
+            t('resources.filter.duration', 'Duration'),
             <div className="flex flex-wrap gap-2">
               {DURATION_PRESETS.map((d) => {
                 const active = chipValues.duration.preset === d.id;
@@ -470,8 +503,8 @@ export function MobileFilterSheet({
                   </Pill>
                 );
               })}
-            </div>
-          </Section>
+            </div>,
+          )}
         </div>
 
         {/* Done */}

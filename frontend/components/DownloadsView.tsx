@@ -20,7 +20,9 @@ import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
-import { MobileFilterSheet } from './DownloadsView/MobileFilterSheet';
+import { FilterChipBar } from './filters/FilterChipBar';
+import { FacetPickerSheet } from './filters/FacetPickerSheet';
+import type { ChipId } from './resources/filter/types';
 import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
@@ -400,7 +402,7 @@ export const DownloadsView: React.FC = () => {
   const [shareTargetResourceId, setShareTargetResourceId] = useState<string | null>(null);
   const [shareTargetName, setShareTargetName] = useState<string>('');
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
-  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+  const [openFacet, setOpenFacet] = useState<ChipId | null>(null);
   const [mobileSearchQuery, setMobileSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
@@ -864,6 +866,16 @@ export const DownloadsView: React.FC = () => {
         )}
       </div>
 
+      {/* Mobile filter chip bar (Pixcall-style) — desktop keeps the FilterBar */}
+      {libraryViewMode !== 'feed' && (
+        <FilterChipBar
+          className="md:hidden border-b border-zinc-800/60 shrink-0"
+          config={filterBarConfig}
+          allTags={allTags}
+          onOpenFacet={setOpenFacet}
+        />
+      )}
+
       {/* Content */}
       <div
         ref={contentScrollRef}
@@ -1122,21 +1134,6 @@ export const DownloadsView: React.FC = () => {
       {libraryViewMode !== 'feed' && createPortal(
         <div className="md:hidden fixed top-[calc(env(safe-area-inset-top,0px)+10px)] right-3 z-40 flex justify-end items-start pointer-events-none">
           <div className="pointer-events-auto flex items-center justify-end gap-2">
-            {!isMobileSearchOpen && (
-              <button
-                type="button"
-                onClick={() => setIsMobileFilterOpen(true)}
-                aria-label={t('resources.filter.title', 'Filters')}
-                className="relative p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
-              >
-                <Filter size={20} className="drop-shadow-md" />
-                {filterBarConfig.activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-indigo-500 text-white text-[9px] font-bold inline-flex items-center justify-center">
-                    {filterBarConfig.activeFilterCount}
-                  </span>
-                )}
-              </button>
-            )}
             {isMobileSearchOpen ? (
               <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-[calc(100vw-80px)] max-w-sm animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
                 {isAISearching ? (
@@ -1209,9 +1206,10 @@ export const DownloadsView: React.FC = () => {
         document.body,
       )}
 
-      <MobileFilterSheet
-        open={isMobileFilterOpen}
-        onClose={() => setIsMobileFilterOpen(false)}
+      <FacetPickerSheet
+        open={openFacet !== null}
+        facetId={openFacet}
+        onClose={() => setOpenFacet(null)}
         config={filterBarConfig}
         allTags={allTags}
         availablePlatforms={availablePlatforms}
