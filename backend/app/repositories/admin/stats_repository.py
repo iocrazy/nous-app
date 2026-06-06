@@ -75,14 +75,28 @@ class AdminStatsRepository:
         return result.data or []
 
     async def completed_videos_by_user(self) -> list[dict[str, Any]]:
+        """One row per non-trashed resource, keyed by owner (``creator_id``
+        aliased to ``user_id``).
+
+        Resource-centric ownership: ``parsed_media.user_id`` was DROPPED in
+        migration 083 (parsed_media became a global content table; per-user
+        ownership moved to ``resources.creator_id``). We count downloaded media
+        per resource owner instead. The ``/storage`` handler groups these rows in
+        Python by ``user_id`` and counts, so we reproduce the SAME row shape:
+        one row per resource with a ``user_id`` key.
+        """
         client = await self._client()
         result = (
-            await client.table("parsed_media")
-            .select("user_id, video_download_status")
-            .eq("video_download_status", "completed")
+            await client.table("resources")
+            .select("creator_id")
+            .eq("is_trashed", False)
             .execute()
         )
-        return result.data or []
+        return [
+            {"user_id": str(row["creator_id"])}
+            for row in (result.data or [])
+            if row.get("creator_id") is not None
+        ]
 
 
 def get_admin_stats_repository() -> "AdminStatsRepository":

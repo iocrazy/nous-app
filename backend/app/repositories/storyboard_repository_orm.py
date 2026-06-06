@@ -38,12 +38,12 @@ the keys the services / routers / workflows actually pass:
                               sync / create-nodes path feeds StoryboardNodeCreate
                               .model_dump() = node_type / position_x / position_y
                               / width / height / data_json — all on
-                              StoryboardNodes. OK. *** BUT *** two OTHER callers
-                              feed PHANTOM keys (see PHANTOM-WRITE note below):
-                              workflows.storyboard.persist_*_scenes_step passes
-                              data_json-wrapped scenes (ok) but script_ai_router
-                              passes node_data with scene_number / camera_notes
-                              (NOT on StoryboardNodes) → already-broken write.
+                              StoryboardNodes. OK. The workflow steps
+                              (persist_*_scenes_step) pass data_json-wrapped
+                              scenes — OK. script_ai_router USED to pass phantom
+                              scene_number / camera_notes top-level (a broken
+                              write); FIXED (it now nests them in data_json +
+                              adds node_type) → all real columns. OK.
   NodeRepo.update           : StoryboardNodeUpdate.model_dump(exclude_none) =
                               position_x / position_y / width / height /
                               data_json / locked — all on StoryboardNodes. OK.
@@ -56,14 +56,15 @@ the keys the services / routers / workflows actually pass:
                               image_url / thumbnail_url / sort_order / note /
                               duration_seconds / transition_type / node_id? —
                               all on StoryboardFrames. OK.
-  FrameRepo.bulk_upsert     : node_id (injected) + frame dicts. *** HARD
-                              PHANTOM-WRITE HIT *** the ONLY callers are the two
-                              workflow steps (persist_split_scenes_step /
-                              persist_video_scenes_step) which pass frame_data =
-                              order_index / prompt / notes / status /
-                              source_image_path — NONE on StoryboardFrames
-                              (which has frame_index / note / image_url / …).
-                              See PHANTOM-WRITE note.
+  FrameRepo.bulk_upsert     : node_id (injected) + frame dicts. The ONLY callers
+                              are the two workflow steps (persist_split_scenes_step
+                              / persist_video_scenes_step). They USED to pass
+                              phantom order_index / prompt / notes / status /
+                              source_image_path (NONE on StoryboardFrames) — a
+                              broken write. FIXED: they now pass frame_index /
+                              note / image_url / project_id / node_id (real
+                              columns) + prompt / status nested in
+                              annotations_json (jsonb). All real columns now. OK.
   FrameRepo.update          : StoryboardFrameUpdate.model_dump(exclude_none) =
                               note / shot_type / camera_angle / camera_movement /
                               focal_length / lighting / duration_seconds /
@@ -81,28 +82,32 @@ the keys the services / routers / workflows actually pass:
                               metadata_json / source_type — all on
                               StoryboardAssets. OK.
 
-PHANTOM-WRITE handling (parity discipline)
-------------------------------------------
-An inert mechanical migration must reproduce the legacy behavior EXACTLY on
-flip — it must NOT repair a broken/no-op endpoint. The legacy REST bulk_upsert
-hands ALL row keys to PostgREST's ``.upsert(rows)``; a key that is not a real
-column makes PostgREST 400, and the legacy method's ``except`` RE-RAISES
-(bulk_upsert is a write → raises). So today:
+PHANTOM-WRITE handling (parity discipline) — now schema-valid
+-------------------------------------------------------------
+The ORM bulk_upsert methods pass row keys straight to
+``pg_insert(...).values(**row)`` — they do NOT use ``_known_only`` to silently
+drop unknown keys (that would TURN a phantom-column 500 INTO a SUCCESS = a
+behavior change, forbidden on a parity migration). An unknown key raises a
+SQLAlchemy compile error which the method's ``except`` re-raises — so a broken
+caller surfaces exactly as under REST.
 
-  - NodeRepo.bulk_upsert via script_ai_router (scene_number / camera_notes) and
-    FrameRepo.bulk_upsert via BOTH workflow steps (order_index / prompt / notes
-    / status / source_image_path) are ALREADY 500-ing in production.
+The two previously-broken AI-gen write surfaces have now been FIXED at the
+caller (the DECIDED product fix, not a silent drop):
 
-To preserve that EXACTLY, the ORM bulk_upsert methods pass the row keys straight
-to ``pg_insert(...).values(**row)`` — they do NOT use ``_known_only`` to silently
-drop unknown keys (that would TURN A 500 INTO A SUCCESS = a behavior change,
-forbidden on a parity migration). An unknown key raises a SQLAlchemy compile
-error (``Unconsumed column names`` / ``invalid keyword``) which the method's
-``except`` re-raises — same observable outcome (write raises) as REST today.
+  - NodeRepo.bulk_upsert via script_ai_router USED to pass top-level
+    scene_number / camera_notes (phantom). Now it nests those in data_json and
+    adds node_type='storyboard_split' — all real StoryboardNodes columns.
+  - FrameRepo.bulk_upsert via BOTH workflow steps USED to pass top-level
+    order_index / prompt / notes / status / source_image_path (phantom) and was
+    missing required project_id / node_id. Now they pass frame_index / note /
+    image_url / project_id / node_id (real columns) + prompt / status nested in
+    annotations_json (jsonb, native dict). All keys are real columns, so
+    ``pg_insert(...).values(**row)`` accepts them without a compile error and the
+    upsert succeeds. (FrameRepo.bulk_upsert also coerces the now-supplied
+    project_id BIGINT FK via _bigint, like the node_id/edge FK coercion.)
+
 The genuinely-real-column callers (canvas sync nodes, frame split via
-FrameRepo.create — NOT bulk_upsert) keep working. This is a DEFERRED PRODUCT
-DECISION (the broken workflow/script-ai surfaces target columns the schema does
-not have — they need a product fix, not a mechanical port).
+FrameRepo.create) keep working as before.
 
 STRATEGY C — VALUE-TYPE PARITY (per-field, exact REST shape)
 ============================================================
@@ -671,6 +676,11 @@ class StoryboardFrameRepositoryOrm(StoryboardFrameRepository):
             return []
         try:
             rows = [{**frame, "node_id": _bigint(node_id)} for frame in frames]
+            # project_id is a required BIGINT FK the callers now supply (str on
+            # the workflow path) — coerce for the int8 bind (asyncpg strictness).
+            for row in rows:
+                if row.get("project_id") is not None:
+                    row["project_id"] = _bigint(row["project_id"])
             out = await _bulk_upsert_rows(StoryboardFrames, _FRAMES_N2A, rows)
             logger.info(f"Bulk-upserted {len(rows)} frames for node {node_id}")
             return out

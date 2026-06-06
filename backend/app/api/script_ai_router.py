@@ -177,12 +177,18 @@ async def convert_to_storyboard(
             for scene in scenes:
                 node_data = {
                     "project_id": body.storyboard_project_id,
-                    "scene_number": scene["scene_number"],
-                    "description": scene["description"],
-                    "camera_notes": scene.get("camera_notes", ""),
+                    "node_type": "storyboard_split",
                     "position_x": 100,
                     "position_y": scene["scene_number"] * NODE_Y_SPACING,
-                    "data_json": {"source": "script_conversion"},
+                    # scene_number / description / camera_notes are NOT columns on
+                    # storyboard_nodes — nest them in the data_json jsonb (mirrors
+                    # how workflows/storyboard.py persists split-scene node data).
+                    "data_json": {
+                        "source": "script_conversion",
+                        "scene_number": scene["scene_number"],
+                        "description": scene["description"],
+                        "camera_notes": scene.get("camera_notes", ""),
+                    },
                 }
                 rows = await node_repo.bulk_upsert(
                     body.storyboard_project_id, [node_data]

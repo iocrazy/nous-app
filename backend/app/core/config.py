@@ -278,10 +278,13 @@ class Settings(BaseSettings):
         "three bulk_upsert methods run row-by-row pg_insert ON CONFLICT (id) DO "
         "UPDATE inside one write_scope() (atomic) to sidestep the mixed-PK "
         "multi-VALUES CompileError; they pass row keys THROUGH (not filtered) so "
-        "the already-broken callers that write phantom columns "
-        "(script_ai_router node scene_number/camera_notes; both workflow frame "
-        "steps order_index/prompt/notes/status/source_image_path) RAISE exactly "
-        "as under REST today (inert parity — no repair). All writes commit via "
+        "any phantom (non-column) key RAISES at compile time = REST-parity 500. "
+        "The two formerly-broken AI-gen callers were FIXED (BUG 6): "
+        "script_ai_router now nests scene_number/camera_notes in data_json + adds "
+        "node_type; both workflow frame steps now write real columns "
+        "(frame_index/note/image_url + project_id/node_id) with prompt/status "
+        "nested in annotations_json — so they succeed instead of 500ing. All "
+        "writes commit via "
         "write_scope(). No date/timestamp range filters → no timestamptz<VARCHAR "
         "hazard. The storyboard_frame_characters junction table has no consumer "
         "(nothing to migrate). Instant rollback = flip back to false.",
@@ -424,11 +427,11 @@ class Settings(BaseSettings):
         "is a str field; pydantic rejects native UUID). created_at → ISO str; "
         "confidence (double) native float; type is CHECK-text NOT Enum (no _plain "
         "unwrap). get_all_tags / get_tag_counts reproduce the get_tag_counts_by_ids "
-        "/ get_user_tag_counts RPCs (DB-side GROUP BY) with the legacy fallback. "
-        "CONCERN (NOT repaired): the legacy _get_tag_counts_fallback selects a "
-        "non-existent resources.user_id column (real col is creator_id) → PG 42703; "
-        "the ORM faithfully reproduces that 42703 via raw SQL rather than silently "
-        "repairing it (the RPC primary path means this branch is ~never hit). No "
+        "/ get_user_tag_counts RPCs (DB-side GROUP BY) with the fallback. Two "
+        "schema-drift bugs were FIXED: _get_tag_counts_fallback now filters on the "
+        "real resources.creator_id (was the nonexistent resources.user_id → PG "
+        "42703); and the get_user_tag_counts RPC itself is repaired by migration "
+        "256 (was JOINing the dropped media_tags / parsed_media.user_id). No "
         "date range filters. Reads return []/None; create raises; writes commit via "
         "write_scope(). Inert — flip back to false to roll back.",
     )
@@ -755,10 +758,12 @@ class Settings(BaseSettings):
         "_plain (CONSUMED — the router does status == 'completed'). user_id "
         "(uuid) → str (DICT KEY in the storage endpoint). since/date filters bind "
         "NATIVE tz-aware datetimes (v3 rule). NOTE — completed_videos_by_user() "
-        "is a PRE-EXISTING BROKEN endpoint: it selects parsed_media.user_id, a "
-        "column DROPPED in migration 083. Under REST it raises PG 42703; the ORM "
-        "reproduces the SAME failure via a raw text() select (NOT repaired — "
-        "inert discipline). Reads only. Inert; flip false to revert.",
+        "was a PRE-EXISTING BROKEN endpoint (it selected parsed_media.user_id, "
+        "DROPPED in migration 083 → PG 42703 on /storage). FIXED (BUG 3, "
+        "resource-centric): both the REST and ORM repos now count per "
+        "resources.creator_id where is_trashed=false and return one "
+        "{'user_id': str} row per resource (the shape the /storage handler groups "
+        "on). Reads only. Inert; flip false to revert.",
     )
     USE_ORM_ADMIN_SYSTEM_SETTINGS: bool = Field(
         default=False,
@@ -796,10 +801,11 @@ class Settings(BaseSettings):
         "them on str fields); id (BIGINT) → native int (router str()s it); no uuid "
         "in any real projection. JSONB filter extra->>request_id reproduced via "
         "extra['request_id'].astext. Time bounds (ISO str) coerced to NATIVE "
-        "tz-aware datetimes before binding (v3 rule). TWO PRE-EXISTING BROKEN "
-        "endpoints reproduced (NOT repaired — inert): frontend_logs() selects "
-        "nonexistent column stack_trace (real col is stack) → PG 42703; audit_logs() "
-        "queries nonexistent table admin_audit_logs → PG 42P01. Reads only. Inert.",
+        "tz-aware datetimes before binding (v3 rule). TWO PRE-EXISTING SCHEMA-DRIFT "
+        "bugs were FIXED in both the REST and ORM repos: frontend_logs() now selects "
+        "the real column stack (was the nonexistent stack_trace → PG 42703); "
+        "audit_logs() now queries the real table audit_logs via admin_id (was the "
+        "nonexistent table admin_audit_logs → PG 42P01). Reads only. Inert.",
     )
     USE_ORM_ADMIN_ALERT_RULES: bool = Field(
         default=False,
@@ -863,7 +869,7 @@ class Settings(BaseSettings):
         "/ updated_at (timestamptz) → ISO str (datetime Pydantic fields parse it); "
         "jsonb → native list. parsed_media has NO uuid column (user_id dropped mig "
         "083) so no uuid coercion is load-bearing; THIS repo never selects user_id "
-        "(no broken endpoint here — the stats repo owns that one). or_ search "
+        "(the stats repo's old user_id endpoint was fixed under USE_ORM_ADMIN_STATS). or_ search "
         "(title/platform_id ilike) reproduced; sort validated vs ALLOWED_SORT_FIELDS. "
         "WRITES delete() + reset_for_retry() COMMIT via write_scope() and return "
         "bool(rowcount) via RETURNING id (REST bool(result.data) parity). No "

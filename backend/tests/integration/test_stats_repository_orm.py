@@ -7,9 +7,10 @@ dashboard aggregations:
   - created_at (tstz) → ISO STR (CONSUMED — endpoints do created_at[:10])
   - video_download_status Enum → bare .value str (CONSUMED — status == "completed")
 
-PLUS pins the BROKEN-ENDPOINT discipline: completed_videos_by_user selects
-parsed_media.user_id (dropped in migration 083) → raises (same 42703 class as
-REST), NOT silently repaired.
+PLUS pins the RESOURCE-CENTRIC fix: completed_videos_by_user now counts per
+resources.creator_id where is_trashed is false (the old parsed_media.user_id was
+dropped in migration 083) and returns one row per resource with a ``user_id`` key
+(the row shape the /storage handler groups on).
 
     source /tmp/orm2_integration.env
     uv run pytest tests/integration/test_stats_repository_orm.py -v
@@ -66,6 +67,30 @@ async def cleanup_test_rows(integration_db_url):
         await conn.execute("DELETE FROM user_logs WHERE action LIKE $1", _PREFIX + "%")
     finally:
         await conn.close()
+
+
+@pytest.fixture
+async def cleanup_test_resources(integration_db_url):
+    seeded_resources: list[int] = []
+    yield seeded_resources
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        if seeded_resources:
+            await conn.execute(
+                "DELETE FROM resources WHERE id = ANY($1::bigint[])", seeded_resources
+            )
+    finally:
+        await conn.close()
+
+
+async def _seed_resource(conn, *, creator_id, is_trashed=False) -> int:
+    return await conn.fetchval(
+        "INSERT INTO resources (creator_id, source_type, filename, is_trashed) "
+        "VALUES ($1, 'web', $2, $3) RETURNING id",
+        creator_id,
+        f"{_PREFIX}{uuid.uuid4().hex[:10]}.mp4",
+        is_trashed,
+    )
 
 
 async def _real_user_id(conn):
@@ -173,17 +198,32 @@ async def test_user_registrations_since_iso_created_at(
         assert r["created_at"][:10]
 
 
-async def test_completed_videos_by_user_is_broken_endpoint(
-    integration_db_url, patched_engine
+async def test_completed_videos_by_user_resource_centric(
+    integration_db_url, patched_engine, cleanup_test_resources
 ):
-    """BROKEN-ENDPOINT discipline: parsed_media.user_id was dropped in migration
-    083, so this query MUST fail (the same 42703 class REST surfaces) — NOT be
-    silently repaired. We assert it raises rather than returning rows."""
-    from asyncpg.exceptions import UndefinedColumnError
-    from sqlalchemy.exc import ProgrammingError
+    """RESOURCE-CENTRIC fix: parsed_media.user_id was dropped in migration 083, so
+    completed_videos_by_user now counts per resources.creator_id (is_trashed
+    false) and returns one row per resource with a ``user_id`` key — the exact
+    shape the /storage handler groups on. Trashed resources are excluded."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        creator_id = await _real_user_id(conn)
+        rid_active = await _seed_resource(conn, creator_id=creator_id)
+        rid_trashed = await _seed_resource(conn, creator_id=creator_id, is_trashed=True)
+        cleanup_test_resources.extend([rid_active, rid_trashed])
+    finally:
+        await conn.close()
 
-    with pytest.raises((ProgrammingError, UndefinedColumnError)):
-        await _repo().completed_videos_by_user()
+    rows = await _repo().completed_videos_by_user()
+
+    # Row shape: each row is {"user_id": <str>} (the /storage handler key).
+    assert all(set(r.keys()) == {"user_id"} for r in rows)
+    assert all(type(r["user_id"]) is str for r in rows)
+    # The active resource's owner appears; the trashed one is excluded (so its
+    # creator only shows up via the active row, not the trashed one).
+    owner = str(creator_id)
+    active_count = sum(1 for r in rows if r["user_id"] == owner)
+    assert active_count >= 1
 
 
 # ─── factory parity ─────────────────────────────────────────────────────

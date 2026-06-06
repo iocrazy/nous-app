@@ -97,20 +97,23 @@ DB-side GROUP BY directly via an engine-native ``func.count()`` query (no RPC
 needed — same aggregate, byte-identical result), with the legacy client-side
 fallback shape kept.
 
-``get_tag_counts`` is a ★ DOUBLE-BROKEN endpoint (CONCERN — NOT repaired) ★:
-  1. Its primary RPC ``get_user_tag_counts`` is itself broken in the CURRENT
-     schema — the function body still references ``media_tags``, a table dropped
-     in migration 077 (merged into ``resource_tags``). Calling it raises
-     ``UndefinedTableError: relation "media_tags" does not exist`` — under REST
-     too (the legacy does NOT wrap the RPC ``.execute()``).
-  2. Its fallback ``_get_tag_counts_fallback`` selects the non-existent
-     ``resources.user_id`` column → PG 42703 (see that method).
-So under REST the legacy ``get_tag_counts`` ALWAYS raises and the router's
-``get_tag_statistics`` try/except returns an EMPTY stats response. We preserve
-that exact net behavior: the ORM wraps the (broken) RPC in try → logs → falls to
-the (broken) fallback → raises 42703 → router catch → empty stats. We do NOT
-repair either bug (would silently change a prod surface on flag-flip). Both are
-reported up as CONCERNs.
+``get_tag_counts`` was a ★ DOUBLE-BROKEN endpoint — BOTH halves are now FIXED ★:
+  1. Its primary RPC ``get_user_tag_counts`` was broken in the schema — the mig
+     066 function body JOINed ``media_tags`` (dropped in migration 077, merged
+     into ``resource_tags``) + ``parsed_media.user_id`` (dropped in migration
+     083), so every call raised ``relation "media_tags" does not exist``. FIXED
+     by **migration 256** (``256_fix_get_user_tag_counts.sql``): the RPC is
+     redefined resource-centric — JOIN ``resource_tags`` → ``resources`` and
+     filter ``resources.creator_id = p_user_id``, same signature, id return type
+     widened UUID → BIGINT to match the snowflake ``tags.id`` (post mig 051). NO
+     code change here — repos call the RPC by name and pick up the new body once
+     256 is applied.
+  2. Its fallback ``_get_tag_counts_fallback`` formerly selected the non-existent
+     ``resources.user_id`` column → PG 42703. FIXED in the prior commit to filter
+     on ``resources.creator_id`` (see that method).
+So the primary RPC path now returns the user's real tag counts; the fallback is
+only hit if the RPC is genuinely absent/empty, and it too returns correct counts.
+The router's ``get_tag_statistics`` try/except still guards both paths.
 
 No date columns and NO date/timestamptz RANGE filters in this repo (every WHERE is
 equality / ILIKE / IN), so there is no timestamptz<VARCHAR binding hazard.

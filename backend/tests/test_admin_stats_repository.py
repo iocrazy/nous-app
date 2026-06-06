@@ -174,11 +174,24 @@ async def test_video_status_history_filters_by_since(
 
 
 @pytest.mark.asyncio
-async def test_completed_videos_by_user_filters_status(
+async def test_completed_videos_by_user_is_resource_centric(
     repo: AdminStatsRepository, fake_query: _FakeQuery
 ) -> None:
-    fake_query._data = []
-    await repo.completed_videos_by_user()
+    """Resource-centric fix: parsed_media.user_id was dropped in migration 083,
+    so this now queries non-trashed ``resources`` by ``creator_id`` and maps each
+    row to a ``{"user_id": <str>}`` shape (what the /storage handler groups on)."""
+    fake_query._data = [
+        {"creator_id": "u1"},
+        {"creator_id": "u2"},
+        {"creator_id": None},  # defensive: skipped
+    ]
+    rows = await repo.completed_videos_by_user()
 
+    # Queries the resources table, not parsed_media.
+    table = next(c for c in fake_query.calls if c[0] == "table")
+    assert table[1] == ("resources",)
+    # Filters out trashed resources.
     eq = next(c for c in fake_query.calls if c[0] == "eq")
-    assert eq[1] == ("video_download_status", "completed")
+    assert eq[1] == ("is_trashed", False)
+    # Row shape: one {"user_id": <str>} per non-null creator_id.
+    assert rows == [{"user_id": "u1"}, {"user_id": "u2"}]
