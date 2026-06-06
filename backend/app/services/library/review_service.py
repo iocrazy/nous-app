@@ -10,14 +10,14 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from app.repositories.review_repository import ReviewRepository
+from app.repositories.review_repository import get_review_repository
 
 
 class ReviewService:
     """Business logic for the review system."""
 
     def __init__(self):
-        self.repo = ReviewRepository()
+        self.repo = get_review_repository()
 
     # ─── Comments ───────────────────────────────────────
 

@@ -125,7 +125,7 @@ async def test_happy_path_queued_to_done_with_outbox():
 
     with (
         patch(
-            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
             return_value=workforce,
         ),
         patch(
@@ -204,7 +204,7 @@ async def test_refuses_non_persistent_agent():
 
     with (
         patch(
-            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
             return_value=workforce,
         ),
         patch(
@@ -234,7 +234,7 @@ async def test_refuses_depth_exceeded():
     workforce.update_task_status = AsyncMock(return_value=True)
 
     with patch(
-        "app.services.workforce.agent_worker.AgentWorkforceRepository",
+        "app.services.workforce.agent_worker.get_agent_workforce_repository",
         return_value=workforce,
     ):
         result = await run_one_task(task)
@@ -259,7 +259,7 @@ async def test_skips_task_no_longer_claimable():
     workforce.update_task_status = AsyncMock(return_value=True)
 
     with patch(
-        "app.services.workforce.agent_worker.AgentWorkforceRepository",
+        "app.services.workforce.agent_worker.get_agent_workforce_repository",
         return_value=workforce,
     ):
         result = await run_one_task(task)
@@ -289,7 +289,7 @@ async def test_empty_prompt_fails_fast():
 
     with (
         patch(
-            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
             return_value=workforce,
         ),
         patch(
@@ -329,7 +329,7 @@ async def test_run_turn_exception_marks_failed():
 
     with (
         patch(
-            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
             return_value=workforce,
         ),
         patch(
@@ -411,7 +411,7 @@ async def test_outbox_routes_to_agent_when_sender_kind_agent():
 
     with (
         patch(
-            "app.services.workforce.agent_worker.AgentWorkforceRepository",
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
             return_value=workforce,
         ),
         patch(

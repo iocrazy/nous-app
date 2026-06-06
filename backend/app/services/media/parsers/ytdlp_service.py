@@ -657,9 +657,11 @@ class YtdlpService:
         # Priority 1: Per-user DB cookie
         if user_id:
             try:
-                from app.repositories.cookies_repository import CookiesRepository
+                from app.repositories.cookies_repository import (
+                    get_cookies_repository,
+                )
 
-                repo = CookiesRepository()
+                repo = get_cookies_repository()
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
@@ -730,9 +732,11 @@ class YtdlpService:
         Returns:
             True if a cookie record exists, False otherwise.
         """
-        from app.repositories.cookies_repository import CookiesRepository
+        from app.repositories.cookies_repository import (
+            get_cookies_repository,
+        )
 
-        repo = CookiesRepository()
+        repo = get_cookies_repository()
         record = await repo.get_by_user_and_platform(user_id, platform)
         return record is not None
 

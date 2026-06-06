@@ -6,9 +6,14 @@ Review system data access layer.
 Handles CRUD for review_comments, review_annotations, and review_status tables.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
+from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.review_repository_orm import ReviewRepositoryOrm
 
 
 class ReviewRepository:
@@ -208,3 +213,26 @@ class ReviewRepository:
             query = query.is_("version_id", "null")
         result = await query.limit(1).execute()
         return result.data[0] if result.data else None
+
+
+def get_review_repository() -> Union["ReviewRepository", "ReviewRepositoryOrm"]:
+    """Return the right ReviewRepository implementation per env.
+
+    ORM when ``USE_ORM_REVIEW`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_REVIEW:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.review_repository_orm import ReviewRepositoryOrm
+
+            return ReviewRepositoryOrm()
+        logger.warning(
+            "USE_ORM_REVIEW=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return ReviewRepository()

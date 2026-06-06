@@ -50,7 +50,10 @@ from uuid import UUID
 
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
-from app.repositories.agent_workforce_repository import AgentWorkforceRepository
+from app.repositories.agent_workforce_repository import (
+    AgentWorkforceRepository,
+    get_agent_workforce_repository,
+)
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
@@ -85,7 +88,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
     agent_id = UUID(task["agent_id"])
     user_id = UUID(task["user_id"])
 
-    workforce = AgentWorkforceRepository()
+    workforce = get_agent_workforce_repository()
 
     # Refuse to enter the run if depth budget is already blown. The
     # inbox processor should have caught this earlier via DelegateTool,

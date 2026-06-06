@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.repositories.team_repository import TeamRepository
+from app.repositories.team_repository import get_team_repository
 from app.schemas.team import (
     JoinTeamRequest,
     TeamCreate,
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/teams", tags=["Teams"])
 @router.get("", response_model=TeamListResponse)
 async def list_teams(auth: AuthDep):
     """List all teams the current user is a member of."""
-    repo = TeamRepository()
+    repo = get_team_repository()
     teams = await repo.get_user_teams(auth.user_id)
 
     return TeamListResponse(
@@ -44,7 +44,7 @@ async def list_teams(auth: AuthDep):
 @router.post("", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
 async def create_team(team: TeamCreate, auth: AuthDep):
     """Create a new team."""
-    repo = TeamRepository()
+    repo = get_team_repository()
 
     try:
         created = await repo.create_team(team.name, auth.user_id)
@@ -68,7 +68,7 @@ async def create_team(team: TeamCreate, auth: AuthDep):
 @router.get("/{team_id}", response_model=TeamResponse)
 async def get_team(team_id: str, auth: AuthDep):
     """Get a specific team by ID."""
-    repo = TeamRepository()
+    repo = get_team_repository()
     team = await repo.get_team_by_id(team_id, auth.user_id)
 
     if not team:
@@ -90,7 +90,7 @@ async def get_team(team_id: str, auth: AuthDep):
 @router.put("/{team_id}", response_model=TeamResponse)
 async def update_team(team_id: str, update: TeamUpdate, auth: AuthDep):
     """Update a team (owner only)."""
-    repo = TeamRepository()
+    repo = get_team_repository()
 
     update_data = {}
     if update.name is not None:
@@ -123,7 +123,7 @@ async def update_team(team_id: str, update: TeamUpdate, auth: AuthDep):
 @router.delete("/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_team(team_id: str, auth: AuthDep):
     """Delete a team (owner only)."""
-    repo = TeamRepository()
+    repo = get_team_repository()
     deleted = await repo.delete_team(team_id, auth.user_id)
 
     if not deleted:
@@ -135,7 +135,7 @@ async def delete_team(team_id: str, auth: AuthDep):
 @router.get("/{team_id}/members", response_model=TeamMemberListResponse)
 async def list_team_members(team_id: str, auth: AuthDep):
     """List all members of a team."""
-    repo = TeamRepository()
+    repo = get_team_repository()
     members = await repo.get_team_members(team_id, auth.user_id)
 
     if not members and not await repo.get_team_by_id(team_id, auth.user_id):
@@ -165,7 +165,7 @@ async def update_member_role(
     team_id: str, user_id: str, update: TeamMemberUpdate, auth: AuthDep
 ):
     """Update a team member's role (owner/admin only)."""
-    repo = TeamRepository()
+    repo = get_team_repository()
 
     if update.role not in ["admin", "editor", "reviewer", "viewer"]:
         raise HTTPException(
@@ -203,7 +203,7 @@ async def update_member_role(
 @router.delete("/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_member(team_id: str, user_id: str, auth: AuthDep):
     """Remove a member from team (owner/admin only, or self)."""
-    repo = TeamRepository()
+    repo = get_team_repository()
     removed = await repo.remove_member(team_id, user_id, auth.user_id)
 
     if not removed:
@@ -216,7 +216,7 @@ async def remove_member(team_id: str, user_id: str, auth: AuthDep):
 @router.post("/join", response_model=TeamResponse)
 async def join_team(request: JoinTeamRequest, auth: AuthDep):
     """Join a team using invite code."""
-    repo = TeamRepository()
+    repo = get_team_repository()
 
     try:
         team = await repo.join_team_by_code(request.invite_code, auth.user_id)

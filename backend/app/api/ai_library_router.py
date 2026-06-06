@@ -1777,7 +1777,7 @@ async def list_my_commitments(
         raise HTTPException(status_code=400, detail="limit must be 1..200")
 
     from app.agent_framework.commitments import CommitmentStatus
-    from app.repositories.commitment_repository import CommitmentRepository
+    from app.repositories.commitment_repository import get_commitment_repository
 
     status_filter: Optional[CommitmentStatus] = None
     if status:
@@ -1789,7 +1789,7 @@ async def list_my_commitments(
                 detail=f"invalid status; expected one of {[s.value for s in CommitmentStatus]}",
             )
 
-    repo = CommitmentRepository()
+    repo = get_commitment_repository()
     items = await repo.list_for_user(
         str(auth.user_id), status=status_filter, limit=limit
     )
@@ -1829,9 +1829,9 @@ async def fulfill_commitment(
     Ownership-checked: only the user who is named on the commitment row
     can fulfill it; any other caller gets 404.
     """
-    from app.repositories.commitment_repository import CommitmentRepository
+    from app.repositories.commitment_repository import get_commitment_repository
 
-    repo = CommitmentRepository()
+    repo = get_commitment_repository()
     existing = await repo.get_by_id(commitment_id)
     if not existing or existing.user_id != str(auth.user_id):
         raise HTTPException(status_code=404, detail="commitment not found")
@@ -1853,9 +1853,9 @@ async def cancel_commitment(
     auth: AuthDep,
 ) -> Dict[str, Any]:
     """User dismisses a pending followup."""
-    from app.repositories.commitment_repository import CommitmentRepository
+    from app.repositories.commitment_repository import get_commitment_repository
 
-    repo = CommitmentRepository()
+    repo = get_commitment_repository()
     existing = await repo.get_by_id(commitment_id)
     if not existing or existing.user_id != str(auth.user_id):
         raise HTTPException(status_code=404, detail="commitment not found")
@@ -2297,10 +2297,10 @@ async def list_approval_requests(auth: AuthDep, limit: int = 50) -> Dict[str, An
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be 1..200")
     from app.repositories.approval_requests_repository import (
-        ApprovalRequestsRepository,
+        get_approval_requests_repository,
     )
 
-    repo = ApprovalRequestsRepository()
+    repo = get_approval_requests_repository()
     rows = await repo.list_pending_for_user(
         _coerce_user_uuid(auth.user_id), limit=limit
     )
@@ -2336,11 +2336,11 @@ async def approve_approval_request(
     auth: AuthDep,
 ) -> Dict[str, Any]:
     from app.repositories.approval_requests_repository import (
-        ApprovalRequestsRepository,
+        get_approval_requests_repository,
     )
 
     user_uuid = _coerce_user_uuid(auth.user_id)
-    repo = ApprovalRequestsRepository()
+    repo = get_approval_requests_repository()
     existing = await repo.get_by_id(request_id)
     if not existing or existing.user_id != user_uuid:
         raise HTTPException(status_code=404, detail="approval request not found")
@@ -2367,11 +2367,11 @@ async def reject_approval_request(
     auth: AuthDep,
 ) -> Dict[str, Any]:
     from app.repositories.approval_requests_repository import (
-        ApprovalRequestsRepository,
+        get_approval_requests_repository,
     )
 
     user_uuid = _coerce_user_uuid(auth.user_id)
-    repo = ApprovalRequestsRepository()
+    repo = get_approval_requests_repository()
     existing = await repo.get_by_id(request_id)
     if not existing or existing.user_id != user_uuid:
         raise HTTPException(status_code=404, detail="approval request not found")

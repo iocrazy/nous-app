@@ -29,7 +29,7 @@ from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.agent_workforce_repository import (
     TASK_KIND_AGENT,
-    AgentWorkforceRepository,
+    get_agent_workforce_repository,
     tt_row_to_task_shape,
 )
 
@@ -500,7 +500,7 @@ async def cancel_task(
     RunRecorder cancel poll) will refuse to keep going. Already-done
     tasks are left alone.
     """
-    workforce = AgentWorkforceRepository()
+    workforce = get_agent_workforce_repository()
     task = await workforce.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail=f"task {task_id} not found")

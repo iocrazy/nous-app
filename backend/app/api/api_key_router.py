@@ -11,7 +11,7 @@ from loguru import logger
 
 from app.core.api_key_scopes import AVAILABLE_SCOPES
 from app.core.deps import AuthDep
-from app.repositories.api_key_repository import ApiKeyRepository
+from app.repositories.api_key_repository import get_api_key_repository
 from app.schemas.api_key import (
     ApiKeyCreate,
     ApiKeyCreateResponse,
@@ -54,7 +54,7 @@ async def create_api_key(request: ApiKeyCreate, auth: AuthDep):
 
     返回完整密钥，可随时从列表中复制。
     """
-    repo = ApiKeyRepository()
+    repo = get_api_key_repository()
 
     # 检查密钥数量限制
     current_count = await repo.count_user_keys(auth.user_id)
@@ -105,7 +105,7 @@ async def list_api_keys(auth: AuthDep, include_revoked: bool = False):
     Args:
         include_revoked: 是否包含已撤销的密钥
     """
-    repo = ApiKeyRepository()
+    repo = get_api_key_repository()
     keys = await repo.get_user_keys(auth.user_id, include_revoked)
 
     key_responses = [
@@ -136,7 +136,7 @@ async def get_api_key(key_id: str, auth: AuthDep):
     """
     获取指定 API 密钥详情
     """
-    repo = ApiKeyRepository()
+    repo = get_api_key_repository()
     key_data = await repo.get_by_key_id(key_id)
 
     if not key_data:
@@ -171,7 +171,7 @@ async def update_api_key(key_id: str, request: ApiKeyUpdate, auth: AuthDep):
     """
     更新 API 密钥
     """
-    repo = ApiKeyRepository()
+    repo = get_api_key_repository()
 
     # 构建更新数据
     update_data = request.model_dump(exclude_unset=True)
@@ -221,7 +221,7 @@ async def delete_api_key(key_id: str, auth: AuthDep):
     """
     删除 API 密钥（硬删除）
     """
-    repo = ApiKeyRepository()
+    repo = get_api_key_repository()
     success = await repo.delete(key_id, auth.user_id)
 
     if not success:
@@ -239,7 +239,7 @@ async def revoke_api_key(key_id: str, auth: AuthDep):
 
     撤销后密钥将无法使用，但记录仍保留
     """
-    repo = ApiKeyRepository()
+    repo = get_api_key_repository()
     result = await repo.revoke(key_id, auth.user_id)
 
     if not result:

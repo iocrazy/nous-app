@@ -10,11 +10,14 @@ API 密钥数据仓储
 import hashlib
 import secrets
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.api_key_repository_orm import ApiKeyRepositoryOrm
 
 
 class ApiKeyRepository:
@@ -343,3 +346,26 @@ class ApiKeyRepository:
         except Exception as e:
             logger.error(f"统计用户 API 密钥数量失败: {e}")
             return 0
+
+
+def get_api_key_repository() -> Union["ApiKeyRepository", "ApiKeyRepositoryOrm"]:
+    """Return the right ApiKeyRepository implementation per env.
+
+    ORM when ``USE_ORM_API_KEY`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_API_KEY:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.api_key_repository_orm import ApiKeyRepositoryOrm
+
+            return ApiKeyRepositoryOrm()
+        logger.warning(
+            "USE_ORM_API_KEY=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return ApiKeyRepository()

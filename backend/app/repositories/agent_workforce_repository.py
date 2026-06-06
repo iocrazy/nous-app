@@ -23,10 +23,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from app.repositories.agent_workforce_repository_orm import (
+        AgentWorkforceRepositoryOrm,
+    )
 
 from app.db.supabase_client import get_async_supabase_admin
 
@@ -805,3 +810,31 @@ class AgentWorkforceRepository:
         except Exception as e:
             logger.error(f"Failed to list undelivered outbox: {e}")
             return []
+
+
+def get_agent_workforce_repository() -> (
+    Union["AgentWorkforceRepository", "AgentWorkforceRepositoryOrm"]
+):
+    """Return the right AgentWorkforceRepository implementation per env.
+
+    ORM (5-table workforce bounded context) when ``USE_ORM_WORKFORCE`` is set
+    AND the SQLAlchemy engine is configured; otherwise the legacy supabase-py
+    REST path. A flag-on but engine-missing deploy logs once and falls back to
+    REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_WORKFORCE:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.agent_workforce_repository_orm import (
+                AgentWorkforceRepositoryOrm,
+            )
+
+            return AgentWorkforceRepositoryOrm()
+        logger.warning(
+            "USE_ORM_WORKFORCE=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AgentWorkforceRepository()

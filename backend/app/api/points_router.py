@@ -17,7 +17,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.points_repository import PointsRepository
+from app.repositories.points_repository import get_points_repository
 from app.schemas.points import PointsAdjustRequest
 from app.services.billing.points_service import PointsService
 
@@ -265,7 +265,7 @@ async def get_transactions(
     """
     try:
         resolved_team_id = await _resolve_team_id(auth.user_id, team_id)
-        repo = PointsRepository()
+        repo = get_points_repository()
         transactions = await repo.get_transactions(
             team_id=resolved_team_id,
             limit=limit,
@@ -297,7 +297,7 @@ async def get_pricing(auth: AuthDep):
     Authentication: Bearer Token or API Key
     """
     try:
-        repo = PointsRepository()
+        repo = get_points_repository()
         pricing = await repo.get_all_pricing()
         return {"success": True, "pricing": pricing}
     except Exception as e:
@@ -324,7 +324,7 @@ async def get_usage_stats(
     """
     try:
         resolved_team_id = await _resolve_team_id(auth.user_id, team_id)
-        repo = PointsRepository()
+        repo = get_points_repository()
         stats = await repo.get_usage_stats(resolved_team_id)
         return {"success": True, "data": stats}
     except HTTPException:
@@ -420,7 +420,7 @@ async def admin_adjust_points(
             )
         elif request.amount < 0:
             # For negative adjustments, deduct from balance directly
-            repo = PointsRepository()
+            repo = get_points_repository()
             team_quota = await repo.get_team_quota(request.team_id)
             if team_quota is None:
                 raise HTTPException(
@@ -489,7 +489,7 @@ async def admin_overview(auth: AuthDep):
         )
 
     try:
-        repo = PointsRepository()
+        repo = get_points_repository()
         overview = await repo.get_admin_overview()
         return {"success": True, "data": overview}
     except Exception as e:

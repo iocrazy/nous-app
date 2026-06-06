@@ -48,7 +48,7 @@ async def test_list_returns_only_pending():
     auth = MagicMock()
     auth.user_id = str(user_id)
     with patch(
-        "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
+        "app.repositories.approval_requests_repository.get_approval_requests_repository",
         return_value=fake_repo,
     ):
         out = await router_module.list_approval_requests(auth)
@@ -68,7 +68,7 @@ async def test_approve_404s_when_not_owner():
     auth.user_id = str(intruder)
     payload = router_module._ApprovalDecision(note="x")
     with patch(
-        "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
+        "app.repositories.approval_requests_repository.get_approval_requests_repository",
         return_value=fake_repo,
     ):
         with pytest.raises(HTTPException) as e:
@@ -86,7 +86,7 @@ async def test_approve_409s_when_already_decided():
     auth.user_id = str(user_id)
     payload = router_module._ApprovalDecision()
     with patch(
-        "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
+        "app.repositories.approval_requests_repository.get_approval_requests_repository",
         return_value=fake_repo,
     ):
         with pytest.raises(HTTPException) as e:
@@ -106,7 +106,7 @@ async def test_approve_happy_path_calls_decide_with_owner():
     auth.user_id = str(user_id)
     payload = router_module._ApprovalDecision(note="lgtm")
     with patch(
-        "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
+        "app.repositories.approval_requests_repository.get_approval_requests_repository",
         return_value=fake_repo,
     ):
         out = await router_module.approve_approval_request(req_id, payload, auth)
@@ -130,7 +130,7 @@ async def test_reject_happy_path():
     auth.user_id = str(user_id)
     payload = router_module._ApprovalDecision(note="too risky")
     with patch(
-        "app.repositories.approval_requests_repository.ApprovalRequestsRepository",
+        "app.repositories.approval_requests_repository.get_approval_requests_repository",
         return_value=fake_repo,
     ):
         out = await router_module.reject_approval_request(req_id, payload, auth)

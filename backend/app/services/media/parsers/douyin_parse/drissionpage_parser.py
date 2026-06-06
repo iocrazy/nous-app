@@ -196,9 +196,11 @@ class DrissionPageParser(metaclass=SingletonMeta):
         if not user_id:
             return ""
         try:
-            from app.repositories.cookies_repository import CookiesRepository
+            from app.repositories.cookies_repository import (
+                get_cookies_repository,
+            )
 
-            repo = CookiesRepository()
+            repo = get_cookies_repository()
             row = await repo.get_by_user_and_platform(user_id, "douyin")
             if row:
                 return (row.get("cookie_text") or row.get("cookie_file") or "").strip()

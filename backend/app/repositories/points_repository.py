@@ -8,11 +8,14 @@ packages, team quotas, member quotas, and point transactions.
 Uses async Supabase client.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.points_repository_orm import PointsRepositoryOrm
 
 
 class PointsRepository:
@@ -658,3 +661,26 @@ class PointsRepository:
                 "total_purchased": 0,
                 "by_type": {},
             }
+
+
+def get_points_repository() -> Union["PointsRepository", "PointsRepositoryOrm"]:
+    """Return the right PointsRepository implementation per env.
+
+    ORM when ``USE_ORM_POINTS`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_POINTS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.points_repository_orm import PointsRepositoryOrm
+
+            return PointsRepositoryOrm()
+        logger.warning(
+            "USE_ORM_POINTS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return PointsRepository()

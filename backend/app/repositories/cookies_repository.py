@@ -8,11 +8,14 @@
 """
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
+
+if TYPE_CHECKING:
+    from app.repositories.cookies_repository_orm import CookiesRepositoryOrm
 
 
 class CookiesRepository:
@@ -174,3 +177,26 @@ class CookiesRepository:
             logger.error(
                 f"标记 Cookie 无效失败: user_id={user_id}, platform={platform}, error={e}"
             )
+
+
+def get_cookies_repository() -> Union["CookiesRepository", "CookiesRepositoryOrm"]:
+    """Return the right CookiesRepository implementation per env.
+
+    ORM when ``USE_ORM_COOKIES`` is set AND the SQLAlchemy engine is configured;
+    otherwise the legacy supabase-py REST path. A flag-on but engine-missing
+    deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_COOKIES:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.cookies_repository_orm import CookiesRepositoryOrm
+
+            return CookiesRepositoryOrm()
+        logger.warning(
+            "USE_ORM_COOKIES=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return CookiesRepository()
