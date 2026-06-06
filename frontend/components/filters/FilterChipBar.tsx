@@ -7,10 +7,11 @@
 // - An APPLIED facet renders as a solid chip showing its value, tapping the
 //   body re-opens its picker, tapping the ✕ clears just that facet.
 // - An UNAPPLIED facet renders as a muted chip that opens its picker.
-// Tapping a dimension calls onOpenFacet(id) — the parent shows FacetPickerSheet.
+// Bounded facets open a compact FacetDropdown anchored to the chip; the
+// unbounded Tags / multi-control Social facets open the full-screen
+// FacetPickerSheet via onOpenFacet.
 //
-// Controlled by the SAME useFilterBarConfig instance the view owns (props), so
-// it shares state with the server-side filter params already wired up.
+// Controlled by the SAME useFilterBarConfig instance the view owns (props).
 
 import { useState } from 'react';
 import { SlidersHorizontal, ChevronDown, X } from 'lucide-react';
@@ -19,11 +20,14 @@ import { useTranslation } from 'react-i18next';
 import type { UseFilterBarConfigReturn } from '../../hooks/useFilterBarConfig';
 import type { ChipId } from '../resources/filter/types';
 import type { Tag } from '../../types';
-import { FACETS, facetActiveLabel } from './facetMeta';
+import { FACETS, facetActiveLabel, facetIsFullscreen } from './facetMeta';
+import { FacetDropdown } from './FacetDropdown';
 
 interface FilterChipBarProps {
   config: UseFilterBarConfigReturn;
   allTags: Tag[];
+  availablePlatforms?: string[];
+  /** Open the full-screen picker for a facet (Tags / Social). */
   onOpenFacet: (id: ChipId) => void;
   className?: string;
 }
@@ -31,14 +35,26 @@ interface FilterChipBarProps {
 export function FilterChipBar({
   config,
   allTags,
+  availablePlatforms = [],
   onOpenFacet,
   className = '',
 }: FilterChipBarProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dropdown, setDropdown] = useState<{ id: ChipId; rect: DOMRect } | null>(
+    null,
+  );
 
   const { chipValues, isChipActive, activeFilterCount, clearAll, clearChip } =
     config;
+
+  const openFacet = (id: ChipId, e: React.MouseEvent<HTMLButtonElement>) => {
+    if (facetIsFullscreen(id)) {
+      onOpenFacet(id);
+    } else {
+      setDropdown({ id, rect: e.currentTarget.getBoundingClientRect() });
+    }
+  };
 
   // Active facets first, then the rest — mirrors Pixcall's dynamic reorder.
   const active = FACETS.filter((f) => isChipActive(f.id));
@@ -72,7 +88,7 @@ export function FilterChipBar({
             >
               <button
                 type="button"
-                onClick={() => onOpenFacet(f.id)}
+                onClick={(e) => openFacet(f.id, e)}
                 className="flex items-center gap-1.5 pl-3 pr-2 py-1.5 active:bg-indigo-600 whitespace-nowrap"
               >
                 <Icon size={13} className="opacity-90" />
@@ -97,7 +113,7 @@ export function FilterChipBar({
             <button
               key={f.id}
               type="button"
-              onClick={() => onOpenFacet(f.id)}
+              onClick={(e) => openFacet(f.id, e)}
               className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm active:bg-zinc-700 whitespace-nowrap"
             >
               <Icon size={13} className="text-zinc-400" />
@@ -107,6 +123,17 @@ export function FilterChipBar({
           );
         })}
       </div>
+
+      {/* Bounded-facet dropdown */}
+      {dropdown && (
+        <FacetDropdown
+          facetId={dropdown.id}
+          anchorRect={dropdown.rect}
+          config={config}
+          availablePlatforms={availablePlatforms}
+          onClose={() => setDropdown(null)}
+        />
+      )}
 
       {/* ≡ menu */}
       {menuOpen && (
