@@ -845,6 +845,75 @@ export async function uploadResource(
   return json.data;
 }
 
+// ─── Cover / Lyrics ──────────────────────────────────────
+
+/**
+ * Build headers for multipart uploads: reuse auth headers but drop any
+ * Content-Type key so the browser sets the multipart boundary itself.
+ */
+async function multipartHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {};
+  const auth = await getAuthHeaders();
+  Object.entries(auth).forEach(([k, v]) => {
+    if (k.toLowerCase() !== 'content-type') headers[k] = v as string;
+  });
+  return headers;
+}
+
+export async function uploadResourceCover(
+  resourceId: string,
+  file: File,
+): Promise<Resource> {
+  const apiUrl = getApiUrl();
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/cover`, {
+    method: 'POST',
+    headers: await multipartHeaders(),
+    body: fd,
+  });
+  if (!res.ok) throw new Error('Failed to upload cover');
+  return (await res.json()).data;
+}
+
+export async function uploadResourceLyrics(
+  resourceId: string,
+  file: File,
+): Promise<{
+  lrc: string;
+  lines: Array<{ text: string; line_start_ms: number | null }>;
+}> {
+  const apiUrl = getApiUrl();
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/lyrics`, {
+    method: 'POST',
+    headers: await multipartHeaders(),
+    body: fd,
+  });
+  if (!res.ok) {
+    const e = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to upload lyrics' }));
+    throw new Error(e.detail || `HTTP ${res.status}`);
+  }
+  return (await res.json()).data.lyrics_json;
+}
+
+export async function getResourceLyrics(
+  resourceId: string,
+): Promise<{
+  lrc: string;
+  lines: Array<{ text: string; line_start_ms: number | null }>;
+} | null> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/lyrics`, {
+    headers: await getAuthHeaders(),
+  });
+  if (!res.ok) return null;
+  return (await res.json()).data ?? null;
+}
+
 // ─── Trash / Restore ─────────────────────────────────────
 
 export async function trashResource(
