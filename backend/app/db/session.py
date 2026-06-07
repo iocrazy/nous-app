@@ -102,6 +102,32 @@ async def write_scope() -> AsyncIterator[AsyncSession]:
 
 
 @asynccontextmanager
+async def maybe_unit_of_work(enabled: bool) -> AsyncIterator[AsyncSession | None]:
+    """Conditionally open a ``unit_of_work()``.
+
+    Application-site helper for wiring atomicity into a multi-repo write path
+    WITHOUT changing behaviour until the path's domain is actually on the ORM.
+
+      enabled=True  → open a real ``unit_of_work()`` (the repo writes inside
+                      share one transaction → atomic).
+      enabled=False → no-op (yields None); each repo write commits on its own,
+                      exactly the legacy per-method behaviour. Zero overhead —
+                      NO session/connection is opened.
+
+    Pass ``settings.USE_ORM_<DOMAIN> and is_configured()`` for ``enabled`` so the
+    unit-of-work activates only when (a) the domain's repos are ORM-backed (they
+    use ``write_scope()`` and therefore join the ambient transaction) AND (b) the
+    SQLAlchemy engine exists (opening a UoW calls ``get_engine()``; without the
+    engine it would raise). With the flag off the path is byte-for-byte unchanged.
+    """
+    if enabled:
+        async with unit_of_work() as session:
+            yield session
+    else:
+        yield None
+
+
+@asynccontextmanager
 async def unit_of_work() -> AsyncIterator[AsyncSession]:
     """Open a service/request-scoped session + transaction. Repo writes called
     inside this block share ONE transaction (atomic: any raise rolls back all).
