@@ -210,7 +210,11 @@ const FilePreview: React.FC<{
         <AudioHero
           src={fileUrl}
           title={resource.filename}
-          coverUrl={resource.thumbnail_path || undefined}
+          coverUrl={
+            resource.cover_image_path && resource.id
+              ? getResourceCoverUrl(String(resource.id))
+              : resource.thumbnail_path || undefined
+          }
           duration={resource.duration_seconds ?? undefined}
         />
         {resource.source_type === 'upload' && (
