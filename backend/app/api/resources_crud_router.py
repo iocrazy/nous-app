@@ -675,6 +675,43 @@ async def upload_resource_cover(
     return {"success": True, "data": result}
 
 
+@router.post("/{resource_id}/lyrics")
+async def upload_resource_lyrics(
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+    file: UploadFile = File(...),
+):
+    """Upload an .lrc file; parse it and store on the resource."""
+    from app.services.lrc_parser import parse_lrc
+
+    repo = ResourcesRepository()
+    resource = await repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    raw = (await file.read()).decode("utf-8", errors="replace")
+    try:
+        lyrics = parse_lrc(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid LRC: {e}")
+    result = await repo.update_resource(resource_id, {"lyrics_json": lyrics})
+    return {"success": True, "data": {"lyrics_json": lyrics, "resource": result}}
+
+
+@router.get("/{resource_id}/lyrics")
+async def get_resource_lyrics(
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Return the resource's stored lyrics_json (or null)."""
+    repo = ResourcesRepository()
+    resource = await repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return {"success": True, "data": resource.get("lyrics_json")}
+
+
 @router.post("/by-platform-id/{platform_id}/trash")
 async def trash_resource_by_platform_id(
     platform_id: str,
