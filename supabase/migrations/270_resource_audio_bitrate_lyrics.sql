@@ -3,6 +3,11 @@
 ALTER TABLE resources ADD COLUMN IF NOT EXISTS audio_bitrate_kbps integer;
 ALTER TABLE resources ADD COLUMN IF NOT EXISTS lyrics_json jsonb;
 
+-- resource_versions mirrors the probed media-metadata columns (it already has
+-- resolution + duration_seconds, and upload spreads the same metadata dict into
+-- the version row). Add bitrate here too or the audio version-insert hits 42703.
+ALTER TABLE resource_versions ADD COLUMN IF NOT EXISTS audio_bitrate_kbps integer;
+
 COMMENT ON COLUMN resources.audio_bitrate_kbps IS 'Audio bitrate in kbps, ffprobed on upload for audio/* resources';
 COMMENT ON COLUMN resources.lyrics_json IS 'User lyrics for uploaded audio: {lrc: text, lines: [{text, line_start_ms}]}';
 
