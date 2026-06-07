@@ -35,9 +35,9 @@ _NODE_ATTRS = {p.key for p in StoryboardNodes.__mapper__.column_attrs}
 _FRAME_ATTRS = {p.key for p in StoryboardFrames.__mapper__.column_attrs}
 
 
-def _capture_persist(step, project_id, scenes):
-    """Run a persist_*_scenes_step with mocked repos, return the node + frame
-    dicts it handed to the repos."""
+async def _capture_persist(step, project_id, scenes):
+    """Run a persist_*_scenes_step (async @DBOS.step) with mocked repos, return
+    the node + frame dicts it handed to the repos."""
     captured: dict[str, list[dict]] = {"nodes": [], "frames": []}
 
     node_repo = MagicMock()
@@ -59,7 +59,7 @@ def _capture_persist(step, project_id, scenes):
             return_value=frame_repo,
         ),
     ):
-        step(project_id, scenes)
+        await step(project_id, scenes)
 
     return captured
 
@@ -69,8 +69,9 @@ def _assert_real_columns(row: dict, attrs: set[str]) -> None:
     assert not phantom, f"phantom (non-column) keys leaked into the write: {phantom}"
 
 
-def test_persist_split_scenes_dicts_are_real_columns() -> None:
-    captured = _capture_persist(
+@pytest.mark.asyncio
+async def test_persist_split_scenes_dicts_are_real_columns() -> None:
+    captured = await _capture_persist(
         sb.persist_split_scenes_step,
         "999",
         [
@@ -101,8 +102,9 @@ def test_persist_split_scenes_dicts_are_real_columns() -> None:
     assert frame["note"] == "some notes"
 
 
-def test_persist_video_scenes_dicts_are_real_columns() -> None:
-    captured = _capture_persist(
+@pytest.mark.asyncio
+async def test_persist_video_scenes_dicts_are_real_columns() -> None:
+    captured = await _capture_persist(
         sb.persist_video_scenes_step,
         "888",
         [{"description": "a scene", "image_path": "frames/x.png", "time": 3}],
