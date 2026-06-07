@@ -193,7 +193,7 @@ export const findOwnedVideoByUrl = async (url: string): Promise<ParsedMedia | nu
     const mt = String(flat.media_type ?? '');
     const isImage = ['2', '68', 'image', 'images'].includes(mt);
     const statusField = isImage ? 'image_download_status' : 'video_download_status';
-    if ((flat as Record<string, unknown>)[statusField] !== 'completed') return null;
+    if ((flat as unknown as Record<string, unknown>)[statusField] !== 'completed') return null;
     return flat;
   } catch {
     return null;
