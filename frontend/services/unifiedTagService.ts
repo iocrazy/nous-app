@@ -110,6 +110,26 @@ export async function updateTag(
   return res.json();
 }
 
+export async function mergeTags(
+  targetId: string,
+  sourceIds: string[],
+): Promise<{ target_id: string; resource_count: number }> {
+  const apiUrl = getApiUrl();
+  const res = await fetch(`${apiUrl}/api/v1/tags/merge`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+    body: JSON.stringify({ target_id: targetId, source_ids: sourceIds }),
+  });
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({ detail: 'Failed to merge tags' }));
+    throw new Error(error.detail || `HTTP ${res.status}`);
+  }
+  invalidateAllTagsCache();
+  return res.json();
+}
+
 export interface TagGroup {
   id: string;
   name: string;
