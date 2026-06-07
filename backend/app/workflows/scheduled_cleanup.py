@@ -24,7 +24,6 @@ from dbos import DBOS
 from loguru import logger
 
 from app.db.scope import system_request_scope
-from app.tasks.utils import run_async
 
 
 @DBOS.step()
@@ -78,44 +77,35 @@ def cleanup_temp_files_step() -> dict[str, Any]:
 
 
 @DBOS.step()
-def cleanup_old_task_tracking_step() -> dict[str, Any]:
+async def cleanup_old_task_tracking_step() -> dict[str, Any]:
     """Drop task_tracking rows in terminal state older than 7 days."""
+    from app.db import engine as db_engine
 
-    async def _do() -> int:
-        from app.db import engine as db_engine
-
-        # See scheduled_recovery.reap_stuck_pending_tasks_step for why
-        # this MUST be timezone-aware UTC, not naive local time.
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-        return await db_engine.execute(
-            "DELETE FROM public.task_tracking "
-            "WHERE status IN ('completed', 'failed', 'cancelled') "
-            "AND updated_at < :cutoff",
-            {"cutoff": cutoff},
-        )
-
-    deleted = run_async(_do())
+    # See scheduled_recovery.reap_stuck_pending_tasks_step for why
+    # this MUST be timezone-aware UTC, not naive local time.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    deleted = await db_engine.execute(
+        "DELETE FROM public.task_tracking "
+        "WHERE status IN ('completed', 'failed', 'cancelled') "
+        "AND updated_at < :cutoff",
+        {"cutoff": cutoff},
+    )
     return {"status": "success", "deleted": deleted}
 
 
 @DBOS.step()
-def cleanup_trashed_resources_step() -> dict[str, Any]:
+async def cleanup_trashed_resources_step() -> dict[str, Any]:
     """Permanently delete resources soft-deleted >15 days ago.
 
-    A2 pass 3: scope is set INSIDE ``_do`` (not at the sync-step level)
-    because ``run_async`` creates a fresh thread/event-loop that does NOT
-    inherit the caller's ContextVar. Setting the scope inside the coroutine
-    that ``run_async`` awaits ensures it lands in the correct context.
-    INERT until ``SCOPE_ENFORCE_RESOURCES`` is on.
+    The ``system_request_scope`` is entered inside the async step body so the
+    scope ContextVar lands in the step's running event loop, wrapping the DB
+    call. INERT until ``SCOPE_ENFORCE_RESOURCES`` is on.
     """
     from app.services.library.resources_service import ResourcesService
 
-    async def _do() -> int:
-        async with system_request_scope(reason="cleanup-trashed-resources"):
-            svc = ResourcesService()
-            return await svc.cleanup_expired_trash(older_than_days=15)
-
-    cleaned = run_async(_do())
+    async with system_request_scope(reason="cleanup-trashed-resources"):
+        svc = ResourcesService()
+        cleaned = await svc.cleanup_expired_trash(older_than_days=15)
     return {"status": "success", "cleaned": cleaned}
 
 
@@ -131,20 +121,20 @@ def cleanup_temp_files_workflow(
 
 @DBOS.scheduled("0 1 * * *")  # daily 01:00 UTC
 @DBOS.workflow()
-def cleanup_trashed_resources_workflow(
+async def cleanup_trashed_resources_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    result = cleanup_trashed_resources_step()
+    result = await cleanup_trashed_resources_step()
     if result.get("cleaned"):
         logger.info(f"[cleanup_trashed_resources] {result}")
 
 
 @DBOS.scheduled("0 2 * * *")  # daily 02:00 UTC
 @DBOS.workflow()
-def cleanup_old_task_tracking_workflow(
+async def cleanup_old_task_tracking_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    result = cleanup_old_task_tracking_step()
+    result = await cleanup_old_task_tracking_step()
     if result.get("deleted"):
         logger.info(f"[cleanup_old_task_tracking] {result}")
 
@@ -235,7 +225,7 @@ def _sweep_orphan_upload_dirs(
 
 
 @DBOS.step()
-def cleanup_orphan_storage_step() -> dict[str, Any]:
+async def cleanup_orphan_storage_step() -> dict[str, Any]:
     """Remove `teams/{scope}/uploads/{resource_id}/` directories whose
     resource_id is not referenced by `public.resources.id`.
 
@@ -259,11 +249,8 @@ def cleanup_orphan_storage_step() -> dict[str, Any]:
     async def _load_resource_ids() -> set[int]:
         from app.db import engine as db_engine
 
-        # A2 pass 3: system_request_scope is set here (inside the coroutine
-        # run_async awaits) so the ContextVar lands in the correct event-loop
-        # context — run_async creates a fresh thread/loop that does not
-        # inherit the caller's ContextVar (Pass 4 will add copy_context;
-        # this wiring is independent of that fix).
+        # system_request_scope is entered inside this coroutine so the
+        # ContextVar lands in the step's event-loop context, wrapping the read.
         # NOTE: db_engine.fetch_all is RAW SQL and currently bypasses the
         # ORM choke point — this scope is a defensive entry-boundary
         # annotation for consistency; the raw-SQL backstop lands in task A3.
@@ -271,7 +258,7 @@ def cleanup_orphan_storage_step() -> dict[str, Any]:
             rows = await db_engine.fetch_all("SELECT id FROM public.resources")
             return {row["id"] for row in rows if row.get("id") is not None}
 
-    valid_ids = run_async(_load_resource_ids())
+    valid_ids = await _load_resource_ids()
     min_age_seconds = ORPHAN_STORAGE_MIN_AGE_DAYS * 86400.0
 
     counts = _sweep_orphan_upload_dirs(base, valid_ids, min_age_seconds)
@@ -286,9 +273,9 @@ def cleanup_orphan_storage_step() -> dict[str, Any]:
 
 @DBOS.scheduled("0 3 * * 0")  # weekly Sunday 03:00 UTC
 @DBOS.workflow()
-def cleanup_orphan_storage_workflow(
+async def cleanup_orphan_storage_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    result = cleanup_orphan_storage_step()
+    result = await cleanup_orphan_storage_step()
     if result.get("deleted_dirs") or result.get("skipped_too_young"):
         logger.info(f"[cleanup_orphan_storage] {result}")

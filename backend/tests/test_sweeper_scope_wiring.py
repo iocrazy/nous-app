@@ -16,17 +16,14 @@ they monkeypatch the repo / service / db method each path calls and capture
 ``current_scope()`` from inside it, then assert it is the ``SYSTEM`` sentinel and
 that ``current_scope()`` is ``None`` after the call (no scope leak).
 
-run_async subtlety (#2, #3)
----------------------------
-``run_async`` spins a fresh thread/event-loop; Python's ``ContextVar`` copy is NOT
-inherited across a new thread by default (a fresh ``ContextVar.get()`` returns the
-default ``None``). The fix is to set the scope INSIDE the inner ``async def _do()``
-/ ``_load_resource_ids()`` that ``run_async`` awaits — the scope is set in the same
-loop/context where the repo calls run, so the assertion holds regardless of whether
-``run_async`` ever copies context (Pass 4 will add that; Pass 3 is independent).
-
-These tests call the real sync ``@DBOS.step`` function, which invokes ``run_async``
-in its body; the captured scope MUST be SYSTEM for the wiring to be correct.
+async-native (ORM 2.0 §2.4b)
+----------------------------
+``cleanup_trashed_resources_step`` and ``cleanup_orphan_storage_step`` are now
+``async def @DBOS.step()`` — the old ``run_async`` fresh-thread/event-loop bridge
+is gone, so the cross-thread ContextVar subtlety no longer applies. The
+``system_request_scope`` is entered directly inside the async step body, in the
+same loop as the DB call. These tests now ``await`` the real async step and assert
+the captured scope is SYSTEM at the DB call and ``None`` after (no leak).
 
 SYSTEM scope is correct under BOTH flag states:
   - FLAG OFF: choke point is inert → system_request_scope is a no-op guard
@@ -141,16 +138,12 @@ async def test_sweep_temp_resources_system_scope_reaches_repo(monkeypatch):
 # ─── 2. cleanup_trashed_resources_step ───────────────────────────────────────
 
 
-def test_cleanup_trashed_resources_step_establishes_system_scope(monkeypatch):
-    """``cleanup_trashed_resources_step`` establishes SYSTEM scope inside its
-    inner ``_do`` coroutine before calling ``svc.cleanup_expired_trash``.
+@pytest.mark.asyncio
+async def test_cleanup_trashed_resources_step_establishes_system_scope(monkeypatch):
+    """``cleanup_trashed_resources_step`` (async) establishes SYSTEM scope before
+    calling ``svc.cleanup_expired_trash``.
 
-    This calls the REAL sync ``@DBOS.step`` function (which calls ``run_async``
-    internally). The scope is set inside the coroutine that ``run_async`` awaits,
-    so it lands in the correct event-loop context — independent of whether
-    ``run_async`` copies the outer ContextVar (it does not today; Pass 4 will
-    fix that). Our captured scope MUST be SYSTEM regardless.
-
+    Awaits the real async ``@DBOS.step``; the captured scope MUST be SYSTEM.
     SYSTEM scope is correct under both flag states.
     """
     from app.workflows.scheduled_cleanup import cleanup_trashed_resources_step
@@ -166,7 +159,7 @@ def test_cleanup_trashed_resources_step_establishes_system_scope(monkeypatch):
         "app.services.library.resources_service.ResourcesService",
         return_value=_FakeSvc(),
     ):
-        result = cleanup_trashed_resources_step()
+        result = await cleanup_trashed_resources_step()
 
     assert result == {"status": "success", "cleaned": 0}
     scope = captured.get("scope")
@@ -177,7 +170,8 @@ def test_cleanup_trashed_resources_step_establishes_system_scope(monkeypatch):
     assert current_scope() is None, "scope leaked after cleanup_trashed_resources_step"
 
 
-def test_cleanup_trashed_resources_step_scope_enforced_flag_on(monkeypatch):
+@pytest.mark.asyncio
+async def test_cleanup_trashed_resources_step_scope_enforced_flag_on(monkeypatch):
     """Belt-and-suspenders: even with SCOPE_ENFORCE_RESOURCES=True the sweep
     succeeds (no UnscopedQueryError) because SYSTEM bypasses enforcement.
 
@@ -205,7 +199,7 @@ def test_cleanup_trashed_resources_step_scope_enforced_flag_on(monkeypatch):
             {"resources": lambda: True},
         ),
     ):
-        result = cleanup_trashed_resources_step()
+        result = await cleanup_trashed_resources_step()
 
     assert result == {"status": "success", "cleaned": 5}
     assert (
@@ -215,24 +209,14 @@ def test_cleanup_trashed_resources_step_scope_enforced_flag_on(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cleanup_trashed_step_scope_under_running_loop():
-    """PINS the inner-``_do`` scope placement against a sync-step-level hoist.
+async def test_cleanup_trashed_step_scope_inside_async_step():
+    """PINS that the SYSTEM scope is established INSIDE the async step body, in the
+    same loop as the DB call (not hoisted to a caller that the DB call can't see).
 
-    The two sync tests above call the step from a SYNC function with no running
-    loop → ``run_async`` takes the ``asyncio.run(...)`` branch, which COPIES the
-    calling context. A scope set even at the sync-step level would therefore still
-    propagate and those tests would still pass — they document the rationale but
-    don't pin it.
-
-    Calling the sync step DIRECTLY from inside this running ``asyncio`` loop
-    (NOT via ``asyncio.to_thread`` — that would land on a loop-less worker thread
-    and take the context-copying ``asyncio.run`` branch) forces ``run_async`` onto
-    its ``ThreadPoolExecutor`` branch: the worker thread runs ``asyncio.run`` with
-    a FRESH context that does NOT inherit the caller's ContextVar. ONLY the inner
-    ``_do()`` scope placement survives here — hoisting the scope to the sync-step
-    body would capture ``None``. This is the test that actually catches the
-    regression the code comments warn against (verified by temporarily hoisting
-    the scope and watching this test fail).
+    Post §2.4b the step is ``async def`` and enters ``system_request_scope``
+    directly around ``svc.cleanup_expired_trash`` — so the scope must be SYSTEM at
+    the moment the service is invoked. A refactor that drops the ``async with`` or
+    moves it off the DB-call path would capture a non-SYSTEM scope here.
     """
     from app.workflows.scheduled_cleanup import cleanup_trashed_resources_step
 
@@ -247,30 +231,30 @@ async def test_cleanup_trashed_step_scope_under_running_loop():
         "app.services.library.resources_service.ResourcesService",
         return_value=_FakeSvc(),
     ):
-        # Running loop present on THIS thread → run_async bounces to a
-        # ThreadPoolExecutor worker that runs asyncio.run with a fresh context.
-        cleanup_trashed_resources_step()
+        await cleanup_trashed_resources_step()
 
     assert captured.get("scope") is SYSTEM, (
-        "scope captured on run_async's ThreadPoolExecutor branch was not SYSTEM — "
-        "the scope must be set INSIDE _do(), not at the sync-step level (a "
-        "sync-step-level scope is dropped when run_async bounces to a worker thread)."
+        "scope at cleanup_expired_trash was not SYSTEM — the async step must enter "
+        "system_request_scope around the DB call."
     )
+    assert current_scope() is None, "scope leaked after cleanup_trashed_resources_step"
 
 
 # ─── 3. cleanup_orphan_storage_step ──────────────────────────────────────────
 
 
-def test_cleanup_orphan_storage_step_establishes_system_scope(monkeypatch, tmp_path):
-    """``cleanup_orphan_storage_step`` establishes SYSTEM scope inside its inner
-    ``_load_resource_ids`` coroutine before calling ``db_engine.fetch_all``.
+@pytest.mark.asyncio
+async def test_cleanup_orphan_storage_step_establishes_system_scope(
+    monkeypatch, tmp_path
+):
+    """``cleanup_orphan_storage_step`` (async) establishes SYSTEM scope inside its
+    inner ``_load_resource_ids`` coroutine before calling ``db_engine.fetch_all``.
 
     Note: ``db_engine.fetch_all`` is RAW SQL and currently bypasses the ORM choke
     point — so the scope is a defensive entry-boundary annotation for now (a
     later task A3 will add the raw-SQL backstop). The wiring is still required so
     the entry boundary is consistent once A3 lands.
 
-    Same run_async inner-scope rationale as test #2 applies here.
     SYSTEM scope is correct under both flag states.
     """
     from app.workflows.scheduled_cleanup import cleanup_orphan_storage_step
@@ -291,7 +275,7 @@ def test_cleanup_orphan_storage_step_establishes_system_scope(monkeypatch, tmp_p
             side_effect=_fake_fetch_all,
         ),
     ):
-        result = cleanup_orphan_storage_step()
+        result = await cleanup_orphan_storage_step()
 
     assert result["status"] == "success"
     scope = captured.get("scope")
@@ -302,7 +286,8 @@ def test_cleanup_orphan_storage_step_establishes_system_scope(monkeypatch, tmp_p
     assert current_scope() is None, "scope leaked after cleanup_orphan_storage_step"
 
 
-def test_cleanup_orphan_storage_step_scope_reset_on_no_download_path():
+@pytest.mark.asyncio
+async def test_cleanup_orphan_storage_step_scope_reset_on_no_download_path():
     """When the download path is not configured the step returns early (skipped).
 
     The scope must not be left set in this early-exit path — ``current_scope()``
@@ -315,22 +300,20 @@ def test_cleanup_orphan_storage_step_scope_reset_on_no_download_path():
         "app.core.utils.Utils.get_download_base_path",
         side_effect=ValueError("not configured"),
     ):
-        result = cleanup_orphan_storage_step()
+        result = await cleanup_orphan_storage_step()
 
     assert result == {"status": "skipped", "reason": "download path not configured"}
     assert current_scope() is None, "scope must be None after skipped early return"
 
 
 @pytest.mark.asyncio
-async def test_cleanup_orphan_storage_step_scope_under_running_loop(tmp_path):
-    """PINS the inner-``_load_resource_ids`` scope placement against a
-    sync-step-level hoist (analogue of the trashed-step running-loop test).
+async def test_cleanup_orphan_storage_step_scope_inside_async_step(tmp_path):
+    """PINS that SYSTEM scope wraps the ``db_engine.fetch_all`` read inside the
+    async ``_load_resource_ids`` coroutine (same loop as the DB call).
 
-    Calling the sync step DIRECTLY from inside this running loop (NOT via
-    ``asyncio.to_thread``) forces ``run_async`` onto its ``ThreadPoolExecutor``
-    branch (fresh context, no ContextVar inheritance). Only the scope set INSIDE
-    ``_load_resource_ids`` survives — a sync-step-level hoist would capture
-    ``None`` here.
+    Post §2.4b there is no ``run_async`` thread-hop; the ``async with
+    system_request_scope`` sits directly around the read. A refactor that moves it
+    off the read path would capture a non-SYSTEM scope here.
     """
     from app.workflows.scheduled_cleanup import cleanup_orphan_storage_step
 
@@ -350,13 +333,10 @@ async def test_cleanup_orphan_storage_step_scope_under_running_loop(tmp_path):
             side_effect=_fake_fetch_all,
         ),
     ):
-        # Running loop present on THIS thread → run_async bounces to a
-        # ThreadPoolExecutor worker that runs asyncio.run with a fresh context.
-        cleanup_orphan_storage_step()
+        await cleanup_orphan_storage_step()
 
     assert captured.get("scope") is SYSTEM, (
-        "scope captured on run_async's ThreadPoolExecutor branch was not SYSTEM — "
-        "the scope must be set INSIDE _load_resource_ids(), not at the sync-step "
-        "level (a sync-step-level scope is dropped when run_async bounces to a "
-        "worker thread)."
+        "scope at db_engine.fetch_all was not SYSTEM — the async step must enter "
+        "system_request_scope around the resource-ids read."
     )
+    assert current_scope() is None, "scope leaked after cleanup_orphan_storage_step"
