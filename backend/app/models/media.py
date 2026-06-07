@@ -2,12 +2,10 @@
 ResourceTags, ResourceSummaries, ResourceTranscripts, ResourceAccessLogs,
 ResourceAnalysis, Folders.
 
-⚠️ INTEGRATION-PENDING: ``ResourceAnalysis`` was hand-derived from the migration
-chain (014 create video_analysis → 035/059 video_id type churn → 066/076 renames
-to resource_analysis, composite PK ``(resource_id, analysis_level)``); no live
-reflection was available when it was authored. It MUST be validated by
-``tests/db/test_schema_drift.py`` against prod (set ``INTEGRATION_DATABASE_URL``)
-before ``USE_ORM_ANALYSIS`` is flipped on. See ``docs/runbook/orm-rollout-plan.md``.
+``ResourceAnalysis`` maps ``resource_analysis`` — created in its final post-076
+form by migration 262 (the original 014→076 chain was never applied to the
+self-hosted prod instance). Validated: schema-drift guard + the repo integration
+tests pass against the live dev DB (== prod schema).
 """
 
 from __future__ import annotations

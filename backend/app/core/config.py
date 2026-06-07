@@ -1006,9 +1006,8 @@ class Settings(BaseSettings):
         "parity is structural. bearer_token stays ENCRYPTED at write "
         "(_encrypt_secret) / DECRYPTED at read (_decrypt_secret) exactly as REST. "
         "M3 defense-in-depth: update/delete keep WHERE user_id == owner_user_id. "
-        "Writes COMMIT via write_scope(). ⚠️ INTEGRATION-PENDING: the "
-        "UserMcpServers model is hand-derived from mig 194 — drift-verify before "
-        "flip. Inert; flip false to revert.",
+        "Writes COMMIT via write_scope(). Table (re)created by mig 263; model + "
+        "repo validated against live dev DB. Inert; flip false to revert.",
     )
     USE_ORM_ANALYSIS: bool = Field(
         default=False,
@@ -1023,9 +1022,9 @@ class Settings(BaseSettings):
         "(executed as a raw statement — parity with the REST .rpc() path); "
         "get_videos_without_analysis / by_level keep their cross-table semantics. "
         "Writes COMMIT via write_scope() with ON CONFLICT (resource_id, "
-        "analysis_level) idempotency. ⚠️ INTEGRATION-PENDING: the ResourceAnalysis "
-        "model is hand-derived from the 014→076 migration chain — drift-verify "
-        "before flip. Inert; flip false to revert.",
+        "analysis_level) idempotency. Table created in final post-076 form by mig "
+        "262; model + repo validated against live dev DB. Inert; flip false to "
+        "revert.",
     )
 
     # ============================================
