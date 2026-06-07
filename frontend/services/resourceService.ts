@@ -599,14 +599,19 @@ export async function fetchResourcesPaginated(
   pageSize: number,
   signal?: AbortSignal,
 ): Promise<KeysetListPage<ResourceItem>> {
-  const tagResourceIds = await resolveTagIntersection(params.tag_ids);
-  if (tagResourceIds !== null && tagResourceIds.length === 0) {
-    return { data: [], hasMore: false, nextCursor: null, totalCount: 0 };
+  // Tag-filtered → run the whole filtered + keyset query server-side via the
+  // search_scope_resources RPC (mig 269). The old path resolved tags to a
+  // resource_id list and passed it back as `.in('resources.id', [...])` — that
+  // list silently capped at PostgREST's 1000-row ceiling AND the giant `.in()`
+  // URL risked a Kong/nginx 502 at scale. The no-tag path below stays on the
+  // PostgREST keyset query (already scale-safe).
+  if (params.tag_ids && params.tag_ids.length > 0) {
+    return fetchResourcesViaRpc(params, cursor, pageSize, signal);
   }
 
   // Order (created_at DESC, id DESC) so the id tiebreaker keeps batch-inserted
   // rows (same created_at) from being clipped at a page boundary.
-  let q = buildResourceItemsQuery(params, tagResourceIds)
+  let q = buildResourceItemsQuery(params, null)
     .order('created_at', { ascending: false })
     .order('id', { ascending: false });
   q = applyKeysetCursor(q, cursor, pageSize);
@@ -627,13 +632,72 @@ export async function fetchResourcesPaginated(
   // exact filter set so the count matches what the user is paging through.
   let totalCount = -1;
   if (cursor === null) {
-    const { count } = await buildResourceItemsQuery(params, tagResourceIds, {
+    const { count } = await buildResourceItemsQuery(params, null, {
       count: true,
     });
     totalCount = count ?? -1;
   }
 
   return { ...page, totalCount };
+}
+
+/**
+ * Server-side filtered + keyset-paginated resource search (mig 269 RPC). Used
+ * for the tag-filtered case so tag-AND scales past PostgREST's 1000-row cap.
+ * Returns the same shape as fetchResourcesPaginated. bigIntSafeFetch (the
+ * client's global fetch) keeps Snowflake ids precision-safe in the jsonb rows.
+ */
+async function fetchResourcesViaRpc(
+  params: FetchResourcesParams,
+  cursor: KeysetCursor | null,
+  pageSize: number,
+  signal?: AbortSignal,
+): Promise<KeysetListPage<ResourceItem>> {
+  let req = supabase.rpc('search_scope_resources', {
+    p_scope_id: params.scopeId,
+    p_is_personal: params.isPersonal,
+    p_folder_id: params.folderId ?? null,
+    p_library_id: params.libraryId ?? null,
+    p_tag_ids: params.tag_ids ?? null,
+    p_min_rating: params.min_rating ?? null,
+    p_ai_transcribed: params.ai_transcribed ?? null,
+    p_ai_summarized: params.ai_summarized ?? null,
+    p_ai_analyzed: params.ai_analyzed ?? null,
+    p_created_after: params.created_after ?? null,
+    p_created_before: params.created_before ?? null,
+    p_duration_min: params.duration_min ?? null,
+    p_duration_max: params.duration_max ?? null,
+    p_aspect_ratios: params.aspect_ratios ?? null,
+    p_types: params.types ?? null,
+    p_platforms: params.platforms ?? null,
+    p_has_comments: params.has_comments ?? null,
+    p_min_likes: params.min_likes ?? null,
+    p_min_comments: params.min_comments ?? null,
+    p_min_favorites: params.min_favorites ?? null,
+    p_min_shares: params.min_shares ?? null,
+    p_social_combine: params.social_combine ?? 'and',
+    p_cursor_ts: cursor?.ts ?? null,
+    p_cursor_id: cursor?.id ?? null,
+    p_limit: pageSize + 1,
+    p_with_count: cursor === null,
+  });
+  if (signal) req = req.abortSignal(signal);
+
+  const { data, error } = await req;
+  if (error) throw error;
+
+  const result = (data ?? { rows: [], total_count: null }) as {
+    rows: ResourceItem[];
+    total_count: number | null;
+  };
+  const rows = result.rows ?? [];
+  const page = sliceKeysetPage(rows, pageSize, (row) => {
+    const r = row as { id?: string | number; created_at?: string };
+    return r.created_at && r.id != null
+      ? { ts: r.created_at, id: String(r.id) }
+      : null;
+  });
+  return { ...page, totalCount: result.total_count ?? -1 };
 }
 
 export async function fetchResourceCount(
