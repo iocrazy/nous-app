@@ -1,5 +1,11 @@
 import { supabase } from '../supabaseClient';
 import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
+import {
+  applyKeysetCursor,
+  sliceKeysetPage,
+  type KeysetCursor,
+  type KeysetListPage,
+} from './pagination';
 import { getAuthHeaders } from './parserService';
 import { apiClient } from './apiClient';
 import { getApiUrl } from '../utils/apiConfig';
@@ -415,6 +421,25 @@ export async function fetchResources(
     return [];
   }
 
+  const query = buildResourceItemsQuery(params, tagResourceIds);
+  const { data, error } = await query.order('created_at', { ascending: false });
+  if (error) throw error;
+  // The query builder's return type narrows as we chain filters; cast back.
+  return (data as unknown as ResourceItem[]) ?? [];
+}
+
+/**
+ * Build the filtered resource_items query (scope / folder / library / tag /
+ * rating / AI status / date / duration / aspect / type / platform / social),
+ * WITHOUT order or execute — so the bulk `fetchResources` and the paginated
+ * `fetchResourcesPaginated` share ONE filter implementation. The caller resolves
+ * the tag intersection first (an empty set short-circuits before reaching here).
+ */
+function buildResourceItemsQuery(
+  params: FetchResourcesParams,
+  tagResourceIds: string[] | null,
+  opts: { count?: boolean } = {},
+) {
   // Social / platform / has_comments filters hit parsed_media columns,
   // which means the nested join needs to be INNER (so a resource without
   // a parsed_media row is excluded). Otherwise keep the outer LEFT join
@@ -433,7 +458,7 @@ export async function fetchResources(
 
   let query = supabase
     .from('resource_items')
-    .select(selectExpr)
+    .select(selectExpr, opts.count ? { count: 'exact', head: true } : undefined)
     .eq('scope_id', params.scopeId)
     .eq('resources.is_trashed', false)
     .neq('resource.source_type', 'web');
@@ -557,12 +582,122 @@ export async function fetchResources(
     }
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false });
+  return query;
+}
 
+/**
+ * Keyset-paginated variant of `fetchResources` — the scale-safe path for the
+ * Resources library / folders / scopes (which can exceed PostgREST's 1000-row
+ * cap once the Eagle import lands). Shares every filter with `fetchResources`
+ * via `buildResourceItemsQuery`; only the ordering, the keyset cursor, and the
+ * first-page count differ. Pass `cursor=null` for the first page, then forward
+ * `result.nextCursor`.
+ */
+export async function fetchResourcesPaginated(
+  params: FetchResourcesParams,
+  cursor: KeysetCursor | null,
+  pageSize: number,
+  signal?: AbortSignal,
+): Promise<KeysetListPage<ResourceItem>> {
+  // Tag-filtered → run the whole filtered + keyset query server-side via the
+  // search_scope_resources RPC (mig 269). The old path resolved tags to a
+  // resource_id list and passed it back as `.in('resources.id', [...])` — that
+  // list silently capped at PostgREST's 1000-row ceiling AND the giant `.in()`
+  // URL risked a Kong/nginx 502 at scale. The no-tag path below stays on the
+  // PostgREST keyset query (already scale-safe).
+  if (params.tag_ids && params.tag_ids.length > 0) {
+    return fetchResourcesViaRpc(params, cursor, pageSize, signal);
+  }
+
+  // Order (created_at DESC, id DESC) so the id tiebreaker keeps batch-inserted
+  // rows (same created_at) from being clipped at a page boundary.
+  let q = buildResourceItemsQuery(params, null)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false });
+  q = applyKeysetCursor(q, cursor, pageSize);
+  if (signal) q = q.abortSignal(signal);
+
+  const { data, error } = await q;
   if (error) throw error;
-  // The query builder's return type narrows as we chain filters; cast
-  // back to ResourceItem[] once we've confirmed no error.
-  return (data as unknown as ResourceItem[]) ?? [];
+
+  const rows = (data as unknown as ResourceItem[]) ?? [];
+  const page = sliceKeysetPage(rows, pageSize, (row) => {
+    const r = row as { id?: string | number; created_at?: string };
+    return r.created_at && r.id != null
+      ? { ts: r.created_at, id: String(r.id) }
+      : null;
+  });
+
+  // Fast total count only on the first page (cursor === null), reusing the
+  // exact filter set so the count matches what the user is paging through.
+  let totalCount = -1;
+  if (cursor === null) {
+    const { count } = await buildResourceItemsQuery(params, null, {
+      count: true,
+    });
+    totalCount = count ?? -1;
+  }
+
+  return { ...page, totalCount };
+}
+
+/**
+ * Server-side filtered + keyset-paginated resource search (mig 269 RPC). Used
+ * for the tag-filtered case so tag-AND scales past PostgREST's 1000-row cap.
+ * Returns the same shape as fetchResourcesPaginated. bigIntSafeFetch (the
+ * client's global fetch) keeps Snowflake ids precision-safe in the jsonb rows.
+ */
+async function fetchResourcesViaRpc(
+  params: FetchResourcesParams,
+  cursor: KeysetCursor | null,
+  pageSize: number,
+  signal?: AbortSignal,
+): Promise<KeysetListPage<ResourceItem>> {
+  let req = supabase.rpc('search_scope_resources', {
+    p_scope_id: params.scopeId,
+    p_is_personal: params.isPersonal,
+    p_folder_id: params.folderId ?? null,
+    p_library_id: params.libraryId ?? null,
+    p_tag_ids: params.tag_ids ?? null,
+    p_min_rating: params.min_rating ?? null,
+    p_ai_transcribed: params.ai_transcribed ?? null,
+    p_ai_summarized: params.ai_summarized ?? null,
+    p_ai_analyzed: params.ai_analyzed ?? null,
+    p_created_after: params.created_after ?? null,
+    p_created_before: params.created_before ?? null,
+    p_duration_min: params.duration_min ?? null,
+    p_duration_max: params.duration_max ?? null,
+    p_aspect_ratios: params.aspect_ratios ?? null,
+    p_types: params.types ?? null,
+    p_platforms: params.platforms ?? null,
+    p_has_comments: params.has_comments ?? null,
+    p_min_likes: params.min_likes ?? null,
+    p_min_comments: params.min_comments ?? null,
+    p_min_favorites: params.min_favorites ?? null,
+    p_min_shares: params.min_shares ?? null,
+    p_social_combine: params.social_combine ?? 'and',
+    p_cursor_ts: cursor?.ts ?? null,
+    p_cursor_id: cursor?.id ?? null,
+    p_limit: pageSize + 1,
+    p_with_count: cursor === null,
+  });
+  if (signal) req = req.abortSignal(signal);
+
+  const { data, error } = await req;
+  if (error) throw error;
+
+  const result = (data ?? { rows: [], total_count: null }) as {
+    rows: ResourceItem[];
+    total_count: number | null;
+  };
+  const rows = result.rows ?? [];
+  const page = sliceKeysetPage(rows, pageSize, (row) => {
+    const r = row as { id?: string | number; created_at?: string };
+    return r.created_at && r.id != null
+      ? { ts: r.created_at, id: String(r.id) }
+      : null;
+  });
+  return { ...page, totalCount: result.total_count ?? -1 };
 }
 
 export async function fetchResourceCount(
@@ -588,14 +723,16 @@ export async function fetchResourceCount(
   // user). For team scope, resources need to be explicitly linked to the
   // team via resource_items — fall back to the old junction query in that
   // case since resources themselves don't carry a team_id column.
+  // Team scope: resources link to the team via resource_items, and an upload
+  // can sit in several folders → COUNT(DISTINCT) in SQL (RPC, mig 268). Replaces
+  // the old id-list (silently capped at 1000 + a 502-risk giant `.in(...)` URL).
   if (!isPersonal) {
-    const { data: items } = await supabase
-      .from('resource_items')
-      .select('resource_id')
-      .eq('scope_id', scopeId);
-    const ids = (items ?? []).map((r) => r.resource_id);
-    if (ids.length === 0) return 0;
-    query = query.in('id', ids);
+    const { data, error } = await supabase.rpc('count_scope_resources', {
+      p_scope_id: scopeId,
+      p_web: false,
+    });
+    if (error) throw error;
+    return (data as number) ?? 0;
   }
 
   const { count, error } = await query;
@@ -1005,14 +1142,15 @@ export async function fetchDownloadedResourceCount(
     .eq('source_type', 'web')
     .eq('is_trashed', false);
 
+  // Team scope: COUNT(DISTINCT) web-sourced resources in the scope via SQL (RPC,
+  // mig 268) — scale-safe, replaces the 1000-capped id-list.
   if (!isPersonal) {
-    const { data: items } = await supabase
-      .from('resource_items')
-      .select('resource_id')
-      .eq('scope_id', scopeId);
-    const ids = (items ?? []).map((r) => r.resource_id);
-    if (ids.length === 0) return 0;
-    query = query.in('id', ids);
+    const { data, error } = await supabase.rpc('count_scope_resources', {
+      p_scope_id: scopeId,
+      p_web: true,
+    });
+    if (error) throw error;
+    return (data as number) ?? 0;
   }
 
   const { count, error } = await query;

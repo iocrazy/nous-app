@@ -6,6 +6,7 @@ import {
   fetchFolders,
   fetchChildFolders,
   fetchResources,
+  fetchResourcesPaginated,
   trashResource,
   restoreResource,
   permanentDeleteResource,
@@ -28,6 +29,8 @@ import {
   type FetchResourcesParams,
 } from '../services/resourceService';
 import { fetchLibraries } from '../services/libraryService';
+import { useKeysetPagination } from '../hooks/useKeysetPagination';
+import type { KeysetCursor } from '../services/pagination';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
 import { useTaskManager } from './TaskManagerContext';
@@ -80,6 +83,10 @@ export interface ResourcesContextType {
   // ── Data state ──
   resources: ResourceItem[];
   setResources: React.Dispatch<React.SetStateAction<ResourceItem[]>>;
+  /** Load the next keyset page of `resources` (no-op when drained/loading). */
+  loadMoreResources: () => Promise<void>;
+  hasMoreResources: boolean;
+  isLoadingMoreResources: boolean;
   folders: Folder[];
   childFolders: Folder[];
   folderPreviews: Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>>;
@@ -223,7 +230,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [folders, setFolders] = useState<Folder[]>([]);
   const [childFolders, setChildFolders] = useState<Folder[]>([]);
   const [folderPreviews, setFolderPreviews] = useState<Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>>>({});
-  const [resources, setResources] = useState<ResourceItem[]>([]);
+  // `resources` + `setResources` are provided by the keyset pagination hook
+  // below (defined after filterParamsRef, its dependency). setResources keeps
+  // the same Dispatch signature, so all optimistic-update call sites are unchanged.
   const [loading, setLoading] = useState(true);
   const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
   const [trashedFolders, setTrashedFolders] = useState<Folder[]>([]);
@@ -286,6 +295,49 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // without recreating on every filter tweak.
   const filterParamsRef = useRef(filterParams);
   filterParamsRef.current = filterParams;
+
+  // ── Keyset-paginated resource list (scale-safe). Replaces the old bulk
+  //    fetchResources → setResources, which silently capped at PostgREST's
+  //    1000-row ceiling once a scope exceeded 1000 items. Smart folders are
+  //    not keyset-paginated yet, so they return as a single page. ──
+  const RESOURCE_PAGE_SIZE =
+    typeof window !== 'undefined' && window.innerWidth < 768 ? 20 : 40;
+  const fetchResourcesPage = useCallback(
+    async (cursor: KeysetCursor | null, signal: AbortSignal) => {
+      if (selectedSmartFolderId) {
+        const items = await fetchSmartFolderResults(selectedSmartFolderId, scopeId);
+        return {
+          data: cursor === null ? items : [],
+          hasMore: false,
+          nextCursor: null,
+          totalCount: items.length,
+        };
+      }
+      return fetchResourcesPaginated(
+        {
+          isPersonal,
+          scopeId,
+          folderId: selectedFolderId,
+          libraryId: selectedLibraryId,
+          ...filterParamsRef.current,
+        },
+        cursor,
+        RESOURCE_PAGE_SIZE,
+        signal,
+      );
+    },
+    // filterParamsKey is the JSON fingerprint read via filterParamsRef.current.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, filterParamsKey],
+  );
+  const {
+    items: resources,
+    setItems: setResources,
+    isLoadingMore: isLoadingMoreResources,
+    hasMore: hasMoreResources,
+    load: loadResourcesFirstPage,
+    loadMore: loadMoreResources,
+  } = useKeysetPagination<ResourceItem>(fetchResourcesPage);
 
   // ── Derived view flags ──
   const isResourcesView = sidebarView === 'resources';
@@ -357,25 +409,17 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
    * silently bypassing it.
    */
   const reloadResources = useCallback(async () => {
-    try {
-      const items = await fetchResources({
-        isPersonal,
-        scopeId,
-        folderId: selectedFolderId,
-        libraryId: selectedLibraryId,
-        ...filterParamsRef.current,
-      });
-      setResources(items);
-      // Post-mutation refreshers (incl. the batch toolbar) call this; if the
-      // user is in the Temp view its separate tempResources state must also
-      // re-fetch, otherwise batch ops leave the Temp view stale. The temp
-      // effect early-returns when not in the Temp view, so this is a no-op
-      // elsewhere.
-      setTempRefreshTick((t) => t + 1);
-    } catch (err) {
-      console.error('[ResourcesContext] reloadResources failed:', err);
-    }
-  }, [isPersonal, scopeId, selectedFolderId, selectedLibraryId]);
+    // Reset to the first page. loadResourcesFirstPage owns the items state +
+    // abort lifecycle and reads the current scope/filters via fetchResourcesPage.
+    await loadResourcesFirstPage();
+    // Post-mutation refreshers (incl. the batch toolbar) call this; if the user
+    // is in the Temp view its separate tempResources state must also re-fetch,
+    // otherwise batch ops leave the Temp view stale. The temp effect
+    // early-returns when not in the Temp view, so this is a no-op elsewhere.
+    setTempRefreshTick((t) => t + 1);
+  // loadResourcesFirstPage has stable identity (keyset hook).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep a stable handle on reloadResources so the realtime subscription
   // below doesn't tear down + re-subscribe on every scope/filter change.
@@ -575,28 +619,17 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
     const loadAll = async () => {
       try {
-        const [items, flds] = await Promise.all([
-          selectedSmartFolderId
-            ? fetchSmartFolderResults(selectedSmartFolderId, scopeId)
-            : fetchResources({
-                isPersonal,
-                scopeId,
-                folderId: selectedFolderId,
-                libraryId: selectedLibraryId,
-                ...filterParams,
-              }),
+        // Resources load through the keyset hook (loadResourcesFirstPage owns the
+        // items state + its own abort lifecycle, and reads the current
+        // scope/filters via fetchResourcesPage). Child folders stay bulk (small).
+        const [, flds] = await Promise.all([
+          loadResourcesFirstPage(),
           fetchChildFolders(scopeId, isPersonal, selectedFolderId, selectedLibraryId),
         ]);
-        if (!cancelled) {
-          setResources(items);
-          setChildFolders(flds);
-        }
+        if (!cancelled) setChildFolders(flds);
       } catch (err) {
         console.error('[ResourcesContext] Failed to load resources/folders:', err);
-        if (!cancelled) {
-          setResources([]);
-          setChildFolders([]);
-        }
+        if (!cancelled) setChildFolders([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -977,6 +1010,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
     resources,
     setResources,
+    loadMoreResources,
+    hasMoreResources,
+    isLoadingMoreResources,
     folders,
     childFolders,
     folderPreviews,
@@ -1067,6 +1103,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,
     viewMode, sortBy, searchQuery, debouncedSearch, showInfoPanel, infoPanelWidth,
     filterParams, setFilterParams, reloadResources,
+    loadMoreResources, hasMoreResources, isLoadingMoreResources,
     loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
     handleTrashResource, handleRestoreResource, handlePermanentDelete, confirmPermanentDelete,
     handleAddTag, handleRemoveTag, handleCreateTag, handleResourceUpdate,

@@ -286,6 +286,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     handlePermanentDelete,
     reloadResources,
     reloadTemp,
+    loadMoreResources,
+    hasMoreResources,
+    isLoadingMoreResources,
   } = ctx;
 
   // PR-E: temp_ttl service + child panels still speak the legacy
@@ -346,6 +349,36 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   // hits POST /api/v1/media/fetch.
   const [showFetchUrlModal, setShowFetchUrlModal] = useState(false);
   const newDropdownRef = useRef<HTMLDivElement>(null);
+
+  // ── Infinite scroll for the keyset-paginated Resources library ──
+  // The useKeysetPagination hook (unlike useLibrary) has no built-in
+  // IntersectionObserver, so this view drives loadMore. An observer (not bare
+  // scroll events) handles BOTH the initial-fill case — page 1 is short and the
+  // sentinel is already on-screen — and ongoing scroll. Re-running on
+  // isLoadingMoreResources flipping false keeps auto-filling until the viewport
+  // is covered or the scope is drained. The hook's own re-entrancy guard +
+  // isLoadingMoreResources gate prevent double-fire.
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          entries[0]?.isIntersecting &&
+          hasMoreResources &&
+          !isLoadingMoreResources &&
+          searchQuery.trim().length === 0
+        ) {
+          loadMoreResources();
+        }
+      },
+      { root: contentScrollRef.current ?? null, rootMargin: '600px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreResources, isLoadingMoreResources, searchQuery, loadMoreResources]);
 
   // Sort panel
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -757,6 +790,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
       {/* Content area */}
       <div
+        ref={contentScrollRef}
         className="flex-1 md:min-h-0 overflow-y-auto p-3 md:p-6 relative lib-scroll"
         style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
         onDragEnter={canUploadDrop ? onDragEnter : undefined}
@@ -1236,6 +1270,17 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               )}
             </div>
           )
+        )}
+
+        {/* Keyset pagination sentinel — observed by the infinite-scroll effect
+            above. Only the Resources library paginates; recycle/temp load
+            eagerly. Unmounts when the scope is drained (hasMore=false). */}
+        {isResourcesView && (hasMoreResources || isLoadingMoreResources) && (
+          <div ref={loadMoreRef} className="w-full flex justify-center py-6">
+            {isLoadingMoreResources && (
+              <span className="text-zinc-500 text-sm">{t('common.loading')}</span>
+            )}
+          </div>
         )}
       </div>
 
