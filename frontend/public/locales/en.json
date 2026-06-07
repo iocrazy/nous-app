@@ -355,6 +355,14 @@
     "noResults": "No results"
   },
   "resources": {
+    "detail": {
+      "lyrics": "Lyrics",
+      "noLyrics": "No lyrics yet",
+      "uploadLrc": "Upload .lrc",
+      "lyricsUploaded": "Lyrics uploaded",
+      "uploadCover": "Cover",
+      "coverUpdated": "Cover updated"
+    },
     "compareVersions": "Compare Versions",
     "details": "Details",
     "viewDetails": "View Details",

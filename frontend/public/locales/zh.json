@@ -355,6 +355,14 @@
     "noResults": "无结果"
   },
   "resources": {
+    "detail": {
+      "lyrics": "歌词",
+      "noLyrics": "暂无歌词",
+      "uploadLrc": "上传 .lrc",
+      "lyricsUploaded": "歌词已上传",
+      "uploadCover": "封面",
+      "coverUpdated": "封面已更新"
+    },
     "compareVersions": "对比版本",
     "details": "详情",
     "viewDetails": "查看详情",
