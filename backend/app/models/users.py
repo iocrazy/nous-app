@@ -5,11 +5,10 @@ Note: auth.users (GoTrue) is permanently EXCLUDED from these models; there is no
 public.users table. FK constraints that targeted users.id are intentionally omitted —
 referential integrity lives in Postgres, not in this reference metadata.
 
-⚠️ INTEGRATION-PENDING: ``UserMcpServers`` was hand-derived from migration 194's
-DDL (no live reflection was available when it was authored). It MUST be validated
-by ``tests/db/test_schema_drift.py`` against prod (set ``INTEGRATION_DATABASE_URL``)
-before ``USE_ORM_USER_MCP_SERVERS`` is flipped on. See
-``docs/runbook/orm-rollout-plan.md``.
+``UserMcpServers`` maps ``user_mcp_servers`` — (re)created by migration 263
+(original mig 194 was never applied to the self-hosted prod instance). Validated:
+schema-drift guard + the repo integration tests pass against the live dev DB
+(== prod schema).
 """
 
 from __future__ import annotations

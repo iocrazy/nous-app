@@ -142,10 +142,11 @@ is the original silent-rollback P0 driver — flip with extra write monitoring.
 *Rationale:* high fan-out — a parity bug here touches many surfaces. Shadow for
 a longer window to cover all call paths. `MEDIA` reads JOIN `resources` (relevant
 to the resources epic — see Tier 7). `ANALYSIS` (`resource_analysis`) is
-cross-table + pgvector + the `match_videos_by_embedding` RPC; its `ResourceAnalysis`
-model is **hand-derived (INTEGRATION-PENDING)** — run `tests/db/test_schema_drift.py`
-against prod (set `INTEGRATION_DATABASE_URL`) to validate the model BEFORE adding it
-to `SHADOW_ORM_DOMAINS`, and verify the embedding/RPC read shapes during shadow.
+cross-table + pgvector + the `match_videos_by_embedding` RPC. The
+`resource_analysis` table is created in final post-076 form by **mig 262** (it
+was absent on the self-hosted prod); the model + repo are drift- and
+integration-validated against the live dev DB (== prod). Still verify the
+embedding/RPC read shapes during the shadow window.
 
 ### Tier 4 — authorization (uuid `==`/`!=` risk)
 `REVIEW`, `TEAM`, `ADMIN_USERS`, `ADMIN_TEAMS`
@@ -160,9 +161,9 @@ that masked/decrypted value shapes match exactly. `USER_MCP_SERVERS`
 (`user_mcp_servers`) stores an **encrypted** `bearer_token` (encrypt-at-write /
 decrypt-at-read) and returns a frozen `UserMCPServer` dataclass with `uuid.UUID`
 ids — verify the decrypted token round-trips and the M3 `WHERE user_id == owner`
-ownership filter holds on update/delete. Its `UserMcpServers` model is
-**hand-derived (INTEGRATION-PENDING)** — drift-verify against prod BEFORE
-shadowing.
+ownership filter holds on update/delete. The `user_mcp_servers` table is
+(re)created by **mig 263** (original mig 194 was absent on the self-hosted prod);
+the model + repo are drift- and integration-validated against the live dev DB.
 
 ### Tier 6 — money (highest stakes)
 `POINTS`, `PAYMENT`, `ADMIN_CREDITS`, `COMMITMENT`, `APPROVAL`
@@ -184,14 +185,13 @@ the full scope flip/rollback procedure. Order: shadow `resources` → flip
 > `analysis` (Tier 3), `user_mcp_servers` (Tier 5) were the last three REST repos
 > without an ORM sibling. They are now code-complete behind `USE_ORM_COLLECTIONS`
 > / `USE_ORM_ANALYSIS` / `USE_ORM_USER_MCP_SERVERS` (all default false, inert).
-> ⚠️ **INTEGRATION-PENDING for two of them:** the `ResourceAnalysis` and
-> `UserMcpServers` models were **hand-derived from migration DDL** (no live
-> reflection was available at authoring time), so their integration tests skip
-> without a DB and the models are unverified against prod. Before adding either
-> domain to `SHADOW_ORM_DOMAINS`, run `tests/db/test_schema_drift.py` with
-> `INTEGRATION_DATABASE_URL` set to validate the model, then run the repo's
-> `tests/integration/test_*_repository_orm.py` against a live DB. `collections`
-> reuses a pre-reflected model and has no such gate.
+> ✅ **Validated against the live dev DB (== prod schema):** the
+> `resource_analysis` and `user_mcp_servers` tables were ABSENT on the self-hosted
+> prod (their original migrations 014→076 / 194 never ran there), so **mig 262 /
+> 263** (re)create them; the schema-drift guard + both repos'
+> `tests/integration/test_*_repository_orm.py` now pass against the live DB. Once
+> mig 262/263 land on prod the tables exist and these domains can shadow + flip
+> like any other. `collections` reused a pre-existing model + table.
 >
 > **Genuinely out of scope:** none remain — every public-table repo now has an
 > ORM path (or is intentionally REST-only infra like `base_repository`).
