@@ -309,9 +309,7 @@ async def merge_tags(auth: AuthDep, body: MergeTagsRequest):
         count = await repo.merge_tags(body.target_id, body.source_ids, auth.user_id)
     except Exception as e:  # RPC RAISE EXCEPTION -> 400
         logger.warning(f"merge_tags failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return MergeTagsResponse(target_id=body.target_id, resource_count=count)
 
 
