@@ -1,5 +1,11 @@
 import { supabase } from '../supabaseClient';
 import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
+import {
+  applyKeysetCursor,
+  sliceKeysetPage,
+  type KeysetCursor,
+  type KeysetListPage,
+} from './pagination';
 import { getAuthHeaders } from './parserService';
 import { apiClient } from './apiClient';
 import { getApiUrl } from '../utils/apiConfig';
@@ -415,6 +421,25 @@ export async function fetchResources(
     return [];
   }
 
+  const query = buildResourceItemsQuery(params, tagResourceIds);
+  const { data, error } = await query.order('created_at', { ascending: false });
+  if (error) throw error;
+  // The query builder's return type narrows as we chain filters; cast back.
+  return (data as unknown as ResourceItem[]) ?? [];
+}
+
+/**
+ * Build the filtered resource_items query (scope / folder / library / tag /
+ * rating / AI status / date / duration / aspect / type / platform / social),
+ * WITHOUT order or execute — so the bulk `fetchResources` and the paginated
+ * `fetchResourcesPaginated` share ONE filter implementation. The caller resolves
+ * the tag intersection first (an empty set short-circuits before reaching here).
+ */
+function buildResourceItemsQuery(
+  params: FetchResourcesParams,
+  tagResourceIds: string[] | null,
+  opts: { count?: boolean } = {},
+) {
   // Social / platform / has_comments filters hit parsed_media columns,
   // which means the nested join needs to be INNER (so a resource without
   // a parsed_media row is excluded). Otherwise keep the outer LEFT join
@@ -433,7 +458,7 @@ export async function fetchResources(
 
   let query = supabase
     .from('resource_items')
-    .select(selectExpr)
+    .select(selectExpr, opts.count ? { count: 'exact', head: true } : undefined)
     .eq('scope_id', params.scopeId)
     .eq('resources.is_trashed', false)
     .neq('resource.source_type', 'web');
@@ -557,12 +582,58 @@ export async function fetchResources(
     }
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false });
+  return query;
+}
 
+/**
+ * Keyset-paginated variant of `fetchResources` — the scale-safe path for the
+ * Resources library / folders / scopes (which can exceed PostgREST's 1000-row
+ * cap once the Eagle import lands). Shares every filter with `fetchResources`
+ * via `buildResourceItemsQuery`; only the ordering, the keyset cursor, and the
+ * first-page count differ. Pass `cursor=null` for the first page, then forward
+ * `result.nextCursor`.
+ */
+export async function fetchResourcesPaginated(
+  params: FetchResourcesParams,
+  cursor: KeysetCursor | null,
+  pageSize: number,
+  signal?: AbortSignal,
+): Promise<KeysetListPage<ResourceItem>> {
+  const tagResourceIds = await resolveTagIntersection(params.tag_ids);
+  if (tagResourceIds !== null && tagResourceIds.length === 0) {
+    return { data: [], hasMore: false, nextCursor: null, totalCount: 0 };
+  }
+
+  // Order (created_at DESC, id DESC) so the id tiebreaker keeps batch-inserted
+  // rows (same created_at) from being clipped at a page boundary.
+  let q = buildResourceItemsQuery(params, tagResourceIds)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false });
+  q = applyKeysetCursor(q, cursor, pageSize);
+  if (signal) q = q.abortSignal(signal);
+
+  const { data, error } = await q;
   if (error) throw error;
-  // The query builder's return type narrows as we chain filters; cast
-  // back to ResourceItem[] once we've confirmed no error.
-  return (data as unknown as ResourceItem[]) ?? [];
+
+  const rows = (data as unknown as ResourceItem[]) ?? [];
+  const page = sliceKeysetPage(rows, pageSize, (row) => {
+    const r = row as { id?: string | number; created_at?: string };
+    return r.created_at && r.id != null
+      ? { ts: r.created_at, id: String(r.id) }
+      : null;
+  });
+
+  // Fast total count only on the first page (cursor === null), reusing the
+  // exact filter set so the count matches what the user is paging through.
+  let totalCount = -1;
+  if (cursor === null) {
+    const { count } = await buildResourceItemsQuery(params, tagResourceIds, {
+      count: true,
+    });
+    totalCount = count ?? -1;
+  }
+
+  return { ...page, totalCount };
 }
 
 export async function fetchResourceCount(

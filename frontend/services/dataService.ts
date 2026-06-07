@@ -1,6 +1,11 @@
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
 import { ParsedMedia } from '../types';
 import { apiClient } from './apiClient';
+import {
+  applyKeysetCursor,
+  sliceKeysetPage,
+  type KeysetCursor,
+} from './pagination';
 
 const TABLE_NAME = 'parsed_media';
 const VIEW_NAME = 'parsed_media';  // View dropped; query base table directly
@@ -240,10 +245,9 @@ const LOCAL_CACHE_SIZE = 500;
  *  timestamp. The id tiebreaker makes pagination stable regardless of
  *  duplicate timestamps.
  */
-export interface LibraryCursor {
-  ts: string;
-  id: string;
-}
+/** The Downloads cursor is just the shared keyset cursor. Alias kept so
+ *  existing imports of `LibraryCursor` keep working. */
+export type LibraryCursor = KeysetCursor;
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -423,18 +427,10 @@ export const fetchLibraryPaginated = async (
       .order('id', { ascending: false });
 
     if (useCursor) {
-      // Composite keyset: WHERE (created_at, id) < (cursor.ts, cursor.id).
-      // PostgREST encoding: or(created_at.lt.<ts>,and(created_at.eq.<ts>,id.lt.<id>)).
-      // Without the id tiebreaker, batched inserts that share a single
-      // timestamp (e.g. 94 rows at the same crawl tick) get clipped at
-      // the page boundary and silently lost — that bug accounted for the
-      // 417→340 mismatch users were seeing.
-      if (cursor) {
-        query = query.or(
-          `created_at.lt.${cursor.ts},and(created_at.eq.${cursor.ts},id.lt.${cursor.id})`,
-        );
-      }
-      query = query.limit(pageSize + 1);
+      // Composite keyset paging — see services/pagination.ts. The id
+      // tiebreaker is what prevents the historical 417→340 row loss when
+      // many rows share one created_at (batch insert at a single tick).
+      query = applyKeysetCursor(query, cursor ?? null, pageSize);
     } else {
       // Legacy offset mode (kept for any caller that hasn't migrated).
       const from = page * pageSize;
@@ -447,18 +443,19 @@ export const fetchLibraryPaginated = async (
     if (error) throw error;
 
     const rows = data || [];
-    const hasMore = rows.length > pageSize;
-    const pageData = hasMore ? rows.slice(0, pageSize) : rows;
-
-    // Capture the cursor BEFORE flattenResourceMedia overwrites
-    // ``created_at`` (which belongs to resources, not parsed_media).
-    const lastRow = pageData[pageData.length - 1] as
-      | { id?: string | number; created_at?: string }
-      | undefined;
-    const nextCursor: LibraryCursor | null =
-      hasMore && lastRow && lastRow.created_at && lastRow.id != null
-        ? { ts: lastRow.created_at, id: String(lastRow.id) }
-        : null;
+    // Split into page + nextCursor. cursorOf reads created_at/id from the raw
+    // row BEFORE flattenResourceMedia (below, at the return) overwrites
+    // created_at — which belongs to resources, not the embedded parsed_media.
+    const { data: pageData, hasMore, nextCursor } = sliceKeysetPage(
+      rows,
+      pageSize,
+      (row) => {
+        const r = row as { id?: string | number; created_at?: string };
+        return r.created_at && r.id != null
+          ? { ts: r.created_at, id: String(r.id) }
+          : null;
+      },
+    );
 
     // Fast total count (only on first page — cursor=null OR page=0). Duplicate
     // the filter set so the count reflects what the user is seeing.
