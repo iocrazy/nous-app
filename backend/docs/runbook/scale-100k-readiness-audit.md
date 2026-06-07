@@ -109,3 +109,83 @@ For these methods, do NOT make ORM "inertly replicate" the 1000 truncation (that
 preserves the bug). Migrate them scale-correct: list methods → pagination; admin
 aggregates → SQL aggregation. Each is a tested behavioral change, not blind parity.
 The remaining (small-table / already-paginated) ORM methods stay inert.
+
+---
+
+# COMPLETE SWEEP (2026-06-07, round 2)
+
+The first pass covered frontend `services/*` + backend `repositories/*`. This round
+swept the three uncovered surfaces: **backend non-repo code** (routers / services /
+tasks / sweepers), the **admin app** (`admin/`), and the **`.in(ids)` URL-502 class**
+(which fires BEFORE the 1000 cap). New failure-mode taxonomy:
+
+- ①TRUNCATE-1000 — REST list, no pagination → silent 1000 cap
+- ②UNBOUNDED-FETCH — ORM/asyncpg, no LIMIT → OOM at 100k
+- ③COUNT/AGGREGATE-IN-PYTHON — fetch rows/ids then `len()`/`sum()`/`set()` in app
+- ④IN-URL-502 — large `.in(ids)` → Kong/nginx URL-length 502 (fires <1000 rows)
+
+## A. Frontend — sites NOT covered by PR #544
+
+PR #544 paginated the **resource-library grid path** (`ResourcesContext` →
+`fetchResourcesPaginated` / `search_scope_resources` RPC / `count_scope_resources`
+RPC). These adjacent frontend sites are still unsafe:
+
+| file:line | function | mode | @100k impact |
+|---|---|---|---|
+| services/resourceService.ts:425 | `fetchResources` (legacy, still called) | ① | non-paginated callers still cap 1000 |
+| services/resourceService.ts:1117 | `fetchDownloadedResources` | ① | team download view caps 1000 |
+| services/resourceService.ts:111 | `fetchFolderContents` | ① | folder >1000 items truncates |
+| services/resourceService.ts:1250 | `fetchSmartFolderResources` | ① | smart folder matches ≤1000 |
+| services/resourceService.ts:915 | `fetchTrashedResources` | ① | recycle bin shows 1000 |
+| services/resourceService.ts:378 | `resolveTagIntersection` | ③+④ | AND-tag prefetch caps 1000 + `.in()` 502 |
+| services/dataService.ts:338 | `resolveLibraryTagIntersection` | ③+④ | downloads tag filter incomplete + 502 |
+| components/DownloadsView/useDownloadsData.ts:32 | `useResourceDataMap` | ④ | `.in('media_id', libraryIds)` un-chunked → 502 |
+| services/resourceService.ts:1313 | `moveResourceItems` | ④ | bulk move `.in()` un-chunked → 502 |
+| services/resourceService.ts:1390 | `moveFolder` | ④ | folder-subtree `.in()` un-chunked → 502 |
+
+The tag-filter pair (`resolveTagIntersection` / `resolveLibraryTagIntersection`) is the
+real correctness bug: at 100k a popular tag has >1000 resources, the prefetch truncates,
+AND the follow-up `.in()` 502s. The `search_scope_resources` RPC already solves this for
+the **resource-library** path — Downloads needs the same RPC treatment.
+
+## B. Backend non-repo code (routers / services / tasks / sweepers)
+
+41 unsafe sites. The dominant pattern (fix-once): **"fetch ALL of a user's
+resources/media_ids into an allowlist, no limit, then filter/count in Python."**
+
+| file:line | symbol | mode | @100k impact |
+|---|---|---|---|
+| api/search_router.py:36 | `_get_user_media_ids` | ①→④ | builds full media_id allowlist → caps 1000 then `.in()` 502 |
+| services/search_service.py:142/191/287 | `search` | ③ | filters/ranks over truncated allowlist |
+| api/analysis_router.py:82 | `get_analysis_stats` | ③ | "% analyzed" computed over ≤1000 rows |
+| services/collections_service.py:31 | `_get_user_resource_mapping` | ①→③ | collection membership map caps 1000 |
+| services/unified_task_manager.py:696 | `get_stats` | ③ | task-center counts wrong >1000 active |
+| api/cleanup_router.py:299 | cleanup scan | ⑤ batch | sweeps ≤1000/run |
+| tasks/scheduled_quotas.py | per-user grant loop | O(users) | query storm: 1 query/user at 100k users |
+
+Aggregate counts across the non-repo layer: **18 ①TRUNCATE-1000, 11 ③COUNT-IN-PYTHON,
+6 ④IN-LARGE-LIST, 3 ②UNBOUNDED-FETCH, 3 ⑤BATCH-PARTIAL.** Most ③ sites are the same
+allowlist pattern → one shared `media_ids_for_user(paginate|count)` helper kills the
+cluster. `scheduled_quotas.py` is a separate (compute-storm) concern, not a cap bug.
+
+## C. Admin app (`admin/`) — CLEAN, API-only
+
+The admin SPA reaches data almost entirely through the backend `/api/v1/admin/*` REST
+API (`useNotionTable` does server-side pagination). Direct-to-supabase from the admin
+front-end: **2 queries, both safe** (`user_profiles.single()`, `deployment_logs.limit(100)`).
+**0 truncate / 0 count-via-ids / 0 in-502.** CSV "export" buttons export the current page
+only (cosmetic, not a scale bug). → **All admin scale risk lives in the already-audited
+`backend/app/repositories/admin/*` layer (Tier 2 above)**; the admin front-end needs no work.
+
+## Updated remediation priority
+
+1. **Tier 1 (done in #544, resource-library path)** ✅ — keyset pagination + count/search RPCs.
+2. **Tier 1b (frontend, NEW — not in #544):** Downloads tag-intersection → reuse the
+   `search_scope_resources` RPC pattern; chunk the 3 un-chunked `.in()` sites
+   (`useResourceDataMap`, `moveResourceItems`, `moveFolder`) to avoid 502.
+3. **Tier 1c (backend, NEW — HIGH):** the `_get_user_media_ids` / search allowlist cluster
+   → one paginated+counting helper; this is a live correctness bug today (search silently
+   misses media for users with >1000 items).
+4. **Tier 2 (admin aggregates):** SQL COUNT/GROUP BY — fix during ORM crossover, do not
+   inert-copy the 1000 truncation.
+5. **Tier 3 (sweepers/batch):** loop/paginate; `scheduled_quotas` O(users) storm → batch RPC.
