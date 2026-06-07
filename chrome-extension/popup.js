@@ -8,6 +8,7 @@ const statusEl = document.getElementById('status');
 // Elements — Push
 const pushView = document.getElementById('pushView');
 const currentUrlEl = document.getElementById('currentUrl');
+const tagSearch = document.getElementById('tagSearch');
 const tagsLoading = document.getElementById('tagsLoading');
 const tagsContainer = document.getElementById('tagsContainer');
 const pushBtn = document.getElementById('pushBtn');
@@ -17,6 +18,7 @@ const settingsToggle = document.getElementById('settingsToggle');
 let selectedTags = new Set();
 let allTags = [];
 let currentTabUrl = '';
+let tagQuery = '';
 
 // Init: check if configured, show appropriate view
 chrome.storage.local.get(['apiUrl', 'apiKey'], (config) => {
@@ -95,13 +97,41 @@ async function loadTags(config) {
   tagsLoading.style.display = 'none';
 }
 
+// Re-render on every keystroke — the tag list is small, no debounce needed.
+tagSearch.addEventListener('input', () => {
+  tagQuery = tagSearch.value;
+  renderTags(allTags);
+});
+
+// Most-used first within any list.
+const byMediaCountDesc = (a, b) => (b.media_count ?? 0) - (a.media_count ?? 0);
+
+// Filter by tag name (English + Chinese), case-insensitive.
+function matchesQuery(tag, q) {
+  if (!q) return true;
+  const name = (tag.name || '').toLowerCase();
+  const nameZh = (tag.name_zh || '').toLowerCase();
+  return name.includes(q) || nameZh.includes(q);
+}
+
 function renderTags(tags) {
   tagsContainer.innerHTML = '';
+
+  const q = tagQuery.trim().toLowerCase();
+  const filtered = tags.filter(tag => matchesQuery(tag, q));
+
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'tags-empty';
+    empty.textContent = q ? 'No tags match your search' : 'No tags yet';
+    tagsContainer.appendChild(empty);
+    return;
+  }
 
   // Group by group_name
   const groups = new Map();
   const ungrouped = [];
-  for (const tag of tags) {
+  for (const tag of filtered) {
     if (!tag.group_name) { ungrouped.push(tag); continue; }
     if (!groups.has(tag.group_name)) groups.set(tag.group_name, []);
     groups.get(tag.group_name).push(tag);
@@ -116,27 +146,31 @@ function renderTags(tags) {
     entries.push(['未分类', ungrouped]);
   }
 
-  // Frequently used (top 6)
-  const top = [...tags]
-    .filter(t => t.media_count > 0)
-    .sort((a, b) => b.media_count - a.media_count)
-    .slice(0, 6);
+  // Frequently used (top 6) — skipped while searching so results stay flat.
+  if (!q) {
+    const top = [...filtered]
+      .filter(t => t.media_count > 0)
+      .sort(byMediaCountDesc)
+      .slice(0, 6);
 
-  if (top.length > 0) {
-    const label = document.createElement('div');
-    label.className = 'tag-group-label';
-    label.innerHTML = '🔥 Frequently Used';
-    tagsContainer.appendChild(label);
-    top.forEach(tag => tagsContainer.appendChild(createTagPill(tag)));
+    if (top.length > 0) {
+      const label = document.createElement('div');
+      label.className = 'tag-group-label';
+      label.innerHTML = '🔥 Frequently Used';
+      tagsContainer.appendChild(label);
+      top.forEach(tag => tagsContainer.appendChild(createTagPill(tag)));
+    }
   }
 
-  // Groups
+  // Groups — each sorted most-used first (immutable copy, no in-place mutation)
   for (const [groupName, groupTags] of entries) {
     const label = document.createElement('div');
     label.className = 'tag-group-label';
     label.textContent = groupName;
     tagsContainer.appendChild(label);
-    groupTags.forEach(tag => tagsContainer.appendChild(createTagPill(tag)));
+    [...groupTags]
+      .sort(byMediaCountDesc)
+      .forEach(tag => tagsContainer.appendChild(createTagPill(tag)));
   }
 }
 
