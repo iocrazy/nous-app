@@ -6,14 +6,14 @@ from typing import Any, Dict, List
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.collections_repository import CollectionsRepository
+from app.repositories.collections_repository import get_collections_repository
 
 
 class CollectionsService:
     """Service for smart collection rule evaluation and media matching (异步)."""
 
     def __init__(self):
-        self.repo = CollectionsRepository()
+        self.repo = get_collections_repository()
 
     async def _get_client(self):
         """Get async client (loop-aware, safe for Celery workers)."""

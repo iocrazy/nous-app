@@ -192,3 +192,28 @@ class AnalysisRepository:
                 stats[level] += 1
 
         return stats
+
+
+def get_analysis_repository() -> "AnalysisRepository":
+    """Return the right AnalysisRepository implementation per env.
+
+    ORM when ``USE_ORM_ANALYSIS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path.  A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+
+    if settings.USE_ORM_ANALYSIS:
+        from app.db.engine import is_configured
+
+        if is_configured():
+            from app.repositories.analysis_repository_orm import (
+                AnalysisRepositoryOrm,
+            )
+
+            return AnalysisRepositoryOrm()
+        logger.warning(
+            "USE_ORM_ANALYSIS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return AnalysisRepository()

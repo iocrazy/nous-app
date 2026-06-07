@@ -6,7 +6,7 @@ from typing import List, Optional
 from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
-from app.repositories.analysis_repository import AnalysisRepository
+from app.repositories.analysis_repository import get_analysis_repository
 from app.services.ai.providers.embedding_service import EmbeddingService
 
 
@@ -41,7 +41,7 @@ class SearchService:
 
     def __init__(self):
         self.embedding_service = EmbeddingService()
-        self.analysis_repo = AnalysisRepository()
+        self.analysis_repo = get_analysis_repository()
 
     async def _get_client(self):
         """Get async client (loop-aware, safe for Celery workers)."""

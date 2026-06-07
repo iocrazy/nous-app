@@ -1,9 +1,15 @@
 """User-related ORM models: UserProfiles, UserCredits, UserTagPreferences,
-UserSettings, UserCookies, UserLogs.
+UserSettings, UserCookies, UserLogs, UserMcpServers.
 
 Note: auth.users (GoTrue) is permanently EXCLUDED from these models; there is no
 public.users table. FK constraints that targeted users.id are intentionally omitted —
 referential integrity lives in Postgres, not in this reference metadata.
+
+⚠️ INTEGRATION-PENDING: ``UserMcpServers`` was hand-derived from migration 194's
+DDL (no live reflection was available when it was authored). It MUST be validated
+by ``tests/db/test_schema_drift.py`` against prod (set ``INTEGRATION_DATABASE_URL``)
+before ``USE_ORM_USER_MCP_SERVERS`` is flipped on. See
+``docs/runbook/orm-rollout-plan.md``.
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from sqlalchemy import (
     ARRAY,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     Index,
@@ -234,3 +241,34 @@ class UserLogs(Base):
     created_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(True), server_default=text("now()")
     )
+
+
+class UserMcpServers(Base):
+    __tablename__ = "user_mcp_servers"
+    __table_args__ = (
+        CheckConstraint(
+            "name ~ '^[A-Za-z0-9_]+$'::text", name="user_mcp_servers_name_check"
+        ),
+        CheckConstraint("url ~ '^https?://'::text", name="user_mcp_servers_url_check"),
+        PrimaryKeyConstraint("id", name="user_mcp_servers_pkey"),
+        UniqueConstraint("user_id", "name", name="user_mcp_servers_user_id_name_key"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    bearer_token: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)

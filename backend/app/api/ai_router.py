@@ -17,7 +17,7 @@ from app.core.deps import AuthDep, get_team_id_for_user
 from app.core.scope_dep import ScopedRequestDep
 from app.db.supabase_client import get_async_supabase_admin as _get_admin
 from app.repositories.ai_repository import get_ai_repository
-from app.repositories.analysis_repository import AnalysisRepository
+from app.repositories.analysis_repository import get_analysis_repository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.ai import (
@@ -910,7 +910,7 @@ async def get_analysis_by_resource(
     if resource.get("creator_id") != auth.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    analysis = await AnalysisRepository().get_analysis(int(media["id"])) or {}
+    analysis = await get_analysis_repository().get_analysis(int(media["id"])) or {}
 
     return VisualAnalysisResponse(
         media_id=str(media["id"]),

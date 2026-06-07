@@ -1,6 +1,6 @@
 # ORM 2.0 Rollout Plan — Shadow-Compare → Tiered Flip Runbook
 
-> The master plan for flipping the 44 `USE_ORM_<DOMAIN>` flags from REST to the
+> The master plan for flipping the `USE_ORM_<DOMAIN>` flags from REST to the
 > SQLAlchemy 2.0 ORM in production, **one domain at a time**, with parity
 > *proven on real prod traffic* before each flip.
 >
@@ -124,10 +124,12 @@ over log tables. Best place to exercise the harness itself.
 
 ### Tier 1 — user logs + simple lookups (low write complexity, value-type-simple)
 `LOGS`, `USER_LOGS`, `STYLE_TEMPLATES`, `TAG_PREFERENCES`, `NOTIFICATIONS`,
-`SCRIPTS`, `NOUS`, `SESSION_MEMORY`, `PERMISSION`, `USER_SETTINGS`
+`SCRIPTS`, `NOUS`, `SESSION_MEMORY`, `PERMISSION`, `USER_SETTINGS`, `COLLECTIONS`
 *Rationale:* per-user CRUD with mostly flat shapes; failures are user-scoped and
 non-destructive. `USER_SETTINGS` writes a shared jsonb column — verify merge-not-
-replace parity (see `bug_user_settings_json_clobber`).
+replace parity (see `bug_user_settings_json_clobber`). `COLLECTIONS`
+(`smart_collections`) is plain per-user CRUD; its model pre-existed in the
+reflected set, so no drift-verify gate beyond the normal shadow window.
 
 ### Tier 2 — mid-complexity lookups / moderate writes
 `LIBRARIES`, `PROJECTS`, `STORYBOARD`, `AI`, `INVITE`, `ISSUE`, `AGENT`,
@@ -136,10 +138,14 @@ replace parity (see `bug_user_settings_json_clobber`).
 is the original silent-rollback P0 driver — flip with extra write monitoring.
 
 ### Tier 3 — central tables with many call-sites
-`TAGS`, `ADMIN_TAGS`, `SKILL`, `MEDIA`, `WORKFORCE`, `ADMIN_TRANSCODE`
+`TAGS`, `ADMIN_TAGS`, `SKILL`, `MEDIA`, `WORKFORCE`, `ADMIN_TRANSCODE`, `ANALYSIS`
 *Rationale:* high fan-out — a parity bug here touches many surfaces. Shadow for
 a longer window to cover all call paths. `MEDIA` reads JOIN `resources` (relevant
-to the resources epic — see Tier 7).
+to the resources epic — see Tier 7). `ANALYSIS` (`resource_analysis`) is
+cross-table + pgvector + the `match_videos_by_embedding` RPC; its `ResourceAnalysis`
+model is **hand-derived (INTEGRATION-PENDING)** — run `tests/db/test_schema_drift.py`
+against prod (set `INTEGRATION_DATABASE_URL`) to validate the model BEFORE adding it
+to `SHADOW_ORM_DOMAINS`, and verify the embedding/RPC read shapes during shadow.
 
 ### Tier 4 — authorization (uuid `==`/`!=` risk)
 `REVIEW`, `TEAM`, `ADMIN_USERS`, `ADMIN_TEAMS`
@@ -148,9 +154,15 @@ here: an `==`/`!=` on a uuid that drifts type silently denies/grants. Diff every
 membership / ownership read carefully before flipping.
 
 ### Tier 5 — secrets
-`COOKIES`, `API_KEY`
+`COOKIES`, `API_KEY`, `USER_MCP_SERVERS`
 *Rationale:* a parity bug can leak or drop credentials. Low traffic, but verify
-that masked/decrypted value shapes match exactly.
+that masked/decrypted value shapes match exactly. `USER_MCP_SERVERS`
+(`user_mcp_servers`) stores an **encrypted** `bearer_token` (encrypt-at-write /
+decrypt-at-read) and returns a frozen `UserMCPServer` dataclass with `uuid.UUID`
+ids — verify the decrypted token round-trips and the M3 `WHERE user_id == owner`
+ownership filter holds on update/delete. Its `UserMcpServers` model is
+**hand-derived (INTEGRATION-PENDING)** — drift-verify against prod BEFORE
+shadowing.
 
 ### Tier 6 — money (highest stakes)
 `POINTS`, `PAYMENT`, `ADMIN_CREDITS`, `COMMITMENT`, `APPROVAL`
@@ -168,9 +180,21 @@ the full scope flip/rollback procedure. Order: shadow `resources` → flip
 `USE_ORM_RESOURCES=true` → verify ORM-path parity → flip
 `SCOPE_ENFORCE_RESOURCES=true` (its own runbook).
 
-> **Out of rollout scope:** `analysis`, `collections`, `user_mcp_servers` have
-> **no ORM implementation** — they stay on REST permanently and are not part of
-> this plan.
+> **Deferred-repo finish wave (now in scope):** `collections` (Tier 1),
+> `analysis` (Tier 3), `user_mcp_servers` (Tier 5) were the last three REST repos
+> without an ORM sibling. They are now code-complete behind `USE_ORM_COLLECTIONS`
+> / `USE_ORM_ANALYSIS` / `USE_ORM_USER_MCP_SERVERS` (all default false, inert).
+> ⚠️ **INTEGRATION-PENDING for two of them:** the `ResourceAnalysis` and
+> `UserMcpServers` models were **hand-derived from migration DDL** (no live
+> reflection was available at authoring time), so their integration tests skip
+> without a DB and the models are unverified against prod. Before adding either
+> domain to `SHADOW_ORM_DOMAINS`, run `tests/db/test_schema_drift.py` with
+> `INTEGRATION_DATABASE_URL` set to validate the model, then run the repo's
+> `tests/integration/test_*_repository_orm.py` against a live DB. `collections`
+> reuses a pre-reflected model and has no such gate.
+>
+> **Genuinely out of scope:** none remain — every public-table repo now has an
+> ORM path (or is intentionally REST-only infra like `base_repository`).
 
 ---
 

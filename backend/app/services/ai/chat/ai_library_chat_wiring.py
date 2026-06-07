@@ -228,10 +228,10 @@ async def build_agent_runner_stack(
         from app.agent_framework.mcp_client import MCPServerConfig
         from app.agent_framework.mcp_outbound_registry import MCPOutboundRegistry
         from app.repositories.user_mcp_servers_repository import (
-            UserMCPServersRepository,
+            get_user_mcp_servers_repository,
         )
 
-        mcp_repo = UserMCPServersRepository()
+        mcp_repo = get_user_mcp_servers_repository()
         mcp_rows = await mcp_repo.list_for_user(user_id, only_enabled=True)
         if mcp_rows:
             mcp_registry = MCPOutboundRegistry()

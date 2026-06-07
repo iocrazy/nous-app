@@ -2012,10 +2012,10 @@ def _mcp_row_to_dict(row, *, include_token: bool = False):
 @router.get("/mcp-servers", summary="List the caller's MCP server registrations")
 async def list_mcp_servers(auth: AuthDep) -> Dict[str, Any]:
     from app.repositories.user_mcp_servers_repository import (
-        UserMCPServersRepository,
+        get_user_mcp_servers_repository,
     )
 
-    repo = UserMCPServersRepository()
+    repo = get_user_mcp_servers_repository()
     rows = await repo.list_for_user(_coerce_user_uuid(auth.user_id), only_enabled=False)
     return {"items": [_mcp_row_to_dict(r) for r in rows], "count": len(rows)}
 
@@ -2027,10 +2027,10 @@ async def list_mcp_servers(auth: AuthDep) -> Dict[str, Any]:
 )
 async def create_mcp_server(payload: _MCPServerCreate, auth: AuthDep) -> Dict[str, Any]:
     from app.repositories.user_mcp_servers_repository import (
-        UserMCPServersRepository,
+        get_user_mcp_servers_repository,
     )
 
-    repo = UserMCPServersRepository()
+    repo = get_user_mcp_servers_repository()
     try:
         row = await repo.create(
             user_id=_coerce_user_uuid(auth.user_id),
@@ -2055,11 +2055,11 @@ async def update_mcp_server(
     auth: AuthDep,
 ) -> Dict[str, Any]:
     from app.repositories.user_mcp_servers_repository import (
-        UserMCPServersRepository,
+        get_user_mcp_servers_repository,
     )
 
     user_uuid = _coerce_user_uuid(auth.user_id)
-    repo = UserMCPServersRepository()
+    repo = get_user_mcp_servers_repository()
     existing = await repo.get_by_id(server_id)
     if not existing or existing.user_id != user_uuid:
         raise HTTPException(status_code=404, detail="MCP server not found")
@@ -2084,11 +2084,11 @@ async def update_mcp_server(
 )
 async def delete_mcp_server(server_id: UUID, auth: AuthDep) -> None:
     from app.repositories.user_mcp_servers_repository import (
-        UserMCPServersRepository,
+        get_user_mcp_servers_repository,
     )
 
     user_uuid = _coerce_user_uuid(auth.user_id)
-    repo = UserMCPServersRepository()
+    repo = get_user_mcp_servers_repository()
     existing = await repo.get_by_id(server_id)
     if not existing or existing.user_id != user_uuid:
         raise HTTPException(status_code=404, detail="MCP server not found")

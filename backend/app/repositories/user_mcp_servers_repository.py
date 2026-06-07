@@ -208,4 +208,32 @@ class UserMCPServersRepository:
             return False
 
 
-__all__ = ["UserMCPServer", "UserMCPServersRepository"]
+def get_user_mcp_servers_repository() -> "UserMCPServersRepository":
+    """Return the right UserMCPServersRepository implementation per env.
+
+    ORM when ``USE_ORM_USER_MCP_SERVERS`` is set AND the SQLAlchemy engine is
+    configured; otherwise the legacy supabase-py REST path. A flag-on but
+    engine-missing deploy logs once and falls back to REST (never crashes).
+    """
+    from app.core.config import settings
+    from app.db.engine import is_configured
+
+    if settings.USE_ORM_USER_MCP_SERVERS:
+        if is_configured():
+            from app.repositories.user_mcp_servers_repository_orm import (
+                UserMCPServersRepositoryOrm,
+            )
+
+            return UserMCPServersRepositoryOrm()
+        logger.warning(
+            "USE_ORM_USER_MCP_SERVERS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return UserMCPServersRepository()
+
+
+__all__ = [
+    "UserMCPServer",
+    "UserMCPServersRepository",
+    "get_user_mcp_servers_repository",
+]
