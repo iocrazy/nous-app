@@ -22,6 +22,7 @@ import {
   GripVertical,
 } from 'lucide-react';
 import type { Tag } from '../types';
+import { mergeUpdatedTag } from './tagEditMerge';
 import {
   fetchAllTags as fetchTags,
   fetchTagGroups,
@@ -348,16 +349,11 @@ export const TagsSettings: React.FC = () => {
       // which would make the optimistic UI flip the tag into
       // Uncategorized until the next loadData() refresh.
       // Derive group_name client-side from local groups before patching.
-      const derivedGroupId = (updated as any).group_id;
-      const derivedGroupName =
-        derivedGroupId == null
-          ? null
-          : groups.find((g) => String(g.id) === String(derivedGroupId))?.name ??
-            null;
-      const patched: Tag = {
-        ...(updated as any),
-        group_name: derivedGroupName,
-      };
+      // PUT /tags/:id returns the bare row without the tag_groups join or a
+      // recomputed media_count — derive group_name client-side and preserve
+      // the existing count so the optimistic UI doesn't regress. See
+      // mergeUpdatedTag for the full rationale.
+      const patched = mergeUpdatedTag(editingTag, updated as Tag, groups);
       setTags((prev) => prev.map((t) => (t.id === editingTag.id ? patched : t)));
       setEditingTag(null);
     } catch (err) {
