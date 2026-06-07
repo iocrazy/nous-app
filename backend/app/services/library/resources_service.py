@@ -1004,6 +1004,21 @@ class ResourcesService:
                     h = stream.get("height")
                     if w and h:
                         result["resolution"] = f"{w}x{h}"
+                if stream.get("codec_type") == "audio":
+                    br = stream.get("bit_rate")
+                    if br:
+                        try:
+                            result["audio_bitrate_kbps"] = round(int(br) / 1000)
+                        except (TypeError, ValueError):
+                            pass
+
+            if "audio_bitrate_kbps" not in result:
+                fbr = fmt.get("bit_rate")
+                if fbr:
+                    try:
+                        result["audio_bitrate_kbps"] = round(int(fbr) / 1000)
+                    except (TypeError, ValueError):
+                        pass
 
             return result
         except Exception as e:
