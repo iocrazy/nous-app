@@ -192,76 +192,28 @@ async def get_request_log_stats(
     auth: AdminAuthDep,
     hours: int = Query(24, ge=1, le=168, description="Number of hours to include"),
 ):
-    """Get aggregated request log statistics."""
+    """Get aggregated request log statistics.
+
+    Aggregation runs server-side in SQL (``rpc_request_log_stats``, mig 270) —
+    correct at any log volume. The previous Python path fetched every row in the
+    window (capped at 1000 by PostgREST → undercounted stats, or an unbounded
+    full-window fetch on the ORM path).
+    """
     repo = get_request_logs_repository()
     start_time = datetime.utcnow() - timedelta(hours=hours)
-    logs = await repo.stats_since(start_time)
+    stats = await repo.request_log_stats(start_time)
 
-    if not logs:
+    if not stats or not stats.get("total"):
         return RequestLogStats(
             by_method=[], by_status=[], top_paths=[], by_hour=[], total=0
         )
 
-    total = len(logs)
-
-    # By method
-    method_counts: dict[str, int] = {}
-    for log in logs:
-        m = log.get("method", "UNKNOWN")
-        method_counts[m] = method_counts.get(m, 0) + 1
-    by_method = [
-        MethodCount(method=m, count=c)
-        for m, c in sorted(method_counts.items(), key=lambda x: -x[1])
-    ]
-
-    # By status group
-    status_counts: dict[str, int] = {}
-    for log in logs:
-        sc = log.get("status_code")
-        if sc is not None:
-            group = f"{sc // 100}xx"
-            status_counts[group] = status_counts.get(group, 0) + 1
-    by_status = [
-        StatusCount(status_group=s, count=c) for s, c in sorted(status_counts.items())
-    ]
-
-    # Top paths
-    path_data: dict[str, list] = {}
-    for log in logs:
-        p = log.get("path", "")
-        if p not in path_data:
-            path_data[p] = []
-        path_data[p].append(log.get("response_time_ms", 0))
-
-    top_paths_list = sorted(path_data.items(), key=lambda x: -len(x[1]))[:20]
-    top_paths = [
-        TopPath(
-            path=p,
-            count=len(times),
-            avg_response_time_ms=(
-                int(sum(t for t in times if t) / max(len([t for t in times if t]), 1))
-                if times
-                else None
-            ),
-        )
-        for p, times in top_paths_list
-    ]
-
-    # By hour
-    hour_counts: dict[str, int] = {}
-    for log in logs:
-        ts = log.get("timestamp", "")
-        if ts and len(ts) >= 13:
-            hour = ts[:13]  # "2024-01-01T12"
-            hour_counts[hour] = hour_counts.get(hour, 0) + 1
-    by_hour = [HourCount(hour=h, count=c) for h, c in sorted(hour_counts.items())]
-
     return RequestLogStats(
-        by_method=by_method,
-        by_status=by_status,
-        top_paths=top_paths,
-        by_hour=by_hour,
-        total=total,
+        by_method=[MethodCount(**m) for m in stats.get("by_method", [])],
+        by_status=[StatusCount(**s) for s in stats.get("by_status", [])],
+        top_paths=[TopPath(**p) for p in stats.get("top_paths", [])],
+        by_hour=[HourCount(**h) for h in stats.get("by_hour", [])],
+        total=stats.get("total", 0),
     )
 
 

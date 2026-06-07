@@ -1,7 +1,5 @@
 """Admin API routes for system monitoring statistics."""
 
-import asyncio
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -104,20 +102,6 @@ def get_time_range(
     return now - timedelta(hours=hours), now, bucket
 
 
-def _bucket_key(dt: datetime, bucket_minutes: int) -> str:
-    """Truncate a datetime to its bucket key string."""
-    minutes = (dt.hour * 60 + dt.minute) // bucket_minutes * bucket_minutes
-    if bucket_minutes >= 1440:
-        return dt.strftime("%Y-%m-%dT00:00")
-    elif bucket_minutes >= 60:
-        bucket_hour = minutes // 60
-        return f"{dt.strftime('%Y-%m-%d')}T{bucket_hour:02d}:00"
-    else:
-        bucket_hour = minutes // 60
-        bucket_min = minutes % 60
-        return f"{dt.strftime('%Y-%m-%d')}T{bucket_hour:02d}:{bucket_min:02d}"
-
-
 # ============================================
 # Main Endpoint
 # ============================================
@@ -130,143 +114,36 @@ async def get_monitoring_stats(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
 ):
-    """Get aggregated monitoring statistics for the admin dashboard."""
+    """Get aggregated monitoring statistics for the admin dashboard.
+
+    All 7 sections are aggregated server-side in SQL (``rpc_monitoring_stats``,
+    mig 271) over the full window — correct at any log volume. The previous path
+    fetched every api_request_logs (capped 10000) + application_logs (capped
+    5000) row and aggregated in Python (an undercount on the capped REST path,
+    a heavy full-window fetch on the ORM path).
+    """
     repo = get_monitoring_repository()
     start, end, bucket_minutes = get_time_range(period, start_date, end_date)
 
-    # Run the three log queries concurrently; latency-bound, so gather() saves
-    # ~2× round-trips vs the sequential version.
-    req_logs, app_logs, fe_error_count = await asyncio.gather(
-        repo.request_logs_between(start, end),
-        repo.app_logs_between(start, end),
-        repo.frontend_error_count(start, end),
-    )
-
-    # ---- Compute overview ----
-    total_requests = len(req_logs)
-    error_requests = sum(1 for r in req_logs if (r.get("status_code") or 0) >= 400)
-    error_rate = round(
-        (error_requests / total_requests * 100) if total_requests > 0 else 0, 2
-    )
-    avg_ms = round(
-        (
-            sum(r.get("response_time_ms") or 0 for r in req_logs) / total_requests
-            if total_requests > 0
-            else 0
-        ),
-        1,
-    )
-    app_error_count = sum(
-        1 for a in app_logs if a.get("level") in ("ERROR", "CRITICAL")
-    )
-
-    overview = OverviewStats(
-        total_requests=total_requests,
-        error_rate=error_rate,
-        avg_response_ms=avg_ms,
-        app_error_count=app_error_count,
-        frontend_error_count=fe_error_count,
-    )
-
-    # ---- Compute request trend (bucketed) ----
-    buckets: dict[str, dict] = defaultdict(lambda: {"requests": 0, "errors": 0})
-    for r in req_logs:
-        ts = r.get("timestamp", "")
-        if not ts:
-            continue
-        try:
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        except (ValueError, AttributeError):
-            continue
-        key = _bucket_key(dt, bucket_minutes)
-        buckets[key]["requests"] += 1
-        if (r.get("status_code") or 0) >= 400:
-            buckets[key]["errors"] += 1
-
-    request_trend = [
-        TrendPoint(time=k, requests=v["requests"], errors=v["errors"])
-        for k, v in sorted(buckets.items())
-    ]
-
-    # ---- Compute top slow APIs ----
-    path_stats: dict[str, list[int]] = defaultdict(list)
-    for r in req_logs:
-        ms = r.get("response_time_ms")
-        path = r.get("path", "")
-        if ms is not None and path:
-            path_stats[path].append(ms)
-
-    top_slow = []
-    for path, times in path_stats.items():
-        times_sorted = sorted(times)
-        count = len(times_sorted)
-        avg = round(sum(times_sorted) / count, 1)
-        p95_idx = min(int(count * 0.95), count - 1)
-        p95 = times_sorted[p95_idx]
-        top_slow.append(SlowApiEntry(path=path, avg_ms=avg, p95_ms=p95, count=count))
-
-    top_slow.sort(key=lambda x: x.avg_ms, reverse=True)
-    top_slow_apis = top_slow[:10]
-
-    # ---- Compute top error endpoints ----
-    error_paths: dict[str, dict] = defaultdict(
-        lambda: {"count": 0, "last_status": None}
-    )
-    for r in req_logs:
-        sc = r.get("status_code") or 0
-        if sc >= 400:
-            path = r.get("path", "")
-            error_paths[path]["count"] += 1
-            error_paths[path]["last_status"] = sc
-
-    top_error_endpoints = sorted(
-        [
-            ErrorEndpointEntry(
-                path=p, error_count=v["count"], last_status=v["last_status"]
-            )
-            for p, v in error_paths.items()
-        ],
-        key=lambda x: x.error_count,
-        reverse=True,
-    )[:10]
-
-    # ---- Compute log level distribution ----
-    level_dist: dict[str, int] = defaultdict(int)
-    for a in app_logs:
-        level_dist[a.get("level", "UNKNOWN")] += 1
-
-    # ---- Compute top error modules ----
-    module_errors: dict[str, int] = defaultdict(int)
-    for a in app_logs:
-        if a.get("level") in ("ERROR", "CRITICAL", "WARNING"):
-            mod = a.get("module") or "unknown"
-            short = mod.split(".")[-1] if "." in mod else mod
-            module_errors[short] += 1
-
-    top_error_modules = sorted(
-        [ErrorModuleEntry(module=m, count=c) for m, c in module_errors.items()],
-        key=lambda x: x.count,
-        reverse=True,
-    )[:10]
-
-    # ---- Recent errors (last 5 ERROR/CRITICAL) ----
-    recent_errors = [
-        RecentErrorEntry(
-            level=a["level"],
-            module=(a.get("module") or "").split(".")[-1] or None,
-            message=a.get("message", ""),
-            logged_at=a.get("logged_at", ""),
-        )
-        for a in app_logs
-        if a.get("level") in ("ERROR", "CRITICAL")
-    ][:5]
+    stats = await repo.monitoring_stats(start, end, bucket_minutes)
+    ov = stats.get("overview", {})
 
     return MonitoringStatsResponse(
-        overview=overview,
-        request_trend=request_trend,
-        top_slow_apis=top_slow_apis,
-        top_error_endpoints=top_error_endpoints,
-        log_level_distribution=dict(level_dist),
-        top_error_modules=top_error_modules,
-        recent_errors=recent_errors,
+        overview=OverviewStats(
+            total_requests=ov.get("total_requests", 0),
+            error_rate=ov.get("error_rate", 0),
+            avg_response_ms=ov.get("avg_response_ms", 0),
+            app_error_count=ov.get("app_error_count", 0),
+            frontend_error_count=ov.get("frontend_error_count", 0),
+        ),
+        request_trend=[TrendPoint(**t) for t in stats.get("request_trend", [])],
+        top_slow_apis=[SlowApiEntry(**s) for s in stats.get("top_slow_apis", [])],
+        top_error_endpoints=[
+            ErrorEndpointEntry(**e) for e in stats.get("top_error_endpoints", [])
+        ],
+        log_level_distribution=stats.get("log_level_distribution", {}),
+        top_error_modules=[
+            ErrorModuleEntry(**m) for m in stats.get("top_error_modules", [])
+        ],
+        recent_errors=[RecentErrorEntry(**r) for r in stats.get("recent_errors", [])],
     )

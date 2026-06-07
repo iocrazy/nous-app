@@ -75,6 +75,38 @@ class MonitoringRepository:
         )
         return result.count or 0
 
+    async def monitoring_stats(
+        self,
+        start: datetime,
+        end: datetime,
+        bucket_minutes: int,
+    ) -> dict:
+        """Server-side aggregated monitoring dashboard stats
+        (``rpc_monitoring_stats``, migration 271).
+
+        Replaces fetching ALL api_request_logs (capped 10000) + application_logs
+        (capped 5000) for the window and computing 7 stat sections in Python —
+        an undercount on the capped REST path and a heavy full-window fetch on
+        the ORM path. The RPC computes everything (overview / trend / top-slow /
+        error endpoints / level distribution / error modules / recent errors) in
+        SQL over the full window and returns only the aggregated payload. Shared
+        by both REST and ORM repos (the ORM subclass inherits this).
+
+        ``bucket_minutes`` controls the request-trend bucket size and key format
+        (>=1440 per-day, >=60 hour-aligned, else minute-aligned) — kept identical
+        to the old ``_bucket_key`` so the dashboard chart x-axis is unchanged.
+        """
+        client = await self._client()
+        result = await client.rpc(
+            "rpc_monitoring_stats",
+            {
+                "p_start": start.isoformat(),
+                "p_end": end.isoformat(),
+                "p_bucket_minutes": bucket_minutes,
+            },
+        ).execute()
+        return result.data or {}
+
 
 def get_monitoring_repository() -> "MonitoringRepository":
     """Return the right MonitoringRepository implementation per env.
