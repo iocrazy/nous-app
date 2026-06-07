@@ -57,7 +57,7 @@ CREATE POLICY "Manage analysis of owned resources"
         EXISTS (
             SELECT 1 FROM resources
             WHERE resources.id = resource_analysis.resource_id
-              AND resources.creator_id = (SELECT uid())
+              AND resources.creator_id = auth.uid()
         )
     );
 
