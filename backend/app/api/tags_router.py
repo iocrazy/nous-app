@@ -38,6 +38,18 @@ class TagGroupsListResponse(BaseModel):
     groups: List[TagGroupItem]
 
 
+class MergeTagsRequest(BaseModel):
+    target_id: str = Field(..., description="Surviving tag id")
+    source_ids: List[str] = Field(
+        ..., min_length=1, description="Tag ids to merge away (deleted)"
+    )
+
+
+class MergeTagsResponse(BaseModel):
+    target_id: str
+    resource_count: int
+
+
 @router.get("/groups", response_model=TagGroupsListResponse)
 async def list_tag_groups(auth: AuthDep):
     """List all tag groups (for frontend tag picker grouping)."""
@@ -281,6 +293,26 @@ async def get_tag(
         )
 
     return tag
+
+
+@router.post("/merge", response_model=MergeTagsResponse)
+async def merge_tags(auth: AuthDep, body: MergeTagsRequest):
+    """Merge source tags into the target tag. User tags only; ownership and
+    atomicity are enforced by the merge_tags RPC."""
+    if body.target_id in body.source_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="target cannot also be a source",
+        )
+    repo = get_tags_repository()
+    try:
+        count = await repo.merge_tags(body.target_id, body.source_ids, auth.user_id)
+    except Exception as e:  # RPC RAISE EXCEPTION -> 400
+        logger.warning(f"merge_tags failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+    return MergeTagsResponse(target_id=body.target_id, resource_count=count)
 
 
 @router.put("/{tag_id}", response_model=TagResponse)
