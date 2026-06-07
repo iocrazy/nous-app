@@ -659,14 +659,16 @@ export async function fetchResourceCount(
   // user). For team scope, resources need to be explicitly linked to the
   // team via resource_items — fall back to the old junction query in that
   // case since resources themselves don't carry a team_id column.
+  // Team scope: resources link to the team via resource_items, and an upload
+  // can sit in several folders → COUNT(DISTINCT) in SQL (RPC, mig 268). Replaces
+  // the old id-list (silently capped at 1000 + a 502-risk giant `.in(...)` URL).
   if (!isPersonal) {
-    const { data: items } = await supabase
-      .from('resource_items')
-      .select('resource_id')
-      .eq('scope_id', scopeId);
-    const ids = (items ?? []).map((r) => r.resource_id);
-    if (ids.length === 0) return 0;
-    query = query.in('id', ids);
+    const { data, error } = await supabase.rpc('count_scope_resources', {
+      p_scope_id: scopeId,
+      p_web: false,
+    });
+    if (error) throw error;
+    return (data as number) ?? 0;
   }
 
   const { count, error } = await query;
@@ -1076,14 +1078,15 @@ export async function fetchDownloadedResourceCount(
     .eq('source_type', 'web')
     .eq('is_trashed', false);
 
+  // Team scope: COUNT(DISTINCT) web-sourced resources in the scope via SQL (RPC,
+  // mig 268) — scale-safe, replaces the 1000-capped id-list.
   if (!isPersonal) {
-    const { data: items } = await supabase
-      .from('resource_items')
-      .select('resource_id')
-      .eq('scope_id', scopeId);
-    const ids = (items ?? []).map((r) => r.resource_id);
-    if (ids.length === 0) return 0;
-    query = query.in('id', ids);
+    const { data, error } = await supabase.rpc('count_scope_resources', {
+      p_scope_id: scopeId,
+      p_web: true,
+    });
+    if (error) throw error;
+    return (data as number) ?? 0;
   }
 
   const { count, error } = await query;
