@@ -24,6 +24,7 @@ export interface TagsFilterDropdownProps {
   selectedTagIds: string[];
   onChange: (nextTagIds: string[]) => void;
   onClearAll: () => void;
+  onMergeTags?: (targetId: string, sourceIds: string[]) => Promise<void>;
 }
 
 export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
@@ -31,6 +32,7 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
   selectedTagIds,
   onChange,
   onClearAll,
+  onMergeTags,
 }) => {
   const { t } = useTranslation();
   const { prefs, toggleStar, updateSettings } = useTagPreferences();
@@ -70,6 +72,7 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
         onToggleTag={handleToggleTag}
         onToggleStar={toggleStar}
         onUpdateSettings={updateSettings}
+        onMergeTags={onMergeTags}
         className="flex-1"
       />
       {selectedTagIds.length > 0 && (
