@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+
 from app.repositories.tags_repository import TagsRepository
 
 
