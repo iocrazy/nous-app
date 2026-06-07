@@ -52,10 +52,10 @@ export const MergeTagsDialog: React.FC<MergeTagsDialogProps> = ({ tags, onConfir
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold text-zinc-100">
-          {t('tags.mergeTitle', 'Merge Tags')}
+          {t('settings.tags.mergeTitle', 'Merge Tags')}
         </h3>
         <p className="text-xs text-zinc-400">
-          {t('tags.mergePickTarget', 'Pick the tag to keep:')}
+          {t('settings.tags.mergePickTarget', 'Pick the tag to keep:')}
         </p>
         <div className="space-y-1 max-h-48 overflow-y-auto">
           {tags.map((tag) => (
@@ -79,7 +79,7 @@ export const MergeTagsDialog: React.FC<MergeTagsDialogProps> = ({ tags, onConfir
           ))}
         </div>
         <p className="text-[11px] text-zinc-500">
-          {t('tags.mergePreview', {
+          {t('settings.tags.mergePreview', {
             defaultValue:
               'Up to {{count}} resources move to «{{name}}». {{n}} tags will be deleted.',
             count: sourceCount,
@@ -101,7 +101,7 @@ export const MergeTagsDialog: React.FC<MergeTagsDialogProps> = ({ tags, onConfir
             disabled={busy}
             className="px-3 py-1.5 text-xs rounded bg-red-600 text-white hover:bg-red-500 disabled:opacity-50"
           >
-            {busy ? t('tags.merging', 'Merging…') : t('tags.merge', 'Merge')}
+            {busy ? t('settings.tags.merging', 'Merging…') : t('settings.tags.merge', 'Merge')}
           </button>
         </div>
       </div>
