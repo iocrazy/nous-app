@@ -218,6 +218,29 @@ class TagsRepository:
         )
         return result.data[0] if result.data else None
 
+    async def merge_tags(
+        self, target_id: str, source_ids: list[str], user_id: str
+    ) -> int:
+        """Merge source tags into target via the atomic merge_tags RPC.
+
+        Re-points every resource_tags row from the sources onto the target
+        (deduped) and deletes the source tags, all in one transaction.
+        Returns the target's resulting resource count.
+        """
+        client = await self._get_client()
+        result = await client.rpc(
+            "merge_tags",
+            {
+                "p_target": str(target_id),
+                "p_sources": [str(s) for s in source_ids],
+                "p_user": user_id,
+            },
+        ).execute()
+        data = result.data
+        if isinstance(data, list):
+            return int(data[0]) if data else 0
+        return int(data or 0)
+
     async def update_tag_admin(self, tag_id: str, **kwargs) -> Optional[dict]:
         """Update any tag (no user_id check). Used for toggling enabled on system tags."""
         update_data = {k: v for k, v in kwargs.items() if v is not None}

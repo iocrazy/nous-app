@@ -42,6 +42,8 @@ import { DateAddedFilterDropdown } from './DateAddedFilterDropdown';
 import { DurationFilterDropdown } from './DurationFilterDropdown';
 import { AspectFilterDropdown } from './AspectFilterDropdown';
 import { SocialFilterDropdown } from './SocialFilterDropdown';
+import { mergeTags as mergeTagsApi } from '../../../services/unifiedTagService';
+import { useResourcesContext } from '../../../contexts/ResourcesContext';
 import { datePresetSummary } from './dateUtils';
 import { durationPresetSummary } from './durationUtils';
 import { aspectSummary } from './aspectUtils';
@@ -126,6 +128,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 }) => {
   const { t } = useTranslation();
   const [openTarget, setOpenTarget] = useState<OpenTarget>(null);
+  const { refreshTags } = useResourcesContext();
 
   const {
     pinnedChips,
@@ -140,6 +143,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     clearAll,
     isChipActive,
   } = config;
+
+  const handleMergeTags = React.useCallback(
+    async (targetId: string, sourceIds: string[]) => {
+      await mergeTagsApi(targetId, sourceIds);
+      setChipValue('tags', { tag_ids: [targetId] });
+      await refreshTags();
+    },
+    [setChipValue, refreshTags],
+  );
 
   // Subset of pinnedChips that's actually rendered in the toolbar.
   // Disallowed chips stay pinned in localStorage but don't show here.
@@ -262,6 +274,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             selectedTagIds={chipValues.tags.tag_ids}
             onChange={(next) => setChipValue('tags', { tag_ids: next })}
             onClearAll={() => clearChip('tags')}
+            onMergeTags={handleMergeTags}
           />
         );
       case 'rating':

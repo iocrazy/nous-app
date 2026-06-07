@@ -99,6 +99,7 @@ export interface ResourcesContextType {
   setSmartFolders: React.Dispatch<React.SetStateAction<SmartCollection[]>>;
   allTags: Tag[];
   setAllTags: React.Dispatch<React.SetStateAction<Tag[]>>;
+  refreshTags: () => Promise<void>;
   /** Total count of user-uploaded resources (non-web, across all folders) for the current scope.
    *  Used by the sidebar to render a count badge on the "My Uploads" entry.
    *  (Variable name retained for historical reasons; UI label is "My Uploads".)
@@ -937,6 +938,14 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     }
   }, []);
 
+  const refreshTags = useCallback(async () => {
+    try {
+      setAllTags(await fetchTags());
+    } catch {
+      /* keep stale list on failure */
+    }
+  }, []);
+
   const handleResourceUpdate = useCallback(async (data: Partial<Resource>) => {
     if (!selectedResource?.resource?.id) return;
     const rid = String(selectedResource.resource.id);
@@ -1016,6 +1025,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setSmartFolders,
     allTags,
     setAllTags,
+    refreshTags,
     myResourcesCount,
     downloadsCount,
     refreshSidebarCounts,
@@ -1087,7 +1097,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, canUpload,
     tempFolderId, tempResources, reloadTemp,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
-    libraries, smartFolders, allTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
+    libraries, smartFolders, allTags, refreshTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
     resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,
