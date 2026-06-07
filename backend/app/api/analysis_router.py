@@ -7,7 +7,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
-from app.repositories.analysis_repository import AnalysisRepository
+from app.repositories.analysis_repository import get_analysis_repository
 from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.workflows.analyze_l1 import analyze_l1_workflow
 
@@ -115,7 +115,7 @@ async def get_analysis_queue(
     Get videos pending analysis.
     Returns videos that don't have any analysis yet.
     """
-    repo = AnalysisRepository()
+    repo = get_analysis_repository()
     videos = await repo.get_videos_without_analysis(limit=limit)
 
     return {"pending_count": len(videos), "videos": videos}
@@ -130,7 +130,7 @@ async def get_media_analysis(
     Get analysis results for a media item.
     Returns 404 if no analysis exists for the media.
     """
-    repo = AnalysisRepository()
+    repo = get_analysis_repository()
     analysis = await repo.get_analysis(media_id)
 
     if not analysis:
@@ -283,7 +283,7 @@ async def trigger_batch_analysis(
 
     from app.services.infra.unified_task_manager import get_task_manager
 
-    media_repo = AnalysisRepository()
+    media_repo = get_analysis_repository()
     mgr = get_task_manager()
     started = 0
     for mid in request.media_ids:
@@ -348,7 +348,7 @@ async def delete_media_analysis(
     Delete analysis for a media item.
     Useful for re-analyzing a media item.
     """
-    repo = AnalysisRepository()
+    repo = get_analysis_repository()
     deleted = await repo.delete_analysis(media_id)
 
     if not deleted:

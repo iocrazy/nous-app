@@ -983,6 +983,50 @@ class Settings(BaseSettings):
         "refund_order do update_order THEN add_points as two un-transactioned awaits "
         "— cross-repo non-atomic; flagged for a human. Inert; flip false to revert.",
     )
+    USE_ORM_COLLECTIONS: bool = Field(
+        default=False,
+        description="Route CollectionsRepository (smart_collections CRUD — the "
+        "SmartCollections model already existed in the reflected set) through the "
+        "SQLAlchemy 2.0 ORM (deferred-repo finish wave). Strategy-C value-type "
+        "parity: id (bigint snowflake) → NATIVE int (PostgREST returned a JSON "
+        "number → int; same type); user_id is an INPUT (caller passes str) and "
+        "the returned dicts carry it back as-is; rules / cached_video_ids (jsonb / "
+        "array) → native dict/list; created_at / updated_at / cached_at "
+        "(timestamptz) → ISO str (the router/UI read them as strings, REST "
+        "returned ISO). Writes COMMIT via write_scope(); update/delete keep the "
+        "WHERE user_id == owner ownership filter. Inert; flip false to revert.",
+    )
+    USE_ORM_USER_MCP_SERVERS: bool = Field(
+        default=False,
+        description="Route UserMcpServersRepository (user_mcp_servers CRUD) "
+        "through the SQLAlchemy 2.0 ORM (deferred-repo finish wave — ★ SECRETS ★). "
+        "The public return type is the frozen UserMCPServer dataclass with id/"
+        "user_id as uuid.UUID OBJECTS (NOT str) — the ORM impl rebuilds the SAME "
+        "dataclass via UserMCPServer.from_row over the ORM row's mapping, so "
+        "parity is structural. bearer_token stays ENCRYPTED at write "
+        "(_encrypt_secret) / DECRYPTED at read (_decrypt_secret) exactly as REST. "
+        "M3 defense-in-depth: update/delete keep WHERE user_id == owner_user_id. "
+        "Writes COMMIT via write_scope(). ⚠️ INTEGRATION-PENDING: the "
+        "UserMcpServers model is hand-derived from mig 194 — drift-verify before "
+        "flip. Inert; flip false to revert.",
+    )
+    USE_ORM_ANALYSIS: bool = Field(
+        default=False,
+        description="Route AnalysisRepository (resource_analysis CRUD + pgvector "
+        "embedding + match_videos_by_embedding RPC + cross-table availability "
+        "queries) through the SQLAlchemy 2.0 ORM (deferred-repo finish wave). "
+        "Strategy-C value-type parity: resource_id (bigint) native int; "
+        "detected_* / full_text (jsonb/text) native; analysis_cost (numeric) → "
+        "the REST shape; analyzed_at/created_at/updated_at (timestamptz) → ISO "
+        "str. content_embedding is written as a pgvector Vector(1536). The vector "
+        "similarity search keeps using the match_videos_by_embedding RPC "
+        "(executed as a raw statement — parity with the REST .rpc() path); "
+        "get_videos_without_analysis / by_level keep their cross-table semantics. "
+        "Writes COMMIT via write_scope() with ON CONFLICT (resource_id, "
+        "analysis_level) idempotency. ⚠️ INTEGRATION-PENDING: the ResourceAnalysis "
+        "model is hand-derived from the 014→076 migration chain — drift-verify "
+        "before flip. Inert; flip false to revert.",
+    )
 
     # ============================================
     # 下载设置

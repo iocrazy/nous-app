@@ -581,9 +581,9 @@ async def find_similar_media(
 
         if response.total == 0:
             # Check if media exists and has embedding
-            from app.repositories.analysis_repository import AnalysisRepository
+            from app.repositories.analysis_repository import get_analysis_repository
 
-            analysis_repo = AnalysisRepository()
+            analysis_repo = get_analysis_repository()
             analysis = await analysis_repo.get_analysis(media_id)
 
             if not analysis:

@@ -37,7 +37,7 @@ def _patch_repo(monkeypatch, analysis):
             _FakeRepo.seen_key = key
             return analysis
 
-    monkeypatch.setattr(ai_router, "AnalysisRepository", _FakeRepo)
+    monkeypatch.setattr(ai_router, "get_analysis_repository", lambda: _FakeRepo())
     return _FakeRepo
 
 

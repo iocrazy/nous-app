@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.core.deps import AuthDep
-from app.repositories.collections_repository import CollectionsRepository
+from app.repositories.collections_repository import get_collections_repository
 from app.schemas.collections import (
     CollectionCreate,
     CollectionListResponse,
@@ -27,7 +27,7 @@ async def list_collections(
 
     Includes both user-created and preset collections by default.
     """
-    repo = CollectionsRepository()
+    repo = get_collections_repository()
     collections = await repo.get_all_collections(auth.user_id)
 
     if not include_presets:
@@ -70,7 +70,7 @@ async def create_collection(
 
     Define rules to automatically match videos based on tags, author, date, etc.
     """
-    repo = CollectionsRepository()
+    repo = get_collections_repository()
 
     created = await repo.create_collection(
         user_id=auth.user_id,
@@ -109,7 +109,7 @@ async def get_collection(
     collection_id: str,
 ):
     """Get a specific collection by ID."""
-    repo = CollectionsRepository()
+    repo = get_collections_repository()
     collection = await repo.get_collection_by_id(collection_id, auth.user_id)
 
     if not collection:
@@ -149,7 +149,7 @@ async def update_collection(
 
     Preset collections can only have their rules updated, not name/icon.
     """
-    repo = CollectionsRepository()
+    repo = get_collections_repository()
 
     existing = await repo.get_collection_by_id(collection_id, auth.user_id)
     if not existing:
@@ -210,7 +210,7 @@ async def delete_collection(
 
     Preset collections cannot be deleted.
     """
-    repo = CollectionsRepository()
+    repo = get_collections_repository()
 
     existing = await repo.get_collection_by_id(collection_id, auth.user_id)
     if not existing:
@@ -245,7 +245,7 @@ async def get_collection_media(
 
     Results are cached for 5 minutes unless refresh=true.
     """
-    repo = CollectionsRepository()
+    repo = get_collections_repository()
     service = CollectionsService()
 
     collection = await repo.get_collection_by_id(collection_id, auth.user_id)
@@ -278,7 +278,7 @@ async def refresh_collection(
     collection_id: str,
 ):
     """Force refresh a collection's cache."""
-    repo = CollectionsRepository()
+    repo = get_collections_repository()
     service = CollectionsService()
 
     collection = await repo.get_collection_by_id(collection_id, auth.user_id)
@@ -303,7 +303,7 @@ async def initialize_preset_collections(auth: AuthDep):
 
     Only creates presets if the user doesn't have any yet.
     """
-    repo = CollectionsRepository()
+    repo = get_collections_repository()
 
     existing_presets = await repo.get_preset_collections(auth.user_id)
     if existing_presets:

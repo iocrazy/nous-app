@@ -209,3 +209,25 @@ class CollectionsRepository:
 
         logger.info(f"Created {len(created)} preset collections for user {user_id}")
         return created
+
+
+def get_collections_repository() -> "CollectionsRepository":
+    """Factory: returns ORM-backed repo when USE_ORM_COLLECTIONS is true and
+    the DB engine is configured; otherwise falls back to supabase-py."""
+    from app.core.config import settings
+    from app.db.engine import is_configured
+
+    if settings.USE_ORM_COLLECTIONS:
+        if is_configured():
+            from app.repositories.collections_repository_orm import (
+                CollectionsRepositoryOrm,
+            )
+
+            return CollectionsRepositoryOrm()
+        from loguru import logger
+
+        logger.warning(
+            "USE_ORM_COLLECTIONS=true but SUPAVISOR_DATABASE_URL is empty "
+            "— falling back to supabase-py path"
+        )
+    return CollectionsRepository()

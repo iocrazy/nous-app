@@ -1,11 +1,21 @@
 """Media-related ORM models: ParsedMedia, Resources, ResourceItems, ResourceVersions,
-ResourceTags, ResourceSummaries, ResourceTranscripts, ResourceAccessLogs, Folders."""
+ResourceTags, ResourceSummaries, ResourceTranscripts, ResourceAccessLogs,
+ResourceAnalysis, Folders.
+
+⚠️ INTEGRATION-PENDING: ``ResourceAnalysis`` was hand-derived from the migration
+chain (014 create video_analysis → 035/059 video_id type churn → 066/076 renames
+to resource_analysis, composite PK ``(resource_id, analysis_level)``); no live
+reflection was available when it was authored. It MUST be validated by
+``tests/db/test_schema_drift.py`` against prod (set ``INTEGRATION_DATABASE_URL``)
+before ``USE_ORM_ANALYSIS`` is flipped on. See ``docs/runbook/orm-rollout-plan.md``.
+"""
 
 from __future__ import annotations
 
 import datetime
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -17,6 +27,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     PrimaryKeyConstraint,
     SmallInteger,
     String,
@@ -675,3 +686,56 @@ class Folders(Base):
     library_id: Mapped[int | None] = mapped_column(BigInteger)
     is_smart: Mapped[bool | None] = mapped_column(Boolean, server_default=text("false"))
     smart_rules: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class ResourceAnalysis(Base):
+    __tablename__ = "resource_analysis"
+    __table_args__ = (
+        CheckConstraint(
+            "analysis_level::text = ANY (ARRAY['none'::character varying::text, "
+            "'L1'::character varying::text, 'L2'::character varying::text, "
+            "'L3'::character varying::text])",
+            name="video_analysis_analysis_level_check",
+        ),
+        ForeignKeyConstraint(
+            ["resource_id"],
+            ["public.resources.id"],
+            ondelete="CASCADE",
+            name="resource_analysis_resource_id_fkey",
+        ),
+        PrimaryKeyConstraint(
+            "resource_id", "analysis_level", name="resource_analysis_pkey"
+        ),
+        {"schema": "public"},
+    )
+
+    resource_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    analysis_level: Mapped[str] = mapped_column(
+        String(10),
+        primary_key=True,
+        server_default=text("'none'::character varying"),
+    )
+    visual_description: Mapped[str | None] = mapped_column(Text)
+    detected_objects: Mapped[dict | None] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+    detected_scenes: Mapped[dict | None] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+    detected_people: Mapped[dict | None] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+    detected_text: Mapped[str | None] = mapped_column(Text)
+    full_text_for_embedding: Mapped[str | None] = mapped_column(Text)
+    content_embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    analysis_model: Mapped[str | None] = mapped_column(String(50))
+    analysis_cost: Mapped[float | None] = mapped_column(
+        Numeric(10, 6), server_default=text("0")
+    )
+    analyzed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+    created_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(True), server_default=text("now()")
+    )
