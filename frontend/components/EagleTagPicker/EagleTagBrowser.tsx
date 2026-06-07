@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next';
 
 import { CategorySidebar } from './CategorySidebar';
 import { TagContent } from './TagContent';
+import { MergeTagsDialog } from './MergeTagsDialog';
 import { SettingsPopover } from './SettingsPopover';
 import type { Tag } from '../../types';
 import type { PickerSettings } from '../../services/tagPreferencesService';
@@ -38,6 +39,10 @@ export interface EagleTagBrowserProps {
   onToggleTag: (tagId: string) => void;
   onToggleStar: (tagId: string) => void;
   onUpdateSettings: (partial: Partial<PickerSettings>) => void;
+
+  /** When provided, enables right-click "Merge N Tags" on the current selection.
+   *  Receives the chosen survivor id and the source ids to merge away. */
+  onMergeTags?: (targetId: string, sourceIds: string[]) => Promise<void>;
 
   /** When provided, renders a "Create \"name\"" row below the search bar.
    *  Hide in contexts where creating tags doesn't make sense (e.g. filter). */
@@ -72,6 +77,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
   onToggleTag,
   onToggleStar,
   onUpdateSettings,
+  onMergeTags,
   onCreate,
   onClose,
   hideSettings = false,
@@ -85,6 +91,11 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [newColor, setNewColor] = useState(TAG_COLORS[5]);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const selectedUserTags = useMemo(
+    () => allTags.filter((t) => selectedIds.has(String(t.id)) && t.type === 'user'),
+    [allTags, selectedIds],
+  );
 
   // Detect mobile when not forced
   const [autoMobile, setAutoMobile] = useState(() => window.innerWidth < 640);
@@ -263,7 +274,19 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
           search={search}
           onToggleTag={onToggleTag}
           onToggleStar={onToggleStar}
+          selectedUserTagCount={onMergeTags ? selectedUserTags.length : 0}
+          onRequestMerge={onMergeTags ? () => setMergeOpen(true) : undefined}
         />
+        {onMergeTags && mergeOpen && selectedUserTags.length >= 2 && (
+          <MergeTagsDialog
+            tags={selectedUserTags}
+            onClose={() => setMergeOpen(false)}
+            onConfirm={async (target, sources) => {
+              await onMergeTags(target, sources);
+              setMergeOpen(false);
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -290,8 +313,20 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
           search={search}
           onToggleTag={onToggleTag}
           onToggleStar={onToggleStar}
+          selectedUserTagCount={onMergeTags ? selectedUserTags.length : 0}
+          onRequestMerge={onMergeTags ? () => setMergeOpen(true) : undefined}
         />
       </div>
+      {onMergeTags && mergeOpen && selectedUserTags.length >= 2 && (
+        <MergeTagsDialog
+          tags={selectedUserTags}
+          onClose={() => setMergeOpen(false)}
+          onConfirm={async (target, sources) => {
+            await onMergeTags(target, sources);
+            setMergeOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };

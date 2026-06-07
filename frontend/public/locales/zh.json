@@ -215,7 +215,12 @@
       "videos": "个视频",
       "system": "系统",
       "empty": "暂无标签，创建第一个标签吧！",
-      "noResults": "未找到匹配的标签"
+      "noResults": "未找到匹配的标签",
+      "mergeTitle": "合并标签",
+      "mergePickTarget": "选择要保留的标签：",
+      "mergePreview": "最多 {{count}} 个素材将归到「{{name}}」，{{n}} 个标签将被删除。",
+      "merge": "合并",
+      "merging": "合并中…"
     }
   },
   "points": {

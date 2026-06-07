@@ -13,6 +13,10 @@ interface TagContentProps {
   search: string;
   onToggleTag: (tagId: string) => void;
   onToggleStar: (tagId: string) => void;
+  /** Count of currently-selected user tags eligible for merge. From the browser. */
+  selectedUserTagCount?: number;
+  /** Opens the merge dialog for the current selection. */
+  onRequestMerge?: () => void;
 }
 
 export const TagContent: React.FC<TagContentProps> = ({
@@ -24,6 +28,8 @@ export const TagContent: React.FC<TagContentProps> = ({
   search,
   onToggleTag,
   onToggleStar,
+  selectedUserTagCount = 0,
+  onRequestMerge,
 }) => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tagId: string } | null>(null);
 
@@ -151,6 +157,15 @@ export const TagContent: React.FC<TagContentProps> = ({
             <Star size={10} className={starredSet.has(contextMenu.tagId) ? 'fill-yellow-500 text-yellow-500' : ''} />
             {starredSet.has(contextMenu.tagId) ? 'Unstar' : 'Star'}
           </button>
+          {onRequestMerge && selectedUserTagCount >= 2 && (
+            <button
+              onClick={() => { onRequestMerge(); closeContextMenu(); }}
+              className="w-full px-3 py-1.5 text-xs text-left text-zinc-300 hover:bg-zinc-800 flex items-center gap-2"
+            >
+              <span className="w-2.5 text-center">⛙</span>
+              Merge {selectedUserTagCount} Tags
+            </button>
+          )}
         </div>
       )}
     </div>

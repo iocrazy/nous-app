@@ -16,6 +16,7 @@ import {
   fetchTagGroups,
   fetchTagStatistics,
   invalidateAllTagsCache,
+  mergeTags,
   removeResourceTag,
   reorderTagGroups,
   updateTag,
@@ -161,6 +162,25 @@ describe('statistics', () => {
   it('throws with detail on error', async () => {
     stubJson({ detail: 'nope' }, 500);
     await expect(fetchTagStatistics()).rejects.toThrow('nope');
+  });
+});
+
+describe('mergeTags', () => {
+  it('POSTs target + sources to /api/v1/tags/merge and returns the payload', async () => {
+    const spy = stubJson({ target_id: '100', resource_count: 9 });
+    const res = await mergeTags('100', ['200', '300']);
+    expect(res.resource_count).toBe(9);
+    const [url, opts] = spy.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/tags/merge');
+    expect(JSON.parse((opts as RequestInit).body as string)).toEqual({
+      target_id: '100',
+      source_ids: ['200', '300'],
+    });
+  });
+
+  it('throws with the backend detail on non-ok', async () => {
+    stubJson({ detail: 'nope' }, 400);
+    await expect(mergeTags('1', ['2'])).rejects.toThrow('nope');
   });
 });
 

@@ -215,7 +215,12 @@
       "videos": "videos",
       "system": "System",
       "empty": "No tags yet. Create your first tag!",
-      "noResults": "No matching tags found"
+      "noResults": "No matching tags found",
+      "mergeTitle": "Merge Tags",
+      "mergePickTarget": "Pick the tag to keep:",
+      "mergePreview": "Up to {{count}} resources move to «{{name}}». {{n}} tags will be deleted.",
+      "merge": "Merge",
+      "merging": "Merging…"
     }
   },
   "points": {
