@@ -1100,13 +1100,24 @@ export function getResourceFileUrl(resourceId: string, token?: string): string {
   return base;
 }
 
-export function getResourceCoverUrl(resourceId: string, token?: string): string {
+export function getResourceCoverUrl(
+  resourceId: string,
+  token?: string,
+  version?: string | number,
+): string {
   const apiUrl = getApiUrl();
   const base = `${apiUrl}/api/v1/resources/${resourceId}/cover`;
+  const params = new URLSearchParams();
   if (token) {
-    return `${base}?token=${encodeURIComponent(token)}`;
+    params.set('token', token);
   }
-  return base;
+  if (version !== undefined && version !== null && `${version}` !== '') {
+    // Cache-bust: the cover route serves an immutable, long-max-age response,
+    // so a re-uploaded cover would otherwise show the stale image.
+    params.set('v', `${version}`);
+  }
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 export function getVersionFileUrl(resourceId: string, versionId: string, token?: string): string {

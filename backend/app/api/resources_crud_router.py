@@ -650,6 +650,7 @@ async def upload_resource_cover(
 ):
     """Upload/replace the cover image for a resource. Stores next to the source
     file and sets cover_image_path."""
+    from app.api.media_permissions import check_media_access
     from app.core.config import settings
 
     if not (file.content_type or "").startswith("image/"):
@@ -658,6 +659,8 @@ async def upload_resource_cover(
     resource = await repo.get_resource_by_id(resource_id)
     if not resource:
         raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
     if not resource.get("file_path"):
         raise HTTPException(status_code=400, detail="Resource has no storage path")
 
@@ -683,12 +686,15 @@ async def upload_resource_lyrics(
     file: UploadFile = File(...),
 ):
     """Upload an .lrc file; parse it and store on the resource."""
+    from app.api.media_permissions import check_media_access
     from app.services.lrc_parser import parse_lrc
 
     repo = ResourcesRepository()
     resource = await repo.get_resource_by_id(resource_id)
     if not resource:
         raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
     raw = (await file.read()).decode("utf-8", errors="replace")
     try:
         lyrics = parse_lrc(raw)
@@ -705,10 +711,14 @@ async def get_resource_lyrics(
     _scope: ScopedRequestDep,
 ):
     """Return the resource's stored lyrics_json (or null)."""
+    from app.api.media_permissions import check_media_access
+
     repo = ResourcesRepository()
     resource = await repo.get_resource_by_id(resource_id)
     if not resource:
         raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
     return {"success": True, "data": resource.get("lyrics_json")}
 
 

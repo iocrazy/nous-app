@@ -212,7 +212,7 @@ const FilePreview: React.FC<{
           title={resource.filename}
           coverUrl={
             resource.cover_image_path && resource.id
-              ? getResourceCoverUrl(String(resource.id))
+              ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
               : resource.thumbnail_path || undefined
           }
           duration={resource.duration_seconds ?? undefined}
