@@ -19,6 +19,10 @@ interface TagGroup {
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
+/** Most-used first within any list (media_count descending) */
+const byMediaCountDesc = (a: Tag, b: Tag) =>
+  (b.media_count ?? 0) - (a.media_count ?? 0);
+
 /** Generate tag pill style: gray when unselected, colored when selected */
 const getTagStyle = (color: string, isSelected: boolean) => {
   const baseColor = color || '#3b82f6';
@@ -40,6 +44,7 @@ const getTagStyle = (color: string, isSelected: boolean) => {
 export const ShortcutsTagsPage: React.FC = () => {
   const [tags, setTags] = useState<Tag[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -102,20 +107,31 @@ export const ShortcutsTagsPage: React.FC = () => {
       });
   }, [token, apiKey]);
 
-  // Top 8 most used tags
-  const topTags = useMemo(() =>
-    [...tags]
+  // Case-insensitive search across English + Chinese names
+  const query = search.trim().toLowerCase();
+  const filteredTags = useMemo(() => {
+    if (!query) return tags;
+    return tags.filter((t) => {
+      const name = (t.name || '').toLowerCase();
+      const nameZh = (t.name_zh || '').toLowerCase();
+      return name.includes(query) || nameZh.includes(query);
+    });
+  }, [tags, query]);
+
+  // Top 8 most used tags — hidden while searching so results stay flat
+  const topTags = useMemo(() => {
+    if (query) return [];
+    return [...tags]
       .filter((t) => t.media_count > 0)
-      .sort((a, b) => b.media_count - a.media_count)
-      .slice(0, 8),
-    [tags],
-  );
+      .sort(byMediaCountDesc)
+      .slice(0, 8);
+  }, [tags, query]);
 
   // Group tags by group_name, exclude ungrouped tags from showing as "Other"
   const grouped = useMemo(() => {
     const map = new Map<string, Tag[]>();
     const ungrouped: Tag[] = [];
-    for (const tag of tags) {
+    for (const tag of filteredTags) {
       if (!tag.group_name) {
         ungrouped.push(tag);
       } else {
@@ -131,8 +147,12 @@ export const ShortcutsTagsPage: React.FC = () => {
     if (ungrouped.length > 0) {
       entries.push(['未分类', ungrouped]);
     }
-    return entries;
-  }, [tags]);
+    // Sort each group most-used first (immutable copy, no in-place mutation)
+    return entries.map(
+      ([name, list]) =>
+        [name, [...list].sort(byMediaCountDesc)] as [string, Tag[]],
+    );
+  }, [filteredTags, query]);
 
   // Extract unique tag groups for create form dropdown
   const tagGroups = useMemo<TagGroup[]>(() => {
@@ -297,6 +317,13 @@ export const ShortcutsTagsPage: React.FC = () => {
             {lang === 'zh' ? `已选 ${selected.size} 个` : `${selected.size} selected`}
           </p>
         )}
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={lang === 'zh' ? '搜索标签...' : 'Search tags...'}
+          className="mt-2 w-full px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
+        />
       </div>
 
       {/* Create tag form */}
@@ -343,6 +370,13 @@ export const ShortcutsTagsPage: React.FC = () => {
 
       {/* Tag groups */}
       <div className="px-4 py-3 space-y-5">
+        {filteredTags.length === 0 && (
+          <p className="text-center text-sm text-zinc-500 py-8">
+            {query
+              ? (lang === 'zh' ? '没有匹配的标签' : 'No tags match your search')
+              : (lang === 'zh' ? '暂无标签' : 'No tags yet')}
+          </p>
+        )}
         {/* Frequently used */}
         {topTags.length > 0 && (
           <div>

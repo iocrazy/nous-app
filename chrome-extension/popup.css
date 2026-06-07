@@ -283,7 +283,33 @@ button:disabled {
   border-color: #818cf8 !important;
 }
 
+.tag-search {
+  font-size: 12px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 6px;
+  color: #e0e0e0;
+}
+
+.tag-search:focus {
+  border-color: #6366f1;
+}
+
+.tag-search::placeholder {
+  color: #52525b;
+}
+
 .tags-loading {
+  font-size: 12px;
+  color: #52525b;
+  text-align: center;
+  padding: 12px 0;
+}
+
+.tags-empty {
+  width: 100%;
   font-size: 12px;
   color: #52525b;
   text-align: center;
