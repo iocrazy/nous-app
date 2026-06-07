@@ -14,8 +14,11 @@ conversion). Any ``run_async(`` outside the allowlist fails the test. As a file
 is converted to async-native, REMOVE it from the allowlist — that locks the
 conversion in (a regression that re-introduces ``run_async`` there will fail).
 
-Converted so far (must stay OFF the allowlist):
-  * ``app/workflows/scheduled_cleanup.py`` — 3 housekeeping steps → async.
+Converted so far:
+  * ``app/workflows/scheduled_cleanup.py`` — 3 housekeeping steps → async
+    (OFF the allowlist; no run_async left).
+  * ``app/workflows/storyboard.py`` — the 2 DB persist steps → async (still ON
+    the allowlist for its 6 remaining AI/export-service bridges).
 """
 
 from __future__ import annotations
@@ -40,8 +43,9 @@ _ALLOWLIST: frozenset[str] = frozenset(
         "app/services/ai/providers/ai_provider_helpers.py",
         # Single system_settings read helper — low ROI, deferred.
         "app/services/media/transcode/transcode_service.py",
-        # Storyboard workflow: 2 DB persist steps + 6 AI/export-service steps —
-        # deferred (feature workflow; needs a DBOS test env to verify).
+        # Storyboard workflow: the 2 DB persist steps are now async-native; the
+        # 6 remaining run_async sites wrap AI / export SERVICES (not repos) — a
+        # service-bridge, not a §2.4b DB bridge. Deferred.
         "app/workflows/storyboard.py",
     }
 )
