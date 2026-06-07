@@ -77,6 +77,26 @@ class RequestLogsRepository:
         )
         return result.data or []
 
+    async def request_log_stats(self, start_time: datetime) -> dict[str, Any]:
+        """Server-side aggregated request-log stats (``rpc_request_log_stats``,
+        migration 270).
+
+        Replaces the old ``stats_since`` fetch-all + Python aggregation, which
+        was capped at 1000 rows by PostgREST on the REST path (stats computed
+        from a tiny truncated sample) and an unbounded full-window fetch on the
+        ORM path. The RPC does the GROUP BY in SQL and returns only the small
+        aggregated payload — correct at any scale, one round-trip, no row dump.
+        Shared by both REST and ORM repos (the ORM subclass inherits this), so
+        the result is identical regardless of ``USE_ORM_ADMIN_REQUEST_LOGS``.
+
+        Returns a dict: ``{total, by_method, by_status, top_paths, by_hour}``.
+        """
+        client = await self._client()
+        result = await client.rpc(
+            "rpc_request_log_stats", {"p_since": start_time.isoformat()}
+        ).execute()
+        return result.data or {}
+
 
 class FrontendErrorLogsRepository:
     TABLE = "frontend_error_logs"
