@@ -38,6 +38,8 @@ from typing import Any, Dict
 from dbos import DBOS
 from loguru import logger
 
+from app.services.infra.dbos_orchestrator import _resolve_pinned_app_version
+
 
 @DBOS.step()
 async def classify_and_act_step() -> Dict[str, int]:
@@ -271,33 +273,64 @@ def _classify_in_python(row: Dict[str, Any]) -> str:
 # finalize the workflow — we must NOT mark it LOST and steal the row out
 # from under the engine. Only mark LOST when DBOS has no live/queued claim
 # (no row at all, or a terminal status that simply didn't mirror yet).
+#
+# VERSION-AWARENESS (post-deploy version-orphan): DBOS partitions workflows
+# by `application_version` (= the build's commit_sha, _resolve_pinned_app_version).
+# After a deploy the worker runs a NEW commit_sha, so a workflow still
+# PENDING/ENQUEUED tagged with the OLD commit_sha is permanently orphaned —
+# no executor of that version exists anymore, DBOS will never recover it. Such
+# a row LOOKS recoverable (PENDING) but never will be, so it is NOT a real
+# claim → the sweeper must be allowed to mark it LOST. We only flip to
+# "not owned" when BOTH versions are known AND differ; if either version is
+# unknown (dev / no build-info), we fail-closed to the old "owned" behavior.
 
 _DBOS_LIVE_STATUSES = frozenset({"PENDING", "ENQUEUED"})
 
 
-def _dbos_claims_workflow(status: "str | None") -> bool:
+def _dbos_claims_workflow(
+    status: "str | None",
+    app_version: "str | None" = None,
+    current_version: "str | None" = None,
+) -> bool:
     """Pure decision: True when the DBOS status means the engine still
     owns / will recover the workflow, so the sweeper must SKIP marking it
     LOST. PENDING/ENQUEUED → owned; SUCCESS/ERROR/CANCELLED/None → no claim.
+
+    Version-orphan rule: a PENDING/ENQUEUED workflow whose `app_version`
+    differs from the live `current_version` is NOT a real claim (no executor
+    of that old version exists post-deploy) → return False. Fail-closed: when
+    either version is unknown (None), keep the "owned" behavior. The default
+    args keep every status-only caller (recovery + tests) behaving as before.
     """
     if not status:
         return False
-    return status.strip().upper() in _DBOS_LIVE_STATUSES
+    if status.strip().upper() not in _DBOS_LIVE_STATUSES:
+        return False
+    if current_version and app_version and app_version != current_version:
+        return False  # version-orphan: PENDING but no live executor of its version
+    return True
 
 
-async def _dbos_status(dbos_workflow_id: "str | None") -> "str | None":
-    """One indexed SELECT on dbos.workflow_status.status for this row's
-    workflow_uuid. Returns None when there's no row. RAISES on a DB error —
-    the caller (`_dbos_still_owns`) decides the fail policy.
+async def _dbos_status_row(
+    dbos_workflow_id: "str | None",
+) -> "tuple[str | None, str | None]":
+    """Returns (status, application_version) for this row's workflow_uuid, or
+    (None, None) when there's no row. One indexed SELECT on
+    dbos.workflow_status. RAISES on a DB error — the caller
+    (`_dbos_still_owns`) decides the fail policy.
     """
     if not dbos_workflow_id:
-        return None
+        return (None, None)
     from app.db import engine as db_engine
 
-    return await db_engine.fetch_val(
-        "SELECT status FROM dbos.workflow_status " "WHERE workflow_uuid = :wid",
+    row = await db_engine.fetch_one(
+        "SELECT status, application_version FROM dbos.workflow_status "
+        "WHERE workflow_uuid = :wid",
         {"wid": dbos_workflow_id},
     )
+    if not row:
+        return (None, None)
+    return (row.get("status"), row.get("application_version"))
 
 
 async def _dbos_still_owns(dbos_workflow_id: "str | None") -> bool:
@@ -310,14 +343,20 @@ async def _dbos_still_owns(dbos_workflow_id: "str | None") -> bool:
     `dbos.workflow_status` hiccup must NOT cause a wrong LOST — the next sweep
     tick retries, and a genuinely-dead task is still gated by hard-ceiling +
     boot-grace, so skipping one tick is harmless.
+
+    Version-aware: a PENDING/ENQUEUED workflow tagged with a different
+    application_version than the live build is a post-deploy version-orphan
+    (no executor of that version exists) → NOT owned → caller may mark it LOST.
     """
     if not dbos_workflow_id:
         return False
     try:
-        return _dbos_claims_workflow(await _dbos_status(dbos_workflow_id))
+        status, app_version = await _dbos_status_row(dbos_workflow_id)
+        current = _resolve_pinned_app_version()
+        return _dbos_claims_workflow(status, app_version, current)
     except Exception as exc:
         logger.opt(exception=True).debug(
-            f"[workflow_health] _dbos_status lookup failed for "
+            f"[workflow_health] _dbos_status_row lookup failed for "
             f"{dbos_workflow_id}; treating as owned (skip mark): {exc}"
         )
         return True
