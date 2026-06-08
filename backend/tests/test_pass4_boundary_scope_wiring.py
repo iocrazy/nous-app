@@ -262,8 +262,9 @@ async def test_chain_followups_step_propagates_scope_through_run_async():
             fresh_download_path="downloads/x.mp4",
         )
 
-    # The scope set at the async caller reached BOTH sync helpers' resource
-    # reads through run_async's thread hop (pass-4a copy_context).
+    # §2.4b: the scope set at the async caller reaches BOTH (now async) helpers'
+    # awaited resource reads via the natural async context (same task — no
+    # run_async thread hop / copy_context needed anymore).
     assert getattr(recorded.get("transcode"), "user_id", None) == _USER
     assert getattr(recorded.get("ai_pipeline"), "user_id", None) == _USER
     assert current_scope() is None
@@ -302,8 +303,9 @@ async def test_chain_transcript_summary_propagates_scope_through_run_async():
     ):
         # Mirror extract_audio_workflow's wrap exactly.
         async with request_scope(Scope(user_id=_USER)):
-            # Sync helper called from inside a running loop → run_async branch 2.
-            chain_transcript_summary_for_tags("p-1", _USER)
+            # §2.4b: helper is async-native — awaited on this loop; the ambient
+            # scope is naturally visible to its awaited `resources` read.
+            await chain_transcript_summary_for_tags("p-1", _USER)
 
     assert getattr(recorded.get("scope"), "user_id", None) == _USER
     assert current_scope() is None
@@ -340,7 +342,8 @@ async def test_chain_summary_for_tags_propagates_scope_through_run_async():
         ),
     ):
         async with request_scope(Scope(user_id=_USER)):
-            chain_summary_for_tags(12345, _USER)
+            # §2.4b: helper is async-native — awaited on this loop.
+            await chain_summary_for_tags(12345, _USER)
 
     assert getattr(recorded.get("scope"), "user_id", None) == _USER
     assert current_scope() is None
@@ -384,8 +387,8 @@ async def test_extract_audio_workflow_body_wraps_chain_in_user_scope():
     def _ok_extract(_platform_id):
         return True
 
-    def _rec_chain(platform_id, user_id, **_kw):
-        # Runs synchronously inside the workflow body's request_scope wrap.
+    async def _rec_chain(platform_id, user_id, **_kw):
+        # §2.4b: awaited inside the workflow body's request_scope wrap.
         recorded["scope"] = current_scope()
 
     assert current_scope() is None
@@ -451,7 +454,7 @@ async def test_ai_transcription_workflow_body_wraps_chain_in_user_scope():
         async def update_progress(self, *_a, **_k):
             return None
 
-    def _rec_chain(parsed_media_id, user_id, **_kw):
+    async def _rec_chain(parsed_media_id, user_id, **_kw):
         recorded["scope"] = current_scope()
 
     assert current_scope() is None
