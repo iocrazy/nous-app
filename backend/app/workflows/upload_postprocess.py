@@ -100,9 +100,14 @@ async def upload_postprocess_workflow(
     file_type: str,
     mime_type: str,
     user_id: str,
+    version_number: int = 1,
 ) -> dict[str, Any]:
     """Run metadata + thumbnail + transcode post-processing for a freshly
-    uploaded resource asynchronously.
+    uploaded resource (or a freshly-uploaded new version) asynchronously.
+
+    ``version_number`` selects which resource_versions row receives the probed
+    metadata + transcode (defaults to 1 for first upload; the new-version
+    upload passes the new version number).
 
     workflow_id idempotency: re-running with the same id replays the cached
     probe/thumbnail step results. The body-level repo writes are idempotent
@@ -148,7 +153,9 @@ async def upload_postprocess_workflow(
             metadata = await upload_postprocess_probe_step(file_path, file_type)
             if metadata:
                 await svc.repo.update_resource(resource_id, metadata)
-                version = await svc.repo.get_version_by_number(resource_id, 1)
+                version = await svc.repo.get_version_by_number(
+                    resource_id, version_number
+                )
                 if version and version.get("id"):
                     await svc.repo.update_version(str(version["id"]), metadata)
         except Exception as e:
@@ -176,7 +183,9 @@ async def upload_postprocess_workflow(
         # step. It self-gates (size/duration) + dispatches its own workflow.
         if file_type == "video":
             try:
-                version = await svc.repo.get_version_by_number(resource_id, 1)
+                version = await svc.repo.get_version_by_number(
+                    resource_id, version_number
+                )
                 if version and version.get("id"):
                     await svc._trigger_transcode_async(
                         resource_id, str(version["id"]), mime_type, user_id=user_id

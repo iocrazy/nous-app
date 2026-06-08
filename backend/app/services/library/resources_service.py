@@ -247,13 +247,11 @@ class ResourcesService:
             or mimetypes.guess_type(safe_name)[0]
             or ""
         )
-        file_type = self._classify_file_type(mime)
-        metadata = {}
-        if file_type in ("video", "audio"):
-            metadata = await self._extract_video_metadata(str(target))
-        elif file_type == "image":
-            metadata = await self._extract_image_metadata(str(target))
-
+        # NOTE: metadata (ffprobe/Pillow), thumbnail, and HLS transcode are
+        # deferred to upload_postprocess_workflow (dispatched by the router) so
+        # the upload request returns as soon as the bytes are written. The
+        # version/resource rows are created with file_path now; metadata fills
+        # in asynchronously and the frontend refreshes via resources Realtime.
         relative_path = f"{base_relative}/v{next_version}/{safe_name}"
         version_data = {
             "resource_id": resource_id,
@@ -265,11 +263,10 @@ class ResourcesService:
             "uploaded_by": user_id,
             "notes": notes,
             "file_hash": file_hash,
-            **metadata,
         }
         version = await self.repo.create_version(version_data)
 
-        # Update resource with latest version info
+        # Update resource with latest version info (metadata deferred)
         update_data = {
             "current_version": next_version,
             "file_path": relative_path,
@@ -277,15 +274,8 @@ class ResourcesService:
             "mime_type": mime,
             "filename": safe_name,
             "file_hash": file_hash,
-            **metadata,
         }
         await self.repo.update_resource(resource_id, update_data)
-
-        # Trigger HLS transcode for video files
-        if file_type == "video":
-            await self._trigger_transcode_async(
-                resource_id, str(version["id"]), mime, user_id=user_id
-            )
 
         return version
 

@@ -102,20 +102,27 @@ export async function updateScriptViewport(
 
 // ─── AI Operations ───────────────────────────────────────────────────────────
 
+// ─── AI Operations (async) ───────────────────────────────────────────────────
+// These four endpoints now dispatch a DBOS workflow and return a `task_id`
+// immediately (the LLM work happens in the background). Callers watch
+// task_tracking via `useTaskCompletion(task_id, …)` and reload the script
+// from the server on completion. See:
+//   docs/superpowers/specs/2026-06-09-async-script-ai-design.md
+
 export async function generateOutline(data: {
   script_id: string;
   premise: string;
   chapter_count: number;
   genre?: string;
   style_guide?: string;
-}): Promise<{ task_id: string; outline?: { name: string; chapters: Array<{ title: string; summary: string }> } }> {
+}): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/generate-outline`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id: string; outline?: { name: string; chapters: Array<{ title: string; summary: string }> } }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }
 
 export async function expandChapter(data: {
@@ -125,14 +132,14 @@ export async function expandChapter(data: {
   summary: string;
   expansion_request?: string;
   context?: string;
-}): Promise<{ content: string; chapter: Record<string, unknown> }> {
+}): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/expand-chapter`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ content: string; chapter: Record<string, unknown> }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }
 
 export async function createBranches(data: {
@@ -143,28 +150,28 @@ export async function createBranches(data: {
   branch_count: number;
   branch_type: 'choice' | 'condition';
   context?: string;
-}): Promise<{ branches: ScriptChapter[] }> {
+}): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/create-branches`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ branches: ScriptChapter[] }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }
 
 export async function convertToStoryboard(data: {
   script_id: string;
   chapter_id: string;
   storyboard_project_id?: string;
-}): Promise<{ task_id?: string; nodes?: Record<string, unknown>[] }> {
+}): Promise<{ task_id: string }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/convert-to-storyboard`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<{ task_id?: string; nodes?: Record<string, unknown>[] }>(res);
+  return unwrapResponse<{ task_id: string }>(res);
 }
 
 // ─── Script Assets ───────────────────────────────────────────────────────────
