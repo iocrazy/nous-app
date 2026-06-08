@@ -322,36 +322,103 @@ const MEDIA_TYPE_VALUES_BY_TYPE: Record<string, string[]> = {
 };
 
 /**
- * Resolve a set of tag ids to the intersection of resource ids that
- * carry ALL of them. See resourceService.resolveTagIntersection for
- * the full rationale — this is a local copy to keep dataService
- * self-contained (both live in frontend/services so a single shared
- * helper would be easy but the contexts differ slightly).
+ * Map the Type chip's broad groups to the `parsed_media.media_type` wire
+ * values used by both the PostgREST path (`applyLibraryFilters`) and the
+ * RPC path (`fetchLibraryViaRpc`). Returns:
+ *   - null  when no type filter is active (caller skips the filter)
+ *   - ['__impossible__'] when an active group maps to no wire values
+ *     (document/other in the web library) — forces zero rows rather than
+ *     silently returning the unfiltered list
+ *   - the flattened wire-value list otherwise
+ * Single source of truth so the two query paths can never disagree.
  */
-async function resolveLibraryTagIntersection(
-  supabase: ReturnType<typeof getSupabaseClient>,
-  tagIds: string[] | undefined,
-): Promise<string[] | null> {
-  if (!supabase || !tagIds || tagIds.length === 0) return null;
-  let currentIds: Set<string> | null = null;
-  for (const tagId of tagIds) {
-    let q = supabase.from('resource_tags').select('resource_id').eq('tag_id', tagId);
-    if (currentIds !== null) {
-      const ids = Array.from(currentIds);
-      if (ids.length === 0) return [];
-      q = q.in('resource_id', ids);
-    }
-    const { data, error } = await q;
-    if (error) throw error;
-    const nextIds = new Set<string>(
-      (data ?? []).map((row: { resource_id: string | number }) =>
-        String(row.resource_id),
-      ),
-    );
-    if (nextIds.size === 0) return [];
-    currentIds = nextIds;
-  }
-  return currentIds ? Array.from(currentIds) : [];
+export function mediaTypesToWire(
+  mediaTypes: string[] | undefined,
+): string[] | null {
+  if (!mediaTypes || mediaTypes.length === 0) return null;
+  const wire = mediaTypes.flatMap((t) => MEDIA_TYPE_VALUES_BY_TYPE[t] ?? []);
+  return wire.length > 0 ? wire : ['__impossible__'];
+}
+
+/**
+ * Server-side filtered + keyset-paginated Downloads search (mig 275 RPC).
+ * Used for the tag-filtered case so tag-AND scales past PostgREST's 1000-row
+ * cap and never builds a giant `.in()` URL. Returns the same
+ * `PaginatedResult<ParsedMedia>` shape as `fetchLibraryPaginated`; the RPC
+ * rows carry `{ id: resources.id, created_at: resources.created_at,
+ * parsed_media: {...} }` so `flattenResourceMedia` + `sliceKeysetPage`
+ * treat them identically to the PostgREST rows. bigIntSafeFetch keeps
+ * Snowflake ids precision-safe inside the jsonb payload.
+ */
+async function fetchLibraryViaRpc(
+  supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
+  userId: string,
+  f: FetchLibraryFilterParams,
+  page: number,
+  pageSize: number,
+  cursor: LibraryCursor | null,
+  signal?: AbortSignal,
+): Promise<PaginatedResult<ParsedMedia>> {
+  // Map the Type chip's broad groups to parsed_media.media_type wire values —
+  // MEDIA_TYPE_VALUES_BY_TYPE is the single source of truth (shared with the
+  // PostgREST path). An active type filter that maps to no wire values
+  // (document/other in the web library) forces zero rows via '__impossible__',
+  // exactly as applyLibraryFilters does.
+  const mediaTypeWire = mediaTypesToWire(f.media_types);
+
+  let req = supabase.rpc('rpc_downloads_library_search', {
+    p_user_id: userId,
+    p_tag_ids: f.tag_ids ?? null,
+    p_min_rating: f.min_rating ?? null,
+    p_ai_transcribed: f.ai_transcribed ?? null,
+    p_ai_summarized: f.ai_summarized ?? null,
+    p_ai_analyzed: f.ai_analyzed ?? null,
+    p_created_after: f.created_after ?? null,
+    p_created_before: f.created_before ?? null,
+    p_duration_min: f.duration_min ?? null,
+    p_duration_max: f.duration_max ?? null,
+    p_aspect_ratios: f.aspect_ratios ?? null,
+    p_platforms: f.platforms ?? null,
+    p_media_types: mediaTypeWire,
+    p_has_comments: f.has_comments ?? null,
+    p_min_likes: f.min_likes ?? null,
+    p_min_comments: f.min_comments ?? null,
+    p_min_favorites: f.min_favorites ?? null,
+    p_min_shares: f.min_shares ?? null,
+    p_social_combine: f.social_combine ?? 'and',
+    p_cursor_ts: cursor?.ts ?? null,
+    p_cursor_id: cursor?.id ?? null,
+    p_limit: pageSize + 1,
+    // Count only on the first page (cursor === null), matching the PostgREST
+    // path's isFirstPage gate so totalCount reflects the active filter set.
+    p_with_count: cursor === null,
+  });
+  if (signal) req = req.abortSignal(signal);
+
+  const { data, error } = await req;
+  if (error) throw error;
+
+  const result = (data ?? { rows: [], total_count: null }) as {
+    rows: any[];
+    total_count: number | null;
+  };
+  const { data: pageData, hasMore, nextCursor } = sliceKeysetPage(
+    result.rows ?? [],
+    pageSize,
+    (row) => {
+      const r = row as { id?: string | number; created_at?: string };
+      return r.created_at && r.id != null
+        ? { ts: r.created_at, id: String(r.id) }
+        : null;
+    },
+  );
+  return {
+    data: pageData.map(flattenResourceMedia) as ParsedMedia[],
+    totalCount: result.total_count ?? -1,
+    hasMore,
+    page,
+    nextCursor,
+  };
 }
 
 /**
@@ -389,12 +456,26 @@ export const fetchLibraryPaginated = async (
     const f = filters ?? {};
     const useCursor = cursor !== undefined; // explicit cursor mode (null = first page)
 
-    // Tag intersection first — an empty set short-circuits the paginated
-    // query (no rows, no count, no round-trip).
-    const tagResourceIds = await resolveLibraryTagIntersection(supabase, f.tag_ids);
-    if (tagResourceIds !== null && tagResourceIds.length === 0) {
-      return { data: [], totalCount: 0, hasMore: false, page, nextCursor: null };
+    // Tag-filtered → run the whole filtered + keyset query server-side via the
+    // rpc_downloads_library_search RPC (mig 275). The old client path resolved
+    // tags to a resource_id set with per-tag `.eq('tag_id')` SELECTs (each
+    // silently capped at PostgREST's 1000-row ceiling → WRONG intersection once
+    // a tag has >1000 resources) then passed it back as `.in('id', [huge list])`
+    // (Kong/nginx 502 risk). The no-tag path below stays on the PostgREST keyset
+    // query — already scale-safe (keyset on resources, no `.in()`).
+    if (f.tag_ids && f.tag_ids.length > 0) {
+      return await fetchLibraryViaRpc(
+        supabase,
+        userId,
+        f,
+        page,
+        pageSize,
+        cursor ?? null,
+        signal,
+      );
     }
+    // No tag filter → no resource_id intersection to apply downstream.
+    const tagResourceIds: string[] | null = null;
 
     const socialMetricActive =
       (f.min_likes !== undefined && f.min_likes > 0) ||
@@ -547,19 +628,12 @@ function applyLibraryFilters<T extends { [k: string]: any }>(
   if (f.platforms && f.platforms.length > 0) {
     query = query.in('parsed_media.source_platform', f.platforms);
   }
-  if (f.media_types && f.media_types.length > 0) {
-    const wireValues = f.media_types.flatMap(
-      (t) => MEDIA_TYPE_VALUES_BY_TYPE[t] ?? [],
-    );
-    if (wireValues.length > 0) {
-      query = query.in('parsed_media.media_type', wireValues);
-    } else {
-      // 'audio' / 'document' / 'other' alone yields zero rows from
-      // parsed_media (web library has no such items). Force-empty result
-      // by intersecting with an impossible value rather than silently
-      // returning the unfiltered list.
-      query = query.in('parsed_media.media_type', ['__impossible__']);
-    }
+  const wireValues = mediaTypesToWire(f.media_types);
+  if (wireValues !== null) {
+    // wireValues is ['__impossible__'] when an active group maps to no
+    // parsed_media.media_type (document/other in the web library) — forces
+    // zero rows rather than silently returning the unfiltered list.
+    query = query.in('parsed_media.media_type', wireValues);
   }
   if (f.has_comments) {
     query = query.gt('parsed_media.comment_count', 0);
