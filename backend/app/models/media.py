@@ -369,6 +369,7 @@ class Resources(Base, UserScoped):
     # PostgREST `select(*)` shape.
     audio_bitrate_kbps: Mapped[int | None] = mapped_column(Integer)
     lyrics_json: Mapped[dict | None] = mapped_column(JSONB)
+    chorus_start_ms: Mapped[int | None] = mapped_column(Integer)
 
 
 class ResourceAccessLogs(Base):
@@ -516,6 +517,7 @@ class ResourceVersions(Base):
         String(64),
         comment="SHA-256 hex digest of this version file content",
     )
+    audio_bitrate_kbps: Mapped[int | None] = mapped_column(Integer)
 
 
 class ResourceItems(Base):
