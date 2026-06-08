@@ -33,7 +33,7 @@ resource desktop views are already consistent.
 
 | # | Decision |
 |---|----------|
-| Social stats / artist | Uploaded audio has no social stats → **the social-stats row is not rendered**. Artist: parse it from the **filename** — when the filename is `Artist - Title`, split into artist + title for display (display-only, no persistence). |
+| Social stats / artist | The stats+actions row **stays** (it also holds the speed chip + ⋮ menu on the right); only the **left social stats are absent** for uploads. This needs no special hiding — the component already does `visibleStats = stats.filter(v > 0)`, so feeding empty/zero social values leaves the left side empty while keeping speed + menu. Artist: parse it from the **filename** — when the filename is `Artist - Title`, split into artist + title for display (display-only, no persistence). |
 | ⋮ menu | **Reuse the existing uploaded-audio capabilities**: Replace cover, Upload .lrc lyrics, Copy link, Delete. (Download's Fetch/Retry asset actions do not apply to uploads.) |
 | Approach | **Extract a shared presentational `MobileAudioShell`** from `MobileAudioScreen`; both the download path and the new uploaded-audio path compose it. The download view must stay **pixel-identical** (it is the LOCKED layout). |
 
@@ -72,16 +72,33 @@ Key generalizations vs today:
 - **Lyrics become an input** (`lyricLines` + `onReloadLyrics`) instead of the
   component calling `getMediaLyrics(mediaId)`. Download feeds it
   `getMediaLyrics`; upload feeds `resource.lyrics_json.lines`.
-- **Social row is optional** — absent/null → not rendered.
+- **`LyricsOverlay` must also be decoupled.** Today it is `mediaId`-only and
+  re-fetches via `SodaLyricsTab(mediaId)`. Add an optional `lines: LyricLine[]`
+  input so the full-screen lyric sub-page renders passed-in lines when no
+  `mediaId` (uploads). When `lines` is provided it renders them directly and
+  skips the mediaId fetch + the qishui "Fetch Lyrics" affordance. Download
+  keeps passing `mediaId` (unchanged behavior).
+- **Social stats stay optional via the existing `visibleStats` filter** — feed
+  uploads no social values → left side empty; the row (speed + ⋮) remains.
 - **⋮ menu is a generic `menuItems[]`** — download builds Fetch/Retry asset
   items; upload builds Replace-cover / Upload-.lrc / Copy-link / Delete.
+- **Top bar is the caller's job.** The immersive top bar (back arrow + `@author`)
+  lives in `DownloadDetailPage`, NOT in the component. The uploaded path
+  (`ResourceDetailPage` mobile) must render its own minimal top bar: a back
+  arrow, no author.
 
 ### 2. `MobileAudioScreen` becomes a thin download adapter
 It keeps its `Video`-based props, does its existing lyrics fetch + asset-menu
 building, and renders `<MobileAudioShell .../>` with the mapped view-model. The
 rendered output must be **identical** to today (same DOM/classes) — this is the
-LOCKED layout; verify with the existing `MobileAudioScreen` test (extend if
-needed) and a manual check.
+LOCKED layout.
+
+**Regression guard — there is NO existing `MobileAudioScreen` test.** The FIRST
+task is to add a **characterization test** for the current download
+`MobileAudioScreen` (render with a representative `Video` + handlers; assert the
+key structural pieces: cover, title, the visible social stats, speed chip, ⋮ menu
+items, waveform player, rating/notes/tags) and lock it in BEFORE extracting the
+shell. The extraction is done only once this test stays green.
 
 ### 3. New uploaded-audio mobile path
 A small adapter `MobileAudioUpload.tsx` (or an inline branch in
@@ -118,18 +135,20 @@ Pure, unit-tested.
 - Missing cover → themed `Music` placeholder + gradient (existing fallback).
 
 ## Testing
-- `parseArtistTitle` unit tests (with/without ` - `, extension strip, feat. parens, multiple hyphens).
-- `MobileAudioShell`: renders title; hides social row when `social` absent; hides
-  artist when absent; renders provided `menuItems`; shows `noAudioPrompt` when `!hasAudio`.
-- `MobileAudioScreen` (download adapter): existing test still green — **output unchanged** (regression guard for the LOCKED layout).
-- Uploaded path: social row absent; artist parsed from filename; menu has the 4 upload items.
+- **Characterization test for download `MobileAudioScreen` FIRST** (added before any extraction; locks the LOCKED layout's structure — none exists today).
+- `parseArtistTitle` unit tests (with/without ` - `, extension strip, feat. parens, multiple hyphens, date-like `2024-01-01` not split).
+- `MobileAudioShell`: renders title; left social stats empty when no social values (speed + ⋮ still present); hides artist when absent; renders provided `menuItems`; shows `noAudioPrompt` when `!hasAudio`.
+- `LyricsOverlay`: renders passed-in `lines` when no `mediaId`; still fetches by `mediaId` when given (download path unchanged).
+- Uploaded path: left social stats empty; artist parsed from filename; menu has the 4 upload items; back-arrow top bar present.
 
 ## Files
+- Create: `frontend/components/MobileAudioScreen.characterization.test.tsx` (regression guard, added FIRST)
 - Create: `frontend/components/MobileAudioShell.tsx`
 - Create: `frontend/components/MobileAudioShell.test.tsx`
 - Create: `frontend/utils/parseArtistTitle.ts` + `frontend/utils/parseArtistTitle.test.ts`
 - Create: `frontend/components/MobileAudioUpload.tsx` (or inline in ResourceDetailPage)
 - Modify: `frontend/components/MobileAudioScreen.tsx` (becomes shell adapter — output identical)
-- Modify: `frontend/components/ResourceDetailPage.tsx` (mobile upload-audio gate)
+- Modify: `frontend/components/LyricsOverlay.tsx` (optional `lines` input for the upload full-screen sub-page)
+- Modify: `frontend/components/ResourceDetailPage.tsx` (mobile upload-audio gate + back-arrow top bar)
 - Modify: `frontend/public/locales/{en,zh}.json` (menu labels: replaceCover, uploadLyrics, copyLink, delete — reuse existing keys where present)
 - Modify: `frontend/package.json` (version bump on ship)
