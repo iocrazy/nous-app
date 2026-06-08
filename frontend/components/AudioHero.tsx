@@ -37,6 +37,12 @@ interface AudioHeroProps {
   currentTime?: number;
   /** Source platform — gates the "Fetch Lyrics" action (only qishui today). */
   sourcePlatform?: string;
+  /**
+   * When provided, the cover image/placeholder becomes clickable and invokes
+   * this callback (used by the uploaded-audio detail view to open a cover file
+   * picker). When absent, the cover is a plain, non-interactive image.
+   */
+  onCoverClick?: () => void;
 }
 
 /**
@@ -57,6 +63,7 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
   mediaId,
   currentTime,
   sourcePlatform,
+  onCoverClick,
 }) => {
   const t = theme ?? buildSodaTheme(null, src);
   const canFetchLyrics = sourcePlatform === 'qishui';
@@ -118,23 +125,40 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
       className="w-full h-full flex flex-col items-center justify-center gap-8 sm:gap-6 px-6 py-10 sm:py-8"
       style={{ background: t.gradientCss }}
     >
-      {coverUrl ? (
-        <img
-          src={coverUrl}
-          alt={title || 'Cover'}
-          className="w-64 h-64 sm:w-56 sm:h-56 rounded-2xl object-cover shadow-2xl shrink-0"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).style.display = 'none';
-          }}
-        />
-      ) : (
-        <div
-          className="w-64 h-64 sm:w-56 sm:h-56 rounded-2xl flex items-center justify-center shadow-2xl shrink-0"
-          style={{ backgroundColor: t.accentSoft }}
-        >
-          <Music size={64} style={{ color: t.onAccent }} />
-        </div>
-      )}
+      {(() => {
+        const cover = coverUrl ? (
+          <img
+            src={coverUrl}
+            alt={title || 'Cover'}
+            className="w-64 h-64 sm:w-56 sm:h-56 rounded-2xl object-cover shadow-2xl shrink-0"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = 'none';
+            }}
+          />
+        ) : (
+          <div
+            className="w-64 h-64 sm:w-56 sm:h-56 rounded-2xl flex items-center justify-center shadow-2xl shrink-0"
+            style={{ backgroundColor: t.accentSoft }}
+          >
+            <Music size={64} style={{ color: t.onAccent }} />
+          </div>
+        );
+        // When a cover-click handler is supplied (uploaded-audio view), make the
+        // cover itself the upload affordance — no separate label.
+        return onCoverClick ? (
+          <button
+            type="button"
+            onClick={onCoverClick}
+            className="shrink-0 rounded-2xl focus:outline-none transition-opacity hover:opacity-80 cursor-pointer"
+            aria-label="Change cover"
+            title="Change cover"
+          >
+            {cover}
+          </button>
+        ) : (
+          cover
+        );
+      })()}
       {/* Title + artist — mobile only (full-screen player look); hidden on
           tablet/desktop where the metadata panel carries this info. */}
       {(title || subtitle) && (

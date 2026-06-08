@@ -181,6 +181,21 @@ const FilePreview: React.FC<{
   const { t } = useTranslation();
   const { addToast } = useToast();
   const mime = resource.mime_type || '';
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCoverFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!f) return;
+    try {
+      const updated = await uploadResourceCover(resource.id, f);
+      onCoverUpdated?.(updated);
+      addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
+    } catch (err) {
+      console.error('Failed to upload cover:', err);
+      addToast('Failed to upload cover', 'error');
+    }
+  };
 
   if (!fileUrl) {
     const { icon: IconComponent, color } = getFileIcon(mime);
@@ -205,8 +220,9 @@ const FilePreview: React.FC<{
   }
 
   if (mime.startsWith('audio/')) {
+    const isUpload = resource.source_type === 'upload';
     return (
-      <div className="relative">
+      <div className="w-full h-full">
         <AudioHero
           src={fileUrl}
           title={resource.filename}
@@ -216,21 +232,16 @@ const FilePreview: React.FC<{
               : resource.thumbnail_path || undefined
           }
           duration={resource.duration_seconds ?? undefined}
+          onCoverClick={isUpload ? () => coverInputRef.current?.click() : undefined}
         />
-        {resource.source_type === 'upload' && (
-          <label className="absolute bottom-2 right-2 z-10 text-xs px-2 py-1 rounded bg-black/60 text-white cursor-pointer hover:bg-black/80">
-            {t('resources.detail.uploadCover', 'Cover')}
-            <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
-              const f = e.target.files?.[0]; if (!f) return;
-              try {
-                const updated = await uploadResourceCover(resource.id, f);
-                onCoverUpdated?.(updated);
-                addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
-              } catch {
-                addToast('Failed to upload cover', 'error');
-              }
-            }} />
-          </label>
+        {isUpload && (
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleCoverFile}
+          />
         )}
       </div>
     );
@@ -1116,8 +1127,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
         )}
 
-        {/* Preview area */}
-        <div className="w-full h-64 sm:h-80 md:h-auto md:flex-1 flex flex-col bg-zinc-950 min-w-0 overflow-hidden shrink-0 md:shrink">
+        {/* Preview area — audio gets a tall hero (matches the download detail
+            view); other media keep the compact mobile preview. */}
+        <div className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col bg-zinc-950 min-w-0 overflow-hidden shrink-0 md:shrink`}>
           {/* Version preview banner */}
           {selectedVersionId && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 shrink-0">
