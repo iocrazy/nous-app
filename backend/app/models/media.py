@@ -363,6 +363,12 @@ class Resources(Base, UserScoped):
         Text,
         Computed("resource_aspect_bucket((resolution)::text)", persisted=True),
     )
+    # Added to the DB by a later migration than the model reflection; the ORM
+    # repo's read dicts dropped them silently (the GET/PUT lyrics endpoints and
+    # the audio-bitrate field), so map them to keep ORM parity with the REST/
+    # PostgREST `select(*)` shape.
+    audio_bitrate_kbps: Mapped[int | None] = mapped_column(Integer)
+    lyrics_json: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class ResourceAccessLogs(Base):
