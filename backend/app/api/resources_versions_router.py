@@ -98,22 +98,44 @@ async def upload_version(
             notes=notes,
         )
 
-        # Trigger thumbnail generation for new version
+        # Post-processing (ffprobe metadata + thumbnail + HLS transcode) runs
+        # asynchronously in upload_postprocess_workflow — targeting the NEW
+        # version row via version_number — so the request returns as soon as
+        # the bytes are written. Frontend refreshes via resources Realtime.
         if result.get("file_path") and result.get("mime_type"):
-            thumbnail_svc = ThumbnailService()
-            # Get scope info for thumbnail path
-            repo = ResourcesRepository()
-            item = await repo.get_first_resource_item(resource_id)
-            if item:
-                background_tasks.add_task(
-                    _scoped_generate_thumbnail,
-                    thumbnail_svc,
-                    auth.user_id,
-                    resource_id=resource_id,
-                    file_path=result["file_path"],
-                    mime_type=result.get("mime_type", ""),
-                    # PR-E 4c: scope_type dropped; generate_thumbnail ignores it.
-                    scope_id=item.get("scope_id", ""),
+            try:
+                mime = result.get("mime_type", "")
+                file_type = (
+                    "video"
+                    if mime.startswith("video/")
+                    else (
+                        "audio"
+                        if mime.startswith("audio/")
+                        else "image" if mime.startswith("image/") else "document"
+                    )
+                )
+                from app.services.infra.dbos_orchestrator import (
+                    start_workflow_routed,
+                )
+                from app.workflows.upload_postprocess import (
+                    upload_postprocess_workflow,
+                )
+
+                await start_workflow_routed(
+                    "upload_postprocess",
+                    dbos_workflow_callable=upload_postprocess_workflow,
+                    dbos_workflow_kwargs={
+                        "resource_id": str(resource_id),
+                        "file_path": result["file_path"],
+                        "file_type": file_type,
+                        "mime_type": mime,
+                        "user_id": auth.user_id,
+                        "version_number": int(result.get("version_number", 1)),
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[Version] postprocess dispatch failed (non-fatal): {e}"
                 )
 
         return {"success": True, "data": result}
