@@ -23,14 +23,18 @@ def _dsn() -> str:
 
 
 @DBOS.step()
-def resolve_analyze_provider(user_id: Optional[str]) -> dict[str, Any]:
+async def resolve_analyze_provider(user_id: Optional[str]) -> dict[str, Any]:
     """Resolve provider key + config + model name. Mirrors
-    analysis_tasks._resolve_analyze_provider_config."""
+    analysis_tasks._resolve_analyze_provider_config.
+
+    §2.4b: async-native — awaits the (now async) helper directly on the
+    workflow's event loop instead of bridging the repo reads through a
+    fresh-loop run_async shim (ORM-incompatible)."""
     from app.services.ai.providers.ai_provider_helpers import (
         resolve_analyze_provider_config,
     )
 
-    provider_key, provider_config, agent_model = resolve_analyze_provider_config(
+    provider_key, provider_config, agent_model = await resolve_analyze_provider_config(
         user_id
     )
     return {
@@ -139,7 +143,7 @@ async def analyze_l1_workflow(
     wf_id = DBOS.workflow_id
 
     try:
-        cfg = resolve_analyze_provider(user_id)
+        cfg = await resolve_analyze_provider(user_id)
         await manager.update_progress(wf_id, 20, subtitle="Analyzing cover image...")
         result = await call_analyze_l1(
             media_id=media_id,
