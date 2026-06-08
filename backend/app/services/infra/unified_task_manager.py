@@ -824,6 +824,22 @@ class UnifiedTaskManager:
         dedup_key = self.make_dedup_key(task_type, dedup_identifier)
         redis = self._get_redis()
 
+        # Persistent already-completed guard — runs BEFORE the Redis lock, so it
+        # is independent of the lock's 1h TTL. The lock only coalesces concurrent
+        # dispatches within its window; a download that finished hours ago has no
+        # lock left, so without this check the SET NX below would succeed and we
+        # would re-dispatch a duplicate of already-completed work. Keyed on the
+        # stable dedup_identifier (platform_id for downloads), this coalesces
+        # re-dispatches indefinitely, not just within the lock window.
+        try:
+            if await self._completed_task_exists(dedup_key):
+                logger.debug(
+                    f"[TaskManager] Dedup key already completed (persistent): {dedup_key}"
+                )
+                return {"action": "completed"}
+        except Exception as e:
+            logger.warning(f"[TaskManager] completed-probe failed, proceeding: {e}")
+
         acquired = await asyncio.to_thread(
             redis.set, dedup_key, "locked", nx=True, ex=DEDUP_LOCK_TTL
         )
@@ -876,7 +892,19 @@ class UnifiedTaskManager:
                 "dedup_key": dedup_key,
             }
 
-        completed_result = await (
+        # No active task and (per the persistent guard above) no completed one:
+        # the lock existed but its task is gone/stale → force-acquire + create.
+        await asyncio.to_thread(redis.set, dedup_key, "locked", ex=DEDUP_LOCK_TTL)
+        logger.warning(f"[TaskManager] Force-acquired stale dedup lock: {dedup_key}")
+        return {"action": "created", "dedup_key": dedup_key}
+
+    async def _completed_task_exists(self, dedup_key: str) -> bool:
+        """True when a prior task with this dedup_key already reached
+        ``phase='completed'``. Persistent — independent of the Redis dedup lock,
+        so re-dispatches of already-completed work are skipped even long after
+        the lock's TTL has expired."""
+        client = await self._get_client()
+        result = await (
             client.table("task_tracking")
             .select("dbos_workflow_id")
             .eq("dedup_key", dedup_key)
@@ -885,14 +913,7 @@ class UnifiedTaskManager:
             .limit(1)
             .execute()
         )
-
-        if completed_result.data:
-            logger.debug(f"[TaskManager] Dedup key already completed: {dedup_key}")
-            return {"action": "completed"}
-
-        await asyncio.to_thread(redis.set, dedup_key, "locked", ex=DEDUP_LOCK_TTL)
-        logger.warning(f"[TaskManager] Force-acquired stale dedup lock: {dedup_key}")
-        return {"action": "created", "dedup_key": dedup_key}
+        return bool(result.data)
 
     # ── Subscriber notification ───────────────────────────────────────
 
