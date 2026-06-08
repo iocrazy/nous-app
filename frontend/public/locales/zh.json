@@ -365,7 +365,10 @@
       "setChorus": "标记高潮",
       "clearChorus": "清除",
       "chorusSet": "已标记高潮点",
-      "chorusCleared": "已移除高潮点"
+      "chorusCleared": "已移除高潮点",
+      "replaceCover": "更换封面",
+      "uploadLyrics": "上传歌词",
+      "copyLink": "复制链接"
     },
     "compareVersions": "对比版本",
     "details": "详情",
