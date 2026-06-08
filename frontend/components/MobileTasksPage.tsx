@@ -31,6 +31,15 @@ export interface MobileTasksPageProps {
   onClose: () => void;
 }
 
+// Always-mounted outer wrapper. Bails out BEFORE the heavy data hooks
+// (useAgentRunTasks opens a Supabase Realtime channel + fetch), so a closed
+// overlay holds zero subscriptions — the inner panel only mounts while open,
+// mirroring the desktop TaskCenterPanel's open/close lifecycle.
+export function MobileTasksPage({ isOpen, onClose }: MobileTasksPageProps) {
+  if (!isOpen) return null;
+  return <MobileTasksPanel onClose={onClose} />;
+}
+
 // ---------------------------------------------------------------------------
 // MobileTasksTabButton — the pill tab button for the mobile bottom bar.
 //
@@ -66,7 +75,7 @@ export function MobileTasksTabButton({
   );
 }
 
-export function MobileTasksPage({ isOpen, onClose }: MobileTasksPageProps) {
+function MobileTasksPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { tasks, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
@@ -117,15 +126,13 @@ export function MobileTasksPage({ isOpen, onClose }: MobileTasksPageProps) {
   const showActive = tab === 'active';
 
   // Shared 1s clock for the live running cards' elapsed time — only ticks while
-  // the page is open AND something is actually running.
+  // something is actually running (the panel only mounts while open).
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!isOpen || counts.running === 0) return;
+    if (counts.running === 0) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [isOpen, counts.running]);
-
-  if (!isOpen) return null;
+  }, [counts.running]);
 
   return (
     <div className="sm:hidden fixed inset-0 z-50 bg-zinc-950 flex flex-col">
