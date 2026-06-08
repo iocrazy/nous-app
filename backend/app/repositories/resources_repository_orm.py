@@ -973,7 +973,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
             # alias i.created_at so it survives the resource overlay.
             sql = (
                 "SELECT i.id, i.resource_id, i.scope_id, "
-                "       i.folder_id, "
+                "       i.folder_id, i.added_by, i.library_id, "
                 "       i.created_at AS i_created_at, "
                 "       row_to_json(r.*) AS resource "
                 "FROM resource_items i "
@@ -1030,7 +1030,8 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                 result = await session.execute(
                     text(
                         "SELECT i.id, i.resource_id, i.scope_id, "
-                        "       i.folder_id, i.created_at AS i_created_at, "
+                        "       i.folder_id, i.added_by, i.library_id, "
+                        "       i.created_at AS i_created_at, "
                         "       row_to_json(r.*) AS resource "
                         "FROM resource_items i "
                         "INNER JOIN resources r ON i.resource_id = r.id "
