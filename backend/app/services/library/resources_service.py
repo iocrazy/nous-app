@@ -95,10 +95,12 @@ class ResourcesService:
 
         1. Save file to disk
         2. Classify file type
-        3. Extract video metadata (if applicable)
-        4. Create resource record
-        5. Create V1 version record
-        6. Create resource_item linking to scope/folder
+        3. Create resource record
+        4. Create V1 version record
+        5. Create resource_item linking to scope/folder
+
+        Media metadata extraction (ffprobe/Pillow) and HLS transcode are
+        deferred to upload_postprocess_workflow so this returns fast.
         """
         safe_name = sanitize_filename(file.filename)
 
@@ -156,16 +158,12 @@ class ResourcesService:
 
         relative_path = f"teams/{scope_id}/uploads/{resource_id}/v1/{safe_name}"
 
-        # Extract media metadata (video & audio: duration, resolution;
-        # image: resolution via Pillow).
-        metadata = {}
-        if file_type in ("video", "audio"):
-            metadata = await self._extract_video_metadata(str(target))
-        elif file_type == "image":
-            metadata = await self._extract_image_metadata(str(target))
-
-        # Update resource with file path and metadata
-        update_data = {"file_path": relative_path, **metadata}
+        # Update resource with file path only. Media metadata extraction
+        # (ffprobe duration/resolution, Pillow image dimensions) and HLS
+        # transcode are deferred to upload_postprocess_workflow so this
+        # response can return fast. Metadata columns stay null until the
+        # workflow backfills them.
+        update_data = {"file_path": relative_path}
         resource = await self.repo.update_resource(resource_id, update_data)
 
         # Create V1 version
@@ -178,7 +176,6 @@ class ResourcesService:
             "mime_type": mime,
             "uploaded_by": user_id,
             "file_hash": file_hash,
-            **metadata,
         }
         await self.repo.create_version(version_data)
 
@@ -194,13 +191,7 @@ class ResourcesService:
         }
         await self.repo.create_resource_item(item_data)
 
-        # Trigger HLS transcode for video files
-        if file_type == "video":
-            versions = await self.repo.get_versions(resource_id)
-            if versions:
-                await self._trigger_transcode_async(
-                    resource_id, str(versions[0]["id"]), mime, user_id=user_id
-                )
+        # HLS transcode (video) is deferred to upload_postprocess_workflow.
 
         return resource
 
