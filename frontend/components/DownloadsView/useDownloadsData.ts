@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { fetchAllTags, createTag } from '../../services/unifiedTagService';
 import { fetchResourceTags, addResourceTag, removeResourceTag } from '../../services/resourceService';
 import { getSupabaseClient } from '../../supabaseClient';
+import { chunked, PG_IN_CHUNK } from '../../utils/chunk';
 import { Tag } from '../../types';
 
 export interface ResourceData {
@@ -24,15 +25,23 @@ export function useResourceDataMap(libraryIds: string[]) {
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
-    supabase
-      .from('resources')
-      .select(
-        'id, media_id, notes, rating, transcript_status, summary_status, visual_analysis_status',
-      )
-      .in('media_id', libraryIds)
-      .then(({ data, error }) => {
-        if (error || !data) return;
-        const map: Record<string, ResourceData> = {};
+    // Chunk the media_id list so the `.in()` query string stays under the
+    // gateway URL/header ceiling (Kong/nginx 502 at scale). Each chunk
+    // returns ≤ chunk-size rows, so the 1000-row PostgREST cap is also
+    // never hit. Run chunks in parallel and merge.
+    Promise.all(
+      chunked(libraryIds, PG_IN_CHUNK).map((ids) =>
+        supabase
+          .from('resources')
+          .select(
+            'id, media_id, notes, rating, transcript_status, summary_status, visual_analysis_status',
+          )
+          .in('media_id', ids),
+      ),
+    ).then((results) => {
+      const map: Record<string, ResourceData> = {};
+      for (const { data, error } of results) {
+        if (error || !data) continue;
         for (const row of data) {
           if (row.media_id) {
             map[row.media_id] = {
@@ -45,8 +54,9 @@ export function useResourceDataMap(libraryIds: string[]) {
             };
           }
         }
-        setResourceDataMap(map);
-      });
+      }
+      setResourceDataMap(map);
+    });
   }, [libraryIds.join(',')]);
 
   const resourceIdMap = useMemo(() => {

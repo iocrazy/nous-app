@@ -10,6 +10,7 @@ import { getAuthHeaders } from './parserService';
 import { apiClient } from './apiClient';
 import { getApiUrl } from '../utils/apiConfig';
 import { buildMediaUrl } from '../utils/mediaUrl';
+import { chunked, PG_IN_CHUNK } from '../utils/chunk';
 
 // ─── Folders ────────────────────────────────────────────
 
@@ -1402,13 +1403,21 @@ export async function moveResourceItems(
 ): Promise<void> {
   const update: Record<string, any> = { folder_id: targetFolderId };
   if (targetLibraryId !== undefined) update.library_id = targetLibraryId;
-  const { data, error } = await supabase
-    .from('resource_items')
-    .update(update)
-    .in('id', resourceItemIds)
-    .select('id');
-  if (error) throw error;
-  if (!data || data.length === 0) {
+  if (resourceItemIds.length === 0) return;
+  // Chunk the id list so a bulk move of >1000 items doesn't blow past the
+  // gateway URL/header ceiling (PATCH carries the `.in()` filter in the URL).
+  // Sequential to keep the write load predictable; accumulate affected rows.
+  let affected = 0;
+  for (const ids of chunked(resourceItemIds, PG_IN_CHUNK)) {
+    const { data, error } = await supabase
+      .from('resource_items')
+      .update(update)
+      .in('id', ids)
+      .select('id');
+    if (error) throw error;
+    affected += data?.length ?? 0;
+  }
+  if (affected === 0) {
     throw new Error('Move failed: items not found or permission denied');
   }
 }
@@ -1454,36 +1463,44 @@ export async function moveFolder(
 
   // Cascade library_id to sub-folders and resource_items
   if (targetLibraryId !== undefined) {
-    // BFS to collect all descendant folder IDs
+    // BFS to collect all descendant folder IDs. Each level's `.in('parent_id')`
+    // probe is chunked so a wide subtree (>1000 siblings at one level) can't
+    // overflow the gateway URL ceiling.
     const allFolderIds = [folderId];
     let queue = [folderId];
     while (queue.length > 0) {
-      const { data: children, error: childErr } = await supabase
-        .from('folders')
-        .select('id')
-        .in('parent_id', queue);
-      if (childErr) throw childErr;
-      if (!children || children.length === 0) break;
-      const childIds = children.map((c: any) => String(c.id));
+      const childIds: string[] = [];
+      for (const parentChunk of chunked(queue, PG_IN_CHUNK)) {
+        const { data: children, error: childErr } = await supabase
+          .from('folders')
+          .select('id')
+          .in('parent_id', parentChunk);
+        if (childErr) throw childErr;
+        if (children) childIds.push(...children.map((c: any) => String(c.id)));
+      }
+      if (childIds.length === 0) break;
       allFolderIds.push(...childIds);
       queue = childIds;
     }
 
-    // Update sub-folders' library_id
-    if (allFolderIds.length > 1) {
+    // Update sub-folders' library_id (chunked — deep tree can exceed 1000).
+    const subFolderIds = allFolderIds.slice(1);
+    for (const ids of chunked(subFolderIds, PG_IN_CHUNK)) {
       const { error: folderErr } = await supabase
         .from('folders')
         .update({ library_id: targetLibraryId })
-        .in('id', allFolderIds.slice(1));
+        .in('id', ids);
       if (folderErr) throw folderErr;
     }
 
-    // Update all resource_items in affected folders
-    const { error: itemErr } = await supabase
-      .from('resource_items')
-      .update({ library_id: targetLibraryId })
-      .in('folder_id', allFolderIds);
-    if (itemErr) throw itemErr;
+    // Update all resource_items in affected folders (chunked on folder_id).
+    for (const ids of chunked(allFolderIds, PG_IN_CHUNK)) {
+      const { error: itemErr } = await supabase
+        .from('resource_items')
+        .update({ library_id: targetLibraryId })
+        .in('folder_id', ids);
+      if (itemErr) throw itemErr;
+    }
   }
 }
 

@@ -18,7 +18,7 @@ from app.tasks.utils import run_async
 # ─── Post-download chain helpers ─────────────────────────────────────
 
 
-def maybe_chain_transcode(
+async def maybe_chain_transcode(
     platform_id: str,
     user_id: str,
     *,
@@ -28,7 +28,13 @@ def maybe_chain_transcode(
     """Chain HLS transcoding after download if the resource is a video.
 
     Pre-creates the transcode task_tracking row carrying ``flow_id`` so
-    it shows up under the same pipeline chain as download in the UI."""
+    it shows up under the same pipeline chain as download in the UI.
+
+    §2.4b: async-native — awaited from the async ``chain_followups_step``;
+    the resource reads + task_manager.create + dispatch run on the caller's
+    loop (no run_async fresh-loop bridge, ORM-safe). The ambient USER scope
+    set by the caller's ``async with request_scope`` is now naturally visible
+    to the awaited reads (same context, no copy_context thread hop)."""
     try:
         import uuid as _uuid
 
@@ -38,7 +44,7 @@ def maybe_chain_transcode(
         from app.workflows.transcode import transcode_workflow
 
         repo = ResourcesRepository()
-        resource = run_async(repo.get_resource_by_platform_id(platform_id))
+        resource = await repo.get_resource_by_platform_id(platform_id)
         if not resource:
             logger.info(
                 f"[Transcode/Chain] No resource found for platform_id={platform_id}"
@@ -51,7 +57,7 @@ def maybe_chain_transcode(
             return
 
         resource_id = str(resource["id"])
-        versions = run_async(repo.get_versions(resource_id))
+        versions = await repo.get_versions(resource_id)
         if not versions:
             logger.info(
                 f"[Transcode/Chain] No versions for resource {resource_id}, skip (download)"
@@ -68,31 +74,27 @@ def maybe_chain_transcode(
         title_clip = (video_title or resource.get("filename") or platform_id or "")[:50]
         wf_id = str(_uuid.uuid4())
         try:
-            run_async(
-                get_task_manager().create(
-                    user_id=user_id,
-                    task_type="transcode",
-                    title=f"Transcode {title_clip}",
-                    media_id=str(platform_id),
-                    resource_id=resource_id,
-                    dbos_workflow_id=wf_id,
-                    flow_id=flow_id,
-                )
+            await get_task_manager().create(
+                user_id=user_id,
+                task_type="transcode",
+                title=f"Transcode {title_clip}",
+                media_id=str(platform_id),
+                resource_id=resource_id,
+                dbos_workflow_id=wf_id,
+                flow_id=flow_id,
             )
         except Exception as e:
             logger.warning(f"[Transcode/Chain] pre-create task_tracking row: {e}")
 
-        run_async(
-            start_workflow_routed(
-                "transcode",
-                dbos_workflow_callable=transcode_workflow,
-                dbos_workflow_kwargs={
-                    "resource_id": resource_id,
-                    "version_id": version_id,
-                    "user_id": user_id,
-                },
-                workflow_id=wf_id,
-            )
+        await start_workflow_routed(
+            "transcode",
+            dbos_workflow_callable=transcode_workflow,
+            dbos_workflow_kwargs={
+                "resource_id": resource_id,
+                "version_id": version_id,
+                "user_id": user_id,
+            },
+            workflow_id=wf_id,
         )
     except Exception as e:
         logger.error(f"[Transcode/Chain] Failed for {platform_id}: {e}", exc_info=True)
@@ -119,7 +121,7 @@ async def read_resource_tag_names(resource_id: str) -> set[str]:
     return names
 
 
-def chain_transcript_summary_for_tags(
+async def chain_transcript_summary_for_tags(
     platform_id: str,
     user_id: str,
     *,
@@ -149,16 +151,17 @@ def chain_transcript_summary_for_tags(
         from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.services.infra.unified_task_manager import get_task_manager
 
-        media = run_async(MediaRepository().get_by_platform_id(platform_id))
+        media = await MediaRepository().get_by_platform_id(platform_id)
         parsed_media_id = (media or {}).get("id")
         if not parsed_media_id:
             logger.warning(f"[AI] No parsed_media row for {platform_id}, skip")
             return
 
         res_repo = ResourcesRepository()
-        resource = run_async(
-            res_repo.get_resource_by_media_id_and_creator(str(parsed_media_id), user_id)
+        resource = await res_repo.get_resource_by_media_id_and_creator(
+            str(parsed_media_id), user_id
         )
+
         if not resource:
             logger.debug(
                 f"[AI] No resource for media={parsed_media_id} user={user_id}, skip"
@@ -166,7 +169,7 @@ def chain_transcript_summary_for_tags(
             return
         resource_id = str(resource["id"])
 
-        tag_names = run_async(read_resource_tag_names(resource_id))
+        tag_names = await read_resource_tag_names(resource_id)
         want_transcript = "Transcript" in tag_names or "Summary" in tag_names
 
         if not want_transcript:
@@ -185,7 +188,7 @@ def chain_transcript_summary_for_tags(
         from app.repositories.user_settings_repository import UserSettingsRepository
 
         try:
-            settings_row = run_async(UserSettingsRepository().get_by_user_id(user_id))
+            settings_row = await UserSettingsRepository().get_by_user_id(user_id)
         except Exception as e:
             logger.warning(
                 f"[AI] user_settings probe failed for {user_id} ({e!r}); "
@@ -210,30 +213,28 @@ def chain_transcript_summary_for_tags(
 
         tr_wf_id = str(_uuid.uuid4())
         try:
-            run_async(
-                mgr.create(
-                    user_id=user_id,
-                    task_type="ai_transcription",
-                    title=f"Transcript {title_clip}",
-                    media_id=str(platform_id),
-                    resource_id=resource_id,
-                    dbos_workflow_id=tr_wf_id,
-                    flow_id=flow_id,
-                )
+            await mgr.create(
+                user_id=user_id,
+                task_type="ai_transcription",
+                title=f"Transcript {title_clip}",
+                media_id=str(platform_id),
+                resource_id=resource_id,
+                dbos_workflow_id=tr_wf_id,
+                flow_id=flow_id,
             )
+
         except Exception as e:
             logger.warning(f"[AI] pre-create ai_transcription row: {e}")
-        run_async(
-            start_workflow_routed(
-                "ai_transcription",
-                dbos_workflow_callable=ai_transcription_workflow,
-                dbos_workflow_kwargs={
-                    "parsed_media_id": int(parsed_media_id),
-                    "user_id": user_id,
-                },
-                workflow_id=tr_wf_id,
-            )
+        await start_workflow_routed(
+            "ai_transcription",
+            dbos_workflow_callable=ai_transcription_workflow,
+            dbos_workflow_kwargs={
+                "parsed_media_id": int(parsed_media_id),
+                "user_id": user_id,
+            },
+            workflow_id=tr_wf_id,
         )
+
         # Summary is dispatched by ai_transcription_workflow's success
         # hook (chain_summary_for_tags), not here. See docstring for why.
         logger.info(
@@ -246,7 +247,7 @@ def chain_transcript_summary_for_tags(
         )
 
 
-def chain_summary_for_tags(parsed_media_id: int, user_id: str):
+async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
     """Dispatch ai_summary_workflow IFF the resource tied to
     ``parsed_media_id`` carries the Summary tag. Called by
     ``ai_transcription_workflow``'s success path so summary always runs
@@ -265,21 +266,22 @@ def chain_summary_for_tags(parsed_media_id: int, user_id: str):
         from app.services.infra.unified_task_manager import get_task_manager
         from app.workflows.ai_summary import ai_summary_workflow
 
-        media = run_async(MediaRepository().get_by_id(int(parsed_media_id)))
+        media = await MediaRepository().get_by_id(int(parsed_media_id))
         if not media:
             logger.debug(f"[AI] summary chain: no parsed_media {parsed_media_id}")
             return
         platform_id = media.get("platform_id")
 
         res_repo = ResourcesRepository()
-        resource = run_async(
-            res_repo.get_resource_by_media_id_and_creator(str(parsed_media_id), user_id)
+        resource = await res_repo.get_resource_by_media_id_and_creator(
+            str(parsed_media_id), user_id
         )
+
         if not resource:
             return
         resource_id = str(resource["id"])
 
-        tag_names = run_async(read_resource_tag_names(resource_id))
+        tag_names = await read_resource_tag_names(resource_id)
         if "Summary" not in tag_names:
             return
 
@@ -302,35 +304,33 @@ def chain_summary_for_tags(parsed_media_id: int, user_id: str):
             rows = r.data or []
             return rows[0].get("flow_id") if rows else None
 
-        flow_id = run_async(_read_flow_id())
+        flow_id = await _read_flow_id()
 
         title_clip = (media.get("title") or platform_id or str(parsed_media_id))[:50]
         sm_wf_id = str(_uuid.uuid4())
         try:
-            run_async(
-                get_task_manager().create(
-                    user_id=user_id,
-                    task_type="ai_summary",
-                    title=f"Summary {title_clip}",
-                    media_id=str(platform_id) if platform_id else None,
-                    resource_id=resource_id,
-                    dbos_workflow_id=sm_wf_id,
-                    flow_id=flow_id,
-                )
+            await get_task_manager().create(
+                user_id=user_id,
+                task_type="ai_summary",
+                title=f"Summary {title_clip}",
+                media_id=str(platform_id) if platform_id else None,
+                resource_id=resource_id,
+                dbos_workflow_id=sm_wf_id,
+                flow_id=flow_id,
             )
+
         except Exception as e:
             logger.warning(f"[AI] pre-create ai_summary row: {e}")
-        run_async(
-            start_workflow_routed(
-                "ai_summary",
-                dbos_workflow_callable=ai_summary_workflow,
-                dbos_workflow_kwargs={
-                    "parsed_media_id": int(parsed_media_id),
-                    "user_id": user_id,
-                },
-                workflow_id=sm_wf_id,
-            )
+        await start_workflow_routed(
+            "ai_summary",
+            dbos_workflow_callable=ai_summary_workflow,
+            dbos_workflow_kwargs={
+                "parsed_media_id": int(parsed_media_id),
+                "user_id": user_id,
+            },
+            workflow_id=sm_wf_id,
         )
+
         logger.info(
             f"[AI] summary chained post-transcript for parsed_media_id={parsed_media_id}"
         )
@@ -341,7 +341,7 @@ def chain_summary_for_tags(parsed_media_id: int, user_id: str):
         )
 
 
-def maybe_chain_ai_pipeline(
+async def maybe_chain_ai_pipeline(
     platform_id: str,
     user_id: str,
     *,
@@ -364,16 +364,17 @@ def maybe_chain_ai_pipeline(
         from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.services.infra.unified_task_manager import get_task_manager
 
-        media = run_async(MediaRepository().get_by_platform_id(platform_id))
+        media = await MediaRepository().get_by_platform_id(platform_id)
         parsed_media_id = (media or {}).get("id")
         if not parsed_media_id:
             logger.warning(f"[AI] No parsed_media row for {platform_id}, skip analyze")
             return
 
         res_repo = ResourcesRepository()
-        resource = run_async(
-            res_repo.get_resource_by_media_id_and_creator(str(parsed_media_id), user_id)
+        resource = await res_repo.get_resource_by_media_id_and_creator(
+            str(parsed_media_id), user_id
         )
+
         if not resource:
             logger.debug(
                 f"[AI] No resource for media={parsed_media_id} user={user_id}, "
@@ -382,7 +383,7 @@ def maybe_chain_ai_pipeline(
             return
         resource_id = str(resource["id"])
 
-        tag_names = run_async(read_resource_tag_names(resource_id))
+        tag_names = await read_resource_tag_names(resource_id)
         if "Analyze" not in tag_names:
             logger.debug(
                 f"[AI] No Analyze tag on resource={resource_id}, skip analyze chain"
@@ -402,33 +403,31 @@ def maybe_chain_ai_pipeline(
         ]
         wf_id = str(_uuid.uuid4())
         try:
-            run_async(
-                get_task_manager().create(
-                    user_id=user_id,
-                    task_type="ai_extract",
-                    title=f"Analyze {title_clip}",
-                    media_id=str(platform_id),
-                    resource_id=resource_id,
-                    dbos_workflow_id=wf_id,
-                    flow_id=flow_id,
-                )
+            await get_task_manager().create(
+                user_id=user_id,
+                task_type="ai_extract",
+                title=f"Analyze {title_clip}",
+                media_id=str(platform_id),
+                resource_id=resource_id,
+                dbos_workflow_id=wf_id,
+                flow_id=flow_id,
             )
+
         except Exception as e:
             logger.warning(f"[AI] pre-create analyze task_tracking row: {e}")
-        run_async(
-            start_workflow_routed(
-                "ai_extract",
-                dbos_workflow_callable=analyze_l1_workflow,
-                dbos_workflow_kwargs={
-                    "media_id": parsed_media_id,
-                    "cover_url": cover_url,
-                    "title": (media or {}).get("title") or "",
-                    "description": (media or {}).get("description") or "",
-                    "user_id": user_id,
-                },
-                workflow_id=wf_id,
-            )
+        await start_workflow_routed(
+            "ai_extract",
+            dbos_workflow_callable=analyze_l1_workflow,
+            dbos_workflow_kwargs={
+                "media_id": parsed_media_id,
+                "cover_url": cover_url,
+                "title": (media or {}).get("title") or "",
+                "description": (media or {}).get("description") or "",
+                "user_id": user_id,
+            },
+            workflow_id=wf_id,
         )
+
         logger.info(f"[AI] analyze chained after download: {platform_id}")
 
     except Exception as e:

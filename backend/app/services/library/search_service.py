@@ -1,7 +1,7 @@
 """Semantic search service using vector embeddings (async optimized)."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -46,6 +46,72 @@ class SearchService:
     async def _get_client(self):
         """Get async client (loop-aware, safe for Celery workers)."""
         return await get_async_supabase_admin()
+
+    async def search_user_media_text(
+        self,
+        user_id: str,
+        pattern: Optional[str],
+        fields: List[str],
+        author: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        tag_ids: Optional[List[str]] = None,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """Multi-field, user-scoped ILIKE search via the ``rpc_user_media_text_search``
+        RPC (migration 274).
+
+        ``parsed_media`` is a GLOBAL table — per-user ownership lives on
+        ``resources``. The RPC JOINs the two and filters
+        ``creator_id = user_id`` server-side, so there is no 1000-row-capped
+        allowlist round-trip and no giant ``.in_()`` URL. Returns the card-view
+        projection rows (``MediaRepository.CARD_SELECT`` columns + per-user
+        ``resource_id`` / AI status), already ``DISTINCT`` per media and ordered
+        ``created_at DESC``.
+
+        ``pattern`` is a ready ILIKE pattern (``%foo%``); ``None`` means
+        match-all (filter-only path). ``fields`` selects which scopes
+        participate (title / description / author / hashtags / transcript /
+        notes / tags / analysis).
+        """
+        client = await self._get_client()
+        result = await client.rpc(
+            "rpc_user_media_text_search",
+            {
+                "p_user_id": str(user_id),
+                "p_pattern": pattern,
+                "p_fields": fields,
+                "p_author": author,
+                "p_date_from": date_from,
+                "p_date_to": date_to,
+                "p_tag_ids": [str(t) for t in tag_ids] if tag_ids else None,
+                "p_limit": limit,
+            },
+        ).execute()
+        payload = result.data or {}
+        return payload.get("rows") or []
+
+    async def user_owned_platform_ids(
+        self, user_id: str, platform_ids: List[str]
+    ) -> List[str]:
+        """Return the subset of ``platform_ids`` the user owns via ``resources``.
+
+        Calls ``rpc_user_owned_platform_ids`` (migration 274). The input is the
+        small top-N ranker output, so the intersection is bounded — no
+        1000-row cap, no URL blow-up. Replaces "fetch the full capped allowlist
+        then intersect in Python".
+        """
+        if not platform_ids:
+            return []
+        client = await self._get_client()
+        result = await client.rpc(
+            "rpc_user_owned_platform_ids",
+            {
+                "p_user_id": str(user_id),
+                "p_platform_ids": [str(p) for p in platform_ids],
+            },
+        ).execute()
+        return list(result.data or [])
 
     async def semantic_search(
         self,
@@ -112,9 +178,21 @@ class SearchService:
     ) -> SearchResponse:
         """
         Hybrid search combining semantic similarity with metadata filters.
-        Optimized: does text search at database level to reduce data transfer.
+
+        Scale Tier-1c: user-scoping is pushed into a JOIN RPC
+        (``rpc_user_media_text_search``, migration 274) instead of pre-fetching
+        the user's full media_id allowlist (PostgREST-capped at 1000 rows) and
+        filtering ``parsed_media`` with a giant ``.in_()``. At 100k+ owned
+        resources the old path silently dropped everything past the first 1000
+        and risked a Kong URL-length 502.
         """
-        client = await self._get_client()
+        # "My library" search is always user-scoped. Without a user_id there is
+        # nothing to scope to — return empty rather than leak global rows (the
+        # old no-user path returned cross-user results, which Tier-1c closes).
+        if not user_id:
+            return SearchResponse(
+                results=[], total=0, query=query or "", search_type="hybrid"
+            )
 
         # Normalize query for search (handle CJK text with spaces)
         query_clean = query.strip() if query else ""
@@ -122,223 +200,97 @@ class SearchService:
 
         # If query is provided, do text search in database
         if query_clean:
-            # Use database-level text search with ILIKE for better performance
-            # Search pattern: match anywhere in the text
+            # Match anywhere in the text (ready ILIKE pattern for the RPC).
             search_pattern = f"%{query_normalized}%"
 
-            # Build the search query with OR conditions using Supabase's or_ filter
-            # We search in: title, description, author, hashtags
-            base_query = client.table("parsed_media").select(
-                "id, platform_id, title, description, cover_urls, author, view_count, created_at, hashtags"
+            # Primary path: title / description / author / hashtags, scoped to
+            # this user via the JOIN RPC. author / date / tag filters are
+            # applied inside the RPC (AND semantics).
+            filtered_videos = await self.search_user_media_text(
+                user_id=user_id,
+                pattern=search_pattern,
+                fields=["title", "description", "author", "hashtags"],
+                author=author,
+                date_from=date_from,
+                date_to=date_to,
+                tag_ids=tag_ids,
+                limit=limit,
             )
-
-            # Apply user filter via resources table (parsed_media is global)
-            if user_id:
-                user_resources = (
-                    await client.table("resources")
-                    .select("media_id")
-                    .eq("creator_id", user_id)
-                    .eq("is_trashed", False)
-                    .execute()
-                )
-                user_media_ids = [
-                    r["media_id"] for r in user_resources.data if r.get("media_id")
-                ]
-                if not user_media_ids:
-                    return SearchResponse(
-                        results=[], total=0, query=query, search_type="hybrid"
-                    )
-                base_query = base_query.in_("id", user_media_ids)
-
-            # Apply other filters
-            if author:
-                base_query = base_query.ilike("author", f"%{author}%")
-            if date_from:
-                base_query = base_query.gte("created_at", date_from)
-            if date_to:
-                base_query = base_query.lte("created_at", date_to)
-
-            # Use or_ filter for text search across multiple columns
-            # Supabase supports: or_(filter1,filter2,...)
-            base_query = base_query.or_(
-                f"title.ilike.{search_pattern},"
-                f"description.ilike.{search_pattern},"
-                f"author.ilike.{search_pattern},"
-                f"hashtags.ilike.{search_pattern}"
-            )
-
-            # Execute the search query
-            search_result = await base_query.limit(limit).execute()
-            filtered_videos = search_result.data
 
             logger.info(
-                f"Database text search found {len(filtered_videos)} results for: {query_clean}"
+                f"Database text search found {len(filtered_videos)} results for: "
+                f"{query_clean}"
             )
 
-            # If no results from basic fields, try searching in resource_analysis
+            # Fallback: if no results from the basic fields, search the visual
+            # analysis text (resource_analysis.visual_description / detected_text)
+            # — same user-scoped JOIN RPC, just a different field set.
             if not filtered_videos:
                 logger.info(
-                    f"No results in basic fields, searching resource_analysis for: {query_clean}"
+                    f"No results in basic fields, searching resource_analysis for: "
+                    f"{query_clean}"
                 )
-
-                # Get user's media IDs via resources table
-                if user_id:
-                    user_resources_2 = (
-                        await client.table("resources")
-                        .select("media_id")
-                        .eq("creator_id", user_id)
-                        .eq("is_trashed", False)
-                        .execute()
-                    )
-                    user_media_ids = [
-                        r["media_id"]
-                        for r in user_resources_2.data
-                        if r.get("media_id")
-                    ]
-                else:
-                    user_media = (
-                        await client.table("parsed_media")
-                        .select("id")
-                        .limit(500)
-                        .execute()
-                    )
-                    user_media_ids = [v["id"] for v in user_media.data]
-
-                if user_media_ids:
-                    # Search in resource_analysis table
-                    analysis_search = (
-                        await client.table("resource_analysis")
-                        .select("resource_id")
-                        .in_("resource_id", user_media_ids)
-                        .or_(
-                            f"visual_description.ilike.{search_pattern},"
-                            f"detected_text.ilike.{search_pattern}"
-                        )
-                        .limit(limit)
-                        .execute()
-                    )
-
-                    if analysis_search.data:
-                        matched_media_ids = [
-                            a["resource_id"] for a in analysis_search.data
-                        ]
-                        # Fetch the full media data for matched IDs
-                        media_result = (
-                            await client.table("parsed_media")
-                            .select(
-                                "id, platform_id, title, description, cover_urls, author, view_count, created_at"
-                            )
-                            .in_("id", matched_media_ids)
-                            .execute()
-                        )
-                        filtered_videos = media_result.data
-                        logger.info(
-                            f"Found {len(filtered_videos)} results in resource_analysis"
-                        )
-
-            # Apply tag filter if specified
-            if tag_ids and filtered_videos:
-                media_ids = [v["id"] for v in filtered_videos]
-                tag_filter_result = (
-                    await client.table("resource_tags")
-                    .select("resource_id")
-                    .in_("resource_id", media_ids)
-                    .in_("tag_id", tag_ids)
-                    .execute()
+                filtered_videos = await self.search_user_media_text(
+                    user_id=user_id,
+                    pattern=search_pattern,
+                    fields=["analysis"],
+                    author=author,
+                    date_from=date_from,
+                    date_to=date_to,
+                    tag_ids=tag_ids,
+                    limit=limit,
                 )
-
-                tagged_media_ids = set(r["resource_id"] for r in tag_filter_result.data)
-                filtered_videos = [
-                    v for v in filtered_videos if v["id"] in tagged_media_ids
-                ]
+                if filtered_videos:
+                    logger.info(
+                        f"Found {len(filtered_videos)} results in resource_analysis"
+                    )
 
             # Build results
-            results = []
-            for video in filtered_videos:
-                results.append(
-                    SearchResult(
-                        media_id=video["id"],
-                        platform_id=video.get("platform_id", ""),
-                        title=video.get("title", ""),
-                        description=video.get("description"),
-                        cover_url=(video.get("cover_urls") or [None])[0],
-                        similarity=0.5,  # Default score for text matches
-                        author=video.get("author"),
-                        view_count=video.get("view_count", 0),
-                        created_at=video.get("created_at"),
-                    )
-                )
-
-            return SearchResponse(
-                results=results, total=len(results), query=query, search_type="hybrid"
-            )
-
-        # No query, just return filtered results
-        base_query = client.table("parsed_media").select(
-            "id, platform_id, title, description, cover_urls, author, view_count, created_at"
-        )
-
-        if user_id:
-            user_resources_3 = (
-                await client.table("resources")
-                .select("media_id")
-                .eq("creator_id", user_id)
-                .eq("is_trashed", False)
-                .execute()
-            )
-            user_media_ids_3 = [
-                r["media_id"] for r in user_resources_3.data if r.get("media_id")
-            ]
-            if not user_media_ids_3:
-                return SearchResponse(
-                    results=[], total=0, query=query or "", search_type="hybrid"
-                )
-            base_query = base_query.in_("id", user_media_ids_3)
-        if author:
-            base_query = base_query.ilike("author", f"%{author}%")
-        if date_from:
-            base_query = base_query.gte("created_at", date_from)
-        if date_to:
-            base_query = base_query.lte("created_at", date_to)
-
-        # Apply tag filter if specified
-        if tag_ids:
-            # Get resource IDs that have the specified tags
-            tag_filter_result = (
-                await client.table("resource_tags")
-                .select("resource_id")
-                .in_("tag_id", tag_ids)
-                .execute()
-            )
-            tagged_media_ids = list(
-                set(r["resource_id"] for r in tag_filter_result.data)
-            )
-
-            if not tagged_media_ids:
-                return SearchResponse(
-                    results=[], total=0, query=query or "", search_type="hybrid"
-                )
-
-            base_query = base_query.in_("id", tagged_media_ids)
-
-        filtered_result = await base_query.limit(limit).execute()
-        filtered_videos = filtered_result.data
-
-        results = []
-        for video in filtered_videos:
-            results.append(
+            results = [
                 SearchResult(
                     media_id=video["id"],
                     platform_id=video.get("platform_id", ""),
                     title=video.get("title", ""),
                     description=video.get("description"),
                     cover_url=(video.get("cover_urls") or [None])[0],
-                    similarity=1.0,  # No semantic ranking
+                    similarity=0.5,  # Default score for text matches
                     author=video.get("author"),
                     view_count=video.get("view_count", 0),
                     created_at=video.get("created_at"),
                 )
+                for video in filtered_videos
+            ]
+
+            return SearchResponse(
+                results=results, total=len(results), query=query, search_type="hybrid"
             )
+
+        # No query: filter-only path (match-all pattern + AND filters).
+        filtered_videos = await self.search_user_media_text(
+            user_id=user_id,
+            pattern=None,
+            fields=[],
+            author=author,
+            date_from=date_from,
+            date_to=date_to,
+            tag_ids=tag_ids,
+            limit=limit,
+        )
+
+        results = [
+            SearchResult(
+                media_id=video["id"],
+                platform_id=video.get("platform_id", ""),
+                title=video.get("title", ""),
+                description=video.get("description"),
+                cover_url=(video.get("cover_urls") or [None])[0],
+                similarity=1.0,  # No semantic ranking
+                author=video.get("author"),
+                view_count=video.get("view_count", 0),
+                created_at=video.get("created_at"),
+            )
+            for video in filtered_videos
+        ]
 
         return SearchResponse(
             results=results, total=len(results), query=query or "", search_type="hybrid"

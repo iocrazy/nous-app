@@ -19,6 +19,14 @@ Converted so far:
     (OFF the allowlist; no run_async left).
   * ``app/workflows/storyboard.py`` — the 2 DB persist steps → async (still ON
     the allowlist for its 6 remaining AI/export-service bridges).
+  * ``app/services/ai/providers/ai_provider_helpers.py`` — the 2 repo reads
+    (user_settings + analyze agent) → async; sole caller
+    ``analyze_l1.resolve_analyze_provider`` is now an async @DBOS.step awaited
+    from the async workflow (OFF the allowlist; no run_async left).
+  * ``app/services/media/transcode/transcode_service.py`` — the single
+    ``_get_db_setting`` system_settings read → async; ``_select_tiers`` + the
+    4 call sites (all inside the async ``transcode_version``) await it (OFF
+    the allowlist; no run_async left).
 """
 
 from __future__ import annotations
@@ -34,15 +42,18 @@ _ALLOWLIST: frozenset[str] = frozenset(
     {
         # Download path: run_async is entangled with yt-dlp / ffmpeg / httpx
         # subprocess dispatch inside sync @DBOS.step bodies (genuine sync-lib
-        # boundary). DB calls here await a follow-up async-hoist pass.
+        # boundary).
+        #   download_helpers.py — the 4 post-download AI/transcode CHAIN helpers
+        #     (maybe_chain_transcode / chain_transcript_summary_for_tags /
+        #     chain_summary_for_tags / maybe_chain_ai_pipeline) are now
+        #     async-native (§2.4b); the remaining run_async here is the
+        #     genuine sync-lib boundary in ensure_download_urls /
+        #     validate_and_refresh_urls / extract_audio_from_video (parser +
+        #     httpx-HEAD inside sync @DBOS.step) → file stays on the list.
         "app/tasks/download_helpers.py",
         "app/tasks/download_strategies.py",
         # Media parse path: parser subprocess chain inside sync @DBOS.step.
         "app/services/media/parsers/parse_helpers.py",
-        # AI provider config read — deferred (caller step still sync).
-        "app/services/ai/providers/ai_provider_helpers.py",
-        # Single system_settings read helper — low ROI, deferred.
-        "app/services/media/transcode/transcode_service.py",
         # Storyboard workflow: the 2 DB persist steps are now async-native; the
         # 6 remaining run_async sites wrap AI / export SERVICES (not repos) — a
         # service-bridge, not a §2.4b DB bridge. Deferred.
