@@ -138,22 +138,22 @@ describe('scriptService AI operations', () => {
     expect(result.task_id).toBe('tk-1');
   });
 
-  it('expandChapter returns content + chapter', async () => {
-    stubJson({
-      success: true,
-      data: { content: 'hello', chapter: { id: 'c1' } },
-    });
+  it('expandChapter dispatches async and returns task_id', async () => {
+    const spy = stubJson({ success: true, data: { task_id: 'tk-exp' } });
     const result = await expandChapter({
       script_id: 's1',
       chapter_id: 'c1',
       title: 't',
       summary: 's',
     });
-    expect(result.content).toBe('hello');
+    expect(spy.mock.calls[0][0]).toBe(
+      'https://api.test/api/v1/scripts/expand-chapter',
+    );
+    expect(result.task_id).toBe('tk-exp');
   });
 
-  it('createBranches returns branches array', async () => {
-    stubJson({ success: true, data: { branches: [{ id: 'b1' }] } });
+  it('createBranches dispatches async and returns task_id', async () => {
+    const spy = stubJson({ success: true, data: { task_id: 'tk-br' } });
     const result = await createBranches({
       script_id: 's1',
       chapter_id: 'c1',
@@ -162,16 +162,19 @@ describe('scriptService AI operations', () => {
       branch_count: 2,
       branch_type: 'choice',
     });
-    expect(result.branches).toHaveLength(1);
+    expect(spy.mock.calls[0][0]).toBe(
+      'https://api.test/api/v1/scripts/create-branches',
+    );
+    expect(result.task_id).toBe('tk-br');
   });
 
-  it('convertToStoryboard returns nodes/task_id', async () => {
-    stubJson({ success: true, data: { nodes: [{}, {}] } });
+  it('convertToStoryboard dispatches async and returns task_id', async () => {
+    stubJson({ success: true, data: { task_id: 'tk-sb' } });
     const result = await convertToStoryboard({
       script_id: 's1',
       chapter_id: 'c1',
     });
-    expect(result.nodes).toHaveLength(2);
+    expect(result.task_id).toBe('tk-sb');
   });
 });
 

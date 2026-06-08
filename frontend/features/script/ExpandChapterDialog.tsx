@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
-import DOMPurify from 'dompurify';
-import { X, BookOpen, Loader2, ChevronRight } from 'lucide-react';
+import { X, BookOpen, Loader2 } from 'lucide-react';
 import { useScriptCanvasStore } from '../../stores/scriptCanvasStore';
 import { expandChapter } from '../../services/scriptService';
+import { useTaskCompletion } from '../../hooks/useTaskCompletion';
+import { useToast } from '../../components/Toast';
 import { useParams } from 'react-router-dom';
 
 interface Props {
@@ -15,12 +16,38 @@ interface Props {
 
 export function ExpandChapterDialog({ isOpen, onClose, chapterId, title, summary }: Props) {
   const { scriptId } = useParams<{ scriptId: string }>();
-  const updateNodeData = useScriptCanvasStore((s) => s.updateNodeData);
+  const reloadScript = useScriptCanvasStore((s) => s.reloadScript);
+  const { addToast } = useToast();
 
   const [expansionRequest, setExpansionRequest] = useState('');
-  const [resultHtml, setResultHtml] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
   const [expanding, setExpanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Watch the dispatched workflow; reload the canvas from the server once
+  // the chapter content has been written, or surface the failure.
+  useTaskCompletion(taskId, {
+    onComplete: async () => {
+      try {
+        if (scriptId) await reloadScript(scriptId);
+        addToast('Chapter expanded', 'success');
+        handleClose();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        setExpanding(false);
+        setTaskId(null);
+        console.error('[ExpandChapterDialog] Reload failed:', message);
+      }
+    },
+    onError: (task) => {
+      const message = task.error_msg || 'Expansion failed';
+      setError(message);
+      addToast(message, 'error');
+      setExpanding(false);
+      setTaskId(null);
+    },
+  });
 
   const handleExpand = useCallback(async () => {
     if (!scriptId) return;
@@ -28,34 +55,27 @@ export function ExpandChapterDialog({ isOpen, onClose, chapterId, title, summary
     setError(null);
 
     try {
-      const result = await expandChapter({
+      const { task_id } = await expandChapter({
         script_id: scriptId,
         chapter_id: chapterId,
         title,
         summary,
         expansion_request: expansionRequest.trim() || undefined,
       });
-
-      setResultHtml(result.content);
+      setTaskId(task_id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
-      console.error('[ExpandChapterDialog] Failed:', message);
-    } finally {
       setExpanding(false);
+      addToast(message, 'error');
+      console.error('[ExpandChapterDialog] Dispatch failed:', message);
     }
-  }, [scriptId, chapterId, title, summary, expansionRequest]);
-
-  const handleConfirm = useCallback(() => {
-    if (resultHtml !== null) {
-      updateNodeData(chapterId, { content: resultHtml, isExpanded: true });
-    }
-    onClose();
-  }, [resultHtml, chapterId, updateNodeData, onClose]);
+  }, [scriptId, chapterId, title, summary, expansionRequest, addToast]);
 
   const handleClose = useCallback(() => {
-    setResultHtml(null);
     setExpansionRequest('');
+    setTaskId(null);
+    setExpanding(false);
     setError(null);
     onClose();
   }, [onClose]);
@@ -99,40 +119,20 @@ export function ExpandChapterDialog({ isOpen, onClose, chapterId, title, summary
               <span className="text-zinc-600 font-normal">(optional)</span>
             </label>
             <textarea
-              className="w-full bg-zinc-800 text-sm text-zinc-200 rounded-lg px-3 py-2 resize-none outline-none focus:ring-1 focus:ring-indigo-500/50 min-h-[72px]"
+              className="w-full bg-zinc-800 text-sm text-zinc-200 rounded-lg px-3 py-2 resize-none outline-none focus:ring-1 focus:ring-indigo-500/50 min-h-[72px] disabled:opacity-60"
               placeholder="e.g. Add more dialogue, intensify conflict..."
               value={expansionRequest}
               onChange={(e) => setExpansionRequest(e.target.value)}
               maxLength={2000}
+              disabled={expanding}
             />
           </div>
 
-          {!resultHtml && (
-            <p className="text-xs text-zinc-500">
-              AI will generate 3-5 paragraphs of prose from this summary.
-            </p>
-          )}
-
-          {/* Generated result preview */}
-          {resultHtml && (
-            <div>
-              <div className="flex items-center gap-1.5 mb-2">
-                <ChevronRight size={13} className="text-indigo-400" />
-                <p className="text-xs font-medium text-zinc-300">Generated Result</p>
-              </div>
-              <div
-                className="bg-zinc-950 rounded-lg px-4 py-3 max-h-[300px] overflow-y-auto text-sm leading-relaxed border border-zinc-800
-                  [&_.scene-heading]:text-orange-400 [&_.scene-heading]:font-semibold [&_.scene-heading]:uppercase [&_.scene-heading]:tracking-wide
-                  [&_.dialogue]:text-orange-300 [&_.dialogue]:italic
-                  [&_p]:text-zinc-300 [&_p]:mb-2"
-                dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(resultHtml, {
-                    ALLOWED_TAGS: ['h2', 'h3', 'p', 'strong', 'em', 'hr', 'br', 'ul', 'ol', 'li', 'span'],
-                  }),
-                }}
-              />
-            </div>
-          )}
+          <p className="text-xs text-zinc-500">
+            {expanding
+              ? 'AI is expanding this chapter. This can take 5–30 seconds…'
+              : 'AI will generate 3-5 paragraphs of prose from this summary.'}
+          </p>
 
           {error && (
             <p className="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">{error}</p>
@@ -148,23 +148,14 @@ export function ExpandChapterDialog({ isOpen, onClose, chapterId, title, summary
             Cancel
           </button>
 
-          {resultHtml ? (
-            <button
-              onClick={handleConfirm}
-              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors"
-            >
-              Confirm Replace
-            </button>
-          ) : (
-            <button
-              onClick={handleExpand}
-              disabled={expanding || !summary}
-              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {expanding ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />}
-              {expanding ? 'Expanding...' : 'Expand with AI'}
-            </button>
-          )}
+          <button
+            onClick={handleExpand}
+            disabled={expanding || !summary}
+            className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {expanding ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />}
+            {expanding ? 'Expanding...' : 'Expand with AI'}
+          </button>
         </div>
       </div>
     </div>
