@@ -132,7 +132,8 @@
     "optional": "可选",
     "all": "全部",
     "back": "返回",
-    "creating": "创建中..."
+    "creating": "创建中...",
+    "done": "完成"
   },
   "parser": {
     "title": "媒体解析",

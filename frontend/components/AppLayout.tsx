@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Search, Library as LibraryIcon, User, FolderOpen, Download, Check,
-  LayoutList, LayoutGrid, Smartphone, Trash2, Share2, Zap, BookOpen,
+  LayoutList, LayoutGrid, Smartphone, Trash2, Share2, Zap, BookOpen, ListChecks,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ViewState, PointPackage, Library, SmartCollection } from '../types';
@@ -21,6 +21,7 @@ import { UploadProvider } from '../contexts/UploadContext';
 import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { UserProfileModal } from './UserProfileModal';
 import { MobileProfilePage } from './MobileProfilePage';
+import { MobileTasksPage, MobileTasksTabButton } from './MobileTasksPage';
 import { CreateTeamModal } from './CreateTeamModal';
 import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
@@ -123,6 +124,7 @@ function AppLayoutInner() {
   const [selectedPaymentPackage, setSelectedPaymentPackage] = useState<PointPackage | null>(null);
   const [isResourcesMenuOpen, setIsResourcesMenuOpen] = useState(false);
   const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
+  const [isMobileTasksOpen, setIsMobileTasksOpen] = useState(false);
   const [isDownloadsMenuOpen, setIsDownloadsMenuOpen] = useState(false);
   const [mobileLibraries, setMobileLibraries] = useState<Library[]>([]);
   const [mobileSmartFolders, setMobileSmartFolders] = useState<SmartCollection[]>([]);
@@ -240,6 +242,12 @@ function AppLayoutInner() {
           setIsSettingsModalOpen(true);
         }}
         onLogout={handleAuthLogout}
+      />
+
+      {/* Mobile Tasks Page — full-screen Task Center overlay */}
+      <MobileTasksPage
+        isOpen={isMobileTasksOpen}
+        onClose={() => setIsMobileTasksOpen(false)}
       />
 
       {/* Create Team Modal */}
@@ -439,6 +447,17 @@ function AppLayoutInner() {
                 <span className="text-[9px] leading-tight font-medium">Resources</span>
               </button>
             </div>
+
+            {/* Tasks — full-screen Task Center overlay */}
+            <MobileTasksTabButton
+              active={isMobileTasksOpen}
+              onClick={() => {
+                setIsMobileMenuOpen(false);
+                setIsResourcesMenuOpen(false);
+                setIsDownloadsMenuOpen(false);
+                setIsMobileTasksOpen(true);
+              }}
+            />
           </div>
         </div>
       </div>
