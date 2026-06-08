@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2, Music, AlertCircle, CloudDownload, Copy, Check } from 'lucide-react';
 import { getMediaLyrics, fetchMediaLyrics, type LyricLine } from '../services/lyricsService';
 import type { SodaTheme } from '../utils/sodaTheme';
+import { LyricsView } from './LyricsView';
 
 interface SodaLyricsTabProps {
   mediaId: string;
@@ -34,7 +35,6 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
   const [fetching, setFetching] = useState(false);
   const [fetchTried, setFetchTried] = useState(false);
   const [copied, setCopied] = useState(false);
-  const activeLineRef = useRef<HTMLParagraphElement>(null);
 
   const canFetch = sourcePlatform === 'qishui';
 
@@ -67,26 +67,6 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
       console.error('Failed to copy lyrics:', err);
     }
   };
-
-  // Active line = last line whose start time has passed. -1 when no sync.
-  const synced = typeof currentTime === 'number' && currentTime > 0;
-  let activeIndex = -1;
-  if (synced) {
-    for (let i = 0; i < lines.length; i++) {
-      const startMs = lines[i].line_start_ms;
-      if (typeof startMs === 'number' && startMs / 1000 <= currentTime) {
-        activeIndex = i;
-      } else if (typeof startMs === 'number') {
-        break;
-      }
-    }
-  }
-
-  // Autoscroll the active line into view whenever it changes.
-  useEffect(() => {
-    if (activeIndex < 0) return;
-    activeLineRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [activeIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -206,24 +186,7 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
           {copied ? <Check size={13} className="text-emerald-300" /> : <Copy size={13} />}
           {copied ? 'Copied' : 'Copy Lyrics'}
         </button>
-        {lines.map((line, index) => {
-          const isActive = index === activeIndex;
-          const themedStyle = theme
-            ? { color: isActive ? theme.lyricActive : theme.lyricNormal }
-            : undefined;
-          return (
-            <p
-              key={index}
-              ref={isActive ? activeLineRef : undefined}
-              style={themedStyle}
-              className={`leading-relaxed transition-all duration-300 ${
-                isActive ? 'text-[22px] font-bold' : 'text-[17px] font-medium opacity-60'
-              } ${theme ? '' : isActive ? 'text-white' : 'text-white/55'}`}
-            >
-              {line.text || ' '}
-            </p>
-          );
-        })}
+        <LyricsView lines={lines} currentTime={currentTime} theme={theme} variant={variant} />
       </div>
     );
   }
@@ -247,28 +210,7 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
           {copied ? 'Copied' : 'Copy Lyrics'}
         </button>
       </div>
-      <div className="max-h-96 overflow-y-auto p-3 space-y-1">
-        {lines.map((line, index) => {
-          const isActive = index === activeIndex;
-          // When a theme is present, lyric colors come from the track palette;
-          // otherwise keep the neutral zinc/white classes.
-          const themedStyle = theme
-            ? { color: isActive ? theme.lyricActive : synced ? theme.lyricNormal : undefined }
-            : undefined;
-          return (
-            <p
-              key={index}
-              ref={isActive ? activeLineRef : undefined}
-              style={themedStyle}
-              className={`leading-relaxed transition-all duration-200 ${
-                isActive ? 'text-base font-semibold' : 'text-sm font-medium'
-              } ${theme ? '' : isActive ? 'text-white' : synced ? 'text-zinc-500' : 'text-zinc-300'}`}
-            >
-              {line.text || ' '}
-            </p>
-          );
-        })}
-      </div>
+      <LyricsView lines={lines} currentTime={currentTime} theme={theme} variant={variant} />
     </div>
   );
 };

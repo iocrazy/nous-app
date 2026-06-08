@@ -7,8 +7,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getFolderContentCount,
+  getResourceLyrics,
   restoreFolder,
   trashFolder,
+  uploadResourceCover,
+  uploadResourceLyrics,
 } from './resourceService';
 
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
@@ -89,5 +92,86 @@ describe('getFolderContentCount', () => {
     await expect(getFolderContentCount('folder-x')).rejects.toMatchObject({
       status: 500,
     });
+  });
+});
+
+describe('getResourceLyrics', () => {
+  it('GETs /resources/:id/lyrics and returns data', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ success: true, data: { lrc: 'x', lines: [] } }),
+      json: async () => ({ success: true, data: { lrc: 'x', lines: [] } }),
+    } as unknown as Response);
+
+    const out = await getResourceLyrics('77');
+    expect(out).toEqual({ lrc: 'x', lines: [] });
+    expect(spy.mock.calls[0][0]).toBe(
+      'https://api.test/api/v1/resources/77/lyrics',
+    );
+  });
+
+  it('returns null on non-ok', async () => {
+    stubResponse({}, 404);
+    expect(await getResourceLyrics('77')).toBeNull();
+  });
+});
+
+describe('uploadResourceCover', () => {
+  it('POSTs multipart to /resources/:id/cover and unwraps data', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ success: true, data: { id: '77' } }),
+      json: async () => ({ success: true, data: { id: '77' } }),
+    } as unknown as Response);
+
+    const file = new File(['img'], 'cover.jpg', { type: 'image/jpeg' });
+    const out = await uploadResourceCover('77', file);
+    expect(out).toEqual({ id: '77' });
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe('https://api.test/api/v1/resources/77/cover');
+    expect((init as RequestInit).method).toBe('POST');
+    expect((init as RequestInit).body).toBeInstanceOf(FormData);
+    // multipart: Content-Type must NOT be set (browser sets boundary)
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(
+      Object.keys(headers).some((k) => k.toLowerCase() === 'content-type'),
+    ).toBe(false);
+  });
+
+  it('throws on non-ok', async () => {
+    stubResponse({ detail: 'bad' }, 400);
+    const file = new File(['img'], 'cover.jpg', { type: 'image/jpeg' });
+    await expect(uploadResourceCover('77', file)).rejects.toThrow();
+  });
+});
+
+describe('uploadResourceLyrics', () => {
+  it('POSTs multipart to /resources/:id/lyrics and returns lyrics_json', async () => {
+    const lyrics = { lrc: 'x', lines: [{ text: 'hi', line_start_ms: 0 }] };
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ success: true, data: { lyrics_json: lyrics } }),
+      json: async () => ({ success: true, data: { lyrics_json: lyrics } }),
+    } as unknown as Response);
+
+    const file = new File(['lrc'], 'song.lrc', { type: 'text/plain' });
+    const out = await uploadResourceLyrics('77', file);
+    expect(out).toEqual(lyrics);
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe('https://api.test/api/v1/resources/77/lyrics');
+    expect((init as RequestInit).method).toBe('POST');
+    expect((init as RequestInit).body).toBeInstanceOf(FormData);
+  });
+
+  it('throws with detail on non-ok', async () => {
+    stubResponse({ detail: 'invalid lrc' }, 422);
+    const file = new File(['lrc'], 'song.lrc', { type: 'text/plain' });
+    await expect(uploadResourceLyrics('77', file)).rejects.toThrow('invalid lrc');
   });
 });

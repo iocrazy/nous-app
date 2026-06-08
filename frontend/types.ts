@@ -327,6 +327,8 @@ export interface Resource {
   file_size_bytes: number | null;
   duration_seconds: number | null;
   resolution: string | null;
+  audio_bitrate_kbps?: number | null;
+  lyrics_json?: { lrc: string; lines: Array<{ text: string; line_start_ms: number | null }> } | null;
   thumbnail_path: string | null;
   cover_image_path: string | null;
   current_version: number;

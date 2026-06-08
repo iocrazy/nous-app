@@ -14,10 +14,12 @@ from typing import List, Optional
 from fastapi import (
     APIRouter,
     Depends,
+    File,
     Header,
     HTTPException,
     Query,
     Request,
+    UploadFile,
 )
 from fastapi.responses import FileResponse
 from loguru import logger
@@ -637,6 +639,87 @@ async def update_resource(
     except Exception as e:
         logger.error(f"Failed to update resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update resource")
+
+
+@router.post("/{resource_id}/cover")
+async def upload_resource_cover(
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+    file: UploadFile = File(...),
+):
+    """Upload/replace the cover image for a resource. Stores next to the source
+    file and sets cover_image_path."""
+    from app.api.media_permissions import check_media_access
+    from app.core.config import settings
+
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Cover must be an image")
+    repo = ResourcesRepository()
+    resource = await repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not resource.get("file_path"):
+        raise HTTPException(status_code=400, detail="Resource has no storage path")
+
+    ext = (file.filename or "cover").rsplit(".", 1)[-1].lower()
+    if ext not in {"jpg", "jpeg", "png", "webp", "gif"}:
+        ext = "jpg"
+    abs_src = Path(settings.DOWNLOAD_PATH) / resource["file_path"]
+    cover_abs = abs_src.parent / f"cover.{ext}"
+    cover_abs.parent.mkdir(parents=True, exist_ok=True)
+    data = await file.read()
+    cover_abs.write_bytes(data)
+    rel = str(cover_abs.relative_to(Path(settings.DOWNLOAD_PATH)))
+
+    result = await repo.update_resource(resource_id, {"cover_image_path": rel})
+    return {"success": True, "data": result}
+
+
+@router.post("/{resource_id}/lyrics")
+async def upload_resource_lyrics(
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+    file: UploadFile = File(...),
+):
+    """Upload an .lrc file; parse it and store on the resource."""
+    from app.api.media_permissions import check_media_access
+    from app.services.lrc_parser import parse_lrc
+
+    repo = ResourcesRepository()
+    resource = await repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+    raw = (await file.read()).decode("utf-8", errors="replace")
+    try:
+        lyrics = parse_lrc(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid LRC: {e}")
+    result = await repo.update_resource(resource_id, {"lyrics_json": lyrics})
+    return {"success": True, "data": {"lyrics_json": lyrics, "resource": result}}
+
+
+@router.get("/{resource_id}/lyrics")
+async def get_resource_lyrics(
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Return the resource's stored lyrics_json (or null)."""
+    from app.api.media_permissions import check_media_access
+
+    repo = ResourcesRepository()
+    resource = await repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+    return {"success": True, "data": resource.get("lyrics_json")}
 
 
 @router.post("/by-platform-id/{platform_id}/trash")

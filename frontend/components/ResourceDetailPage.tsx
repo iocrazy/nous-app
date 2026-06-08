@@ -52,6 +52,9 @@ import {
   getResourceCoverUrl,
   retryTranscode,
   updateResource,
+  getResourceLyrics,
+  uploadResourceLyrics,
+  uploadResourceCover,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
@@ -69,6 +72,7 @@ import { ResourceReviewPanel } from './ResourceReviewPanel';
 import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioHero } from './AudioHero';
+import { LyricsView } from './LyricsView';
 import { fetchComments } from '../services/reviewService';
 import {
   triggerTranscriptionByResource,
@@ -172,8 +176,10 @@ function getAIStatusIndicator(status?: string) {
 const FilePreview: React.FC<{
   resource: Resource;
   fileUrl: string | null;
-}> = ({ resource, fileUrl }) => {
+  onCoverUpdated?: (updated: Resource) => void;
+}> = ({ resource, fileUrl, onCoverUpdated }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const mime = resource.mime_type || '';
 
   if (!fileUrl) {
@@ -200,12 +206,33 @@ const FilePreview: React.FC<{
 
   if (mime.startsWith('audio/')) {
     return (
-      <AudioHero
-        src={fileUrl}
-        title={resource.filename}
-        coverUrl={resource.thumbnail_path || undefined}
-        duration={resource.duration_seconds ?? undefined}
-      />
+      <div className="relative">
+        <AudioHero
+          src={fileUrl}
+          title={resource.filename}
+          coverUrl={
+            resource.cover_image_path && resource.id
+              ? getResourceCoverUrl(String(resource.id), undefined, resource.updated_at)
+              : resource.thumbnail_path || undefined
+          }
+          duration={resource.duration_seconds ?? undefined}
+        />
+        {resource.source_type === 'upload' && (
+          <label className="absolute bottom-2 right-2 z-10 text-xs px-2 py-1 rounded bg-black/60 text-white cursor-pointer hover:bg-black/80">
+            {t('resources.detail.uploadCover', 'Cover')}
+            <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+              const f = e.target.files?.[0]; if (!f) return;
+              try {
+                const updated = await uploadResourceCover(resource.id, f);
+                onCoverUpdated?.(updated);
+                addToast(t('resources.detail.coverUpdated', 'Cover updated'), 'success');
+              } catch {
+                addToast('Failed to upload cover', 'error');
+              }
+            }} />
+          </label>
+        )}
+      </div>
     );
   }
 
@@ -309,7 +336,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Review state
-  const [rightTab, setRightTab] = useState<'info' | 'review' | 'transcript' | 'analysis'>('info');
+  const [rightTab, setRightTab] = useState<'info' | 'review' | 'transcript' | 'analysis' | 'lyrics'>('info');
+  const [lyrics, setLyrics] = useState<{ lrc: string; lines: Array<{ text: string; line_start_ms: number | null }> } | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
 
   // AI / Transcript / Analysis state
@@ -623,6 +651,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     }
   }, [rightTab]);
 
+  // ─── Load lyrics for uploaded audio on tab switch ───
+  useEffect(() => {
+    if (rightTab === 'lyrics' && !lyrics) {
+      getResourceLyrics(resourceId).then((d) => { if (d) setLyrics(d); }).catch(() => {});
+    }
+  }, [rightTab, lyrics, resourceId]);
+
   const loadTranscript = useCallback(async () => {
     try {
       setTranscriptLoading(true);
@@ -753,6 +788,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const { icon: FileIcon, color: iconColor, bg: iconBg } = getFileIcon(resource.mime_type);
   const isVideo = resource.mime_type?.startsWith('video/');
   const isAudio = resource.mime_type?.startsWith('audio/');
+  const isUploadedAudio = isAudio && resource.source_type === 'upload';
   const viewingVersion = selectedVersionId
     ? versions.find((v) => v.id === selectedVersionId)
     : versions.find((v) => v.version_number === resource.current_version);
@@ -1123,11 +1159,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             </div>
           ) : isAudio && fileUrl ? (
             <div className="w-full h-full">
-              <FilePreview resource={resource} fileUrl={fileUrl} />
+              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} />
             </div>
           ) : (
             <div className="p-6">
-              <FilePreview resource={resource} fileUrl={fileUrl} />
+              <FilePreview resource={resource} fileUrl={fileUrl} onCoverUpdated={setResource} />
             </div>
           )}
           </div>
@@ -1154,18 +1190,31 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <Eye size={16} />
               Overview
             </button>
-            <button
-              onClick={() => { setRightTab('review'); setViewAnnotations(undefined); }}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                rightTab === 'review'
-                  ? 'border-indigo-500 text-indigo-400'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
-              }`}
-            >
-              <Pencil size={16} />
-              Review
-            </button>
-            {(isVideo || isAudio) && (
+            {!isUploadedAudio && (
+              <button
+                onClick={() => { setRightTab('review'); setViewAnnotations(undefined); }}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                  rightTab === 'review'
+                    ? 'border-indigo-500 text-indigo-400'
+                    : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                }`}
+              >
+                <Pencil size={16} />
+                Review
+              </button>
+            )}
+            {isUploadedAudio && (
+              <button
+                onClick={() => setRightTab('lyrics')}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                  rightTab === 'lyrics' ? 'border-indigo-500 text-indigo-400'
+                    : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'}`}
+              >
+                <Music size={16} />
+                {t('resources.detail.lyrics', 'Lyrics')}
+              </button>
+            )}
+            {!isUploadedAudio && (isVideo || isAudio) && (
               <>
                 <button
                   onClick={() => setRightTab('transcript')}
@@ -1255,9 +1304,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           <div className="hidden md:flex justify-between items-start gap-2 px-4 pt-4 mb-1 min-w-0">
             <div className="flex gap-2 shrink-0 flex-wrap">
               <DetailBadge>{resource.file_type || resource.mime_type?.split('/').pop() || 'File'}</DetailBadge>
-              {resource.resolution && (
-                <DetailBadge variant="accent">{resource.resolution.replace(/:/g, 'x')}</DetailBadge>
-              )}
+              {isAudio
+                ? (resource.audio_bitrate_kbps ? <DetailBadge variant="accent">{resource.audio_bitrate_kbps}kbps</DetailBadge> : null)
+                : (resource.resolution && <DetailBadge variant="accent">{resource.resolution.replace(/:/g, 'x')}</DetailBadge>)}
             </div>
             <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {String(resource.id)}</span>
           </div>
@@ -1786,6 +1835,29 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     </div>
                   )}
                 </section>
+              )}
+            </div>
+          ) : rightTab === 'lyrics' ? (
+            <div className="p-4 overflow-y-auto flex-1">
+              {lyrics?.lines?.length ? (
+                <LyricsView lines={lyrics.lines} />
+              ) : (
+                <div className="text-center text-zinc-500 text-sm py-8 space-y-3">
+                  <p>{t('resources.detail.noLyrics', 'No lyrics yet')}</p>
+                  <label className="inline-block px-3 py-1.5 rounded bg-indigo-600 text-white text-xs cursor-pointer hover:bg-indigo-500">
+                    {t('resources.detail.uploadLrc', 'Upload .lrc')}
+                    <input type="file" accept=".lrc,text/plain" className="hidden" onChange={async (e) => {
+                      const f = e.target.files?.[0]; if (!f) return;
+                      try {
+                        const data = await uploadResourceLyrics(resourceId, f);
+                        setLyrics(data);
+                        addToast(t('resources.detail.lyricsUploaded', 'Lyrics uploaded'), 'success');
+                      } catch (err) {
+                        addToast(err instanceof Error ? err.message : 'Failed', 'error');
+                      }
+                    }} />
+                  </label>
+                </div>
               )}
             </div>
           ) : null}
