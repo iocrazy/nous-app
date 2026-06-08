@@ -2,6 +2,8 @@ import { useState, useCallback } from 'react';
 import { X, GitBranch, Loader2 } from 'lucide-react';
 import { useScriptCanvasStore } from '../../stores/scriptCanvasStore';
 import { createBranches } from '../../services/scriptService';
+import { useTaskCompletion } from '../../hooks/useTaskCompletion';
+import { useToast } from '../../components/Toast';
 import { useParams } from 'react-router-dom';
 
 interface Props {
@@ -14,13 +16,39 @@ interface Props {
 
 export function CreateBranchDialog({ isOpen, onClose, chapterId, title, summary }: Props) {
   const { scriptId } = useParams<{ scriptId: string }>();
-  const addChapterNode = useScriptCanvasStore((s) => s.addChapterNode);
-  const nodes = useScriptCanvasStore((s) => s.nodes);
+  const reloadScript = useScriptCanvasStore((s) => s.reloadScript);
+  const { addToast } = useToast();
 
   const [branchCount, setBranchCount] = useState(2);
   const [branchType, setBranchType] = useState<'choice' | 'condition'>('choice');
+  const [taskId, setTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Watch the dispatched workflow; the new branch chapters are created
+  // server-side, so reload the canvas from the server on completion.
+  useTaskCompletion(taskId, {
+    onComplete: async () => {
+      try {
+        if (scriptId) await reloadScript(scriptId);
+        addToast('Branches created', 'success');
+        handleClose();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        setLoading(false);
+        setTaskId(null);
+        console.error('[CreateBranchDialog] Reload failed:', message);
+      }
+    },
+    onError: (task) => {
+      const message = task.error_msg || 'Branch generation failed';
+      setError(message);
+      addToast(message, 'error');
+      setLoading(false);
+      setTaskId(null);
+    },
+  });
 
   const handleCreate = useCallback(async () => {
     if (!scriptId) return;
@@ -28,7 +56,7 @@ export function CreateBranchDialog({ isOpen, onClose, chapterId, title, summary 
     setError(null);
 
     try {
-      const result = await createBranches({
+      const { task_id } = await createBranches({
         script_id: scriptId,
         chapter_id: chapterId,
         title,
@@ -36,37 +64,22 @@ export function CreateBranchDialog({ isOpen, onClose, chapterId, title, summary 
         branch_count: branchCount,
         branch_type: branchType,
       });
-
-      const parentNode = nodes.find((n) => n.id === chapterId);
-      const parentX = parentNode?.position.x ?? 400;
-      const parentY = parentNode?.position.y ?? 100;
-      const BRANCH_X_OFFSET = 350;
-      const BRANCH_Y_OFFSET = 250;
-
-      for (let i = 0; i < result.branches.length; i++) {
-        const branch = result.branches[i];
-        const xOffset = (i - result.branches.length / 2 + 0.5) * BRANCH_X_OFFSET;
-        addChapterNode(
-          { x: parentX + xOffset, y: parentY + BRANCH_Y_OFFSET },
-          {
-            title: branch.title ?? `Branch ${i + 1}`,
-            summary: branch.summary ?? '',
-            chapterNumber: nodes.length + i + 1,
-            branchLabel: branch.branch_label,
-            branchType: branchType,
-          },
-        );
-      }
-
-      onClose();
+      setTaskId(task_id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
-      console.error('[CreateBranchDialog] Failed:', message);
-    } finally {
       setLoading(false);
+      addToast(message, 'error');
+      console.error('[CreateBranchDialog] Dispatch failed:', message);
     }
-  }, [scriptId, chapterId, title, summary, branchCount, branchType, nodes, addChapterNode, onClose]);
+  }, [scriptId, chapterId, title, summary, branchCount, branchType, addToast]);
+
+  const handleClose = useCallback(() => {
+    setTaskId(null);
+    setLoading(false);
+    setError(null);
+    onClose();
+  }, [onClose]);
 
   if (!isOpen) return null;
 
@@ -78,7 +91,7 @@ export function CreateBranchDialog({ isOpen, onClose, chapterId, title, summary 
             <GitBranch size={16} className="text-amber-400" />
             <h3 className="text-sm font-semibold text-white">Create Story Branches</h3>
           </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+          <button onClick={handleClose} className="text-zinc-500 hover:text-zinc-300">
             <X size={16} />
           </button>
         </div>
@@ -97,7 +110,8 @@ export function CreateBranchDialog({ isOpen, onClose, chapterId, title, summary 
                 <button
                   key={type}
                   onClick={() => setBranchType(type)}
-                  className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors ${
+                  disabled={loading}
+                  className={`flex-1 px-3 py-2 text-xs rounded-lg border transition-colors disabled:opacity-60 ${
                     branchType === type
                       ? 'border-amber-500 bg-amber-900/30 text-amber-300'
                       : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
@@ -116,7 +130,8 @@ export function CreateBranchDialog({ isOpen, onClose, chapterId, title, summary 
                 <button
                   key={n}
                   onClick={() => setBranchCount(n)}
-                  className={`w-10 h-10 rounded-lg text-sm font-medium transition-colors ${
+                  disabled={loading}
+                  className={`w-10 h-10 rounded-lg text-sm font-medium transition-colors disabled:opacity-60 ${
                     branchCount === n
                       ? 'bg-amber-600 text-white'
                       : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
@@ -135,7 +150,7 @@ export function CreateBranchDialog({ isOpen, onClose, chapterId, title, summary 
 
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-800">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-zinc-800 transition-colors"
           >
             Cancel

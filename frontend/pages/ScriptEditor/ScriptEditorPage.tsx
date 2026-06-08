@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Save } from 'lucide-react';
-import { useScriptCanvasStore, type ScriptNode } from '../../stores/scriptCanvasStore';
+import {
+  useScriptCanvasStore,
+  mapChaptersToNodes,
+  mapChaptersToEdges,
+} from '../../stores/scriptCanvasStore';
 import { EditorTopBar } from '../../components/EditorTopBar';
 import { EditorLoadingScreen } from '../../components/EditorLoadingScreen';
 import { ScriptCanvas } from '../../features/script/ScriptCanvas';
@@ -24,38 +28,6 @@ import {
   updateScriptViewport,
   type ImportedChapter,
 } from '../../services/scriptService';
-import type { ScriptChapter } from '../../types';
-
-function mapChaptersToNodes(chapters: ScriptChapter[]): ScriptNode[] {
-  return chapters.map((ch) => ({
-    id: String(ch.id),
-    type: 'chapterNode' as const,
-    position: { x: ch.position_x, y: ch.position_y },
-    data: {
-      title: ch.title ?? '',
-      summary: ch.summary ?? '',
-      content: ch.content ?? '',
-      chapterNumber: ch.chapter_number ?? 0,
-      branchLabel: ch.branch_label,
-      branchType: ch.branch_type,
-    },
-    ...(ch.width ? { width: ch.width } : {}),
-    ...(ch.height ? { height: ch.height } : {}),
-  }));
-}
-
-function mapChaptersToEdges(
-  chapters: ScriptChapter[]
-): { id: string; source: string; target: string }[] {
-  return chapters
-    .filter((ch) => ch.parent_chapter_id)
-    .map((ch) => ({
-      id: `edge-${ch.parent_chapter_id}-${ch.id}`,
-      source: String(ch.parent_chapter_id),
-      target: String(ch.id),
-    }));
-}
-
 export function ScriptEditorPage() {
   const navigate = useNavigate();
   const { teamId, projectId, scriptId } = useParams<{

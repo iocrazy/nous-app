@@ -13,7 +13,6 @@ from app.schemas.script import (
     GenerateOutlineRequest,
 )
 from app.services.infra.unified_task_manager import get_task_manager
-from app.services.storyboard.script.script_ai_service import ScriptAIService
 from app.services.storyboard.script.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts")
@@ -71,21 +70,35 @@ async def generate_outline(
 
 @router.post("/expand-chapter")
 async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str, Any]:
-    """Synchronously expand a chapter summary into full prose."""
+    """Dispatch async chapter expansion. Returns task_id immediately."""
     try:
         await _verify_script_access(body.script_id, auth.user_id)
-        ai_svc = ScriptAIService(user_id=auth.user_id)
-        content = await ai_svc.expand_chapter(
-            title=body.title,
-            summary=body.summary,
-            context=body.context,
+        mgr = get_task_manager()
+        task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="script_expand_chapter",
+            title=f"Expand chapter: {body.title}",
         )
 
-        # Update the chapter with expanded content
-        script_svc = ScriptService()
-        updated = await script_svc.update_chapter(body.chapter_id, {"content": content})
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.script_ai_workflows import script_expand_chapter_workflow
 
-        return {"success": True, "data": {"content": content, "chapter": updated}}
+        await start_workflow_routed(
+            "script_expand_chapter",
+            dbos_workflow_callable=script_expand_chapter_workflow,
+            dbos_workflow_kwargs={
+                "script_id": body.script_id,
+                "chapter_id": body.chapter_id,
+                "title": body.title,
+                "summary": body.summary,
+                "context": body.context,
+                "user_id": auth.user_id,
+            },
+        )
+
+        return {"success": True, "task_id": task_id}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"[ScriptAI] expand_chapter failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to expand chapter")
@@ -93,44 +106,37 @@ async def expand_chapter(auth: AuthDep, body: ExpandChapterRequest) -> Dict[str,
 
 @router.post("/create-branches")
 async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[str, Any]:
-    """Synchronously generate story branches and create chapter nodes."""
+    """Dispatch async story branching. Returns task_id immediately."""
     try:
         await _verify_script_access(body.script_id, auth.user_id)
-        ai_svc = ScriptAIService(user_id=auth.user_id)
-        branches = await ai_svc.create_branches(
-            title=body.title,
-            summary=body.summary,
-            branch_count=body.branch_count,
-            branch_type=body.branch_type,
-            context=body.context,
+        mgr = get_task_manager()
+        task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="script_create_branches",
+            title=f"Create {body.branch_count} branches: {body.title}",
         )
 
-        # Get parent chapter position to offset branches
-        script_svc = ScriptService()
-        parent = await script_svc.chapter_repo.get_by_id(body.chapter_id)
-        parent_x = parent.get("position_x", 400) if parent else 400
-        parent_y = parent.get("position_y", 100) if parent else 100
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.script_ai_workflows import script_create_branches_workflow
 
-        BRANCH_X_OFFSET = 350
-        BRANCH_Y_OFFSET = 250
-
-        created = []
-        for i, branch in enumerate(branches):
-            x_offset = (i - len(branches) / 2 + 0.5) * BRANCH_X_OFFSET
-            chapter_data = {
+        await start_workflow_routed(
+            "script_create_branches",
+            dbos_workflow_callable=script_create_branches_workflow,
+            dbos_workflow_kwargs={
                 "script_id": body.script_id,
-                "parent_chapter_id": body.chapter_id,
-                "title": branch["title"],
-                "summary": branch["summary"],
-                "branch_label": branch["branch_label"],
+                "chapter_id": body.chapter_id,
+                "title": body.title,
+                "summary": body.summary,
+                "branch_count": body.branch_count,
                 "branch_type": body.branch_type,
-                "position_x": parent_x + x_offset,
-                "position_y": parent_y + BRANCH_Y_OFFSET,
-            }
-            result = await script_svc.create_chapter(body.script_id, chapter_data)
-            created.append(result)
+                "context": body.context,
+                "user_id": auth.user_id,
+            },
+        )
 
-        return {"success": True, "data": {"branches": created}}
+        return {"success": True, "task_id": task_id}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"[ScriptAI] create_branches failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create branches")
@@ -140,79 +146,36 @@ async def create_branches(auth: AuthDep, body: CreateBranchesRequest) -> Dict[st
 async def convert_to_storyboard(
     auth: AuthDep, body: ConvertToStoryboardRequest
 ) -> Dict[str, Any]:
-    """Convert a script chapter into storyboard scenes via AI."""
+    """Dispatch async chapter→storyboard conversion. Returns task_id.
+
+    The chapter + project style-guide reads now happen INSIDE the workflow
+    (``script_ai_scenes_step``); the endpoint only verifies access and
+    dispatches chapter_id + storyboard_project_id.
+    """
     try:
-        script_svc = ScriptService()
-
-        # 1. Read chapter content/summary
-        chapter = await script_svc.chapter_repo.get_by_id(body.chapter_id)
-        if not chapter:
-            raise HTTPException(status_code=404, detail="Chapter not found")
-
-        # 2. Get script project for style_guide
-        project = await script_svc.project_repo.get_by_id(body.script_id)
-        style_guide = None
-        if project and project.get("settings_json"):
-            style_guide = project["settings_json"].get("style_guide")
-
-        # 3. AI: split chapter into visual scenes
-        ai_svc = ScriptAIService(user_id=auth.user_id)
-        scenes = await ai_svc.split_chapter_to_scenes(
-            title=chapter.get("title", ""),
-            summary=chapter.get("summary", ""),
-            content=chapter.get("content"),
-            style_guide=style_guide,
+        await _verify_script_access(body.script_id, auth.user_id)
+        mgr = get_task_manager()
+        task_id = await mgr.create(
+            user_id=auth.user_id,
+            task_type="script_to_storyboard",
+            title="Convert chapter to storyboard",
         )
 
-        # 4. Create storyboard nodes if a target project is specified
-        created_nodes = []
-        if body.storyboard_project_id:
-            from app.repositories.storyboard_repository import (
-                get_storyboard_node_repository,
-            )
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.script_ai_workflows import script_to_storyboard_workflow
 
-            node_repo = get_storyboard_node_repository()
-            NODE_Y_SPACING = 300
-
-            for scene in scenes:
-                node_data = {
-                    "project_id": body.storyboard_project_id,
-                    "node_type": "storyboard_split",
-                    "position_x": 100,
-                    "position_y": scene["scene_number"] * NODE_Y_SPACING,
-                    # scene_number / description / camera_notes are NOT columns on
-                    # storyboard_nodes — nest them in the data_json jsonb (mirrors
-                    # how workflows/storyboard.py persists split-scene node data).
-                    "data_json": {
-                        "source": "script_conversion",
-                        "scene_number": scene["scene_number"],
-                        "description": scene["description"],
-                        "camera_notes": scene.get("camera_notes", ""),
-                    },
-                }
-                rows = await node_repo.bulk_upsert(
-                    body.storyboard_project_id, [node_data]
-                )
-                if rows:
-                    created_nodes.append(rows[0])
-
-            # 5. Record link in script_storyboard_links
-            for node in created_nodes:
-                await script_svc.create_storyboard_link(
-                    {
-                        "chapter_id": body.chapter_id,
-                        "storyboard_project_id": body.storyboard_project_id,
-                        "storyboard_node_id": node.get("id"),
-                    }
-                )
-
-        return {
-            "success": True,
-            "data": {
-                "scenes": scenes,
-                "created_nodes": created_nodes,
+        await start_workflow_routed(
+            "script_to_storyboard",
+            dbos_workflow_callable=script_to_storyboard_workflow,
+            dbos_workflow_kwargs={
+                "script_id": body.script_id,
+                "chapter_id": body.chapter_id,
+                "storyboard_project_id": body.storyboard_project_id,
+                "user_id": auth.user_id,
             },
-        }
+        )
+
+        return {"success": True, "task_id": task_id}
     except HTTPException:
         raise
     except Exception as exc:

@@ -9,6 +9,8 @@ import {
   applyEdgeChanges,
   addEdge as addReactFlowEdge,
 } from '@xyflow/react';
+import { fetchScriptProject } from '../services/scriptService';
+import type { ScriptChapter } from '../types';
 
 export interface ChapterNodeData {
   title: string;
@@ -24,6 +26,37 @@ export interface ChapterNodeData {
 
 export type ScriptNode = Node<ChapterNodeData>;
 export type ScriptEdge = Edge;
+
+/** Map server chapter rows → ReactFlow nodes (server holds positions). */
+export function mapChaptersToNodes(chapters: ScriptChapter[]): ScriptNode[] {
+  return chapters.map((ch) => ({
+    id: String(ch.id),
+    type: 'chapterNode' as const,
+    position: { x: ch.position_x, y: ch.position_y },
+    data: {
+      title: ch.title ?? '',
+      summary: ch.summary ?? '',
+      content: ch.content ?? '',
+      chapterNumber: ch.chapter_number ?? 0,
+      branchLabel: ch.branch_label,
+      branchType: ch.branch_type,
+      contentJson: null,
+    },
+    ...(ch.width ? { width: ch.width } : {}),
+    ...(ch.height ? { height: ch.height } : {}),
+  }));
+}
+
+/** Derive parent→child edges from chapter parent links. */
+export function mapChaptersToEdges(chapters: ScriptChapter[]): ScriptEdge[] {
+  return chapters
+    .filter((ch) => ch.parent_chapter_id)
+    .map((ch) => ({
+      id: `edge-${ch.parent_chapter_id}-${ch.id}`,
+      source: String(ch.parent_chapter_id),
+      target: String(ch.id),
+    }));
+}
 
 interface HistorySnapshot {
   nodes: ScriptNode[];
@@ -45,6 +78,11 @@ interface ScriptCanvasState {
 
   setCanvasData: (nodes: ScriptNode[], edges: ScriptEdge[]) => void;
   clearCanvas: () => void;
+
+  /** Refetch the script from the server and rebuild the canvas from
+   * server state (the source of truth for positions + AI-generated
+   * content). Used by the async AI dialogs after a task completes. */
+  reloadScript: (scriptId: string) => Promise<void>;
 
   addChapterNode: (position: { x: number; y: number }, data?: Partial<ChapterNodeData>) => string;
   updateNodeData: (nodeId: string, data: Partial<ChapterNodeData>) => void;
@@ -120,6 +158,15 @@ export const useScriptCanvasStore = create<ScriptCanvasState>((set, get) => ({
       selectedNodeId: null,
       history: pushHistory(state),
     }));
+  },
+
+  reloadScript: async (scriptId) => {
+    const project = await fetchScriptProject(scriptId);
+    set({
+      nodes: mapChaptersToNodes(project.chapters),
+      edges: mapChaptersToEdges(project.chapters),
+      history: { past: [], future: [] },
+    });
   },
 
   addChapterNode: (position, data) => {
