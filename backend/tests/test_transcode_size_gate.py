@@ -37,9 +37,14 @@ class _FakeRepo:
 
 def _settings_stub(min_size_mb: str):
     """Stub for TranscodeService._get_db_setting — only the keys
-    transcode_version reads before the size gate."""
+    transcode_version reads before the size gate. Async to match the
+    §2.4b async-native _get_db_setting (awaited by transcode_version)."""
     table = {"transcode_enabled": "true", "transcode_min_size_mb": min_size_mb}
-    return staticmethod(lambda key: table.get(key))
+
+    async def _stub(key):
+        return table.get(key)
+
+    return staticmethod(_stub)
 
 
 async def test_size_gate_skips_file_below_threshold(monkeypatch):

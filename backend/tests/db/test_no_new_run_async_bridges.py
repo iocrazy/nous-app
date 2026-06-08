@@ -23,6 +23,10 @@ Converted so far:
     (user_settings + analyze agent) → async; sole caller
     ``analyze_l1.resolve_analyze_provider`` is now an async @DBOS.step awaited
     from the async workflow (OFF the allowlist; no run_async left).
+  * ``app/services/media/transcode/transcode_service.py`` — the single
+    ``_get_db_setting`` system_settings read → async; ``_select_tiers`` + the
+    4 call sites (all inside the async ``transcode_version``) await it (OFF
+    the allowlist; no run_async left).
 """
 
 from __future__ import annotations
@@ -43,8 +47,6 @@ _ALLOWLIST: frozenset[str] = frozenset(
         "app/tasks/download_strategies.py",
         # Media parse path: parser subprocess chain inside sync @DBOS.step.
         "app/services/media/parsers/parse_helpers.py",
-        # Single system_settings read helper — low ROI, deferred.
-        "app/services/media/transcode/transcode_service.py",
         # Storyboard workflow: the 2 DB persist steps are now async-native; the
         # 6 remaining run_async sites wrap AI / export SERVICES (not repos) — a
         # service-bridge, not a §2.4b DB bridge. Deferred.

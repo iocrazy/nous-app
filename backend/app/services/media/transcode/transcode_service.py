@@ -176,7 +176,7 @@ class TranscodeService:
         failure in Activity Logs.
         """
         # Master toggle check (read from DB for Celery worker compatibility)
-        db_enabled = self._get_db_setting("transcode_enabled")
+        db_enabled = await self._get_db_setting("transcode_enabled")
         is_enabled = (
             db_enabled.lower() in ("true", "1", "yes")
             if db_enabled
@@ -203,7 +203,7 @@ class TranscodeService:
         # of the admin threshold. Restoring the gate here covers every
         # trigger path (DBOS workflow, chained-from-download, manual
         # re-transcode). min_size_mb = 0 means "transcode everything".
-        min_size_raw = self._get_db_setting("transcode_min_size_mb")
+        min_size_raw = await self._get_db_setting("transcode_min_size_mb")
         try:
             min_size_mb = (
                 int(min_size_raw)
@@ -325,7 +325,7 @@ class TranscodeService:
                     )
 
                     # Phase 2: Enhancement tiers (non-blocking for user)
-                    applicable = self._select_tiers(width, height)
+                    applicable = await self._select_tiers(width, height)
                     if applicable:
                         try:
                             for tier in applicable:
@@ -370,7 +370,7 @@ class TranscodeService:
             # Standard Path: full encoding (non-H.264 or passthrough failed)
             # ============================================================
             # Select applicable tiers
-            applicable = self._select_tiers(width, height)
+            applicable = await self._select_tiers(width, height)
             if not applicable:
                 logger.info(f"No applicable tiers for {width}x{height}, skipping")
                 await self.repo.update_version(
@@ -669,13 +669,16 @@ class TranscodeService:
     # Tier selection
     # ------------------------------------------------------------------ #
 
-    def _select_tiers(self, width: int, height: int) -> List[TranscodeTier]:
+    async def _select_tiers(self, width: int, height: int) -> List[TranscodeTier]:
         """Select tiers at or below the source resolution, filtered by admin config.
 
         Reads from system_settings DB table (not in-memory settings) so Celery
-        workers pick up admin changes without restart.
+        workers pick up admin changes without restart. §2.4b: async — awaits the
+        (now async) ``_get_db_setting`` on the caller's loop.
         """
-        tiers_csv = self._get_db_setting("transcode_tiers") or settings.TRANSCODE_TIERS
+        tiers_csv = (
+            await self._get_db_setting("transcode_tiers")
+        ) or settings.TRANSCODE_TIERS
         enabled_names = {t.strip().lower() for t in tiers_csv.split(",") if t.strip()}
         applicable = []
         for tier in TIERS:
@@ -684,27 +687,23 @@ class TranscodeService:
         return applicable
 
     @staticmethod
-    def _get_db_setting(key: str) -> Optional[str]:
-        """Read a single value from system_settings (sync-safe for Celery/DBOS).
+    async def _get_db_setting(key: str) -> Optional[str]:
+        """Read a single value from system_settings.
 
-        Direct PG via the SQLAlchemy engine (Issue #199). The old supabase-py
-        path made TWO separate run_async() calls — the first created the
-        per-loop supabase client, run_async's drain closed it, the second
-        reused the now-closed client → "Cannot send a request, as the client
-        has been closed". The engine has no per-loop client to close, so a
-        single run_async is clean.
+        Direct PG via the SQLAlchemy engine (Issue #199). §2.4b: async-native
+        — awaited from the async ``transcode_version`` / ``_select_tiers`` on
+        their own event loop, instead of bridging ``db_engine.fetch_val``
+        through a fresh-loop ``run_async`` shim (ORM-incompatible: asyncpg
+        connections are event-loop-bound).
         """
         try:
             from app.db import engine as db_engine
-            from app.tasks.utils import run_async
 
             if not db_engine.is_configured():
                 return None
-            return run_async(
-                db_engine.fetch_val(
-                    "SELECT value FROM public.system_settings WHERE key = :k",
-                    {"k": key},
-                )
+            return await db_engine.fetch_val(
+                "SELECT value FROM public.system_settings WHERE key = :k",
+                {"k": key},
             )
         except Exception as e:
             logger.warning(f"[Transcode] Failed to read system_settings.{key}: {e}")
