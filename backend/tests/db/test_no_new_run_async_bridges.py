@@ -52,18 +52,19 @@ _ALLOWLIST: frozenset[str] = frozenset(
         #     httpx-HEAD inside sync @DBOS.step) → file stays on the list.
         "app/tasks/download_helpers.py",
         "app/tasks/download_strategies.py",
-        # Media parse path: the pure-DB steps save_media_to_db / auto_tag_media
-        # are now async-native (§2.4b — parse_workflow + save_media_step /
-        # auto_tag_step converted to async). The remaining run_async here is the
-        # genuine sync-lib boundary: _try_lighthttp / _try_abogus /
-        # _try_drissionpage / fetch_and_parse_ytdlp / fetch_and_parse_qishui (the
-        # douyin/ytdlp/qishui parser subprocess chain) + _get_douyin_method_flags
-        # (read inside the sync fetch_and_parse_step) → file stays on the list.
+        # Media parse path: parser subprocess chain inside sync @DBOS.step.
         "app/services/media/parsers/parse_helpers.py",
         # Storyboard workflow: the 2 DB persist steps are now async-native; the
         # 6 remaining run_async sites wrap AI / export SERVICES (not repos) — a
         # service-bridge, not a §2.4b DB bridge. Deferred.
         "app/workflows/storyboard.py",
+        # AI chat wiring: the memory-harvester side_effect closure (_fire) is a
+        # SYNC zero-arg callable per the HookResult.side_effect contract, invoked
+        # by AgentRunner ON the event loop. It dispatches the memory-write
+        # WORKFLOW via start_workflow_routed → a sync→async DISPATCH bridge (NOT
+        # a DB/repo bridge). run_async is the loop-safe way to do it (replaced a
+        # bare asyncio.run that crashed under the running loop — audit 2026-06-08).
+        "app/services/ai/chat/ai_library_chat_wiring.py",
     }
 )
 

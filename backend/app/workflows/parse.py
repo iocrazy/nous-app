@@ -177,33 +177,27 @@ def fetch_and_parse_step(
 
 
 @DBOS.step()
-async def save_media_step(
+def save_media_step(
     parsed_data: dict[str, Any], platform_id: str, video_bool: bool
 ) -> Optional[dict[str, Any]]:
-    """Insert/update parsed_media row. Returns the saved record or None.
-
-    §2.4b: async-native — awaits the (now async) save_media_to_db on the
-    workflow's own loop instead of bridging the DB write through a fresh-loop
-    run_async shim. This is a pure-DB step (no sync-lib), so async is clean."""
+    """Insert/update parsed_media row. Returns the saved record or None."""
     from app.services.media.parsers.parse_helpers import save_media_to_db
 
-    return await save_media_to_db(parsed_data, platform_id, video_bool)
+    return save_media_to_db(parsed_data, platform_id, video_bool)
 
 
 @DBOS.step()
-async def auto_tag_step(
+def auto_tag_step(
     video_db_id: Any,
     platform_id: str,
     aweme_detail: dict[str, Any],
     title: str,
     description: str,
 ) -> None:
-    """Best-effort hashtag → tag classification. Never raises.
-
-    §2.4b: async-native (pure-DB step; awaits the now-async auto_tag_media)."""
+    """Best-effort hashtag → tag classification. Never raises."""
     from app.services.media.parsers.parse_helpers import auto_tag_media
 
-    await auto_tag_media(video_db_id, platform_id, aweme_detail, title, description)
+    auto_tag_media(video_db_id, platform_id, aweme_detail, title, description)
 
 
 def dispatch_download_step(
@@ -586,7 +580,7 @@ def mark_parse_processing_step(workflow_id: str) -> None:
 
 
 @DBOS.workflow()
-async def parse_workflow(
+def parse_workflow(
     url: str,
     user_id: str,
     *,
@@ -602,12 +596,6 @@ async def parse_workflow(
     Recommended workflow_id: `f"parse-{user_id}-{hash(url)}"` so a
     duplicate user-click within the same retry budget short-circuits
     to the cached result.
-
-    §2.4b: async workflow (same proven pattern as soda/download/extract_audio
-    workflows — async @DBOS.workflow dispatched via Queue.enqueue). Sync
-    @DBOS.steps (fetch_and_parse_step etc., which run the parser sync-lib) are
-    called WITHOUT await — DBOS runs them; only the now-async pure-DB steps
-    (save_media_step / auto_tag_step) are awaited.
     """
     # 0. Mark task_tracking.phase='processing' so admin counters /
     # TaskMonitor "WORKER" stat reflect that this workflow is actually
@@ -664,7 +652,7 @@ async def parse_workflow(
     update_parse_subtitle_step(DBOS.workflow_id, "Saving metadata...")
 
     # 3. Save metadata — same short-circuit-by-raise rule.
-    saved_video = await save_media_step(parsed_data, platform_id, video_bool)
+    saved_video = save_media_step(parsed_data, platform_id, video_bool)
     if not saved_video:
         raise RuntimeError(
             f"save_metadata_only failed for {platform_id}: see media_repository.create logs"
@@ -690,7 +678,7 @@ async def parse_workflow(
 
     # 4. Auto-tag (non-blocking — step swallows errors)
     if video_db_id:
-        await auto_tag_step(
+        auto_tag_step(
             video_db_id,
             platform_id,
             aweme_detail,
