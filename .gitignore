@@ -17,7 +17,9 @@ reference/
 release/
 /tasks/
 docs/plans/
-docs/superpowers/
+# docs/superpowers/ — plans & specs are now version-controlled (archival); keep scratch dirs ignored below
+docs/superpowers/research/
+docs/superpowers/**/.cache/
 docs/MediaHub-*
 
 # Python
