@@ -132,7 +132,8 @@
     "optional": "optional",
     "all": "All",
     "back": "Back",
-    "creating": "Creating..."
+    "creating": "Creating...",
+    "done": "Done"
   },
   "parser": {
     "title": "Media Parser",
