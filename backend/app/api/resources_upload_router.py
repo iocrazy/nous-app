@@ -17,7 +17,6 @@ from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.library.permission_service import PermissionService
 from app.services.library.resources_service import ResourcesService
-from app.services.media.render.thumbnail_service import ThumbnailService
 
 # All endpoints require auth (AuthDep) and are resources-dedicated → establish
 # the ambient tenant Scope at the ROUTER level. Inert until SCOPE_ENFORCE_RESOURCES.
@@ -181,19 +180,33 @@ async def upload_resource(
             except Exception:
                 pass
 
-        # Generate thumbnail synchronously so it's ready for the frontend
+        # Post-processing (ffprobe metadata + thumbnail + transcode) runs
+        # asynchronously in upload_postprocess_workflow so the request returns
+        # as soon as the bytes are written + the resource row exists. The
+        # frontend (ResourcesContext) reloads on the resources UPDATE the
+        # workflow writes (thumbnail_path), so metadata/thumbnail fill in live.
         if result.get("file_path") and result.get("mime_type"):
             try:
-                thumbnail_svc = ThumbnailService()
-                thumb_path = await thumbnail_svc.generate_thumbnail(
-                    resource_id=str(result["id"]),
-                    file_path=result["file_path"],
-                    mime_type=result.get("mime_type", ""),
+                from app.services.infra.dbos_orchestrator import (
+                    start_workflow_routed,
                 )
-                if thumb_path:
-                    result["thumbnail_path"] = thumb_path
+                from app.workflows.upload_postprocess import (
+                    upload_postprocess_workflow,
+                )
+
+                await start_workflow_routed(
+                    "upload_postprocess",
+                    dbos_workflow_callable=upload_postprocess_workflow,
+                    dbos_workflow_kwargs={
+                        "resource_id": str(result["id"]),
+                        "file_path": result["file_path"],
+                        "file_type": result.get("file_type", ""),
+                        "mime_type": result.get("mime_type", ""),
+                        "user_id": auth.user_id,
+                    },
+                )
             except Exception as e:
-                logger.warning(f"Thumbnail generation failed (non-fatal): {e}")
+                logger.warning(f"[Upload] postprocess dispatch failed (non-fatal): {e}")
 
         return {"success": True, "data": result}
     except HTTPException:

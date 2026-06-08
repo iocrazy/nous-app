@@ -55,7 +55,9 @@ from app.db.scope import Scope, request_scope
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-async def probe_metadata_step(file_path: str, file_type: str) -> dict[str, Any]:
+async def upload_postprocess_probe_step(
+    file_path: str, file_type: str
+) -> dict[str, Any]:
     """Probe media metadata (duration/resolution via ffprobe for
     video/audio, resolution via Pillow for image).
 
@@ -78,7 +80,7 @@ async def probe_metadata_step(file_path: str, file_type: str) -> dict[str, Any]:
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-async def generate_thumbnail_step(
+async def upload_postprocess_thumbnail_step(
     resource_id: str, file_path: str, mime_type: str
 ) -> Optional[str]:
     """Generate a thumbnail next to the source file. Returns the relative
@@ -143,7 +145,7 @@ async def upload_postprocess_workflow(
     async with request_scope(Scope(user_id=user_id)):
         # ── Phase A: metadata probe + persist (non-fatal) ──────────────
         try:
-            metadata = await probe_metadata_step(file_path, file_type)
+            metadata = await upload_postprocess_probe_step(file_path, file_type)
             if metadata:
                 await svc.repo.update_resource(resource_id, metadata)
                 version = await svc.repo.get_version_by_number(resource_id, 1)
@@ -157,7 +159,9 @@ async def upload_postprocess_workflow(
 
         # ── Phase B: thumbnail (non-fatal) ─────────────────────────────
         try:
-            thumb = await generate_thumbnail_step(resource_id, file_path, mime_type)
+            thumb = await upload_postprocess_thumbnail_step(
+                resource_id, file_path, mime_type
+            )
             if thumb:
                 await svc.repo.update_resource(resource_id, {"thumbnail_path": thumb})
         except Exception as e:
