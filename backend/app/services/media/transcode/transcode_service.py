@@ -701,10 +701,17 @@ class TranscodeService:
 
             if not db_engine.is_configured():
                 return None
-            return await db_engine.fetch_val(
+            value = await db_engine.fetch_val(
                 "SELECT value FROM public.system_settings WHERE key = :k",
                 {"k": key},
             )
+            # system_settings.value is jsonb: a JSON boolean/number deserializes
+            # to a Python bool/int, not a str. Every consumer here treats the
+            # result as a string (`.lower()`, `.split(",")`, int(...)), so a
+            # setting saved as jsonb `true` (e.g. transcode_enabled) would crash
+            # with "'bool' object has no attribute 'lower'". Honor the declared
+            # Optional[str] contract by coercing non-null values to str.
+            return None if value is None else str(value)
         except Exception as e:
             logger.warning(f"[Transcode] Failed to read system_settings.{key}: {e}")
         return None
