@@ -89,6 +89,21 @@ export async function updateResource(
   return json.data;
 }
 
+export async function setResourceChorus(
+  resourceId: string,
+  chorusMs: number | null,
+): Promise<Resource> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}/chorus`, {
+    method: 'PUT',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chorus_start_ms: chorusMs }),
+  });
+  if (!response.ok) throw new Error('Failed to set chorus');
+  const json = await response.json();
+  return json.data;
+}
+
 export async function trashFolder(id: string): Promise<void> {
   await apiClient.post(`/api/v1/resources/folders/${id}/trash`);
 }

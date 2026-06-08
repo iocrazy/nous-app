@@ -30,6 +30,7 @@ from app.core.scope_guards import verify_scope_access
 from app.db.scope import Scope, request_scope, system_request_scope
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.resources import (
+    ChorusUpdate,
     ResourceMoveRequest,
     ResourceTagRequest,
     ResourceUpdate,
@@ -720,6 +721,35 @@ async def get_resource_lyrics(
     if not await check_media_access(resource_id, auth.user_id, None):
         raise HTTPException(status_code=403, detail="Access denied")
     return {"success": True, "data": resource.get("lyrics_json")}
+
+
+@router.put("/{resource_id}/chorus")
+async def set_resource_chorus(
+    resource_id: str,
+    data: ChorusUpdate,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Set or clear (null) the chorus marker for an uploaded audio resource."""
+    from app.api.media_permissions import check_media_access
+
+    repo = ResourcesRepository()
+    resource = await repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if (resource.get("source_type") != "upload") or not (
+        resource.get("mime_type") or ""
+    ).startswith("audio/"):
+        raise HTTPException(
+            status_code=400, detail="Chorus is only settable on uploaded audio"
+        )
+
+    result = await repo.update_resource(
+        resource_id, {"chorus_start_ms": data.chorus_start_ms}
+    )
+    return {"success": True, "data": result}
 
 
 @router.post("/by-platform-id/{platform_id}/trash")

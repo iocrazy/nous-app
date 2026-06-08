@@ -43,6 +43,13 @@ interface AudioHeroProps {
    * picker). When absent, the cover is a plain, non-interactive image.
    */
   onCoverClick?: () => void;
+  /** Forwarded to AudioWaveformPlayer — enables chorus Set/Clear controls. */
+  chorusEditable?: boolean;
+  /** Forwarded to AudioWaveformPlayer — set (sec) or clear (null) the chorus. */
+  onChorusChange?: (sec: number | null) => void;
+  /** Forwarded i18n labels for the chorus controls. */
+  setChorusLabel?: string;
+  clearChorusLabel?: string;
 }
 
 /**
@@ -64,6 +71,10 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
   currentTime,
   sourcePlatform,
   onCoverClick,
+  chorusEditable,
+  onChorusChange,
+  setChorusLabel,
+  clearChorusLabel,
 }) => {
   const t = theme ?? buildSodaTheme(null, src);
   const canFetchLyrics = sourcePlatform === 'qishui';
@@ -206,6 +217,10 @@ export const AudioHero: React.FC<AudioHeroProps> = ({
           filename={title || 'Audio'}
           duration={duration}
           chorusStartSec={chorusStartSec}
+          chorusEditable={chorusEditable}
+          onChorusChange={onChorusChange}
+          setChorusLabel={setChorusLabel}
+          clearChorusLabel={clearChorusLabel}
           onTimeUpdate={onTimeUpdate}
           theme={t}
         />

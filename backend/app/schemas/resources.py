@@ -37,6 +37,12 @@ class ResourceUpdate(BaseModel):
     )
 
 
+class ChorusUpdate(BaseModel):
+    """Body for PUT /resources/{id}/chorus. None clears the marker."""
+
+    chorus_start_ms: Optional[int] = Field(None, ge=0)
+
+
 class ResourceMoveRequest(BaseModel):
     """Request body for moving a resource to a folder."""
 

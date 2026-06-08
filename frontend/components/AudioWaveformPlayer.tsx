@@ -29,6 +29,13 @@ interface AudioWaveformPlayerProps {
    * chip) can own the value/cycle. Ignored in `'full'` layout.
    */
   playbackRate?: number;
+  /** When true, render Set/Clear chorus controls in the full-layout control bar. */
+  chorusEditable?: boolean;
+  /** Set (seconds) or clear (null) the chorus marker. */
+  onChorusChange?: (sec: number | null) => void;
+  /** Labels for the chorus controls (i18n supplied by the caller). */
+  setChorusLabel?: string;
+  clearChorusLabel?: string;
 }
 
 const BAR_COUNT = 200;
@@ -48,6 +55,10 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
   theme,
   layout = 'full',
   playbackRate: externalPlaybackRate,
+  chorusEditable,
+  onChorusChange,
+  setChorusLabel = 'Set chorus',
+  clearChorusLabel = 'Clear',
 }) => {
   const isCompact = layout === 'compact';
   // Compact lives in a narrow row, so 200 hair-thin bars compress into an
@@ -513,6 +524,26 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
 
         {/* Spacer — filename intentionally not shown (pushes controls right) */}
         <span className="flex-1 min-w-0" />
+
+        {/* Chorus set/clear — uploaded-audio only (opt-in via chorusEditable) */}
+        {chorusEditable &&
+          (chorusStartSec === undefined ? (
+            <button
+              type="button"
+              onClick={() => onChorusChange?.(currentTime)}
+              className="px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors whitespace-nowrap"
+            >
+              {setChorusLabel}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onChorusChange?.(null)}
+              className="px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors whitespace-nowrap"
+            >
+              {clearChorusLabel}
+            </button>
+          ))}
 
         {/* Playback rate */}
         <button
