@@ -35,11 +35,26 @@ Fidelity contract (the swap must be invisible to all call sites):
     returns enum MEMBERS; the prior impls returned bare ``str``. Every read
     of a resources row is funnelled through ``_resources_row_to_dict`` which
     unwraps enums to ``.value`` (see ``_plain``).
+  - VALUE-TYPE read-parity (strategy-C — AUTHZ-CRITICAL): the ORM read
+    helpers (``_orm_obj_to_dict`` / RETURNING ``.mappings()``) return NATIVE
+    Python types — ``uuid.UUID`` for uuid columns (creator_id / created_by /
+    added_by / uploaded_by) and ``datetime`` for timestamptz columns
+    (created_at / updated_at / trashed_at / transcode_at). The legacy REST
+    (PostgREST) repo returns these as ``str``. Consumers compare WITHOUT
+    coercion — e.g. ``resource.get("creator_id") != auth.user_id`` (ai_router)
+    and ``resource["creator_id"] != user_id`` (resources_service), where the
+    user id is a ``str`` — so a native ``UUID`` makes ``!=`` ALWAYS true and
+    the owner is wrongly DENIED (silent authz break). Every dict the repo
+    returns is funnelled through ``_rest_parity`` (uuid → str, datetime → ISO
+    str), recursing into nested ``resource`` / ``parsed_media`` sub-dicts, so
+    the ORM dict is a true drop-in for the REST baseline. BIGINT ids stay int
+    (int on both sides).
 """
 
 from __future__ import annotations
 
 import json
+import uuid
 from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -65,18 +80,72 @@ _RESOURCE_VERSIONS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ResourceVersions
 _FOLDERS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(Folders)
 
 
+def _to_rest_value(value: Any) -> Any:
+    """Coerce ONE native ORM read value to its PostgREST/REST wire form.
+
+    Strategy-C value-type parity (AUTHZ-CRITICAL): the ORM read helpers hand
+    back native ``uuid.UUID`` / ``datetime`` objects where the legacy REST
+    (PostgREST) repo returned ``str``. Generic ``isinstance`` sweep (NOT a
+    column-name allowlist) so EVERY uuid/datetime field is covered without
+    enumeration, recursing into nested dicts and lists of dicts (e.g. the
+    embedded ``resource`` / ``parsed_media`` sub-dicts). BIGINT ids are ``int``
+    on both sides → pass through untouched. Enums are already unwrapped to
+    ``.value`` upstream by ``_plain`` (strings pass through here, so enum
+    read-parity is preserved). ``None`` and every other scalar pass through."""
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        # tz-aware UTC datetime → ``...+00:00`` matches PostgREST. (PostgREST
+        # trims trailing zeros in microseconds; that residual cosmetic diff is
+        # accepted + pre-existing across the rollout — we do NOT replicate it.)
+        return value.isoformat()
+    if isinstance(value, dict):
+        return _rest_parity(value)
+    if isinstance(value, list):
+        return [_to_rest_value(v) for v in value]
+    return value
+
+
+def _rest_parity(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a NEW dict (immutable — never mutate the input) with strategy-C
+    value-type coercion applied to every value: uuid → str, datetime → ISO
+    str, recursing into nested dicts / lists of dicts. See ``_to_rest_value``.
+
+    Applied at EVERY dict-returning boundary of this repo so the ORM dict is a
+    true drop-in for the REST baseline (fixes the 6 ``creator_id`` authz
+    comparisons in ai_router / resources_service that break on a native UUID)."""
+    return {k: _to_rest_value(v) for k, v in d.items()}
+
+
 def _resources_row_to_dict(obj: Any) -> Dict[str, Any]:
-    """SELECT *-shaped dict for a ``resources`` ORM row (enum-safe)."""
-    return _orm_obj_to_dict(obj, _RESOURCES_NAME_TO_ATTR)
+    """SELECT *-shaped dict for a ``resources`` ORM row (enum + value safe)."""
+    return _rest_parity(_orm_obj_to_dict(obj, _RESOURCES_NAME_TO_ATTR))
+
+
+def _resource_item_row_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for a ``resource_items`` ORM row (value safe)."""
+    return _rest_parity(_orm_obj_to_dict(obj, _RESOURCE_ITEMS_NAME_TO_ATTR))
+
+
+def _version_row_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for a ``resource_versions`` ORM row (value safe)."""
+    return _rest_parity(_orm_obj_to_dict(obj, _RESOURCE_VERSIONS_NAME_TO_ATTR))
+
+
+def _folder_row_to_dict(obj: Any) -> Dict[str, Any]:
+    """SELECT *-shaped dict for a ``folders`` ORM row (value safe)."""
+    return _rest_parity(_orm_obj_to_dict(obj, _FOLDERS_NAME_TO_ATTR))
 
 
 def _mappings_dict(row: Any) -> Dict[str, Any]:
-    """Plain dict from a RETURNING ``.mappings()`` row, enum-unwrapped.
+    """Plain dict from a RETURNING ``.mappings()`` row, enum- and value-safe.
 
     RETURNING rows still pass through the column type result processors, so
     an ``Enum`` column comes back as an enum MEMBER here too — funnel through
-    ``_plain`` for the same bare-str parity as reads."""
-    return {k: _plain(v) for k, v in dict(row).items()}
+    ``_plain`` for the same bare-str parity as reads — and uuid/datetime
+    columns come back native, so funnel through ``_rest_parity`` for the same
+    REST wire shape (uuid → str, datetime → ISO str)."""
+    return _rest_parity({k: _plain(v) for k, v in dict(row).items()})
 
 
 class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
@@ -273,18 +342,23 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
             if _plain(status) != "completed":
                 return None
 
-            return {
-                "id": row["r_id"],
-                "media_id": row["r_media_id"],
-                "parsed_media": {
-                    "id": row["p_id"],
-                    "platform_id": row["platform_id"],
-                    "original_url": row["original_url"],
-                    "video_download_status": _plain(row["video_download_status"]),
-                    "image_download_status": _plain(row["image_download_status"]),
-                    "media_type": row["media_type"],
-                },
-            }
+            # ids/strings/statuses only (no uuid/datetime here) — _rest_parity is
+            # a no-op for the current shape, applied for uniformity + safety if
+            # the projection ever grows a uuid/timestamptz column.
+            return _rest_parity(
+                {
+                    "id": row["r_id"],
+                    "media_id": row["r_media_id"],
+                    "parsed_media": {
+                        "id": row["p_id"],
+                        "platform_id": row["platform_id"],
+                        "original_url": row["original_url"],
+                        "video_download_status": _plain(row["video_download_status"]),
+                        "image_download_status": _plain(row["image_download_status"]),
+                        "media_type": row["media_type"],
+                    },
+                }
+            )
         except Exception as e:
             logger.debug(
                 f"[ResourcesRepo] L2 dedup probe failed url={url[:40]} "
@@ -504,7 +578,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .where(Resources.creator_id == creator_id)
                     .where(Resources.is_trashed.is_(False))
                 )
-                return [dict(r) for r in result.mappings().all()]
+                return [_rest_parity(dict(r)) for r in result.mappings().all()]
         except Exception as e:
             logger.error(f"Failed to find resources by hash: {e}")
             return []
@@ -534,9 +608,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     stmt = stmt.where(ResourceItems.folder_id.is_(None))
                 result = await session.execute(stmt.limit(1))
                 row = result.scalars().first()
-                return (
-                    _orm_obj_to_dict(row, _RESOURCE_ITEMS_NAME_TO_ATTR) if row else None
-                )
+                return _resource_item_row_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to find resource_item: {e}")
             return None
@@ -629,9 +701,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .limit(1)
                 )
                 row = result.scalars().first()
-                return (
-                    _orm_obj_to_dict(row, _RESOURCE_ITEMS_NAME_TO_ATTR) if row else None
-                )
+                return _resource_item_row_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get resource_item: {e}")
             return None
@@ -659,9 +729,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     stmt = stmt.where(ResourceItems.folder_id.is_(None))
                 result = await session.execute(stmt.limit(1))
                 row = result.scalars().first()
-                return (
-                    _orm_obj_to_dict(row, _RESOURCE_ITEMS_NAME_TO_ATTR) if row else None
-                )
+                return _resource_item_row_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get resource_item in folder: {e}")
             return None
@@ -677,9 +745,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .limit(1)
                 )
                 row = result.scalars().first()
-                return (
-                    _orm_obj_to_dict(row, _RESOURCE_ITEMS_NAME_TO_ATTR) if row else None
-                )
+                return _resource_item_row_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get first resource_item: {e}")
             return None
@@ -924,7 +990,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                 if isinstance(resource, str):
                     row["resource"] = json.loads(resource)
                 row["created_at"] = row.pop("i_created_at")
-            return rows
+            return [_rest_parity(row) for row in rows]
         except Exception as e:
             logger.error(f"Failed to get resource items: {e}")
             return []
@@ -947,7 +1013,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .where(Resources.is_trashed.is_(True))
                     .where(Resources.trashed_at < cutoff)
                 )
-                return [dict(r) for r in result.mappings().all()]
+                return [_rest_parity(dict(r)) for r in result.mappings().all()]
         except Exception as e:
             logger.error(f"Failed to get expired trashed resources: {e}")
             return []
@@ -980,7 +1046,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                 if isinstance(resource, str):
                     row["resource"] = json.loads(resource)
                 row["created_at"] = row.pop("i_created_at")
-            return rows
+            return [_rest_parity(row) for row in rows]
         except Exception as e:
             logger.error(f"Failed to get trashed resources: {e}")
             return []
@@ -1022,10 +1088,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .where(ResourceVersions.resource_id == self._bigint(resource_id))
                     .order_by(ResourceVersions.version_number.desc())
                 )
-                return [
-                    _orm_obj_to_dict(r, _RESOURCE_VERSIONS_NAME_TO_ATTR)
-                    for r in result.scalars().all()
-                ]
+                return [_version_row_to_dict(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to get versions for resource {resource_id}: {e}")
             return []
@@ -1039,11 +1102,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .limit(1)
                 )
                 row = result.scalars().first()
-                return (
-                    _orm_obj_to_dict(row, _RESOURCE_VERSIONS_NAME_TO_ATTR)
-                    if row
-                    else None
-                )
+                return _version_row_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get version {version_id}: {e}")
             return None
@@ -1060,11 +1119,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .limit(1)
                 )
                 row = result.scalars().first()
-                return (
-                    _orm_obj_to_dict(row, _RESOURCE_VERSIONS_NAME_TO_ATTR)
-                    if row
-                    else None
-                )
+                return _version_row_to_dict(row) if row else None
         except Exception as e:
             logger.error(
                 f"Failed to get version {version_number} for {resource_id}: {e}"
@@ -1118,7 +1173,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .where(ResourceVersions.transcode_status.is_(None))
                     .where(ResourceVersions.file_path.isnot(None))
                 )
-                return [dict(r) for r in result.mappings().all()]
+                return [_rest_parity(dict(r)) for r in result.mappings().all()]
         except Exception as e:
             logger.error(f"Failed to get untranscoded video versions: {e}")
             return []
@@ -1166,10 +1221,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .where(Folders.is_trashed.is_(True))
                     .order_by(Folders.trashed_at.desc())
                 )
-                return [
-                    _orm_obj_to_dict(r, _FOLDERS_NAME_TO_ATTR)
-                    for r in result.scalars().all()
-                ]
+                return [_folder_row_to_dict(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to get trashed folders: {e}")
             return []
@@ -1188,10 +1240,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     stmt = stmt.where(Folders.is_trashed.is_(False))
                 stmt = stmt.order_by(Folders.sort_order.asc())
                 result = await session.execute(stmt)
-                return [
-                    _orm_obj_to_dict(r, _FOLDERS_NAME_TO_ATTR)
-                    for r in result.scalars().all()
-                ]
+                return [_folder_row_to_dict(r) for r in result.scalars().all()]
         except Exception as e:
             logger.error(f"Failed to get folders: {e}")
             return []
@@ -1205,7 +1254,7 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .limit(1)
                 )
                 row = result.scalars().first()
-                return _orm_obj_to_dict(row, _FOLDERS_NAME_TO_ATTR) if row else None
+                return _folder_row_to_dict(row) if row else None
         except Exception as e:
             logger.error(f"Failed to get folder {folder_id}: {e}")
             return None
