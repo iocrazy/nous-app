@@ -37,7 +37,7 @@ New column on `resources` (migration `273_resource_chorus_start.sql`):
 - `chorus_start_ms integer NULL` — chorus start in milliseconds (same unit as `metadata.chorus.start`). `NULL` = no chorus.
 - `NOTIFY pgrst, 'reload schema';` at the end (PostgREST visibility).
 
-Add `chorus_start_ms?: number | null` to the `Resource` type and the two sibling Resource-shaped interfaces in `frontend/types.ts`.
+Add `chorus_start_ms?: number | null` to the three Resource-shaped interfaces in `frontend/types.ts` (the `Resource` type plus its two siblings — the same three that carry `audio_bitrate_kbps`).
 
 ## Backend
 
@@ -61,11 +61,18 @@ New optional props:
 - `chorusEditable?: boolean`
 - `onChorusChange?: (sec: number | null) => void`
 
-Behavior when `chorusEditable` is true (else: today's read-only marker, unchanged):
-- **No chorus** (`chorusStartSec` undefined): render a small "Set chorus" button near the waveform → calls `onChorusChange(currentTime)` (the player owns `currentTime`).
-- **Chorus set**: render the existing amber marker **plus** a small "Clear" button → calls `onChorusChange(null)`.
+`AudioWaveformPlayer` has two layouts: `full` (default) and `compact`. `AudioHero`
+passes no `layout`, so uploaded audio renders the **`full`** layout on **both
+desktop and mobile**; the `compact` layout is used only by `MobileAudioScreen`
+(download mobile player, out of scope). Therefore the chorus controls are added to
+the **`full` layout's bottom control bar only** — the compact layout is left
+unchanged.
 
-The buttons live next to the waveform so they appear "in the playback area" on both desktop and mobile. `DownloadDetailPage` / `MobileAudioScreen` pass neither prop → no change.
+Behavior when `chorusEditable` is true (else: today's read-only marker, unchanged):
+- **No chorus** (`chorusStartSec` undefined): the bottom control bar shows a small "Set chorus" button → calls `onChorusChange(currentTime)` (the player owns `currentTime`; if playback hasn't started, `currentTime` is `0`, which stamps the very start — acceptable, no special-casing).
+- **Chorus set**: the existing amber marker renders **plus** a "Clear" button in the bottom control bar → calls `onChorusChange(null)`.
+
+`DownloadDetailPage` / `MobileAudioScreen` pass neither prop → no change.
 
 ### `AudioHero` (pass-through)
 Forward `chorusEditable` and `onChorusChange` to `AudioWaveformPlayer` (it already forwards `chorusStartSec` and `onTimeUpdate`).
