@@ -56,6 +56,7 @@ import {
   uploadResourceLyrics,
   uploadResourceCover,
   setResourceChorus,
+  trashResource,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
@@ -73,6 +74,7 @@ import { ResourceReviewPanel } from './ResourceReviewPanel';
 import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioHero } from './AudioHero';
+import { MobileAudioUpload } from './MobileAudioUpload';
 import { LyricsView } from './LyricsView';
 import { fetchComments } from '../services/reviewService';
 import {
@@ -799,6 +801,22 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     navigate(-1);
   }, [navigate]);
 
+  // Trash the resource (soft delete), then return to the previous view. Resolves
+  // the scope locator from the resource_items context (same source the sibling
+  // loader uses) since trashResource is scope-gated.
+  const handleDelete = useCallback(async () => {
+    try {
+      const ctx = await fetchResourceContext(resourceId);
+      if (!ctx) throw new Error('Missing resource context');
+      await trashResource(resourceId, ctx.scope_id, ctx.folder_id);
+      addToast(t('resources.movedToTrash', 'Moved to Recycle Bin'), 'success');
+      navigate(-1);
+    } catch (err) {
+      console.error('Failed to delete resource:', err);
+      addToast('Failed to delete', 'error');
+    }
+  }, [resourceId, navigate, addToast, t]);
+
   // Loading state
   if (loading) {
     return (
@@ -835,6 +853,20 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     : versions.find((v) => v.version_number === resource.current_version);
   const transcodeStatus = viewingVersion?.transcode_status;
   const fileExt = getFileExtension(resource.filename);
+
+  // Mobile uploaded-audio → the immersive single-surface layout (the same shell
+  // the download detail uses), replacing the preview + inspector entirely.
+  if (!isDesktop && isUploadedAudio && fileUrl) {
+    return (
+      <MobileAudioUpload
+        resource={resource}
+        fileUrl={fileUrl}
+        onResourceUpdated={setResource}
+        onBack={handleBack}
+        onDelete={handleDelete}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">

@@ -365,7 +365,10 @@
       "setChorus": "Set chorus",
       "clearChorus": "Clear",
       "chorusSet": "Chorus marked",
-      "chorusCleared": "Chorus removed"
+      "chorusCleared": "Chorus removed",
+      "replaceCover": "Replace cover",
+      "uploadLyrics": "Upload .lrc",
+      "copyLink": "Copy link"
     },
     "compareVersions": "Compare Versions",
     "details": "Details",

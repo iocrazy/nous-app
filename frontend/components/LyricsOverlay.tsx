@@ -1,10 +1,17 @@
 import React, { useEffect } from 'react';
 import { ChevronDown, Music } from 'lucide-react';
 import SodaLyricsTab from './SodaLyricsTab';
+import { LyricsView } from './LyricsView';
+import type { LyricLine } from '../services/lyricsService';
 import type { SodaTheme } from '../utils/sodaTheme';
 
 interface LyricsOverlayProps {
-  mediaId: string;
+  /** Download path: media item whose lyrics SodaLyricsTab fetches by id. */
+  mediaId?: string;
+  /** Upload path: lyric lines already in hand (no mediaId / no fetch). When
+   * provided, the overlay renders these directly via LyricsView instead of
+   * delegating to SodaLyricsTab. */
+  lines?: LyricLine[];
   currentTime?: number;
   title?: string;
   subtitle?: string;
@@ -23,6 +30,7 @@ interface LyricsOverlayProps {
  */
 export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   mediaId,
+  lines,
   currentTime,
   title,
   subtitle,
@@ -31,6 +39,10 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
   onClose,
   sourcePlatform,
 }) => {
+  // Upload path: lyrics passed in directly (no mediaId, no fetch). Falls back to
+  // the SodaLyricsTab download path (fetch by mediaId + qishui Fetch button) when
+  // no lines are supplied.
+  const usePassedLines = lines !== undefined;
   // Nice-to-have: lock body scroll while the overlay is open.
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -98,7 +110,16 @@ export const LyricsOverlay: React.FC<LyricsOverlayProps> = ({
 
       {/* Body: scrolling synced lyrics */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+24px)]">
-        <SodaLyricsTab mediaId={mediaId} currentTime={currentTime} theme={theme} variant="bare" sourcePlatform={sourcePlatform} />
+        {usePassedLines ? (
+          // Upload path: render the in-hand lines directly. Match the bare
+          // top/bottom spacing SodaLyricsTab uses for its bare variant so the
+          // first line sits under the header and the last can scroll to center.
+          <div className="pt-4 pb-[55vh] space-y-6">
+            <LyricsView lines={lines} currentTime={currentTime} theme={theme} variant="bare" />
+          </div>
+        ) : (
+          <SodaLyricsTab mediaId={mediaId as string} currentTime={currentTime} theme={theme} variant="bare" sourcePlatform={sourcePlatform} />
+        )}
       </div>
     </div>
   );
