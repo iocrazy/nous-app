@@ -55,6 +55,7 @@ import {
   getResourceLyrics,
   uploadResourceLyrics,
   uploadResourceCover,
+  setResourceChorus,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
@@ -233,6 +234,35 @@ const FilePreview: React.FC<{
           }
           duration={resource.duration_seconds ?? undefined}
           onCoverClick={isUpload ? () => coverInputRef.current?.click() : undefined}
+          chorusStartSec={
+            resource.chorus_start_ms != null ? resource.chorus_start_ms / 1000 : undefined
+          }
+          chorusEditable={isUpload}
+          setChorusLabel={t('resources.detail.setChorus', 'Set chorus')}
+          clearChorusLabel={t('resources.detail.clearChorus', 'Clear')}
+          onChorusChange={
+            isUpload
+              ? async (sec) => {
+                  try {
+                    const ms = sec == null ? null : Math.round(sec * 1000);
+                    const updated = await setResourceChorus(resource.id, ms);
+                    onCoverUpdated?.(updated);
+                    addToast(
+                      t(
+                        ms == null
+                          ? 'resources.detail.chorusCleared'
+                          : 'resources.detail.chorusSet',
+                        ms == null ? 'Chorus removed' : 'Chorus marked',
+                      ),
+                      'success',
+                    );
+                  } catch (err) {
+                    console.error('Failed to set chorus:', err);
+                    addToast('Failed to set chorus', 'error');
+                  }
+                }
+              : undefined
+          }
         />
         {isUpload && (
           <input

@@ -361,7 +361,11 @@
       "uploadLrc": "Upload .lrc",
       "lyricsUploaded": "Lyrics uploaded",
       "uploadCover": "Cover",
-      "coverUpdated": "Cover updated"
+      "coverUpdated": "Cover updated",
+      "setChorus": "Set chorus",
+      "clearChorus": "Clear",
+      "chorusSet": "Chorus marked",
+      "chorusCleared": "Chorus removed"
     },
     "compareVersions": "Compare Versions",
     "details": "Details",

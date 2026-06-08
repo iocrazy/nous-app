@@ -361,7 +361,11 @@
       "uploadLrc": "上传 .lrc",
       "lyricsUploaded": "歌词已上传",
       "uploadCover": "封面",
-      "coverUpdated": "封面已更新"
+      "coverUpdated": "封面已更新",
+      "setChorus": "标记高潮",
+      "clearChorus": "清除",
+      "chorusSet": "已标记高潮点",
+      "chorusCleared": "已移除高潮点"
     },
     "compareVersions": "对比版本",
     "details": "详情",
