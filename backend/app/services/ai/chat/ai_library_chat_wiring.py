@@ -135,9 +135,14 @@ async def build_agent_runner_stack(
     # `start_workflow_routed("memory_tasks", ...)`. PR-D7 phase 3:
     # celery_dispatch fallback dropped — routing is all 'dbos' and the
     # legacy write_memory_task Celery wrapper has been deleted.
-    import asyncio
-
+    #
+    # AgentRunner._run_post_hooks (async) invokes this closure ON the event
+    # loop, so a bare ``asyncio.run`` would raise "cannot be called from a
+    # running event loop" (swallowed by _dispatch_side_effect → memory-harvest
+    # silently dropped). Use the loop-safe ``run_async`` helper instead — it
+    # falls back to a worker-thread loop when one is already running.
     from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.tasks.utils import run_async
     from app.workflows.write_memory import write_memory_workflow
 
     def _memory_signature_factory(
@@ -153,7 +158,7 @@ async def build_agent_runner_stack(
         and continues — fire-and-forget."""
 
         def _fire() -> None:
-            asyncio.run(
+            run_async(
                 start_workflow_routed(
                     "memory_tasks",
                     dbos_workflow_callable=write_memory_workflow,

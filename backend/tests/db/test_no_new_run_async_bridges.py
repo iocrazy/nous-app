@@ -58,6 +58,13 @@ _ALLOWLIST: frozenset[str] = frozenset(
         # 6 remaining run_async sites wrap AI / export SERVICES (not repos) — a
         # service-bridge, not a §2.4b DB bridge. Deferred.
         "app/workflows/storyboard.py",
+        # AI chat wiring: the memory-harvester side_effect closure (_fire) is a
+        # SYNC zero-arg callable per the HookResult.side_effect contract, invoked
+        # by AgentRunner ON the event loop. It dispatches the memory-write
+        # WORKFLOW via start_workflow_routed → a sync→async DISPATCH bridge (NOT
+        # a DB/repo bridge). run_async is the loop-safe way to do it (replaced a
+        # bare asyncio.run that crashed under the running loop — audit 2026-06-08).
+        "app/services/ai/chat/ai_library_chat_wiring.py",
     }
 )
 

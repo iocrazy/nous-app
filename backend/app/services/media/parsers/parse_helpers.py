@@ -25,19 +25,31 @@ from app.services.ai.visual.classification_service import ClassificationService
 
 def _run_async(coro):
     """Run an async coroutine in a sync context. Mirrors
-    `app.tasks.utils.run_async`.
+    `app.tasks.utils.run_async` — now loop-safe (two branches).
 
-    Single-branch, no thread hop: ``asyncio.run`` already copies the calling
-    thread's current context (it creates its Task via ``loop.create_task``), so
-    the ambient ``_scope`` (app.db.scope) set on the calling thread already
-    reaches the coroutine. Wrapping in ``copy_context().run(...)`` is therefore
-    functionally REDUNDANT here — it cannot recover a scope that isn't already
-    in the calling thread's context. The explicit wrap is kept for symmetry with
-    ``run_async`` (whose branch-2 thread hop genuinely needs it) and to make the
-    context-capture point explicit/future-proof should a thread hop ever be
-    added. See the A2 pass 4a report for the no-op finding.
+    Branch 1 (no running loop — today's only path, since every caller is a
+    sync parser helper): ``copy_context().run(asyncio.run, coro)``. The
+    copy_context is a no-op for scope (asyncio.run already copies the calling
+    thread's context) but kept explicit/symmetric.
+
+    Branch 2 (a loop IS already running on this thread): a plain
+    ``asyncio.run`` would raise ``RuntimeError: asyncio.run() cannot be called
+    from a running event loop``. Hop to a worker thread (fresh loop) carrying
+    the copied context — same fix as ``app.tasks.utils.run_async`` branch 2.
+    Was previously single-branch (latent crash if ever reached from an async
+    context); hardened defensively even though no current caller hits it.
     """
-    return contextvars.copy_context().run(asyncio.run, coro)
+    import concurrent.futures
+
+    ctx = contextvars.copy_context()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(ctx.run, asyncio.run, coro).result()
+    return ctx.run(asyncio.run, coro)
 
 
 def extract_url(url: str) -> str:

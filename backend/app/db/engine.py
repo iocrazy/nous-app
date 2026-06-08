@@ -64,6 +64,16 @@ def get_engine() -> AsyncEngine:
             "SUPAVISOR_DATABASE_URL is not configured — SQLAlchemy engine "
             "is disabled. Set the env var or use the legacy path."
         )
+    # ⚠️ NullPool is LOAD-BEARING for run_async + ORM safety — do NOT swap it
+    # for a real pool (QueuePool / AsyncAdaptedQueuePool) without rearchitecting.
+    # asyncpg connections are event-loop-bound. `run_async` (app/tasks/utils.py)
+    # spins a FRESH event loop per call (the sync→async bridge used by DBOS sync
+    # steps). With NullPool each checkout opens a brand-new asyncpg connection on
+    # the CURRENT loop and closes it on release → nothing loop-bound survives, so
+    # the process-wide singleton engine is safe across those fresh loops. A real
+    # pool would retain a connection created on one run_async loop and hand it to
+    # a later, different loop → "got Future attached to a different loop" (SEV-1).
+    # Supavisor is the real server-side pool; this client pool stays Null.
     _engine = create_async_engine(
         _sqla_url(),
         poolclass=NullPool,
