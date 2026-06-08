@@ -51,6 +51,9 @@ from app.workflows.storyboard import (  # noqa: F401
 )
 from app.workflows.thumbnail import thumbnail_workflow  # noqa: F401
 from app.workflows.transcode import transcode_workflow  # noqa: F401
+from app.workflows.upload_postprocess import (  # noqa: F401
+    upload_postprocess_workflow,
+)
 from app.workflows.write_memory import write_memory_workflow  # noqa: F401
 
 # Shared NON-partitioned dispatch queue for the gateway → DBOSClient migration.
