@@ -288,7 +288,7 @@ def fetch_and_parse_qishui(
     return {}, parsed_data
 
 
-def save_media_to_db(
+async def save_media_to_db(
     parsed_data: dict, platform_id: str, video_bool: bool
 ) -> Optional[dict]:
     """Save parsed_media + create/update per-user resource via the canonical
@@ -314,7 +314,7 @@ def save_media_to_db(
     payload.setdefault("need_download_music", False)
 
     try:
-        result = _run_async(MediaService.save_metadata_only(platform_id, payload))
+        result = await MediaService.save_metadata_only(platform_id, payload)
     except Exception as e:
         logger.error(f"[Parse] save_metadata_only raised: {e!r}")
         return None
@@ -334,7 +334,7 @@ def save_media_to_db(
     return result
 
 
-def auto_tag_media(
+async def auto_tag_media(
     video_db_id: Any,
     platform_id: str,
     aweme_detail: dict,
@@ -352,13 +352,11 @@ def auto_tag_media(
                 if tag.get("hashtag_name")
             ]
 
-        added_tags = _run_async(
-            ClassificationService.auto_tag_media(
-                media_id=video_db_id,
-                title=title or "",
-                description=description,
-                original_tags=original_tags,
-            )
+        added_tags = await ClassificationService.auto_tag_media(
+            media_id=video_db_id,
+            title=title or "",
+            description=description,
+            original_tags=original_tags,
         )
         if added_tags:
             logger.info(
