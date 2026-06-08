@@ -328,6 +328,7 @@ export interface Resource {
   duration_seconds: number | null;
   resolution: string | null;
   audio_bitrate_kbps?: number | null;
+  chorus_start_ms?: number | null;
   lyrics_json?: { lrc: string; lines: Array<{ text: string; line_start_ms: number | null }> } | null;
   thumbnail_path: string | null;
   cover_image_path: string | null;
@@ -696,6 +697,7 @@ export interface FileVersion {
   audio_codec: string | null;
   video_bitrate_kbps: number | null;
   audio_bitrate_kbps: number | null;
+  chorus_start_ms?: number | null;
   audio_channels: number | null;
   audio_sample_rate: number | null;
   thumbnail_path: string | null;
@@ -750,6 +752,7 @@ export interface ProjectFile {
   audio_codec: string | null;
   video_bitrate_kbps: number | null;
   audio_bitrate_kbps: number | null;
+  chorus_start_ms?: number | null;
   audio_channels: number | null;
   audio_sample_rate: number | null;
   thumbnail_path: string | null;
