@@ -42,7 +42,14 @@ _ALLOWLIST: frozenset[str] = frozenset(
     {
         # Download path: run_async is entangled with yt-dlp / ffmpeg / httpx
         # subprocess dispatch inside sync @DBOS.step bodies (genuine sync-lib
-        # boundary). DB calls here await a follow-up async-hoist pass.
+        # boundary).
+        #   download_helpers.py — the 4 post-download AI/transcode CHAIN helpers
+        #     (maybe_chain_transcode / chain_transcript_summary_for_tags /
+        #     chain_summary_for_tags / maybe_chain_ai_pipeline) are now
+        #     async-native (§2.4b); the remaining run_async here is the
+        #     genuine sync-lib boundary in ensure_download_urls /
+        #     validate_and_refresh_urls / extract_audio_from_video (parser +
+        #     httpx-HEAD inside sync @DBOS.step) → file stays on the list.
         "app/tasks/download_helpers.py",
         "app/tasks/download_strategies.py",
         # Media parse path: parser subprocess chain inside sync @DBOS.step.
