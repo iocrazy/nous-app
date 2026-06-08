@@ -1,51 +1,35 @@
 """Shared AI-provider config helpers — extracted from the legacy
 `app.tasks.ai_tasks` + `analysis_tasks` (PR-D7 phase 3 cleanup).
 
-Pure helpers (no Celery, no DBOS). Used by:
+Pure helpers (no Celery). Used by:
     - `app.workflows.analyze_l1` (resolve_analyze_provider step)
 
 Each helper preserves the exact behaviour of its `_xxx` predecessor
 in the legacy tasks module.
+
+§2.4b async DB-hoist: the DB-reading helpers are now ``async def`` and
+``await`` the repos directly. They were previously sync, bridging to the
+async repos via a fresh-event-loop ``_run_async`` shim — a pattern that is
+incompatible with the SQLAlchemy ORM (asyncpg connections are loop-bound)
+and that caused a prod connection-leak (2026-05-22). The sole caller,
+``analyze_l1.resolve_analyze_provider``, is an ``async @DBOS.step`` awaited
+from the async ``analyze_l1_workflow``, so awaiting here runs on the
+workflow's own loop — no bridge, ORM-safe.
 """
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
 
 
-def _run_async(coro):
-    """Run a coroutine from sync code, safely whether or not the calling
-    thread already has a running event loop.
-
-    Background: this helper is invoked from sync ``@DBOS.step`` functions
-    that DBOS schedules on a thread pool. In some DBOS versions the thread
-    already has a running loop (DBOS internally awaits step completion),
-    so a plain ``asyncio.run(coro)`` raises ``RuntimeError: asyncio.run()
-    cannot be called from a running event loop``. That regressed every
-    ``analyze_l1_workflow`` run via the post-PR-283 ``maybe_chain_ai_pipeline``
-    Analyze branch (QA 2026-05-17). Same loop-safe pattern as
-    ``ytdlp_service._get_cookie_args``.
-    """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if loop is not None and loop.is_running():
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            return pool.submit(asyncio.run, coro).result()
-    return asyncio.run(coro)
-
-
-def get_ai_settings(user_id: str) -> dict:
+async def get_ai_settings(user_id: str) -> dict:
     """Load user's AI settings from the database."""
     from app.repositories.user_settings_repository import UserSettingsRepository
 
     repo = UserSettingsRepository()
-    settings = _run_async(repo.get_by_user_id(user_id))
+    settings = await repo.get_by_user_id(user_id)
     if settings and settings.get("settings_json"):
         return settings["settings_json"].get("ai_settings", {})
     return {}
@@ -57,7 +41,7 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
     return providers.get(provider_key, {})
 
 
-def resolve_analyze_provider_config(
+async def resolve_analyze_provider_config(
     user_id: Optional[str],
 ) -> Tuple[str, Dict[str, Any], str]:
     """Resolve analyze agent's model + user's BYO provider config.
@@ -74,7 +58,7 @@ def resolve_analyze_provider_config(
     from app.services.ai.adapters.factory import provider_key_for_model
 
     agent_repo = get_agent_repository()
-    agent = _run_async(agent_repo.get_by_slug("analyze"))
+    agent = await agent_repo.get_by_slug("analyze")
     model = ((agent or {}).get("model") or "").strip()
     if not model:
         logger.warning(
@@ -95,7 +79,7 @@ def resolve_analyze_provider_config(
     if not user_id or not provider_key:
         return provider_key, {"model": model}, model
 
-    ai_settings = get_ai_settings(user_id)
+    ai_settings = await get_ai_settings(user_id)
     provider_config = dict(get_provider_config(ai_settings, provider_key))
     provider_config["model"] = model
     return provider_key, provider_config, model
