@@ -20,28 +20,6 @@ from app.services.library.search_service import SearchService
 router = APIRouter(prefix="/search", tags=["Search"])
 
 
-async def _fetch_user_media_ids(user_id: str) -> List[int]:
-    """Return the ``parsed_media.id`` list this user owns via ``resources``.
-
-    ``parsed_media`` is a **global** table — one row per platform_id across
-    every user in the system. Per-user ownership lives on ``resources``
-    (``creator_id`` + ``media_id`` FK to ``parsed_media.id`` + ``is_trashed``
-    + ``source_type='web'``). Every search that should only return "my
-    library" must first look up this list and scope the parsed_media query
-    to it, otherwise results leak across users.
-    """
-    client = await get_async_supabase_admin()
-    result = (
-        await client.table("resources")
-        .select("media_id")
-        .eq("creator_id", user_id)
-        .eq("source_type", "web")
-        .eq("is_trashed", False)
-        .execute()
-    )
-    return [int(r["media_id"]) for r in (result.data or []) if r.get("media_id")]
-
-
 async def _fetch_user_resources_by_media_id(
     user_id: str,
     media_ids: List[int],
@@ -88,7 +66,6 @@ async def _fetch_user_resources_by_media_id(
 
 async def _hydrate_media_by_platform_ids(
     platform_ids: List[str],
-    user_media_ids: Optional[List[int]] = None,
     user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch card-view parsed_media rows for a list of platform_ids.
@@ -103,53 +80,30 @@ async def _hydrate_media_by_platform_ids(
     ``ai_analyze_text``) are excluded — the detail endpoint is the one that
     returns them. See MediaRepository.CARD_SELECT for the field list.
 
-    When ``user_media_ids`` is provided, the hydration is further scoped to
-    rows that exist in the user's ``resources`` — prevents cross-user leak
-    for callers whose platform_ids came from a non-scoped ranker (e.g.
-    ``semantic_search`` doesn't currently filter by user).
+    When ``user_id`` is provided, the hydration is scoped to rows the user
+    actually owns. Scale Tier-1c: ownership is resolved by intersecting the
+    (small, top-N ranker output) ``platform_ids`` against the user's
+    ``resources`` via the ``rpc_user_owned_platform_ids`` RPC — bounded by the
+    input array, so no 1000-row-capped allowlist fetch and no URL blow-up.
 
     Returns empty list if ``platform_ids`` is empty.
     """
     if not platform_ids:
         return []
     client = await get_async_supabase_admin()
-    # If ``user_media_ids`` would push the URL past nginx's 8KB limit
-    # (each Snowflake id is ~15 chars, plus separators), drop the
-    # ``id IN`` filter and intersect in Python instead. ``platform_id IN``
-    # is already small (top-N ranker output), so this is safe.
-    URL_SAFE_LIMIT = 100
-    if user_media_ids is not None:
-        if not user_media_ids:
-            return []
-        if len(user_media_ids) <= URL_SAFE_LIMIT:
-            query = (
-                client.table("parsed_media")
-                .select(MediaRepository.CARD_SELECT)
-                .in_("platform_id", platform_ids)
-                .in_("id", user_media_ids)
-            )
-            result = await query.execute()
-            rows = result.data or []
-        else:
-            # Too many ids for a single URL — fetch by platform_id then
-            # intersect with the allowlist in memory. Cheap because the
-            # platform_ids ranker has already trimmed to a few dozen.
-            user_id_set = set(user_media_ids)
-            query = (
-                client.table("parsed_media")
-                .select(MediaRepository.CARD_SELECT)
-                .in_("platform_id", platform_ids)
-            )
-            result = await query.execute()
-            rows = [r for r in (result.data or []) if r.get("id") in user_id_set]
-    else:
-        query = (
-            client.table("parsed_media")
-            .select(MediaRepository.CARD_SELECT)
-            .in_("platform_id", platform_ids)
-        )
-        result = await query.execute()
-        rows = result.data or []
+    query = (
+        client.table("parsed_media")
+        .select(MediaRepository.CARD_SELECT)
+        .in_("platform_id", platform_ids)
+    )
+    result = await query.execute()
+    rows = result.data or []
+    # Scope to rows the user owns. The ranker's ``platform_ids`` is already
+    # small, so the ownership intersection is bounded — no full allowlist.
+    if user_id:
+        owned = await SearchService().user_owned_platform_ids(user_id, platform_ids)
+        owned_set = set(owned)
+        rows = [r for r in rows if r.get("platform_id") in owned_set]
     # Merge per-user resource_id + AI status onto each hit so the card
     # click navigates to the correct /resources/file/<resource_id> URL
     # and the AI dot icons reflect real state. Search rows without a
@@ -201,12 +155,10 @@ async def semantic_search(
         )
 
         platform_ids = [r.platform_id for r in response.results]
-        # semantic_search doesn't filter by user_id yet — scope hydration via
-        # user_media_ids so we don't leak cross-user parsed_media rows.
-        user_media_ids = await _fetch_user_media_ids(auth.user_id)
+        # semantic_search doesn't filter by user_id yet — scope hydration to the
+        # rows the user owns so we don't leak cross-user parsed_media rows.
         videos = await _hydrate_media_by_platform_ids(
             platform_ids,
-            user_media_ids=user_media_ids,
             user_id=auth.user_id,
         )
         # Filter ranked results to only include hits the user actually owns.
@@ -272,13 +224,10 @@ async def hybrid_search(
         )
 
         platform_ids = [r.platform_id for r in response.results]
-        # hybrid_search already filters by user_id internally, but we still
-        # pass user_media_ids to hydration as a defensive guardrail in case
-        # of a race between the ranker query and the hydration.
-        user_media_ids = await _fetch_user_media_ids(auth.user_id)
+        # hybrid_search already filters by user_id internally; scope hydration
+        # to the rows the user owns as a defensive guardrail too.
         videos = await _hydrate_media_by_platform_ids(
             platform_ids,
-            user_media_ids=user_media_ids,
             user_id=auth.user_id,
         )
         return SearchResponse(
@@ -357,24 +306,11 @@ async def text_search(
             query=q,
             search_type="text",
         )
-    pattern = f"*{q_safe}*"
+    # Ready ILIKE pattern for the RPC (SQL ILIKE uses ``%`` wildcards).
+    pattern = f"%{q_safe}%"
 
-    # CRITICAL: scope to rows THIS user owns via ``resources``. parsed_media
-    # is a global table — searching it directly returns every user's library
-    # mashed together. Get the per-user media_id allowlist first.
-    user_media_ids = await _fetch_user_media_ids(auth.user_id)
-    if not user_media_ids:
-        return SearchResponse(
-            results=[],
-            videos=[],
-            total=0,
-            query=q,
-            search_type="text",
-        )
-
-    # Build OR filter dynamically from selected fields. Empty fields list →
-    # no scope → empty result (caller probably means "no scope checked",
-    # not "any scope").
+    # Empty fields list → no scope → empty result (caller probably means "no
+    # scope checked", not "any scope").
     if not request.fields:
         return SearchResponse(
             results=[],
@@ -384,148 +320,27 @@ async def text_search(
             search_type="text",
         )
 
-    client = await get_async_supabase_admin()
-
-    # Direct parsed_media columns map straight to ILIKE filters.
-    column_map = {
-        "title": "title",
-        "description": "description",
-        "author": "author",
-        "hashtags": "hashtags",
-        "transcript": "ai_extract_text",
-    }
-    direct_or_parts = [
-        f"{column_map[f]}.ilike.{pattern}" for f in request.fields if f in column_map
-    ]
-
-    # tags / notes need pre-queries — they live on other tables and
-    # contribute media_ids that we OR into the main filter via id.in.(...)
-    extra_media_ids: set[int] = set()
+    # Scale Tier-1c: scope to rows THIS user owns via a JOIN RPC instead of
+    # pre-fetching the user's full (1000-row-capped) media_id allowlist and
+    # filtering parsed_media with a chunked ``.in_()``. ``parsed_media`` is a
+    # global table — the RPC JOINs ``resources`` and filters
+    # ``creator_id = user_id`` server-side, applies the multi-field ILIKE
+    # (title / description / author / hashtags / transcript / notes / tags),
+    # dedups per media, orders ``created_at DESC`` and limits — all in one
+    # round-trip, with per-user ``resource_id`` + AI status already merged in.
     try:
-        if "tags" in request.fields:
-            tags_q = (
-                await client.table("tags").select("id").ilike("name", pattern).execute()
-            )
-            tag_ids = [t["id"] for t in (tags_q.data or []) if t.get("id") is not None]
-            if tag_ids:
-                rt_q = (
-                    await client.table("resource_tags")
-                    .select("resource_id")
-                    .in_("tag_id", tag_ids)
-                    .execute()
-                )
-                resource_ids = [
-                    r["resource_id"] for r in (rt_q.data or []) if r.get("resource_id")
-                ]
-                if resource_ids:
-                    res_q = (
-                        await client.table("resources")
-                        .select("media_id")
-                        .in_("id", resource_ids)
-                        .eq("creator_id", auth.user_id)
-                        .eq("source_type", "web")
-                        .eq("is_trashed", False)
-                        .execute()
-                    )
-                    for r in res_q.data or []:
-                        if r.get("media_id"):
-                            extra_media_ids.add(int(r["media_id"]))
-
-        if "notes" in request.fields:
-            notes_q = (
-                await client.table("resources")
-                .select("media_id")
-                .eq("creator_id", auth.user_id)
-                .eq("source_type", "web")
-                .eq("is_trashed", False)
-                .ilike("notes", pattern)
-                .execute()
-            )
-            for r in notes_q.data or []:
-                if r.get("media_id"):
-                    extra_media_ids.add(int(r["media_id"]))
-    except Exception as e:
-        logger.error(f"Text search side-query failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(e)}",
+        rows = await SearchService().search_user_media_text(
+            user_id=auth.user_id,
+            pattern=pattern,
+            fields=list(request.fields),
+            limit=request.limit,
         )
-
-    or_parts = list(direct_or_parts)
-    if extra_media_ids:
-        # Intersect with user_media_ids (defense in depth — already-scoped
-        # but cheap to re-confirm).
-        scoped = extra_media_ids & set(user_media_ids)
-        if scoped:
-            ids_csv = ",".join(str(i) for i in scoped)
-            or_parts.append(f"id.in.({ids_csv})")
-
-    # If the only selected scopes were tags/notes and they yielded zero
-    # extra_media_ids AND there are no direct fields, no rows can match.
-    if not or_parts:
-        return SearchResponse(
-            results=[],
-            videos=[],
-            total=0,
-            query=q,
-            search_type="text",
-        )
-
-    or_filter = ",".join(or_parts)
-    # Chunk the user_media_ids — PostgREST encodes ``in_(...)`` into a
-    # query-string filter, and a few hundred 18-digit Snowflake ids blow
-    # past nginx's URI length limit (8KB) → 414. Each chunk is sized so
-    # ``id=in.(id1,id2,…)`` plus the OR filter and base URL stays under
-    # ~6KB. Results are merged + re-sorted client-side, then trimmed to
-    # ``request.limit``.
-    URL_SAFE_CHUNK = 100
-    rows: List[Dict[str, Any]] = []
-    seen_ids: set[int] = set()
-    try:
-        for start in range(0, len(user_media_ids), URL_SAFE_CHUNK):
-            chunk = user_media_ids[start : start + URL_SAFE_CHUNK]
-            chunk_result = (
-                await client.table("parsed_media")
-                .select(MediaRepository.CARD_SELECT)
-                .in_("id", chunk)
-                .or_(or_filter)
-                .order("created_at", desc=True)
-                .limit(request.limit)
-                .execute()
-            )
-            for row in chunk_result.data or []:
-                rid = row.get("id")
-                if rid is None or rid in seen_ids:
-                    continue
-                seen_ids.add(rid)
-                rows.append(row)
     except Exception as e:
         logger.error(f"Text search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Search failed: {str(e)}",
         )
-
-    # Merge + global sort + trim. Each chunk was sorted DESC and limited,
-    # but cross-chunk order needs a final re-sort to match the contract.
-    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
-    rows = rows[: request.limit]
-
-    # Merge per-user resource_id + AI status onto each row so the card
-    # click navigates to the right /resources/file/<resource_id> URL and
-    # the AI dot icons reflect real state. See _hydrate_media_by_platform_ids
-    # for the same pattern on the semantic / hybrid endpoints.
-    media_ids_for_hydration = [int(r["id"]) for r in rows if r.get("id") is not None]
-    resource_map = await _fetch_user_resources_by_media_id(
-        auth.user_id, media_ids_for_hydration
-    )
-    for row in rows:
-        mid = row.get("id")
-        if mid is None:
-            continue
-        extra = resource_map.get(int(mid))
-        if extra:
-            row.update(extra)
 
     # Project every row into a slim SearchResultItem (for analytics /
     # backwards-compat callers) AND include the full rows in ``videos``.
