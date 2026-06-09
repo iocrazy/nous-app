@@ -1282,7 +1282,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         {/* Keyset pagination sentinel — observed by the infinite-scroll effect
             above. Only the Resources library paginates; recycle/temp load
             eagerly. Unmounts when the scope is drained (hasMore=false). */}
-        {isResourcesView && (hasMore || isLoadingMore) && (
+        {(isResourcesView || isRecycleView) && (hasMore || isLoadingMore) && (
           <div ref={loadMoreRef} className="w-full flex justify-center py-6">
             {isLoadingMore && (
               <span className="text-zinc-500 text-sm">{t('common.loading')}</span>

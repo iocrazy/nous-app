@@ -1020,6 +1020,66 @@ export async function fetchTrashedResources(
   }));
 }
 
+/**
+ * Keyset-paginated recycle bin (same filter as `fetchTrashedResources`, but
+ * ordered `(trashed_at DESC, id DESC)` so it scrolls past PostgREST's 1000-row
+ * cap). No search param — the recycle view has no filter bar. First-page count
+ * on `cursor === null`.
+ */
+export async function fetchTrashedResourcesPaginated(
+  isPersonal: boolean,
+  scopeId: string,
+  cursor: KeysetCursor | null,
+  pageSize: number,
+  signal?: AbortSignal,
+): Promise<KeysetListPage<ResourceItem>> {
+  let q = supabase
+    .from('resources')
+    .select('*')
+    .eq('is_trashed', true)
+    .eq('last_scope_type', isPersonal ? 'personal' : 'team')
+    .eq('last_scope_id', scopeId)
+    .order('trashed_at', { ascending: false })
+    .order('id', { ascending: false });
+  q = applyKeysetCursor(q, cursor, pageSize, { tsCol: 'trashed_at', idCol: 'id' });
+  if (signal) q = q.abortSignal(signal);
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  // Slice on the RAW resource rows — the cursor reads trashed_at/id BEFORE the
+  // map flattens them into the ResourceItem wrapper.
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const page = sliceKeysetPage(rows, pageSize, (r) =>
+    r.trashed_at && r.id != null
+      ? { ts: r.trashed_at as string, id: String(r.id) }
+      : null,
+  );
+  const items = page.data.map((resource): ResourceItem => ({
+    id: resource.id as string,
+    resource_id: resource.id as string,
+    scope_id: scopeId,
+    folder_id: (resource.last_folder_id as string | null) ?? null,
+    library_id: (resource.last_library_id as string | null) ?? null,
+    added_by: (resource.created_by as string | null) ?? null,
+    created_at: resource.created_at as string,
+    resource: resource as unknown as Resource,
+  }));
+
+  let totalCount = -1;
+  if (cursor === null) {
+    const { count } = await supabase
+      .from('resources')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_trashed', true)
+      .eq('last_scope_type', isPersonal ? 'personal' : 'team')
+      .eq('last_scope_id', scopeId);
+    totalCount = count ?? -1;
+  }
+
+  return { data: items, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount };
+}
+
 // ─── Single Resource ────────────────────────────────────
 
 export async function fetchResourceById(resourceId: string): Promise<Resource> {
