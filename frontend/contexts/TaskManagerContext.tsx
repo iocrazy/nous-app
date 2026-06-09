@@ -351,6 +351,91 @@ async function fetchAllTasks(): Promise<UnifiedTask[]> {
   return items.map(rowToTask);
 }
 
+/** Bounded "recent" working set for the global context — newest page only
+ * (badge / TopBar dropdown / VideoDetailPanel / mobile all want recent, not
+ * the full history). Replaces the drain-all fetchAllTasks. */
+async function fetchRecentTasks(): Promise<UnifiedTask[]> {
+  const headers = await getAuthHeaders();
+  const resp = await fetch(
+    `${API_BASE}/api/v1/task-manager/tasks?limit=${TASK_PAGE_SIZE}&offset=0&sort=created_desc`,
+    { headers },
+  );
+  if (!resp.ok) {
+    console.error(`[TaskManager] fetchRecentTasks failed: ${resp.status}`);
+    return [];
+  }
+  const json = await resp.json();
+  return ((json.data as Record<string, unknown>[]) || []).map(rowToTask);
+}
+
+// ─── Settings → Tasks: server-side page-number pagination ──────────────
+
+export type TaskSort =
+  | 'created_desc'
+  | 'created_asc'
+  | 'updated_desc'
+  | 'title_asc';
+
+export interface TaskPageParams {
+  page: number; // 1-based
+  pageSize: number;
+  statuses?: TaskStatus[];
+  types?: TaskType[];
+  search?: string;
+  sort?: TaskSort;
+}
+
+export interface TaskPageResult {
+  tasks: UnifiedTask[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** One filtered/sorted page of the user's tasks + total match count. */
+export async function fetchTasksPage(
+  params: TaskPageParams,
+): Promise<TaskPageResult> {
+  const { page, pageSize, statuses, types, search, sort } = params;
+  const qs = new URLSearchParams();
+  qs.set('limit', String(pageSize));
+  qs.set('offset', String((page - 1) * pageSize));
+  if (sort) qs.set('sort', sort);
+  if (search?.trim()) qs.set('search', search.trim());
+  (statuses ?? []).forEach((s) => qs.append('statuses', s));
+  (types ?? []).forEach((t) => qs.append('types', t));
+  const resp = await fetch(
+    `${API_BASE}/api/v1/task-manager/tasks?${qs.toString()}`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!resp.ok) throw new Error(`tasks ${resp.status}: ${resp.statusText}`);
+  const json = await resp.json();
+  return {
+    tasks: ((json.data as Record<string, unknown>[]) || []).map(rowToTask),
+    total: (json.total as number) ?? 0,
+    page: (json.page as number) ?? page,
+    pageSize: (json.page_size as number) ?? pageSize,
+  };
+}
+
+export interface ActiveCounts {
+  total: number;
+  byType: Record<string, number>;
+}
+
+/** Authoritative active (pending/processing) counts for the sidebar badge,
+ * decoupled from any paged list. */
+export async function fetchActiveCounts(): Promise<ActiveCounts> {
+  const resp = await fetch(
+    `${API_BASE}/api/v1/task-manager/active-counts`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!resp.ok) throw new Error(`active-counts ${resp.status}`);
+  const json = await resp.json();
+  const d = (json.data as { total?: number; by_type?: Record<string, number> }) ?? {};
+  return { total: d.total ?? 0, byType: d.by_type ?? {} };
+}
+
 async function apiCancelTask(taskId: string): Promise<void> {
   // taskId is the dbos_workflow_id (UUID). Use DBOS-native cancel so the
   // running workflow actually stops. The trigger then mirrors the
