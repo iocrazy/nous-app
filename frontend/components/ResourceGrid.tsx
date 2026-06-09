@@ -194,6 +194,13 @@ export interface ResourceGridProps {
   onEmptyAreaTouchEnd: () => void;
   onTouchDragMove: (e: React.TouchEvent) => void;
   onTouchDragEnd: (e: React.TouchEvent) => void;
+
+  // Infinite-scroll pagination for the CURRENT view. Lifted to props (was read
+  // from context) so each view (library / downloads / recycle / folder) can
+  // drive its OWN keyset loadMore instead of sharing the main resources list's.
+  loadMore: () => void;
+  hasMore: boolean;
+  isLoadingMore: boolean;
 }
 
 // ─── Component ──────────────────────────────────────────
@@ -265,6 +272,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   onEmptyAreaTouchEnd,
   onTouchDragMove,
   onTouchDragEnd,
+  loadMore,
+  hasMore,
+  isLoadingMore,
 }) => {
   const { t } = useTranslation();
   const ctx = useResourcesContext();
@@ -286,9 +296,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     handlePermanentDelete,
     reloadResources,
     reloadTemp,
-    loadMoreResources,
-    hasMoreResources,
-    isLoadingMoreResources,
   } = ctx;
 
   // PR-E: temp_ttl service + child panels still speak the legacy
@@ -367,18 +374,18 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       (entries) => {
         if (
           entries[0]?.isIntersecting &&
-          hasMoreResources &&
-          !isLoadingMoreResources &&
+          hasMore &&
+          !isLoadingMore &&
           searchQuery.trim().length === 0
         ) {
-          loadMoreResources();
+          loadMore();
         }
       },
       { root: contentScrollRef.current ?? null, rootMargin: '600px' },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMoreResources, isLoadingMoreResources, searchQuery, loadMoreResources]);
+  }, [hasMore, isLoadingMore, searchQuery, loadMore]);
 
   // Sort panel
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -1275,9 +1282,9 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         {/* Keyset pagination sentinel — observed by the infinite-scroll effect
             above. Only the Resources library paginates; recycle/temp load
             eagerly. Unmounts when the scope is drained (hasMore=false). */}
-        {isResourcesView && (hasMoreResources || isLoadingMoreResources) && (
+        {isResourcesView && (hasMore || isLoadingMore) && (
           <div ref={loadMoreRef} className="w-full flex justify-center py-6">
-            {isLoadingMoreResources && (
+            {isLoadingMore && (
               <span className="text-zinc-500 text-sm">{t('common.loading')}</span>
             )}
           </div>
