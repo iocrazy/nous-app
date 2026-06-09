@@ -45,27 +45,40 @@ export function MobileTabBar({ tabs, collapsed, onExpand, hidden }: MobileTabBar
 
   // Position the sliding indicator under the active tab (expanded state only).
   // Measured via bounding rects — offsetLeft is unreliable since popup tabs
-  // wrap the button in a relative div. Re-measured immediately and again after
-  // the morph transition settles (~300ms) so it lands correctly after expand.
+  // wrap the button in a relative div.
+  //
+  // A ResizeObserver on the container + a document.fonts.ready hook are the
+  // load-bearing bits: the web font (Inter) loads AFTER first paint (FOUT), which
+  // widens the tab labels and shifts every cell. Without re-measuring on that
+  // reflow the indicator stays at the fallback-font positions and drifts left.
+  // The observer also covers the collapse/expand morph and any width change.
   useLayoutEffect(() => {
+    const c = containerRef.current;
     const measure = () => {
-      const c = containerRef.current;
       const cell = cellRefs.current[activeIndex];
       if (!c || !cell) return;
       const cr = c.getBoundingClientRect();
       const br = cell.getBoundingClientRect();
       // Offset from the container's PADDING box (the indicator is anchored at
       // left-0 = padding-box origin). Subtract clientLeft (the left border
-      // width) so translateX lands exactly on the cell — without it the border
-      // adds a constant rightward drift.
+      // width) so translateX lands exactly on the cell.
       setIndicator({ left: br.left - cr.left - c.clientLeft, width: br.width });
     };
     measure();
     const settle = window.setTimeout(measure, 320);
     window.addEventListener('resize', measure);
+    let ro: ResizeObserver | undefined;
+    if (c && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => measure());
+      ro.observe(c);
+    }
+    // Re-measure once web fonts finish loading (Inter widens the labels).
+    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
+    if (fonts?.ready) fonts.ready.then(measure).catch(() => {});
     return () => {
       window.clearTimeout(settle);
       window.removeEventListener('resize', measure);
+      ro?.disconnect();
     };
   }, [activeIndex, tabs.length, collapsed]);
 
