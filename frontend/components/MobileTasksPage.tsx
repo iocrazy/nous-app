@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Inbox, ListChecks, Upload as UploadIcon } from 'lucide-react';
+import { CheckCircle2, Inbox, Upload as UploadIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
@@ -29,56 +29,29 @@ import { useTaskManager, type UnifiedTask } from '../contexts/TaskManagerContext
 export interface MobileTasksPageProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Feed the inner scroll position to the collapsible bottom tab bar. */
+  onContentScroll?: (el: HTMLElement) => void;
 }
 
 // Always-mounted outer wrapper. Bails out BEFORE the heavy data hooks
 // (useAgentRunTasks opens a Supabase Realtime channel + fetch), so a closed
 // overlay holds zero subscriptions — the inner panel only mounts while open,
 // mirroring the desktop TaskCenterPanel's open/close lifecycle.
-export function MobileTasksPage({ isOpen, onClose }: MobileTasksPageProps) {
+export function MobileTasksPage({ isOpen, onClose, onContentScroll }: MobileTasksPageProps) {
   if (!isOpen) return null;
-  return <MobileTasksPanel onClose={onClose} />;
+  return <MobileTasksPanel onClose={onClose} onContentScroll={onContentScroll} />;
 }
 
-// ---------------------------------------------------------------------------
-// MobileTasksTabButton — the pill tab button for the mobile bottom bar.
-//
-// Lives in this file (not AppLayout) because it reads the live active-task
-// count via useTaskManager for the badge — that hook is only valid INSIDE
-// TaskManagerProvider, and AppLayout's function body runs outside it (the
-// provider only wraps AppLayout's JSX return, where the pill is rendered).
-// ---------------------------------------------------------------------------
-
-export function MobileTasksTabButton({
-  active,
-  onClick,
+function MobileTasksPanel({
+  onClose,
+  onContentScroll,
 }: {
-  active: boolean;
-  onClick: () => void;
+  onClose: () => void;
+  onContentScroll?: (el: HTMLElement) => void;
 }) {
-  const { totalActive } = useTaskManager();
-  return (
-    <button
-      onClick={onClick}
-      className={`relative flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
-        active ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-500'
-      }`}
-    >
-      <ListChecks size={20} />
-      <span className="text-[9px] leading-tight font-medium">Tasks</span>
-      {totalActive > 0 && (
-        <span className="absolute top-0 right-2 flex items-center justify-center min-w-[16px] h-[16px] px-1 text-[9px] font-bold leading-none text-white bg-indigo-500 rounded-full">
-          {totalActive > 99 ? '99+' : totalActive}
-        </span>
-      )}
-    </button>
-  );
-}
-
-function MobileTasksPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { tasks, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
+  const { tasks, cancelTask, retryTask, isLoading } = useTaskManager();
   const upload = useUpload();
   const [tab, setTab] = useState<TaskTab>('active');
   const [detailTask, setDetailTask] = useState<UnifiedTask | null>(null);
@@ -135,26 +108,14 @@ function MobileTasksPanel({ onClose }: { onClose: () => void }) {
   }, [counts.running]);
 
   return (
-    <div className="sm:hidden fixed inset-0 z-50 bg-zinc-950 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800/80">
-        <div className="w-16">
-          {completedCount > 0 && (
-            <button
-              onClick={() => clearCompleted()}
-              className="text-[12px] text-zinc-500 hover:text-zinc-300 active:text-zinc-200 transition-colors"
-            >
-              {t('topbar.clearCompleted')}
-            </button>
-          )}
-        </div>
+    // z-[48]: covers the underlying page's floating controls (z-30/z-40) but
+    // sits BELOW the bottom tab bar (z-[49]) so the pill stays visible &
+    // tappable here, and below modals/Profile (z-50). TaskDetailModal portals
+    // at z-60, above everything.
+    <div className="sm:hidden fixed inset-0 z-[48] bg-zinc-950 flex flex-col">
+      {/* Header — leave the page via the bottom tab bar. Clear button deferred. */}
+      <div className="flex items-center justify-center px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800/80">
         <h1 className="text-[17px] font-semibold text-zinc-100">{t('topbar.taskCenter')}</h1>
-        <button
-          onClick={onClose}
-          className="px-4 py-1.5 text-[15px] font-medium text-zinc-100 bg-zinc-800 rounded-full hover:bg-zinc-700 active:bg-zinc-600 transition-colors"
-        >
-          {t('common.done', 'Done')}
-        </button>
       </div>
 
       {isLoading ? (
@@ -173,7 +134,10 @@ function MobileTasksPanel({ onClose }: { onClose: () => void }) {
           />
 
           {/* Task list — fills remaining height, scrolls */}
-          <div className="flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom,16px)+16px)]">
+          <div
+            onScroll={(e) => onContentScroll?.(e.currentTarget)}
+            className="flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom,16px)+96px)]"
+          >
             {showActive ? (
               <>
                 {/* Running now — prominent live cards */}
