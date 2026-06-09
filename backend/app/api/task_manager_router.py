@@ -15,7 +15,11 @@ from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
-from app.services.infra.unified_task_manager import get_task_manager
+from app.services.infra.unified_task_manager import (
+    VALID_TASK_STATUSES,
+    VALID_TASK_TYPES,
+    get_task_manager,
+)
 
 router = APIRouter(prefix="/task-manager")
 
@@ -30,19 +34,57 @@ async def list_tasks(
     status: Optional[str] = Query(
         None, pattern="^(pending|processing|completed|failed|cancelled)$"
     ),
+    types: Optional[list[str]] = Query(None),
+    statuses: Optional[list[str]] = Query(None),
+    search: Optional[str] = Query(None, max_length=200),
+    sort: str = Query(
+        "created_desc",
+        pattern="^(created_desc|created_asc|updated_desc|title_asc)$",
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    """Get paginated tasks for the current user."""
+    """One filtered/sorted page of the current user's tasks + total count.
+
+    Filters/sort/search run server-side (page-number pagination). The legacy
+    single ``task_type``/``status`` params fold into the multi-select lists for
+    backward compatibility.
+    """
+    # Fold legacy singles into the multi-select lists.
+    eff_types = types or ([task_type] if task_type else None)
+    eff_statuses = statuses or ([status] if status else None)
+
+    # Never trust the client list — validate every value against the enum.
+    if eff_types and not set(eff_types) <= VALID_TASK_TYPES:
+        raise HTTPException(status_code=422, detail="Invalid task_type filter")
+    if eff_statuses and not set(eff_statuses) <= VALID_TASK_STATUSES:
+        raise HTTPException(status_code=422, detail="Invalid status filter")
+
     tracker = get_task_manager()
-    tasks = await tracker.get_tasks(
+    rows, total = await tracker.get_tasks(
         auth.user_id,
-        task_type=task_type,
-        status=status,
+        types=eff_types,
+        statuses=eff_statuses,
+        search=search,
+        sort=sort,
         limit=limit,
         offset=offset,
     )
-    return {"success": True, "data": tasks}
+    return {
+        "success": True,
+        "data": rows,
+        "total": total,
+        "page": offset // limit + 1,
+        "page_size": limit,
+    }
+
+
+@router.get("/active-counts")
+async def active_counts(auth: AuthDep):
+    """Active (pending/processing) task counts by type — the sidebar badge
+    source, decoupled from the paged task list."""
+    tracker = get_task_manager()
+    return {"success": True, "data": await tracker.get_active_counts(auth.user_id)}
 
 
 @router.get("/tasks/active")
