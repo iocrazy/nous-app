@@ -6,7 +6,6 @@ import {
   cancelWorkflow,
   restartWorkflow,
 } from '../services/dbosWorkflowService';
-import { paginateAll } from '../utils/paginate';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -98,12 +97,20 @@ export function isAISubTask(type: TaskType): boolean {
 }
 
 export interface TaskManagerState {
+  /** Bounded "recent" working set (newest page) — feeds the badge dropdown,
+   * VideoDetailPanel and mobile. The full paginated history lives in the
+   * Settings → Tasks view via useTaskPage, NOT here. */
   tasks: UnifiedTask[];
   isLoading: boolean;
   /** Supabase Realtime channel (task_tracking postgres_changes) subscribed? */
   isConnected: boolean;
   /** Redis WebSocket (/ws/task-progress for fine-grained download progress) open? */
   isWsConnected: boolean;
+  /** Authoritative active counts (decoupled from any paged list). */
+  activeData: ActiveCounts;
+  /** Monotonic counter bumped on every structural task change (INSERT /
+   * UPDATE / DELETE). Paged consumers (useTaskPage) watch it to refetch. */
+  revision: number;
 }
 
 interface TaskManagerContextType extends TaskManagerState {
@@ -150,7 +157,18 @@ type Action =
   | { type: 'DELETE'; id: string }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'SET_CONNECTED'; connected: boolean }
-  | { type: 'SET_WS_CONNECTED'; connected: boolean };
+  | { type: 'SET_WS_CONNECTED'; connected: boolean }
+  | { type: 'SET_ACTIVE_COUNTS'; counts: ActiveCounts };
+
+/** Structural changes that should bump `revision` (so paged views refetch).
+ * UPDATE_PROGRESS is excluded — it fires per WS tick and would storm refetches;
+ * a page-number log doesn't need sub-status-change liveness. */
+const STRUCTURAL_ACTIONS = new Set<Action['type']>([
+  'INSERT',
+  'UPDATE',
+  'DELETE',
+  'DOWNLOAD_STARTED',
+]);
 
 /** task_tracking row → UnifiedTask. The table has no `id` column
  * anymore (PK = dbos_workflow_id, see migration 180), so adapt by
@@ -176,10 +194,12 @@ function wsStatusToTaskStatus(wsStatus?: string): TaskStatus | undefined {
   }
 }
 
-function reducer(state: TaskManagerState, action: Action): TaskManagerState {
+function baseReducer(state: TaskManagerState, action: Action): TaskManagerState {
   switch (action.type) {
     case 'SET_TASKS':
       return { ...state, tasks: action.tasks, isLoading: false };
+    case 'SET_ACTIVE_COUNTS':
+      return { ...state, activeData: action.counts };
     case 'INSERT': {
       // Avoid duplicates by id
       if (state.tasks.some(t => t.id === action.task.id)) {
@@ -286,6 +306,16 @@ function reducer(state: TaskManagerState, action: Action): TaskManagerState {
   }
 }
 
+function reducer(state: TaskManagerState, action: Action): TaskManagerState {
+  const next = baseReducer(state, action);
+  // Bump revision when a structural action actually changed state, so paged
+  // views (useTaskPage) know to refetch the current page.
+  if (next !== state && STRUCTURAL_ACTIONS.has(action.type)) {
+    return { ...next, revision: state.revision + 1 };
+  }
+  return next;
+}
+
 // ─── API helpers ────────────────────────────────────────
 
 const API_BASE = 'VITE_API_URL' in import.meta.env
@@ -312,43 +342,90 @@ function getWsBaseUrl(): string {
 }
 
 const TASK_PAGE_SIZE = 200; // backend caps limit at 200 (le=200)
-const TASK_MAX = 5000; // safety cap against pathological sets
 
-async function fetchAllTasks(): Promise<UnifiedTask[]> {
-  // Read from public.task_tracking via the legacy task-manager REST
-  // endpoint (renamed internally to point at task_tracking; URL kept
-  // for backwards compat). This table is the application-side sidecar
-  // of dbos.workflow_status — DBOS lifecycle is auto-mirrored here by
-  // PG trigger (see migration 180), so a single fetch returns everything
-  // the UI needs (title/subtitle/progress + status/started_at/error_msg).
-  //
-  // Drain ALL pages: status/type/search filters run client-side, so a
-  // partial load would hide matching rows on unloaded pages. The endpoint
-  // hard-caps limit at 200, so >200 tasks need offset pagination — the
-  // original single limit=200 fetch silently dropped the oldest tail.
+/** Bounded "recent" working set for the global context — newest page only
+ * (badge / TopBar dropdown / VideoDetailPanel / mobile all want recent, not
+ * the full history). Replaces the drain-all fetchAllTasks. */
+async function fetchRecentTasks(): Promise<UnifiedTask[]> {
   const headers = await getAuthHeaders();
-  const { items, capped } = await paginateAll<Record<string, unknown>>(
-    async (offset, pageSize) => {
-      const resp = await fetch(
-        `${API_BASE}/api/v1/task-manager/tasks?limit=${pageSize}&offset=${offset}`,
-        { headers },
-      );
-      if (!resp.ok) {
-        console.error(
-          `[TaskManager] fetchAllTasks failed at offset ${offset}: ${resp.status} ${resp.statusText}`,
-        );
-        return []; // stop pagination; keep pages fetched so far
-      }
-      const json = await resp.json();
-      return (json.data as Record<string, unknown>[]) || [];
-    },
-    TASK_PAGE_SIZE,
-    TASK_MAX,
+  const resp = await fetch(
+    `${API_BASE}/api/v1/task-manager/tasks?limit=${TASK_PAGE_SIZE}&offset=0&sort=created_desc`,
+    { headers },
   );
-  if (capped) {
-    console.warn(`[TaskManager] task list hit ${TASK_MAX}-row cap; oldest tasks omitted`);
+  if (!resp.ok) {
+    console.error(`[TaskManager] fetchRecentTasks failed: ${resp.status}`);
+    return [];
   }
-  return items.map(rowToTask);
+  const json = await resp.json();
+  return ((json.data as Record<string, unknown>[]) || []).map(rowToTask);
+}
+
+// ─── Settings → Tasks: server-side page-number pagination ──────────────
+
+export type TaskSort =
+  | 'created_desc'
+  | 'created_asc'
+  | 'updated_desc'
+  | 'title_asc';
+
+export interface TaskPageParams {
+  page: number; // 1-based
+  pageSize: number;
+  statuses?: TaskStatus[];
+  types?: TaskType[];
+  search?: string;
+  sort?: TaskSort;
+}
+
+export interface TaskPageResult {
+  tasks: UnifiedTask[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** One filtered/sorted page of the user's tasks + total match count. */
+export async function fetchTasksPage(
+  params: TaskPageParams,
+): Promise<TaskPageResult> {
+  const { page, pageSize, statuses, types, search, sort } = params;
+  const qs = new URLSearchParams();
+  qs.set('limit', String(pageSize));
+  qs.set('offset', String((page - 1) * pageSize));
+  if (sort) qs.set('sort', sort);
+  if (search?.trim()) qs.set('search', search.trim());
+  (statuses ?? []).forEach((s) => qs.append('statuses', s));
+  (types ?? []).forEach((t) => qs.append('types', t));
+  const resp = await fetch(
+    `${API_BASE}/api/v1/task-manager/tasks?${qs.toString()}`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!resp.ok) throw new Error(`tasks ${resp.status}: ${resp.statusText}`);
+  const json = await resp.json();
+  return {
+    tasks: ((json.data as Record<string, unknown>[]) || []).map(rowToTask),
+    total: (json.total as number) ?? 0,
+    page: (json.page as number) ?? page,
+    pageSize: (json.page_size as number) ?? pageSize,
+  };
+}
+
+export interface ActiveCounts {
+  total: number;
+  byType: Record<string, number>;
+}
+
+/** Authoritative active (pending/processing) counts for the sidebar badge,
+ * decoupled from any paged list. */
+export async function fetchActiveCounts(): Promise<ActiveCounts> {
+  const resp = await fetch(
+    `${API_BASE}/api/v1/task-manager/active-counts`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!resp.ok) throw new Error(`active-counts ${resp.status}`);
+  const json = await resp.json();
+  const d = (json.data as { total?: number; by_type?: Record<string, number> }) ?? {};
+  return { total: d.total ?? 0, byType: d.by_type ?? {} };
 }
 
 async function apiCancelTask(taskId: string): Promise<void> {
@@ -408,18 +485,31 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     isLoading: true,
     isConnected: false,
     isWsConnected: false,
+    activeData: { total: 0, byType: {} },
+    revision: 0,
   });
   const channelRef = useRef<ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null>(null);
 
-  // Initial fetch
+  // Load the bounded recent working set + the authoritative active counts.
+  // The recent set feeds the badge dropdown / mobile / VideoDetailPanel; the
+  // counts feed the badge number (decoupled, so it stays right regardless of
+  // which page the Settings → Tasks view is on).
   const refreshTasks = useCallback(async () => {
     dispatch({ type: 'SET_LOADING', loading: true });
-    try {
-      const tasks = await fetchAllTasks();
-      dispatch({ type: 'SET_TASKS', tasks });
-    } catch (e) {
-      console.error('[TaskManager] Failed to fetch tasks:', e);
+    const [recent, counts] = await Promise.allSettled([
+      fetchRecentTasks(),
+      fetchActiveCounts(),
+    ]);
+    if (recent.status === 'fulfilled') {
+      dispatch({ type: 'SET_TASKS', tasks: recent.value });
+    } else {
+      console.error('[TaskManager] Failed to fetch recent tasks:', recent.reason);
       dispatch({ type: 'SET_LOADING', loading: false });
+    }
+    if (counts.status === 'fulfilled') {
+      dispatch({ type: 'SET_ACTIVE_COUNTS', counts: counts.value });
+    } else {
+      console.error('[TaskManager] Failed to fetch active counts:', counts.reason);
     }
   }, []);
 
@@ -617,11 +707,14 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => clearInterval(timer);
   }, [currentUserId, bothChannelsDown, refreshTasks]);
 
-  // Derived state
+  // Derived state. The active LIST comes from the bounded recent working set
+  // (active tasks are newest, so they're always present); the active COUNTS
+  // come from the authoritative active-counts endpoint (decoupled from any
+  // paged list, so the badge is right no matter the page).
   const activeTasks = state.tasks.filter(
     t => t.status === 'pending' || t.status === 'processing'
   );
-  const totalActive = activeTasks.length;
+  const totalActive = state.activeData.total;
   const activeCounts: Record<TaskType, number> = {
     parse: 0,
     download: 0,
@@ -633,9 +726,9 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     ai_summary: 0,
     agent: 0,
   };
-  for (const t of activeTasks) {
-    if (t.task_type in activeCounts) {
-      activeCounts[t.task_type]++;
+  for (const [type, n] of Object.entries(state.activeData.byType)) {
+    if (type in activeCounts) {
+      activeCounts[type as TaskType] = n;
     }
   }
 

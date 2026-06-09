@@ -11,15 +11,17 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { ListTodo, WifiOff } from 'lucide-react';
-import { useTaskManager, type TaskStatus, type TaskType, type UnifiedTask } from '../../contexts/TaskManagerContext';
+import { useTaskManager, type UnifiedTask } from '../../contexts/TaskManagerContext';
 import {
-  filterTasks, groupTasks, sortTasks,
-  type GroupBy, type SortBy, type TaskFilter,
+  groupTasks,
+  type GroupBy,
 } from '../../utils/taskDisplay';
 import { TaskToolbar, type ViewMode } from './TaskToolbar';
 import { TaskListView } from './TaskListView';
 import { TaskKanbanView } from './TaskKanbanView';
 import { BatchActionBar } from './BatchActionBar';
+import { TaskPagination } from './TaskPagination';
+import { useTaskPage } from './useTaskPage';
 import { useToast } from '../Toast';
 import { useTranslation } from 'react-i18next';
 import {
@@ -39,17 +41,19 @@ interface TaskCenterProps {
 }
 
 export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
-  const { tasks, isLoading, refreshTasks, isConnected, isWsConnected, retryTask, deleteTask } = useTaskManager();
+  const { revision, refreshTasks, isConnected, isWsConnected, retryTask, deleteTask } = useTaskManager();
   const { addToast } = useToast();
   const { t } = useTranslation();
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<Set<TaskStatus>>(new Set());
-  const [typeFilter, setTypeFilter] = useState<Set<TaskType>>(new Set());
+  // Settings → Tasks list: server-side page-number pagination. Owns
+  // page / multi-select filters / sort / search; `tasks` below is the
+  // CURRENT PAGE only (grouping + selection run over the page).
+  const taskPage = useTaskPage(revision);
+  const tasks = taskPage.tasks;
+
   // Default 'none' (no grouping, pure time-sorted list). Users opt in
   // to grouping via the toolbar's Layers picker — paperclip-style.
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
-  const [sortBy, setSortBy] = useState<SortBy>('created_desc');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   // Set of task ids whose inline detail panel is open. Multi-expand
   // intentionally — admin Arco's NotionTable behaves the same way.
@@ -78,29 +82,6 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
     });
   };
 
-  const toggleStatus = (s: TaskStatus) => {
-    setStatusFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
-  };
-
-  const toggleType = (t: TaskType) => {
-    setTypeFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(t)) next.delete(t);
-      else next.add(t);
-      return next;
-    });
-  };
-
-  const filterSpec = useMemo<TaskFilter>(
-    () => ({ search, statuses: statusFilter, types: typeFilter }),
-    [search, statusFilter, typeFilter],
-  );
-
   // ─── Stale connection banner ──────────────────────────
   // Suppress flicker during initial mount: wait 3s after !isLoading before
   // surfacing a disconnection. SUBSCRIBED + WS open arrive within ~1s of
@@ -109,17 +90,16 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   const isAnyConnectionDown = !isConnected || !isWsConnected;
   const [showStaleBanner, setShowStaleBanner] = useState(false);
   useEffect(() => {
-    if (isLoading || !isAnyConnectionDown) {
+    if (taskPage.loading || !isAnyConnectionDown) {
       setShowStaleBanner(false);
       return;
     }
     const timer = setTimeout(() => setShowStaleBanner(true), 3000);
     return () => clearTimeout(timer);
-  }, [isLoading, isAnyConnectionDown]);
+  }, [taskPage.loading, isAnyConnectionDown]);
 
-  const filtered = useMemo(() => filterTasks(tasks, filterSpec), [tasks, filterSpec]);
-  const sorted = useMemo(() => sortTasks(filtered, sortBy), [filtered, sortBy]);
-  const groups = useMemo(() => groupTasks(sorted, groupBy), [sorted, groupBy]);
+  // Group the CURRENT PAGE client-side (filter/sort already ran server-side).
+  const groups = useMemo(() => groupTasks(tasks, groupBy), [tasks, groupBy]);
 
   // Partition the live selection against the current task list (drops ids
   // that vanished, and splits the retryable subset for the Retry button).
@@ -130,7 +110,7 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
 
   const selectAllTerminal = () =>
     setSelectedIds((prev) =>
-      addAll(prev, sorted.filter((t) => isTerminal(t.status)).map((t) => t.id)),
+      addAll(prev, tasks.filter((t) => isTerminal(t.status)).map((t) => t.id)),
     );
 
   // On-screen row order (respects grouping); drives ↑/↓ keyboard nav.
@@ -222,13 +202,14 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
+      taskPage.refresh();
       await refreshTasks();
     } finally {
       setRefreshing(false);
     }
   };
 
-  if (isLoading && tasks.length === 0) {
+  if (taskPage.loading && tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
         <ListTodo size={36} className="mb-3 text-zinc-700 animate-pulse" />
@@ -255,21 +236,21 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
         </button>
       )}
       <TaskToolbar
-        search={search}
-        onSearchChange={setSearch}
-        statusFilter={statusFilter}
-        onToggleStatus={toggleStatus}
-        typeFilter={typeFilter}
-        onToggleType={toggleType}
+        search={taskPage.search}
+        onSearchChange={taskPage.setSearch}
+        statusFilter={taskPage.statuses}
+        onToggleStatus={taskPage.toggleStatus}
+        typeFilter={taskPage.types}
+        onToggleType={taskPage.toggleType}
         groupBy={groupBy}
         onGroupByChange={setGroupBy}
-        sortBy={sortBy}
-        onSortByChange={setSortBy}
+        sortBy={taskPage.sort}
+        onSortByChange={taskPage.setSort}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         onRefresh={handleRefresh}
         isRefreshing={refreshing}
-        totalCount={sorted.length}
+        totalCount={taskPage.total}
       />
       <div
         className="flex-1 overflow-y-auto outline-none"
@@ -294,6 +275,15 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
           />
         )}
       </div>
+      {viewMode === 'list' && (
+        <TaskPagination
+          page={taskPage.page}
+          totalPages={taskPage.totalPages}
+          total={taskPage.total}
+          onPage={taskPage.setPage}
+          disabled={taskPage.loading || batchBusy}
+        />
+      )}
       {/* Pinned to the BOTTOM as the last flex child: selecting a row shrinks
           the scroll viewport from below instead of shoving the whole list
           down (no top-anchored layout shift on first select). */}

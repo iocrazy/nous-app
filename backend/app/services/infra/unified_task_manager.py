@@ -27,6 +27,45 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
+# ─── Task list filtering / sorting (server-side, page-number pagination) ──
+
+# Allowed enum values — used to validate multi-select filters before they
+# reach the query builder (never trust the client list).
+VALID_TASK_TYPES = frozenset(
+    {
+        "parse",
+        "download",
+        "upload",
+        "transcode",
+        "ai_pipeline",
+        "ai_extract",
+        "ai_transcription",
+        "ai_summary",
+    }
+)
+VALID_TASK_STATUSES = frozenset(
+    {"pending", "processing", "completed", "failed", "cancelled"}
+)
+
+# sort key → (column, descending)
+_TASK_SORT_MAP: dict[str, tuple[str, bool]] = {
+    "created_desc": ("created_at", True),
+    "created_asc": ("created_at", False),
+    "updated_desc": ("updated_at", True),
+    "title_asc": ("title", False),
+}
+
+# PostgREST or() splits on commas and uses ()/*/: as syntax. Strip those from
+# a free-text search term so a stray comma/paren can't break out of the
+# or()-filter (and to keep the term a plain ILIKE substring). Users rarely
+# search task titles for these chars; dropping them is acceptable.
+_OR_RESERVED = str.maketrans({c: " " for c in ',()*:"\\'})
+
+
+def _sanitize_search(term: str) -> str:
+    return term.translate(_OR_RESERVED).strip()
+
+
 # ─── Phase Enum ───────────────────────────────────────────────────────
 
 
@@ -667,26 +706,64 @@ class UnifiedTaskManager:
         self,
         user_id: str,
         *,
-        task_type: Optional[str] = None,
-        status: Optional[str] = None,
+        types: Optional[list[str]] = None,
+        statuses: Optional[list[str]] = None,
+        search: Optional[str] = None,
+        sort: str = "created_desc",
         limit: int = 50,
         offset: int = 0,
-    ) -> list[dict]:
-        """Get paginated tasks for a user."""
+    ) -> tuple[list[dict], int]:
+        """One filtered/sorted, offset-paginated page of a user's tasks plus
+        the total match count (for page-number pagination).
+
+        Filter (type/status multi-select + free-text search) and sort run
+        server-side; `count="exact"` returns the full match total in the same
+        round-trip so the UI can render "Page N / M". Returns ``(rows, total)``.
+        """
         client = await self._get_client()
         query = (
             client.table("task_tracking")
-            .select("*")
+            .select("*", count="exact")
             .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .range(offset, offset + limit - 1)
         )
-        if task_type:
-            query = query.eq("task_type", task_type)
-        if status:
-            query = query.eq("status", status)
+        if types:
+            query = query.in_("task_type", types)
+        if statuses:
+            query = query.in_("status", statuses)
+        if search:
+            term = _sanitize_search(search)
+            if term:
+                query = query.or_(
+                    f"title.ilike.*{term}*,"
+                    f"subtitle.ilike.*{term}*,"
+                    f"error_msg.ilike.*{term}*"
+                )
+        col, desc = _TASK_SORT_MAP.get(sort, _TASK_SORT_MAP["created_desc"])
+        query = query.order(col, desc=desc).range(offset, offset + limit - 1)
         result = await query.execute()
-        return result.data or []
+        return result.data or [], (result.count or 0)
+
+    async def get_active_counts(self, user_id: str) -> dict:
+        """Active (pending/processing) task counts by type, for the sidebar
+        badge. Decoupled from the paged list so the badge stays correct no
+        matter which page is shown. Safe to fetch+count in Python because the
+        active set is inherently bounded (a user has few in-flight tasks) —
+        unlike ``get_stats`` which scans the whole history.
+        """
+        client = await self._get_client()
+        result = await (
+            client.table("task_tracking")
+            .select("task_type")
+            .eq("user_id", user_id)
+            .in_("status", ["pending", "processing"])
+            .execute()
+        )
+        by_type: dict[str, int] = {}
+        for row in result.data or []:
+            t = row.get("task_type")
+            if t:
+                by_type[t] = by_type.get(t, 0) + 1
+        return {"total": sum(by_type.values()), "by_type": by_type}
 
     async def get_stats(self, user_id: str) -> dict:
         """Get task counts by type and status."""

@@ -13,6 +13,11 @@
         "deleteDone": "Deleted {{count}} task(s)",
         "partial": "{{ok}} succeeded, {{failed}} failed"
       }
+    },
+    "pagination": {
+      "total": "{{count}} tasks",
+      "prev": "Previous",
+      "next": "Next"
     }
   },
   "nav": {

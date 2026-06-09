@@ -13,6 +13,11 @@
         "deleteDone": "已删除 {{count}} 个任务",
         "partial": "成功 {{ok}} 个，失败 {{failed}} 个"
       }
+    },
+    "pagination": {
+      "total": "{{count}} 个任务",
+      "prev": "上一页",
+      "next": "下一页"
     }
   },
   "nav": {
