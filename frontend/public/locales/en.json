@@ -1,4 +1,20 @@
 {
+  "taskCenter": {
+    "batch": {
+      "selected": "{{count}} selected",
+      "running": "Retrying {{done}}/{{total}}…",
+      "selectAll": "Select all",
+      "retry": "Retry ({{count}})",
+      "delete": "Delete ({{count}})",
+      "confirmDelete": "Delete {{count}} task row(s)? The underlying job state stays in the workflow log.",
+      "clear": "Clear selection",
+      "toast": {
+        "retryDone": "Re-dispatched {{count}} task(s)",
+        "deleteDone": "Deleted {{count}} task(s)",
+        "partial": "{{ok}} succeeded, {{failed}} failed"
+      }
+    }
+  },
   "nav": {
     "linkParser": "Link Parser",
     "myLibrary": "My Library",

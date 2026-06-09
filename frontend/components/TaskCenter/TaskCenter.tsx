@@ -19,6 +19,17 @@ import {
 import { TaskToolbar, type ViewMode } from './TaskToolbar';
 import { TaskListView } from './TaskListView';
 import { TaskKanbanView } from './TaskKanbanView';
+import { BatchActionBar } from './BatchActionBar';
+import { useToast } from '../Toast';
+import { useTranslation } from 'react-i18next';
+import {
+  isTerminal,
+  toggleSelection,
+  addAll,
+  partitionForRetry,
+  nextFocusId,
+} from '../../utils/taskSelection';
+import { runBatch } from '../../utils/batchRunner';
 
 interface TaskCenterProps {
   /** When true, the component fills its parent container without breaking
@@ -28,7 +39,9 @@ interface TaskCenterProps {
 }
 
 export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
-  const { tasks, isLoading, refreshTasks, isConnected, isWsConnected } = useTaskManager();
+  const { tasks, isLoading, refreshTasks, isConnected, isWsConnected, retryTask, deleteTask } = useTaskManager();
+  const { addToast } = useToast();
+  const { t } = useTranslation();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<Set<TaskStatus>>(new Set());
@@ -42,6 +55,19 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   // intentionally — admin Arco's NotionTable behaves the same way.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
+
+  // ─── Multi-select / batch actions ────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => toggleSelection(prev, id));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // Keyboard roving focus: click anywhere in the list to engage, then
+  // ↑/↓ move the focused row, Space toggles its selection, Enter expands.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
 
   const toggleExpand = (task: UnifiedTask) => {
     setExpandedIds((prev) => {
@@ -95,6 +121,104 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   const sorted = useMemo(() => sortTasks(filtered, sortBy), [filtered, sortBy]);
   const groups = useMemo(() => groupTasks(sorted, groupBy), [sorted, groupBy]);
 
+  // Partition the live selection against the current task list (drops ids
+  // that vanished, and splits the retryable subset for the Retry button).
+  const retryPartition = useMemo(
+    () => partitionForRetry(tasks, selectedIds),
+    [tasks, selectedIds],
+  );
+
+  const selectAllTerminal = () =>
+    setSelectedIds((prev) =>
+      addAll(prev, sorted.filter((t) => isTerminal(t.status)).map((t) => t.id)),
+    );
+
+  // On-screen row order (respects grouping); drives ↑/↓ keyboard nav.
+  const orderedIds = useMemo(
+    () => groups.flatMap((g) => g.tasks.map((t) => t.id)),
+    [groups],
+  );
+  const taskById = useMemo(
+    () => new Map(tasks.map((t) => [t.id, t])),
+    [tasks],
+  );
+
+  const handleListKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (orderedIds.length === 0) return;
+      e.preventDefault();
+      setFocusedId((cur) => nextFocusId(orderedIds, cur, e.key === 'ArrowDown' ? 1 : -1));
+    } else if (e.key === ' ' || e.key === 'Spacebar') {
+      if (!focusedId) return;
+      const tk = taskById.get(focusedId);
+      if (tk && isTerminal(tk.status)) {
+        e.preventDefault(); // stop the page from scrolling
+        toggleSelect(focusedId);
+      }
+    } else if (e.key === 'Enter') {
+      if (!focusedId) return;
+      const tk = taskById.get(focusedId);
+      if (tk) {
+        e.preventDefault();
+        toggleExpand(tk);
+      }
+    } else if (e.key === 'Escape') {
+      // First Esc clears the selection (and focus) WITHOUT bubbling — the
+      // SettingsModal listens for Escape on `document`, so stopPropagation
+      // keeps the modal open. With nothing selected, let Esc bubble through
+      // so the second press closes Settings as usual.
+      if (selectedIds.size > 0) {
+        e.stopPropagation();
+        clearSelection();
+        setFocusedId(null);
+      }
+    }
+  };
+
+  const runBatchAction = async (
+    ids: string[],
+    action: (id: string) => Promise<void>,
+    successKey: 'retry' | 'delete',
+  ) => {
+    if (ids.length === 0 || batchBusy) return;
+    setBatchBusy(true);
+    setBatchProgress({ done: 0, total: ids.length });
+    try {
+      const { succeeded, failed } = await runBatch(ids, action, {
+        concurrency: 4,
+        onProgress: (done, total) => setBatchProgress({ done, total }),
+      });
+      if (failed.length === 0) {
+        addToast(
+          t(`taskCenter.batch.toast.${successKey}Done`, { count: succeeded.length }),
+          'success',
+        );
+      } else {
+        addToast(
+          t('taskCenter.batch.toast.partial', {
+            ok: succeeded.length,
+            failed: failed.length,
+          }),
+          'error',
+        );
+      }
+      clearSelection();
+    } finally {
+      setBatchBusy(false);
+      setBatchProgress(null);
+    }
+  };
+
+  const handleBatchRetry = () =>
+    runBatchAction(retryPartition.retryable, retryTask, 'retry');
+  const handleBatchDelete = () => {
+    const ids = retryPartition.all;
+    if (ids.length === 0) return;
+    // Destructive + multi-row → confirm (mirrors the single-row delete).
+    if (!window.confirm(t('taskCenter.batch.confirmDelete', { count: ids.length }))) return;
+    runBatchAction(ids, deleteTask, 'delete');
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
@@ -147,12 +271,20 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
         isRefreshing={refreshing}
         totalCount={sorted.length}
       />
-      <div className="flex-1 overflow-y-auto">
+      <div
+        className="flex-1 overflow-y-auto outline-none"
+        tabIndex={viewMode === 'list' ? 0 : undefined}
+        onKeyDown={viewMode === 'list' ? handleListKeyDown : undefined}
+      >
         {viewMode === 'list' ? (
           <TaskListView
             groups={groups}
             expandedIds={expandedIds}
             onToggle={toggleExpand}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            focusedId={focusedId}
+            onFocusRow={setFocusedId}
           />
         ) : (
           <TaskKanbanView
@@ -162,6 +294,21 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
           />
         )}
       </div>
+      {/* Pinned to the BOTTOM as the last flex child: selecting a row shrinks
+          the scroll viewport from below instead of shoving the whole list
+          down (no top-anchored layout shift on first select). */}
+      {retryPartition.all.length > 0 && (
+        <BatchActionBar
+          selectedCount={retryPartition.all.length}
+          retryableCount={retryPartition.retryable.length}
+          onRetry={handleBatchRetry}
+          onDelete={handleBatchDelete}
+          onSelectAll={selectAllTerminal}
+          onClear={clearSelection}
+          busy={batchBusy}
+          progress={batchProgress}
+        />
+      )}
     </div>
   );
 };
