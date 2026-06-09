@@ -163,8 +163,15 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
         toggleExpand(tk);
       }
     } else if (e.key === 'Escape') {
-      if (selectedIds.size > 0) clearSelection();
-      else setFocusedId(null);
+      // First Esc clears the selection (and focus) WITHOUT bubbling — the
+      // SettingsModal listens for Escape on `document`, so stopPropagation
+      // keeps the modal open. With nothing selected, let Esc bubble through
+      // so the second press closes Settings as usual.
+      if (selectedIds.size > 0) {
+        e.stopPropagation();
+        clearSelection();
+        setFocusedId(null);
+      }
     }
   };
 
