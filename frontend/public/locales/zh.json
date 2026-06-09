@@ -6,6 +6,7 @@
       "selectAll": "全选",
       "retry": "重试 ({{count}})",
       "delete": "删除 ({{count}})",
+      "confirmDelete": "删除 {{count}} 行任务记录？底层任务状态仍保留在 workflow log 中。",
       "clear": "清除选择",
       "toast": {
         "retryDone": "已重新派发 {{count}} 个任务",

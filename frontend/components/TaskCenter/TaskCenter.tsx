@@ -211,8 +211,13 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
 
   const handleBatchRetry = () =>
     runBatchAction(retryPartition.retryable, retryTask, 'retry');
-  const handleBatchDelete = () =>
-    runBatchAction(retryPartition.all, deleteTask, 'delete');
+  const handleBatchDelete = () => {
+    const ids = retryPartition.all;
+    if (ids.length === 0) return;
+    // Destructive + multi-row → confirm (mirrors the single-row delete).
+    if (!window.confirm(t('taskCenter.batch.confirmDelete', { count: ids.length }))) return;
+    runBatchAction(ids, deleteTask, 'delete');
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
