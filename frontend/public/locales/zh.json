@@ -1,4 +1,19 @@
 {
+  "taskCenter": {
+    "batch": {
+      "selected": "已选 {{count}} 项",
+      "running": "重试中 {{done}}/{{total}}…",
+      "selectAll": "全选",
+      "retry": "重试 ({{count}})",
+      "delete": "删除 ({{count}})",
+      "clear": "清除选择",
+      "toast": {
+        "retryDone": "已重新派发 {{count}} 个任务",
+        "deleteDone": "已删除 {{count}} 个任务",
+        "partial": "成功 {{ok}} 个，失败 {{failed}} 个"
+      }
+    }
+  },
   "nav": {
     "linkParser": "链接解析",
     "myLibrary": "我的媒体库",

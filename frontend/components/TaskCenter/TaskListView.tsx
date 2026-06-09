@@ -11,6 +11,7 @@ import { ChevronRight, ChevronDown, CircleDot, Circle, CheckCircle2, XCircle, Ba
 import type { UnifiedTask, TaskStatus } from '../../contexts/TaskManagerContext';
 import { taskTypeLabel } from '../../contexts/TaskManagerContext';
 import { taskIdLabel, statusVisual, relativeTime, type TaskGroup } from '../../utils/taskDisplay';
+import { isTerminal } from '../../utils/taskSelection';
 import { TaskRowExpanded } from './TaskRowExpanded';
 import { FlowGroupCard } from './FlowGroupCard';
 
@@ -18,6 +19,8 @@ interface TaskListViewProps {
   groups: TaskGroup[];
   expandedIds: Set<string>;
   onToggle: (task: UnifiedTask) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
 }
 
 function StatusIcon({ status }: { status: TaskStatus | undefined }) {
@@ -41,20 +44,43 @@ const TaskRow: React.FC<{
   task: UnifiedTask;
   expanded: boolean;
   onToggle: () => void;
-}> = ({ task, expanded, onToggle }) => {
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
+}> = ({ task, expanded, onToggle, selected, onToggleSelect }) => {
   const md = (task.metadata ?? {}) as Record<string, unknown>;
   const agentId = md.agent_id as string | undefined;
   // Prefer the task_tracking.flow_id column; fall back to metadata.flow_id
   // for legacy rows that stamped flow into metadata before the column wired.
   const flowId = task.flow_id ?? (md.flow_id as string | undefined);
+  // Only terminal tasks (completed/failed/cancelled) get a checkbox — batch
+  // Retry/Delete have no meaning for in-flight rows.
+  const selectable = isTerminal(task.status);
   return (
     <>
+      <div
+        className={`flex items-center border-b border-zinc-900/60 last:border-b-0 ${
+          expanded ? 'bg-indigo-500/10' : selected ? 'bg-indigo-500/[0.06]' : 'hover:bg-zinc-800/40'
+        }`}
+      >
+        {selectable ? (
+          <label
+            className="flex items-center pl-3 pr-0.5 cursor-pointer shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect(task.id)}
+              className="h-3 w-3 rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+            />
+          </label>
+        ) : (
+          <span className="w-[26px] shrink-0" aria-hidden />
+        )}
       <button
         type="button"
         onClick={onToggle}
-        className={`w-full flex items-center gap-3 px-4 py-1.5 text-left text-xs transition border-b border-zinc-900/60 last:border-b-0 ${
-          expanded ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/40'
-        }`}
+        className={`flex-1 min-w-0 flex items-center gap-3 pl-1 pr-4 py-1.5 text-left text-xs transition`}
       >
         {expanded
           ? <ChevronDown size={11} className="text-zinc-400 shrink-0" />
@@ -86,6 +112,7 @@ const TaskRow: React.FC<{
           {relativeTime(task.updated_at ?? task.created_at)}
         </span>
       </button>
+      </div>
       {expanded && <TaskRowExpanded task={task} />}
     </>
   );
@@ -95,7 +122,9 @@ const GroupSection: React.FC<{
   group: TaskGroup;
   expandedIds: Set<string>;
   onToggle: (t: UnifiedTask) => void;
-}> = ({ group, expandedIds, onToggle }) => {
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+}> = ({ group, expandedIds, onToggle, selectedIds, onToggleSelect }) => {
   const [open, setOpen] = useState(true);
 
   const renderRow = (t: UnifiedTask) => (
@@ -104,6 +133,8 @@ const GroupSection: React.FC<{
       task={t}
       expanded={expandedIds.has(t.id)}
       onToggle={() => onToggle(t)}
+      selected={selectedIds.has(t.id)}
+      onToggleSelect={onToggleSelect}
     />
   );
 
@@ -144,7 +175,7 @@ const GroupSection: React.FC<{
   );
 };
 
-export const TaskListView: React.FC<TaskListViewProps> = ({ groups, expandedIds, onToggle }) => {
+export const TaskListView: React.FC<TaskListViewProps> = ({ groups, expandedIds, onToggle, selectedIds, onToggleSelect }) => {
   if (groups.length === 0) {
     return (
       <div className="flex items-center justify-center py-24 text-sm text-zinc-500">
@@ -155,7 +186,14 @@ export const TaskListView: React.FC<TaskListViewProps> = ({ groups, expandedIds,
   return (
     <div className="border-x border-b border-zinc-800/80">
       {groups.map((g) => (
-        <GroupSection key={g.key} group={g} expandedIds={expandedIds} onToggle={onToggle} />
+        <GroupSection
+          key={g.key}
+          group={g}
+          expandedIds={expandedIds}
+          onToggle={onToggle}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
+        />
       ))}
     </div>
   );

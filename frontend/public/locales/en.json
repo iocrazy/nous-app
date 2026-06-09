@@ -1,4 +1,19 @@
 {
+  "taskCenter": {
+    "batch": {
+      "selected": "{{count}} selected",
+      "running": "Retrying {{done}}/{{total}}…",
+      "selectAll": "Select all",
+      "retry": "Retry ({{count}})",
+      "delete": "Delete ({{count}})",
+      "clear": "Clear selection",
+      "toast": {
+        "retryDone": "Re-dispatched {{count}} task(s)",
+        "deleteDone": "Deleted {{count}} task(s)",
+        "partial": "{{ok}} succeeded, {{failed}} failed"
+      }
+    }
+  },
   "nav": {
     "linkParser": "Link Parser",
     "myLibrary": "My Library",
