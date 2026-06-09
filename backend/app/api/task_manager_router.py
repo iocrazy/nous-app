@@ -103,6 +103,27 @@ async def get_task_stats(auth: AuthDep):
     return {"success": True, "data": stats}
 
 
+@router.get("/tasks/ids")
+async def list_task_ids(
+    auth: AuthDep,
+    types: Optional[list[str]] = Query(None),
+    statuses: Optional[list[str]] = Query(None),
+    search: Optional[str] = Query(None, max_length=200),
+):
+    """Terminal task ids matching the current filter — powers the batch
+    "select all N matching" affordance (cross-page selection). Ids only,
+    capped server-side."""
+    if types and not set(types) <= VALID_TASK_TYPES:
+        raise HTTPException(status_code=422, detail="Invalid task_type filter")
+    if statuses and not set(statuses) <= VALID_TASK_STATUSES:
+        raise HTTPException(status_code=422, detail="Invalid status filter")
+    tracker = get_task_manager()
+    ids, capped = await tracker.get_matching_task_ids(
+        auth.user_id, types=types, statuses=statuses, search=search
+    )
+    return {"success": True, "ids": ids, "total": len(ids), "capped": capped}
+
+
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str, auth: AuthDep):
     """Cancel a pending/processing task and revoke its Celery job."""

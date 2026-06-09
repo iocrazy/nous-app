@@ -19,6 +19,12 @@ interface BatchActionBarProps {
   onClear: () => void;
   busy: boolean;
   progress: { done: number; total: number } | null;
+  /** Cross-page select-all is active (selectedCount spans all pages). */
+  allMatchingActive?: boolean;
+  /** Total terminal tasks matching the current filter (for the affordance). */
+  matchTotal?: number;
+  /** Provided when more matches exist beyond the current page → show the link. */
+  onSelectAllMatching?: () => void;
 }
 
 export const BatchActionBar: React.FC<BatchActionBarProps> = ({
@@ -30,6 +36,9 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
   onClear,
   busy,
   progress,
+  allMatchingActive,
+  matchTotal,
+  onSelectAllMatching,
 }) => {
   const { t } = useTranslation();
 
@@ -45,8 +54,20 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
         </span>
       ) : (
         <span className="text-zinc-300 font-medium">
-          {t('taskCenter.batch.selected', { count: selectedCount })}
+          {allMatchingActive
+            ? t('taskCenter.batch.selectedAllMatching', { count: selectedCount })
+            : t('taskCenter.batch.selected', { count: selectedCount })}
         </span>
+      )}
+
+      {!busy && onSelectAllMatching && (
+        <button
+          type="button"
+          onClick={onSelectAllMatching}
+          className="text-indigo-300 hover:text-indigo-200 underline underline-offset-2 transition"
+        >
+          {t('taskCenter.batch.selectAllMatching', { count: matchTotal ?? 0 })}
+        </button>
       )}
 
       <div className="flex-1" />
