@@ -83,10 +83,12 @@ export function MobileTabBar({ tabs, collapsed, onExpand, hidden }: MobileTabBar
           ref={containerRef}
           className="relative bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/60 rounded-full flex items-center px-2 py-1.5 gap-0.5 shadow-2xl"
         >
-          {/* Sliding active indicator — hidden while collapsed (the lone active
-              tab carries its own bg then). */}
+          {/* Sliding active indicator — iOS-26 "liquid glass": translucent fill
+              + top highlight + soft shadow, with a springy (overshoot) ease so
+              the switch reads as a glass pill snapping into place. Hidden while
+              collapsed (the dot is the container itself). */}
           <div
-            className={`absolute top-1.5 bottom-1.5 rounded-full bg-zinc-800 transition-[transform,width,opacity] duration-300 ease-out ${
+            className={`absolute top-1.5 bottom-1.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-md shadow-[0_2px_10px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] transition-[transform,width,opacity] duration-[420ms] ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
               hasActive && !collapsed ? 'opacity-100' : 'opacity-0'
             }`}
             style={{ transform: `translateX(${indicator.left}px)`, width: indicator.width }}
@@ -107,7 +109,7 @@ export function MobileTabBar({ tabs, collapsed, onExpand, hidden }: MobileTabBar
                   onClick={collapsed ? onExpand : tab.onClick}
                   className={`relative z-10 flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
                     tab.active ? 'text-indigo-400' : 'text-zinc-500'
-                  } ${collapsed && tab.active ? 'bg-zinc-800' : ''}`}
+                  }`}
                 >
                   {tab.icon}
                   {!collapsed && (

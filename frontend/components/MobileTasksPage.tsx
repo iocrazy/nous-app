@@ -51,7 +51,7 @@ function MobileTasksPanel({
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { tasks, cancelTask, retryTask, clearCompleted, isLoading } = useTaskManager();
+  const { tasks, cancelTask, retryTask, isLoading } = useTaskManager();
   const upload = useUpload();
   const [tab, setTab] = useState<TaskTab>('active');
   const [detailTask, setDetailTask] = useState<UnifiedTask | null>(null);
@@ -113,20 +113,9 @@ function MobileTasksPanel({
     // tappable here, and below modals/Profile (z-50). TaskDetailModal portals
     // at z-60, above everything.
     <div className="sm:hidden fixed inset-0 z-[48] bg-zinc-950 flex flex-col">
-      {/* Header — leave the page via the bottom tab bar; no Done/search here. */}
-      <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800/80">
-        <div className="w-16">
-          {completedCount > 0 && (
-            <button
-              onClick={() => clearCompleted()}
-              className="text-[12px] text-zinc-500 hover:text-zinc-300 active:text-zinc-200 transition-colors"
-            >
-              {t('topbar.clearCompleted')}
-            </button>
-          )}
-        </div>
+      {/* Header — leave the page via the bottom tab bar. Clear button deferred. */}
+      <div className="flex items-center justify-center px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800/80">
         <h1 className="text-[17px] font-semibold text-zinc-100">{t('topbar.taskCenter')}</h1>
-        <div className="w-16" />
       </div>
 
       {isLoading ? (
