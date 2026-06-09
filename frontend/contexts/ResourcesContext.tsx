@@ -11,7 +11,7 @@ import {
   restoreResource,
   permanentDeleteResource,
   permanentDeleteFolder,
-  fetchTrashedResources,
+  fetchTrashedResourcesPaginated,
   fetchDownloadedResources,
   fetchDownloadedResourceCount,
   fetchResourceCount,
@@ -91,6 +91,10 @@ export interface ResourcesContextType {
   childFolders: Folder[];
   folderPreviews: Record<string, Array<{ resource_id: string | null; thumbnail_path: string | null; cover_image_path: string | null; mime_type: string | null }>>;
   trashedResources: ResourceItem[];
+  /** Load the next keyset page of the recycle bin (no-op when drained/loading). */
+  loadMoreTrashed: () => Promise<void>;
+  hasMoreTrashed: boolean;
+  isLoadingMoreTrashed: boolean;
   trashedFolders: Folder[];
   downloadedResources: ResourceItem[];
   libraries: Library[];
@@ -234,7 +238,6 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // below (defined after filterParamsRef, its dependency). setResources keeps
   // the same Dispatch signature, so all optimistic-update call sites are unchanged.
   const [loading, setLoading] = useState(true);
-  const [trashedResources, setTrashedResources] = useState<ResourceItem[]>([]);
   const [trashedFolders, setTrashedFolders] = useState<Folder[]>([]);
   const [recycleFolderId, setRecycleFolderId] = useState<string | null>(null);
   const [recycleFolderItems, setRecycleFolderItems] = useState<ResourceItem[]>([]);
@@ -338,6 +341,23 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     load: loadResourcesFirstPage,
     loadMore: loadMoreResources,
   } = useKeysetPagination<ResourceItem>(fetchResourcesPage);
+
+  // Recycle bin — keyset-paginated like the main list (was a drain-all that
+  // capped at 1000). No filters/search: the recycle view has no filter bar.
+  const RECYCLE_PAGE_SIZE = RESOURCE_PAGE_SIZE;
+  const fetchTrashedPage = useCallback(
+    (cursor: KeysetCursor | null, signal: AbortSignal) =>
+      fetchTrashedResourcesPaginated(isPersonal, scopeId, cursor, RECYCLE_PAGE_SIZE, signal),
+    [isPersonal, scopeId, RECYCLE_PAGE_SIZE],
+  );
+  const {
+    items: trashedResources,
+    setItems: setTrashedResources,
+    isLoadingMore: isLoadingMoreTrashed,
+    hasMore: hasMoreTrashed,
+    load: loadTrashedFirstPage,
+    loadMore: loadMoreTrashed,
+  } = useKeysetPagination<ResourceItem>(fetchTrashedPage);
 
   // ── Derived view flags ──
   const isResourcesView = sidebarView === 'resources';
@@ -694,21 +714,20 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     });
   }, [resources, downloadedResources]);
 
-  // Load trashed resources
+  // Load trashed resources. Items go through the keyset hook (loadTrashedFirstPage
+  // resets to page 1); folders stay a single fetch (a scope has few trashed folders).
   const loadTrashedResources = useCallback(async () => {
     try {
-      const [items, flds] = await Promise.all([
-        fetchTrashedResources(isPersonal, scopeId),
+      const [, flds] = await Promise.all([
+        loadTrashedFirstPage(),
         fetchTrashedFolders(scopeId),
       ]);
-      setTrashedResources(items);
       setTrashedFolders(flds);
     } catch (err) {
       console.error('Failed to load trashed items:', err);
-      setTrashedResources([]);
       setTrashedFolders([]);
     }
-  }, [isPersonal, scopeId]);
+  }, [scopeId, loadTrashedFirstPage]);
 
   useEffect(() => {
     if (sidebarView !== 'recycle') return;
@@ -716,26 +735,20 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setRecycleFolderId(null);
     setLoading(true);
     Promise.all([
-      fetchTrashedResources(isPersonal, scopeId),
+      loadTrashedFirstPage(),
       fetchTrashedFolders(scopeId),
     ])
-      .then(([items, flds]) => {
-        if (!cancelled) {
-          setTrashedResources(items);
-          setTrashedFolders(flds);
-        }
+      .then(([, flds]) => {
+        if (!cancelled) setTrashedFolders(flds);
       })
       .catch(() => {
-        if (!cancelled) {
-          setTrashedResources([]);
-          setTrashedFolders([]);
-        }
+        if (!cancelled) setTrashedFolders([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [sidebarView, isPersonal, scopeId]);
+  }, [sidebarView, isPersonal, scopeId, loadTrashedFirstPage]);
 
   // Load resource_items inside a trashed folder
   useEffect(() => {
@@ -1017,6 +1030,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     childFolders,
     folderPreviews,
     trashedResources,
+    loadMoreTrashed,
+    hasMoreTrashed,
+    isLoadingMoreTrashed,
     trashedFolders,
     downloadedResources,
     libraries,
@@ -1104,6 +1120,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     viewMode, sortBy, searchQuery, debouncedSearch, showInfoPanel, infoPanelWidth,
     filterParams, setFilterParams, reloadResources,
     loadMoreResources, hasMoreResources, isLoadingMoreResources,
+    loadMoreTrashed, hasMoreTrashed, isLoadingMoreTrashed,
     loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
     handleTrashResource, handleRestoreResource, handlePermanentDelete, confirmPermanentDelete,
     handleAddTag, handleRemoveTag, handleCreateTag, handleResourceUpdate,

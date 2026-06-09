@@ -493,14 +493,22 @@ export const ResourcesViewInner: React.FC = () => {
     onEmptyAreaTouchStart: handleEmptyAreaTouchStart, onEmptyAreaTouchMove: handleEmptyAreaTouchMove,
     onEmptyAreaTouchEnd: handleEmptyAreaTouchEnd, onTouchDragMove: handleTouchDragMove,
     onTouchDragEnd: handleTouchDragEnd,
-    // Pagination lifted to props. For now every view gets the main resources
-    // list's keyset loadMore (behavior-identical to the old context read — the
-    // sentinel only renders in isResourcesView anyway). Track B step 2+ swaps
-    // in per-view loadMore (recycle/folder) here.
-    loadMore: ctx.loadMoreResources, hasMore: ctx.hasMoreResources,
-    isLoadingMore: ctx.isLoadingMoreResources,
+    // Pagination lifted to props, switched per view: the TOP-LEVEL recycle bin
+    // gets its own keyset loadMore; inside a trashed sub-folder the data is the
+    // (still drain-loaded) recycleFolderItems, so no keyset → hasMore=false;
+    // everything else uses the main resources list's. (loadMore is only ever
+    // called when hasMore is true, so its value is irrelevant when false.)
+    loadMore: ctx.isRecycleView ? ctx.loadMoreTrashed : ctx.loadMoreResources,
+    hasMore: ctx.isRecycleView
+      ? (ctx.recycleFolderId ? false : ctx.hasMoreTrashed)
+      : ctx.hasMoreResources,
+    isLoadingMore: ctx.isRecycleView
+      ? (ctx.recycleFolderId ? false : ctx.isLoadingMoreTrashed)
+      : ctx.isLoadingMoreResources,
   }), [
+    ctx.isRecycleView, ctx.recycleFolderId,
     ctx.loadMoreResources, ctx.hasMoreResources, ctx.isLoadingMoreResources,
+    ctx.loadMoreTrashed, ctx.hasMoreTrashed, ctx.isLoadingMoreTrashed,
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
     allSelectableIds, sortOptions, filterBarConfig, allTags, availablePlatforms,
     uploadsAllowedChips,
