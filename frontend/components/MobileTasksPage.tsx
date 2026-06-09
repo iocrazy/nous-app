@@ -108,11 +108,12 @@ function MobileTasksPanel({
   }, [counts.running]);
 
   return (
-    // z-40: sits BELOW the bottom tab bar (z-45) so the pill stays visible &
-    // tappable while the Task Center is open (the TaskDetailModal portals at
-    // z-60, above both).
-    <div className="sm:hidden fixed inset-0 z-40 bg-zinc-950 flex flex-col">
-      {/* Header */}
+    // z-[48]: covers the underlying page's floating controls (z-30/z-40) but
+    // sits BELOW the bottom tab bar (z-[49]) so the pill stays visible &
+    // tappable here, and below modals/Profile (z-50). TaskDetailModal portals
+    // at z-60, above everything.
+    <div className="sm:hidden fixed inset-0 z-[48] bg-zinc-950 flex flex-col">
+      {/* Header — leave the page via the bottom tab bar; no Done/search here. */}
       <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800/80">
         <div className="w-16">
           {completedCount > 0 && (
@@ -125,12 +126,7 @@ function MobileTasksPanel({
           )}
         </div>
         <h1 className="text-[17px] font-semibold text-zinc-100">{t('topbar.taskCenter')}</h1>
-        <button
-          onClick={onClose}
-          className="px-4 py-1.5 text-[15px] font-medium text-zinc-100 bg-zinc-800 rounded-full hover:bg-zinc-700 active:bg-zinc-600 transition-colors"
-        >
-          {t('common.done', 'Done')}
-        </button>
+        <div className="w-16" />
       </div>
 
       {isLoading ? (

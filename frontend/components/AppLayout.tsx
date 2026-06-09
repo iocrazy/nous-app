@@ -316,13 +316,16 @@ function AppLayoutInner() {
     </div>
   ) : null;
 
+  // Tasks is an overlay: while it's open it owns the "active" highlight, so the
+  // underlying page's tab must not also read active (else the collapsed dot
+  // would pick the first active tab — the wrong icon).
   const mobileTabs: MobileTab[] = [
     {
-      key: 'parser', icon: <Search size={20} />, label: 'Parser', active: view === 'parser',
+      key: 'parser', icon: <Search size={20} />, label: 'Parser', active: view === 'parser' && !isMobileTasksOpen,
       onClick: () => { setIsMobileTasksOpen(false); setIsResourcesMenuOpen(false); setIsDownloadsMenuOpen(false); handleMobileNavClick('parser'); },
     },
     ...(isPersonalWorkspace ? [{
-      key: 'downloads', icon: <Download size={20} />, label: 'Downloads', active: isDownloadsRoute,
+      key: 'downloads', icon: <Download size={20} />, label: 'Downloads', active: isDownloadsRoute && !isMobileTasksOpen,
       onClick: () => {
         setIsMobileMenuOpen(false); setIsMobileTasksOpen(false); setIsResourcesMenuOpen(false);
         if (isDownloadsRoute) { setIsDownloadsMenuOpen(v => !v); }
@@ -331,7 +334,7 @@ function AppLayoutInner() {
       popup: downloadsPopup,
     } as MobileTab] : []),
     {
-      key: 'resources', icon: <FolderOpen size={20} />, label: 'Resources', active: view === 'resources' && !isDownloadsRoute,
+      key: 'resources', icon: <FolderOpen size={20} />, label: 'Resources', active: view === 'resources' && !isDownloadsRoute && !isMobileTasksOpen,
       onClick: () => {
         setIsMobileMenuOpen(false); setIsMobileTasksOpen(false); setIsDownloadsMenuOpen(false);
         if (view === 'resources' && !isDownloadsRoute) { setIsResourcesMenuOpen(v => !v); }
