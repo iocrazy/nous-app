@@ -219,18 +219,6 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
         isRefreshing={refreshing}
         totalCount={sorted.length}
       />
-      {retryPartition.all.length > 0 && (
-        <BatchActionBar
-          selectedCount={retryPartition.all.length}
-          retryableCount={retryPartition.retryable.length}
-          onRetry={handleBatchRetry}
-          onDelete={handleBatchDelete}
-          onSelectAll={selectAllTerminal}
-          onClear={clearSelection}
-          busy={batchBusy}
-          progress={batchProgress}
-        />
-      )}
       <div className="flex-1 overflow-y-auto">
         {viewMode === 'list' ? (
           <TaskListView
@@ -248,6 +236,21 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
           />
         )}
       </div>
+      {/* Pinned to the BOTTOM as the last flex child: selecting a row shrinks
+          the scroll viewport from below instead of shoving the whole list
+          down (no top-anchored layout shift on first select). */}
+      {retryPartition.all.length > 0 && (
+        <BatchActionBar
+          selectedCount={retryPartition.all.length}
+          retryableCount={retryPartition.retryable.length}
+          onRetry={handleBatchRetry}
+          onDelete={handleBatchDelete}
+          onSelectAll={selectAllTerminal}
+          onClear={clearSelection}
+          busy={batchBusy}
+          progress={batchProgress}
+        />
+      )}
     </div>
   );
 };

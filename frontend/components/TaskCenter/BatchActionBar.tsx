@@ -34,7 +34,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
   const { t } = useTranslation();
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900/90 border-b border-indigo-500/30 text-xs">
+    <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900/95 border-t border-indigo-500/30 shadow-[0_-4px_12px_rgba(0,0,0,0.3)] text-xs shrink-0">
       {busy && progress ? (
         <span className="flex items-center gap-2 text-indigo-300">
           <Loader2 size={13} className="animate-spin" />
