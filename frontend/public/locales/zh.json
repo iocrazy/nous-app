@@ -2,8 +2,12 @@
   "taskCenter": {
     "batch": {
       "selected": "已选 {{count}} 项",
+      "selectedAllMatching": "已选全部 {{count}} 个匹配",
       "running": "重试中 {{done}}/{{total}}…",
       "selectAll": "全选",
+      "selectAllMatching": "选全部 {{count}} 个匹配",
+      "selectCapped": "已选前 {{count}} 个（已封顶）",
+      "selectAllFailed": "选全部匹配失败",
       "retry": "重试 ({{count}})",
       "delete": "删除 ({{count}})",
       "confirmDelete": "删除 {{count}} 行任务记录？底层任务状态仍保留在 workflow log 中。",

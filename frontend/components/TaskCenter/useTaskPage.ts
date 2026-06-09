@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   fetchTasksPage,
+  fetchMatchingTaskIds,
   type TaskSort,
   type UnifiedTask,
   type TaskStatus,
@@ -39,6 +40,8 @@ export interface UseTaskPage {
   setSearch: (q: string) => void;
   setSort: (s: TaskSort) => void;
   refresh: () => void;
+  /** All terminal task ids matching the current filter (cross-page select-all). */
+  fetchAllMatchingIds: () => Promise<{ ids: string[]; capped: boolean }>;
 }
 
 export function useTaskPage(revision: number): UseTaskPage {
@@ -133,6 +136,18 @@ export function useTaskPage(revision: number): UseTaskPage {
     setPage(1); // page index is meaningless across a size change
   };
 
+  const fetchAllMatchingIds = useCallback(
+    async () => {
+      const r = await fetchMatchingTaskIds({
+        statuses: [...statuses],
+        types: [...types],
+        search: debouncedSearch,
+      });
+      return { ids: r.ids, capped: r.capped };
+    },
+    [statuses, types, debouncedSearch],
+  );
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return {
@@ -154,5 +169,6 @@ export function useTaskPage(revision: number): UseTaskPage {
     setSearch,
     setSort,
     refresh: load,
+    fetchAllMatchingIds,
   };
 }

@@ -765,6 +765,50 @@ class UnifiedTaskManager:
                 by_type[t] = by_type.get(t, 0) + 1
         return {"total": sum(by_type.values()), "by_type": by_type}
 
+    async def get_matching_task_ids(
+        self,
+        user_id: str,
+        *,
+        types: Optional[list[str]] = None,
+        statuses: Optional[list[str]] = None,
+        search: Optional[str] = None,
+        limit: int = 5000,
+    ) -> tuple[list[str], bool]:
+        """All matching task ids (dbos_workflow_id) for "select all matching".
+
+        Only TERMINAL tasks (completed/failed/cancelled) are batch-selectable,
+        so the result is intersected with the terminal set. Returns
+        ``(ids, capped)`` — ids only (cheap), capped at ``limit`` so a runaway
+        filter can't pull an unbounded list into a batch.
+        """
+        terminal = {"completed", "failed", "cancelled"}
+        eff = [s for s in statuses if s in terminal] if statuses else list(terminal)
+        if not eff:
+            return [], False  # filter excludes every terminal status
+        client = await self._get_client()
+        query = (
+            client.table("task_tracking")
+            .select("dbos_workflow_id")
+            .eq("user_id", user_id)
+            .in_("status", eff)
+        )
+        if types:
+            query = query.in_("task_type", types)
+        if search:
+            term = _sanitize_search(search)
+            if term:
+                query = query.or_(
+                    f"title.ilike.*{term}*,"
+                    f"subtitle.ilike.*{term}*,"
+                    f"error_msg.ilike.*{term}*"
+                )
+        query = query.order("created_at", desc=True).limit(limit + 1)
+        result = await query.execute()
+        rows = result.data or []
+        capped = len(rows) > limit
+        ids = [r["dbos_workflow_id"] for r in rows[:limit] if r.get("dbos_workflow_id")]
+        return ids, capped
+
     async def get_stats(self, user_id: str) -> dict:
         """Get task counts by type and status."""
         client = await self._get_client()

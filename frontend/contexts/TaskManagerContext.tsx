@@ -410,6 +410,30 @@ export async function fetchTasksPage(
   };
 }
 
+/** Terminal task ids matching a filter — for cross-page "select all matching".
+ * Ids only (cheap), capped server-side at 5000. */
+export async function fetchMatchingTaskIds(params: {
+  statuses?: TaskStatus[];
+  types?: TaskType[];
+  search?: string;
+}): Promise<{ ids: string[]; total: number; capped: boolean }> {
+  const qs = new URLSearchParams();
+  (params.statuses ?? []).forEach((s) => qs.append('statuses', s));
+  (params.types ?? []).forEach((t) => qs.append('types', t));
+  if (params.search?.trim()) qs.set('search', params.search.trim());
+  const resp = await fetch(
+    `${API_BASE}/api/v1/task-manager/tasks/ids?${qs.toString()}`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!resp.ok) throw new Error(`task ids ${resp.status}`);
+  const json = await resp.json();
+  return {
+    ids: (json.ids as string[]) ?? [],
+    total: (json.total as number) ?? 0,
+    capped: !!json.capped,
+  };
+}
+
 export interface ActiveCounts {
   total: number;
   byType: Record<string, number>;

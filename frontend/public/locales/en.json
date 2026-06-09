@@ -2,8 +2,12 @@
   "taskCenter": {
     "batch": {
       "selected": "{{count}} selected",
+      "selectedAllMatching": "All {{count}} matching selected",
       "running": "Retrying {{done}}/{{total}}…",
       "selectAll": "Select all",
+      "selectAllMatching": "Select all {{count}} matching",
+      "selectCapped": "Selected the first {{count}} (capped)",
+      "selectAllFailed": "Failed to select all matching",
       "retry": "Retry ({{count}})",
       "delete": "Delete ({{count}})",
       "confirmDelete": "Delete {{count}} task row(s)? The underlying job state stays in the workflow log.",

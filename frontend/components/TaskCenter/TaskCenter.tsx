@@ -65,9 +65,17 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const toggleSelect = (id: string) =>
+  // "Select all N matching" (cross-page) flips this on; any manual selection
+  // change flips it off so the bar reflects reality.
+  const [allMatching, setAllMatching] = useState(false);
+  const toggleSelect = (id: string) => {
     setSelectedIds((prev) => toggleSelection(prev, id));
-  const clearSelection = () => setSelectedIds(new Set());
+    setAllMatching(false);
+  };
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setAllMatching(false);
+  };
 
   // Keyboard roving focus: click anywhere in the list to engage, then
   // ↑/↓ move the focused row, Space toggles its selection, Enter expands.
@@ -108,10 +116,28 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
     [tasks, selectedIds],
   );
 
-  const selectAllTerminal = () =>
+  const selectAllTerminal = () => {
     setSelectedIds((prev) =>
       addAll(prev, tasks.filter((t) => isTerminal(t.status)).map((t) => t.id)),
     );
+    setAllMatching(false);
+  };
+
+  // Cross-page: select EVERY terminal task matching the current filter (not
+  // just the visible page). Fetches ids server-side (capped at 5000).
+  const handleSelectAllMatching = async () => {
+    try {
+      const { ids, capped } = await taskPage.fetchAllMatchingIds();
+      setSelectedIds(new Set(ids));
+      setAllMatching(true);
+      if (capped) {
+        addToast(t('taskCenter.batch.selectCapped', { count: ids.length }), 'info');
+      }
+    } catch (e) {
+      console.error('[TaskCenter] select-all-matching failed:', e);
+      addToast(t('taskCenter.batch.selectAllFailed'), 'error');
+    }
+  };
 
   // On-screen row order (respects grouping); drives ↑/↓ keyboard nav.
   const orderedIds = useMemo(
@@ -189,14 +215,18 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
     }
   };
 
-  const handleBatchRetry = () =>
-    runBatchAction(retryPartition.retryable, retryTask, 'retry');
+  // When all-matching is active, selectedIds spans pages (the ids endpoint
+  // already returned terminal-only), so act on the raw set; otherwise use the
+  // on-page partition (which knows retryable vs all for visible rows).
+  const retryIds = allMatching ? [...selectedIds] : retryPartition.retryable;
+  const deleteIds = allMatching ? [...selectedIds] : retryPartition.all;
+
+  const handleBatchRetry = () => runBatchAction(retryIds, retryTask, 'retry');
   const handleBatchDelete = () => {
-    const ids = retryPartition.all;
-    if (ids.length === 0) return;
+    if (deleteIds.length === 0) return;
     // Destructive + multi-row → confirm (mirrors the single-row delete).
-    if (!window.confirm(t('taskCenter.batch.confirmDelete', { count: ids.length }))) return;
-    runBatchAction(ids, deleteTask, 'delete');
+    if (!window.confirm(t('taskCenter.batch.confirmDelete', { count: deleteIds.length }))) return;
+    runBatchAction(deleteIds, deleteTask, 'delete');
   };
 
   const handleRefresh = async () => {
@@ -289,16 +319,23 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
       {/* Pinned to the BOTTOM as the last flex child: selecting a row shrinks
           the scroll viewport from below instead of shoving the whole list
           down (no top-anchored layout shift on first select). */}
-      {retryPartition.all.length > 0 && (
+      {(retryPartition.all.length > 0 || (allMatching && selectedIds.size > 0)) && (
         <BatchActionBar
-          selectedCount={retryPartition.all.length}
-          retryableCount={retryPartition.retryable.length}
+          selectedCount={allMatching ? selectedIds.size : retryPartition.all.length}
+          retryableCount={allMatching ? selectedIds.size : retryPartition.retryable.length}
           onRetry={handleBatchRetry}
           onDelete={handleBatchDelete}
           onSelectAll={selectAllTerminal}
           onClear={clearSelection}
           busy={batchBusy}
           progress={batchProgress}
+          allMatchingActive={allMatching}
+          matchTotal={taskPage.total}
+          onSelectAllMatching={
+            !allMatching && taskPage.total > tasks.length
+              ? handleSelectAllMatching
+              : undefined
+          }
         />
       )}
     </div>

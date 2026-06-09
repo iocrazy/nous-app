@@ -81,6 +81,10 @@ class _FakeQuery:
         self.calls.append(("range", a))
         return self
 
+    def limit(self, *a):
+        self.calls.append(("limit", a))
+        return self
+
     async def execute(self):
         return SimpleNamespace(data=self._rows, count=self._count)
 
@@ -144,6 +148,29 @@ async def test_get_tasks_default_sort_is_created_desc() -> None:
 
 
 # ─── get_active_counts ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_matching_task_ids_terminal_only_and_capped() -> None:
+    # limit+1 rows back → capped; ids sliced to limit
+    rows = [{"dbos_workflow_id": f"w{i}"} for i in range(3)]
+    mgr, q = _mgr_with(rows, len(rows))
+    ids, capped = await mgr.get_matching_task_ids(
+        "u", statuses=["failed", "processing"], limit=2
+    )
+    # requested statuses intersected with terminal → only 'failed' queried
+    assert ("in_", ("status", ["failed"])) in q.calls
+    assert ids == ["w0", "w1"]  # sliced to limit
+    assert capped is True
+
+
+@pytest.mark.asyncio
+async def test_get_matching_task_ids_empty_when_no_terminal_status() -> None:
+    mgr, q = _mgr_with([], 0)
+    ids, capped = await mgr.get_matching_task_ids("u", statuses=["processing"])
+    assert ids == [] and capped is False
+    # short-circuits before querying
+    assert not any(c[0] == "table" for c in q.calls)
 
 
 @pytest.mark.asyncio
