@@ -493,7 +493,14 @@ export const ResourcesViewInner: React.FC = () => {
     onEmptyAreaTouchStart: handleEmptyAreaTouchStart, onEmptyAreaTouchMove: handleEmptyAreaTouchMove,
     onEmptyAreaTouchEnd: handleEmptyAreaTouchEnd, onTouchDragMove: handleTouchDragMove,
     onTouchDragEnd: handleTouchDragEnd,
+    // Pagination lifted to props. For now every view gets the main resources
+    // list's keyset loadMore (behavior-identical to the old context read — the
+    // sentinel only renders in isResourcesView anyway). Track B step 2+ swaps
+    // in per-view loadMore (recycle/folder) here.
+    loadMore: ctx.loadMoreResources, hasMore: ctx.hasMoreResources,
+    isLoadingMore: ctx.isLoadingMoreResources,
   }), [
+    ctx.loadMoreResources, ctx.hasMoreResources, ctx.isLoadingMoreResources,
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
     allSelectableIds, sortOptions, filterBarConfig, allTags, availablePlatforms,
     uploadsAllowedChips,
