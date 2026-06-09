@@ -96,6 +96,14 @@ export function useTaskPage(revision: number): UseTaskPage {
     load();
   }, [load]);
 
+  // Clamp: if `total` shrank below the current page (a Realtime delete or a
+  // filter change while deep-paged), snap back to the last valid page so the
+  // user never sits on an empty out-of-range page. total=0 → page 1.
+  useEffect(() => {
+    const tp = Math.max(1, Math.ceil(total / pageSize));
+    if (page > tp) setPage(tp);
+  }, [total, pageSize, page]);
+
   // Realtime: refetch the current page when the context signals a change.
   // Debounced so a burst of DBOS UPDATEs coalesces into one refetch.
   const loadRef = useRef(load);
