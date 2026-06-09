@@ -54,7 +54,11 @@ export function MobileTabBar({ tabs, collapsed, onExpand, hidden }: MobileTabBar
       if (!c || !cell) return;
       const cr = c.getBoundingClientRect();
       const br = cell.getBoundingClientRect();
-      setIndicator({ left: br.left - cr.left, width: br.width });
+      // Offset from the container's PADDING box (the indicator is anchored at
+      // left-0 = padding-box origin). Subtract clientLeft (the left border
+      // width) so translateX lands exactly on the cell — without it the border
+      // adds a constant rightward drift.
+      setIndicator({ left: br.left - cr.left - c.clientLeft, width: br.width });
     };
     measure();
     const settle = window.setTimeout(measure, 320);
@@ -88,7 +92,7 @@ export function MobileTabBar({ tabs, collapsed, onExpand, hidden }: MobileTabBar
               the switch reads as a glass pill snapping into place. Hidden while
               collapsed (the dot is the container itself). */}
           <div
-            className={`absolute top-1.5 bottom-1.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-md shadow-[0_2px_10px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] transition-[transform,width,opacity] duration-[420ms] ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
+            className={`absolute left-0 top-1.5 bottom-1.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-md shadow-[0_2px_10px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)] transition-[transform,width,opacity] duration-[420ms] ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
               hasActive && !collapsed ? 'opacity-100' : 'opacity-0'
             }`}
             style={{ transform: `translateX(${indicator.left}px)`, width: indicator.width }}
