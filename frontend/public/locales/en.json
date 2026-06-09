@@ -16,6 +16,7 @@
     },
     "pagination": {
       "total": "{{count}} tasks",
+      "perPage": "{{count}} / page",
       "prev": "Previous",
       "next": "Next"
     }

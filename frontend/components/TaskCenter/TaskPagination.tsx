@@ -5,6 +5,7 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { TASK_PAGE_SIZE_OPTIONS } from './useTaskPage';
 
 /** Windowed page list: always show first + last + a span around current,
  * with '…' gaps. e.g. window(6, 50) → [1, '…', 5, 6, 7, '…', 50]. */
@@ -33,7 +34,9 @@ interface TaskPaginationProps {
   page: number;
   totalPages: number;
   total: number;
+  pageSize: number;
   onPage: (p: number) => void;
+  onPageSize: (n: number) => void;
   disabled?: boolean;
 }
 
@@ -41,7 +44,9 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
   page,
   totalPages,
   total,
+  pageSize,
   onPage,
+  onPageSize,
   disabled,
 }) => {
   const { t } = useTranslation();
@@ -57,6 +62,21 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
       <span className="text-zinc-400">
         {t('taskCenter.pagination.total', { count: total })}
       </span>
+      <label className="flex items-center gap-1 text-zinc-500">
+        <select
+          value={pageSize}
+          onChange={(e) => onPageSize(Number(e.target.value))}
+          disabled={disabled}
+          className="bg-zinc-800/80 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-300 text-xs outline-none focus:border-indigo-500 disabled:opacity-40 cursor-pointer"
+          aria-label={t('taskCenter.pagination.perPage') ?? 'Per page'}
+        >
+          {TASK_PAGE_SIZE_OPTIONS.map((n) => (
+            <option key={n} value={n}>
+              {t('taskCenter.pagination.perPage', { count: n })}
+            </option>
+          ))}
+        </select>
+      </label>
       <div className="flex-1" />
       <button
         type="button"

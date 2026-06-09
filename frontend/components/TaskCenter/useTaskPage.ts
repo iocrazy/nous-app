@@ -17,6 +17,8 @@ import {
 } from '../../contexts/TaskManagerContext';
 
 export const TASK_PAGE_SIZE = 50;
+/** Page-size choices (backend caps `limit` at 200). */
+export const TASK_PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 
 export interface UseTaskPage {
   tasks: UnifiedTask[];
@@ -31,6 +33,7 @@ export interface UseTaskPage {
   search: string;
   sort: TaskSort;
   setPage: (p: number) => void;
+  setPageSize: (n: number) => void;
   toggleStatus: (s: TaskStatus) => void;
   toggleType: (t: TaskType) => void;
   setSearch: (q: string) => void;
@@ -40,6 +43,7 @@ export interface UseTaskPage {
 
 export function useTaskPage(revision: number): UseTaskPage {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSizeRaw] = useState<number>(TASK_PAGE_SIZE);
   const [statuses, setStatuses] = useState<Set<TaskStatus>>(new Set());
   const [types, setTypes] = useState<Set<TaskType>>(new Set());
   const [search, setSearchRaw] = useState('');
@@ -67,7 +71,7 @@ export function useTaskPage(revision: number): UseTaskPage {
     try {
       const res = await fetchTasksPage({
         page,
-        pageSize: TASK_PAGE_SIZE,
+        pageSize,
         statuses: [...statuses],
         types: [...types],
         search: debouncedSearch,
@@ -83,7 +87,7 @@ export function useTaskPage(revision: number): UseTaskPage {
     } finally {
       if (myId === reqId.current) setLoading(false);
     }
-  }, [page, statuses, types, debouncedSearch, sort]);
+  }, [page, pageSize, statuses, types, debouncedSearch, sort]);
 
   useEffect(() => {
     load();
@@ -124,14 +128,18 @@ export function useTaskPage(revision: number): UseTaskPage {
     setSortRaw(s);
     setPage(1);
   };
+  const setPageSize = (n: number) => {
+    setPageSizeRaw(n);
+    setPage(1); // page index is meaningless across a size change
+  };
 
-  const totalPages = Math.max(1, Math.ceil(total / TASK_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return {
     tasks,
     total,
     page,
-    pageSize: TASK_PAGE_SIZE,
+    pageSize,
     totalPages,
     loading,
     error,
@@ -140,6 +148,7 @@ export function useTaskPage(revision: number): UseTaskPage {
     search,
     sort,
     setPage,
+    setPageSize,
     toggleStatus,
     toggleType,
     setSearch,

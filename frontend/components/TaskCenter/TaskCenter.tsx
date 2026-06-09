@@ -280,7 +280,9 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
           page={taskPage.page}
           totalPages={taskPage.totalPages}
           total={taskPage.total}
+          pageSize={taskPage.pageSize}
           onPage={taskPage.setPage}
+          onPageSize={taskPage.setPageSize}
           disabled={taskPage.loading || batchBusy}
         />
       )}
