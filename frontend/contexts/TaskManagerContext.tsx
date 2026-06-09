@@ -537,6 +537,22 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   }, []);
 
+  // Refresh ONLY the authoritative active counts (the badge). The badge no
+  // longer derives from the in-memory list, so a Realtime status change must
+  // re-pull the count or the badge goes stale until the next full refresh.
+  // Debounced so a burst of DBOS UPDATEs coalesces into one cheap count query.
+  const countsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bumpActiveCounts = useCallback(() => {
+    if (countsTimer.current) clearTimeout(countsTimer.current);
+    countsTimer.current = setTimeout(async () => {
+      try {
+        dispatch({ type: 'SET_ACTIVE_COUNTS', counts: await fetchActiveCounts() });
+      } catch (e) {
+        console.error('[TaskManager] active-counts refresh failed:', e);
+      }
+    }, 500);
+  }, []);
+
   // Supabase Realtime — single source = public.task_tracking.
   // The PG trigger trg_mirror_dbos_lifecycle (migration 180) auto-syncs
   // DBOS lifecycle (status/started_at/completed_at/error_msg) into this
@@ -569,6 +585,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
         filter: `user_id=eq.${currentUserId}`,
       }, (payload) => {
         dispatch({ type: 'INSERT', task: rowToTask(payload.new) });
+        bumpActiveCounts();
       })
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -577,6 +594,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
         filter: `user_id=eq.${currentUserId}`,
       }, (payload) => {
         dispatch({ type: 'UPDATE', task: rowToTask(payload.new) });
+        bumpActiveCounts();
       })
       .on('postgres_changes', {
         event: 'DELETE',
@@ -588,6 +606,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const oldRow = payload.old as { dbos_workflow_id?: string; id?: string };
         const id = oldRow.dbos_workflow_id || oldRow.id;
         if (id) dispatch({ type: 'DELETE', id });
+        bumpActiveCounts();
       })
       .subscribe((status, err) => {
         console.debug(`[TaskManager] Realtime status: ${status}`, err || '');
@@ -605,7 +624,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
         channelRef.current = null;
       }
     };
-  }, [currentUserId, refreshTasks]);
+  }, [currentUserId, refreshTasks, bumpActiveCounts]);
 
   // ─── Redis WebSocket for real-time progress ────────────
   const wsRef = useRef<WebSocket | null>(null);
