@@ -42,6 +42,25 @@ export function removeAll(selected: Set<string>, ids: string[]): Set<string> {
   return new Set([...selected].filter((id) => !drop.has(id)));
 }
 
+/**
+ * Roving-focus step for keyboard nav. `ordered` is the on-screen row order.
+ * Returns the id the focus should move to:
+ *  - empty list → null
+ *  - no current focus (or current scrolled out of the list) → first row
+ *  - otherwise step by `dir` (±1), clamped at both ends.
+ */
+export function nextFocusId(
+  ordered: string[],
+  current: string | null,
+  dir: 1 | -1,
+): string | null {
+  if (ordered.length === 0) return null;
+  const idx = current ? ordered.indexOf(current) : -1;
+  if (idx < 0) return ordered[0];
+  const n = Math.min(Math.max(idx + dir, 0), ordered.length - 1);
+  return ordered[n];
+}
+
 export interface RetryPartition {
   /** Every selected id that still exists in `tasks`. */
   all: string[];

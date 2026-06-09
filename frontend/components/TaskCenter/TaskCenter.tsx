@@ -27,6 +27,7 @@ import {
   toggleSelection,
   addAll,
   partitionForRetry,
+  nextFocusId,
 } from '../../utils/taskSelection';
 import { runBatch } from '../../utils/batchRunner';
 
@@ -63,6 +64,10 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) => toggleSelection(prev, id));
   const clearSelection = () => setSelectedIds(new Set());
+
+  // Keyboard roving focus: click anywhere in the list to engage, then
+  // ↑/↓ move the focused row, Space toggles its selection, Enter expands.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
 
   const toggleExpand = (task: UnifiedTask) => {
     setExpandedIds((prev) => {
@@ -127,6 +132,41 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
     setSelectedIds((prev) =>
       addAll(prev, sorted.filter((t) => isTerminal(t.status)).map((t) => t.id)),
     );
+
+  // On-screen row order (respects grouping); drives ↑/↓ keyboard nav.
+  const orderedIds = useMemo(
+    () => groups.flatMap((g) => g.tasks.map((t) => t.id)),
+    [groups],
+  );
+  const taskById = useMemo(
+    () => new Map(tasks.map((t) => [t.id, t])),
+    [tasks],
+  );
+
+  const handleListKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (orderedIds.length === 0) return;
+      e.preventDefault();
+      setFocusedId((cur) => nextFocusId(orderedIds, cur, e.key === 'ArrowDown' ? 1 : -1));
+    } else if (e.key === ' ' || e.key === 'Spacebar') {
+      if (!focusedId) return;
+      const tk = taskById.get(focusedId);
+      if (tk && isTerminal(tk.status)) {
+        e.preventDefault(); // stop the page from scrolling
+        toggleSelect(focusedId);
+      }
+    } else if (e.key === 'Enter') {
+      if (!focusedId) return;
+      const tk = taskById.get(focusedId);
+      if (tk) {
+        e.preventDefault();
+        toggleExpand(tk);
+      }
+    } else if (e.key === 'Escape') {
+      if (selectedIds.size > 0) clearSelection();
+      else setFocusedId(null);
+    }
+  };
 
   const runBatchAction = async (
     ids: string[],
@@ -219,7 +259,11 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
         isRefreshing={refreshing}
         totalCount={sorted.length}
       />
-      <div className="flex-1 overflow-y-auto">
+      <div
+        className="flex-1 overflow-y-auto outline-none"
+        tabIndex={viewMode === 'list' ? 0 : undefined}
+        onKeyDown={viewMode === 'list' ? handleListKeyDown : undefined}
+      >
         {viewMode === 'list' ? (
           <TaskListView
             groups={groups}
@@ -227,6 +271,8 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
             onToggle={toggleExpand}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
+            focusedId={focusedId}
+            onFocusRow={setFocusedId}
           />
         ) : (
           <TaskKanbanView

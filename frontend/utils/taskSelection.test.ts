@@ -7,6 +7,7 @@ import {
   addAll,
   removeAll,
   partitionForRetry,
+  nextFocusId,
 } from './taskSelection';
 
 const task = (
@@ -63,6 +64,27 @@ describe('addAll / removeAll', () => {
       'c',
     ]);
     expect([...base]).toEqual(['a']); // untouched
+  });
+});
+
+describe('nextFocusId', () => {
+  const ids = ['a', 'b', 'c'];
+  it('returns null for an empty list', () => {
+    expect(nextFocusId([], null, 1)).toBeNull();
+    expect(nextFocusId([], 'a', -1)).toBeNull();
+  });
+  it('focuses the first row when nothing is focused', () => {
+    expect(nextFocusId(ids, null, 1)).toBe('a');
+    expect(nextFocusId(ids, null, -1)).toBe('a');
+  });
+  it('falls back to first row when current is no longer present', () => {
+    expect(nextFocusId(ids, 'ghost', 1)).toBe('a');
+  });
+  it('steps and clamps at both ends', () => {
+    expect(nextFocusId(ids, 'a', 1)).toBe('b');
+    expect(nextFocusId(ids, 'c', 1)).toBe('c'); // clamp bottom
+    expect(nextFocusId(ids, 'b', -1)).toBe('a');
+    expect(nextFocusId(ids, 'a', -1)).toBe('a'); // clamp top
   });
 });
 
