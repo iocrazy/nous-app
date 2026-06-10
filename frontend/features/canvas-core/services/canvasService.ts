@@ -9,6 +9,7 @@
 
 import { apiFetch, ApiError, buildAuthHeaders } from '../../../services/apiClient';
 import { getApiUrl } from '../../../utils/apiConfig';
+import type { GridLines } from '../editor/gridMath';
 import type { CropRegion } from '../editor/types';
 import type {
   Canvas,
@@ -160,4 +161,50 @@ export async function deriveCrop(
     { method: 'POST', json: payload },
   );
   return readEnvelope<DerivedResource>(response);
+}
+
+// ============================================================
+// Grid derive (Phase 3 Day 9)
+// ============================================================
+
+/** One tile of a grid derive — row/col are 0-based, row-major. */
+export interface GridTileResult {
+  row: number;
+  col: number;
+  resource: DerivedResource;
+}
+
+/** Shape of `POST /resources/{id}/derive-grid`'s data payload. */
+export interface GridDeriveResult {
+  rows: number;
+  cols: number;
+  tiles: GridTileResult[];
+}
+
+export interface DeriveGridOptions {
+  /** Optional filename prefix; tiles default to grid-r{row}c{col}-{source}. */
+  filenamePrefix?: string;
+}
+
+/**
+ * Split an existing image resource along normalized split lines and
+ * persist every tile as a new sibling resource. Wraps the backend
+ * `tiles_from_lines` + crop pipeline.
+ *
+ * Throws `ApiError` on any non-2xx response (404 source missing,
+ * 400 invalid lines / non-image, 403 access denied, 500 backend
+ * failure). Callers should surface the message via toast / inline.
+ */
+export async function deriveGrid(
+  sourceResourceId: string,
+  lines: GridLines,
+  opts: DeriveGridOptions = {},
+): Promise<GridDeriveResult> {
+  const payload: Record<string, unknown> = { xs: lines.xs, ys: lines.ys };
+  if (opts.filenamePrefix) payload.filename_prefix = opts.filenamePrefix;
+  const response = await apiFetch(
+    `/api/v1/resources/${sourceResourceId}/derive-grid`,
+    { method: 'POST', json: payload },
+  );
+  return readEnvelope<GridDeriveResult>(response);
 }

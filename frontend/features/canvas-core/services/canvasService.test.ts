@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '../../../services/apiClient';
+import type { GridLines } from '../editor/gridMath';
 import type { CropRegion } from '../editor/types';
 import type { Canvas } from '../types';
-import { deriveCrop, saveCanvas } from './canvasService';
+import { deriveCrop, deriveGrid, saveCanvas } from './canvasService';
 
 const serverRow: Canvas = {
   id: '4242',
@@ -140,6 +141,72 @@ describe('deriveCrop', () => {
       }),
     );
     await expect(deriveCrop('source-1', region)).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+});
+
+describe('deriveGrid', () => {
+  const lines: GridLines = { xs: [0.5], ys: [0.5] };
+  const fakeTile = (row: number, col: number) => ({
+    row,
+    col,
+    resource: {
+      id: `999900000000000${row}${col}`,
+      filename: `grid-r${row + 1}c${col + 1}-orig.png`,
+      file_path: `teams/scope-1/derived/x/v1/grid-r${row + 1}c${col + 1}-orig.png`,
+      mime_type: 'image/png',
+      file_size_bytes: 100,
+    },
+  });
+  const fakeResult = {
+    rows: 2,
+    cols: 2,
+    tiles: [fakeTile(0, 0), fakeTile(0, 1), fakeTile(1, 0), fakeTile(1, 1)],
+  };
+
+  it('POSTs to /resources/{id}/derive-grid with the lines', async () => {
+    fetchMock.mockResolvedValueOnce(envelope(fakeResult));
+    const result = await deriveGrid('source-1', lines);
+    expect(result.rows).toBe(2);
+    expect(result.tiles).toHaveLength(4);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/resources/source-1/derive-grid');
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    expect(body.xs).toEqual([0.5]);
+    expect(body.ys).toEqual([0.5]);
+    expect(body.filename_prefix).toBeUndefined();
+  });
+
+  it('includes filename_prefix when supplied', async () => {
+    fetchMock.mockResolvedValueOnce(envelope(fakeResult));
+    await deriveGrid('source-1', lines, { filenamePrefix: 'shot' });
+    const init = fetchMock.mock.calls[0][1];
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    expect(body.filename_prefix).toBe('shot');
+  });
+
+  it('throws ApiError on a non-2xx response', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'at least one split line' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(deriveGrid('source-1', lines)).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+
+  it('throws ApiError when the success envelope is missing data', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(deriveGrid('source-1', lines)).rejects.toBeInstanceOf(
       ApiError,
     );
   });
