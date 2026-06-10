@@ -101,7 +101,7 @@ class YtdlpService:
             url: Video URL (must have passed app.boundary.url_guard.validate_url)
             user_id: Optional user ID for per-user cookie lookup
             user_agent: Optional explicit UA (used for Douyin so the same UA
-                threads through LightHTTP/ABogus/yt-dlp/download_video).
+                threads through ABogus/yt-dlp/download_video).
 
         Returns:
             dict: yt-dlp info_dict with video metadata
@@ -226,8 +226,18 @@ class YtdlpService:
         ua_args = ["--user-agent", user_agent] if user_agent else []
         cmd = [
             "yt-dlp",
+            # H.264 (avc1) first; every fallback tier excludes HEVC
+            # (hev1/hvc1) — browsers can't decode it, which rendered as
+            # "black screen, audio only" downloads (2026-06-10 P1). The
+            # final bare `best` survives only for sources exposing a
+            # single pre-merged format (no codec choice exists there).
             "-f",
-            "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+            (
+                "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/"
+                "bestvideo[vcodec!^=hev][vcodec!^=hvc][ext=mp4]+bestaudio[ext=m4a]/"
+                "bestvideo[vcodec!^=hev][vcodec!^=hvc]+bestaudio/"
+                "best[vcodec!^=hev][vcodec!^=hvc]/best"
+            ),
             # Sort the matched formats so 1080p wins over 720p when both
             # are returned. yt-dlp's default sort doesn't always prefer
             # the highest resolution — bilibili logged-in users were

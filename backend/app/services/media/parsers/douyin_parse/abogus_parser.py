@@ -6,8 +6,7 @@ a_bogus 签名版抖音解析器
 链路：share_url → aweme_id → 构造 /aweme/v1/web/aweme/detail/ 完整 URL
      → node env.js 计算 a_bogus → 拼到 URL 尾部 → httpx GET → aweme_detail
 
-与另外两个 parser 的定位区别：
-- `IesDouyinParser`     抓 iesdouyin.com 分享页 _ROUTER_DATA，碰到验证码/登录墙就挂
+与另一个 parser 的定位区别：
 - `DrissionPageParser`  起 headless Chrome 拦截 API，最稳但最重（Docker 要装 Chrome）
 - `ABogusDouyinParser`  用 HTTP + Node 子进程签名直达 API，轻量，依赖有效 cookie
 

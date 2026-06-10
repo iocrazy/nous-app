@@ -27,8 +27,7 @@ from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import log_user_action
 from app.schemas.media import MediaTypeFetchRequest
 from app.services.billing.points_service import PointsService
-from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
-from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
+from app.services.media.parsers.douyin_parse.parse_chain import reparse_douyin
 from app.services.media.parsers.media_service import MediaService
 from app.services.media.parsers.url_router import URLRouter
 
@@ -236,16 +235,15 @@ async def fetch_media_by_type(
 
         if platform in ("douyin", "tiktok"):
             try:
-                aweme_detail = await IesDouyinParser._fetch_share_page(platform_id)
-                if aweme_detail:
-                    IesDouyinParser._process_video_urls(aweme_detail)
-                    new_parsed = await DouyinFormatter.parse_aweme_detail(
-                        aweme_detail=aweme_detail,
-                        valid_url=media.get("original_url", ""),
-                        download_video=True,
-                        download_music=True,
-                        download_cover=True,
-                    )
+                # Unified chain (ABogus → DrissionPage) — same chain as the
+                # initial parse; tries original_url then bare aweme_id.
+                reparse_result = await reparse_douyin(
+                    platform_id,
+                    original_url=original_url,
+                    user_id=auth.user_id,
+                )
+                if reparse_result:
+                    new_parsed, _parse_method = reparse_result
                     if new_parsed:
                         update_fields = {}
                         for field in [

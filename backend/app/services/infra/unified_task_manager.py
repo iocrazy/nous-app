@@ -236,6 +236,25 @@ class UnifiedTaskManager:
             "dbos_workflow_id", task_id
         ).execute()
 
+    async def patch_metadata(self, task_id: str, patch: Dict[str, Any]) -> None:
+        """Merge ``patch`` into task_tracking.metadata.
+
+        metadata is a shared business-decorated jsonb column — always
+        read-merge-write, never replace wholesale (same rule as
+        user_settings.settings_json, see #485)."""
+        client = await self._get_client()
+        existing = (
+            await client.table("task_tracking")
+            .select("metadata")
+            .eq("dbos_workflow_id", task_id)
+            .maybe_single()
+            .execute()
+        )
+        current = ((existing.data if existing else None) or {}).get("metadata") or {}
+        await client.table("task_tracking").update(
+            {"metadata": {**current, **patch}}
+        ).eq("dbos_workflow_id", task_id).execute()
+
     async def _row_exists(self, task_id: str) -> bool:
         """Return True if a task_tracking row exists for this workflow id.
 
