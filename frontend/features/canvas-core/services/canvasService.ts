@@ -208,3 +208,36 @@ export async function deriveGrid(
   );
   return readEnvelope<GridDeriveResult>(response);
 }
+
+// ============================================================
+// Mask-cutout derive (Phase 3 Day 12)
+// ============================================================
+
+export interface DeriveMaskCutoutOptions {
+  /** Optional override; defaults to ``cutout-{source stem}.png``. */
+  filename?: string;
+}
+
+/**
+ * Apply a painted mask (raw base64 PNG, white = keep) to an existing
+ * image resource and persist the RGBA cutout as a new sibling
+ * resource. Wraps the backend `apply_mask_cutout` primitive + the
+ * shared derive pipeline.
+ *
+ * Throws `ApiError` on any non-2xx response (404 source missing,
+ * 400 invalid / empty mask, 413 oversized mask, 403 access denied,
+ * 500 backend failure).
+ */
+export async function deriveMaskCutout(
+  sourceResourceId: string,
+  maskPngBase64: string,
+  opts: DeriveMaskCutoutOptions = {},
+): Promise<DerivedResource> {
+  const payload: Record<string, unknown> = { mask_png_base64: maskPngBase64 };
+  if (opts.filename) payload.filename = opts.filename;
+  const response = await apiFetch(
+    `/api/v1/resources/${sourceResourceId}/derive-mask-cutout`,
+    { method: 'POST', json: payload },
+  );
+  return readEnvelope<DerivedResource>(response);
+}
