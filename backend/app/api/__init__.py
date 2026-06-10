@@ -12,7 +12,6 @@ from app.api.admin import admin_router
 from app.api.ai_library_router import router as ai_library_router
 from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
-from app.api.analysis_router import router as analysis_router
 from app.api.api_key_router import router as api_key_router
 from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
@@ -88,8 +87,6 @@ api_router.include_router(router=frontend_config_router, tags=["前端配置"])
 api_router.include_router(router=task_router, tags=["任务管理"])
 
 api_router.include_router(router=tags_router, tags=["Tags"])
-
-api_router.include_router(router=analysis_router, tags=["Analysis"])
 
 api_router.include_router(router=search_router, tags=["Search"])
 
