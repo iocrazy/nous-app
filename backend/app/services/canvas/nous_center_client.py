@@ -96,6 +96,31 @@ class NousCenterClient:
             "Content-Type": "application/json",
         }
 
+    async def ping_workflows(self) -> Dict[str, Any]:
+        """Cheapest "is the server up?" probe — GET /workflows?limit=1.
+
+        Returns the raw response JSON on 200. Raises NousCenterError on
+        anything else; used by the "Verify protocol" UI button to give
+        the admin a quick green/red signal.
+        """
+        url = f"{self._base_url}/workflows?limit=1"
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(url, headers=self._headers())
+        except httpx.HTTPError as exc:
+            raise NousCenterError(f"ping transport failed: {exc}") from exc
+
+        if response.status_code != 200:
+            raise NousCenterError(
+                f"ping HTTP {response.status_code}: {response.text[:200]}",
+                status_code=response.status_code,
+            )
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise NousCenterError(f"ping malformed JSON: {exc}") from exc
+
     async def start_run(
         self,
         *,

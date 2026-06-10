@@ -183,3 +183,24 @@ async def run_canvas_prompt(
     )
     body = CanvasPromptRunResponse(ok=result.ok, text=result.text, error=result.error)
     return {"success": True, "data": body.model_dump(mode="json")}
+
+
+@router.get("/canvases/providers/nous-center/verify")
+async def verify_nous_center_protocol(auth: AuthDep) -> dict:
+    """Confirm the nous-center service is reachable + the contract holds.
+
+    Drives the "Verify protocol" button in the AI settings UI. Result
+    is always in-band: {ok, base_url?, workflows_visible? | error}.
+    Any authenticated user can probe (the call is read-only and uses
+    the server-side service token, not the user's identity).
+    """
+    from app.core.config import get_settings
+    from app.services.canvas.nous_center_verify import verify_nous_center
+
+    # Touch auth so the dep injection is exercised — the value isn't
+    # used, but the route still requires a logged-in caller.
+    _ = auth.user_id
+
+    settings = get_settings()
+    result = await verify_nous_center(settings)
+    return {"success": True, "data": result}
