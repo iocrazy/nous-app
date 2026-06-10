@@ -820,10 +820,15 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 </div>
               )}
 
+              {/* Trigger is the catch-all: anything that's not actively
+                  processing/failed and has no fetched result shows the button.
+                  An allowlist here broke twice — the column's DB default is
+                  'none' (not 'pending'; ResourceDetailPage checks it
+                  explicitly), and unknown future values would blank the
+                  section again. */}
               {!visualAnalysis
-                && (!video.visual_analysis_status
-                  || video.visual_analysis_status === 'pending'
-                  || video.visual_analysis_status === 'completed') && (
+                && video.visual_analysis_status !== 'processing'
+                && video.visual_analysis_status !== 'failed' && (
                 <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
                   {visualAnalysisFetching ? (
                     <div className="flex items-center gap-3">
