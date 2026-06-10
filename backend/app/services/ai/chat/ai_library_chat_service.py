@@ -603,6 +603,7 @@ class AILibraryChatService:
                     agent_slug=agent_slug,
                     request_instructions=request_instructions,
                     recalled_memories=stack.recalled_memories,
+                    graph_facts=stack.graph_facts,
                 )
             )
 

@@ -71,6 +71,9 @@ class AgentRunnerStack:
 
     runner: AgentRunner
     recalled_memories: list[RecalledMemory]
+    # Phase 4 M3: bi-temporal facts from the Graphiti graph (flag-gated;
+    # empty when FEATURE_GRAPH_MEMORY is off).
+    graph_facts: list[str]
     primary_model: str  # the model that will actually be tried first
     fallback_chain_active: bool
 
@@ -114,6 +117,8 @@ async def build_agent_runner_stack(
         user_query=user_query,
         settings=settings,
     )
+
+    graph_facts = await _safe_recall_graph_facts(user_id=user_id, user_query=user_query)
 
     # ── 2. HookRegistry per-turn ────────────────────────────────────
     registry = HookRegistry()
@@ -297,6 +302,7 @@ async def build_agent_runner_stack(
     return AgentRunnerStack(
         runner=runner,
         recalled_memories=recalled,
+        graph_facts=graph_facts,
         primary_model=primary_model,
         fallback_chain_active=bool(fallback_models),
     )
@@ -353,6 +359,27 @@ async def _safe_recall_memories(
         RecalledMemory(id=r.id, summary=r.summary, when_to_use=r.when_to_use)
         for r in records
     ]
+
+
+async def _safe_recall_graph_facts(
+    *, user_id: UUID, user_query: str, limit: int = 5
+) -> list[str]:
+    """Best-effort Graphiti fact recall (Phase 4 M3). Empty list when
+    the FEATURE_GRAPH_MEMORY flag is off or anything fails — graph
+    outages must never delay or break a chat turn."""
+    try:
+        from app.services.ai.memory.graph_memory import get_graph_memory_service
+
+        service = get_graph_memory_service()
+        if not service.config.enabled:
+            return []
+        facts = await service.search(
+            user_query, group_id=f"user-{user_id}", limit=limit
+        )
+        return [f.fact for f in facts]
+    except Exception:  # noqa: BLE001
+        logger.exception("[m3] graph fact recall failed; degrading to none")
+        return []
 
 
 def _memory_recall_enabled() -> bool:
