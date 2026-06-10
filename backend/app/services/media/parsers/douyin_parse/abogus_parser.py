@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode
 
+import httpx
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
@@ -137,18 +138,50 @@ class ABogusDouyinParser:
     # ───────────────── internals ─────────────────
 
     @classmethod
+    def _match_aweme_id(cls, url: str) -> str | None:
+        """Extract the aweme_id from a URL via _ID_PATTERNS, else None."""
+        for pattern, _ in _ID_PATTERNS:
+            m = pattern.search(url)
+            if m:
+                return m.group(1)
+        return None
+
+    @classmethod
     async def _resolve_aweme_id(cls, src: str, ua: str) -> str | None:
+        """Resolve a share URL / bare id to the aweme_id.
+
+        Hop-by-hop with short-circuit: douyin's short-link chain is
+        v.douyin.com 302 → iesdouyin.com/share/video/{id} 302 →
+        www.douyin.com/video/{id} (a full HTML page), and each hop can
+        take seconds under douyin-side throttling. The FIRST Location
+        already carries the id, so we read redirects manually
+        (follow_redirects=False — initial URL still SSRF-validated) and
+        stop as soon as a Location matches, instead of fetching every
+        hop (8-22s observed → ~1 request)."""
         if src.isdigit():
             return src
+        matched = cls._match_aweme_id(src)
+        if matched:
+            return matched
         try:
             async with safe_async_client(timeout=cls.SHARE_REDIRECT_TIMEOUT) as client:
-                resp = await client.get(src, headers={"User-Agent": ua})
-                final_url = str(resp.url)
-                for pattern, _ in _ID_PATTERNS:
-                    m = pattern.search(final_url)
-                    if m:
-                        return m.group(1)
-                tail = final_url.split("?")[0].rstrip("/").split("/")[-1]
+                url = src
+                for _hop in range(5):
+                    resp = await client.get(
+                        url, headers={"User-Agent": ua}, follow_redirects=False
+                    )
+                    location = resp.headers.get("Location")
+                    if not resp.is_redirect or not location:
+                        url = str(resp.url)
+                        break
+                    url = str(httpx.URL(url).join(location))
+                    matched = cls._match_aweme_id(url)
+                    if matched:
+                        return matched
+                matched = cls._match_aweme_id(url)
+                if matched:
+                    return matched
+                tail = url.split("?")[0].rstrip("/").split("/")[-1]
                 return tail if tail.isdigit() else None
         except Exception as err:
             logger.error(f"[ABogus] resolve_aweme_id failed: {err}")
