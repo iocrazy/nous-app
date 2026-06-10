@@ -41,29 +41,56 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
     return providers.get(provider_key, {})
 
 
+DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
+
+
 async def resolve_analyze_provider_config(
     user_id: Optional[str],
 ) -> Tuple[str, Dict[str, Any], str]:
-    """Resolve analyze agent's model + user's BYO provider config.
+    """Resolve the visual-analysis agent's model + user's BYO provider config.
 
-    Returns ``(provider_key, provider_config, model)``. Reads the
-    ``analyze`` ``ai_agents`` row to get its ``model``, derives the
-    provider prefix, then pulls the user's BYO entry for that provider
-    out of ``ai_settings.ai_providers``.
+    Returns ``(provider_key, provider_config, model)``. Honors the user's
+    ``task_assignment.visual_analysis`` setting — as of migration 142 (Phase 2
+    PR 2.8b) that key stores an AI Library agent slug (e.g. 'analyze', or a
+    custom 'test-analyze'). We resolve that slug to its ``ai_agents`` row, take
+    its ``model``, derive the provider prefix, then pull the user's BYO entry
+    for that provider out of ``ai_settings.ai_providers``.
 
-    When ``user_id`` is None or the agent row is missing, returns empty
-    config and lets the service route through the factory's default.
+    Falls back to the built-in ``analyze`` agent when the assignment is unset
+    or the assigned slug doesn't resolve. When ``user_id`` is None or the agent
+    row is missing, returns empty config and lets the service route through the
+    factory's default.
+
+    Bug history: this previously hardcoded ``get_by_slug("analyze")``, so a user
+    who assigned a different agent (and only configured that agent's provider as
+    BYO) always got the default ``analyze`` agent's model (qwen-max) with no
+    matching provider config → empty config → "All connection attempts failed".
     """
     from app.repositories.agent_repository import get_agent_repository
     from app.services.ai.adapters.factory import provider_key_for_model
 
+    # Load settings first so we can read the user's assigned agent slug. Reused
+    # below for the BYO provider lookup, so this is a single read, not two.
+    ai_settings = await get_ai_settings(user_id) if user_id else {}
+    assigned_slug = (
+        (ai_settings.get("task_assignment") or {}).get("visual_analysis")
+        or DEFAULT_ANALYZE_AGENT_SLUG
+    ).strip() or DEFAULT_ANALYZE_AGENT_SLUG
+
     agent_repo = get_agent_repository()
-    agent = await agent_repo.get_by_slug("analyze")
+    agent = await agent_repo.get_by_slug(assigned_slug)
+    if not agent and assigned_slug != DEFAULT_ANALYZE_AGENT_SLUG:
+        logger.warning(
+            f"[AI] visual_analysis assigned agent '{assigned_slug}' not found; "
+            f"falling back to '{DEFAULT_ANALYZE_AGENT_SLUG}'"
+        )
+        agent = await agent_repo.get_by_slug(DEFAULT_ANALYZE_AGENT_SLUG)
+
     model = ((agent or {}).get("model") or "").strip()
     if not model:
         logger.warning(
-            "[AI] analyze agent row missing or has no model; "
-            "VisualAnalysisService will use built-in default"
+            f"[AI] visual_analysis agent '{assigned_slug}' missing or has no "
+            "model; VisualAnalysisService will use built-in default"
         )
         return "", {}, ""
 
@@ -71,15 +98,14 @@ async def resolve_analyze_provider_config(
         provider_key = provider_key_for_model(model)
     except ValueError:
         logger.warning(
-            f"[AI] analyze agent model '{model}' has unknown provider prefix; "
-            "falling back to generic OpenAI-compatible adapter"
+            f"[AI] visual_analysis agent model '{model}' has unknown provider "
+            "prefix; falling back to generic OpenAI-compatible adapter"
         )
         provider_key = ""
 
     if not user_id or not provider_key:
         return provider_key, {"model": model}, model
 
-    ai_settings = await get_ai_settings(user_id)
     provider_config = dict(get_provider_config(ai_settings, provider_key))
     provider_config["model"] = model
     return provider_key, provider_config, model
