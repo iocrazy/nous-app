@@ -51,9 +51,10 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   const taskPage = useTaskPage(revision);
   const tasks = taskPage.tasks;
 
-  // Default 'none' (no grouping, pure time-sorted list). Users opt in
-  // to grouping via the toolbar's Layers picker — paperclip-style.
-  const [groupBy, setGroupBy] = useState<GroupBy>('none');
+  // Default 'flow': one user submission (parse → download → followups)
+  // reads as one group — matching the floating panel's flow cards. Users
+  // can switch back to the flat list via the toolbar's Layers picker.
+  const [groupBy, setGroupBy] = useState<GroupBy>('flow');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   // Set of task ids whose inline detail panel is open. Multi-expand
   // intentionally — admin Arco's NotionTable behaves the same way.

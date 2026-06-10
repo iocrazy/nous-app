@@ -15,11 +15,15 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ApprovalsPanel } from './ApprovalsPanel';
-import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
 import { TaskDetailModal } from './TaskCenter/TaskDetailModal';
-import { ActiveTaskCard } from './TaskCenter/ActiveTaskCard';
 import { TaskCenterStatusBar, type TaskTab } from './TaskCenter/TaskCenterStatusBar';
-import { summarizeTasks, isActiveStatus } from './TaskCenter/taskCenterSummary';
+import { FlowTaskList } from './TaskCenter/FlowStepCard';
+import {
+  groupTasksByFlow,
+  isActiveItem,
+  summarizeFlowItems,
+  type PanelItem,
+} from './TaskCenter/flowGrouping';
 import { useAgentRunTasks } from './TaskCenter/useAgentRunTasks';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -146,28 +150,25 @@ const TaskCenterPanel: React.FC<{
   );
   const allTasks = [...backendTasks, ...agentTasks];
 
-  const counts = summarizeTasks(allTasks, uploadingItems.length);
+  // One user submission (parse → download → thumbnail/extract_audio/
+  // transcode/ai_*) shares a flow_id and renders as ONE card with step
+  // circles. Counts are in flow units — what the user calls "a task".
+  const panelItems = groupTasksByFlow(allTasks);
+  const flowCounts = summarizeFlowItems(panelItems);
+  const counts = { ...flowCounts, running: flowCounts.running + uploadingItems.length };
   const completedCount = counts.completed + counts.failed;
   const activeTotal = counts.running + counts.queued;
   const hasTasks = allTasks.length > 0 || uploadingItems.length > 0;
 
-  // Newest first; within the Active tab, running sorts above queued.
-  const byRecency = (a: UnifiedTask, b: UnifiedTask) =>
-    (b.created_at || '').localeCompare(a.created_at || '');
-  const activeList = allTasks
-    .filter((tk) => isActiveStatus(tk.status))
-    .sort((a, b) => {
-      const ar = a.status === 'processing' ? 1 : 0;
-      const br = b.status === 'processing' ? 1 : 0;
-      return ar !== br ? br - ar : byRecency(a, b);
-    });
-  const historyList = allTasks
-    .filter((tk) => !isActiveStatus(tk.status))
-    .sort(byRecency)
-    .slice(0, 50);
-
-  const runningTasks = activeList.filter((tk) => tk.status === 'processing');
-  const queuedTasks = activeList.filter((tk) => tk.status === 'pending');
+  // Active tab: items with something processing sort above purely-queued.
+  const hasProcessing = (i: PanelItem) =>
+    i.kind === 'flow'
+      ? i.steps.some((s) => s.status === 'processing')
+      : i.task.status === 'processing';
+  const activeItems = panelItems
+    .filter(isActiveItem)
+    .sort((a, b) => Number(hasProcessing(b)) - Number(hasProcessing(a)));
+  const historyItems = panelItems.filter((i) => !isActiveItem(i)).slice(0, 50);
   const showActive = tab === 'active';
 
   // Shared 1s clock for the live running cards' elapsed time — only ticks while
@@ -213,16 +214,6 @@ const TaskCenterPanel: React.FC<{
           <div className="max-h-80 overflow-y-auto">
             {showActive ? (
               <>
-                {/* Running now — prominent live cards */}
-                {runningTasks.length > 0 && (
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                    {t('topbar.running')} · {runningTasks.length}
-                  </div>
-                )}
-                {runningTasks.map((task) => (
-                  <ActiveTaskCard key={task.id} task={task} now={now} onCancel={cancelTask} />
-                ))}
-
                 {/* Active uploads from UploadContext (client-side progress) */}
                 {uploadingItems.map((item) => (
                   <div key={item.id} className="px-3 py-2.5 border-b border-zinc-800/50">
@@ -257,24 +248,17 @@ const TaskCenterPanel: React.FC<{
                   </div>
                 ))}
 
-                {/* Queued */}
-                {queuedTasks.length > 0 && (
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500 border-t border-zinc-800/50">
-                    {t('topbar.queued')} · {queuedTasks.length}
-                  </div>
-                )}
-                {queuedTasks.map((task) => (
-                  <TaskCenterRow
-                    key={task.id}
-                    task={task}
-                    onCancel={cancelTask}
-                    onRetry={retryTask}
-                    onOpenResource={openResource}
-                    onOpenDetail={onOpenDetail}
-                  />
-                ))}
+                {/* Flow cards (step circles) + standalone tasks */}
+                <FlowTaskList
+                  items={activeItems}
+                  now={now}
+                  onCancel={cancelTask}
+                  onRetry={retryTask}
+                  onOpenResource={openResource}
+                  onOpenDetail={onOpenDetail}
+                />
 
-                {uploadingItems.length === 0 && activeList.length === 0 && (
+                {uploadingItems.length === 0 && activeItems.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
                     <CheckCircle2 size={24} className="mb-2 text-zinc-600" />
                     <span className="text-xs">{t('topbar.noActiveTasks')}</span>
@@ -283,17 +267,15 @@ const TaskCenterPanel: React.FC<{
               </>
             ) : (
               <>
-                {historyList.map((task) => (
-                  <TaskCenterRow
-                    key={task.id}
-                    task={task}
-                    onCancel={cancelTask}
-                    onRetry={retryTask}
-                    onOpenResource={openResource}
-                    onOpenDetail={onOpenDetail}
-                  />
-                ))}
-                {historyList.length === 0 && (
+                <FlowTaskList
+                  items={historyItems}
+                  now={now}
+                  onCancel={cancelTask}
+                  onRetry={retryTask}
+                  onOpenResource={openResource}
+                  onOpenDetail={onOpenDetail}
+                />
+                {historyItems.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
                     <Inbox size={24} className="mb-2 text-zinc-600" />
                     <span className="text-xs">{t('topbar.noItems')}</span>

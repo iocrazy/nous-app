@@ -14,6 +14,8 @@ export type TaskType =
   | 'download'
   | 'upload'
   | 'transcode'
+  | 'thumbnail'
+  | 'extract_audio'
   | 'ai_pipeline'
   | 'ai_extract'
   | 'ai_transcription'
@@ -763,6 +765,8 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     download: 0,
     upload: 0,
     transcode: 0,
+    thumbnail: 0,
+    extract_audio: 0,
     ai_pipeline: 0,
     ai_extract: 0,
     ai_transcription: 0,
@@ -848,6 +852,8 @@ export function taskTypeIcon(type: TaskType): string {
     case 'upload': return '\u2191';              // ↑
     case 'download': return '\u2193';            // ↓
     case 'transcode': return '\u27F3';           // ⟳
+    case 'thumbnail': return '\uD83D\uDDBC';   // framed picture
+    case 'extract_audio': return '\uD83C\uDFB5'; // musical note
     case 'ai_pipeline': return '\u2726';         // ✦
     case 'ai_extract': return '\uD83D\uDC41';    // eye (visual analysis)
     case 'ai_transcription': return '\uD83D\uDCDD'; // 📝 (transcription)
@@ -863,6 +869,8 @@ export function taskTypeLabel(type: TaskType): string {
     case 'upload': return 'Upload';
     case 'download': return 'Download';
     case 'transcode': return 'Transcode';
+    case 'thumbnail': return 'Thumbnail';
+    case 'extract_audio': return 'Audio';
     case 'ai_pipeline': return 'AI Pipeline';
     case 'ai_extract': return 'Visual Analysis';
     case 'ai_transcription': return 'Transcription';
