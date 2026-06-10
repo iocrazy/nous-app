@@ -11,7 +11,6 @@ from decimal import Decimal
 import pytest
 
 from app.services.ai.cost import (
-    CostSnapshot,
     TokenUsage,
     compute_cost,
 )
@@ -21,7 +20,6 @@ from app.services.ai.cost.snapshot import (
     FxRate,
     VolumeDiscountTier,
 )
-
 
 # ============================================================================
 # Fixtures
@@ -149,8 +147,12 @@ class TestDiscounts:
     def test_volume_tier_picks_highest_eligible(self):
         tiers = [
             VolumeDiscountTier(threshold_monthly_usd=Decimal("100"), discount_pct=5.0),
-            VolumeDiscountTier(threshold_monthly_usd=Decimal("1000"), discount_pct=15.0),
-            VolumeDiscountTier(threshold_monthly_usd=Decimal("10000"), discount_pct=25.0),
+            VolumeDiscountTier(
+                threshold_monthly_usd=Decimal("1000"), discount_pct=15.0
+            ),
+            VolumeDiscountTier(
+                threshold_monthly_usd=Decimal("10000"), discount_pct=25.0
+            ),
         ]
         # Spend $2000 so the $1000 tier (15%) applies
         result = compute_cost(
@@ -291,7 +293,9 @@ class TestCredit:
             rate=_make_rate(),
             usage=_make_usage(input=1000, output=200),  # ~$0.0048
             fx=_make_fx(),
-            credit=CreditConsumption(credit_id=99, credit_consumed_usd=Decimal("10.00")),
+            credit=CreditConsumption(
+                credit_id=99, credit_consumed_usd=Decimal("10.00")
+            ),
             now=FIXED_NOW,
         )
         # We don't consume more than the actual bill
@@ -304,7 +308,9 @@ class TestCredit:
             rate=_make_rate(),
             usage=_make_usage(input=1000, output=200),  # ~$0.0048
             fx=_make_fx(),
-            credit=CreditConsumption(credit_id=88, credit_consumed_usd=Decimal("0.002")),
+            credit=CreditConsumption(
+                credit_id=88, credit_consumed_usd=Decimal("0.002")
+            ),
             now=FIXED_NOW,
         )
         # 0.0048 - 0.002 = 0.0028

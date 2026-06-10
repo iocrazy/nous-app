@@ -19,7 +19,7 @@ See https://opentelemetry.io/docs/specs/semconv/gen-ai/.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional
@@ -266,13 +266,8 @@ def compute_cost(
             now=now,
         )
 
-    # ----- Step 1: raw USD using list price (for "you would have paid X without enterprise discount") -----
-    raw_input_usd = _rate_times_tokens(rate.list_input_usd, usage.input)
-    raw_output_usd = _rate_times_tokens(rate.list_input_usd, usage.output)  # use input list for "raw" floor; will be replaced below
-    # Actually: raw_usd uses LIST prices, not effective. For Plan dashboard view "saved by enterprise".
-    # We approximate raw via list_input on input only (other dims need their own list values, which
-    # the view doesn't currently expose — keep raw_usd as "list-input baseline" for now;
-    # the cache_saved figure below is what we really show to users).
+    # raw_usd (list-price baseline) is computed at Step 8 below; the
+    # discounted figure uses the effective rates immediately.
 
     # ----- Step 2: discounted USD using effective rates (enterprise already baked in) -----
     discounted_usd = (
@@ -290,7 +285,9 @@ def compute_cost(
     if usage.image_units and rate.effective_image_per_unit_usd:
         discounted_usd += Decimal(usage.image_units) * rate.effective_image_per_unit_usd
     if usage.video_seconds and rate.effective_video_per_second_usd:
-        discounted_usd += Decimal(str(usage.video_seconds)) * rate.effective_video_per_second_usd
+        discounted_usd += (
+            Decimal(str(usage.video_seconds)) * rate.effective_video_per_second_usd
+        )
 
     # ----- Step 3: cache savings (what user would have paid without cache hits) -----
     saved_by_cache_usd = _rate_times_tokens(
@@ -330,9 +327,8 @@ def compute_cost(
         credit_id = credit.credit_id
 
     # ----- Step 8: raw_usd floor for display = list_input × tokens (approximation; see comment in Step 1) -----
-    raw_usd = (
-        _rate_times_tokens(rate.list_input_usd, usage.input)
-        + _rate_times_tokens(rate.list_input_usd, usage.output)
+    raw_usd = _rate_times_tokens(rate.list_input_usd, usage.input) + _rate_times_tokens(
+        rate.list_input_usd, usage.output
     )
     # Ensure raw_usd >= discounted_usd + saved_by_cache so display doesn't show negative savings.
     if raw_usd < discounted_usd + saved_by_cache_usd:
