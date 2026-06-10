@@ -93,6 +93,10 @@ class CanvasRunService:
                 ok=False, text="", error="prompt body is empty"
             )
 
+        # Route to nous-center for workflow-style providers.
+        if provider_slug and provider_slug.startswith("nous/"):
+            return await self._run_via_nous(provider_slug, body, agent_id)
+
         model = _resolve_model(provider_slug)
         system_message = _compose_system_message(agent_id)
 
@@ -129,6 +133,46 @@ class CanvasRunService:
         if not isinstance(content, str):
             return ""
         return content
+
+    # ------------------------------------------------------------------
+    # nous-center workflow routing
+    # ------------------------------------------------------------------
+
+    async def _run_via_nous(
+        self,
+        provider_slug: str,
+        body: str,
+        agent_id: Optional[str],
+    ) -> CanvasPromptRunResult:
+        """provider_slug shape: ``nous/<workflow_slug>``. Calls nous-center,
+        polls for completion, returns the workflow's text output (or a
+        JSON encoding when the workflow output is non-textual)."""
+        from app.services.canvas.nous_center_runner import (
+            NousCenterNotConfigured,
+            run_nous_workflow,
+        )
+
+        _, _, workflow_slug = provider_slug.partition("/")
+        if not workflow_slug:
+            return CanvasPromptRunResult(
+                ok=False, text="", error="nous provider_slug missing workflow"
+            )
+
+        try:
+            settings = await self._get_settings()
+            return await run_nous_workflow(
+                settings=settings,
+                workflow_slug=workflow_slug,
+                prompt=body,
+                agent_id=agent_id,
+            )
+        except NousCenterNotConfigured as exc:
+            return CanvasPromptRunResult(ok=False, text="", error=str(exc))
+        except Exception as exc:
+            logger.exception("nous-center workflow %s failed", workflow_slug)
+            return CanvasPromptRunResult(
+                ok=False, text="", error=f"nous-center call failed: {exc}"
+            )
 
     @staticmethod
     def _minimal_composed(*, model: str, system_message: str):
