@@ -58,139 +58,6 @@ def extract_url(url: str) -> str:
     return valid_urls[0]
 
 
-_DOUYIN_METHOD_FLAG_KEYS = {
-    "douyin_lighthttp_enabled": "lighthttp",
-    "douyin_abogus_enabled": "abogus",
-    "douyin_drissionpage_enabled": "drissionpage",
-}
-
-
-def _get_douyin_method_flags() -> dict[str, bool]:
-    """Read Douyin parse method toggles from system_settings. Defaults
-    to all-on so a missing settings row doesn't disable parsing."""
-    flags = {short: True for short in _DOUYIN_METHOD_FLAG_KEYS.values()}
-    try:
-        from app.db.supabase_client import get_async_supabase_admin
-
-        async def _read():
-            client = await get_async_supabase_admin()
-            return await (
-                client.table("system_settings")
-                .select("key, value")
-                .in_("key", list(_DOUYIN_METHOD_FLAG_KEYS.keys()))
-                .execute()
-            )
-
-        result = _run_async(_read())
-        for row in result.data or []:
-            short = _DOUYIN_METHOD_FLAG_KEYS.get(row["key"])
-            if short:
-                flags[short] = row["value"] is True or row["value"] == "true"
-    except Exception as e:
-        logger.warning(f"[Douyin] Failed to read method flags, using defaults: {e}")
-    return flags
-
-
-def _try_lighthttp(
-    url: str,
-    user_id: Optional[str],
-    user_agent: Optional[str],
-    video_bool: bool,
-    cover_bool: bool,
-):
-    """LightHTTP via IesDouyinParser. Returns (aweme_detail, parsed_data) or None."""
-    from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
-    from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
-
-    try:
-        aweme_detail = _run_async(
-            IesDouyinParser.parse(url, user_id=user_id, user_agent=user_agent)
-        )
-        if aweme_detail:
-            parsed = _run_async(
-                DouyinFormatter.parse_aweme_detail(
-                    aweme_detail=aweme_detail,
-                    valid_url=url,
-                    download_video=video_bool,
-                    download_music=False,
-                    download_cover=cover_bool,
-                )
-            )
-            if parsed:
-                return aweme_detail, parsed
-    except Exception as e:
-        logger.warning(f"[Douyin] LightHTTP failed: {e}")
-    return None
-
-
-def _try_abogus(
-    url: str,
-    user_id: Optional[str],
-    user_agent: Optional[str],
-    video_bool: bool,
-    cover_bool: bool,
-):
-    """ABogus signed HTTP via ABogusDouyinParser."""
-    from app.services.media.parsers.douyin_parse.abogus_parser import ABogusDouyinParser
-    from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
-
-    try:
-        aweme_detail = _run_async(
-            ABogusDouyinParser.parse(url, user_id=user_id, user_agent=user_agent)
-        )
-        if aweme_detail:
-            parsed = _run_async(
-                DouyinFormatter.parse_aweme_detail(
-                    aweme_detail=aweme_detail,
-                    valid_url=url,
-                    download_video=video_bool,
-                    download_music=False,
-                    download_cover=cover_bool,
-                )
-            )
-            if parsed:
-                return aweme_detail, parsed
-    except Exception as e:
-        logger.warning(f"[Douyin] ABogus failed: {e}")
-    return None
-
-
-def _try_drissionpage(
-    url: str,
-    user_id: Optional[str],
-    user_agent: Optional[str],
-    video_bool: bool,
-    cover_bool: bool,
-):
-    """DrissionPage browser fallback (slow, last resort)."""
-    from app.services.media.parsers.douyin_parse.drissionpage_parser import (
-        DrissionPageParser,
-    )
-    from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
-
-    try:
-        aweme_detail = _run_async(
-            DrissionPageParser.fetch_one_video(
-                url, user_id=user_id, user_agent=user_agent
-            )
-        )
-        if aweme_detail:
-            parsed = _run_async(
-                DouyinFormatter.parse_aweme_detail(
-                    aweme_detail=aweme_detail,
-                    valid_url=url,
-                    download_video=video_bool,
-                    download_music=False,
-                    download_cover=cover_bool,
-                )
-            )
-            if parsed:
-                return aweme_detail, parsed
-    except Exception as e:
-        logger.warning(f"[Douyin] DrissionPage failed: {e}")
-    return None
-
-
 def fetch_and_parse(
     valid_url: str,
     video_bool: bool,
@@ -198,46 +65,34 @@ def fetch_and_parse(
     categories: Optional[str] = None,
     user_agent: Optional[str] = None,
     user_id: Optional[str] = None,
-) -> tuple[dict, dict]:
-    """3-tier Douyin fallback chain: ABogus → LightHTTP → DrissionPage,
-    respecting admin toggles in system_settings.
+) -> tuple[dict, dict, str]:
+    """Unified Douyin parse chain: ABogus → DrissionPage (see
+    ``douyin_parse.parse_chain`` for the chain itself + admin toggles).
 
-    Order rationale (2026-05-08): ABogus authenticates with the user's
-    saved douyin cookie via user_cookies table, so when a logged-in
-    user has uploaded their cookie it sails past Douyin's anti-bot
-    consistently. LightHTTP doesn't carry cookie auth and started
-    failing with NO_ROUTER_DATA after Douyin tightened share-page
-    detection — kept as middle tier because it's the only path that
-    handles image-text notes (douyin /note/...) that DrissionPage's
-    video-page-only flow misses. Browser is the slow last resort.
+    ABogus authenticates with the user's saved douyin cookie via the
+    user_cookies table, covers videos AND image-text notes, and is the
+    same chain the download-time re-parse uses — the initial-parse /
+    re-parse fork (and its dead LightHTTP tier) is gone.
 
-    Returns (aweme_detail, parsed_data). Raises RuntimeError on failure."""
-    flags = _get_douyin_method_flags()
-    logger.info(f"[Douyin Fallback] flags={flags} ua={(user_agent or '')[:40]}…")
+    Returns (aweme_detail, parsed_data, parse_method). Raises
+    RuntimeError on failure."""
+    from app.services.media.parsers.douyin_parse.parse_chain import (
+        fetch_douyin_detail,
+    )
 
-    methods: list[tuple[str, Any]] = []
-    if flags.get("abogus"):
-        methods.append(("ABogus", _try_abogus))
-    if flags.get("lighthttp"):
-        methods.append(("LightHTTP", _try_lighthttp))
-    if flags.get("drissionpage"):
-        methods.append(("DrissionPage", _try_drissionpage))
-
-    if not methods:
-        raise RuntimeError("All Douyin parse methods are disabled in admin settings")
-
-    aweme_detail = None
-    parsed_data = None
-    for name, fn in methods:
-        logger.info(f"[Douyin Fallback] Trying {name}…")
-        result = fn(valid_url, user_id, user_agent, video_bool, cover_bool)
-        if result:
-            aweme_detail, parsed_data = result
-            logger.info(f"[Douyin Fallback] Succeeded via {name}")
-            break
-
-    if not parsed_data:
+    result = _run_async(
+        fetch_douyin_detail(
+            valid_url,
+            user_id=user_id,
+            user_agent=user_agent,
+            download_video=video_bool,
+            download_music=False,
+            download_cover=cover_bool,
+        )
+    )
+    if not result:
         raise RuntimeError("All enabled Douyin parse methods failed")
+    aweme_detail, parsed_data, parse_method = result
 
     # `categories` was a user-supplied tag set in the legacy Celery
     # parse_task; the formatter never consumed it (it's persisted
@@ -245,7 +100,7 @@ def fetch_and_parse(
     if categories:
         parsed_data["_pending_categories"] = categories
 
-    return aweme_detail, parsed_data
+    return aweme_detail, parsed_data, parse_method
 
 
 def fetch_and_parse_ytdlp(

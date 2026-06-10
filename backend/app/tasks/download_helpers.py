@@ -440,6 +440,41 @@ async def maybe_chain_ai_pipeline(
 # ─── URL availability helpers ─────────────────────────────────────────
 
 
+def reparse_douyin_via_chain(
+    platform_id: str,
+    original_url: str | None,
+    *,
+    user_id: str | None = None,
+    user_agent: str | None = None,
+) -> tuple[dict | None, str]:
+    """Sync bridge over the unified douyin re-parse (ABogus → DrissionPage,
+    original_url first then bare aweme_id). Returns (parsed_data, method);
+    (None, "") when every attempt fails. Never raises."""
+    from app.services.media.parsers.douyin_parse.parse_chain import reparse_douyin
+    from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
+
+    try:
+        result = run_async(
+            reparse_douyin(
+                platform_id,
+                original_url=original_url,
+                user_id=user_id,
+                user_agent=user_agent or pick_ua(),
+                download_video=True,
+                download_music=True,
+                download_cover=True,
+            )
+        )
+    except Exception as e:
+        logger.warning(
+            f"[Download/URL] unified-chain re-parse raised for {platform_id}: {e}"
+        )
+        return None, ""
+    if not result:
+        return None, ""
+    return result
+
+
 def ensure_download_urls(
     platform_id: str, media: dict, needed_types: list[str]
 ) -> dict:
@@ -482,119 +517,30 @@ def ensure_download_urls(
         )
         return media
 
-    # IES + DrissionPage are douyin-specific. For yt-dlp platforms
-    # (bilibili / youtube / twitter / xhs / ...), calling them just wastes
-    # two HTTP calls + emits noisy "URL 模式不匹配" / "NO_ROUTER_DATA" logs
-    # while the outer caller's yt-dlp fallback (download_strategies.py
-    # video failure branch) is the actually-correct recovery path.
+    # The douyin chain (ABogus / DrissionPage) is douyin-specific. For
+    # yt-dlp platforms (bilibili / youtube / twitter / xhs / ...), calling
+    # it just wastes HTTP calls while the outer caller's yt-dlp fallback
+    # (download_strategies.py video failure branch) is the
+    # actually-correct recovery path.
     source_platform = media.get("source_platform")
     if source_platform not in ("douyin", "tiktok"):
         logger.info(
-            f"[Download/URL] Skip IES/Browser re-parse for {source_platform} "
+            f"[Download/URL] Skip douyin re-parse for {source_platform} "
             f"platform_id={platform_id} — yt-dlp fallback owns recovery"
         )
         return media
 
     try:
-        from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
-        from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
-        from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
-
-        # One UA for the whole re-parse sequence (LightHTTP → BrowserAuto).
-        reparse_ua = pick_ua()
-
-        # --- Attempt 1: IesDouyinParser (fast HTTP, no browser) ---
-        aweme_detail = run_async(
-            IesDouyinParser.parse(original_url, user_agent=reparse_ua)
+        # Unified chain (ABogus → DrissionPage) — the SAME chain the
+        # initial parse uses, so re-parse can't silently rot again the
+        # way the old LightHTTP→BrowserAuto fork did (LightHTTP was
+        # permanently anti-bot blocked → every re-parse failed → yt-dlp
+        # HEVC fallback → black-screen downloads).
+        new_parsed, parse_method = reparse_douyin_via_chain(
+            platform_id,
+            original_url,
+            user_id=media.get("user_id"),
         )
-        parse_method = "LightHTTP"
-
-        # If short URL failed, try directly with platform_id (bypass URL redirect)
-        if not aweme_detail and platform_id:
-            logger.info(
-                f"[Download/URL] Short URL failed, trying platform_id directly: {platform_id}"
-            )
-            aweme_detail = run_async(
-                IesDouyinParser._fetch_share_page(platform_id, user_agent=reparse_ua)
-            )
-            if aweme_detail:
-                IesDouyinParser._process_video_urls(aweme_detail)
-                parse_method = "LightHTTP-directID"
-
-        if aweme_detail:
-            new_parsed = run_async(
-                DouyinFormatter.parse_aweme_detail(
-                    aweme_detail=aweme_detail,
-                    valid_url=original_url,
-                    download_video=True,
-                    download_music=True,
-                    download_cover=True,
-                )
-            )
-        else:
-            new_parsed = None
-
-        # Check which types are still missing after LightHTTP
-        still_missing = []
-        if new_parsed:
-            for t in missing_types:
-                field = url_fields.get(t)
-                if field and not new_parsed.get(field):
-                    still_missing.append(t)
-        else:
-            still_missing = list(missing_types)
-
-        # --- Attempt 2: DrissionPageParser browser fallback (if still missing) ---
-        if still_missing:
-            logger.info(
-                f"[Download/URL] LightHTTP still missing {still_missing}, "
-                f"falling back to BrowserAuto for {platform_id}"
-            )
-            try:
-                from app.services.media.parsers.douyin_parse.drissionpage_parser import (
-                    DrissionPageParser,
-                )
-
-                browser_detail = run_async(
-                    DrissionPageParser.fetch_one_video(
-                        original_url, user_agent=reparse_ua
-                    )
-                )
-                if browser_detail:
-                    parse_method = "BrowserAuto"
-                    browser_parsed = run_async(
-                        DouyinFormatter.parse_aweme_detail(
-                            aweme_detail=browser_detail,
-                            valid_url=original_url,
-                            download_video=True,
-                            download_music=True,
-                            download_cover=True,
-                        )
-                    )
-                    if browser_parsed:
-                        # Merge browser results into new_parsed (browser data wins)
-                        if new_parsed:
-                            for t in still_missing:
-                                field = url_fields.get(t)
-                                if field and browser_parsed.get(field):
-                                    new_parsed[field] = browser_parsed[field]
-                        else:
-                            new_parsed = browser_parsed
-                        logger.info(
-                            f"[Download/URL] BrowserAuto re-parse succeeded for {platform_id}"
-                        )
-                    else:
-                        logger.warning(
-                            f"[Download/URL] BrowserAuto parse yielded no data for {platform_id}"
-                        )
-                else:
-                    logger.warning(
-                        f"[Download/URL] BrowserAuto returned empty for {platform_id}"
-                    )
-            except Exception as e:
-                logger.warning(
-                    f"[Download/URL] BrowserAuto fallback failed for {platform_id}: {e}"
-                )
 
         if not new_parsed:
             logger.warning(
@@ -649,18 +595,43 @@ async def check_url_accessible(url: str, timeout: float = 10.0) -> tuple[bool, s
     from app.boundary import safe_async_client
 
     headers = Utils.get_headers()
+    # Per-URL outcomes log at INFO/WARNING (not DEBUG): prod doesn't
+    # persist DEBUG, which left a 30s+ diagnostic black hole around the
+    # 2026-06-10 "URLs cleared on a DNS blip" incident.
     try:
         async with safe_async_client(http2=True) as client:
             resp = await client.head(url, headers=headers, timeout=timeout)
             if resp.status_code == 200:
                 return True, "ok"
             reason = f"HTTP {resp.status_code}"
-            logger.debug(f"[Download/Validate] HEAD {reason} for {url[:80]}...")
+            logger.info(f"[Download/Validate] HEAD {reason} for {url[:80]}...")
             return False, reason
     except Exception as e:
-        reason = str(e)[:100]
-        logger.debug(f"[Download/Validate] HEAD failed for {url[:80]}...: {reason}")
+        reason = str(e)[:100] or type(e).__name__
+        logger.warning(f"[Download/Validate] HEAD failed for {url[:80]}...: {reason}")
         return False, reason
+
+
+# Definitive HTTP rejections that mean the CDN URL itself is expired or
+# blocked. Everything else (DNS/timeout/connect errors, 5xx, 429) is a
+# transient condition that says nothing about URL validity.
+_PERMANENT_HTTP_CODES = {400, 401, 403, 404, 410}
+
+
+def is_permanent_url_failure(reason: str) -> bool:
+    """Classify a ``check_url_accessible`` failure reason.
+
+    Only definitive HTTP client rejections count as permanent. Clearing
+    stored URLs on transient failures (e.g. a 30s aweme.snssdk.com DNS
+    blip) destroyed perfectly good state and cascaded into the yt-dlp
+    HEVC black-screen fallback — 2026-06-10 P1."""
+    if not reason.startswith("HTTP "):
+        return False
+    try:
+        code = int(reason.split()[1])
+    except (IndexError, ValueError):
+        return False
+    return code in _PERMANENT_HTTP_CODES
 
 
 def validate_and_refresh_urls(
@@ -670,17 +641,21 @@ def validate_and_refresh_urls(
 
     Flow:
     1. Check current URLs accessibility via HEAD
-    2. If all inaccessible → clear URLs in DB → re-parse → check new URLs
-    3. Return whether URLs are valid for download
+    2. If all fail TRANSIENTLY (DNS/timeout/5xx/429) → soft-fail: keep the
+       stored URLs, no re-parse — the caller attempts the GET download
+       anyway and the real download failure path owns recovery
+    3. If all fail PERMANENTLY (403/404/410 = expired CDN URL) → re-parse
+       for fresh URLs. The DB column is never NULLed up front: a failed
+       re-parse must leave the previous URLs intact (clearing them on a
+       blip was the 2026-06-10 black-screen root cause)
     """
-    from app.repositories.media_repository import MediaRepository as _MR_val
-
     urls = media.get(url_field) or []
     if not urls:
         return media, False, "no URLs available"
 
     # Test current URLs (handle nested lists: [[url1, url2], [url3, url4]])
     fail_reason = ""
+    saw_permanent = False
     for item in urls:
         # Nested list: item is [url1, url2, ...] — test first URL
         url = item[0] if isinstance(item, list) and item else item
@@ -690,14 +665,26 @@ def validate_and_refresh_urls(
         if ok:
             return media, True, "ok"
         fail_reason = reason
+        if is_permanent_url_failure(reason):
+            saw_permanent = True
 
-    # All URLs inaccessible → clear and re-parse
+    if not saw_permanent:
+        logger.warning(
+            f"[Download/Validate] All {len(urls)} {type_key} URLs failed "
+            f"TRANSIENTLY for {platform_id} ({fail_reason}) — keeping stored "
+            f"URLs, attempting download anyway"
+        )
+        return media, False, f"transient: {fail_reason}"
+
+    # Permanent rejection → URLs are expired/blocked; re-parse for fresh
+    # ones. Only the in-memory copy is cleared (to make ensure_download_urls
+    # treat the type as missing) — the DB keeps the old URLs until the
+    # re-parse SUCCEEDS and overwrites them.
     logger.info(
-        f"[Download/Validate] All {len(urls)} {type_key} URLs inaccessible for {platform_id} "
-        f"({fail_reason}), clearing and re-parsing..."
+        f"[Download/Validate] All {len(urls)} {type_key} URLs permanently "
+        f"rejected for {platform_id} ({fail_reason}), re-parsing..."
     )
     media[url_field] = []
-    run_async(_MR_val().update(platform_id, {url_field: None}))
     media = ensure_download_urls(platform_id, media, [type_key])
 
     # Test fresh URLs

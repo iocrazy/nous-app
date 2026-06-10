@@ -26,7 +26,7 @@ class DouyinFormatter:
         Douyin's music structure varies between API sources:
         - Full API: music.play_url.url_list = [url1, url2, ...]
         - Full API: music.play_url.uri = "obj/xxx" (build stable URL)
-        - LightHTTP: music.play_url may be empty {}, but music.mid exists
+        - Share-page sources: music.play_url may be empty {}, but music.mid exists
         - Some: music.play_url is a string URL directly
         """
         music_obj = aweme_detail.get("music", {})

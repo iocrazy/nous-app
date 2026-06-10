@@ -20,35 +20,44 @@ import inspect
 
 
 def test_drissionpage_fallback_guarded_by_platform() -> None:
-    """The BrowserAuto / DrissionPage fallback block in
-    download_strategies must check source_platform before running —
-    otherwise non-douyin tasks (bilibili / youtube / xhs / twitter)
-    burn ~30s in a Chromium scrape that always returns empty."""
+    """The douyin-chain recovery block (ABogus → DrissionPage re-parse,
+    which replaced the old BrowserAuto fallback) in download_strategies
+    must check source_platform before running — otherwise non-douyin
+    tasks (bilibili / youtube / xhs / twitter) burn ~30s in a Chromium
+    scrape that always returns empty."""
     strategies_mod = importlib.import_module("app.tasks.download_strategies")
     source = inspect.getsource(strategies_mod)
 
-    # Locate the BrowserAuto fallback block by its log message
-    # signature.
-    anchor = source.find("httpx+yt-dlp both failed, trying BrowserAuto")
+    # Locate the chain-recovery block by its log message signature.
+    anchor = source.find("re-parsing via ")
     assert anchor != -1, (
-        "BrowserAuto fallback log line moved or was removed — update "
+        "douyin chain recovery log line moved or was removed — update "
         "this regression test if intentional."
     )
 
-    # The platform guard must appear before the DrissionPageParser
-    # import within the same block. Take the 1500 chars before the
-    # anchor as the guard zone (the if-condition + comment).
-    guard_zone = source[max(0, anchor - 1500) : anchor + 200]
+    # The platform guard must appear before the recovery log within the
+    # same block. Take the 1200 chars before the anchor as the guard
+    # zone (the if-condition + comment).
+    guard_zone = source[max(0, anchor - 1200) : anchor + 200]
 
     assert "source_platform" in guard_zone, (
-        "BrowserAuto fallback must check `source_platform` before "
-        "running DrissionPage. Without the guard, non-douyin tasks "
-        "(bilibili / youtube / etc.) waste ~30s loading Chromium and "
-        "always return empty — observed on prod 2026-05-13."
+        "douyin chain recovery must check `source_platform` before "
+        "running the douyin re-parse (which can end in DrissionPage). "
+        "Without the guard, non-douyin tasks waste ~30s loading "
+        "Chromium and always return empty — observed on prod 2026-05-13."
     )
     assert "douyin" in guard_zone, (
-        "BrowserAuto guard must whitelist douyin (and optionally "
+        "chain recovery guard must whitelist douyin (and optionally "
         "tiktok) explicitly — generic platform checks are a smell."
+    )
+
+    # The inverse guard: yt-dlp must NOT be reachable for douyin —
+    # its format fallthrough grabs HEVC (black screen, audio only,
+    # 2026-06-10 P1). The yt-dlp fallback lives in the elif branch.
+    ytdlp_anchor = source.find("yt-dlp fallback (non-douyin platforms only)")
+    assert ytdlp_anchor != -1 and ytdlp_anchor > anchor, (
+        "yt-dlp fallback must be the non-douyin elif branch AFTER the "
+        "douyin chain recovery — douyin must never reach yt-dlp."
     )
 
 

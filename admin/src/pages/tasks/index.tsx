@@ -471,7 +471,7 @@ export function TaskCenter() {
       descData.push({ label: 'Original URL', value: <span style={{ fontSize: 12, wordBreak: 'break-all' }}>{meta.original_url as string}</span> })
     }
     if (meta.parse_method) {
-      const methodLabels: Record<string, string> = { ytdlp: 'yt-dlp', lightweight: 'Lightweight', drissionpage: 'DrissionPage' }
+      const methodLabels: Record<string, string> = { ytdlp: 'yt-dlp', abogus: 'ABogus', drissionpage: 'DrissionPage', qishui: 'Soda', lightweight: 'Lightweight' }
       descData.push({ label: 'Parse Method', value: (
         <Tag size="small" color="cyan">{methodLabels[meta.parse_method as string] || (meta.parse_method as string)}</Tag>
       )})

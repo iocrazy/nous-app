@@ -1055,7 +1055,7 @@ class Settings(BaseSettings):
         ]
     )
 
-    # Douyin 专用 UA 池。一次解析任务挑一条，贯穿 LightHTTP/ABogus/DrissionPage
+    # Douyin 专用 UA 池。一次解析任务挑一条，贯穿 ABogus/DrissionPage
     # 和 yt-dlp 下载——ABogus 签名绑定 UA，混用会让服务端验签失败。
     DOUYIN_USER_AGENTS: list[str] = Field(
         default_factory=lambda: [

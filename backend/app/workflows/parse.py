@@ -135,13 +135,18 @@ def fetch_and_parse_step(
     user_id: Optional[str] = None,
     platform: str = "douyin",
 ) -> dict[str, Any]:
-    """Platform-aware parse step. douyin → 3-tier fallback chain
-    (LightHTTP → ABogus → DrissionPage) + DouyinFormatter; other platforms
-    (bilibili / youtube / …) → yt-dlp metadata + YtdlpService schema map.
+    """Platform-aware parse step. douyin → unified chain
+    (ABogus → DrissionPage, see douyin_parse.parse_chain) + DouyinFormatter;
+    other platforms (bilibili / youtube / …) → yt-dlp metadata +
+    YtdlpService schema map.
 
     `platform` defaults to "douyin" so any in-flight workflows queued
     before this change keep the legacy behaviour. Heavy I/O — 3 retries
-    matches the legacy Celery budget."""
+    matches the legacy Celery budget.
+
+    `parse_method` records which tier actually delivered (abogus /
+    drissionpage / ytdlp / qishui) — patched into task_tracking.metadata
+    so admin Tasks shows the parse channel again."""
     if platform == "qishui":
         from app.services.media.parsers.parse_helpers import fetch_and_parse_qishui
 
@@ -152,10 +157,11 @@ def fetch_and_parse_step(
             user_agent=user_agent,
             user_id=user_id,
         )
+        parse_method = "qishui"
     elif platform == "douyin":
         from app.services.media.parsers.parse_helpers import fetch_and_parse
 
-        aweme_detail, parsed_data = fetch_and_parse(
+        aweme_detail, parsed_data, parse_method = fetch_and_parse(
             valid_url,
             video_bool,
             cover_bool,
@@ -173,7 +179,12 @@ def fetch_and_parse_step(
             user_agent=user_agent,
             user_id=user_id,
         )
-    return {"aweme_detail": aweme_detail, "parsed_data": parsed_data}
+        parse_method = "ytdlp"
+    return {
+        "aweme_detail": aweme_detail,
+        "parsed_data": parsed_data,
+        "parse_method": parse_method,
+    }
 
 
 @DBOS.step()
@@ -423,6 +434,7 @@ def update_parse_tracking_step(
     workflow_id: str,
     platform_id: str,
     subtitle: str,
+    parse_method: Optional[str] = None,
 ) -> None:
     """Patch the parse workflow's own task_tracking row with the resolved
     media_id (= platform_id) and a friendlier subtitle.
@@ -431,15 +443,23 @@ def update_parse_tracking_step(
     parsed media card and link the follow-up download task — without
     this update the parse task stays without a media_id and the result
     card never appears (legacy parse_tasks.py used to do the same write
-    via `manager._atomic_update`)."""
+    via `manager._atomic_update`).
+
+    `parse_method` lands in metadata.parse_method (merged, not replaced —
+    metadata is a shared jsonb column) so the admin Tasks page can show
+    which parse tier delivered (the legacy Celery path used to write
+    this; the DBOS port had dropped it)."""
     from app.services.infra.unified_task_manager import get_task_manager
 
     async def _do() -> None:
         try:
-            await get_task_manager()._atomic_update(
+            mgr = get_task_manager()
+            await mgr._atomic_update(
                 workflow_id,
                 {"media_id": str(platform_id), "subtitle": subtitle[:120]},
             )
+            if parse_method:
+                await mgr.patch_metadata(workflow_id, {"parse_method": parse_method})
         except Exception as e:
             logger.warning(f"[parse] update_parse_tracking failed: {e}")
 
@@ -643,6 +663,7 @@ def parse_workflow(
     )
     aweme_detail = fetched["aweme_detail"]
     parsed_data = fetched["parsed_data"]
+    parse_method = fetched.get("parse_method")
 
     platform_id = parsed_data.get("platform_id")
     media_type = parsed_data.get("media_type", 0)
@@ -674,6 +695,7 @@ def parse_workflow(
             workflow_id=DBOS.workflow_id,
             platform_id=str(platform_id),
             subtitle=(video_title or "Parsed")[:120],
+            parse_method=parse_method,
         )
 
     # 4. Auto-tag (non-blocking — step swallows errors)

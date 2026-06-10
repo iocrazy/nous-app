@@ -5,8 +5,8 @@ URL Router Service
 
 Detects source platform from URL and dispatches to the appropriate handler.
 Most platforms use yt-dlp as the primary parser; qishui (Soda Music) uses a
-dedicated 'soda' handler. Douyin falls back to LightHTTP / DrissionPage when
-yt-dlp fails (handled in media_router).
+dedicated 'soda' handler. Douyin uses the unified ABogus / DrissionPage chain
+(douyin_parse.parse_chain).
 """
 
 import re
