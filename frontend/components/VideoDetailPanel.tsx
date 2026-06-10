@@ -203,9 +203,16 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     try {
       setVisualAnalysisFetching(true);
       const data = await getVisualAnalysisByResource(resourceId);
-      setVisualAnalysis(data);
+      // The endpoint deliberately returns 200 with null fields when the
+      // resource was never analyzed (no 404, to avoid red DevTools rows on
+      // every tab open) — presence is detected via visual_description.
+      // Treating any 200 as "has analysis" rendered an EMPTY result card and
+      // swallowed the Trigger button on un-analyzed videos.
+      if (data.description) {
+        setVisualAnalysis(data);
+      }
     } catch {
-      // 404 = no analysis yet — stay on the trigger/processing state
+      // network error — stay on the trigger/processing state
     } finally {
       setVisualAnalysisFetching(false);
     }
