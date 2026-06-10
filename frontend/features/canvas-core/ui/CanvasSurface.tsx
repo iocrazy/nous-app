@@ -15,10 +15,12 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  SelectionMode,
   type Edge,
   type EdgeChange,
   type Node,
   type NodeChange,
+  type OnSelectionChangeParams,
   type Viewport,
   applyEdgeChanges,
   applyNodeChanges,
@@ -63,11 +65,21 @@ export function CanvasSurface() {
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
   const viewport = useCanvasCoreStore((s) => s.viewport);
+  const selection = useCanvasCoreStore((s) => s.selection);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);
   const setConnections = useCanvasCoreStore((s) => s.setConnections);
   const setViewport = useCanvasCoreStore((s) => s.setViewport);
+  const setSelection = useCanvasCoreStore((s) => s.setSelection);
 
-  const rfNodes = useMemo(() => toReactFlowNodes(nodes), [nodes]);
+  const selectionSet = useMemo(() => new Set(selection), [selection]);
+  const rfNodes = useMemo(
+    () =>
+      toReactFlowNodes(nodes).map((n) => ({
+        ...n,
+        selected: selectionSet.has(n.id),
+      })),
+    [nodes, selectionSet],
+  );
   const rfEdges = useMemo(() => toReactFlowEdges(connections), [connections]);
 
   const onNodesChange = useCallback(
@@ -93,6 +105,14 @@ export function CanvasSurface() {
     [setViewport],
   );
 
+  const onSelectionChange = useCallback(
+    (params: OnSelectionChangeParams) => {
+      const ids = params.nodes.map((n) => n.id);
+      setSelection(ids);
+    },
+    [setSelection],
+  );
+
   return (
     <ReactFlow
       nodes={rfNodes}
@@ -100,9 +120,16 @@ export function CanvasSurface() {
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onMove={onMove}
+      onSelectionChange={onSelectionChange}
       viewport={viewport}
       fitView={false}
       proOptions={{ hideAttribution: true }}
+      // Shift-drag for box select; click-drag is for panning the
+      // viewport, matching Figma / Miro / Excalidraw.
+      selectionMode={SelectionMode.Partial}
+      selectionOnDrag={false}
+      multiSelectionKeyCode="Shift"
+      deleteKeyCode={null}
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
       <Controls position="bottom-right" />
