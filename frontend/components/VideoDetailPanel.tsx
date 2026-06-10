@@ -208,6 +208,33 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     }
   }, [tasks, resourceId, transcribeStatus]);
 
+  // Visual analysis: handleVisualAnalysis optimistically sets 'processing' but
+  // (unlike transcribe/summarize) doesn't poll, so on failure the panel used to
+  // stay stuck on "Analyzing…". Reconcile against the latest ai_extract task for
+  // this resource: terminal failed/cancelled → flip to 'failed' (the panel then
+  // shows the retry button + reason); completed → 'completed'. Backend also
+  // writes the same status, so a fresh load is correct too; this is the live
+  // (no-refresh) path.
+  useEffect(() => {
+    if (!resourceId || !onUpdate) return;
+    if (video.visual_analysis_status !== 'processing') return;
+    const latest = tasks
+      .filter((t) => t.task_type === 'ai_extract' && t.resource_id === resourceId)
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )[0];
+    if (!latest) return;
+    if (latest.status === 'completed') {
+      onUpdate(video.platform_id, { visual_analysis_status: 'completed' });
+      setVisualAnalysisLoading(false);
+    } else if (latest.status === 'failed' || latest.status === 'cancelled') {
+      onUpdate(video.platform_id, { visual_analysis_status: 'failed' });
+      setVisualAnalysisError(latest.error_msg || 'Visual analysis failed');
+      setVisualAnalysisLoading(false);
+    }
+  }, [tasks, resourceId, video.visual_analysis_status, video.platform_id, onUpdate]);
+
   const handleTranscribe = async () => {
     try {
       setTranscriptLoading(true);

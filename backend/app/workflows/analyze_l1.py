@@ -84,6 +84,17 @@ async def call_analyze_l1(
         raise RuntimeError(f"no resource for parsed_media id={media_id}")
     resource_id = int(media_row["resource_id"])
 
+    # Make resources.visual_analysis_status authoritative for the whole run:
+    # 'processing' now, 'completed' on success (below), 'failed' on the no-result
+    # path. The UI keys its Visual Analysis panel off this column, so a terminal
+    # value here is what unsticks the "Analyzing…" state (instead of relying on
+    # the frontend's optimistic local flag, which never resolved on failure).
+    await db_engine.execute(
+        "UPDATE public.resources SET visual_analysis_status = 'processing' "
+        "WHERE id = :rid",
+        {"rid": resource_id},
+    )
+
     analysis_service = VisualAnalysisService(
         provider_key=provider_key, provider_config=provider_config
     )
@@ -93,6 +104,13 @@ async def call_analyze_l1(
 
     result = await analysis_service.analyze_l1(cover_url, user_id=user_id)
     if not result:
+        # Mark the resource failed so the UI's existing 'failed' branch (retry
+        # button) shows instead of a stuck "Analyzing…".
+        await db_engine.execute(
+            "UPDATE public.resources SET visual_analysis_status = 'failed' "
+            "WHERE id = :rid",
+            {"rid": resource_id},
+        )
         # No result == the provider call failed (VisualAnalysisService caught the
         # error, logged it, and returned None — e.g. the assigned provider is
         # unreachable OR is not a vision/multimodal model). RAISE rather than
