@@ -10,6 +10,7 @@
 import { apiFetch, ApiError, buildAuthHeaders } from '../../../services/apiClient';
 import { getApiUrl } from '../../../utils/apiConfig';
 import type { GridLines } from '../editor/gridMath';
+import type { OutpaintPadding } from '../editor/outpaintMath';
 import type { CropRegion } from '../editor/types';
 import type {
   Canvas,
@@ -237,6 +238,46 @@ export async function deriveMaskCutout(
   if (opts.filename) payload.filename = opts.filename;
   const response = await apiFetch(
     `/api/v1/resources/${sourceResourceId}/derive-mask-cutout`,
+    { method: 'POST', json: payload },
+  );
+  return readEnvelope<DerivedResource>(response);
+}
+
+// ============================================================
+// Outpaint derive (Phase 3 Day 15)
+// ============================================================
+
+export interface DeriveOutpaintOptions {
+  /** Collected for the future AI fill; the v1 blur fill ignores it. */
+  prompt?: string;
+  /** Optional override; defaults to ``outpaint-{source.filename}``. */
+  filename?: string;
+}
+
+/**
+ * Extend an image resource's canvas (blur-fill v1) and persist the
+ * result as a new sibling resource. Wraps the backend
+ * `extend_canvas` primitive + the shared derive pipeline.
+ *
+ * Throws `ApiError` on any non-2xx response (404 source missing,
+ * 400 invalid padding / non-image, 403 access denied, 500 backend
+ * failure).
+ */
+export async function deriveOutpaint(
+  sourceResourceId: string,
+  padding: OutpaintPadding,
+  opts: DeriveOutpaintOptions = {},
+): Promise<DerivedResource> {
+  const payload: Record<string, unknown> = {
+    left: padding.left,
+    top: padding.top,
+    right: padding.right,
+    bottom: padding.bottom,
+  };
+  if (opts.prompt) payload.prompt = opts.prompt;
+  if (opts.filename) payload.filename = opts.filename;
+  const response = await apiFetch(
+    `/api/v1/resources/${sourceResourceId}/derive-outpaint`,
     { method: 'POST', json: payload },
   );
   return readEnvelope<DerivedResource>(response);

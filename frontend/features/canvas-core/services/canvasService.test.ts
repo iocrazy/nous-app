@@ -8,6 +8,7 @@ import {
   deriveCrop,
   deriveGrid,
   deriveMaskCutout,
+  deriveOutpaint,
   saveCanvas,
 } from './canvasService';
 
@@ -256,6 +257,52 @@ describe('deriveMaskCutout', () => {
       }),
     );
     await expect(deriveMaskCutout('source-1', 'MASKB64')).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+});
+
+describe('deriveOutpaint', () => {
+  const padding = { left: 0.5, top: 0, right: 0.5, bottom: 0 };
+  const fakeExtended = {
+    id: '7777000000000000',
+    filename: 'outpaint-orig.png',
+    file_path: 'teams/s/derived/7777000000000000/v1/outpaint-orig.png',
+    mime_type: 'image/png',
+    file_size_bytes: 999,
+  };
+
+  it('POSTs to /resources/{id}/derive-outpaint with the padding', async () => {
+    fetchMock.mockResolvedValueOnce(envelope(fakeExtended));
+    const result = await deriveOutpaint('source-1', padding);
+    expect(result.id).toBe('7777000000000000');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/resources/source-1/derive-outpaint');
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    expect(body).toEqual({ left: 0.5, top: 0, right: 0.5, bottom: 0 });
+  });
+
+  it('includes prompt and filename when supplied', async () => {
+    fetchMock.mockResolvedValueOnce(envelope(fakeExtended));
+    await deriveOutpaint('source-1', padding, {
+      prompt: 'meadow',
+      filename: 'wide.png',
+    });
+    const init = fetchMock.mock.calls[0][1];
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    expect(body.prompt).toBe('meadow');
+    expect(body.filename).toBe('wide.png');
+  });
+
+  it('throws ApiError on a non-2xx response', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'no padding' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(deriveOutpaint('source-1', padding)).rejects.toBeInstanceOf(
       ApiError,
     );
   });
