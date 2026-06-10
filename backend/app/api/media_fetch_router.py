@@ -11,7 +11,6 @@ Helper functions are in media_fetch_helpers.py.
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from loguru import logger
 
-from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.api.media_batch_router import router as batch_router
 from app.api.media_fetch_helpers import (
     MediaFetchRequest,
@@ -361,98 +360,82 @@ async def fetch_media_by_type(
 @router.post("/{platform_id}/extract-audio", tags=TAGS_FETCH)
 async def extract_audio(
     platform_id: str,
-    background_tasks: BackgroundTasks,
     auth: AuthDep,
 ):
-    """
-    Re-extract audio from a downloaded video file (ffmpeg -c:a copy).
-    """
+    """Re-extract audio from a downloaded video.
+
+    Dispatches the real ``extract_audio_workflow`` (same as the download
+    chain's ``chain_followups_step``) instead of the old inline ffmpeg
+    fork. The fork (a) created its task_tracking row WITHOUT
+    ``dbos_workflow_id`` — the NOT NULL PK — so every create failed with
+    23502 and was swallowed: the toast said "started" but Task Center
+    never showed a task; (b) never updated
+    ``parsed_media.extract_audio_status`` (stuck 'pending' forever);
+    (c) never chained transcript/summary on completion."""
+    import uuid as _uuid
+
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.extract_audio import extract_audio_workflow
+
     try:
         repo = MediaRepository()
         media = await repo.get_by_platform_id(platform_id)
         if not media:
             raise HTTPException(status_code=404, detail="Media not found")
 
-        download_path = media.get("download_path")
-        if not download_path:
+        if not media.get("download_path"):
             raise HTTPException(
                 status_code=400,
                 detail="No video file found. Download the video first.",
             )
 
-        video_title = media.get("title", platform_id)[:30]
+        video_title = (media.get("title") or platform_id)[:50]
 
-        from app.services.infra.unified_task_manager import get_task_manager
-
-        tracker = get_task_manager()
-        unified_task_id = None
+        # Best-effort resource resolution — the workflow uses it to chain
+        # transcript/summary when the resource carries those intent tags.
+        resource_id: str | None = None
         try:
-            unified_task_id = await tracker.create(
-                user_id=auth.user_id,
-                task_type="download",
-                title=video_title,
-                subtitle="Audio Extract",
-                media_id=platform_id,
+            from app.repositories.resources_repository import ResourcesRepository
+
+            resource = await ResourcesRepository().get_resource_by_media_id_and_creator(
+                str(media.get("id")), auth.user_id
             )
-            await tracker.start(unified_task_id)
+            if resource:
+                resource_id = str(resource["id"])
         except Exception as e:
-            logger.warning(f"[ExtractAudio] Failed to create unified task: {e}")
+            logger.warning(f"[ExtractAudio] resource lookup failed (non-fatal): {e}")
 
-        async def _do_extract(pid: str, task_id: str | None):
-            """PR-D7 phase 3: ffmpeg subprocess inlined here. The legacy
-            `_extract_audio_from_video` helper lived inside
-            app/tasks/download_tasks.py which has been deleted."""
-            import asyncio
-            import subprocess
-            from pathlib import Path
+        wf_id = str(_uuid.uuid4())
+        try:
+            await get_task_manager().create(
+                user_id=auth.user_id,
+                task_type="extract_audio",
+                title=f"Audio {video_title}",
+                media_id=str(platform_id),
+                resource_id=resource_id,
+                dbos_workflow_id=wf_id,
+            )
+        except Exception as e:
+            logger.warning(f"[ExtractAudio] pre-create task_tracking row: {e}")
 
-            from app.core.config import settings as _settings
-            from app.repositories.media_repository import MediaRepository as _MR
-
-            _tracker = get_task_manager()
-            try:
-                _media = await _MR().get_by_platform_id(pid)
-                if not _media or not _media.get("download_path"):
-                    raise RuntimeError("media row missing download_path")
-                video_path = Path(_settings.DOWNLOAD_PATH) / _media["download_path"]
-                audio_path = video_path.with_suffix(".m4a")
-
-                def _run_ffmpeg() -> bool:
-                    proc = subprocess.run(
-                        [
-                            "ffmpeg",
-                            "-y",
-                            "-i",
-                            str(video_path),
-                            "-vn",
-                            "-c:a",
-                            "copy",
-                            str(audio_path),
-                        ],
-                        capture_output=True,
-                        timeout=300,
-                        **safe_popen_kwargs(),
-                    )
-                    return proc.returncode == 0
-
-                success = await asyncio.to_thread(_run_ffmpeg)
-                if task_id:
-                    if success:
-                        await _tracker.complete(task_id)
-                    else:
-                        await _tracker.fail(task_id, "Audio extraction failed")
-            except Exception as e:
-                logger.error(f"[ExtractAudio] Failed for {pid}: {e}")
-                if task_id:
-                    await _tracker.fail(task_id, str(e)[:500])
-
-        background_tasks.add_task(_do_extract, platform_id, unified_task_id)
+        await start_workflow_routed(
+            "extract_audio",
+            dbos_workflow_callable=extract_audio_workflow,
+            dbos_workflow_kwargs={
+                "platform_id": platform_id,
+                "user_id": auth.user_id,
+                "resource_id": resource_id,
+                "video_title": video_title,
+            },
+            workflow_id=wf_id,
+        )
 
         return {
             "success": True,
             "message": "Audio extraction started",
             "platform_id": platform_id,
-            "task_id": unified_task_id,
+            "task_id": wf_id,
         }
 
     except HTTPException:
