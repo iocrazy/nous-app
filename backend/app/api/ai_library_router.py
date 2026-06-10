@@ -1122,6 +1122,13 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
         .execute()
     )
     latest_run = latest_q.data[0] if latest_q.data else None
+    # agent_runs.id is a BIGINT Snowflake (mig 232). This endpoint returns a
+    # raw Dict (no response_model), so unlike the run list/detail endpoints —
+    # whose RunListItem opts into coerce_numbers_to_str — it would otherwise
+    # leak the id as a JS number (precision loss >2^53, and the frontend
+    # `id.slice()` crash). Coerce to str here, matching the RunListItem contract.
+    if latest_run and latest_run.get("id") is not None:
+        latest_run["id"] = str(latest_run["id"])
 
     # 14-day daily series — pre-fill with zeros so the chart's x axis
     # stays continuous when there are gaps. ``window_start`` is already
@@ -1234,7 +1241,10 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
             "run_count": len(runs_14d),
         },
         "recent_tasks": [tt_row_to_task_shape(r) for r in (recent_tasks_q.data or [])],
-        "recent_runs": recent_runs_q.data or [],
+        "recent_runs": [
+            {**r, "id": str(r["id"])} if r.get("id") is not None else r
+            for r in (recent_runs_q.data or [])
+        ],
     }
 
 

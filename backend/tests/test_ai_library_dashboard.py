@@ -225,6 +225,56 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
 
 
 @pytest.mark.asyncio
+async def test_dashboard_coerces_bigint_run_ids_to_str(client: AsyncClient) -> None:
+    """agent_runs.id is a BIGINT Snowflake (mig 232) — the DB returns it as an
+    int. This endpoint has no response_model (unlike the RunListItem-backed
+    run list/detail), so it must str-coerce the id itself, else the frontend
+    gets a precision-lost JS number and `id.slice(...)` crashes the page."""
+    agent_id = str(uuid4())
+    today_iso = datetime.now(timezone.utc).isoformat()
+    big_id = 7648846557194673893  # >2^53 — would lose precision as a JS number
+
+    run_row = {
+        "id": big_id,  # INT, as PostgREST/Python returns a BIGINT
+        "status": "completed",
+        "trigger": "manual",
+        "model": "qwen-max",
+        "started_at": today_iso,
+        "ended_at": today_iso,
+        "prompt_tokens": 1,
+        "completion_tokens": 1,
+        "cost_cents": "0.1",
+    }
+    fake_client = _client_for(
+        {
+            "agent_runs": [[run_row], [run_row], [run_row]],  # 14d / latest / recent
+            "task_tracking": [[], []],
+        }
+    )
+
+    with (
+        patch("app.api.ai_library_router.get_agent_repository") as mock_repo,
+        patch(
+            "app.api.ai_library_router.get_async_supabase_admin",
+            AsyncMock(return_value=fake_client),
+        ),
+    ):
+        mock_repo.return_value.get_by_slug = AsyncMock(
+            return_value={"id": agent_id, "slug": "ceo", "name": "CEO"}
+        )
+        resp = await client.get(f"{BASE}/agents/ceo/dashboard")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Both the latest-run banner and every recent-runs row carry a STRING id —
+    # the full, precise Snowflake (not a rounded number).
+    assert body["latest_run"]["id"] == str(big_id)
+    assert isinstance(body["latest_run"]["id"], str)
+    assert body["recent_runs"][0]["id"] == str(big_id)
+    assert all(isinstance(r["id"], str) for r in body["recent_runs"])
+
+
+@pytest.mark.asyncio
 async def test_dashboard_empty_agent_returns_zero_buckets(
     client: AsyncClient,
 ) -> None:
