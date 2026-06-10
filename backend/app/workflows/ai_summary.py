@@ -83,6 +83,7 @@ async def run_summarize_agent(
     parsed_media_id: int,
     provider_key: str,
     provider_config: dict[str, Any],
+    wf_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Invoke the `summarize` agent via SummarizeService → AgentRunner.
     Returns {summary, key_points, topics}. Each retry is a fresh agent
@@ -98,6 +99,8 @@ async def run_summarize_agent(
         user_id=user_id,
         parsed_media_id=parsed_media_id,
         title=title,
+        # task ↔ run bidirectional linkage (mig 282) — see analyze_l1.
+        task_id=wf_id,
     )
     if result is None:
         raise RuntimeError("summarize agent returned None")
@@ -208,6 +211,7 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
             parsed_media_id=parsed_media_id,
             provider_key=inputs.get("provider_key", ""),
             provider_config=inputs.get("provider_config", {}),
+            wf_id=wf_id,
         )
         await manager.update_progress(wf_id, 70, subtitle="Summary generated")
         result = await persist_summary(

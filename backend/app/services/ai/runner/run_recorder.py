@@ -80,6 +80,15 @@ class RunRecorder:
     team_id: Optional[int] = None
     project_id: Optional[int] = None
     issue_id: Optional[int] = None  # links this run to an issue via mig-208 triggers
+    # Paperclip-style bidirectional task linkage (mig 282). When the run
+    # executes inside a tracked workflow, pass the task_tracking PK
+    # (dbos_workflow_id, text). The recorder then:
+    #   run → task: agent_runs.task_id = task_id (insert)
+    #   task → run: task_tracking.agent_id = agent_id +
+    #               metadata.run_id = run id   (post-insert stamp)
+    # so the agent Dashboard's task panels see service work, not just
+    # chat-Delegate dispatches.
+    task_id: Optional[str] = None
     model: Optional[str] = None
     provider: Optional[str] = None
     input_summary: Optional[str] = None
@@ -356,6 +365,7 @@ class RunRecorder:
             "session_id": str(self.session_id) if self.session_id else None,
             "team_id": self.team_id,
             "project_id": self.project_id,
+            "task_id": self.task_id,
             "status": "running",
             "trigger": self.trigger,
             "model": self.model,
@@ -379,6 +389,45 @@ class RunRecorder:
             # → no agent_runs row was finalised for any run after mig 232.
             self.run_id = str(result.data[0]["id"])
             self._last_heartbeat_monotonic = time.monotonic()
+            await self._link_task()
+
+    async def _link_task(self) -> None:
+        """Stamp the task → run/agent backlink on task_tracking (mig 282).
+
+        Sets task_tracking.agent_id (business column — phase/status/progress
+        stay trigger-owned per the task-system discipline) and merges
+        metadata.run_id (MERGE, never replace — the user_settings clobber
+        lesson applies to every shared jsonb column). Best-effort: linkage
+        failure never breaks the run.
+        """
+        if not self.task_id or self.run_id is None:
+            return
+        try:
+            from app.db import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            current = (
+                await client.table("task_tracking")
+                .select("metadata")
+                .eq("dbos_workflow_id", self.task_id)
+                .maybe_single()
+                .execute()
+            )
+            if not current or current.data is None:
+                return
+            merged = dict(current.data.get("metadata") or {})
+            merged["run_id"] = self.run_id
+            await (
+                client.table("task_tracking")
+                .update({"agent_id": str(self.agent_id), "metadata": merged})
+                .eq("dbos_workflow_id", self.task_id)
+                .execute()
+            )
+        except Exception as err:
+            logger.warning(
+                f"[RunRecorder] task linkage failed "
+                f"(task_id={self.task_id} run_id={self.run_id}): {err}"
+            )
 
     async def _finish(
         self,

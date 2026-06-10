@@ -126,7 +126,13 @@ async def call_analyze_l1(
 
     await _progress(30, "Preparing analysis...")
     result = await analysis_service.analyze_l1(
-        cover_url, user_id=user_id, on_progress=_progress
+        cover_url,
+        user_id=user_id,
+        on_progress=_progress,
+        # task ↔ run bidirectional linkage (mig 282): RunRecorder writes
+        # agent_runs.task_id and stamps agent_id + metadata.run_id back onto
+        # this workflow's task_tracking row.
+        task_id=wf_id,
     )
     if not result:
         # Mark the resource failed so the UI's existing 'failed' branch (retry

@@ -40,7 +40,6 @@ from app.repositories.agent_runs_repository import (
     get_agent_runs_repository,
 )
 from app.repositories.agent_workforce_repository import (
-    TASK_KIND_AGENT,
     tt_row_to_task_shape,
 )
 from app.repositories.skill_repository import (
@@ -1167,15 +1166,16 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     run_activity_14d = [{"date": d, "count": activity_buckets.get(d, 0)} for d in days]
     success_rate_14d = [{"date": d, **success_buckets[d]} for d in days]
 
-    # Tasks: status counts over 14d. A4: tasks live in task_tracking
-    # WHERE task_kind='agent_task' scoped by user_id (Delegate from chat
-    # carries the caller's user_id, and direct dispatches get their owner
-    # stamped). Match the same window so the dashboard tells one
-    # consistent story.
+    # Tasks: status counts over 14d, scoped by agent_id + user_id. Counts
+    # EVERY task the agent worked, regardless of task_kind: chat-Delegate
+    # dispatches (task_kind='agent_task') AND service workflows (visual
+    # analysis / summary, task_kind='workflow') whose RunRecorder stamped
+    # agent_id back onto the row (mig 282 paperclip-style task↔run linkage).
+    # The old task_kind='agent_task' filter hid all service work, so an
+    # agent that only ran analyses showed an empty task panel.
     tasks_q = await (
         client.table("task_tracking")
         .select("dbos_workflow_id,phase,created_at,title,metadata")
-        .eq("task_kind", TASK_KIND_AGENT)
         .eq("agent_id", str(agent_uuid))
         .eq("user_id", str(user_uuid))
         .gte("created_at", iso_start)
@@ -1190,13 +1190,13 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
 
     # Recent agent tasks (5) — pulled separately in case the 14d
     # window is empty but older tasks still matter for context.
+    # Same agent_id-only scoping as the 14d query above.
     recent_tasks_q = await (
         client.table("task_tracking")
         .select(
             "dbos_workflow_id,phase,created_at,started_at,completed_at,title,"
             "error_code,error_msg,metadata"
         )
-        .eq("task_kind", TASK_KIND_AGENT)
         .eq("agent_id", str(agent_uuid))
         .eq("user_id", str(user_uuid))
         .order("created_at", desc=True)
