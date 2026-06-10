@@ -98,6 +98,12 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # RunRecorder; this internal LLM call is a side-channel for which
     # cost is rolled up via metadata.compaction.total_tokens_saved.
     "agent_framework/summarizer.py": "compaction head summarizer auxiliary LLM, side-channel",
+    # Phase 0.5-B Tasklet framework: single-turn cheap-model calls
+    # (qwen-turbo by default) for title gen / intent / tagging / etc.
+    # Side-channel from the main agent run — per the upgrade plan v1.2,
+    # tasklet invocations are recorded into ai_messages.tasklet_calls
+    # JSONB (separate accounting path), not agent_run_events.
+    "services/ai/tasklets/base.py": "tasklet cheap-model auxiliary LLM, recorded in ai_messages.tasklet_calls",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a
