@@ -28,6 +28,7 @@ import {
 import type {
   Canvas,
   CanvasConnection,
+  CanvasKind,
   CanvasNode,
   CanvasViewport,
 } from '../types';
@@ -56,6 +57,11 @@ export interface HistorySnapshot {
 interface CanvasState {
   // ---- Lifecycle ----
   canvasId: string | null;
+  /** smart = Infinite-Canvas-style with shot/prompt/output nodes;
+   *  classic = legacy block editor. Surface uses this to pick the
+   *  React Flow nodeTypes map and toolbar. NULL until loadCanvas
+   *  resolves. */
+  kind: CanvasKind | null;
   loadStatus: CanvasLoadStatus;
   loadError: string | null;
 
@@ -141,6 +147,7 @@ export function createCanvasCoreStore(
     function applyServerRow(row: Canvas): void {
       set({
         canvasId: row.id,
+        kind: row.kind,
         viewport: row.viewport_json ?? IDENTITY_VIEWPORT,
         nodes: row.nodes_json ?? [],
         connections: row.connections_json ?? [],
@@ -268,6 +275,7 @@ export function createCanvasCoreStore(
 
     return {
       canvasId: null,
+      kind: null,
       loadStatus: 'idle',
       loadError: null,
       viewport: IDENTITY_VIEWPORT,
@@ -293,6 +301,7 @@ export function createCanvasCoreStore(
         pendingHistoryBase = null;
         set({
           canvasId: null,
+          kind: null,
           loadStatus: 'idle',
           loadError: null,
           viewport: IDENTITY_VIEWPORT,

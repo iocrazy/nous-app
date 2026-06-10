@@ -30,6 +30,8 @@ import { useCallback, useMemo } from 'react';
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { SMART_NODE_TYPES } from '../smart/nodes/registry';
+import { canConnectSmart } from '../smart/types';
 
 type AnyNode = Node;
 type AnyEdge = Edge;
@@ -66,6 +68,7 @@ export function CanvasSurface() {
   const connections = useCanvasCoreStore((s) => s.connections);
   const viewport = useCanvasCoreStore((s) => s.viewport);
   const selection = useCanvasCoreStore((s) => s.selection);
+  const kind = useCanvasCoreStore((s) => s.kind);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);
   const setConnections = useCanvasCoreStore((s) => s.setConnections);
   const setViewport = useCanvasCoreStore((s) => s.setViewport);
@@ -113,14 +116,30 @@ export function CanvasSurface() {
     [setSelection],
   );
 
+  const isConnectionValid = useCallback(
+    (connection: { source: string; target: string }) => {
+      if (kind !== 'smart') return true;
+      const findType = (id: string) => {
+        const found = rfNodes.find((n) => n.id === id);
+        return found?.type;
+      };
+      return canConnectSmart(findType(connection.source), findType(connection.target));
+    },
+    [kind, rfNodes],
+  );
+
+  const nodeTypes = kind === 'smart' ? SMART_NODE_TYPES : undefined;
+
   return (
     <ReactFlow
       nodes={rfNodes}
       edges={rfEdges}
+      nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onMove={onMove}
       onSelectionChange={onSelectionChange}
+      isValidConnection={isConnectionValid}
       viewport={viewport}
       fitView={false}
       proOptions={{ hideAttribution: true }}

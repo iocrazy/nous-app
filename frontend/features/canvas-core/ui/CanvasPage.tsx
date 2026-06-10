@@ -11,9 +11,10 @@
  * edits.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
+import { CanvasComposer } from '../smart/CanvasComposer';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
 import { CanvasSurface } from './CanvasSurface';
@@ -21,10 +22,12 @@ import { useCanvasShortcuts } from './useCanvasShortcuts';
 
 export default function CanvasPage() {
   const { canvasId } = useParams<{ canvasId: string }>();
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const loadStatus = useCanvasCoreStore((s) => s.loadStatus);
   const loadError = useCanvasCoreStore((s) => s.loadError);
   const saveStatus = useCanvasCoreStore((s) => s.saveStatus);
   const saveError = useCanvasCoreStore((s) => s.saveError);
+  const kind = useCanvasCoreStore((s) => s.kind);
   const loadCanvas = useCanvasCoreStore((s) => s.loadCanvas);
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
   const reset = useCanvasCoreStore((s) => s.reset);
@@ -59,8 +62,9 @@ export default function CanvasPage() {
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div ref={surfaceRef} className="relative h-full w-full">
       <CanvasSurface />
+      {kind === 'smart' && <CanvasComposer surfaceRef={surfaceRef} />}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} />
     </div>
