@@ -1038,6 +1038,14 @@ class Settings(BaseSettings):
     )
     HTTP_TIMEOUT: float = Field(default=30.0, description="HTTP请求超时(秒)")
     DOWNLOAD_TIMEOUT: float = Field(default=60.0, description="下载超时(秒)")
+    COVER_DOWNLOAD_TIMEOUT: float = Field(
+        default=45.0,
+        description=(
+            "封面下载的总时限(秒)。DOWNLOAD_TIMEOUT 是 httpx 的 per-read 超时,"
+            "对慢速 trickle 的 CDN 无总上界 → 封面拉取可 hang 数十分钟拖垮整个任务。"
+            "用 asyncio.wait_for 包一层总 deadline,超时即放弃该 URL 试下一个。"
+        ),
+    )
 
     # 用户代理列表（通用）
     USER_AGENTS: list[str] = Field(

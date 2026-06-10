@@ -1286,7 +1286,26 @@ class DownloaderService:
 
             # Try to download cover (try multiple URLs)
             for url in cover_urls:
-                if await DownloaderService.download_file(url, cover_full_path, headers):
+                # Total-deadline guard: settings.DOWNLOAD_TIMEOUT is httpx's
+                # PER-READ timeout — a slow byte-trickle from a throttled/blocked
+                # CDN never trips it but can hang the fetch for tens of minutes,
+                # leaving cover_download_status stuck at 'pending' and dragging the
+                # whole (already video-complete) workflow to a 'lost' reap. Cover is
+                # small + best-effort, so bound the TOTAL time per URL and move on.
+                try:
+                    cover_ok = await asyncio.wait_for(
+                        DownloaderService.download_file(url, cover_full_path, headers),
+                        timeout=settings.COVER_DOWNLOAD_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    # Non-streaming GET buffers fully before writing the file, so
+                    # cancellation here leaves no partial cover.jpg on disk.
+                    logger.warning(
+                        f"封面下载超时 ({settings.COVER_DOWNLOAD_TIMEOUT}s),"
+                        f"跳过该 URL: {url[:80]}"
+                    )
+                    cover_ok = False
+                if cover_ok:
                     # Update database (store relative path)
                     try:
                         await repo.update(
