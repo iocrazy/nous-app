@@ -9,6 +9,7 @@
 
 import { apiFetch, ApiError, buildAuthHeaders } from '../../../services/apiClient';
 import { getApiUrl } from '../../../utils/apiConfig';
+import type { CropRegion } from '../editor/types';
 import type {
   Canvas,
   CanvasCreatePayload,
@@ -115,4 +116,48 @@ function pickCurrent(node: unknown): Canvas | null {
     return pickCurrent(obj.detail);
   }
   return null;
+}
+
+// ============================================================
+// Crop derive (Phase 3 Day 6)
+// ============================================================
+
+/** Shape of the resource row returned by `POST /resources/{id}/derive-crop`. */
+export interface DerivedResource {
+  id: string;
+  filename: string;
+  file_path: string;
+  mime_type: string;
+  file_size_bytes: number;
+  // The backend response carries many more columns; only the fields
+  // the crop-editor flow consumes are typed.
+  [key: string]: unknown;
+}
+
+export interface DeriveCropOptions {
+  /** Optional override for the new resource's filename. */
+  filename?: string;
+}
+
+/**
+ * Crop an existing image resource and persist the result as a new
+ * sibling resource. Wraps the backend `crop_normalized` primitive +
+ * the resources insert pipeline.
+ *
+ * Throws `ApiError` on any non-2xx response (404 source missing,
+ * 400 invalid region / non-image, 403 access denied, 500 backend
+ * failure). Callers should surface the message via toast / inline.
+ */
+export async function deriveCrop(
+  sourceResourceId: string,
+  region: CropRegion,
+  opts: DeriveCropOptions = {},
+): Promise<DerivedResource> {
+  const payload: Record<string, unknown> = { region };
+  if (opts.filename) payload.filename = opts.filename;
+  const response = await apiFetch(
+    `/api/v1/resources/${sourceResourceId}/derive-crop`,
+    { method: 'POST', json: payload },
+  );
+  return readEnvelope<DerivedResource>(response);
 }
