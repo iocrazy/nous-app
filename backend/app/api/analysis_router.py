@@ -104,23 +104,6 @@ async def get_analysis_stats(auth: AuthDep):
     )
 
 
-@router.get("/queue")
-async def get_analysis_queue(
-    auth: AuthDep,
-    limit: int = Query(
-        50, le=100, description="Maximum number of pending videos to return"
-    ),
-):
-    """
-    Get videos pending analysis.
-    Returns videos that don't have any analysis yet.
-    """
-    repo = get_analysis_repository()
-    videos = await repo.get_videos_without_analysis(limit=limit)
-
-    return {"pending_count": len(videos), "videos": videos}
-
-
 @router.get("/{media_id}", response_model=AnalysisResponse)
 async def get_media_analysis(
     auth: AuthDep,
@@ -281,14 +264,27 @@ async def trigger_batch_analysis(
 
     import uuid as _uuid
 
+    from app.db.supabase_client import get_async_supabase_admin
     from app.services.infra.unified_task_manager import get_task_manager
 
-    media_repo = get_analysis_repository()
+    # Fetch all requested parsed_media in one shot (≤100 by the guard above).
+    # The previous per-row `AnalysisRepository.get_media(...)` never existed —
+    # it raised AttributeError that the per-row except swallowed, so the batch
+    # silently queued nothing. Mirror trigger_analysis's parsed_media projection.
+    supabase = await get_async_supabase_admin()
+    media_result = (
+        await supabase.table("parsed_media")
+        .select("id, title, description, cover_urls")
+        .in_("id", request.media_ids)
+        .execute()
+    )
+    media_by_id = {row["id"]: row for row in (media_result.data or [])}
+
     mgr = get_task_manager()
     started = 0
     for mid in request.media_ids:
         try:
-            row = await media_repo.get_media(mid)
+            row = media_by_id.get(mid)
             if not row:
                 continue
             cover = ((row.get("cover_urls") or []) + [None])[0]

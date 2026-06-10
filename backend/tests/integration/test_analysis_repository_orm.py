@@ -343,23 +343,6 @@ async def test_delete_analysis_returns_false_when_missing(
     assert result is False
 
 
-async def test_get_videos_without_analysis_returns_list(
-    integration_db_url, patched_engine, test_resource
-):
-    """get_videos_without_analysis returns a list of dicts with expected keys."""
-    repo = _repo()
-    await repo.delete_analysis(test_resource)  # ensure our media is unanalysed
-    results = await repo.get_videos_without_analysis(limit=5)
-    assert isinstance(results, list)
-    # If results exist, check shape.
-    for item in results:
-        assert "id" in item
-        assert type(item["id"]) is int
-        assert "title" in item
-        assert "description" in item
-        assert "cover_urls" in item
-
-
 async def test_get_analysis_stats_after_create(
     integration_db_url, patched_engine, test_resource
 ):

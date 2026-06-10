@@ -1020,7 +1020,7 @@ class Settings(BaseSettings):
         "str. content_embedding is written as a pgvector Vector(1536). The vector "
         "similarity search keeps using the match_videos_by_embedding RPC "
         "(executed as a raw statement — parity with the REST .rpc() path); "
-        "get_videos_without_analysis / by_level keep their cross-table semantics. "
+        "get_videos_by_analysis_level keeps its cross-table semantics. "
         "Writes COMMIT via write_scope() with ON CONFLICT (resource_id, "
         "analysis_level) idempotency. Table created in final post-076 form by mig "
         "262; model + repo validated against live dev DB. Inert; flip false to "

@@ -91,7 +91,7 @@ from loguru import logger
 from sqlalchemy import delete, select, text
 
 from app.db.session import read_scope, write_scope
-from app.models import ParsedMedia, ResourceAnalysis, Resources
+from app.models import ResourceAnalysis, Resources
 from app.repositories.analysis_repository import AnalysisRepository
 
 
@@ -145,45 +145,6 @@ class AnalysisRepositoryOrm(AnalysisRepository):
         if row is None:
             return None
         return self._row_to_dict(row)
-
-    async def get_videos_without_analysis(self, limit: int = 100) -> List[dict]:
-        """Get parsed_media rows that have no resource_analysis entry.
-
-        Two-step query mirroring REST:
-          1. Collect all resource_id values from resource_analysis.
-          2. Select parsed_media NOT IN those ids (or all, if none analysed).
-
-        Returns dicts with keys: id, title, description, cover_urls.
-        """
-        async with read_scope() as session:
-            # Step 1: resource_ids that already have analysis.
-            analyzed_result = await session.execute(
-                select(ResourceAnalysis.resource_id)
-            )
-            analyzed_ids = [r[0] for r in analyzed_result.fetchall()]
-
-            # Step 2: parsed_media not in the analyzed set.
-            stmt = select(
-                ParsedMedia.id,
-                ParsedMedia.title,
-                ParsedMedia.description,
-                ParsedMedia.cover_urls,
-            ).limit(limit)
-            if analyzed_ids:
-                stmt = stmt.where(ParsedMedia.id.not_in(analyzed_ids))
-
-            result = await session.execute(stmt)
-            rows = result.mappings().all()
-
-        return [
-            {
-                "id": int(row["id"]),
-                "title": row["title"],
-                "description": row["description"],
-                "cover_urls": row["cover_urls"],
-            }
-            for row in rows
-        ]
 
     async def get_videos_by_analysis_level(
         self, level: str, limit: int = 100

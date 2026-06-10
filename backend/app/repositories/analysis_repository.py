@@ -107,28 +107,6 @@ class AnalysisRepository:
         logger.info(f"Updated embedding for video {resource_id}")
         return result.data[0] if result.data else None
 
-    async def get_videos_without_analysis(self, limit: int = 100) -> List[dict]:
-        """Get videos that don't have analysis yet."""
-        table = await self._get_table()
-        client = await self._get_client()
-
-        # Get video IDs that have analysis
-        analyzed = await table.select("resource_id").execute()
-        analyzed_ids = [r["resource_id"] for r in analyzed.data]
-
-        # Get videos not in that list
-        query = (
-            client.table("parsed_media")
-            .select("id, title, description, cover_urls")
-            .limit(limit)
-        )
-
-        if analyzed_ids:
-            query = query.not_.in_("id", analyzed_ids)
-
-        result = await query.execute()
-        return result.data
-
     async def get_videos_by_analysis_level(
         self, level: str, limit: int = 100
     ) -> List[dict]:
