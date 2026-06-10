@@ -29,6 +29,7 @@ from app.api.media_router import router as media_router
 from app.api.notifications_router import router as notifications_router
 from app.api.payment_router import router as payment_router
 from app.api.points_router import router as points_router
+from app.api.canvases_router import router as canvases_router
 from app.api.projects_router import router as projects_router
 from app.api.realtime_router import router as realtime_router
 from app.api.resources_router import router as resources_router
@@ -110,6 +111,7 @@ api_router.include_router(router=points_router, tags=["Points"])
 api_router.include_router(router=payment_router, tags=["Payment"])
 
 api_router.include_router(router=projects_router, tags=["MediaTrack"])
+api_router.include_router(router=canvases_router, tags=["Canvas"])
 
 api_router.include_router(router=resources_router, tags=["Resources"])
 
