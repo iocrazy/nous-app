@@ -262,7 +262,9 @@ style_preference_extractor = Tasklet(
         '- composition (e.g. "close-up", "wide shot", "asymmetric")\n'
         "- avoid (things the user explicitly does NOT want)\n\n"
         "Return STRICT JSON:\n"
-        '{"preferences": [{"category": "<one of above>", "value": "<short phrase>", "strength": "strong|moderate|weak"}]}\n'
+        '{"preferences": ['
+        '{"category": "<one of above>", "value": "<short phrase>", '
+        '"strength": "strong|moderate|weak"}]}\n'
         "Empty array if nothing durable found."
     ),
     output_schema={
