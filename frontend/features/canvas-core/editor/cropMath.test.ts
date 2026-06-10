@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { dragHandle, scaleRegionAroundCentre, snapRegion } from './cropMath';
+import {
+  dragHandle,
+  scaleRegionAroundCentre,
+  snapRegion,
+  snapRegionToAspect,
+} from './cropMath';
 import {
   FULL_REGION,
   MIN_CROP,
@@ -168,5 +173,64 @@ describe('scaleRegionAroundCentre', () => {
     expect(next.height).toBe(1);
     expect(next.x).toBe(0);
     expect(next.y).toBe(0);
+  });
+});
+
+// ============================================================
+// snapRegionToAspect
+// ============================================================
+
+describe('snapRegionToAspect', () => {
+  it('1:1 from a wide rectangle keeps width, shortens height, recentres', () => {
+    const r: CropRegion = { x: 0.1, y: 0.4, width: 0.6, height: 0.2 };
+    const next = snapRegionToAspect(r, 1);
+    // larger dim is width (0.6); height becomes 0.6 → recentre.
+    expect(next.width).toBeCloseTo(0.6, 9);
+    expect(next.height).toBeCloseTo(0.6, 9);
+    // centre invariant on the X axis (clamped on Y because 0.6 around
+    // 0.5 spans [0.2, 0.8] which still fits — centre preserved).
+    expect(next.x + next.width / 2).toBeCloseTo(0.4, 9);
+    expect(next.y + next.height / 2).toBeCloseTo(0.5, 9);
+  });
+
+  it('16:9 from a tall rectangle widens it, keeping the larger dim', () => {
+    const r: CropRegion = { x: 0.4, y: 0.1, width: 0.2, height: 0.6 };
+    const next = snapRegionToAspect(r, 16 / 9);
+    // larger dim is height (0.6); width = 0.6 * (16/9) ≈ 1.066 → overshoots
+    // so both shrink uniformly. After uniform shrink, width/height = 16/9.
+    expect(next.width / next.height).toBeCloseTo(16 / 9, 6);
+    // both dims must fit in [0, 1].
+    expect(next.width).toBeLessThanOrEqual(1);
+    expect(next.height).toBeLessThanOrEqual(1);
+  });
+
+  it('aspect <= 0 returns the input untouched', () => {
+    const r: CropRegion = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 };
+    expect(snapRegionToAspect(r, 0)).toEqual(r);
+    expect(snapRegionToAspect(r, -2)).toEqual(r);
+    expect(snapRegionToAspect(r, NaN)).toEqual(r);
+  });
+
+  it('1:1 from a small square is preserved (no change)', () => {
+    const r: CropRegion = { x: 0.4, y: 0.4, width: 0.2, height: 0.2 };
+    const next = snapRegionToAspect(r, 1);
+    expect(next.width).toBeCloseTo(0.2, 9);
+    expect(next.height).toBeCloseTo(0.2, 9);
+    expect(next.x + next.width / 2).toBeCloseTo(0.5, 9);
+    expect(next.y + next.height / 2).toBeCloseTo(0.5, 9);
+  });
+
+  it('output never violates MIN_CROP', () => {
+    // Both dims already at minimum; ratio stretches one too thin
+    // → clampRegion bumps it back to MIN_CROP.
+    const r: CropRegion = {
+      x: 0.475,
+      y: 0.475,
+      width: MIN_CROP,
+      height: MIN_CROP,
+    };
+    const next = snapRegionToAspect(r, 16 / 9);
+    expect(next.width).toBeGreaterThanOrEqual(MIN_CROP);
+    expect(next.height).toBeGreaterThanOrEqual(MIN_CROP);
   });
 });
