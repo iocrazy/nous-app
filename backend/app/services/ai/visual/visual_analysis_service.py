@@ -250,6 +250,7 @@ class VisualAnalysisService:
         metadata: Dict[str, Any],
         user_id: Optional[Any],
         trigger: str,
+        task_id: Optional[str] = None,
     ) -> Optional[VisualAnalysisResult]:
         """Compose prompt + run one turn with multimodal content.
 
@@ -313,6 +314,7 @@ class VisualAnalysisService:
                 agent_id=composed.agent_id,
                 user_id=uid,
                 trigger=trigger,
+                task_id=task_id,
                 model=model or None,
                 provider=provider,
                 input_summary=input_summary,
@@ -350,6 +352,7 @@ class VisualAnalysisService:
         *,
         user_id: Optional[Any] = None,
         on_progress: Optional[Any] = None,
+        task_id: Optional[str] = None,
     ) -> Optional[VisualAnalysisResult]:
         """L1 Analysis: cover image only. Cost: ~$0.001 per image.
 
@@ -359,6 +362,10 @@ class VisualAnalysisService:
         sees honest intermediate progress instead of jumping 20→100. Progress
         failures must never break the analysis — callers should swallow their
         own errors, but we guard anyway.
+
+        ``task_id``: the task_tracking PK (dbos_workflow_id) when running
+        inside a tracked workflow — threaded into RunRecorder for the
+        paperclip-style task ↔ run bidirectional linkage (mig 282).
         """
 
         async def _progress(pct: int, subtitle: str) -> None:
@@ -392,6 +399,7 @@ class VisualAnalysisService:
             metadata={"mode": "L1", "cover_url": cover_url},
             user_id=user_id,
             trigger="visual_analysis_l1",
+            task_id=task_id,
         )
 
     async def analyze_l2(

@@ -283,3 +283,67 @@ async def test_bigint_snowflake_id_finalises_run() -> None:
     # the run was actually finalised (update ran) — the bug skipped this
     assert len(table.update_calls) == 1
     assert table.update_calls[0]["status"] == "completed"
+
+
+class _FakeTableWithTaskRow(_FakeTable):
+    """Extends the fake to answer the task_tracking metadata read that
+    RunRecorder._link_task performs (mig 282 task ↔ run linkage)."""
+
+    def __init__(self, *, task_metadata: dict | None = None, **kw) -> None:
+        super().__init__(**kw)
+        self._task_metadata = task_metadata if task_metadata is not None else {}
+
+    async def execute(self):
+        if self._last_select == "metadata":
+            return _Result({"metadata": self._task_metadata})
+        return await super().execute()
+
+
+@pytest.mark.asyncio
+async def test_task_id_links_run_and_task_bidirectionally() -> None:
+    """mig 282 paperclip-style linkage: when task_id is passed, the insert
+    carries agent_runs.task_id, and the recorder stamps agent_id +
+    metadata.run_id back onto the task_tracking row (MERGING metadata,
+    never replacing it — the shared-jsonb clobber lesson)."""
+    agent = uuid4()
+    table = _FakeTableWithTaskRow(
+        insert_result_data=[{"id": 310819108761487}],
+        task_metadata={"media_id": "42"},
+    )
+    client = _FakeClient(table)
+
+    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+        rec = RunRecorder(
+            agent_id=agent,
+            user_id=uuid4(),
+            trigger="visual_analysis_l1",
+            task_id="wf-abc-123",
+        )
+        async with rec:
+            pass
+
+    # run → task: insert payload carries the task id
+    assert table.insert_calls[0]["task_id"] == "wf-abc-123"
+    # task → run: first update is the linkage stamp (second is finish)
+    assert len(table.update_calls) == 2
+    link = table.update_calls[0]
+    assert link["agent_id"] == str(agent)
+    assert link["metadata"] == {"media_id": "42", "run_id": "310819108761487"}
+    assert table.update_calls[1]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_no_task_id_skips_linkage() -> None:
+    """Without task_id the recorder behaves exactly as before — one insert,
+    one finish update, no task_tracking writes."""
+    table = _FakeTable(insert_result_data=[{"id": 310819108761487}])
+    client = _FakeClient(table)
+
+    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+        rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+        async with rec:
+            pass
+
+    assert "task_id" not in table.insert_calls[0]
+    assert len(table.update_calls) == 1  # finish only
+    assert table.update_calls[0]["status"] == "completed"
