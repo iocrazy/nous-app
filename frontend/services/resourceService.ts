@@ -1381,18 +1381,78 @@ export async function deleteSmartFolder(folderId: string): Promise<void> {
   if (!response.ok) throw new Error('Failed to delete smart folder');
 }
 
-export async function fetchSmartFolderResults(
-  folderId: string,
+/**
+ * Resolve a smart-folder `relative:-7d` value to an absolute ISO timestamp.
+ * Mirrors the backend `ResourcesRepository._resolve_value` so the value the
+ * RPC receives is already an absolute date it can cast with `::timestamptz`.
+ * Units: d = days, h = hours, m = minutes (default days). Non-relative values
+ * pass through unchanged.
+ */
+function resolveRelativeDate(value: string): string {
+  if (!value.startsWith('relative:')) return value;
+  const offsetStr = value.split(':')[1] ?? '';
+  const unit = offsetStr.slice(-1);
+  const amount = parseInt(offsetStr.slice(0, -1), 10);
+  if (Number.isNaN(amount)) return value;
+  const msPerUnit = unit === 'h' ? 3_600_000 : unit === 'm' ? 60_000 : 86_400_000;
+  return new Date(Date.now() + amount * msPerUnit).toISOString();
+}
+
+/**
+ * Keyset-paginated smart-folder evaluation via the `search_smart_folder` RPC
+ * (mig 276). Replaces the legacy drain-all `GET /smart-folders/{id}/results`,
+ * which silently capped at PostgREST's 1000-row ceiling once a smart folder
+ * matched more than 1000 resources.
+ *
+ * Calls the RPC DIRECTLY through the supabase client (not the backend) so
+ * `bigIntSafeFetch` keeps Snowflake ids precision-safe in the jsonb rows — the
+ * same pattern as `fetchResourcesViaRpc`. RLS (SECURITY INVOKER on the RPC)
+ * enforces scope access. Relative-date conditions are resolved to absolute
+ * timestamps here before dispatch, parity with the legacy Python path.
+ */
+export async function fetchSmartFolderResultsPaginated(
   scopeId: string,
-): Promise<ResourceItem[]> {
-  const apiUrl = getApiUrl();
-  const params = new URLSearchParams({ scope_id: scopeId });
-  const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders/${folderId}/results?${params}`, {
-    headers: await getAuthHeaders(),
+  rules: SmartFolderRules,
+  cursor: KeysetCursor | null,
+  pageSize: number,
+  signal?: AbortSignal,
+): Promise<KeysetListPage<ResourceItem>> {
+  const resolvedRules = {
+    operator: rules.operator,
+    match: rules.match,
+    conditions: (rules.conditions || []).map((c) => ({
+      field: c.field,
+      op: c.op,
+      value: resolveRelativeDate(String(c.value)),
+    })),
+  };
+
+  let req = supabase.rpc('search_smart_folder', {
+    p_scope_id: scopeId,
+    p_rules: resolvedRules,
+    p_search: null,
+    p_cursor_ts: cursor?.ts ?? null,
+    p_cursor_id: cursor?.id ?? null,
+    p_limit: pageSize + 1,
+    p_with_count: cursor === null,
   });
-  if (!response.ok) throw new Error('Failed to fetch smart folder results');
-  const json = await response.json();
-  return json.data || [];
+  if (signal) req = req.abortSignal(signal);
+
+  const { data, error } = await req;
+  if (error) throw error;
+
+  const result = (data ?? { rows: [], total_count: null }) as {
+    rows: ResourceItem[];
+    total_count: number | null;
+  };
+  const rows = result.rows ?? [];
+  const page = sliceKeysetPage(rows, pageSize, (row) => {
+    const r = row as { id?: string | number; created_at?: string };
+    return r.created_at && r.id != null
+      ? { ts: r.created_at, id: String(r.id) }
+      : null;
+  });
+  return { ...page, totalCount: result.total_count ?? -1 };
 }
 
 /**
