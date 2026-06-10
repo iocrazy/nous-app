@@ -28,7 +28,10 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.core.scope_guards import verify_scope_access
 from app.db.scope import Scope, request_scope, system_request_scope
-from app.repositories.resources_repository import ResourcesRepository
+from app.repositories.resources_repository import (
+    UNTRANSCODED_BATCH,
+    ResourcesRepository,
+)
 from app.schemas.resources import (
     ChorusUpdate,
     ResourceMoveRequest,
@@ -346,8 +349,24 @@ async def batch_transcode(auth: AuthDep, _scope: ScopedRequestDep):
                     f"[Transcode/Batch] Failed to queue version {v['id']}: {e}"
                 )
 
+        # A full batch means more untranscoded versions remain (the repo caps
+        # the working set so the request never balloons / never silently clips
+        # at PostgREST's 1000 row ceiling). Each queued version is now `pending`
+        # so it leaves the set — re-invoking drains the rest.
+        has_more = len(versions) >= UNTRANSCODED_BATCH
+        if has_more:
+            logger.info(
+                "[Transcode/Batch] Batch full (%s) — more untranscoded versions "
+                "remain; re-invoke to continue.",
+                UNTRANSCODED_BATCH,
+            )
         logger.info(f"[Transcode/Batch] Queued {queued}/{len(versions)} versions")
-        return {"success": True, "queued": queued, "total_found": len(versions)}
+        return {
+            "success": True,
+            "queued": queued,
+            "total_found": len(versions),
+            "has_more": has_more,
+        }
     except Exception as e:
         logger.error(f"Failed to batch transcode: {e}")
         raise HTTPException(status_code=500, detail="Failed to batch transcode")

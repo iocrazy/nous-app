@@ -7,6 +7,12 @@ from typing import Any, Optional
 
 from app.db import get_async_supabase_admin
 
+# Cap on versions returned per batch-transcode call. Replaces an unbounded
+# SELECT that PostgREST silently truncated at 1000. The caller marks each
+# version ``pending`` so it leaves the failed/NULL set, making the batch
+# re-runnable to drain a larger backlog over successive calls.
+BATCH_VERSIONS_LIMIT = 2000
+
 
 class AdminTranscodeRepository:
     VERSIONS_TABLE = "resource_versions"
@@ -146,8 +152,16 @@ class AdminTranscodeRepository:
             .execute()
         )
 
-    async def list_versions_for_batch(self, action: str) -> list[dict[str, Any]]:
-        """`retry_failed` returns failed videos; `transcode_new` returns untranscoded."""
+    async def list_versions_for_batch(
+        self, action: str, limit: int = BATCH_VERSIONS_LIMIT
+    ) -> list[dict[str, Any]]:
+        """`retry_failed` returns failed videos; `transcode_new` returns untranscoded.
+
+        Returns at most ``limit`` rows ordered by id. The caller marks each
+        version ``pending`` (so it leaves the failed/NULL set), making the batch
+        re-runnable to drain past one call — replacing the unbounded SELECT that
+        PostgREST silently capped at 1000.
+        """
         client = await self._client()
         query = (
             client.table(self.VERSIONS_TABLE)
@@ -159,7 +173,7 @@ class AdminTranscodeRepository:
         else:  # transcode_new
             query = query.is_("transcode_status", "null")
 
-        result = await query.execute()
+        result = await query.order("id", desc=False).limit(limit).execute()
         return result.data or []
 
     # ─── Settings ──────────────────────────────────────────────────────

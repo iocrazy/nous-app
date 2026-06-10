@@ -10,6 +10,7 @@ from loguru import logger
 from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
 from app.repositories.admin.transcode_repository import (
+    BATCH_VERSIONS_LIMIT,
     get_admin_transcode_repository,
 )
 from app.schemas.admin import (
@@ -245,24 +246,36 @@ async def batch_transcode(
         except Exception as e:
             logger.warning(f"[Admin] Batch transcode failed for version {v['id']}: {e}")
 
+    # A full batch means more matching versions remain (the repo caps the
+    # working set so the request never balloons / never silently clips at
+    # PostgREST's 1000 ceiling). Each queued version is now `pending` so it
+    # leaves the failed/NULL set — re-invoking drains the rest.
+    has_more = len(versions) >= BATCH_VERSIONS_LIMIT
+
     # Audit log
     await create_audit_log(
         admin_id=auth.user_id,
         action=f"transcode_batch_{action}",
         target_type="resource_version",
         target_id="batch",
-        details={"action": action, "total_found": len(versions), "queued": queued},
+        details={
+            "action": action,
+            "total_found": len(versions),
+            "queued": queued,
+            "has_more": has_more,
+        },
         ip_address=request.client.host if request.client else None,
     )
 
     logger.info(
         f"[Admin] Batch transcode {action}: {queued}/{len(versions)} queued "
-        f"by admin={auth.user_id}"
+        f"by admin={auth.user_id}{' (more remain)' if has_more else ''}"
     )
     return {
         "message": f"Batch {action}: {queued} transcode tasks queued",
         "total_found": len(versions),
         "queued": queued,
+        "has_more": has_more,
     }
 
 

@@ -104,6 +104,23 @@ This is a behavioral FIX (not an inert ORM copy) — the 1000-truncation is a la
 get_expired_trashed_resources, get_untranscoded_video_versions, transcode batch,
 analysis already-analyzed set. Fix = loop/paginate or raise the working limit.
 
+> **STATUS (2026-06-10, `refactor/tier3-sweeper-pagination`):** the first three
+> are FIXED — each repo method (REST + ORM twin) now applies a deterministic
+> `ORDER BY` + explicit `LIMIT` (`EXPIRED_TRASH_BATCH=5000`,
+> `UNTRANSCODED_BATCH=2000`, `BATCH_VERSIONS_LIMIT=2000`), and each consuming
+> sweeper/endpoint is re-runnable (deletes / marks `pending`) so a backlog
+> drains over successive runs; the two HTTP batch endpoints now return
+> `has_more`. The **analysis already-analyzed set** (`get_videos_without_analysis`)
+> is intentionally NOT bundled here: it is dormant (`resource_analysis` = 0 rows
+> on prod) and its outer result is already bounded (`limit ≤ 100`), but it hides
+> a deeper latent bug — it compares `parsed_media.id NOT IN
+> [resource_analysis.resource_id]`, yet the FK proves `resource_analysis.resource_id`
+> references `resources.id`, a different id domain → the dedup silently never
+> matches once analysis data exists. Fixing it correctly needs a product-intent
+> decision (what "video without analysis" means across
+> parsed_media ↔ resources ↔ resource_analysis), so it is tracked as a separate
+> correctness fix, not a mechanical scale change.
+
 ## Reframe for the ORM rollout
 For these methods, do NOT make ORM "inertly replicate" the 1000 truncation (that
 preserves the bug). Migrate them scale-correct: list methods → pagination; admin

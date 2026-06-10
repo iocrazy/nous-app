@@ -71,6 +71,8 @@ from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plai
 from app.repositories.resources_repository import (
     _AI_STATUS_COMPLETED,
     _AI_STATUS_FIELDS,
+    EXPIRED_TRASH_BATCH,
+    UNTRANSCODED_BATCH,
     ResourcesRepository,
 )
 
@@ -998,9 +1000,14 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
     # ── Trash listing ───────────────────────────────────────────────
 
     async def get_expired_trashed_resources(
-        self, older_than_days: int = 30
+        self, older_than_days: int = 30, limit: int = EXPIRED_TRASH_BATCH
     ) -> List[Dict[str, Any]]:
-        """Trashed resources older than N days, for permanent cleanup."""
+        """Trashed resources older than N days, for permanent cleanup.
+
+        Bounded + ordered to match the REST twin: at most ``limit`` rows,
+        oldest-trashed first. Was an unbounded SELECT (whole expired set into
+        RAM at scale); the daily sweeper re-runs to drain a larger backlog.
+        """
         try:
             cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
             async with read_scope() as session:
@@ -1012,6 +1019,8 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     )
                     .where(Resources.is_trashed.is_(True))
                     .where(Resources.trashed_at < cutoff)
+                    .order_by(Resources.trashed_at.asc())
+                    .limit(limit)
                 )
                 return [_rest_parity(dict(r)) for r in result.mappings().all()]
         except Exception as e:
@@ -1158,9 +1167,16 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
             logger.error(f"Failed to update version {version_id}: {e}")
             raise
 
-    async def get_untranscoded_video_versions(self) -> List[Dict[str, Any]]:
+    async def get_untranscoded_video_versions(
+        self, limit: int = UNTRANSCODED_BATCH
+    ) -> List[Dict[str, Any]]:
         """Video versions never transcoded — NULL ``transcode_status`` AND
-        non-NULL ``file_path``. Projection matches legacy."""
+        non-NULL ``file_path``. Projection matches legacy.
+
+        Bounded + ordered to match the REST twin: at most ``limit`` rows by id.
+        The caller marks each ``pending`` so it leaves this set, making the
+        batch re-runnable to drain past one call.
+        """
         try:
             async with read_scope() as session:
                 result = await session.execute(
@@ -1173,6 +1189,8 @@ class ResourcesRepositoryOrm(AsyncpgRepository, ResourcesRepository):
                     .where(ResourceVersions.mime_type.like("video/%"))
                     .where(ResourceVersions.transcode_status.is_(None))
                     .where(ResourceVersions.file_path.isnot(None))
+                    .order_by(ResourceVersions.id.asc())
+                    .limit(limit)
                 )
                 return [_rest_parity(dict(r)) for r in result.mappings().all()]
         except Exception as e:
