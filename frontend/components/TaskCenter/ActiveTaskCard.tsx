@@ -3,10 +3,10 @@ import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   formatSpeed,
-  taskTypeIcon,
   taskTypeLabel,
   type UnifiedTask,
 } from '../../contexts/TaskManagerContext';
+import { TaskTypeIcon } from './TaskTypeIcon';
 import { formatElapsed } from './taskElapsed';
 
 interface ActiveTaskCardProps {
@@ -36,7 +36,7 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
         <div className="relative w-9 h-9 shrink-0">
           <span className="absolute inset-0 rounded-full bg-emerald-500/30 animate-ping" />
           <div className="relative w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-sm">
-            {taskTypeIcon(task.task_type)}
+            <TaskTypeIcon type={task.task_type} size={16} />
           </div>
         </div>
 

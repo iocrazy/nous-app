@@ -2,10 +2,10 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Ban, CheckCircle2, Loader2, X, XCircle } from 'lucide-react';
 import {
   formatSpeed,
-  taskTypeIcon,
   taskTypeLabel,
   type UnifiedTask,
 } from '../../contexts/TaskManagerContext';
+import { TaskTypeIcon } from './TaskTypeIcon';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
 import { getResourceCoverUrl } from '../../services/resourceService';
@@ -182,7 +182,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
             />
           ) : (
             <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-sm bg-purple-500/15 text-purple-300">
-              {taskTypeIcon(flow.steps[0]?.task_type ?? 'download')}
+              <TaskTypeIcon type={flow.steps[0]?.task_type ?? 'download'} size={16} />
             </div>
           )}
 
@@ -234,19 +234,24 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
         </div>
       </div>
 
-      {/* Expanded step: rich live card while running, plain row otherwise */}
-      {expandedStep &&
-        (expandedStep.status === 'processing' ? (
-          <ActiveTaskCard task={expandedStep} now={now} onCancel={onCancel} />
-        ) : (
-          <TaskCenterRow
-            task={expandedStep}
-            onCancel={onCancel}
-            onRetry={onRetry}
-            onOpenResource={onOpenResource}
-            onOpenDetail={onOpenDetail}
-          />
-        ))}
+      {/* Expanded step: rich live card while running, plain row otherwise.
+          Indented behind a vertical guide line so the sub-step visually
+          belongs to the flow card above it. */}
+      {expandedStep && (
+        <div className="ml-7 mr-2 mb-2 border-l-2 border-zinc-700/70 bg-zinc-900/30 rounded-r-lg">
+          {expandedStep.status === 'processing' ? (
+            <ActiveTaskCard task={expandedStep} now={now} onCancel={onCancel} />
+          ) : (
+            <TaskCenterRow
+              task={expandedStep}
+              onCancel={onCancel}
+              onRetry={onRetry}
+              onOpenResource={onOpenResource}
+              onOpenDetail={onOpenDetail}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 };

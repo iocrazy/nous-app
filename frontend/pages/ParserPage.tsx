@@ -23,8 +23,8 @@ import {
   formatSpeed as tmFormatSpeed,
   formatFileSize as tmFormatFileSize,
   taskTypeLabel,
-  taskTypeIcon,
 } from '../contexts/TaskManagerContext';
+import { TaskTypeIcon } from '../components/TaskCenter/TaskTypeIcon';
 
 export function ParserPage() {
   const { t } = useTranslation();
@@ -402,7 +402,7 @@ export function ParserPage() {
                 {activeTasks.map((task) => (
                   <div key={task.id} className="px-4 py-3 flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-indigo-500/20 text-indigo-400">
-                      {taskTypeIcon(task.task_type)}
+                      <TaskTypeIcon type={task.task_type} size={14} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">

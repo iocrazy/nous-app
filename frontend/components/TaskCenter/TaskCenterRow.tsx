@@ -6,12 +6,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   formatSpeed,
   formatFileSize,
-  taskTypeIcon,
   taskTypeLabel,
   type UnifiedTask,
   type TaskStatus,
 } from '../../contexts/TaskManagerContext';
 import { taskRowActions, taskShowsCover } from './taskRowPresentation';
+import { TaskTypeIcon } from './TaskTypeIcon';
 import { failureLabel } from '../../utils/taskFailure';
 
 // Task type → background color for the icon badge (fallback when no cover).
@@ -95,7 +95,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
               task.task_type,
             )}`}
           >
-            {taskTypeIcon(task.task_type)}
+            <TaskTypeIcon type={task.task_type} size={14} />
           </div>
         )}
 

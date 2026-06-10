@@ -846,23 +846,6 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / 1073741824).toFixed(2)} GB`;
 }
 
-export function taskTypeIcon(type: TaskType): string {
-  switch (type) {
-    case 'parse': return '\uD83D\uDD0D';         // 🔍
-    case 'upload': return '\u2191';              // ↑
-    case 'download': return '\u2193';            // ↓
-    case 'transcode': return '\u27F3';           // ⟳
-    case 'thumbnail': return '\uD83D\uDDBC';   // framed picture
-    case 'extract_audio': return '\uD83C\uDFB5'; // musical note
-    case 'ai_pipeline': return '\u2726';         // ✦
-    case 'ai_extract': return '\uD83D\uDC41';    // eye (visual analysis)
-    case 'ai_transcription': return '\uD83D\uDCDD'; // 📝 (transcription)
-    case 'ai_summary': return '\u2726';           // ✦ (summary)
-    case 'agent': return '\ud83e\udd16';     // \ud83e\udd16 (agent run)
-    default: return '\u2022';
-  }
-}
-
 export function taskTypeLabel(type: TaskType): string {
   switch (type) {
     case 'parse': return 'Parse';
