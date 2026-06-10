@@ -65,6 +65,7 @@ const UsagePage = lazyWithRetry(() => import('./pages/UsagePage').then(m => ({ d
 const WorkforcePage = lazyWithRetry(() => import('./pages/WorkforcePage').then(m => ({ default: m.WorkforcePage })));
 const MemoryViewerPage = lazyWithRetry(() => import('./pages/MemoryViewerPage').then(m => ({ default: m.MemoryViewerPage })));
 const IssuesPage = lazyWithRetry(() => import('./pages/IssuesPage').then(m => ({ default: m.IssuesPage })));
+const CanvasPage = lazyWithRetry(() => import('./features/canvas-core/ui/CanvasPage'));
 const AILibraryLayout = lazyWithRetry(() =>
   import('./components/AILibrary/AILibraryLayout').then(m => ({ default: m.AILibraryLayout })),
 );
@@ -153,6 +154,7 @@ export const router = createBrowserRouter([
           { path: 'projects', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
           { path: 'projects/:projectId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
           { path: 'projects/:projectId/review/:fileId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'canvas/:canvasId', element: <SuspenseWrap><CanvasPage /></SuspenseWrap> },
           { path: 'settings', element: <SuspenseWrap><SettingsPage /></SuspenseWrap> },
           { path: 'cleanup', element: <SuspenseWrap><ModuleGuard moduleKey="cleanup"><CleanupPage /></ModuleGuard></SuspenseWrap> },
           { path: 'points', element: <SuspenseWrap><PointsPage /></SuspenseWrap> },
