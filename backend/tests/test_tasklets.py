@@ -7,7 +7,6 @@ validation) — they don't hit a real LLM. The adapter is mocked with
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,7 +14,6 @@ import pytest
 from app.services.ai.tasklets.base import (
     Tasklet,
     TaskletError,
-    TaskletResult,
     parse_json_response,
 )
 from app.services.ai.tasklets.builtins import (
@@ -23,7 +21,6 @@ from app.services.ai.tasklets.builtins import (
     intent_classifier,
     title_generator,
 )
-
 
 # ============================================================================
 # parse_json_response — robust JSON extraction

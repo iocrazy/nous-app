@@ -28,7 +28,6 @@ full model. Bump model on a specific tasklet by passing a kwarg::
 
 from __future__ import annotations
 
-
 from app.services.ai.tasklets.base import Tasklet
 
 # ============================================================================
