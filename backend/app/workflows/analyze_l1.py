@@ -93,7 +93,20 @@ async def call_analyze_l1(
 
     result = await analysis_service.analyze_l1(cover_url, user_id=user_id)
     if not result:
-        return {"status": "no_result", "media_id": media_id}
+        # No result == the provider call failed (VisualAnalysisService caught the
+        # error, logged it, and returned None — e.g. the assigned provider is
+        # unreachable OR is not a vision/multimodal model). RAISE rather than
+        # return a dict: returning would let the workflow report "Analysis
+        # complete" + DBOS SUCCESS (CLAUDE.md task-discipline #4), so the task
+        # would show completed while nothing was written. Raising routes through
+        # the workflow's record_workflow_failure → task_tracking is marked
+        # failed with this message, so the user sees WHY instead of a silent
+        # "Analyzing…" that never resolves.
+        raise RuntimeError(
+            "visual analysis produced no result — the provider call failed "
+            "(check that the model assigned to Visual Analysis supports vision/"
+            "images and is reachable; see application_logs for the provider error)"
+        )
 
     await analysis_repo.upsert_analysis(
         resource_id,
