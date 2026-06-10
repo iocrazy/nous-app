@@ -142,3 +142,62 @@ class TestRunPrompt:
         await svc.run_prompt(body="hi", agent_id="abc-123")
         composed = adapter.calls[0]["composed"]
         assert "Acting under agent abc-123" in composed.system_message
+
+
+class TestNousProviderRouting:
+    @pytest.mark.asyncio
+    async def test_nous_slash_workflow_routes_via_nous_runner(self, monkeypatch):
+        captured = {}
+
+        async def fake_run_nous_workflow(
+            *, settings, workflow_slug, prompt, agent_id=None, **_
+        ):
+            captured["workflow_slug"] = workflow_slug
+            captured["prompt"] = prompt
+            captured["agent_id"] = agent_id
+            from app.schemas.canvas_run import CanvasPromptRunResult
+
+            return CanvasPromptRunResult(ok=True, text="from nous", error=None)
+
+        monkeypatch.setattr(
+            "app.services.canvas.nous_center_runner.run_nous_workflow",
+            fake_run_nous_workflow,
+        )
+
+        adapter = FakeAdapter()
+        svc = make_service(adapter)
+        result = await svc.run_prompt(
+            body="story please",
+            provider_slug="nous/storyboard",
+        )
+        assert result.ok is True
+        assert result.text == "from nous"
+        assert captured["workflow_slug"] == "storyboard"
+        assert captured["prompt"] == "story please"
+        # And the LLM adapter was NOT used.
+        assert adapter.calls == []
+
+    @pytest.mark.asyncio
+    async def test_nous_slash_missing_workflow_returns_error(self):
+        adapter = FakeAdapter()
+        svc = make_service(adapter)
+        result = await svc.run_prompt(body="x", provider_slug="nous/")
+        assert result.ok is False
+        assert "missing workflow" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_nous_unconfigured_falls_through_as_in_band_error(self, monkeypatch):
+        from app.services.canvas.nous_center_runner import NousCenterNotConfigured
+
+        async def raises(**_kwargs):
+            raise NousCenterNotConfigured("not configured")
+
+        monkeypatch.setattr(
+            "app.services.canvas.nous_center_runner.run_nous_workflow", raises
+        )
+
+        adapter = FakeAdapter()
+        svc = make_service(adapter)
+        result = await svc.run_prompt(body="x", provider_slug="nous/anything")
+        assert result.ok is False
+        assert "not configured" in (result.error or "")
