@@ -169,9 +169,7 @@ async def reparse_douyin(
     Returns ``(parsed_data, method)`` or ``None``.
     """
     sources = [
-        src
-        for src in (original_url, str(platform_id) if platform_id else None)
-        if src
+        src for src in (original_url, str(platform_id) if platform_id else None) if src
     ]
     for idx, src in enumerate(sources):
         if idx:

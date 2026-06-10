@@ -36,8 +36,7 @@ def test_is_permanent_url_failure_classifier():
     # network-level errors (str(exception)) → transient
     assert dh.is_permanent_url_failure("timed out") is False
     assert (
-        dh.is_permanent_url_failure("[Errno 8] nodename nor servname provided")
-        is False
+        dh.is_permanent_url_failure("[Errno 8] nodename nor servname provided") is False
     )
     assert dh.is_permanent_url_failure("") is False
 
