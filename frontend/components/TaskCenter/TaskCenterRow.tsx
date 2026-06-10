@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CheckCircle2, XCircle, X, RotateCcw, Download, ExternalLink } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getResourceCoverUrl, getResourceFileUrl } from '../../services/resourceService';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   formatSpeed,
   formatFileSize,
@@ -60,6 +61,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
   onOpenDetail,
 }) => {
   const { t } = useTranslation();
+  const { mediaToken } = useAuth();
   const [coverFailed, setCoverFailed] = useState(false);
 
   const actions = taskRowActions(task);
@@ -134,7 +136,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                   )}
                   {actions.download && task.resource_id && (
                     <a
-                      href={getResourceFileUrl(String(task.resource_id))}
+                      href={getResourceFileUrl(String(task.resource_id), mediaToken ?? undefined)}
                       onClick={(e) => e.stopPropagation()}
                       className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100"
                       title={t('topbar.downloadResult')}

@@ -418,13 +418,23 @@ async def serve_resource_file(
     from app.core.deps import get_auth
 
     try:
-        # Accept token as query parameter for HTML element src usage
+        user_id: Optional[str] = None
+
+        # ?token= is the URL-auth transport for <a download>/<img>/<video>
+        # src (no headers possible there). It may carry the signed media
+        # token (frontend's `mediaToken`, purpose-built for URLs) OR a
+        # Supabase JWT (legacy callers e.g. canvas OutputNodeView). Try
+        # the media token first, fall back to treating it as a JWT.
+        if token and not authorization and not x_api_key:
+            from app.api.media_auth import validate_media_cookie
+
+            user_id = await validate_media_cookie(token)
+
         effective_auth = authorization
-        if not effective_auth and not x_api_key and token:
+        if not effective_auth and not x_api_key and token and user_id is None:
             effective_auth = f"Bearer {token}"
 
-        user_id: Optional[str] = None
-        if effective_auth or x_api_key:
+        if user_id is None and (effective_auth or x_api_key):
             try:
                 auth = await get_auth(request, effective_auth, x_api_key)
                 user_id = auth.user_id

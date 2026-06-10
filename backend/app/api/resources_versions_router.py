@@ -326,18 +326,37 @@ async def serve_version_file(
     token: Optional[str] = Query(None),
 ):
     """Serve the file for a specific version."""
+    from app.api.media_permissions import check_media_access
     from app.core.deps import get_auth
 
     try:
-        effective_auth = authorization
-        if not effective_auth and not x_api_key and token:
-            effective_auth = f"Bearer {token}"
-        # Auth is required (no public branch); resolved manually for the ?token=
-        # transport. Establish the ambient user Scope from the resolved identity
-        # (defensive sibling-table wiring). Inert until SCOPE_ENFORCE_RESOURCES.
-        _auth = await get_auth(request, effective_auth, x_api_key)
+        user_id: Optional[str] = None
 
-        async with request_scope(Scope(user_id=_auth.user_id)):
+        # ?token= may carry the signed media token (frontend `mediaToken`,
+        # purpose-built for URL auth) or a Supabase JWT — same dual
+        # transport as serve_resource_file above.
+        if token and not authorization and not x_api_key:
+            from app.api.media_auth import validate_media_cookie
+
+            user_id = await validate_media_cookie(token)
+
+        if user_id is None:
+            effective_auth = authorization
+            if not effective_auth and not x_api_key and token:
+                effective_auth = f"Bearer {token}"
+            # Auth is required (no public branch); resolved manually for the
+            # ?token= transport.
+            _auth = await get_auth(request, effective_auth, x_api_key)
+            user_id = _auth.user_id
+
+        # Resource-level ownership/team check — being logged in is not
+        # enough to read someone else's version files.
+        if not await check_media_access(resource_id, user_id, None):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Establish the ambient user Scope from the resolved identity
+        # (defensive sibling-table wiring). Inert until SCOPE_ENFORCE_RESOURCES.
+        async with request_scope(Scope(user_id=user_id)):
             repo = ResourcesRepository()
             version = await repo.get_version_by_id(version_id)
             if not version or str(version.get("resource_id")) != resource_id:
