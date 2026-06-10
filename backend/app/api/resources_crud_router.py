@@ -33,6 +33,7 @@ from app.repositories.resources_repository import (
     ResourcesRepository,
 )
 from app.schemas.canvas_crop_schema import CropDeriveRequest
+from app.schemas.canvas_grid_schema import GridDeriveRequest
 from app.schemas.resources import (
     ChorusUpdate,
     ResourceMoveRequest,
@@ -1162,3 +1163,55 @@ async def derive_crop_resource_endpoint(
     except Exception as exc:
         logger.error(f"derive_crop failed for {resource_id}: {exc}")
         raise HTTPException(status_code=500, detail="Failed to derive crop")
+
+
+@router.post("/{resource_id}/derive-grid")
+async def derive_grid_resource_endpoint(
+    resource_id: str,
+    body: GridDeriveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Split the image at ``resource_id`` along normalized split lines
+    and persist every tile as a new sibling resource (same scope,
+    source_type='derived').
+
+    The request body is a ``GridDeriveRequest`` (xs / ys split lines +
+    optional filename prefix). Access is gated by ``check_media_access``
+    against the source resource — the new resources inherit its scope.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.canvas.grid_derive_service import (
+        GridDeriveError,
+        derive_grid_resources,
+    )
+
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await derive_grid_resources(
+            source_resource_id=resource_id,
+            user_id=auth.user_id,
+            xs=body.xs,
+            ys=body.ys,
+            filename_prefix=body.filename_prefix,
+        )
+        return {
+            "success": True,
+            "data": {
+                "rows": result.rows,
+                "cols": result.cols,
+                "tiles": [
+                    {"row": t.row, "col": t.col, "resource": t.resource}
+                    for t in result.tiles
+                ],
+            },
+        }
+    except GridDeriveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"derive_grid failed for {resource_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to derive grid split")
