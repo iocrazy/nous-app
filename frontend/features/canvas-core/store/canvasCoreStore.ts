@@ -39,9 +39,19 @@ import {
 } from '../utils/viewport';
 
 const DEFAULT_DEBOUNCE_MS = 500;
+const DEFAULT_HISTORY_DEBOUNCE_MS = 250;
+const MAX_HISTORY = 30;
 
 export type CanvasLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type CanvasSaveStatus = 'idle' | 'saving' | 'error';
+
+/** Document-state snapshot pushed onto the undo stack. Selection is
+ *  NOT part of history (UI state), and viewport is NOT either (panning
+ *  / zooming is too noisy to keep on undo and users don't expect it). */
+export interface HistorySnapshot {
+  nodes: CanvasNode[];
+  connections: CanvasConnection[];
+}
 
 interface CanvasState {
   // ---- Lifecycle ----
@@ -67,6 +77,13 @@ interface CanvasState {
   /** Revision the most recent persisted save reflected. */
   persistedRevision: number;
 
+  // ---- Selection (UI state, not persisted, not in history) ----
+  selection: string[];
+
+  // ---- Undo / Redo (document-state only) ----
+  historyPast: HistorySnapshot[];
+  historyFuture: HistorySnapshot[];
+
   // ---- Reset / load ----
   reset(): void;
   loadCanvas(canvasId: string): Promise<void>;
@@ -78,6 +95,17 @@ interface CanvasState {
   setNodes(nodes: CanvasNode[]): void;
   setConnections(connections: CanvasConnection[]): void;
 
+  // ---- Selection ----
+  setSelection(ids: string[]): void;
+  selectAll(): void;
+  clearSelection(): void;
+
+  // ---- History ----
+  undo(): void;
+  redo(): void;
+  canUndo(): boolean;
+  canRedo(): boolean;
+
   // ---- Persist ----
   flushSave(): Promise<void>;
   resolveConflictWithServer(): void;
@@ -86,6 +114,7 @@ interface CanvasState {
 
 interface CanvasStoreFactoryOptions {
   debounceMs?: number;
+  historyDebounceMs?: number;
   saveImpl?: typeof saveCanvas;
   loadImpl?: typeof fetchCanvas;
 }
@@ -94,12 +123,19 @@ export function createCanvasCoreStore(
   options: CanvasStoreFactoryOptions = {},
 ) {
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+  const historyDebounceMs =
+    options.historyDebounceMs ?? DEFAULT_HISTORY_DEBOUNCE_MS;
   const saveImpl = options.saveImpl ?? saveCanvas;
   const loadImpl = options.loadImpl ?? fetchCanvas;
-  // Per-factory-call debounce handle. Naturally scoped to this store —
-  // multiple createCanvasCoreStore() calls each get their own timer,
+  // Per-factory-call timers. Naturally scoped to this store —
+  // multiple createCanvasCoreStore() calls each get their own,
   // including the per-test instances in vitest.
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let historyTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Snapshot taken at the START of an edit burst — pushed to historyPast
+   *  when the debounced commit fires. Lets a user undo back to the state
+   *  BEFORE the edit, not to a mid-burst intermediate. */
+  let pendingHistoryBase: HistorySnapshot | null = null;
 
   const useStore = create<CanvasState>((set, get) => {
     function applyServerRow(row: Canvas): void {
@@ -118,13 +154,54 @@ export function createCanvasCoreStore(
         conflict: null,
         revision: 0,
         persistedRevision: 0,
+        selection: [],
+        historyPast: [],
+        historyFuture: [],
       });
+      pendingHistoryBase = null;
     }
 
     function markDirty(): void {
       const next = get().revision + 1;
       set({ revision: next, saveStatus: 'idle', saveError: null });
       scheduleSave();
+    }
+
+    /**
+     * Called by setNodes / setConnections BEFORE the new state is applied
+     * — captures the pre-edit snapshot exactly once per debounce window so
+     * undo lands on the state before the edit burst started.
+     */
+    function noteDocumentEditStarting(): void {
+      if (pendingHistoryBase === null) {
+        const { nodes, connections } = get();
+        pendingHistoryBase = { nodes, connections };
+      }
+      if (historyTimer) clearTimeout(historyTimer);
+      historyTimer = setTimeout(() => {
+        historyTimer = null;
+        commitPendingHistory();
+      }, historyDebounceMs);
+    }
+
+    function commitPendingHistory(): void {
+      const base = pendingHistoryBase;
+      pendingHistoryBase = null;
+      if (!base) return;
+      const { historyPast } = get();
+      const nextPast = [...historyPast, base];
+      // Ring-cap from the FRONT — drop the oldest entries.
+      while (nextPast.length > MAX_HISTORY) nextPast.shift();
+      // Any forward redos are invalidated by a new edit.
+      set({ historyPast: nextPast, historyFuture: [] });
+    }
+
+    function flushPendingHistory(): void {
+      if (historyTimer) {
+        clearTimeout(historyTimer);
+        historyTimer = null;
+      }
+      commitPendingHistory();
     }
 
     function scheduleSave(): void {
@@ -204,10 +281,16 @@ export function createCanvasCoreStore(
       conflict: null,
       revision: 0,
       persistedRevision: 0,
+      selection: [],
+      historyPast: [],
+      historyFuture: [],
 
       reset() {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = null;
+        if (historyTimer) clearTimeout(historyTimer);
+        historyTimer = null;
+        pendingHistoryBase = null;
         set({
           canvasId: null,
           loadStatus: 'idle',
@@ -223,6 +306,9 @@ export function createCanvasCoreStore(
           conflict: null,
           revision: 0,
           persistedRevision: 0,
+          selection: [],
+          historyPast: [],
+          historyFuture: [],
         });
       },
 
@@ -256,13 +342,78 @@ export function createCanvasCoreStore(
       },
 
       setNodes(nodes) {
+        noteDocumentEditStarting();
         set({ nodes });
         markDirty();
       },
 
       setConnections(connections) {
+        noteDocumentEditStarting();
         set({ connections });
         markDirty();
+      },
+
+      setSelection(ids) {
+        // dedupe + stable order so equality checks are predictable
+        const unique = Array.from(new Set(ids));
+        set({ selection: unique });
+      },
+
+      selectAll() {
+        const allIds = get()
+          .nodes.map((n) => {
+            const obj = n as Record<string, unknown>;
+            return typeof obj.id === 'string' ? obj.id : null;
+          })
+          .filter((v): v is string => v !== null);
+        set({ selection: allIds });
+      },
+
+      clearSelection() {
+        set({ selection: [] });
+      },
+
+      undo() {
+        // Flush any in-flight edit burst so its base is on the stack
+        // before we pop — otherwise undo would skip the most recent edit.
+        flushPendingHistory();
+        const { historyPast, nodes, connections } = get();
+        if (historyPast.length === 0) return;
+        const nextPast = historyPast.slice(0, -1);
+        const popped = historyPast[historyPast.length - 1];
+        const presentSnapshot: HistorySnapshot = { nodes, connections };
+        set({
+          historyPast: nextPast,
+          historyFuture: [presentSnapshot, ...get().historyFuture],
+          nodes: popped.nodes,
+          connections: popped.connections,
+        });
+        markDirty();
+      },
+
+      redo() {
+        const { historyFuture } = get();
+        if (historyFuture.length === 0) return;
+        const [next, ...rest] = historyFuture;
+        const presentSnapshot: HistorySnapshot = {
+          nodes: get().nodes,
+          connections: get().connections,
+        };
+        set({
+          historyFuture: rest,
+          historyPast: [...get().historyPast, presentSnapshot],
+          nodes: next.nodes,
+          connections: next.connections,
+        });
+        markDirty();
+      },
+
+      canUndo() {
+        return get().historyPast.length > 0 || pendingHistoryBase !== null;
+      },
+
+      canRedo() {
+        return get().historyFuture.length > 0;
       },
 
       async flushSave() {
