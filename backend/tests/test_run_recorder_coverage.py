@@ -104,6 +104,12 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # tasklet invocations are recorded into ai_messages.tasklet_calls
     # JSONB (separate accounting path), not agent_run_events.
     "services/ai/tasklets/base.py": "tasklet cheap-model auxiliary LLM, recorded in ai_messages.tasklet_calls",
+    # Phase 2 smart-canvas prompt runner: single-turn creative
+    # generation invoked from the React Flow surface. NOT a chat
+    # session — no skills, tools, or history. Cost accounting lands
+    # via canvas-side telemetry in a later slice (current PR ships
+    # the runner; agent_runs binding is Phase 4.5).
+    "services/canvas/canvas_run_service.py": "smart-canvas single-turn creative LLM, not a chat session",
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a

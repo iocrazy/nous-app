@@ -26,7 +26,12 @@ from app.schemas.canvas import (
     CanvasResponse,
     CanvasUpdate,
 )
+from app.schemas.canvas_run import (
+    CanvasPromptRunRequest,
+    CanvasPromptRunResponse,
+)
 from app.services.canvas import CanvasConflict, CanvasService
+from app.services.canvas.canvas_run_service import CanvasRunService
 
 router = APIRouter()
 
@@ -150,3 +155,31 @@ async def create_project_canvas(
     if row is None:
         raise HTTPException(status_code=500, detail="canvas create failed")
     return {"success": True, "data": _to_response(row)}
+
+
+# ============================================================
+# Smart-mode prompt run
+# ============================================================
+
+
+@router.post("/canvases/runs/prompts")
+async def run_canvas_prompt(
+    auth: AuthDep,
+    payload: CanvasPromptRunRequest,
+) -> dict:
+    """Execute one smart-canvas prompt run.
+
+    Failure modes (adapter init / LLM call / empty body) are returned
+    in-band via {ok: false, error}; the HTTP layer always returns 200
+    unless gating fails. The frontend's `backendRunner` distinguishes
+    ok vs failed by reading the body, not the status code.
+    """
+    await _gate_canvas_write(payload.canvas_id, auth)
+    svc = CanvasRunService()
+    result = await svc.run_prompt(
+        body=payload.body,
+        provider_slug=payload.provider_slug,
+        agent_id=payload.agent_id,
+    )
+    body = CanvasPromptRunResponse(ok=result.ok, text=result.text, error=result.error)
+    return {"success": True, "data": body.model_dump(mode="json")}
