@@ -100,3 +100,44 @@ async def test_auto_tag_media_skips_when_no_resource(monkeypatch) -> None:
     assert added == []
     assert repo.resolve_calls == ["123"]
     assert repo.add_resource_calls == []
+
+
+@pytest.mark.asyncio
+async def test_auto_tag_media_runs_under_system_scope(monkeypatch) -> None:
+    """Regression: auto-tagging runs inside the parse workflow with NO request
+    scope. After SCOPE_ENFORCE_RESOURCES flipped on, the resources SELECT in
+    resolve_media_id_to_resource_id tripped UnscopedQueryError → auto-tagging
+    silently failed for every parse. It must now open a SYSTEM scope so the
+    resources access is treated as deliberate system access (no fail-closed)."""
+    from app.db.scope import SYSTEM, current_scope
+
+    seen_scope: list[object] = []
+
+    class _ScopeProbingRepo(_FakeTagsRepo):
+        async def resolve_media_id_to_resource_id(self, media_id: str):
+            # Capture the ambient scope AT THE MOMENT the resources access runs.
+            seen_scope.append(current_scope())
+            return await super().resolve_media_id_to_resource_id(media_id)
+
+    repo = _ScopeProbingRepo(
+        resource_id="999",
+        tags_by_name={"Food": {"id": "11", "name": "Food"}},
+    )
+    monkeypatch.setattr(
+        "app.services.ai.visual.classification_service.get_tags_repository",
+        lambda: repo,
+    )
+
+    # No scope set on the contextvar going in (mirrors the parse-workflow caller).
+    assert current_scope() is None
+
+    await ClassificationService.auto_tag_media(
+        media_id=123,
+        title="美食做饭菜谱 cooking recipe kitchen",
+    )
+
+    # The resources access saw the SYSTEM sentinel (not None → would have raised
+    # UnscopedQueryError against an enforced model in prod).
+    assert seen_scope == [SYSTEM]
+    # And the scope was reset on exit (no leak to the caller's context).
+    assert current_scope() is None
