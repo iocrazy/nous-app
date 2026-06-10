@@ -57,19 +57,20 @@ def test_returns_analysis_mapped(monkeypatch):
             "analyzed_at": "2026-06-02T10:00:00Z",
         },
     )
-    resp = asyncio.run(ai_router.get_analysis_by_resource("r-1", _auth()))
+    resp = asyncio.run(ai_router.get_analysis_by_resource("8001", _auth()))
     assert resp.media_id == "555"
     assert resp.visual_description == "A cat on a sofa"
     assert resp.detected_objects == ["cat", "sofa"]
     assert resp.analysis_model == "qwen-vl"
-    # analysis row is keyed by the linked media id, not the resource id
-    assert repo.seen_key == 555
+    # resource_analysis is keyed by resource_id (FK → resources.id, mig 076/262),
+    # NOT the media id — the read must use the resource's own id (8001), not 555.
+    assert repo.seen_key == 8001
 
 
 def test_not_analyzed_returns_200_with_nulls(monkeypatch):
     _patch_resolve(monkeypatch, media_id=42)
     _patch_repo(monkeypatch, None)
-    resp = asyncio.run(ai_router.get_analysis_by_resource("r-2", _auth()))
+    resp = asyncio.run(ai_router.get_analysis_by_resource("8002", _auth()))
     assert resp.media_id == "42"
     assert resp.visual_description is None
     assert resp.detected_objects is None
@@ -81,5 +82,5 @@ def test_ownership_mismatch_raises_403(monkeypatch):
     _patch_resolve(monkeypatch, creator_id="someone-else")
     _patch_repo(monkeypatch, {"visual_description": "secret"})
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(ai_router.get_analysis_by_resource("r-3", _auth("u1")))
+        asyncio.run(ai_router.get_analysis_by_resource("8003", _auth("u1")))
     assert exc.value.status_code == 403
