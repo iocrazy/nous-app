@@ -41,6 +41,10 @@ interface CropEditorModalProps {
   initialRegion?: CropRegion;
   onCommit(region: CropRegion): void;
   onCancel(): void;
+  /** When true, the modal disables Commit / Cancel / X and shows a
+   *  busy label on the Commit button. Parent uses this for any in-flight
+   *  derive / persist call. */
+  committing?: boolean;
 }
 
 export function CropEditorModal({
@@ -50,6 +54,7 @@ export function CropEditorModal({
   initialRegion,
   onCommit,
   onCancel,
+  committing = false,
 }: CropEditorModalProps) {
   const [region, setRegion] = useState<CropRegion>(
     initialRegion ?? FULL_REGION,
@@ -75,9 +80,10 @@ export function CropEditorModal({
     [],
   );
 
-  // Esc → cancel.
+  // Esc → cancel. (Disabled while a commit is in-flight so the user
+  // can't bail mid-network.)
   useEffect(() => {
-    if (!open) return;
+    if (!open || committing) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -86,11 +92,12 @@ export function CropEditorModal({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onCancel]);
+  }, [open, onCancel, committing]);
 
   const handleBackdropClick = useCallback(() => {
+    if (committing) return;
     onCancel();
-  }, [onCancel]);
+  }, [onCancel, committing]);
 
   const handleCommit = useCallback(() => {
     onCommit(region);
@@ -124,8 +131,9 @@ export function CropEditorModal({
             type="button"
             data-testid="crop-editor-close"
             onClick={onCancel}
+            disabled={committing}
             aria-label="Close crop editor"
-            className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -180,7 +188,8 @@ export function CropEditorModal({
             type="button"
             data-testid="crop-editor-cancel"
             onClick={onCancel}
-            className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+            disabled={committing}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Cancel
           </button>
@@ -188,9 +197,10 @@ export function CropEditorModal({
             type="button"
             data-testid="crop-editor-commit"
             onClick={handleCommit}
-            className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+            disabled={committing}
+            className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Commit
+            {committing ? 'Committing…' : 'Commit'}
           </button>
         </div>
       </div>

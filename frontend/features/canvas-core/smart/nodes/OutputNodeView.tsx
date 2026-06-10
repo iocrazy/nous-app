@@ -1,8 +1,11 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useCallback, useState } from 'react';
 
+import { getResourceFileUrl } from '../../../../services/resourceService';
+import { getSupabaseClient } from '../../../../supabaseClient';
 import { CropEditorModal } from '../../editor/CropEditorModal';
 import { FULL_REGION, type CropRegion } from '../../editor/types';
+import { deriveCrop } from '../../services/canvasService';
 import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -14,28 +17,76 @@ const KIND_LABEL: Record<OutputNodeData['kind'], string> = {
   audio: 'Audio',
 };
 
+/** Build the served-file URL for a freshly-derived resource. The crop
+ *  endpoint returns a resource row but no URL — the front-end composes
+ *  it the same way ResourceCard does. */
+async function buildPreviewUrl(resourceId: string): Promise<string> {
+  try {
+    const supabase = getSupabaseClient();
+    const { data } = await supabase.auth.getSession();
+    return getResourceFileUrl(resourceId, data.session?.access_token);
+  } catch {
+    // If we somehow can't read the session, fall back to the unsigned
+    // URL — the <img> request will still carry the cookie auth if any.
+    return getResourceFileUrl(resourceId);
+  }
+}
+
 export function OutputNodeView({ id, data, selected }: NodeProps) {
   const { kind, resource_id, preview_text, preview_url, crop_region } =
     data as unknown as OutputNodeData;
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
 
   const canCrop = kind === 'image' && !!preview_url;
 
   const openEditor = useCallback(() => {
-    if (canCrop) setEditorOpen(true);
+    if (!canCrop) return;
+    setCommitError(null);
+    setEditorOpen(true);
   }, [canCrop]);
 
   const closeEditor = useCallback(() => {
     setEditorOpen(false);
+    setCommitError(null);
   }, []);
 
   const handleCommit = useCallback(
-    (region: CropRegion) => {
-      patchData({ crop_region: region });
-      setEditorOpen(false);
+    async (region: CropRegion) => {
+      // Fallback path: no resource_id means the image was supplied
+      // ad-hoc (no backend record). Persist the region locally so the
+      // visual stays correct; nothing to derive against.
+      if (!resource_id) {
+        patchData({ crop_region: region });
+        setEditorOpen(false);
+        return;
+      }
+      try {
+        setCommitting(true);
+        setCommitError(null);
+        const result = await deriveCrop(resource_id, region);
+        const newId = String(result.id);
+        const newUrl = await buildPreviewUrl(newId);
+        patchData({
+          resource_id: newId,
+          preview_url: newUrl,
+          // The new resource IS the cropped image — clear the in-node
+          // crop so a second crop starts from a clean rectangle.
+          crop_region: null,
+        });
+        setEditorOpen(false);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Failed to derive crop';
+        setCommitError(message);
+        // Leave the modal open so the user can retry or cancel.
+      } finally {
+        setCommitting(false);
+      }
     },
-    [patchData],
+    [resource_id, patchData],
   );
 
   return (
@@ -105,7 +156,17 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           initialRegion={crop_region ?? FULL_REGION}
           onCommit={handleCommit}
           onCancel={closeEditor}
+          committing={committing}
         />
+      )}
+      {commitError && editorOpen && (
+        <div
+          data-testid="crop-commit-error"
+          role="alert"
+          className="absolute left-1/2 top-1/2 z-[51] mt-32 -translate-x-1/2 rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg"
+        >
+          {commitError}
+        </div>
       )}
     </div>
   );
