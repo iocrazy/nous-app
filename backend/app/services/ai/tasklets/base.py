@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -129,9 +129,7 @@ class Tasklet:
         try:
             text = resp["choices"][0]["message"].get("content") or ""
         except (KeyError, IndexError, TypeError) as exc:
-            logger.warning(
-                "[tasklet:%s] unexpected response shape: %s", self.slug, exc
-            )
+            logger.warning("[tasklet:%s] unexpected response shape: %s", self.slug, exc)
             return TaskletResult(
                 ok=False,
                 error="bad_response_shape",

@@ -28,7 +28,6 @@ full model. Bump model on a specific tasklet by passing a kwarg::
 
 from __future__ import annotations
 
-from dataclasses import replace
 
 from app.services.ai.tasklets.base import Tasklet
 
@@ -70,7 +69,7 @@ intent_classifier = Tasklet(
         "- video_task: user wants to generate / edit a video\n"
         "- script_task: user wants to write / edit a script\n"
         "- other: doesn't fit any of the above\n\n"
-        "Return STRICT JSON: {\"intent\": \"<category>\", \"confidence\": <0..1>}"
+        'Return STRICT JSON: {"intent": "<category>", "confidence": <0..1>}'
     ),
     output_schema={
         "type": "object",
@@ -109,7 +108,7 @@ tag_inferrer = Tasklet(
         "- Lowercase, single word or short hyphenated phrase\n"
         "- No spaces, no punctuation\n"
         "- Cover topic + format + style if applicable\n\n"
-        "Return STRICT JSON: {\"tags\": [\"...\", \"...\"]}"
+        'Return STRICT JSON: {"tags": ["...", "..."]}'
     ),
     output_schema={
         "type": "object",
@@ -135,7 +134,7 @@ route_selector = Tasklet(
         "- summarize: condensing long text\n"
         "- analyze: visual or content analysis tasks\n"
         "- chat: general conversation, no specialist needed\n\n"
-        "Return STRICT JSON: {\"agent_slug\": \"<slug>\", \"reasoning\": \"<1 sentence why>\"}"
+        'Return STRICT JSON: {"agent_slug": "<slug>", "reasoning": "<1 sentence why>"}'
     ),
     output_schema={
         "type": "object",
@@ -165,7 +164,7 @@ sentiment_check = Tasklet(
         "- neutral: no strong signal either way\n"
         "- satisfied: user expressed positive feedback\n"
         "- excited: user is enthusiastic / eager\n\n"
-        "Return STRICT JSON: {\"sentiment\": \"<category>\", \"trigger_phrase\": \"<the words that flagged it, or empty>\"}"
+        'Return STRICT JSON: {"sentiment": "<category>", "trigger_phrase": "<the words that flagged it, or empty>"}'
     ),
     output_schema={
         "type": "object",
@@ -201,7 +200,7 @@ prompt_rewriter = Tasklet(
         "- Add concrete visual descriptors (composition, lighting, mood)\n"
         "- Use comma-separated phrases (no narrative sentences)\n"
         "- Don't exceed 60 words\n"
-        "- Don't include any uncertain claims like \"maybe\" or \"if you want\"\n\n"
+        '- Don\'t include any uncertain claims like "maybe" or "if you want"\n\n'
         "Respond with just the rewritten prompt, nothing else."
     ),
     max_tokens=200,
@@ -237,8 +236,8 @@ key_phrase_extractor = Tasklet(
         "You extract 3-10 key noun-phrases from the given text. Each phrase:\n"
         "- 1-4 words\n"
         "- A concrete concept or named entity\n"
-        "- No generic glue words (\"the system\", \"a thing\")\n\n"
-        "Return STRICT JSON: {\"phrases\": [\"...\", \"...\"]}"
+        '- No generic glue words ("the system", "a thing")\n\n'
+        'Return STRICT JSON: {"phrases": ["...", "..."]}'
     ),
     output_schema={
         "type": "object",
@@ -258,13 +257,13 @@ style_preference_extractor = Tasklet(
     system_prompt=(
         "You extract durable visual / aesthetic preferences the user expressed. "
         "Categories you might find:\n"
-        "- color (e.g. \"warm tones\", \"high contrast\")\n"
-        "- medium (e.g. \"oil painting\", \"3d render\", \"line art\")\n"
-        "- mood (e.g. \"melancholic\", \"playful\", \"dramatic\")\n"
-        "- composition (e.g. \"close-up\", \"wide shot\", \"asymmetric\")\n"
+        '- color (e.g. "warm tones", "high contrast")\n'
+        '- medium (e.g. "oil painting", "3d render", "line art")\n'
+        '- mood (e.g. "melancholic", "playful", "dramatic")\n'
+        '- composition (e.g. "close-up", "wide shot", "asymmetric")\n'
         "- avoid (things the user explicitly does NOT want)\n\n"
         "Return STRICT JSON:\n"
-        "{\"preferences\": [{\"category\": \"<one of above>\", \"value\": \"<short phrase>\", \"strength\": \"strong|moderate|weak\"}]}\n"
+        '{"preferences": [{"category": "<one of above>", "value": "<short phrase>", "strength": "strong|moderate|weak"}]}\n'
         "Empty array if nothing durable found."
     ),
     output_schema={
@@ -290,7 +289,7 @@ character_entity_extractor = Tasklet(
         "- traits (1-5 short adjectives or roles)\n"
         "- first_mentioned (the sentence or fragment where they first appear)\n\n"
         "Return STRICT JSON:\n"
-        "{\"characters\": [{\"name\": \"...\", \"aliases\": [...], \"traits\": [...], \"first_mentioned\": \"...\"}]}\n"
+        '{"characters": [{"name": "...", "aliases": [...], "traits": [...], "first_mentioned": "..."}]}\n'
         "Empty array if no proper character is found."
     ),
     output_schema={
