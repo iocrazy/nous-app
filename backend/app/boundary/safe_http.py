@@ -104,8 +104,15 @@ class SafeAsyncClient(httpx.AsyncClient):
         auth: httpx.Auth | None = httpx._client.USE_CLIENT_DEFAULT,  # type: ignore[attr-defined]
         follow_redirects: bool | None = None,
     ) -> httpx.Response:
-        """Validate-each-hop redirect loop. Caller's follow_redirects flag
-        is intentionally ignored — boundary policy always wins."""
+        """Validate-each-hop redirect loop.
+
+        Caller's follow_redirects flag is ignored EXCEPT for an explicit
+        ``False``: not following a redirect issues no further requests,
+        so honoring the opt-out is strictly safer than the loop — the
+        initial URL is still validated, and the caller gets the raw 3xx
+        back (used by douyin's share-link resolver to read the
+        aweme_id straight out of the first Location instead of fetching
+        every hop)."""
         current = request
         for hop in range(self._max_redirects + 1):
             # 1. Validate the URL we're about to fetch.
@@ -150,7 +157,7 @@ class SafeAsyncClient(httpx.AsyncClient):
                 follow_redirects=False,
             )
 
-            if not response.is_redirect:
+            if not response.is_redirect or follow_redirects is False:
                 return response
 
             location = response.headers.get("Location")
