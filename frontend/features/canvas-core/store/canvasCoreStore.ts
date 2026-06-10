@@ -100,6 +100,14 @@ interface CanvasState {
   zoomViewportAround(anchor: { x: number; y: number }, nextZoom: number): void;
   setNodes(nodes: CanvasNode[]): void;
   setConnections(connections: CanvasConnection[]): void;
+  /** Patch a single node's `data` (or top-level fields) in place. Used
+   *  by the runner to bump run_status without rebuilding the full
+   *  nodes array. Marks dirty but does NOT push to history (run
+   *  lifecycle is operational state, not a user-undoable edit). */
+  patchNode(
+    id: string,
+    patch: { data?: Record<string, unknown>; [k: string]: unknown },
+  ): void;
 
   // ---- Selection ----
   setSelection(ids: string[]): void;
@@ -359,6 +367,31 @@ export function createCanvasCoreStore(
       setConnections(connections) {
         noteDocumentEditStarting();
         set({ connections });
+        markDirty();
+      },
+
+      patchNode(id, patch) {
+        const { nodes } = get();
+        let changed = false;
+        const next = nodes.map((node) => {
+          const obj = node as Record<string, unknown>;
+          if (obj.id !== id) return node;
+          changed = true;
+          const mergedData =
+            patch.data && typeof obj.data === 'object' && obj.data !== null
+              ? { ...(obj.data as Record<string, unknown>), ...patch.data }
+              : (patch.data ?? obj.data);
+          const { data: _ignored, ...topLevel } = patch;
+          return {
+            ...obj,
+            ...topLevel,
+            ...(mergedData !== undefined ? { data: mergedData } : {}),
+          } as CanvasNode;
+        });
+        if (!changed) return;
+        // Do NOT call noteDocumentEditStarting — runtime status churn
+        // shouldn't pollute the undo stack.
+        set({ nodes: next });
         markDirty();
       },
 

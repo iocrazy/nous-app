@@ -13,7 +13,9 @@
 
 import type { CanvasNode } from '../types';
 
-export type SmartNodeType = 'shot' | 'prompt' | 'output';
+export type SmartNodeType = 'shot' | 'prompt' | 'output' | 'loop';
+
+export type LoopMode = 'serial' | 'parallel' | 'batch';
 
 export interface ShotNodeData {
   title: string;
@@ -49,6 +51,12 @@ export interface OutputNodeData {
   preview_text: string;
 }
 
+export interface LoopNodeData {
+  mode: LoopMode;
+  /** Optional human label, e.g. "for each shot". */
+  label: string;
+}
+
 export interface SmartNode<T> extends Record<string, unknown> {
   id: string;
   type: SmartNodeType;
@@ -59,19 +67,26 @@ export interface SmartNode<T> extends Record<string, unknown> {
 export type ShotNode = SmartNode<ShotNodeData>;
 export type PromptNode = SmartNode<PromptNodeData>;
 export type OutputNode = SmartNode<OutputNodeData>;
-export type AnySmartNode = ShotNode | PromptNode | OutputNode;
+export type LoopNode = SmartNode<LoopNodeData>;
+export type AnySmartNode = ShotNode | PromptNode | OutputNode | LoopNode;
 
 /**
  * Connect-rule predicate for smart mode.
  *
- *   shot   → prompt   ✓
- *   prompt → output   ✓
- *   prompt → prompt   ✓ (chain: one prompt feeds the next)
- *   shot   → output   ✗ (must go through a prompt)
- *   output → anything ✗ (outputs are terminal)
- *   <unknown type>    handled as "allow" — the surface is mode-aware,
- *                     custom future node types should opt-in their own
- *                     rules.
+ *   shot   → prompt          ✓
+ *   shot   → loop            ✓ (loop fans out a shot collection)
+ *   prompt → output          ✓
+ *   prompt → prompt          ✓ (chain: one prompt feeds the next)
+ *   prompt → loop            ✓ (prompt output can drive a loop)
+ *   loop   → prompt          ✓ (loop iterates a prompt downstream)
+ *   loop   → loop            ✓ (nested fanouts)
+ *   shot   → output          ✗ (must go through a prompt)
+ *   loop   → output          ✗ (always needs a prompt downstream)
+ *   loop   → shot            ✗ (shots are sources)
+ *   output → anything        ✗ (outputs are terminal)
+ *   *      → shot            ✗ (shots are sources only)
+ *   <unknown type>           allow — the surface is mode-aware, custom
+ *                            future types opt in their own rules.
  */
 export function canConnectSmart(
   sourceType: string | undefined,
@@ -80,7 +95,10 @@ export function canConnectSmart(
   if (!sourceType || !targetType) return true;
   if (sourceType === 'output') return false;
   if (targetType === 'shot') return false;
-  if (sourceType === 'shot' && targetType !== 'prompt') return false;
+  if (sourceType === 'shot' && targetType !== 'prompt' && targetType !== 'loop')
+    return false;
+  if (sourceType === 'loop' && (targetType === 'output' || targetType === 'shot'))
+    return false;
   return true;
 }
 
@@ -89,6 +107,13 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   shot: 240,
   prompt: 280,
   output: 260,
+  loop: 200,
+};
+
+export const LOOP_MODE_TONE: Record<LoopMode, string> = {
+  serial: 'border-slate-400 dark:border-slate-600',
+  parallel: 'border-violet-500',
+  batch: 'border-cyan-500',
 };
 
 /** Run-status colour token for the prompt node halo + the output badge. */
@@ -105,6 +130,9 @@ export function isSmartNode(node: CanvasNode): node is AnySmartNode {
   return (
     typeof obj.id === 'string' &&
     typeof obj.type === 'string' &&
-    (obj.type === 'shot' || obj.type === 'prompt' || obj.type === 'output')
+    (obj.type === 'shot' ||
+      obj.type === 'prompt' ||
+      obj.type === 'output' ||
+      obj.type === 'loop')
   );
 }

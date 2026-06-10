@@ -20,6 +20,8 @@ import type {
   PromptNodeData,
   OutputNodeData,
   SmartNodeType,
+  LoopNode,
+  LoopNodeData,
 } from './types';
 
 interface Position {
@@ -104,6 +106,22 @@ export function createOutputNode(
       kind,
       resource_id: data.resource_id ?? null,
       preview_text: data.preview_text ?? '',
+    },
+  };
+}
+
+export function createLoopNode(
+  data: Partial<LoopNodeData> = {},
+  opts: FactoryOptions = {},
+): LoopNode {
+  const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
+  return {
+    id: makeId('loop', random),
+    type: 'loop',
+    position: opts.position ?? DEFAULT_POSITION,
+    data: {
+      mode: data.mode ?? 'serial',
+      label: data.label ?? '',
     },
   };
 }
