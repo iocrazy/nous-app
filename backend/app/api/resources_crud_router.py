@@ -34,6 +34,7 @@ from app.repositories.resources_repository import (
 )
 from app.schemas.canvas_crop_schema import CropDeriveRequest
 from app.schemas.canvas_grid_schema import GridDeriveRequest
+from app.schemas.canvas_mask_schema import MaskDeriveRequest
 from app.schemas.resources import (
     ChorusUpdate,
     ResourceMoveRequest,
@@ -1215,3 +1216,44 @@ async def derive_grid_resource_endpoint(
     except Exception as exc:
         logger.error(f"derive_grid failed for {resource_id}: {exc}")
         raise HTTPException(status_code=500, detail="Failed to derive grid split")
+
+
+@router.post("/{resource_id}/derive-mask-cutout")
+async def derive_mask_cutout_endpoint(
+    resource_id: str,
+    body: MaskDeriveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Apply a painted mask to the image at ``resource_id`` and persist
+    the RGBA cutout as a new sibling resource (same scope,
+    source_type='derived', always image/png).
+
+    The request body is a ``MaskDeriveRequest`` (base64 mask PNG +
+    optional filename). Access is gated by ``check_media_access``
+    against the source resource — the new resource inherits its scope.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.canvas.mask_derive_service import (
+        MaskDeriveError,
+        derive_mask_cutout,
+    )
+
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await derive_mask_cutout(
+            source_resource_id=resource_id,
+            user_id=auth.user_id,
+            mask_png_base64=body.mask_png_base64,
+            filename_override=body.filename,
+        )
+        return {"success": True, "data": result.resource}
+    except MaskDeriveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"derive_mask_cutout failed for {resource_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to derive mask cutout")
