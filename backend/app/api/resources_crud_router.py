@@ -32,6 +32,7 @@ from app.repositories.resources_repository import (
     UNTRANSCODED_BATCH,
     ResourcesRepository,
 )
+from app.schemas.canvas_crop_schema import CropDeriveRequest
 from app.schemas.resources import (
     ChorusUpdate,
     ResourceMoveRequest,
@@ -1115,3 +1116,49 @@ async def remove_resource_tag(
     except Exception as e:
         logger.error(f"Failed to remove tag {tag_id} from resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to remove tag")
+
+
+@router.post("/{resource_id}/derive-crop")
+async def derive_crop_resource_endpoint(
+    resource_id: str,
+    body: CropDeriveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Crop the image at ``resource_id`` and persist the result as a
+    new sibling resource (same scope, source_type='derived').
+
+    The request body is a ``CropDeriveRequest`` (region + optional
+    filename). Access is gated by ``check_media_access`` against the
+    source resource — the new resource inherits the source's scope.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.canvas.crop_derive_service import (
+        CropDeriveError,
+        derive_crop_resource,
+    )
+    from app.services.canvas.image_crop import CropRegion
+
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await derive_crop_resource(
+            source_resource_id=resource_id,
+            user_id=auth.user_id,
+            region=CropRegion(
+                x=body.region.x,
+                y=body.region.y,
+                width=body.region.width,
+                height=body.region.height,
+            ),
+            filename_override=body.filename,
+        )
+        return {"success": True, "data": result.resource}
+    except CropDeriveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"derive_crop failed for {resource_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to derive crop")
