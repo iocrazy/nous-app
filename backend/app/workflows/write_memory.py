@@ -166,6 +166,61 @@ async def write_graph_episode_step(
     return {"episode_written": written}
 
 
+async def _write_honcho_turn(
+    *,
+    user_id: str,
+    agent_id: str,
+    session_id: str,
+    user_msgs: list[str],
+    asst_msgs: list[str],
+) -> bool:
+    """Flag-gated Honcho dual-write (Phase 4 M5). Plain function so
+    tests can exercise it without a DBOS workflow context.
+
+    Only the latest exchange is posted — Honcho's deriver accumulates
+    per-peer representations server-side, so re-sending the rolling
+    window would duplicate every turn N times.
+    """
+    from app.services.ai.memory.honcho_memory import get_honcho_memory_service
+
+    service = get_honcho_memory_service()
+    if not service.config.enabled:
+        return False
+    user_message = user_msgs[-1] if user_msgs else ""
+    assistant_message = asst_msgs[-1] if asst_msgs else ""
+    if not (user_message.strip() or assistant_message.strip()):
+        return False
+    return await service.add_chat_turn(
+        user_id=user_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        user_message=user_message,
+        assistant_message=assistant_message,
+    )
+
+
+@DBOS.step()
+async def write_honcho_turn_step(
+    *,
+    user_id: str,
+    agent_id: str,
+    session_id: str,
+    user_msgs: list[str],
+    asst_msgs: list[str],
+) -> dict[str, Any]:
+    """Thin DBOS wrapper around ``_write_honcho_turn``. No retries —
+    same reasoning as the graph step: a missed turn degrades future
+    recall only, and a retry double-ingests."""
+    written = await _write_honcho_turn(
+        user_id=user_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        user_msgs=user_msgs,
+        asst_msgs=asst_msgs,
+    )
+    return {"honcho_written": written}
+
+
 async def _build_cheap_llm_call():
     """Cheap-model extractor LLM closure. Mirrors memory_tasks._build_cheap_llm_call."""
     from app.core.config import settings
@@ -242,5 +297,19 @@ async def write_memory_workflow(
             asst_msgs=msgs["asst_msgs"],
         )
         result = {**result, **graph}
+
+    # Phase 4 M5: Honcho user-model dual-write — same contract as the
+    # graph step (after L1, flag-gated, failures stay in the step).
+    from app.services.ai.memory.honcho_memory import get_honcho_memory_service
+
+    if get_honcho_memory_service().config.enabled:
+        honcho = await write_honcho_turn_step(
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            user_msgs=msgs["user_msgs"],
+            asst_msgs=msgs["asst_msgs"],
+        )
+        result = {**result, **honcho}
 
     return result
