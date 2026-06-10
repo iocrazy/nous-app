@@ -223,6 +223,66 @@ def test_agent_slug_constant() -> None:
     assert VisualAnalysisService.AGENT_SLUG == "analyze"
 
 
+def test_agent_slug_defaults_and_overrides() -> None:
+    """The constructor's agent_slug becomes the instance slug (defaulting to
+    'analyze'). This is what _run_multimodal composes — so the user's assigned
+    visual-analysis agent (e.g. 'test-analyze') drives BOTH the prompt and the
+    composed model, instead of the hardcoded 'analyze'."""
+    assert VisualAnalysisService().AGENT_SLUG == "analyze"
+    assert VisualAnalysisService(agent_slug="test-analyze").AGENT_SLUG == "test-analyze"
+    # Blank/whitespace falls back to the default.
+    assert VisualAnalysisService(agent_slug="  ").AGENT_SLUG == "analyze"
+
+
+@pytest.mark.asyncio
+async def test_run_composes_the_constructor_agent_slug() -> None:
+    """Regression for the visual-analysis bug: a service built for
+    'test-analyze' must compose 'test-analyze' (not the hardcoded 'analyze'),
+    so composed.model is the assigned agent's model that matches the BYO
+    provider config the caller passed."""
+    svc = VisualAnalysisService(agent_slug="test-analyze")
+
+    composed = MagicMock()
+    composed.agent_id = "00000000-0000-0000-0000-000000000001"
+    composed.agent_slug = "test-analyze"
+    composed.model = "doubao-seed-2-0-pro-260215"
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(
+        return_value={
+            "content": '{"category":"Food","visual_description":"x",'
+            '"detected_objects":[],"detected_scenes":[],"detected_people":[],'
+            '"detected_text":"","mood":""}',
+            "raw": {},
+        }
+    )
+
+    with (
+        patch.object(
+            svc, "_encode_image_from_url", new=AsyncMock(return_value="BASE64DATA")
+        ),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.AgentRunner",
+            return_value=runner,
+        ),
+        patch.object(svc, "_build_adapter", return_value=MagicMock()),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.SkillToolService",
+            return_value=MagicMock(),
+        ),
+    ):
+        await svc.analyze_l1("https://example.com/cover.jpg")
+
+    composer_input = composer.compose.await_args.args[0]
+    assert composer_input.agent_slug == "test-analyze"
+
+
 # ---------------------------------------------------------------------------
 # V4: BYO provider config flows into the adapter
 # ---------------------------------------------------------------------------
