@@ -849,7 +849,7 @@ export function taskTypeIcon(type: TaskType): string {
     case 'download': return '\u2193';            // ↓
     case 'transcode': return '\u27F3';           // ⟳
     case 'ai_pipeline': return '\u2726';         // ✦
-    case 'ai_extract': return '\uD83C\uDFA4';    // 🎤 (audio extract)
+    case 'ai_extract': return '\uD83D\uDC41';    // eye (visual analysis)
     case 'ai_transcription': return '\uD83D\uDCDD'; // 📝 (transcription)
     case 'ai_summary': return '\u2726';           // ✦ (summary)
     case 'agent': return '\ud83e\udd16';     // \ud83e\udd16 (agent run)
@@ -864,7 +864,7 @@ export function taskTypeLabel(type: TaskType): string {
     case 'download': return 'Download';
     case 'transcode': return 'Transcode';
     case 'ai_pipeline': return 'AI Pipeline';
-    case 'ai_extract': return 'Audio Extract';
+    case 'ai_extract': return 'Visual Analysis';
     case 'ai_transcription': return 'Transcription';
     case 'ai_summary': return 'Summary';
     case 'agent': return 'Agent';
