@@ -13,7 +13,7 @@ import {
   getTranscript, getTranscriptByResource,
   triggerSummary, triggerSummaryByResource,
   getSummary, getSummaryByResource,
-  triggerVisualAnalysis,
+  triggerVisualAnalysis, triggerVisualAnalysisByResource,
   pollForResult,
 } from '../services/aiService';
 import { useTaskManager } from '../contexts/TaskManagerContext';
@@ -261,7 +261,14 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     try {
       setVisualAnalysisLoading(true);
       setVisualAnalysisError(null);
-      await triggerVisualAnalysis(video.platform_id);
+      // Prefer the resource-based trigger (dispatches analyze_l1_workflow) —
+      // same migration transcript/summary already got. The platform_id path
+      // (triggerVisualAnalysis) is the legacy 501 "not implemented" stub.
+      if (resourceId) {
+        await triggerVisualAnalysisByResource(resourceId);
+      } else {
+        await triggerVisualAnalysis(video.platform_id);
+      }
       if (onUpdate) {
         onUpdate(video.platform_id, { visual_analysis_status: 'processing' });
       }
