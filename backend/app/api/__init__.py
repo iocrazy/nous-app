@@ -14,6 +14,7 @@ from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
 from app.api.analysis_router import router as analysis_router
 from app.api.api_key_router import router as api_key_router
+from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.error_report_router import router as error_report_router
@@ -29,7 +30,6 @@ from app.api.media_router import router as media_router
 from app.api.notifications_router import router as notifications_router
 from app.api.payment_router import router as payment_router
 from app.api.points_router import router as points_router
-from app.api.canvases_router import router as canvases_router
 from app.api.projects_router import router as projects_router
 from app.api.realtime_router import router as realtime_router
 from app.api.resources_router import router as resources_router
