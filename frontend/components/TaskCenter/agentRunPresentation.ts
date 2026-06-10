@@ -21,6 +21,10 @@ export interface AgentRunRow {
   completion_tokens?: number | null;
   cost_cents?: number | null;
   model?: string | null;
+  /** task_tracking PK when the run executes inside a tracked workflow
+   * (mig 282). Task-linked runs are hidden from the Task Center — their
+   * task entry already represents them. */
+  task_id?: string | null;
 }
 
 /** agent_runs has no "queued" state — a run is executing or terminal. */

@@ -5,7 +5,7 @@ import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import { agentRunToTask, type AgentRunRow } from './agentRunPresentation';
 
 const SELECT =
-  'id,user_id,status,trigger,input_summary,output_summary,error_message,started_at,ended_at,created_at,prompt_tokens,completion_tokens,cost_cents,model';
+  'id,user_id,status,trigger,input_summary,output_summary,error_message,started_at,ended_at,created_at,prompt_tokens,completion_tokens,cost_cents,model,task_id';
 const RECENT_LIMIT = 50;
 
 /**
@@ -33,6 +33,7 @@ export function useAgentRunTasks(): UnifiedTask[] {
         .from('agent_runs')
         .select(SELECT)
         .eq('user_id', currentUserId)
+        .is('task_id', null)
         .order('created_at', { ascending: false })
         .limit(RECENT_LIMIT);
       if (error) {
@@ -46,6 +47,15 @@ export function useAgentRunTasks(): UnifiedTask[] {
     fetchRuns();
 
     const upsert = (row: AgentRunRow) => {
+      // Runs linked to a task_tracking row (mig 282: service workflows like
+      // visual analysis / summary) are already represented by their task entry
+      // — showing the raw run too duplicated every analysis in the panel
+      // (an "L1 analysis of <url>" 🤖 row next to the real task). Hide them;
+      // standalone runs (chat / issue turns, task_id NULL) keep showing.
+      if (row.task_id) {
+        setTasks((prev) => prev.filter((t) => t.id !== row.id));
+        return;
+      }
       setTasks((prev) => {
         const mapped = agentRunToTask(row);
         const idx = prev.findIndex((t) => t.id === mapped.id);
