@@ -4,7 +4,12 @@ import { ApiError } from '../../../services/apiClient';
 import type { GridLines } from '../editor/gridMath';
 import type { CropRegion } from '../editor/types';
 import type { Canvas } from '../types';
-import { deriveCrop, deriveGrid, saveCanvas } from './canvasService';
+import {
+  deriveCrop,
+  deriveGrid,
+  deriveMaskCutout,
+  saveCanvas,
+} from './canvasService';
 
 const serverRow: Canvas = {
   id: '4242',
@@ -207,6 +212,50 @@ describe('deriveGrid', () => {
       }),
     );
     await expect(deriveGrid('source-1', lines)).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+});
+
+describe('deriveMaskCutout', () => {
+  const fakeCutout = {
+    id: '8888000000000000',
+    filename: 'cutout-orig.png',
+    file_path: 'teams/s/derived/8888000000000000/v1/cutout-orig.png',
+    mime_type: 'image/png',
+    file_size_bytes: 999,
+  };
+
+  it('POSTs to /resources/{id}/derive-mask-cutout with the mask', async () => {
+    fetchMock.mockResolvedValueOnce(envelope(fakeCutout));
+    const result = await deriveMaskCutout('source-1', 'MASKB64');
+    expect(result.id).toBe('8888000000000000');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain(
+      '/api/v1/resources/source-1/derive-mask-cutout',
+    );
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    expect(body.mask_png_base64).toBe('MASKB64');
+    expect(body.filename).toBeUndefined();
+  });
+
+  it('includes filename override when supplied', async () => {
+    fetchMock.mockResolvedValueOnce(envelope(fakeCutout));
+    await deriveMaskCutout('source-1', 'MASKB64', { filename: 'hero.png' });
+    const init = fetchMock.mock.calls[0][1];
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    expect(body.filename).toBe('hero.png');
+  });
+
+  it('throws ApiError on a non-2xx response', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'mask is empty' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(deriveMaskCutout('source-1', 'MASKB64')).rejects.toBeInstanceOf(
       ApiError,
     );
   });
