@@ -14,7 +14,7 @@
  * via the viewport math).
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { screenToWorld } from '../utils/viewport';
@@ -24,6 +24,7 @@ import {
   createPromptNode,
   createShotNode,
 } from './factories';
+import { createBackendRunner } from './runner.backend';
 import {
   mockRunner,
   runPrompts,
@@ -39,25 +40,33 @@ interface CanvasComposerOptions {
    *  rect (translated into world coords). Falls back to viewport
    *  origin when not provided — useful for tests / headless renders. */
   surfaceRef?: React.RefObject<HTMLElement | null>;
-  /** Override the runner — tests pass a deterministic one; production
-   *  defaults to the mock and will swap to the real adapter in the
-   *  next slice. */
+  /** Override the runner — tests pass a deterministic one. Default at
+   *  runtime is the backend runner bound to the open canvas; if no
+   *  canvas is loaded yet, falls back to the mock so the UX is still
+   *  exercisable in isolation. */
   runner?: PromptCaller;
 }
 
 export function CanvasComposer({
   surfaceRef,
-  runner = mockRunner,
+  runner: runnerOverride,
 }: CanvasComposerOptions = {}) {
   const viewport = useCanvasCoreStore((s) => s.viewport);
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
   const selection = useCanvasCoreStore((s) => s.selection);
+  const canvasId = useCanvasCoreStore((s) => s.canvasId);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
   const patchNode = useCanvasCoreStore((s) => s.patchNode);
 
   const [running, setRunning] = useState(false);
+
+  const runner = useMemo<PromptCaller>(() => {
+    if (runnerOverride) return runnerOverride;
+    if (canvasId) return createBackendRunner({ canvasId });
+    return mockRunner;
+  }, [runnerOverride, canvasId]);
 
   const dropPosition = useCallback((): { x: number; y: number } => {
     const rect = surfaceRef?.current?.getBoundingClientRect();
