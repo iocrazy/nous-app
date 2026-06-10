@@ -46,25 +46,37 @@ DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
 
 async def resolve_analyze_provider_config(
     user_id: Optional[str],
-) -> Tuple[str, Dict[str, Any], str]:
-    """Resolve the visual-analysis agent's model + user's BYO provider config.
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the visual-analysis agent slug + model + user's BYO provider config.
 
-    Returns ``(provider_key, provider_config, model)``. Honors the user's
-    ``task_assignment.visual_analysis`` setting — as of migration 142 (Phase 2
-    PR 2.8b) that key stores an AI Library agent slug (e.g. 'analyze', or a
-    custom 'test-analyze'). We resolve that slug to its ``ai_agents`` row, take
-    its ``model``, derive the provider prefix, then pull the user's BYO entry
-    for that provider out of ``ai_settings.ai_providers``.
+    Returns ``(provider_key, provider_config, model, agent_slug)``. Honors the
+    user's ``task_assignment.visual_analysis`` setting — as of migration 142
+    (Phase 2 PR 2.8b) that key stores an AI Library agent slug (e.g. 'analyze',
+    or a custom 'test-analyze'). We resolve that slug to its ``ai_agents`` row,
+    take its ``model``, derive the provider prefix, then pull the user's BYO
+    entry for that provider out of ``ai_settings.ai_providers``.
+
+    ``agent_slug`` (the resolved slug, after any fallback) is returned so the
+    caller composes the SAME agent's prompt as the one whose model we resolved.
+    VisualAnalysisService composes the agent's IDENTITY/SOUL/AGENT to build its
+    system prompt, and ``composed.model`` (the composed agent's model) is what
+    actually drives the adapter — so the prompt agent and the model agent MUST
+    be the same one, else the composed model overrides the resolved one.
 
     Falls back to the built-in ``analyze`` agent when the assignment is unset
     or the assigned slug doesn't resolve. When ``user_id`` is None or the agent
     row is missing, returns empty config and lets the service route through the
     factory's default.
 
-    Bug history: this previously hardcoded ``get_by_slug("analyze")``, so a user
-    who assigned a different agent (and only configured that agent's provider as
-    BYO) always got the default ``analyze`` agent's model (qwen-max) with no
-    matching provider config → empty config → "All connection attempts failed".
+    Bug history:
+      - #622 fixed the slug read here, but the run still used qwen-max because
+        VisualAnalysisService hardcoded the prompt agent to 'analyze', and the
+        composed (qwen-max) model overrode the resolved doubao one. Returning
+        ``agent_slug`` lets the caller compose the right agent end-to-end.
+      - Originally hardcoded ``get_by_slug("analyze")``, so a user who assigned a
+        different agent (and only configured that agent's provider as BYO) always
+        got 'analyze'\\'s qwen-max with no matching config → empty config →
+        "All connection attempts failed".
     """
     from app.repositories.agent_repository import get_agent_repository
     from app.services.ai.adapters.factory import provider_key_for_model
@@ -76,6 +88,7 @@ async def resolve_analyze_provider_config(
         (ai_settings.get("task_assignment") or {}).get("visual_analysis")
         or DEFAULT_ANALYZE_AGENT_SLUG
     ).strip() or DEFAULT_ANALYZE_AGENT_SLUG
+    resolved_slug = assigned_slug
 
     agent_repo = get_agent_repository()
     agent = await agent_repo.get_by_slug(assigned_slug)
@@ -85,6 +98,7 @@ async def resolve_analyze_provider_config(
             f"falling back to '{DEFAULT_ANALYZE_AGENT_SLUG}'"
         )
         agent = await agent_repo.get_by_slug(DEFAULT_ANALYZE_AGENT_SLUG)
+        resolved_slug = DEFAULT_ANALYZE_AGENT_SLUG
 
     model = ((agent or {}).get("model") or "").strip()
     if not model:
@@ -92,7 +106,7 @@ async def resolve_analyze_provider_config(
             f"[AI] visual_analysis agent '{assigned_slug}' missing or has no "
             "model; VisualAnalysisService will use built-in default"
         )
-        return "", {}, ""
+        return "", {}, "", resolved_slug
 
     try:
         provider_key = provider_key_for_model(model)
@@ -104,8 +118,8 @@ async def resolve_analyze_provider_config(
         provider_key = ""
 
     if not user_id or not provider_key:
-        return provider_key, {"model": model}, model
+        return provider_key, {"model": model}, model, resolved_slug
 
     provider_config = dict(get_provider_config(ai_settings, provider_key))
     provider_config["model"] = model
-    return provider_key, provider_config, model
+    return provider_key, provider_config, model, resolved_slug

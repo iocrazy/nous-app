@@ -100,7 +100,7 @@ async def test_resolve_runs_async_native_without_loop_bridge(
     integration_db_url, patched_engine, seed_user_settings
 ):
     # With no `analyze` ai_agents row in the dev mirror, resolve returns the
-    # empty triple — but the point is it EXECUTES the agent read async-native
+    # empty config — but the point is it EXECUTES the agent read async-native
     # against real PG without a fresh-loop crash (the §2.4b failure mode).
     from app.services.ai.providers.ai_provider_helpers import (
         resolve_analyze_provider_config,
@@ -108,8 +108,9 @@ async def test_resolve_runs_async_native_without_loop_bridge(
 
     user_id, _ = seed_user_settings
     result = await resolve_analyze_provider_config(user_id)
-    assert isinstance(result, tuple) and len(result) == 3
-    provider_key, provider_config, model = result
+    assert isinstance(result, tuple) and len(result) == 4
+    provider_key, provider_config, model, agent_slug = result
     assert isinstance(provider_key, str)
     assert isinstance(provider_config, dict)
     assert isinstance(model, str)
+    assert isinstance(agent_slug, str)

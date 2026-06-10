@@ -72,8 +72,9 @@ async def test_resolve_returns_empty_when_agent_missing():
             return_value=_settings_repo({}),
         ),
     ):
-        key, cfg, model = await helpers.resolve_analyze_provider_config("u-1")
+        key, cfg, model, slug = await helpers.resolve_analyze_provider_config("u-1")
     assert (key, cfg, model) == ("", {}, "")
+    assert slug == "analyze"
 
 
 async def test_resolve_honors_assigned_visual_analysis_agent():
@@ -106,7 +107,7 @@ async def test_resolve_honors_assigned_visual_analysis_agent():
             return_value=settings_repo,
         ),
     ):
-        key, cfg, model = await helpers.resolve_analyze_provider_config("u-1")
+        key, cfg, model, slug = await helpers.resolve_analyze_provider_config("u-1")
     assert key == "doubao"
     assert model == "doubao-seed-2-0-pro-260215"
     assert cfg == {
@@ -114,6 +115,9 @@ async def test_resolve_honors_assigned_visual_analysis_agent():
         "base_url": "https://ark/api/v3",
         "model": "doubao-seed-2-0-pro-260215",
     }
+    # The resolved slug must be the assigned one — so the caller composes the
+    # SAME agent's prompt (else composed.model overrides the resolved model).
+    assert slug == "test-analyze"
 
 
 async def test_resolve_falls_back_to_analyze_when_assigned_slug_missing():
@@ -138,10 +142,12 @@ async def test_resolve_falls_back_to_analyze_when_assigned_slug_missing():
             return_value=settings_repo,
         ),
     ):
-        key, cfg, model = await helpers.resolve_analyze_provider_config("u-1")
+        key, cfg, model, slug = await helpers.resolve_analyze_provider_config("u-1")
     assert key == "qwen"
     assert model == "qwen-max"
     assert cfg == {"api_key": "sk-q", "model": "qwen-max"}
+    # Fell back to the built-in agent, so the caller composes 'analyze'.
+    assert slug == "analyze"
 
 
 async def test_resolve_no_user_returns_model_only():
@@ -157,10 +163,11 @@ async def test_resolve_no_user_returns_model_only():
             return_value="qwen",
         ),
     ):
-        key, cfg, model = await helpers.resolve_analyze_provider_config(None)
+        key, cfg, model, slug = await helpers.resolve_analyze_provider_config(None)
     assert key == "qwen"
     assert cfg == {"model": "qwen-max"}
     assert model == "qwen-max"
+    assert slug == "analyze"
 
 
 async def test_resolve_merges_user_byo_provider_config():
@@ -188,8 +195,9 @@ async def test_resolve_merges_user_byo_provider_config():
             return_value="qwen",
         ),
     ):
-        key, cfg, model = await helpers.resolve_analyze_provider_config("u-1")
+        key, cfg, model, slug = await helpers.resolve_analyze_provider_config("u-1")
     assert key == "qwen"
     # BYO api_key merged + model stamped on top.
     assert cfg == {"api_key": "sk-x", "model": "qwen-max"}
     assert model == "qwen-max"
+    assert slug == "analyze"

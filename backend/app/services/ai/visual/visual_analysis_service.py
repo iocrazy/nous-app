@@ -79,8 +79,9 @@ class VisualAnalysisService:
         self,
         provider_key: str = "",
         provider_config: Optional[Dict[str, Any]] = None,
+        agent_slug: str = AGENT_SLUG,
     ) -> None:
-        """Hold per-call BYO credentials.
+        """Hold per-call BYO credentials + the agent slug to compose.
 
         ``provider_key`` / ``provider_config`` come from the Celery task
         layer (which reads the user's ``ai_settings.ai_providers`` per the
@@ -88,9 +89,20 @@ class VisualAnalysisService:
         falls back to the factory's per-model default using global settings
         — that path is only exercised by the smoke-test / no-user
         invocations.
+
+        ``agent_slug`` is the user's assigned visual-analysis agent (resolved
+        from ``task_assignment.visual_analysis``; defaults to the built-in
+        ``analyze``). We compose THIS agent's prompt, so ``composed.model``
+        (which drives the adapter) matches the model whose BYO config the
+        caller passed. Hardcoding it to ``analyze`` here was the second half of
+        the visual-analysis bug: the resolver picked the user's doubao model but
+        this composed 'analyze' (qwen-max), and the composed model won.
         """
         self._provider_key = (provider_key or "").strip()
         self._provider_config: Dict[str, Any] = dict(provider_config or {})
+        # Instance attr shadows the class default; _run_multimodal composes
+        # ``self.AGENT_SLUG``.
+        self.AGENT_SLUG = (agent_slug or AGENT_SLUG).strip() or AGENT_SLUG
         # Cost estimate coefficients (informational only; authoritative
         # cost lives on the agent_runs row via RunRecorder's price-snapshot
         # columns). Kept as GPT-4o pricing historically; deliberately not

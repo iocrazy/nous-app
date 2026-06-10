@@ -34,13 +34,17 @@ async def resolve_analyze_provider(user_id: Optional[str]) -> dict[str, Any]:
         resolve_analyze_provider_config,
     )
 
-    provider_key, provider_config, agent_model = await resolve_analyze_provider_config(
-        user_id
-    )
+    (
+        provider_key,
+        provider_config,
+        agent_model,
+        agent_slug,
+    ) = await resolve_analyze_provider_config(user_id)
     return {
         "provider_key": provider_key,
         "provider_config": provider_config or {},
         "agent_model": agent_model,
+        "agent_slug": agent_slug,
     }
 
 
@@ -54,6 +58,7 @@ async def call_analyze_l1(
     provider_key: str,
     provider_config: dict[str, Any],
     agent_model: Optional[str],
+    agent_slug: str = "analyze",
 ) -> dict[str, Any]:
     """Run the multimodal analysis + persist results. Returns a digest dict.
 
@@ -96,7 +101,9 @@ async def call_analyze_l1(
     )
 
     analysis_service = VisualAnalysisService(
-        provider_key=provider_key, provider_config=provider_config
+        provider_key=provider_key,
+        provider_config=provider_config,
+        agent_slug=agent_slug or "analyze",
     )
     embedding_service = EmbeddingService()
     analysis_repo = get_analysis_repository()
@@ -212,6 +219,7 @@ async def analyze_l1_workflow(
             provider_key=cfg["provider_key"],
             provider_config=cfg["provider_config"],
             agent_model=cfg["agent_model"],
+            agent_slug=cfg.get("agent_slug") or "analyze",
         )
         await manager.update_progress(wf_id, 100, subtitle="Analysis complete")
         return result
