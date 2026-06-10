@@ -106,6 +106,8 @@ export function createOutputNode(
       kind,
       resource_id: data.resource_id ?? null,
       preview_text: data.preview_text ?? '',
+      preview_url: data.preview_url ?? null,
+      crop_region: data.crop_region ?? null,
     },
   };
 }
