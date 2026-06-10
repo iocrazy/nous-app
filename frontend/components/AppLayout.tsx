@@ -218,9 +218,15 @@ function AppLayoutInner() {
     setIsMobileMenuOpen(false);
   };
 
-  // Re-evaluate the tab bar against the window when the page / overlay changes,
-  // and close any open tab popup whenever the bar collapses on scroll.
-  useEffect(() => { resetTabBar(); }, [view, location.pathname, isMobileTasksOpen, resetTabBar]);
+  // Re-evaluate the tab bar when the page / overlay changes, and close any open
+  // tab popup whenever the bar collapses on scroll. Opening the Tasks overlay
+  // starts a fresh scroll surface at its top, so force-expand there instead of
+  // reading the (possibly mid-scrolled) underlying window — otherwise opening
+  // Tasks from a scrolled page would show the bar collapsed.
+  useEffect(() => {
+    if (isMobileTasksOpen) expandTabBar();
+    else resetTabBar();
+  }, [view, location.pathname, isMobileTasksOpen, resetTabBar, expandTabBar]);
   useEffect(() => {
     if (tabBarCollapsed) { setIsResourcesMenuOpen(false); setIsDownloadsMenuOpen(false); }
   }, [tabBarCollapsed]);
