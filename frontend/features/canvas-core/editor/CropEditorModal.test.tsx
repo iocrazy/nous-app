@@ -174,3 +174,92 @@ describe('CropEditorModal — reset on re-open', () => {
     expect(onCommit).toHaveBeenCalledWith(FULL_REGION);
   });
 });
+
+describe('CropEditorModal — aspect ratio toolbar', () => {
+  it('renders all 6 presets including Free', () => {
+    render(<Host />);
+    expect(screen.getByTestId('crop-aspect-free')).toBeInTheDocument();
+    expect(screen.getByTestId('crop-aspect-1-1')).toBeInTheDocument();
+    expect(screen.getByTestId('crop-aspect-4-3')).toBeInTheDocument();
+    expect(screen.getByTestId('crop-aspect-16-9')).toBeInTheDocument();
+    expect(screen.getByTestId('crop-aspect-3-4')).toBeInTheDocument();
+    expect(screen.getByTestId('crop-aspect-9-16')).toBeInTheDocument();
+  });
+
+  it('clicking 1:1 from a wide rectangle snaps to a square and commits it', () => {
+    const onCommit = vi.fn();
+    render(
+      <Host
+        initialRegion={{ x: 0.1, y: 0.4, width: 0.6, height: 0.2 }}
+        onCommit={onCommit}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('crop-aspect-1-1'));
+    fireEvent.click(screen.getByTestId('crop-editor-commit'));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    const committed = onCommit.mock.calls[0][0];
+    expect(committed.width).toBeCloseTo(committed.height, 9);
+  });
+
+  it('Free does NOT touch the region', () => {
+    const onCommit = vi.fn();
+    const seed = { x: 0.13, y: 0.27, width: 0.45, height: 0.61 };
+    render(<Host initialRegion={seed} onCommit={onCommit} />);
+    fireEvent.click(screen.getByTestId('crop-aspect-free'));
+    fireEvent.click(screen.getByTestId('crop-editor-commit'));
+    expect(onCommit).toHaveBeenCalledWith(seed);
+  });
+
+  it('selected preset is announced via aria-pressed', () => {
+    render(<Host />);
+    fireEvent.click(screen.getByTestId('crop-aspect-16-9'));
+    expect(screen.getByTestId('crop-aspect-16-9')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByTestId('crop-aspect-1-1')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('re-opening the modal clears the previous aspect selection', () => {
+    const { rerender } = render(
+      <CropEditorModal
+        open={true}
+        src="data:image/png;base64,iVBORw0KGgo="
+        onCommit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('crop-aspect-1-1'));
+    expect(screen.getByTestId('crop-aspect-1-1')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    rerender(
+      <CropEditorModal
+        open={false}
+        src="data:image/png;base64,iVBORw0KGgo="
+        onCommit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    rerender(
+      <CropEditorModal
+        open={true}
+        src="data:image/png;base64,iVBORw0KGgo="
+        onCommit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('crop-aspect-1-1')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.getByTestId('crop-aspect-free')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+});

@@ -98,3 +98,48 @@ export function scaleRegionAroundCentre(
     height,
   });
 }
+
+/**
+ * Snap a region to a target width-to-height aspect ratio (e.g. 16/9).
+ *
+ * Strategy: preserve the larger of the two current dimensions and
+ * derive the other one from the ratio. So clicking "16:9" on a tall
+ * rectangle widens it; clicking it on a wide rectangle shortens it.
+ * The result is re-centred on the current centre and clamped into
+ * [0, 1] + MIN_CROP via `clampRegion`.
+ *
+ * `aspect <= 0` or NaN returns the input untouched so callers can use
+ * `null` to mean "free / no constraint" without branching.
+ */
+export function snapRegionToAspect(
+  region: CropRegion,
+  aspect: number,
+): CropRegion {
+  if (!Number.isFinite(aspect) || aspect <= 0) return region;
+  const centreX = region.x + region.width / 2;
+  const centreY = region.y + region.height / 2;
+  // Preserve the larger dimension and derive the other from the ratio.
+  let width: number;
+  let height: number;
+  if (region.width >= region.height) {
+    width = region.width;
+    height = width / aspect;
+  } else {
+    height = region.height;
+    width = height * aspect;
+  }
+  // If either dimension overshoots the image, shrink uniformly so both
+  // fit inside [0, 1]. This avoids clampRegion bumping one dimension
+  // up to MIN_CROP and breaking the ratio.
+  const overshoot = Math.max(width, height);
+  if (overshoot > 1) {
+    width /= overshoot;
+    height /= overshoot;
+  }
+  return clampRegion({
+    x: centreX - width / 2,
+    y: centreY - height / 2,
+    width,
+    height,
+  });
+}
