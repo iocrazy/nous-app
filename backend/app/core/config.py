@@ -84,7 +84,11 @@ class Settings(BaseSettings):
     # default → no domain shadowed → factories behave exactly as before. Example:
     # SHADOW_ORM_DOMAINS="admin_audit_logs,admin_monitoring".
     SHADOW_ORM_DOMAINS: str = Field(
-        default="",
+        default=(
+            "admin_audit_logs,admin_monitoring,admin_stats,"
+            "admin_system_settings,admin_table_preferences,admin_search,"
+            "admin_request_logs,admin_tasks,admin_videos,admin_alert_rules"
+        ),
         description="Comma-list of ORM domains to shadow-compare (REST live + "
         "ORM background diff) for parity validation. Independent of USE_ORM_*. "
         "Empty = no shadowing (fully inert).",
