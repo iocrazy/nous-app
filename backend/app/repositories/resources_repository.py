@@ -14,6 +14,13 @@ from loguru import logger
 
 from app.db.supabase_client import get_async_supabase_admin
 
+# Working-set caps for the batch sweepers in this repo. They replace
+# unbounded SELECTs that PostgREST silently truncated at 1000 (and the ORM
+# twins fetched fully into RAM). Each consuming sweeper re-runs, so a backlog
+# larger than one batch drains over successive runs instead of being clipped.
+EXPIRED_TRASH_BATCH = 5000
+UNTRANSCODED_BATCH = 2000
+
 # AI status fields live on the `resources` table (migration 067). A resource
 # is considered "completed" for a step when the column equals this value.
 _AI_STATUS_COMPLETED = "completed"
@@ -759,9 +766,16 @@ class ResourcesRepository:
             return 0
 
     async def get_expired_trashed_resources(
-        self, older_than_days: int = 30
+        self, older_than_days: int = 30, limit: int = EXPIRED_TRASH_BATCH
     ) -> List[Dict[str, Any]]:
-        """Find trashed resources older than N days for permanent cleanup."""
+        """Find trashed resources older than N days for permanent cleanup.
+
+        Returns at most ``limit`` rows, oldest-trashed first. The explicit
+        ``ORDER BY trashed_at`` + ``LIMIT`` replaces an unbounded SELECT that
+        PostgREST silently capped at 1000 (and that the ORM twin fetched
+        unbounded — OOM at scale). The daily sweeper re-runs, so a backlog
+        larger than one batch drains over successive runs.
+        """
         try:
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(days=older_than_days)
@@ -772,6 +786,8 @@ class ResourcesRepository:
                 .select("id, file_path, cover_image_path")
                 .eq("is_trashed", True)
                 .lt("trashed_at", cutoff)
+                .order("trashed_at", desc=False)
+                .limit(limit)
                 .execute()
             )
             return result.data or []
@@ -895,8 +911,16 @@ class ResourcesRepository:
             logger.error(f"Failed to update version {version_id}: {e}")
             raise
 
-    async def get_untranscoded_video_versions(self) -> List[Dict[str, Any]]:
-        """Get video versions that have never been transcoded (NULL status, has file)."""
+    async def get_untranscoded_video_versions(
+        self, limit: int = UNTRANSCODED_BATCH
+    ) -> List[Dict[str, Any]]:
+        """Get video versions that have never been transcoded (NULL status, has file).
+
+        Returns at most ``limit`` rows ordered by id. The caller queues each +
+        marks it ``pending`` (so it leaves this set), making the batch
+        re-runnable to drain a backlog past one call — replacing the unbounded
+        SELECT that silently capped at 1000.
+        """
         try:
             client = await self._get_client()
             result = (
@@ -905,6 +929,8 @@ class ResourcesRepository:
                 .like("mime_type", "video/%")
                 .is_("transcode_status", "null")
                 .not_.is_("file_path", "null")
+                .order("id", desc=False)
+                .limit(limit)
                 .execute()
             )
             return result.data or []

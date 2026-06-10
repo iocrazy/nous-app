@@ -29,7 +29,10 @@ from app.core.file_utils import (
     sniff_mime,
     stream_upload_to_disk,
 )
-from app.repositories.resources_repository import ResourcesRepository
+from app.repositories.resources_repository import (
+    EXPIRED_TRASH_BATCH,
+    ResourcesRepository,
+)
 
 
 async def _resolve_personal_team_id(user_id: str) -> str:
@@ -697,6 +700,14 @@ class ResourcesService:
 
         if cleaned:
             logger.info(f"Cleaned up {cleaned} expired trashed resources")
+        # A full batch means more expired resources remain; the daily sweeper
+        # re-runs and continues from the next-oldest. (The repo caps the working
+        # set — previously an unbounded SELECT that silently clipped at 1000.)
+        if len(expired) >= EXPIRED_TRASH_BATCH:
+            logger.info(
+                "Expired-trash batch full (%s) — more remain; next sweep continues.",
+                EXPIRED_TRASH_BATCH,
+            )
         return cleaned
 
     def _delete_physical_files(self, resource: dict) -> None:

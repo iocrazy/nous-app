@@ -85,7 +85,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
 from app.models import ParsedMedia, Resources, ResourceVersions, SystemSettings
-from app.repositories.admin.transcode_repository import AdminTranscodeRepository
+from app.repositories.admin.transcode_repository import (
+    BATCH_VERSIONS_LIMIT,
+    AdminTranscodeRepository,
+)
 
 # Ordered (result-dict KEY, ORM attribute) for the LIST_COLUMNS projection.
 _LIST_FIELDS: tuple[tuple[str, str], ...] = (
@@ -271,14 +274,26 @@ class AdminTranscodeRepositoryOrm(AdminTranscodeRepository):
                 .values(transcode_status="pending")
             )
 
-    async def list_versions_for_batch(self, action: str) -> list[dict[str, Any]]:
+    async def list_versions_for_batch(
+        self, action: str, limit: int = BATCH_VERSIONS_LIMIT
+    ) -> list[dict[str, Any]]:
         """retry_failed → failed videos; transcode_new → untranscoded (status NULL).
-        Returns {id, resource_id, mime_type} rows (native int ids; router str()s)."""
-        base = select(
-            ResourceVersions.id,
-            ResourceVersions.resource_id,
-            ResourceVersions.mime_type,
-        ).where(ResourceVersions.mime_type.like("video/%"))
+        Returns {id, resource_id, mime_type} rows (native int ids; router str()s).
+
+        Bounded + ordered to match the REST twin: at most ``limit`` rows by id.
+        The caller marks each ``pending`` so it leaves the set, making the batch
+        re-runnable to drain past one call.
+        """
+        base = (
+            select(
+                ResourceVersions.id,
+                ResourceVersions.resource_id,
+                ResourceVersions.mime_type,
+            )
+            .where(ResourceVersions.mime_type.like("video/%"))
+            .order_by(ResourceVersions.id.asc())
+            .limit(limit)
+        )
         if action == "retry_failed":
             base = base.where(ResourceVersions.transcode_status == "failed")
         else:  # transcode_new

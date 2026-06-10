@@ -189,6 +189,36 @@ async def test_list_versions_for_batch_transcode_new(
 
 
 @pytest.mark.asyncio
+async def test_list_versions_for_batch_is_bounded_and_ordered(
+    repo: AdminTranscodeRepository, fake_query: _FakeQuery
+) -> None:
+    # Scale guard: the working set must be deterministically ordered and capped
+    # so it can never silently truncate at PostgREST's 1000 ceiling.
+    from app.repositories.admin.transcode_repository import BATCH_VERSIONS_LIMIT
+
+    fake_query._data = []
+    await repo.list_versions_for_batch("transcode_new")
+
+    order_call = next(c for c in fake_query.calls if c[0] == "order")
+    assert order_call[1] == ("id",)
+    assert order_call[2] == {"desc": False}
+
+    limit_call = next(c for c in fake_query.calls if c[0] == "limit")
+    assert limit_call[1] == (BATCH_VERSIONS_LIMIT,)
+
+
+@pytest.mark.asyncio
+async def test_list_versions_for_batch_respects_custom_limit(
+    repo: AdminTranscodeRepository, fake_query: _FakeQuery
+) -> None:
+    fake_query._data = []
+    await repo.list_versions_for_batch("retry_failed", limit=50)
+
+    limit_call = next(c for c in fake_query.calls if c[0] == "limit")
+    assert limit_call[1] == (50,)
+
+
+@pytest.mark.asyncio
 async def test_mark_pending_updates_status(
     repo: AdminTranscodeRepository, fake_query: _FakeQuery
 ) -> None:
