@@ -11,6 +11,7 @@
  * UI layer just calls into it.
  */
 
+import type { CropRegion } from '../editor/types';
 import type { CanvasNode } from '../types';
 
 export type SmartNodeType = 'shot' | 'prompt' | 'output' | 'loop';
@@ -49,6 +50,14 @@ export interface OutputNodeData {
   /** Inline preview text — used for kind='text' and as a fallback
    *  caption for media. */
   preview_text: string;
+  /** URL of the rendered image/video/audio preview — populated when the
+   *  run finishes and the artifact has a fetchable preview. Null until
+   *  then. The crop editor reads from this. */
+  preview_url: string | null;
+  /** Last-committed crop applied to the image preview. Null = no crop
+   *  (full image). Stored in normalized [0,1] coords so it survives
+   *  rendering at any size. Only meaningful for kind='image'. */
+  crop_region: CropRegion | null;
 }
 
 export interface LoopNodeData {
