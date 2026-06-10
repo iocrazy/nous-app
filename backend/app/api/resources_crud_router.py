@@ -35,6 +35,7 @@ from app.repositories.resources_repository import (
 from app.schemas.canvas_crop_schema import CropDeriveRequest
 from app.schemas.canvas_grid_schema import GridDeriveRequest
 from app.schemas.canvas_mask_schema import MaskDeriveRequest
+from app.schemas.canvas_outpaint_schema import OutpaintDeriveRequest
 from app.schemas.resources import (
     ChorusUpdate,
     ResourceMoveRequest,
@@ -1257,3 +1258,51 @@ async def derive_mask_cutout_endpoint(
     except Exception as exc:
         logger.error(f"derive_mask_cutout failed for {resource_id}: {exc}")
         raise HTTPException(status_code=500, detail="Failed to derive mask cutout")
+
+
+@router.post("/{resource_id}/derive-outpaint")
+async def derive_outpaint_endpoint(
+    resource_id: str,
+    body: OutpaintDeriveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Extend the canvas of the image at ``resource_id`` (blur-fill
+    v1) and persist the result as a new sibling resource (same scope,
+    source_type='derived').
+
+    The request body is an ``OutpaintDeriveRequest`` (per-side padding
+    fractions + optional prompt/filename). Access is gated by
+    ``check_media_access`` against the source resource.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.canvas.image_outpaint import Padding
+    from app.services.canvas.outpaint_derive_service import (
+        OutpaintDeriveError,
+        derive_outpaint_resource,
+    )
+
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await derive_outpaint_resource(
+            source_resource_id=resource_id,
+            user_id=auth.user_id,
+            padding=Padding(
+                left=body.left,
+                top=body.top,
+                right=body.right,
+                bottom=body.bottom,
+            ),
+            prompt=body.prompt,
+            filename_override=body.filename,
+        )
+        return {"success": True, "data": result.resource}
+    except OutpaintDeriveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"derive_outpaint failed for {resource_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to derive outpaint")
