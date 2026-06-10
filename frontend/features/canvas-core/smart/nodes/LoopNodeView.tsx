@@ -1,16 +1,18 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
-import type { LoopNodeData } from '../types';
+import type { LoopMode, LoopNodeData } from '../types';
 import { LOOP_MODE_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { useNodeDataPatch } from './useNodeDataPatch';
 
-const MODE_LABEL: Record<LoopNodeData['mode'], string> = {
-  serial: 'Serial',
-  parallel: 'Parallel',
-  batch: 'Batch',
-};
+const MODE_OPTIONS: ReadonlyArray<{ value: LoopMode; label: string }> = [
+  { value: 'serial', label: 'Serial' },
+  { value: 'parallel', label: 'Parallel' },
+  { value: 'batch', label: 'Batch' },
+];
 
-export function LoopNodeView({ data, selected }: NodeProps) {
+export function LoopNodeView({ id, data, selected }: NodeProps) {
   const { mode, label } = data as unknown as LoopNodeData;
+  const patch = useNodeDataPatch(id);
   const tone = selected ? 'border-indigo-500' : LOOP_MODE_TONE[mode];
 
   return (
@@ -28,16 +30,27 @@ export function LoopNodeView({ data, selected }: NodeProps) {
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Loop
         </div>
-        <div className="text-[10px] uppercase tracking-wider text-slate-400">
-          {MODE_LABEL[mode]}
-        </div>
+        <select
+          className="nodrag rounded border border-slate-200 bg-transparent px-1 py-0 text-[10px] uppercase tracking-wider text-slate-500 outline-none focus:ring-1 focus:ring-indigo-300 dark:border-slate-700 dark:text-slate-400"
+          value={mode}
+          onChange={(e) => patch({ mode: e.target.value as LoopMode })}
+          aria-label="Loop mode"
+        >
+          {MODE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="p-3">
-        <div className="text-sm text-slate-700 dark:text-slate-200">
-          {label || (
-            <span className="italic text-slate-400">unnamed loop</span>
-          )}
-        </div>
+        <input
+          className="nodrag w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:ring-1 focus:ring-indigo-300 dark:text-slate-200"
+          placeholder="Loop label (optional)"
+          value={label}
+          onChange={(e) => patch({ label: e.target.value })}
+          aria-label="Loop label"
+        />
       </div>
       <Handle
         type="source"
