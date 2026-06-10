@@ -91,6 +91,81 @@ async def extract_and_persist_memories_step(
     return result
 
 
+def _build_turn_episode(
+    user_msgs: list[str], asst_msgs: list[str], *, max_chars: int = 6000
+) -> str:
+    """Render the MOST RECENT user/assistant pair as an episode body.
+
+    The L1 writer consumes the whole rolling window every harvest; an
+    episode ingested per turn must only carry the new turn, otherwise
+    the graph re-ingests the same exchanges N times. Empty when there
+    is nothing new to say.
+    """
+    parts: list[str] = []
+    if user_msgs:
+        parts.append(f"user: {user_msgs[-1]}")
+    if asst_msgs:
+        parts.append(f"assistant: {asst_msgs[-1]}")
+    body = "\n".join(p for p in parts if p.strip())
+    return body[:max_chars]
+
+
+async def _write_graph_episode(
+    *,
+    user_id: str,
+    session_id: str,
+    run_id: Optional[str],
+    iteration: int,
+    user_msgs: list[str],
+    asst_msgs: list[str],
+) -> bool:
+    """Flag-gated Graphiti dual-write (Phase 4 M2). Plain function so
+    tests can exercise it without a DBOS workflow context.
+
+    Failures never propagate — the service swallows them and this
+    returns False; the L1 ``agent_memories`` result is already final
+    by the time this runs.
+    """
+    from app.services.ai.memory.graph_memory import get_graph_memory_service
+
+    service = get_graph_memory_service()
+    if not service.config.enabled:
+        return False
+    body = _build_turn_episode(user_msgs, asst_msgs)
+    if not body:
+        return False
+    return await service.add_chat_episode(
+        group_id=f"user-{user_id}",
+        name=f"chat-{session_id}-{run_id or iteration}",
+        body=body,
+        source_description="mediahub chat turn",
+    )
+
+
+@DBOS.step()
+async def write_graph_episode_step(
+    *,
+    user_id: str,
+    session_id: str,
+    run_id: Optional[str],
+    iteration: int,
+    user_msgs: list[str],
+    asst_msgs: list[str],
+) -> dict[str, Any]:
+    """Thin DBOS wrapper around ``_write_graph_episode``. No retries:
+    a missed episode degrades future recall, never the current chat,
+    and double-ingesting on retry pollutes the graph instead."""
+    written = await _write_graph_episode(
+        user_id=user_id,
+        session_id=session_id,
+        run_id=run_id,
+        iteration=iteration,
+        user_msgs=user_msgs,
+        asst_msgs=asst_msgs,
+    )
+    return {"episode_written": written}
+
+
 async def _build_cheap_llm_call():
     """Cheap-model extractor LLM closure. Mirrors memory_tasks._build_cheap_llm_call."""
     from app.core.config import settings
@@ -144,10 +219,28 @@ async def write_memory_workflow(
     if not msgs["user_msgs"] and not msgs["asst_msgs"]:
         return {"rows_written": 0, "reason": "no_messages"}
 
-    return await extract_and_persist_memories_step(
+    result = await extract_and_persist_memories_step(
         run_id=run_id,
         agent_id=agent_id,
         user_id=user_id,
         user_msgs=msgs["user_msgs"],
         asst_msgs=msgs["asst_msgs"],
     )
+
+    # Phase 4 M2: Graphiti dual-write, AFTER the L1 path so a graph
+    # outage can never cost an agent_memories row. Cheap flag check
+    # here skips the step entirely for the (default) disabled case.
+    from app.services.ai.memory.graph_memory import get_graph_memory_service
+
+    if get_graph_memory_service().config.enabled:
+        graph = await write_graph_episode_step(
+            user_id=user_id,
+            session_id=session_id,
+            run_id=run_id,
+            iteration=iteration,
+            user_msgs=msgs["user_msgs"],
+            asst_msgs=msgs["asst_msgs"],
+        )
+        result = {**result, **graph}
+
+    return result
