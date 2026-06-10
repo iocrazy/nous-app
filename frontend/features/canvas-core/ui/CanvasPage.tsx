@@ -17,6 +17,7 @@ import { useParams } from 'react-router-dom';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
 import { CanvasSurface } from './CanvasSurface';
+import { useCanvasShortcuts } from './useCanvasShortcuts';
 
 export default function CanvasPage() {
   const { canvasId } = useParams<{ canvasId: string }>();
@@ -27,6 +28,8 @@ export default function CanvasPage() {
   const loadCanvas = useCanvasCoreStore((s) => s.loadCanvas);
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
   const reset = useCanvasCoreStore((s) => s.reset);
+
+  useCanvasShortcuts({ enabled: loadStatus === 'ready' });
 
   useEffect(() => {
     if (!canvasId) return;
