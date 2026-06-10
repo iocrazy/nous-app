@@ -14,6 +14,7 @@ from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
 from app.api.analysis_router import router as analysis_router
 from app.api.api_key_router import router as api_key_router
+from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.error_report_router import router as error_report_router
@@ -110,6 +111,7 @@ api_router.include_router(router=points_router, tags=["Points"])
 api_router.include_router(router=payment_router, tags=["Payment"])
 
 api_router.include_router(router=projects_router, tags=["MediaTrack"])
+api_router.include_router(router=canvases_router, tags=["Canvas"])
 
 api_router.include_router(router=resources_router, tags=["Resources"])
 
