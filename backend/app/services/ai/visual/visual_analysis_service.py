@@ -345,13 +345,35 @@ class VisualAnalysisService:
     # ── Public API ────────────────────────────────────────────────────
 
     async def analyze_l1(
-        self, cover_url: str, *, user_id: Optional[Any] = None
+        self,
+        cover_url: str,
+        *,
+        user_id: Optional[Any] = None,
+        on_progress: Optional[Any] = None,
     ) -> Optional[VisualAnalysisResult]:
-        """L1 Analysis: cover image only. Cost: ~$0.001 per image."""
+        """L1 Analysis: cover image only. Cost: ~$0.001 per image.
+
+        ``on_progress``: optional ``async (pct: int, subtitle: str)`` callback
+        fired at real milestones (image encoded → model called). The caller
+        (analyze_l1 workflow) maps these onto task_tracking progress so the UI
+        sees honest intermediate progress instead of jumping 20→100. Progress
+        failures must never break the analysis — callers should swallow their
+        own errors, but we guard anyway.
+        """
+
+        async def _progress(pct: int, subtitle: str) -> None:
+            if on_progress is None:
+                return
+            try:
+                await on_progress(pct, subtitle)
+            except Exception as e:  # noqa: BLE001 — progress is best-effort
+                logger.warning(f"[VisualAnalysis] progress callback failed: {e}")
+
         image_data = await self._encode_image_from_url(cover_url)
         if not image_data:
             logger.error(f"Failed to encode cover image: {cover_url}")
             return None
+        await _progress(40, "Cover image downloaded")
 
         image_blocks = [
             {
@@ -362,6 +384,7 @@ class VisualAnalysisService:
                 },
             },
         ]
+        await _progress(50, "Calling vision model...")
         return await self._run_multimodal(
             instruction=_L1_INSTRUCTION,
             image_content_blocks=image_blocks,

@@ -14,8 +14,10 @@ import {
   triggerSummary, triggerSummaryByResource,
   getSummary, getSummaryByResource,
   triggerVisualAnalysis, triggerVisualAnalysisByResource,
+  getVisualAnalysisByResource,
   pollForResult,
 } from '../services/aiService';
+import type { VisualAnalysisData } from '../services/aiService';
 import { useTaskManager } from '../contexts/TaskManagerContext';
 
 interface VideoDetailPanelProps {
@@ -110,9 +112,11 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
   const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysisData | null>(null);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [visualAnalysisLoading, setVisualAnalysisLoading] = useState(false);
+  const [visualAnalysisFetching, setVisualAnalysisFetching] = useState(false);
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [visualAnalysisError, setVisualAnalysisError] = useState<string | null>(null);
@@ -127,6 +131,9 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     }
     if (activeTab === 'analysis' && !summary && !summaryLoading) {
       loadSummary();
+    }
+    if (activeTab === 'analysis' && !visualAnalysis && !visualAnalysisFetching) {
+      loadVisualAnalysis();
     }
   }, [activeTab]);
 
@@ -186,6 +193,24 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     }
   }, [video.platform_id, resourceId]);
 
+  // The completed analysis lives in resource_analysis (read via
+  // GET /ai/analysis/resource/:rid — same source as the Task Center result
+  // card). The legacy parsed_media.ai_analyze_text column is never written by
+  // the analyze_l1 workflow, so without this fetch the panel could never show
+  // a result — it sat on the Trigger button forever even after success.
+  const loadVisualAnalysis = useCallback(async () => {
+    if (!resourceId) return;
+    try {
+      setVisualAnalysisFetching(true);
+      const data = await getVisualAnalysisByResource(resourceId);
+      setVisualAnalysis(data);
+    } catch {
+      // 404 = no analysis yet — stay on the trigger/processing state
+    } finally {
+      setVisualAnalysisFetching(false);
+    }
+  }, [resourceId]);
+
   const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
   const { tasks } = useTaskManager();
 
@@ -228,6 +253,9 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     if (latest.status === 'completed') {
       onUpdate(video.platform_id, { visual_analysis_status: 'completed' });
       setVisualAnalysisLoading(false);
+      // Pull the freshly-written result so the panel flips straight from
+      // "Analyzing…" to the analysis card without a manual refresh.
+      loadVisualAnalysis();
     } else if (latest.status === 'failed' || latest.status === 'cancelled') {
       onUpdate(video.platform_id, { visual_analysis_status: 'failed' });
       setVisualAnalysisError(latest.error_msg || 'Visual analysis failed');
@@ -738,40 +766,92 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 {getStatusIndicator(video.visual_analysis_status)}
               </div>
 
-              {video.visual_analysis_status === 'processing' && (
+              {/* Result card — fetched from resource_analysis, the table the
+                  analyze_l1 workflow actually writes. Takes priority over the
+                  status branches: fetched data is ground truth. */}
+              {visualAnalysis && (
+                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg space-y-3">
+                  {visualAnalysis.description && (
+                    <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                      {visualAnalysis.description}
+                    </p>
+                  )}
+                  {(() => {
+                    const chips = [
+                      ...(visualAnalysis.objects ?? []),
+                      ...(visualAnalysis.scenes ?? []),
+                      ...(visualAnalysis.people ?? []),
+                    ].filter(Boolean);
+                    return chips.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {chips.map((c, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-0.5 rounded-full text-[10px] bg-zinc-800 text-zinc-300"
+                          >
+                            {String(c)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
+                  {visualAnalysis.text && (
+                    <p className="text-xs text-zinc-400 whitespace-pre-wrap break-words bg-zinc-950/40 rounded p-2 border border-zinc-800">
+                      {visualAnalysis.text}
+                    </p>
+                  )}
+                  {visualAnalysis.model && (
+                    <p className="text-[11px] text-zinc-500">{visualAnalysis.model}</p>
+                  )}
+                </div>
+              )}
+
+              {!visualAnalysis && video.visual_analysis_status === 'processing' && (
                 <div className="flex items-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
                   <Loader2 size={18} className="animate-spin text-purple-400" />
                   <span className="text-sm text-zinc-400">Analyzing visual content...</span>
                 </div>
               )}
 
-              {(!video.visual_analysis_status || video.visual_analysis_status === 'pending') && (
+              {!visualAnalysis
+                && (!video.visual_analysis_status
+                  || video.visual_analysis_status === 'pending'
+                  || video.visual_analysis_status === 'completed') && (
                 <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                  <p className="text-sm text-zinc-500 mb-3">
-                    Analyze video frames to detect objects, scenes, and visual content.
-                  </p>
-                  <button
-                    onClick={handleVisualAnalysis}
-                    disabled={visualAnalysisLoading}
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
-                  >
-                    {visualAnalysisLoading ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Eye size={14} />
-                    )}
-                    Trigger Visual Analysis
-                  </button>
-                  {visualAnalysisError && (
-                    <p className="mt-2 text-xs text-red-400 flex items-center gap-1">
-                      <AlertCircle size={12} />
-                      {visualAnalysisError}
-                    </p>
+                  {visualAnalysisFetching ? (
+                    <div className="flex items-center gap-3">
+                      <Loader2 size={18} className="animate-spin text-purple-400" />
+                      <span className="text-sm text-zinc-400">Loading analysis...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-zinc-500 mb-3">
+                        Analyze video frames to detect objects, scenes, and visual content.
+                      </p>
+                      <button
+                        onClick={handleVisualAnalysis}
+                        disabled={visualAnalysisLoading}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        {visualAnalysisLoading ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Eye size={14} />
+                        )}
+                        Trigger Visual Analysis
+                      </button>
+                      {visualAnalysisError && (
+                        <p className="mt-2 text-xs text-red-400 flex items-center gap-1">
+                          <AlertCircle size={12} />
+                          {visualAnalysisError}
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
               )}
 
-              {video.visual_analysis_status === 'failed' && (
+              {!visualAnalysis && video.visual_analysis_status === 'failed' && (
                 <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-lg">
                   <p className="text-sm text-red-400 mb-3">Visual analysis failed. Please try again.</p>
                   <button
@@ -786,14 +866,6 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     )}
                     Retry
                   </button>
-                </div>
-              )}
-
-              {video.visual_analysis_status === 'completed' && video.ai_analyze_text && (
-                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                  <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
-                    {video.ai_analyze_text}
-                  </p>
                 </div>
               )}
             </section>

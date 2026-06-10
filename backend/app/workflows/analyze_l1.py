@@ -59,6 +59,7 @@ async def call_analyze_l1(
     provider_config: dict[str, Any],
     agent_model: Optional[str],
     agent_slug: str = "analyze",
+    wf_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Run the multimodal analysis + persist results. Returns a digest dict.
 
@@ -109,7 +110,24 @@ async def call_analyze_l1(
     analysis_repo = get_analysis_repository()
     tags_repo = get_tags_repository()
 
-    result = await analysis_service.analyze_l1(cover_url, user_id=user_id)
+    # Real-milestone progress: map the service's hooks (image downloaded →
+    # model called) onto task_tracking so the UI's progress bar reflects
+    # actual stages instead of sitting at 20% for the whole LLM call.
+    # Best-effort — a progress write must never fail the analysis.
+    async def _progress(pct: int, subtitle: str) -> None:
+        if not wf_id:
+            return
+        from app.services.infra.unified_task_manager import get_task_manager
+
+        try:
+            await get_task_manager().update_progress(wf_id, pct, subtitle=subtitle)
+        except Exception:  # noqa: BLE001 — progress is decorative
+            pass
+
+    await _progress(30, "Preparing analysis...")
+    result = await analysis_service.analyze_l1(
+        cover_url, user_id=user_id, on_progress=_progress
+    )
     if not result:
         # Mark the resource failed so the UI's existing 'failed' branch (retry
         # button) shows instead of a stuck "Analyzing…".
@@ -133,6 +151,7 @@ async def call_analyze_l1(
             "images and is reachable; see application_logs for the provider error)"
         )
 
+    await _progress(85, "Saving analysis results...")
     await analysis_repo.upsert_analysis(
         resource_id,
         analysis_level="L1",
@@ -209,7 +228,7 @@ async def analyze_l1_workflow(
 
     try:
         cfg = await resolve_analyze_provider(user_id)
-        await manager.update_progress(wf_id, 20, subtitle="Analyzing cover image...")
+        await manager.update_progress(wf_id, 20, subtitle="Provider resolved")
         result = await call_analyze_l1(
             media_id=media_id,
             cover_url=cover_url,
@@ -220,6 +239,7 @@ async def analyze_l1_workflow(
             provider_config=cfg["provider_config"],
             agent_model=cfg["agent_model"],
             agent_slug=cfg.get("agent_slug") or "analyze",
+            wf_id=wf_id,
         )
         await manager.update_progress(wf_id, 100, subtitle="Analysis complete")
         return result
