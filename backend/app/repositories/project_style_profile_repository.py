@@ -24,6 +24,15 @@ _GET_SQL = (
     "WHERE project_id = :pid"
 )
 
+# Storyboard nodes carry storyboard_projects.id; the profile is keyed on
+# canonical projects.id — bridge through the mig-110 link in one query.
+_GET_FOR_STORYBOARD_SQL = f"""
+    SELECT {', '.join('psp.' + c.strip() for c in _SELECT_COLUMNS.split(','))}
+    FROM public.project_style_profile psp
+    JOIN public.storyboard_projects sp ON sp.project_id = psp.project_id
+    WHERE sp.id = :sbid
+"""
+
 # COALESCE merge: absent (None) fields keep their stored value, so a PUT
 # carrying only style_md never clobbers visual_style / reference_links
 # (the user_settings.settings_json clobber lesson, applied at birth).
@@ -79,6 +88,20 @@ class ProjectStyleProfileRepository:
         from app.db import engine as db_engine
 
         row = await db_engine.fetch_one(_GET_SQL, {"pid": int(project_id)})
+        return _serialize(row) if row else None
+
+    async def get_for_storyboard_project(
+        self, storyboard_project_id: int
+    ) -> Optional[dict[str, Any]]:
+        """Profile for the canonical project a storyboard project links to.
+
+        None when the storyboard project is unlinked (legacy rows) or no
+        profile has been saved yet."""
+        from app.db import engine as db_engine
+
+        row = await db_engine.fetch_one(
+            _GET_FOR_STORYBOARD_SQL, {"sbid": int(storyboard_project_id)}
+        )
         return _serialize(row) if row else None
 
     async def upsert(

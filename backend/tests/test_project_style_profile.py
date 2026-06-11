@@ -83,6 +83,17 @@ async def test_get_returns_none_when_unsaved(engine_calls: dict) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_for_storyboard_project_binds_int_and_joins(
+    engine_calls: dict,
+) -> None:
+    repo = ProjectStyleProfileRepository()
+    assert await repo.get_for_storyboard_project(888) is None
+    call = engine_calls["fetch_one"][0]
+    assert call["params"] == {"sbid": 888}
+    assert "JOIN public.storyboard_projects" in call["sql"]
+
+
+@pytest.mark.asyncio
 async def test_upsert_serializes_jsonb_params(engine_calls: dict) -> None:
     repo = ProjectStyleProfileRepository()
     await repo.upsert(
