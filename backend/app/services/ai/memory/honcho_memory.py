@@ -116,16 +116,22 @@ class HonchoMemoryService:
         session_id: str,
         user_message: str,
         assistant_message: str,
+        workspace_id: Optional[str] = None,
     ) -> bool:
         """Ingest one exchange. Returns True when the messages landed;
-        False on any failure or when disabled/inoperative."""
+        False on any failure or when disabled/inoperative.
+
+        ``workspace_id`` overrides the config default — the harvest
+        path passes ``team-{team_id}`` when the session carries team
+        context (canvas plan: Workspace=team), else the deployment
+        default applies."""
         client = self._get_client()
         if client is None:
             return False
         if not (user_message.strip() or assistant_message.strip()):
             return False
 
-        workspace = self.config.workspace_id
+        workspace = workspace_id or self.config.workspace_id
         user_peer = f"user-{user_id}"
         agent_peer = f"agent-{agent_id}"
         session = f"session-{session_id}"
