@@ -353,6 +353,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
               setAgent(updated);
               setDraft(buildDraft(updated));
             }}
+            onDuplicate={openForkModal}
           />
           {isPreset && (
             <button

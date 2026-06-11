@@ -1372,6 +1372,52 @@ async def list_agent_runs(
 
 
 @router.get(
+    "/runs/live",
+    summary="Currently-running agent runs across all agents (Workforce strip)",
+)
+async def list_live_runs(auth: AuthDep) -> Dict[str, Any]:
+    """Caller-scoped status='running' runs, newest first, enriched with the
+    agent's slug/name/icon. Powers the Workforce board's "Running now" strip
+    (paperclip's live-runs dashboard, R4). NOTE: registered BEFORE
+    /runs/{run_id} so the literal path wins route matching."""
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    client = await get_async_supabase_admin()
+    runs_q = (
+        await client.table("agent_runs")
+        .select(
+            "id,agent_id,status,trigger,model,started_at,"
+            "prompt_tokens,completion_tokens,cost_cents,input_summary,task_id"
+        )
+        .eq("user_id", str(user_uuid))
+        .eq("status", "running")
+        .order("started_at", desc=True)
+        .limit(20)
+        .execute()
+    )
+    items = runs_q.data or []
+    agent_ids = sorted({str(r["agent_id"]) for r in items})
+    agents_by_id: Dict[str, Dict[str, Any]] = {}
+    if agent_ids:
+        agents_q = (
+            await client.table("ai_agents")
+            .select("id,slug,name,icon")
+            .in_("id", agent_ids)
+            .execute()
+        )
+        agents_by_id = {str(a["id"]): a for a in (agents_q.data or [])}
+    for r in items:
+        a = agents_by_id.get(str(r["agent_id"])) or {}
+        r["id"] = str(r["id"])
+        r["task_id"] = str(r["task_id"]) if r.get("task_id") else None
+        r["agent_slug"] = a.get("slug")
+        r["agent_name"] = a.get("name")
+        r["agent_icon"] = a.get("icon")
+        if r.get("cost_cents") is not None:
+            r["cost_cents"] = float(r["cost_cents"])
+    return {"items": items, "count": len(items)}
+
+
+@router.get(
     "/runs/{run_id}",
     response_model=RunDetail,
     summary="Get run detail",

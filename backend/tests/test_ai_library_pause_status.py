@@ -164,3 +164,71 @@ def test_status_idle_when_no_live_runs(client: TestClient) -> None:
         resp = client.get("/api/v1/ai-library/agents/my-agent/status")
     assert resp.status_code == 200
     assert resp.json()["status"] == "idle"
+
+
+# ─── live runs strip ────────────────────────────────────────────────────────
+
+
+def _live_runs_client(runs: list, agents: list):
+    """table('agent_runs') → runs; table('ai_agents') → agents."""
+
+    def _chain(data):
+        c = MagicMock()
+        c.select.return_value = c
+        c.eq.return_value = c
+        c.in_.return_value = c
+        c.order.return_value = c
+        c.limit.return_value = c
+        c.execute = AsyncMock(return_value=MagicMock(data=data))
+        return c
+
+    sb = MagicMock()
+    sb.table.side_effect = lambda name: _chain(runs if name == "agent_runs" else agents)
+    return sb
+
+
+def test_live_runs_enriched_with_agent_identity(client: TestClient) -> None:
+    """R4: /runs/live returns caller's running runs with agent slug/name/icon
+    stitched in and bigint ids str-coerced."""
+    agent_id = str(uuid4())
+    runs = [
+        {
+            "id": 315543034218506,  # bigint snowflake
+            "agent_id": agent_id,
+            "status": "running",
+            "trigger": "visual_analysis_l1",
+            "model": "doubao-seed-2-0-pro-260215",
+            "started_at": "2026-06-11T00:00:00Z",
+            "prompt_tokens": 100,
+            "completion_tokens": 5,
+            "cost_cents": "0.1",
+            "input_summary": "L1 analysis of ...",
+            "task_id": "wf-1",
+        }
+    ]
+    agents = [
+        {"id": agent_id, "slug": "test-analyze", "name": "Test Analyze", "icon": "bot"}
+    ]
+    with patch(
+        "app.api.ai_library_router.get_async_supabase_admin",
+        AsyncMock(return_value=_live_runs_client(runs, agents)),
+    ):
+        resp = client.get("/api/v1/ai-library/runs/live")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["count"] == 1
+    item = body["items"][0]
+    assert item["id"] == "315543034218506"  # str, not precision-lost number
+    assert item["agent_slug"] == "test-analyze"
+    assert item["agent_name"] == "Test Analyze"
+    assert item["cost_cents"] == 0.1
+
+
+def test_live_runs_empty(client: TestClient) -> None:
+    with patch(
+        "app.api.ai_library_router.get_async_supabase_admin",
+        AsyncMock(return_value=_live_runs_client([], [])),
+    ):
+        resp = client.get("/api/v1/ai-library/runs/live")
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "count": 0}

@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pause, Play, Plus } from 'lucide-react';
+import { Copy, GitFork, MoreHorizontal, Pause, Play, Plus } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { createIssue } from '../../services/issuesService';
@@ -44,10 +44,12 @@ interface AgentActionBarProps {
   readOnly: boolean;
   /** Called after pause/resume succeeds so the parent refreshes the agent row. */
   onAgentUpdated: (agent: AILibraryAgent) => void;
+  /** Opens the fork modal (Duplicate in the overflow menu). */
+  onDuplicate?: () => void;
 }
 
 export const AgentActionBar: React.FC<AgentActionBarProps> = ({
-  agent, readOnly, onAgentUpdated,
+  agent, readOnly, onAgentUpdated, onDuplicate,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -56,6 +58,20 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
   );
   const [busy, setBusy] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the overflow menu on outside click.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [menuOpen]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -129,6 +145,47 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
       )}
 
       <StatusChip status={status} />
+
+      {/* Overflow menu (paperclip R5): Copy agent ID / Duplicate. */}
+      <div className="relative" ref={menuRef}>
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          className="rounded-lg border border-zinc-700 bg-zinc-800 p-2 text-zinc-300 hover:bg-zinc-700 transition-colors"
+          aria-label={t('common.more', 'More')}
+        >
+          <MoreHorizontal size={14} />
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl">
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(agent.id);
+                addToast(t('aiLibrary.agents.idCopied', 'Agent ID copied'), 'success');
+                setMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              <Copy size={12} />
+              {t('aiLibrary.agents.copyId', 'Copy agent ID')}
+            </button>
+            {onDuplicate && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDuplicate();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+              >
+                <GitFork size={12} />
+                {t('aiLibrary.agents.duplicate', 'Duplicate')}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {assignOpen && (
         <NewIssueDialog

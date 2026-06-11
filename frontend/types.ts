@@ -1138,6 +1138,24 @@ export interface AgentRunTaskRef {
   task_type?: string | null;
 }
 
+/** One currently-running run in the Workforce live strip. */
+export interface LiveAgentRun {
+  id: string;
+  agent_id: string;
+  status: 'running';
+  trigger: string;
+  model?: string | null;
+  started_at: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_cents?: number | null;
+  input_summary?: string | null;
+  task_id?: string | null;
+  agent_slug?: string | null;
+  agent_name?: string | null;
+  agent_icon?: string | null;
+}
+
 /** One transcript event of a run (mig 285 agent_run_events). */
 export interface AgentRunEvent {
   seq: number;
