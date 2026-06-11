@@ -3,6 +3,7 @@ import { getSupabaseClient, isSupabaseConfigured, reinitializeSupabaseClient, ge
 import { UserProfile, UserSettings, AISettings as AISettingsType } from '../types';
 import { fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from '../services/dataService';
 import { createMediaSession, deleteMediaSession, fetchMediaToken } from '../services/mediaAuthService';
+import { installAuthRecovery } from '../services/authRecovery';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -217,6 +218,11 @@ export function AuthProvider({
         setCurrentUserId(null);
       }
     };
+
+    // Global 401 recovery: refresh-or-logout when the backend rejects a
+    // dead token (slept tab whose silent refresh failed). On logout it
+    // fires SIGNED_OUT -> isAuthenticated=false -> AuthGuard /login.
+    installAuthRecovery();
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       await handleSession(session);
