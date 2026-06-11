@@ -420,6 +420,7 @@ class StoryboardService:
 
             character = await self.character_repo.create(character_data)
             logger.info(f"Created character '{name}' for project {project_id}")
+            await _dispatch_character_episode(character)
             return character
         except Exception as exc:
             logger.error(
@@ -443,7 +444,9 @@ class StoryboardService:
             Updated character row dict.
         """
         try:
-            return await self.character_repo.update(character_id, data)
+            updated = await self.character_repo.update(character_id, data)
+            await _dispatch_character_episode(updated)
+            return updated
         except Exception as exc:
             logger.error(f"Failed to update character {character_id}: {exc}")
             raise
@@ -878,3 +881,39 @@ _MIME_EXT_MAP = {
 def _mime_to_ext(mime_type: str) -> str:
     """Convert a MIME type to a file extension, defaulting to .png."""
     return _MIME_EXT_MAP.get(mime_type, ".png")
+
+
+async def _dispatch_character_episode(character: Dict[str, Any]) -> None:
+    """Fire-and-forget Graphiti dual-write for a character row (Phase 4
+    M7). Enqueues a routed workflow — the LLM-backed graph ingestion
+    must never delay the API response. Failures are swallowed: the
+    character write already succeeded.
+    """
+    try:
+        from app.services.ai.memory.graph_memory import get_graph_memory_service
+
+        if not get_graph_memory_service().config.enabled:
+            return
+        if not character or not character.get("id"):
+            return
+
+        import json as _json
+
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.workflows.write_character_memory import (
+            write_character_episode_workflow,
+        )
+
+        await start_workflow_routed(
+            "memory_tasks",
+            dbos_workflow_callable=write_character_episode_workflow,
+            dbos_workflow_kwargs={
+                "project_id": str(character.get("project_id") or ""),
+                "character_id": str(character["id"]),
+                "name": str(character.get("name") or ""),
+                "description": character.get("description"),
+                "visual_traits_json": _json.dumps(character.get("visual_traits") or {}),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("[storyboard] character episode dispatch failed (non-fatal)")

@@ -148,15 +148,16 @@ class GraphMemoryService:
             return False
 
     async def search(
-        self, query: str, *, group_id: str, limit: int = 10
+        self, query: str, *, group_ids: list[str], limit: int = 10
     ) -> list[GraphFact]:
-        """Hybrid fact retrieval scoped to ``group_id``. Empty list on
-        any failure or when disabled."""
+        """Hybrid fact retrieval scoped to ``group_ids`` (e.g. the
+        user's personal group plus the session's project group).
+        Empty list on any failure or when disabled."""
         client = self._client()
-        if client is None or not query.strip():
+        if client is None or not query.strip() or not group_ids:
             return []
         try:
-            edges = await client.search(query, group_ids=[group_id], num_results=limit)
+            edges = await client.search(query, group_ids=group_ids, num_results=limit)
             facts: list[GraphFact] = []
             for edge in edges or []:
                 fact_text = getattr(edge, "fact", None)
@@ -170,7 +171,7 @@ class GraphMemoryService:
                 )
             return facts
         except Exception:  # noqa: BLE001
-            logger.exception("[graph_memory] search failed (group=%s)", group_id)
+            logger.exception("[graph_memory] search failed (groups=%s)", group_ids)
             return []
 
 

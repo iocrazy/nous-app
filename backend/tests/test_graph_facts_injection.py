@@ -98,10 +98,10 @@ class FakeService(GraphMemoryService):
         self._raise = raise_
         self.queries: list[dict] = []
 
-    async def search(self, query, *, group_id, limit=10):  # type: ignore[override]
+    async def search(self, query, *, group_ids, limit=10):  # type: ignore[override]
         if self._raise:
             raise RuntimeError("boom")
-        self.queries.append({"query": query, "group_id": group_id, "limit": limit})
+        self.queries.append({"query": query, "group_ids": group_ids, "limit": limit})
         return self._facts
 
 
@@ -120,7 +120,7 @@ async def test_recall_maps_facts_and_scopes_to_user(
         user_id=UUID(int=42), user_query="export size?"
     )
     assert facts == ["likes vertical video"]
-    assert svc.queries[0]["group_id"] == f"user-{UUID(int=42)}"
+    assert svc.queries[0]["group_ids"] == [f"user-{UUID(int=42)}"]
     assert svc.queries[0]["limit"] == 5
 
 

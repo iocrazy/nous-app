@@ -111,7 +111,7 @@ async def test_disabled_service_never_touches_graphiti() -> None:
     ok = await service.add_chat_episode(group_id="user-1", name="turn", body="hello")
     assert ok is False
     assert fake.episodes == []
-    assert await service.search("anything", group_id="user-1") == []
+    assert await service.search("anything", group_ids=["user-1"]) == []
 
 
 @pytest.mark.asyncio
@@ -156,7 +156,7 @@ async def test_search_maps_edges_to_graph_facts() -> None:
         search_results=[FakeEdge("User prefers vertical video", valid_at=when)]
     )
     service = GraphMemoryService(config=_enabled_config(), graphiti=fake)
-    facts = await service.search("video preference", group_id="user-42", limit=5)
+    facts = await service.search("video preference", group_ids=["user-42"], limit=5)
     assert facts == [GraphFact(fact="User prefers vertical video", valid_at=when)]
     assert fake.search_calls[0]["group_ids"] == ["user-42"]
     assert fake.search_calls[0]["num_results"] == 5
@@ -166,7 +166,7 @@ async def test_search_maps_edges_to_graph_facts() -> None:
 async def test_search_failure_returns_empty() -> None:
     fake = FakeGraphiti(raise_on="search")
     service = GraphMemoryService(config=_enabled_config(), graphiti=fake)
-    assert await service.search("q", group_id="g") == []
+    assert await service.search("q", group_ids=["g"]) == []
 
 
 @pytest.mark.asyncio
@@ -177,7 +177,7 @@ async def test_inoperative_config_no_ops_without_graphiti() -> None:
         config=GraphMemoryConfig(enabled=True, falkordb_host="")
     )
     assert await service.add_chat_episode(group_id="g", name="n", body="b") is False
-    assert await service.search("q", group_id="g") == []
+    assert await service.search("q", group_ids=["g"]) == []
 
 
 # ============================================================
