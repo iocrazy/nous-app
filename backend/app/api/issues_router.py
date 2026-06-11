@@ -241,7 +241,17 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
             raise HTTPException(status_code=500, detail=f"DBOS dispatch failed: {e}")
 
     # Persist workflow_id so the UI can find it without re-deriving.
-    row = await issue_repository.update(issue_id, {"dbos_workflow_id": workflow_id})
+    # dbos_workflow_id is service_role-only (mig-170 allowlist trigger); with
+    # USE_ORM_ISSUES the repository writes via the app-role engine and the
+    # trigger rejects it — use the SET LOCAL ROLE service_role helper instead
+    # (same pattern as issue_lifecycle.py execution-field writes).
+    from app.db import engine as db_engine
+
+    await db_engine.execute_as_service_role(
+        "UPDATE public.issues SET dbos_workflow_id = :wf WHERE id = :iid",
+        {"wf": workflow_id, "iid": issue_id},
+    )
+    row = await issue_repository.get_by_id(issue_id)
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 
