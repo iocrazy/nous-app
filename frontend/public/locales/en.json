@@ -88,7 +88,8 @@
     "noAccount": "Don't have an account? Sign up",
     "hasAccount": "Already have an account? Log in",
     "registerSuccess": "Registration successful. Please check your email.",
-    "passwordMismatch": "Passwords do not match"
+    "passwordMismatch": "Passwords do not match",
+    "sessionExpired": "Your session expired — please sign in again."
   },
   "notifications": {
     "title": "Notifications",
@@ -1866,5 +1867,10 @@
     "colTotalTokens": "Total tokens",
     "colCost": "Cost",
     "colFailed": "Failed"
+  },
+  "clockDrift": {
+    "warning": "Your device clock is {{amount}} {{direction}} server time — this breaks sign-in. Enable automatic date & time in system settings.",
+    "behind": "behind",
+    "ahead": "ahead"
   }
 }

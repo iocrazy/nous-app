@@ -88,7 +88,8 @@
     "noAccount": "没有账户？立即注册",
     "hasAccount": "已有账户？立即登录",
     "registerSuccess": "注册成功，请查收邮件",
-    "passwordMismatch": "两次密码不一致"
+    "passwordMismatch": "两次密码不一致",
+    "sessionExpired": "登录已过期，请重新登录。"
   },
   "notifications": {
     "title": "通知",
@@ -1866,5 +1867,10 @@
     "colTotalTokens": "总 Tokens",
     "colCost": "花费",
     "colFailed": "失败"
+  },
+  "clockDrift": {
+    "warning": "设备时间与服务器相差 {{amount}}（{{direction}}）——这会导致登录异常。请在系统设置中开启自动设置日期与时间。",
+    "behind": "偏慢",
+    "ahead": "偏快"
   }
 }

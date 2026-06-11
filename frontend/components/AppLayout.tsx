@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ClockDriftBanner } from './ClockDriftBanner';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Search, Library as LibraryIcon, User, FolderOpen, Download, Check,
@@ -364,6 +365,9 @@ function AppLayoutInner() {
         scroll container, which breaks `position: sticky` for everything inside
         (the mobile filter chip bar wouldn't pin). */}
     <div className="flex min-h-[100dvh] bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-clip">
+
+      {/* Device clock-drift warning (breaks token refresh — May-20-clock incident) */}
+      <ClockDriftBanner />
 
       {/* User Profile Modal */}
       <UserProfileModal
