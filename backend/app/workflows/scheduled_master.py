@@ -280,11 +280,16 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     # Pin the workflow id now and persist it; the WORKFLOW body performs
     # the actual dispatch (same path as POST /issues/{id}/dispatch).
-    # Must go through the repository (service_role) — the mig-172 issues
-    # column-allowlist trigger blocks dbos_workflow_id writes from the
-    # app-role asyncpg engine.
+    # dbos_workflow_id is guarded by the mig-170 column-allowlist trigger
+    # (service_role only) — and with USE_ORM_ISSUES the repository writes
+    # via the app-role engine too, so neither raw execute nor repo.update
+    # passes. execute_as_service_role (SET LOCAL ROLE service_role) is the
+    # established pattern (see issue_lifecycle.py execution-field writes).
     workflow_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
-    await issue_repository.update(issue_id, {"dbos_workflow_id": workflow_id})
+    await db_engine.execute_as_service_role(
+        "UPDATE public.issues SET dbos_workflow_id = :wf WHERE id = :iid",
+        {"wf": workflow_id, "iid": issue_id},
+    )
 
     # Stash last_issue_id for the next fire's delivery gate (merge, never
     # replace — the payload also carries the routine's config).
