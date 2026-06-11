@@ -1697,7 +1697,10 @@
         "statInput": "Input",
         "statOutput": "Output",
         "statCached": "Cached",
-        "selectPrompt": "Select a run to view details"
+        "selectPrompt": "Select a run to view details",
+        "transcript": "Transcript",
+        "transcriptNice": "Nice",
+        "transcriptRaw": "Raw"
       },
       "budget": {
         "sectionLabel": "Monthly budget",

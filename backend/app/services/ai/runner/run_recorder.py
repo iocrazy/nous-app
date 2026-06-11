@@ -107,8 +107,10 @@ class RunRecorder:
     _cached_rate: Optional[float] = field(default=None, init=False)  # cents per 1k
     _last_heartbeat_monotonic: float = field(default=0.0, init=False)
     _cancelled: bool = field(default=False, init=False)
+    _event_seq: int = field(default=0, init=False)
 
     HEARTBEAT_RATE_LIMIT_S: float = 15.0  # local, DB-write throttle
+    EVENT_VALUE_MAX_CHARS: int = 4000  # per-field payload truncation
 
     async def __aenter__(self) -> "RunRecorder":
         try:
@@ -253,6 +255,42 @@ class RunRecorder:
             self.input_summary = _truncate(input_summary, 500)
         if output_summary is not None:
             self._output_summary = _truncate(output_summary, 500)
+
+    async def record_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Append one transcript event (mig 285, paperclip port P3).
+
+        AgentRunner calls this as the run executes (user message → tool
+        calls → assistant output); the Runs detail pane renders the stream
+        as the Transcript section. Best-effort like every other telemetry
+        write — a failed insert never breaks the run. Payload string values
+        are truncated so a huge tool result can't bloat the table.
+        """
+        if self.run_id is None:
+            return
+        self._event_seq += 1
+        try:
+            from app.db import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            await (
+                client.table("agent_run_events")
+                .insert(
+                    {
+                        "run_id": str(self.run_id),
+                        "seq": self._event_seq,
+                        "event_type": event_type,
+                        "payload": _truncate_payload(
+                            payload, self.EVENT_VALUE_MAX_CHARS
+                        ),
+                    }
+                )
+                .execute()
+            )
+        except Exception as err:
+            logger.warning(
+                f"[RunRecorder] record_event failed "
+                f"(run={self.run_id} seq={self._event_seq}): {err}"
+            )
 
     async def heartbeat(self) -> None:
         """Refresh heartbeat_at if >=15s since last write.
@@ -507,3 +545,28 @@ def _truncate(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + "..."
+
+
+def _truncate_payload(payload: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    """JSON-safe copy of an event payload with long string values truncated.
+
+    One level deep is enough — event payloads are flat ({content}, {tool,
+    args, result}); nested dicts are stringified-then-truncated so a deep
+    tool result can't sneak megabytes past the cap.
+    """
+    out: dict[str, Any] = {}
+    for k, v in (payload or {}).items():
+        if isinstance(v, str):
+            out[k] = _truncate(v, max_chars)
+        elif isinstance(v, (int, float, bool)) or v is None:
+            out[k] = v
+        else:
+            try:
+                import json as _json
+
+                out[k] = _truncate(
+                    _json.dumps(v, ensure_ascii=False, default=str), max_chars
+                )
+            except Exception:  # noqa: BLE001 — telemetry only
+                out[k] = _truncate(repr(v), max_chars)
+    return out

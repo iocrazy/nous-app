@@ -1697,7 +1697,10 @@
         "statInput": "输入",
         "statOutput": "输出",
         "statCached": "缓存",
-        "selectPrompt": "选择一条运行记录查看详情"
+        "selectPrompt": "选择一条运行记录查看详情",
+        "transcript": "执行记录",
+        "transcriptNice": "Nice",
+        "transcriptRaw": "Raw"
       },
       "budget": {
         "sectionLabel": "每月预算",

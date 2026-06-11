@@ -1135,6 +1135,14 @@ export interface AgentRunTaskRef {
   task_type?: string | null;
 }
 
+/** One transcript event of a run (mig 285 agent_run_events). */
+export interface AgentRunEvent {
+  seq: number;
+  event_type: 'user' | 'assistant' | 'tool_call' | 'error' | 'system';
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
 /** Full detail view — adds summaries, metadata, snapshots, and cancel state. */
 export interface AgentRunDetail extends AgentRunListItem {
   session_id?: string | null;

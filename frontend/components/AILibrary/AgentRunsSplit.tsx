@@ -8,6 +8,7 @@ import type {
   AgentRunDetail, AgentRunListItem, AgentRunListResponse, AgentRunStatus,
 } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { RunTranscript } from './RunTranscript';
 import { useToast } from '../Toast';
 
 // Paperclip-style split-pane Runs tab: left = scrollable run list (status
@@ -332,6 +333,9 @@ const RunDetailPane: React.FC<{
           </div>
         </section>
       )}
+
+      {/* Transcript (mig 285 event stream) — hidden for pre-285 runs */}
+      <RunTranscript runId={detail.id} isRunning={detail.status === 'running'} />
 
       {/* Session */}
       {detail.session_id && (
