@@ -160,12 +160,14 @@ class OpenAICompatibleProvider(AIProvider):
         return response.choices[0].message.content
 
     async def list_models(self) -> List[str]:
-        try:
-            models = await self._client.models.list()
-            return sorted([m.id for m in models.data])
-        except Exception as e:
-            logger.warning(f"Failed to list models from {self.base_url}: {e}")
-            return []
+        # Let failures propagate — the only async caller is
+        # AIProviderFactory.test_connection, which turns the exception
+        # into {"success": False, error}. Swallowing to [] here made a
+        # disabled/revoked key test as "Connected" (success + empty
+        # models), and the stale catalog in settings kept rendering
+        # "Detected N models from server".
+        models = await self._client.models.list()
+        return sorted([m.id for m in models.data])
 
 
 class DeepSeekProvider(OpenAICompatibleProvider):
