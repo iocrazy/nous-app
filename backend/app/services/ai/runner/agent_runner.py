@@ -62,6 +62,31 @@ _DEFAULT_COMPACTOR = ContextCompactor()
 SUPPORTED_TOOLS: frozenset[str] = frozenset({"Skill", "Delegate", "ResourceFetch"})
 
 
+def _last_user_text(user_messages: list[dict]) -> str:
+    """Last user-role message content as display text (P3 transcript).
+
+    Multimodal content arrives as a list of blocks — summarise non-text
+    blocks (image_url etc.) instead of dumping base64 into the event log.
+    """
+    for m in reversed(user_messages or []):
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                btype = block.get("type") if isinstance(block, dict) else None
+                if btype == "text":
+                    parts.append(str(block.get("text") or ""))
+                elif btype:
+                    parts.append(f"[{btype}]")
+            return " ".join(p for p in parts if p) or "[non-text content]"
+        return str(content or "")
+    return ""
+
+
 def _is_mcp_tool_name(name: str, mcp_registry) -> bool:
     """Q5: check if a tool name maps to a registered MCP server.
 
@@ -260,6 +285,15 @@ class AgentRunner:
         iteration = 0
         MAX_STREAM_ITERATIONS = 10
 
+        # P3 transcript (mig 285): open the event stream with the user turn.
+        # Streaming runs skip the final 'assistant' event — the chat layer
+        # persists the full message itself; tool_call events below are the
+        # part the Transcript adds over chat history.
+        if recorder is not None and hasattr(recorder, "record_event"):
+            await recorder.record_event(
+                "user", {"content": _last_user_text(user_messages)}
+            )
+
         while iteration < MAX_STREAM_ITERATIONS:
             iteration += 1
             if abort is not None and abort.is_aborted():
@@ -426,6 +460,18 @@ class AgentRunner:
                     }
                 )
 
+                # P3 transcript (mig 285): mirror of run_turn's tool event.
+                if recorder is not None and hasattr(recorder, "record_event"):
+                    await recorder.record_event(
+                        "tool_call",
+                        {
+                            "tool": tool_name,
+                            "args": args,
+                            "result": result,
+                            "iteration": iteration,
+                        },
+                    )
+
                 if loop_guard.is_looping():
                     warning = loop_guard.render_warning()
                     if warning:
@@ -525,6 +571,13 @@ class AgentRunner:
 
         messages = list(user_messages)
         iteration = 0
+
+        # P3 transcript (mig 285): open the event stream with the user turn.
+        # Best-effort — record_event never raises.
+        if recorder is not None and hasattr(recorder, "record_event"):
+            await recorder.record_event(
+                "user", {"content": _last_user_text(user_messages)}
+            )
 
         # Wave G (G3): per-run loop guard. Detects "same (tool, args)
         # called >= N times in last M calls" and warns the LLM mid-run
@@ -657,6 +710,10 @@ class AgentRunner:
                 # msg.get("content") can be None (e.g. Claude emits null
                 # content on a pure-tool-use turn). The `or ""` guarantees
                 # the contract — callers always receive a str.
+                if recorder is not None and hasattr(recorder, "record_event"):
+                    await recorder.record_event(
+                        "assistant", {"content": msg.get("content") or ""}
+                    )
                 return {
                     "content": msg.get("content") or "",
                     "raw": resp,
@@ -803,6 +860,20 @@ class AgentRunner:
                         "iteration": iteration,
                     }
                 )
+
+                # P3 transcript (mig 285): one event per executed tool call
+                # (args + result in one payload — the Nice renderer shows it
+                # as a folded card). record_event truncates long values.
+                if recorder is not None and hasattr(recorder, "record_event"):
+                    await recorder.record_event(
+                        "tool_call",
+                        {
+                            "tool": tool_name,
+                            "args": args,
+                            "result": result,
+                            "iteration": iteration,
+                        },
+                    )
 
                 # Wave G (G3): observe for loop detection. Args
                 # canonicalized to a stable string (sorted keys).

@@ -1418,6 +1418,42 @@ async def get_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
 
 
 @router.get(
+    "/runs/{run_id}/events",
+    summary="Transcript event stream for one run (mig 285, paperclip P3)",
+)
+async def list_run_events(
+    run_id: str,
+    auth: AuthDep,
+    after_seq: int = 0,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Ordered agent_run_events for the Runs detail Transcript section.
+
+    Ownership enforced the same way as the run detail (a foreign run_id
+    reads as 404). ``after_seq`` supports incremental polling while the
+    run is live.
+    """
+    runs_repo = get_agent_runs_repository()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    row = await runs_repo.get_by_id(run_id, user_id=user_uuid)
+    if not row:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    client = await get_async_supabase_admin()
+    q = (
+        await client.table("agent_run_events")
+        .select("seq,event_type,payload,created_at")
+        .eq("run_id", str(run_id))
+        .gt("seq", after_seq)
+        .order("seq", desc=False)
+        .limit(max(1, min(limit, 1000)))
+        .execute()
+    )
+    items = q.data or []
+    return {"items": items, "count": len(items)}
+
+
+@router.get(
     "/runs/{run_id}/children",
     response_model=List[RunListItem],
     summary="List direct sub-runs spawned by this run via the Task tool",

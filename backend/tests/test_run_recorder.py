@@ -347,3 +347,61 @@ async def test_no_task_id_skips_linkage() -> None:
     assert "task_id" not in table.insert_calls[0]
     assert len(table.update_calls) == 1  # finish only
     assert table.update_calls[0]["status"] == "completed"
+
+
+class _FakeTableWithEvents(_FakeTable):
+    """Routes agent_run_events inserts into a separate list so run-row
+    asserts stay untouched."""
+
+    def __init__(self, **kw) -> None:
+        super().__init__(**kw)
+        self.event_inserts: list[dict] = []
+        self._current_table = ""
+
+    def for_table(self, name: str) -> "_FakeTableWithEvents":
+        self._current_table = name
+        return self
+
+    def insert(self, payload: dict):
+        if self._current_table == "agent_run_events":
+            self.event_inserts.append(payload)
+            return _Executable({"data": [payload]})
+        return super().insert(payload)
+
+
+class _FakeClientRouting:
+    def __init__(self, table: _FakeTableWithEvents) -> None:
+        self._table = table
+
+    def table(self, name: str):
+        return self._table.for_table(name)
+
+
+@pytest.mark.asyncio
+async def test_record_event_appends_sequenced_truncated_rows() -> None:
+    """mig 285 transcript: record_event auto-increments seq, truncates long
+    payload values, and never writes before the run row exists."""
+    table = _FakeTableWithEvents(insert_result_data=[{"id": 310819108761487}])
+    client = _FakeClientRouting(table)
+
+    with patch("app.db.get_async_supabase_admin", AsyncMock(return_value=client)):
+        rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+        # Before start: run_id None → no-op, no insert.
+        await rec.record_event("user", {"content": "early"})
+        assert table.event_inserts == []
+
+        async with rec:
+            await rec.record_event("user", {"content": "hello"})
+            await rec.record_event(
+                "tool_call",
+                {"tool": "Skill", "args": {"skill": "x"}, "result": "y" * 10_000},
+            )
+
+    assert [e["seq"] for e in table.event_inserts] == [1, 2]
+    assert table.event_inserts[0]["event_type"] == "user"
+    assert table.event_inserts[0]["payload"]["content"] == "hello"
+    # Long string value truncated to the cap (+ ellipsis).
+    result_val = table.event_inserts[1]["payload"]["result"]
+    assert len(result_val) <= RunRecorder.EVENT_VALUE_MAX_CHARS + 3
+    # Non-string values JSON-encoded.
+    assert "skill" in table.event_inserts[1]["payload"]["args"]

@@ -16,6 +16,7 @@ import { getApiUrl } from '../utils/apiConfig';
 import type {
   AgentDashboard,
   AgentRunDetail,
+  AgentRunEvent,
   AgentRunListResponse,
   AILibraryAgent,
   AILibraryApprovalRequest,
@@ -142,6 +143,18 @@ export const aiLibraryService = {
   }> {
     const resp = await fetch(
       `${base()}/agents/${encodeURIComponent(slug)}/status`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  /** Transcript event stream for one run (mig 285). after_seq = incremental poll. */
+  async getRunEvents(
+    runId: string,
+    afterSeq = 0,
+  ): Promise<{ items: AgentRunEvent[]; count: number }> {
+    const resp = await fetch(
+      `${base()}/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}`,
       { headers: await getAuthHeaders() },
     );
     return handle(resp);
