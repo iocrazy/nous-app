@@ -231,6 +231,8 @@ async def test_workflow_helper_posts_latest_pair(
             "session_id": "999",
             "user_message": "newest question",
             "assistant_message": "newest answer",
+            # No team context resolvable in unit tests → default workspace.
+            "workspace_id": None,
         }
     ]
 
@@ -283,3 +285,69 @@ async def test_live_add_chat_turn() -> None:
         assistant_message="Acknowledged: minimal thumbnail preference.",
     )
     assert ok is True
+
+
+# ============================================================
+# Workspace=team mapping (Phase 4 M6)
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_workspace_override_routes_to_team_namespace() -> None:
+    recorder = Recorder()
+    service = _service(recorder)
+    ok = await service.add_chat_turn(
+        user_id="42",
+        agent_id="7",
+        session_id="999",
+        user_message="hi",
+        assistant_message="yo",
+        workspace_id="team-555",
+    )
+    assert ok is True
+    paths = [p for p, _ in recorder.requests]
+    assert paths[0] == "/v3/workspaces"
+    assert recorder.requests[0][1] == {"id": "team-555"}
+    assert paths[-1] == "/v3/workspaces/team-555/sessions/session-999/messages"
+
+
+@pytest.mark.asyncio
+async def test_workflow_resolves_team_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.workflows import write_memory as wm
+
+    svc = RecordingService()
+    monkeypatch.setattr(
+        "app.services.ai.memory.honcho_memory.get_honcho_memory_service",
+        lambda: svc,
+    )
+
+    async def fake_resolve(session_id: str):
+        assert session_id == "999"
+        return "team-555"
+
+    monkeypatch.setattr(wm, "_resolve_team_workspace", fake_resolve)
+    ok = await wm._write_honcho_turn(
+        user_id="42",
+        agent_id="7",
+        session_id="999",
+        user_msgs=["q"],
+        asst_msgs=["a"],
+    )
+    assert ok is True
+    assert svc.turns[0]["workspace_id"] == "team-555"
+
+
+@pytest.mark.asyncio
+async def test_resolve_team_workspace_handles_lookup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.workflows.write_memory import _resolve_team_workspace
+
+    class BoomEngine:
+        async def fetch_one(self, *a, **k):
+            raise RuntimeError("db down")
+
+    monkeypatch.setattr("app.db.engine.fetch_one", BoomEngine().fetch_one)
+    assert await _resolve_team_workspace("999") is None

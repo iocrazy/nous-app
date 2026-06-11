@@ -190,13 +190,40 @@ async def _write_honcho_turn(
     assistant_message = asst_msgs[-1] if asst_msgs else ""
     if not (user_message.strip() or assistant_message.strip()):
         return False
+    workspace_id = await _resolve_team_workspace(session_id)
     return await service.add_chat_turn(
         user_id=user_id,
         agent_id=agent_id,
         session_id=session_id,
         user_message=user_message,
         assistant_message=assistant_message,
+        workspace_id=workspace_id,
     )
+
+
+async def _resolve_team_workspace(session_id: str) -> Optional[str]:
+    """Map the session's team to a Honcho workspace (Workspace=team).
+
+    Returns ``team-{team_id}`` when the session carries team context,
+    None (→ deployment default workspace) when it doesn't or the
+    lookup fails — never blocks the write on a metadata read.
+    """
+    try:
+        from app.db import engine as db_engine
+
+        row = await db_engine.fetch_one(
+            "SELECT team_id FROM public.ai_sessions WHERE id = :sid",
+            {"sid": session_id},
+        )
+        team_id = row.get("team_id") if row else None
+        return f"team-{team_id}" if team_id else None
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "[write_memory] team lookup failed for session %s; "
+            "falling back to default workspace",
+            session_id,
+        )
+        return None
 
 
 @DBOS.step()
