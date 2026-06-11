@@ -13,14 +13,18 @@ interface NewIssueDialogProps {
   teamId: number | null;
   /** When set, the dialog opens in "sub-issue" mode and writes parent_id on submit. */
   parentId?: number | null;
+  /** Preselect the assignee (paperclip "Assign Task" from an agent page). */
+  defaultAgentId?: string | null;
   onClose: () => void;
   onSubmit: (payload: IssueCreatePayload) => Promise<void>;
 }
 
-export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({ agents, teamId, parentId, onClose, onSubmit }) => {
+export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({
+  agents, teamId, parentId, defaultAgentId, onClose, onSubmit,
+}) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [agentId, setAgentId] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null);
   const [priority, setPriority] = useState<IssuePriority>('medium');
   const [submitting, setSubmitting] = useState(false);
 

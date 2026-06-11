@@ -1713,7 +1713,18 @@
         "resume": "恢复",
         "resuming": "正在恢复...",
         "resumedToast": "Agent 已恢复"
-      }
+      },
+      "statusChip": {
+        "idle": "空闲",
+        "running": "运行中",
+        "paused": "已暂停"
+      },
+      "assignTask": "Assign Task",
+      "pause": "Pause",
+      "resume": "Resume",
+      "resumed": "Agent 已恢复",
+      "pausedToast": "Agent 已暂停",
+      "taskAssigned": "任务已指派"
     },
     "skills": {
       "addFile": "+ 添加文件",
