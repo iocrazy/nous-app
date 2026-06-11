@@ -256,6 +256,48 @@ class StoryboardAIService:
 
         raise ValueError(f"No valid JSON found in LLM output: {text[:300]!r}")
 
+    _STYLE_FRAGMENT_MAX_CHARS = 600
+
+    async def build_project_style_fragment(self, storyboard_project_id: str) -> str:
+        """Project style guidance for prompt injection (Phase 4 M9).
+
+        Reads the project's style profile (keyed on the canonical project
+        the storyboard project links to) and renders ``style_md`` plus the
+        structured ``visual_style`` traits into one clipped fragment.
+        Empty string when no profile exists or anything fails — style is
+        seasoning, never a reason for a generation to break."""
+        try:
+            from app.repositories.project_style_profile_repository import (
+                get_project_style_profile_repository,
+            )
+
+            profile = (
+                await get_project_style_profile_repository().get_for_storyboard_project(
+                    int(storyboard_project_id)
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Style profile lookup failed for storyboard project %s",
+                storyboard_project_id,
+            )
+            return ""
+        if not profile:
+            return ""
+
+        parts: List[str] = []
+        style_md = (profile.get("style_md") or "").strip()
+        if style_md:
+            parts.append(style_md)
+        visual_style = profile.get("visual_style")
+        if isinstance(visual_style, dict):
+            traits = ", ".join(
+                f"{key}: {value}" for key, value in visual_style.items() if value
+            )
+            if traits:
+                parts.append(traits)
+        return " — ".join(parts)[: self._STYLE_FRAGMENT_MAX_CHARS]
+
     async def _build_character_prompt_fragments(self, character_ids: List[str]) -> str:
         """
         Fetch each character and return a joined description string.
@@ -338,6 +380,10 @@ class StoryboardAIService:
                 )
                 if character_fragment:
                     effective_prompt = f"{character_fragment}, {prompt}"
+
+            style_fragment = await self.build_project_style_fragment(project_id)
+            if style_fragment:
+                effective_prompt = f"{effective_prompt}. Style: {style_fragment}"
 
             image_provider = provider_registry.get_image_provider(provider_name)
 
