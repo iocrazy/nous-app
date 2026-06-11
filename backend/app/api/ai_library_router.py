@@ -564,6 +564,93 @@ async def resume_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
     return enriched[0]
 
 
+@router.post(
+    "/agents/{slug}/pause",
+    response_model=AgentOut,
+    summary="Pause agent (sets paused_reason='manual')",
+)
+async def pause_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
+    """Manually pause an agent — mirror of /resume (paperclip's Pause action).
+
+    Sets paused_reason='manual'. RunRecorder's pre-flight check raises
+    AgentPausedError before any LLM call while this is set, so a paused
+    agent stops doing work immediately (between runs). 400 when already
+    paused; 403 for presets; 404 when not found.
+    """
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+    if agent.get("is_system_preset"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="system preset agents are read-only in phase 1",
+        )
+    if agent.get("paused_reason") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="agent is already paused",
+        )
+
+    agent_uuid = UUID(str(agent["id"]))
+    await agent_repo.update_fields(agent_uuid, {"paused_reason": "manual"})
+
+    refreshed = await agent_repo.get_by_slug(slug)
+    if refreshed is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="agent disappeared after pause",
+        )
+    row = {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    enriched = await _enrich_agents_with_scope_names([row])
+    return enriched[0]
+
+
+@router.get(
+    "/agents/{slug}/status",
+    summary="Live agent status chip (idle / running / paused)",
+)
+async def get_agent_status(slug: str, auth: AuthDep) -> Dict[str, Any]:
+    """Derived status for the agent header chip (paperclip-style).
+
+    paused_reason set → 'paused'; else any of the caller's runs currently
+    status='running' → 'running'; else 'idle'. Scoped to the caller's runs
+    (same scoping as the Runs tab) so one user's chat doesn't light up the
+    chip for everyone.
+    """
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+    if agent.get("paused_reason"):
+        return {
+            "status": "paused",
+            "paused_reason": agent["paused_reason"],
+            "running_count": 0,
+        }
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    client = await get_async_supabase_admin()
+    running_q = (
+        await client.table("agent_runs")
+        .select("id", count="exact", head=True)
+        .eq("agent_id", str(agent["id"]))
+        .eq("user_id", str(user_uuid))
+        .eq("status", "running")
+        .execute()
+    )
+    running = running_q.count or 0
+    return {
+        "status": "running" if running > 0 else "idle",
+        "paused_reason": None,
+        "running_count": running,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Skills
 # ---------------------------------------------------------------------------

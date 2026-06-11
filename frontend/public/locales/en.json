@@ -1713,7 +1713,18 @@
         "resume": "Resume",
         "resuming": "Resuming...",
         "resumedToast": "Agent resumed"
-      }
+      },
+      "statusChip": {
+        "idle": "idle",
+        "running": "running",
+        "paused": "paused"
+      },
+      "assignTask": "Assign Task",
+      "pause": "Pause",
+      "resume": "Resume",
+      "resumed": "Agent resumed",
+      "pausedToast": "Agent paused",
+      "taskAssigned": "Task assigned"
     },
     "skills": {
       "addFile": "+ Add file",

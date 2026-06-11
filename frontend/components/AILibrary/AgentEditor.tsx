@@ -31,6 +31,7 @@ import { MarkdownEditor } from './MarkdownEditor';
 import { NewAgentModal } from './NewAgentModal';
 import { AgentIconPicker } from './AgentIconPicker';
 import { AgentDashboardTab } from './AgentDashboardTab';
+import { AgentActionBar } from './AgentActionBar';
 import { AgentRunsSplit } from './AgentRunsSplit';
 import { VersionHistoryPanel } from './VersionHistoryPanel';
 
@@ -345,6 +346,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <AgentActionBar
+            agent={agent}
+            readOnly={readOnly}
+            onAgentUpdated={(updated) => {
+              setAgent(updated);
+              setDraft(buildDraft(updated));
+            }}
+          />
           {isPreset && (
             <button
               onClick={openForkModal}
