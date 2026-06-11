@@ -123,6 +123,15 @@ class AiAgents(Base):
         server_default=text("false"),
         comment="true = platform-managed preset, false = user-created",
     )
+    capability_profile: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+        comment=(
+            "Phase 4.5 capability gating: {tool_blacklist, allowed_skills, "
+            "max_parallel_delegates, context_budget_tokens}. Empty object = ungated."
+        ),
+    )
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
     icon: Mapped[Optional[str]] = mapped_column(Text)
     monthly_token_budget: Mapped[Optional[int]] = mapped_column(Integer)

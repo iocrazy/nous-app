@@ -132,6 +132,19 @@ async def build_agent_runner_stack(
             priority=20,
         )
 
+    # Phase 4.5: per-agent capability gating. Only registered when the
+    # agent actually carries a profile — the common (empty) case pays
+    # zero per-tool-call overhead.
+    capability_profile = agent.get("capability_profile") or {}
+    if capability_profile:
+        from app.services.infra.hooks.capability_gate import CapabilityGateHook
+
+        registry.register_pre(
+            CapabilityGateHook(capability_profile),
+            name="capability_gate",
+            priority=25,
+        )
+
     registry.register_post(
         CostAuditorHook(),
         name="cost_auditor",
