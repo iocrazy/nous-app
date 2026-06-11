@@ -6,8 +6,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-import pytest
-
 
 async def test_returns_existing_when_issue_has_session(monkeypatch):
     from app.services.issues import issue_session as m
@@ -45,7 +43,9 @@ async def test_creates_and_backfills_when_absent(monkeypatch):
         }
 
     chat_svc = AsyncMock()
-    chat_svc.create_session = AsyncMock(return_value={"id": "new-sess"})
+    # ai_sessions.id is a BIGINT snowflake since mig 232 (service returns it
+    # as a str) — the backfill must coerce to int for asyncpg.
+    chat_svc.create_session = AsyncMock(return_value={"id": "315917457926636"})
     monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
     agent_repo = AsyncMock()
     agent_repo.get_by_id = AsyncMock(return_value={"slug": "writer"})
@@ -64,9 +64,11 @@ async def test_creates_and_backfills_when_absent(monkeypatch):
     ):
         got = await m.get_or_create_issue_session(409)
 
-    assert got == "new-sess"
+    assert got == "315917457926636"
     assert "UPDATE public.issues" in created["sql"]
-    assert created["params"]["sid"] == "new-sess" and created["params"]["id"] == 409
+    # sid must be an int (BIGINT column; asyncpg rejects str)
+    assert created["params"]["sid"] == 315917457926636
+    assert created["params"]["id"] == 409
 
 
 async def test_returns_none_when_no_agent(monkeypatch):

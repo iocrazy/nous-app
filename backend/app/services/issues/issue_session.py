@@ -48,10 +48,13 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
     session_id = str(session["id"])
 
     # Backfill, guarding on NULL so a concurrent create loses cleanly.
+    # ai_session_id is BIGINT since mig 232 (snowflake ids) — asyncpg
+    # requires a real int, a str raises DataError ('str' object cannot
+    # be interpreted as an integer).
     n = await db_engine.execute(
         "UPDATE public.issues SET ai_session_id = :sid "
         "WHERE id = :id AND ai_session_id IS NULL",
-        {"sid": session_id, "id": issue_id},
+        {"sid": int(session_id), "id": issue_id},
     )
     if n == 0:
         winner = await db_engine.fetch_one(
