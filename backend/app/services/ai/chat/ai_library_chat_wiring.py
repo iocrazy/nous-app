@@ -45,6 +45,24 @@ from app.services.workforce.delegate_tool import DelegateToolService
 logger = logging.getLogger(__name__)
 
 
+def _resolve_tool_rate_limit(capability_profile: dict[str, Any]) -> int:
+    """Tool-calls-per-minute cap for the RateLimit hook.
+
+    Per-agent ``capability_profile.rate_limit_tool_calls_per_min`` wins;
+    ``AGENT_TOOL_CALLS_PER_MIN`` env is the fleet default. 0 (the default)
+    disables the brake. Malformed values resolve to 0 — a config typo
+    must not brick the agent."""
+    override = capability_profile.get("rate_limit_tool_calls_per_min")
+    if isinstance(override, int) and override >= 0:
+        return override
+    raw = os.getenv("AGENT_TOOL_CALLS_PER_MIN", "0")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
 def _llm_total_deadline_s() -> Optional[float]:
     """AI-007: chain-wide wall-time ceiling for LLM retry + fallback.
 
@@ -125,6 +143,19 @@ async def build_agent_runner_stack(
     # ── 2. HookRegistry per-turn ────────────────────────────────────
     registry = HookRegistry()
 
+    # Phase 4.5: tool-call rate brake (Layer-2 budget). Per-agent profile
+    # overrides the env default; 0/absent = never registered, zero overhead.
+    capability_profile = agent.get("capability_profile") or {}
+    rate_limit = _resolve_tool_rate_limit(capability_profile)
+    if rate_limit > 0:
+        from app.services.infra.hooks.rate_limit import RateLimitHook
+
+        registry.register_pre(
+            RateLimitHook(limit_per_min=rate_limit),
+            name="rate_limit",
+            priority=15,
+        )
+
     if budget_cents is not None:
         registry.register_pre(
             BudgetGuardHook(budget_cents=float(budget_cents)),
@@ -135,7 +166,6 @@ async def build_agent_runner_stack(
     # Phase 4.5: per-agent capability gating. Only registered when the
     # agent actually carries a profile — the common (empty) case pays
     # zero per-tool-call overhead.
-    capability_profile = agent.get("capability_profile") or {}
     if capability_profile:
         from app.services.infra.hooks.capability_gate import CapabilityGateHook
 
