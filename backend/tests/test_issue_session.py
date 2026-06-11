@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 
-
 async def test_returns_existing_when_issue_has_session(monkeypatch):
     from app.services.issues import issue_session as m
 
