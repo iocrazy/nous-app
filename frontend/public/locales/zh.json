@@ -1727,7 +1727,14 @@
       "resume": "Resume",
       "resumed": "Agent 已恢复",
       "pausedToast": "Agent 已暂停",
-      "taskAssigned": "任务已指派"
+      "taskAssigned": "任务已指派",
+      "limits": {
+        "sectionLabel": "Run limits",
+        "timeoutLabel": "Timeout (sec)",
+        "timeoutHint": "单次运行的最长耗时，在 LLM 迭代之间检查。留空或 0 = 不限制。",
+        "concurrencyLabel": "Max concurrent runs",
+        "concurrencyHint": "已有这么多运行中时，新运行会被拒绝。留空 = 不限制。"
+      }
     },
     "skills": {
       "addFile": "+ 添加文件",

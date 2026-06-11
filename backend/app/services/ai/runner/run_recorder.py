@@ -59,6 +59,17 @@ class AgentPausedError(Exception):
     """
 
 
+class AgentBusyError(AgentPausedError):
+    """Raised by RunRecorder.start() when the agent already has
+    max_concurrent_runs live runs (mig 286, paperclip P4).
+
+    Subclasses AgentPausedError ON PURPOSE: every existing call site that
+    surfaces a pre-flight pause ("agent paused") handles this identically
+    without modification — the run is rejected before any LLM call and no
+    agent_runs row is created.
+    """
+
+
 class RunCancelledError(Exception):
     """Raised internally when cancel_requested=true is observed.
 
@@ -349,7 +360,7 @@ class RunRecorder:
         client = await get_async_supabase_admin()
         result = (
             await client.table("ai_agents")
-            .select("paused_reason")
+            .select("paused_reason,max_concurrent_runs")
             .eq("id", str(self.agent_id))
             .maybe_single()
             .execute()
@@ -357,6 +368,26 @@ class RunRecorder:
         if result and result.data and result.data.get("paused_reason"):
             reason = result.data["paused_reason"]
             raise AgentPausedError(f"agent paused (reason={reason})")
+
+        # mig 286 (paperclip P4): per-agent concurrency cap. Counted across
+        # ALL users — the limit protects the agent/provider, not one caller.
+        # Race window between count and insert is accepted (paperclip's is
+        # too): the cap is a throttle, not a mutex.
+        limit = (result.data or {}).get("max_concurrent_runs") if result else None
+        if limit:
+            running_q = (
+                await client.table("agent_runs")
+                .select("id", count="exact", head=True)
+                .eq("agent_id", str(self.agent_id))
+                .eq("status", "running")
+                .execute()
+            )
+            running = running_q.count or 0
+            if running >= int(limit):
+                raise AgentBusyError(
+                    f"agent at max_concurrent_runs ({running}/{limit}) — "
+                    "try again when a run finishes"
+                )
 
     async def _snapshot_price(self) -> None:
         """Look up the most-recent ai_model_prices row as-of now for this model.

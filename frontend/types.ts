@@ -1004,6 +1004,9 @@ export interface AILibraryAgent {
   project_name?: string | null;
   // Budget-guard columns (migration 148). Null budget = unlimited.
   monthly_token_budget?: number | null;
+  /** mig 286 run limits — null = unlimited. */
+  timeout_sec?: number | null;
+  max_concurrent_runs?: number | null;
   monthly_cost_cents_budget?: number | null;
   /** 'budget' when sweeper detects over-spend, 'manual' when admin pauses. */
   paused_reason?: 'budget' | 'manual' | null;

@@ -388,7 +388,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             <div className="text-xs text-amber-200/70">
               {t(
                 'aiLibrary.agents.providerDisabledBody',
-                'Model {{model}} belongs to a provider this account hasn\'t configured. Invocations of this agent will fail. Pick another model below or configure the provider in AI Settings.',
+                "Model {{model}} belongs to a provider this account hasn't configured. Invocations of this agent will fail. Pick another model below or configure the provider in AI Settings.",
                 { model: agent.model },
               )}
             </div>
@@ -575,6 +575,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             disabled={readOnly}
             onTokenChange={(v) => updateDraft('monthly_token_budget', v)}
             onCostChange={(v) => updateDraft('monthly_cost_cents_budget', v)}
+          />
+
+          <RunLimitFields
+            timeoutSec={draft.timeout_sec ?? null}
+            maxConcurrentRuns={draft.max_concurrent_runs ?? null}
+            disabled={readOnly}
+            onTimeoutChange={(v) => updateDraft('timeout_sec', v)}
+            onConcurrencyChange={(v) => updateDraft('max_concurrent_runs', v)}
           />
 
           <div className="pt-1 text-xs text-zinc-500">
@@ -1068,6 +1076,8 @@ function buildDraft(a: AILibraryAgent): Partial<AILibraryAgent> {
     agent_md: a.agent_md ?? '',
     monthly_token_budget: a.monthly_token_budget ?? null,
     monthly_cost_cents_budget: a.monthly_cost_cents_budget ?? null,
+    timeout_sec: a.timeout_sec ?? null,
+    max_concurrent_runs: a.max_concurrent_runs ?? null,
   };
 }
 
@@ -1139,6 +1149,77 @@ const PausedBanner: React.FC<{
  * digits without React emitting spurious 0s or NaN — we parse on change and
  * send `null` back up when the field is empty.
  */
+/**
+ * Run limits (mig 286, paperclip P4). timeout_sec bounds one run's tool loop
+ * (checked between LLM iterations); max_concurrent_runs is a pre-flight cap
+ * enforced by RunRecorder. Blank = unlimited.
+ */
+const RunLimitFields: React.FC<{
+  timeoutSec: number | null;
+  maxConcurrentRuns: number | null;
+  disabled: boolean;
+  onTimeoutChange: (value: number | null) => void;
+  onConcurrencyChange: (value: number | null) => void;
+}> = ({ timeoutSec, maxConcurrentRuns, disabled, onTimeoutChange, onConcurrencyChange }) => {
+  const { t } = useTranslation();
+  const parseIntOr = (raw: string, min: number): number | null => {
+    if (raw === '') return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? Math.max(min, Math.floor(parsed)) : null;
+  };
+  return (
+    <div className="space-y-1.5">
+      <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+        {t('aiLibrary.agents.limits.sectionLabel', 'Run limits')}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-zinc-400">
+            {t('aiLibrary.agents.limits.timeoutLabel', 'Timeout (sec)')}
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={10}
+            value={timeoutSec ?? ''}
+            placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
+            onChange={(e) => onTimeoutChange(parseIntOr(e.target.value, 0))}
+            disabled={disabled}
+            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
+          />
+          <p className="mt-1 text-xs text-zinc-500">
+            {t(
+              'aiLibrary.agents.limits.timeoutHint',
+              "Max wall-clock per run, checked between LLM iterations. Blank or 0 = no cap.",
+            )}
+          </p>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-zinc-400">
+            {t('aiLibrary.agents.limits.concurrencyLabel', 'Max concurrent runs')}
+          </label>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={maxConcurrentRuns ?? ''}
+            placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
+            onChange={(e) => onConcurrencyChange(parseIntOr(e.target.value, 1))}
+            disabled={disabled}
+            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
+          />
+          <p className="mt-1 text-xs text-zinc-500">
+            {t(
+              'aiLibrary.agents.limits.concurrencyHint',
+              "New runs are rejected while this many are already running. Blank = unlimited.",
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const BudgetFields: React.FC<{
   tokenBudget: number | null;
   costCentsBudget: number | null;
@@ -1218,7 +1299,7 @@ const BudgetFields: React.FC<{
           <p className="mt-1 text-xs text-zinc-500">
             {t(
               'aiLibrary.agents.budget.costBudgetHint',
-              'Hard cap on this month\'s spend. The sweeper pauses the agent within ~60s of crossing the cap.',
+              "Hard cap on this month's spend. The sweeper pauses the agent within ~60s of crossing the cap.",
             )}
           </p>
         </div>

@@ -284,6 +284,14 @@ class AgentRunner:
         messages = list(user_messages)
         iteration = 0
         MAX_STREAM_ITERATIONS = 10
+        # mig 286: same wall-clock cap as run_turn (see comment there).
+        import time as _time
+
+        _deadline = (
+            _time.monotonic() + composed.timeout_sec
+            if getattr(composed, "timeout_sec", None)
+            else None
+        )
 
         # P3 transcript (mig 285): open the event stream with the user turn.
         # Streaming runs skip the final 'assistant' event — the chat layer
@@ -296,6 +304,20 @@ class AgentRunner:
 
         while iteration < MAX_STREAM_ITERATIONS:
             iteration += 1
+            if _deadline is not None and _time.monotonic() > _deadline:
+                logger.warning(
+                    f"[stream_turn] run timeout_sec={composed.timeout_sec} "
+                    f"exceeded at iter={iteration}"
+                )
+                yield StreamChunk(
+                    delta_text=(
+                        f"\n\n[run exceeded the agent's timeout_sec "
+                        f"({composed.timeout_sec}s)]"
+                    ),
+                    finish_reason="length",
+                    usage={"warning": "timeout_sec_exceeded"},
+                )
+                return
             if abort is not None and abort.is_aborted():
                 inc_metric("streaming_aborted_mid")
                 raise RunAborted("user cancel between stream iterations")
@@ -571,6 +593,16 @@ class AgentRunner:
 
         messages = list(user_messages)
         iteration = 0
+        # mig 286 (paperclip P4): per-run wall-clock cap. Checked between
+        # LLM iterations — bounds the tool loop; a single hung HTTP call is
+        # bounded by the adapter's own client timeout.
+        import time as _time
+
+        _deadline = (
+            _time.monotonic() + composed.timeout_sec
+            if getattr(composed, "timeout_sec", None)
+            else None
+        )
 
         # P3 transcript (mig 285): open the event stream with the user turn.
         # Best-effort — record_event never raises.
@@ -632,6 +664,21 @@ class AgentRunner:
 
         for _ in range(MAX_TOOL_ITERATIONS):
             iteration += 1
+
+            if _deadline is not None and _time.monotonic() > _deadline:
+                logger.warning(
+                    f"[AgentRunner] run timeout_sec={composed.timeout_sec} "
+                    f"exceeded at iter={iteration}"
+                )
+                return {
+                    "content": "",
+                    "raw": None,
+                    "error": (
+                        f"run exceeded the agent's timeout_sec "
+                        f"({composed.timeout_sec}s)"
+                    ),
+                    "error_code": "run_timeout",
+                }
 
             if recorder is not None:
                 await recorder.heartbeat()

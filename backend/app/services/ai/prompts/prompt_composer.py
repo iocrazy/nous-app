@@ -148,6 +148,9 @@ class PromptComposer:
             prefix_fingerprint=prefix_fp,
             dynamic_fingerprint=dynamic_fp,
             recalled_memory_ids=[m.id for m in inp.recalled_memories],
+            # mig 286: per-run wall-clock cap, enforced by AgentRunner
+            # between LLM iterations.
+            timeout_sec=agent.get("timeout_sec"),
         )
 
     # ------------------------------------------------------------------
