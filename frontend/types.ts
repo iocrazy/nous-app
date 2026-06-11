@@ -1120,6 +1120,18 @@ export interface AgentRunListItem {
   ended_at?: string | null;
   error_code?: string | null;
   skill_slugs_used: string[];
+  /** task_tracking PK when the run executed inside a tracked workflow (mig 282). */
+  task_id?: string | null;
+  /** 500-char display summary — left-column snippet in the split-pane Runs tab. */
+  output_summary?: string | null;
+}
+
+/** Slim task_tracking ref attached to a run detail ("Tasks Touched"). */
+export interface AgentRunTaskRef {
+  id: string;
+  title?: string | null;
+  phase?: string | null;
+  task_type?: string | null;
 }
 
 /** Full detail view — adds summaries, metadata, snapshots, and cancel state. */
@@ -1131,11 +1143,13 @@ export interface AgentRunDetail extends AgentRunListItem {
   cancel_requested: boolean;
   prompt_cents_per_1k_snapshot?: number | null;
   completion_cents_per_1k_snapshot?: number | null;
+  cached_input_tokens?: number;
   input_summary?: string | null;
-  output_summary?: string | null;
   error_message?: string | null;
   metadata_json: Record<string, unknown>;
   created_at: string;
+  /** Resolved from task_id by the backend (null when not workflow-linked). */
+  task?: AgentRunTaskRef | null;
 }
 
 export interface AgentRunListResponse {

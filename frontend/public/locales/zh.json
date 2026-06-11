@@ -1686,7 +1686,13 @@
           "failed": "失败",
           "cancelled": "已取消",
           "heartbeat_lost": "心跳丢失"
-        }
+        },
+        "tasksTouched": "关联任务",
+        "session": "会话",
+        "statInput": "输入",
+        "statOutput": "输出",
+        "statCached": "缓存",
+        "selectPrompt": "选择一条运行记录查看详情"
       },
       "budget": {
         "sectionLabel": "每月预算",
