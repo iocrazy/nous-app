@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
   Clock, Tag, ChevronRight, Brain, AlertCircle, List, AlignLeft, ChevronDown, Music,
@@ -113,6 +113,13 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysisData | null>(null);
+  // Task-driven phase for the Visual Analysis section — independent of
+  // video.visual_analysis_status (the parent's onUpdate prop chain doesn't
+  // reliably flow back; see the watcher effect below).
+  const [analysisTaskPhase, setAnalysisTaskPhase] = useState<
+    'processing' | 'completed' | 'failed' | null
+  >(null);
+  const analysisFetchAttemptedRef = useRef(false);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [visualAnalysisLoading, setVisualAnalysisLoading] = useState(false);
@@ -240,35 +247,52 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     }
   }, [tasks, resourceId, transcribeStatus]);
 
-  // Visual analysis: handleVisualAnalysis optimistically sets 'processing' but
-  // (unlike transcribe/summarize) doesn't poll, so on failure the panel used to
-  // stay stuck on "Analyzing…". Reconcile against the latest ai_extract task for
-  // this resource: terminal failed/cancelled → flip to 'failed' (the panel then
-  // shows the retry button + reason); completed → 'completed'. Backend also
-  // writes the same status, so a fresh load is correct too; this is the live
-  // (no-refresh) path.
+  // Visual analysis is TASK-DRIVEN: the panel mirrors the latest ai_extract
+  // task for this resource into LOCAL state (analysisTaskPhase) and fetches
+  // the result on completion. It deliberately does NOT gate on
+  // video.visual_analysis_status — the earlier version did
+  // (`if (status !== 'processing') return`), relying on onUpdate writing
+  // 'processing' back into the video prop, but DownloadDetailPage's prop
+  // chain doesn't flow updates back, so the watcher never fired: the run
+  // completed, the result row existed, and the panel never fetched it
+  // (api_request_logs showed zero GETs after completion).
   useEffect(() => {
-    if (!resourceId || !onUpdate) return;
-    if (video.visual_analysis_status !== 'processing') return;
+    if (!resourceId) return;
     const latest = tasks
-      .filter((t) => t.task_type === 'ai_extract' && t.resource_id === resourceId)
+      .filter(
+        (t) =>
+          t.task_type === 'ai_extract'
+          && String(t.resource_id) === String(resourceId),
+      )
       .sort(
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       )[0];
     if (!latest) return;
     if (latest.status === 'completed') {
-      onUpdate(video.platform_id, { visual_analysis_status: 'completed' });
+      setAnalysisTaskPhase('completed');
       setVisualAnalysisLoading(false);
-      // Pull the freshly-written result so the panel flips straight from
-      // "Analyzing…" to the analysis card without a manual refresh.
-      loadVisualAnalysis();
+      if (!visualAnalysis && !analysisFetchAttemptedRef.current) {
+        analysisFetchAttemptedRef.current = true;
+        loadVisualAnalysis();
+      }
+      if (onUpdate && video.visual_analysis_status === 'processing') {
+        onUpdate(video.platform_id, { visual_analysis_status: 'completed' });
+      }
     } else if (latest.status === 'failed' || latest.status === 'cancelled') {
-      onUpdate(video.platform_id, { visual_analysis_status: 'failed' });
+      setAnalysisTaskPhase('failed');
       setVisualAnalysisError(latest.error_msg || 'Visual analysis failed');
       setVisualAnalysisLoading(false);
+    } else {
+      // queued / processing — a retry resets the fetch guard so the NEXT
+      // completion fetches fresh data.
+      setAnalysisTaskPhase('processing');
+      analysisFetchAttemptedRef.current = false;
     }
-  }, [tasks, resourceId, video.visual_analysis_status, video.platform_id, onUpdate]);
+  }, [
+    tasks, resourceId, video.visual_analysis_status, video.platform_id,
+    onUpdate, visualAnalysis, loadVisualAnalysis,
+  ]);
 
   const handleTranscribe = async () => {
     try {
@@ -331,6 +355,10 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
       } else {
         await triggerVisualAnalysis(video.platform_id);
       }
+      // Optimistic local phase — the task row arrives via realtime a beat
+      // later; until then the spinner (not the trigger button) should show.
+      setAnalysisTaskPhase('processing');
+      analysisFetchAttemptedRef.current = false;
       if (onUpdate) {
         onUpdate(video.platform_id, { visual_analysis_status: 'processing' });
       }
@@ -813,7 +841,10 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 </div>
               )}
 
-              {!visualAnalysis && video.visual_analysis_status === 'processing' && (
+              {!visualAnalysis
+                && (analysisTaskPhase === 'processing'
+                  || (analysisTaskPhase === null
+                    && video.visual_analysis_status === 'processing')) && (
                 <div className="flex items-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
                   <Loader2 size={18} className="animate-spin text-purple-400" />
                   <span className="text-sm text-zinc-400">Analyzing visual content...</span>
@@ -825,10 +856,15 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   An allowlist here broke twice — the column's DB default is
                   'none' (not 'pending'; ResourceDetailPage checks it
                   explicitly), and unknown future values would blank the
-                  section again. */}
+                  section again. analysisTaskPhase (task-driven local state)
+                  takes precedence over the video prop, whose updates don't
+                  reliably flow back from the parent. */}
               {!visualAnalysis
-                && video.visual_analysis_status !== 'processing'
-                && video.visual_analysis_status !== 'failed' && (
+                && analysisTaskPhase !== 'processing'
+                && analysisTaskPhase !== 'failed'
+                && !(analysisTaskPhase === null
+                  && (video.visual_analysis_status === 'processing'
+                    || video.visual_analysis_status === 'failed')) && (
                 <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
                   {visualAnalysisFetching ? (
                     <div className="flex items-center gap-3">
@@ -863,7 +899,10 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 </div>
               )}
 
-              {!visualAnalysis && video.visual_analysis_status === 'failed' && (
+              {!visualAnalysis
+                && (analysisTaskPhase === 'failed'
+                  || (analysisTaskPhase === null
+                    && video.visual_analysis_status === 'failed')) && (
                 <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-lg">
                   <p className="text-sm text-red-400 mb-3">Visual analysis failed. Please try again.</p>
                   <button
