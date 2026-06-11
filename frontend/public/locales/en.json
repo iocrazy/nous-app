@@ -1727,7 +1727,14 @@
       "resume": "Resume",
       "resumed": "Agent resumed",
       "pausedToast": "Agent paused",
-      "taskAssigned": "Task assigned"
+      "taskAssigned": "Task assigned",
+      "limits": {
+        "sectionLabel": "Run limits",
+        "timeoutLabel": "Timeout (sec)",
+        "timeoutHint": "Max wall-clock per run, checked between LLM iterations. Blank or 0 = no cap.",
+        "concurrencyLabel": "Max concurrent runs",
+        "concurrencyHint": "New runs are rejected while this many are already running. Blank = unlimited."
+      }
     },
     "skills": {
       "addFile": "+ Add file",
