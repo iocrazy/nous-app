@@ -713,6 +713,16 @@ def validate_and_refresh_urls(
 # ─── Audio extraction helper ─────────────────────────────────────────
 
 
+class AudioExtractError(RuntimeError):
+    """Audio extraction failed for a specific, nameable reason.
+
+    Raised instead of returning False so the reason survives all the way
+    into task_tracking.error_msg / DBOS workflow error — a bare False
+    collapsed "no media row", "video file gone", "ffmpeg rc=1 (no audio
+    stream)" etc. into one unactionable generic message (the 3-layer
+    observability bug, 2026-06-07)."""
+
+
 def extract_audio_from_video(platform_id: str) -> bool:
     """Extract audio from downloaded video using ffmpeg stream copy (zero-transcode).
 
@@ -722,7 +732,8 @@ def extract_audio_from_video(platform_id: str) -> bool:
     This is ~100x faster than downloading music separately via URL
     because it's a pure I/O operation with no network or re-encoding.
 
-    Returns True on success, False on failure.
+    Returns True on success; raises AudioExtractError with the specific
+    reason on failure.
     """
     import subprocess
 
@@ -731,20 +742,19 @@ def extract_audio_from_video(platform_id: str) -> bool:
     repo = _MR_extract()
     media = run_async(repo.get_by_platform_id(platform_id))
     if not media:
-        logger.warning(f"[Audio/Extract] No media record for {platform_id}")
-        return False
+        raise AudioExtractError(f"no parsed_media record for {platform_id}")
 
     video_rel_path = media.get("download_path")
     if not video_rel_path:
-        logger.warning(f"[Audio/Extract] No download_path for {platform_id}")
-        return False
+        raise AudioExtractError(
+            f"media {platform_id} has no download_path (video not downloaded)"
+        )
 
     base_path = Utils.get_download_base_path()
     video_full_path = os.path.join(base_path, video_rel_path)
 
     if not os.path.exists(video_full_path):
-        logger.warning(f"[Audio/Extract] Video file not found: {video_full_path}")
-        return False
+        raise AudioExtractError(f"video file missing on disk: {video_rel_path}")
 
     output_dir = os.path.dirname(video_full_path)
     audio_full_path = os.path.join(output_dir, "audio.m4a")
@@ -768,19 +778,18 @@ def extract_audio_from_video(platform_id: str) -> bool:
         )
 
         if result.returncode != 0:
-            logger.warning(
-                f"[Audio/Extract] ffmpeg failed (rc={result.returncode}): "
-                f"{result.stderr[:300]}"
-            )
-            return False
+            # The tail of stderr carries ffmpeg's actual complaint
+            # (e.g. "does not contain any stream" for audio-less video).
+            stderr_clip = (result.stderr or "").strip()[-300:]
+            raise AudioExtractError(f"ffmpeg rc={result.returncode}: {stderr_clip}")
 
         if not os.path.exists(audio_full_path) or os.path.getsize(audio_full_path) == 0:
-            logger.warning(
-                f"[Audio/Extract] Output file missing or empty: {audio_full_path}"
-            )
             if os.path.exists(audio_full_path):
                 os.remove(audio_full_path)
-            return False
+            raise AudioExtractError(
+                "ffmpeg succeeded but output audio.m4a is missing/empty "
+                "(source video likely has no audio stream)"
+            )
 
         file_size = os.path.getsize(audio_full_path)
         logger.info(
@@ -803,12 +812,11 @@ def extract_audio_from_video(platform_id: str) -> bool:
 
         return True
 
+    except AudioExtractError:
+        raise
     except subprocess.TimeoutExpired:
-        logger.warning(f"[Audio/Extract] ffmpeg timed out for {platform_id}")
-        return False
+        raise AudioExtractError("ffmpeg timed out after 30s") from None
     except FileNotFoundError:
-        logger.warning("[Audio/Extract] ffmpeg not found in PATH")
-        return False
+        raise AudioExtractError("ffmpeg binary not found in PATH") from None
     except Exception as e:
-        logger.warning(f"[Audio/Extract] Error for {platform_id}: {e}")
-        return False
+        raise AudioExtractError(f"{type(e).__name__}: {e}") from e

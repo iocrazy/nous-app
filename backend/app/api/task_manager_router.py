@@ -255,13 +255,23 @@ async def extend_task_timeout(task_id: str, auth: AuthDep, minutes: int = 30):
 
 @router.post("/tasks/{task_id}/retry")
 async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
-    """Reset a failed/cancelled task for retry and re-dispatch the Celery job."""
+    """Reset a failed/cancelled/lost task and genuinely re-dispatch it.
+
+    The row is re-keyed to a FRESH dbos_workflow_id and every dispatch
+    below starts its workflow under that same id — so the lifecycle
+    trigger tracks the new attempt. Reusing the old id was the "Retry
+    doesn't actually retry" bug: the old workflow is terminal, DBOS
+    treats a same-id start as an idempotent replay, the trigger never
+    fires again, and the sweeper re-marks the row lost an hour later."""
+    import uuid as _uuid
+
+    new_wf_id = str(_uuid.uuid4())
     tracker = get_task_manager()
-    task = await tracker.retry_task(task_id, auth.user_id)
+    task = await tracker.retry_task(task_id, auth.user_id, new_workflow_id=new_wf_id)
     if not task:
         raise HTTPException(404, "Task not found or not in retryable state")
 
-    # Re-dispatch the actual Celery task based on type
+    # Re-dispatch the actual workflow based on type
     task_type = task.get("task_type")
     resource_id = task.get("resource_id")
     user_id = auth.user_id
@@ -289,6 +299,7 @@ async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
                         "version_id": version_id,
                         "user_id": user_id,
                     },
+                    workflow_id=new_wf_id,
                 )
                 logger.info(
                     f"[TaskRetry] Dispatched transcode for resource={resource_id}, version={version_id}, reusing task={task_id}"
@@ -344,6 +355,7 @@ async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
                     "resource_id": resource_id,
                     "user_agent": meta.get("user_agent"),
                 },
+                workflow_id=new_wf_id,
             )
             logger.info(
                 f"[TaskRetry] Re-dispatched download for task={task_id}, media={media_id}"
@@ -362,10 +374,41 @@ async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
                         "parsed_media_id": int(media_id),
                         "user_id": user_id,
                     },
+                    workflow_id=new_wf_id,
                 )
             except Exception as _e:
                 logger.debug(f"[TaskRetry] Failed to link dbos_workflow_id: {_e}")
             logger.info(f"[TaskRetry] Re-dispatched summary for task={task_id}")
+
+        elif task_type == "extract_audio":
+            # Previously there was NO branch for extract_audio: Retry reset
+            # the row, dispatched nothing, and the sweeper re-marked it
+            # lost an hour later (the third layer of the observability bug).
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
+            from app.workflows.extract_audio import extract_audio_workflow
+
+            media_id = task.get("media_id")
+            if not media_id:
+                logger.warning(
+                    f"[TaskRetry] extract_audio task {task_id} has no media_id"
+                )
+                return {"success": True, "data": task}
+
+            await start_workflow_routed(
+                "extract_audio",
+                dbos_workflow_callable=extract_audio_workflow,
+                dbos_workflow_kwargs={
+                    "platform_id": str(media_id),
+                    "user_id": user_id,
+                    "resource_id": resource_id,
+                    "video_title": (task.get("title") or "").removeprefix("Audio "),
+                },
+                workflow_id=new_wf_id,
+            )
+            logger.info(
+                f"[TaskRetry] Re-dispatched extract_audio for task={task_id}, "
+                f"media={media_id}"
+            )
 
     except Exception as e:
         logger.error(
