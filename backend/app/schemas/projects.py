@@ -251,3 +251,14 @@ class CreateCollectionRequest(BaseModel):
     allowed_types: Optional[list[str]] = None
     max_file_size_mb: int = 500
     deadline: Optional[str] = None
+
+
+class StyleProfileUpdate(BaseModel):
+    """Request body for PUT /projects/{id}/style-profile.
+
+    All fields optional — absent fields keep their stored value (merge
+    semantics, never clobber)."""
+
+    style_md: Optional[str] = Field(None, max_length=20000)
+    visual_style: Optional[dict] = None
+    reference_links: Optional[list] = Field(None, max_length=100)
