@@ -133,6 +133,14 @@ async def _dispatch_one(row: Dict[str, Any]) -> None:
         },
     )
 
+    # paperclip R1: agent routines don't dispatch a media workflow — a fire
+    # creates an issue assigned to the agent (origin_kind='routine') and
+    # kicks the existing execute_issue chain. Handled before the generic
+    # task_type → workflow registry below.
+    if task_type == "agent_routine":
+        await _fire_agent_routine(row)
+        return
+
     # Dispatch via the task_type → workflow registry. For now we route
     # through start_workflow_routed so the existing routing table
     # decides which workflow callable to fire. Unknown task_type just
@@ -164,6 +172,106 @@ async def _dispatch_one(row: Dict[str, Any]) -> None:
     logger.info(
         f"[scheduled_master] fired schedule={sched_id} task_type={task_type} "
         f"user={user_id} next_at={next_at.isoformat()}"
+    )
+
+
+_ROUTINE_TERMINAL_ISSUE_STATUSES = ("done", "cancelled")
+
+
+async def _fire_agent_routine(row: Dict[str, Any]) -> None:
+    """One agent-routine fire: delivery-policy gate → create issue assigned
+    to the agent → dispatch execute_issue → stash last_issue_id back onto
+    the schedule payload (paperclip R1).
+
+    delivery_policy:
+      - skip_if_active (default): if the issue created by the PREVIOUS fire
+        is still open (not done/cancelled), skip this fire — prevents a slow
+        agent from accumulating a backlog of identical issues (paperclip's
+        coalesce_if_active analogue).
+      - always: fire regardless.
+    """
+    import json as _json
+    import uuid as _uuid
+
+    from app.db import engine as db_engine
+
+    payload = row.get("payload") or {}
+    if isinstance(payload, str):  # asyncpg may hand jsonb back as str
+        payload = _json.loads(payload)
+    sched_id = row["id"]
+    user_id = row.get("user_id")
+    agent_slug = (payload.get("agent_slug") or "").strip()
+    prompt_md = (payload.get("prompt_md") or "").strip()
+    policy = payload.get("delivery_policy") or "skip_if_active"
+
+    if not agent_slug or not prompt_md or not user_id:
+        raise RuntimeError(
+            f"agent_routine {sched_id} payload incomplete "
+            f"(agent_slug={agent_slug!r}, prompt_md={'set' if prompt_md else 'empty'}, "
+            f"user_id={'set' if user_id else 'empty'})"
+        )
+
+    # Delivery gate: previous fire's issue still open → skip quietly.
+    last_issue_id = payload.get("last_issue_id")
+    if policy == "skip_if_active" and last_issue_id:
+        prev = await db_engine.fetch_one(
+            "SELECT status FROM public.issues WHERE id = :iid",
+            {"iid": int(last_issue_id)},
+        )
+        if prev and prev.get("status") not in _ROUTINE_TERMINAL_ISSUE_STATUSES:
+            logger.info(
+                f"[scheduled_master] routine {sched_id} skipped — previous "
+                f"issue {last_issue_id} still {prev.get('status')}"
+            )
+            return
+
+    agent = await db_engine.fetch_one(
+        "SELECT id, name FROM public.ai_agents WHERE slug = :slug",
+        {"slug": agent_slug},
+    )
+    if not agent:
+        raise RuntimeError(f"agent_routine {sched_id}: agent '{agent_slug}' not found")
+
+    from app.repositories.issue_repository import issue_repository
+
+    now_label = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    issue_row = await issue_repository.atomic_create(
+        {
+            "title": f"{row.get('name') or 'Routine'} — {now_label}",
+            "description": prompt_md,
+            "status": "todo",
+            "priority": "medium",
+            "assignee_agent_id": str(agent["id"]),
+            "created_by_user_id": str(user_id),
+            "origin_kind": "routine",
+            "origin_id": str(sched_id),
+        }
+    )
+    issue_id = int(issue_row["id"])
+
+    # Same dispatch path as POST /issues/{id}/dispatch (client-aware:
+    # gateway enqueues via DBOSClient, worker runs in-process). Imported
+    # lazily to avoid a module-level workflows→router cycle.
+    workflow_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
+    from app.api.issues_router import _dispatch_execute_issue
+
+    _dispatch_execute_issue(issue_id, workflow_id)
+    await db_engine.execute(
+        "UPDATE public.issues SET dbos_workflow_id = :wf WHERE id = :iid",
+        {"wf": workflow_id, "iid": issue_id},
+    )
+
+    # Stash last_issue_id for the next fire's delivery gate (merge, never
+    # replace — the payload also carries the routine's config).
+    merged = {**payload, "last_issue_id": issue_id}
+    await db_engine.execute(
+        "UPDATE public.user_schedules SET payload = CAST(:p AS jsonb) "
+        "WHERE id = :id",
+        {"p": _json.dumps(merged), "id": sched_id},
+    )
+    logger.info(
+        f"[scheduled_master] routine {sched_id} fired → issue {issue_id} "
+        f"(agent={agent_slug}, wf={workflow_id})"
     )
 
 
