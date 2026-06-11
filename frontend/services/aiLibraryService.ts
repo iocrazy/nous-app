@@ -18,6 +18,7 @@ import type {
   AgentRunDetail,
   AgentRunEvent,
   AgentRunListResponse,
+  LiveAgentRun,
   AILibraryAgent,
   AILibraryApprovalRequest,
   AILibraryCommitment,
@@ -145,6 +146,14 @@ export const aiLibraryService = {
       `${base()}/agents/${encodeURIComponent(slug)}/status`,
       { headers: await getAuthHeaders() },
     );
+    return handle(resp);
+  },
+
+  /** Caller's currently-running runs across all agents (Workforce live strip). */
+  async getLiveRuns(): Promise<{ items: LiveAgentRun[]; count: number }> {
+    const resp = await fetch(`${base()}/runs/live`, {
+      headers: await getAuthHeaders(),
+    });
     return handle(resp);
   },
 

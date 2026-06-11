@@ -1734,7 +1734,10 @@
         "timeoutHint": "Max wall-clock per run, checked between LLM iterations. Blank or 0 = no cap.",
         "concurrencyLabel": "Max concurrent runs",
         "concurrencyHint": "New runs are rejected while this many are already running. Blank = unlimited."
-      }
+      },
+      "idCopied": "Agent ID copied",
+      "copyId": "Copy agent ID",
+      "duplicate": "Duplicate"
     },
     "skills": {
       "addFile": "+ Add file",
@@ -1812,6 +1815,9 @@
       "newFileContentLabel": "Initial content",
       "deleteFileConfirm": "Delete {{path}}? This cannot be undone.",
       "deleteFileError": "Failed to delete: {{err}}"
+    },
+    "workforce": {
+      "runningNow": "Running now"
     }
   },
   "aiUsage": {

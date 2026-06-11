@@ -1734,7 +1734,10 @@
         "timeoutHint": "单次运行的最长耗时，在 LLM 迭代之间检查。留空或 0 = 不限制。",
         "concurrencyLabel": "Max concurrent runs",
         "concurrencyHint": "已有这么多运行中时，新运行会被拒绝。留空 = 不限制。"
-      }
+      },
+      "idCopied": "Agent ID 已复制",
+      "copyId": "Copy agent ID",
+      "duplicate": "Duplicate"
     },
     "skills": {
       "addFile": "+ 添加文件",
@@ -1812,6 +1815,9 @@
       "newFileContentLabel": "初始内容",
       "deleteFileConfirm": "删除 {{path}}？此操作不可恢复。",
       "deleteFileError": "删除失败：{{err}}"
+    },
+    "workforce": {
+      "runningNow": "运行中"
     }
   },
   "aiUsage": {

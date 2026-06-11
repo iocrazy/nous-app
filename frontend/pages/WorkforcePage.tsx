@@ -37,6 +37,7 @@ import {
   type WorkforceStateHistoryRow,
 } from '../services/workforceService';
 import { getAgentIcon } from '../components/AILibrary/agentIcons';
+import { LiveRunsStrip } from '../components/AILibrary/LiveRunsStrip';
 import { getSupabaseClient } from '../supabaseClient';
 import { AgentDetailDrawer } from '../components/Workforce/AgentDetailDrawer';
 
@@ -213,6 +214,9 @@ export const WorkforcePage: React.FC = () => {
           {error}
         </div>
       )}
+
+      {/* paperclip live-runs port (R4): running agent_runs across all agents */}
+      <LiveRunsStrip />
 
       {!board ? (
         <div className="text-sm text-zinc-500">{t('workforce.loading', 'Loading…')}</div>
