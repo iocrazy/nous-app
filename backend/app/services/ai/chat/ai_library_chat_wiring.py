@@ -118,7 +118,9 @@ async def build_agent_runner_stack(
         settings=settings,
     )
 
-    graph_facts = await _safe_recall_graph_facts(user_id=user_id, user_query=user_query)
+    graph_facts = await _safe_recall_graph_facts(
+        user_id=user_id, user_query=user_query, session_id=session_id
+    )
 
     # ── 2. HookRegistry per-turn ────────────────────────────────────
     registry = HookRegistry()
@@ -362,24 +364,54 @@ async def _safe_recall_memories(
 
 
 async def _safe_recall_graph_facts(
-    *, user_id: UUID, user_query: str, limit: int = 5
+    *,
+    user_id: UUID,
+    user_query: str,
+    session_id: Optional[str] = None,
+    limit: int = 5,
 ) -> list[str]:
-    """Best-effort Graphiti fact recall (Phase 4 M3). Empty list when
-    the FEATURE_GRAPH_MEMORY flag is off or anything fails — graph
-    outages must never delay or break a chat turn."""
+    """Best-effort Graphiti fact recall (Phase 4 M3/M7). Searches the
+    user's personal group plus — when the session belongs to a project
+    — the project group (storyboard characters etc. live there).
+    Empty list when the FEATURE_GRAPH_MEMORY flag is off or anything
+    fails — graph outages must never delay or break a chat turn."""
     try:
         from app.services.ai.memory.graph_memory import get_graph_memory_service
 
         service = get_graph_memory_service()
         if not service.config.enabled:
             return []
-        facts = await service.search(
-            user_query, group_id=f"user-{user_id}", limit=limit
-        )
+        group_ids = [f"user-{user_id}"]
+        project_id = await _resolve_session_project(session_id)
+        if project_id:
+            group_ids.append(f"project-{project_id}")
+        facts = await service.search(user_query, group_ids=group_ids, limit=limit)
         return [f.fact for f in facts]
     except Exception:  # noqa: BLE001
         logger.exception("[m3] graph fact recall failed; degrading to none")
         return []
+
+
+async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
+    """ai_sessions.project_id lookup; None on missing/failure."""
+    if not session_id:
+        return None
+    try:
+        # ai_sessions.id is BIGINT — asyncpg rejects str binds on int8.
+        sid = int(session_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        from app.db import engine as db_engine
+
+        row = await db_engine.fetch_one(
+            "SELECT project_id FROM public.ai_sessions WHERE id = :sid",
+            {"sid": sid},
+        )
+        project_id = row.get("project_id") if row else None
+        return str(project_id) if project_id else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _memory_recall_enabled() -> bool:
