@@ -375,6 +375,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [notesValue, setNotesValue] = useState('');
+  const [promptValue, setPromptValue] = useState('');
+  const [promptOpen, setPromptOpen] = useState(false);
   const [urlValue, setUrlValue] = useState('');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -460,10 +462,12 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     if (resource) {
       setNameValue(resource.filename);
       setNotesValue(resource.notes || '');
+      setPromptValue(resource.gen_prompt || '');
+      setPromptOpen(false);
       setUrlValue(resource.url || '');
       setEditingName(false);
     }
-  }, [resource?.id, resource?.filename, resource?.notes, resource?.url]);
+  }, [resource?.id, resource?.filename, resource?.notes, resource?.gen_prompt, resource?.url]);
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.select();
@@ -496,6 +500,22 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       handleResourceUpdate({ notes: val || null } as Partial<Resource>);
     }
   }, [notesValue, resource?.notes, handleResourceUpdate]);
+
+  const commitPrompt = useCallback(() => {
+    const val = promptValue.trim();
+    if (val !== (resource?.gen_prompt || '').trim()) {
+      // Empty string (not null) so the PATCH survives exclude_none and clears.
+      handleResourceUpdate({ gen_prompt: val } as Partial<Resource>);
+    }
+  }, [promptValue, resource?.gen_prompt, handleResourceUpdate]);
+
+  const copyPrompt = useCallback(() => {
+    if (!resource?.gen_prompt) return;
+    navigator.clipboard
+      .writeText(resource.gen_prompt)
+      .then(() => addToast(t('resources.infoPanel.promptCopied', 'Prompt copied'), 'success'))
+      .catch((err) => console.error('Failed to copy prompt:', err));
+  }, [resource?.gen_prompt, addToast, t]);
 
   const commitUrl = useCallback(() => {
     const val = urlValue.trim();
@@ -1441,6 +1461,43 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
             />
           </div>
+
+          {/* Prompt — AI generation prompt. Card when present (or opened);
+              a light add-entry otherwise so non-AI assets stay uncluttered. */}
+          {resource.gen_prompt || promptOpen ? (
+            <div className="px-4 mt-2">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  {t('resources.infoPanel.prompt', 'Prompt')}
+                </span>
+                {resource.gen_prompt && (
+                  <button
+                    onClick={copyPrompt}
+                    className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors"
+                  >
+                    <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
+                  </button>
+                )}
+              </div>
+              <textarea
+                value={promptValue}
+                onChange={(e) => setPromptValue(e.target.value)}
+                onBlur={commitPrompt}
+                placeholder={t('resources.infoPanel.promptPlaceholder', 'Paste the AI generation prompt...')}
+                rows={4}
+                className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs font-mono text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+              />
+            </div>
+          ) : (
+            <div className="px-4 mt-1">
+              <button
+                onClick={() => setPromptOpen(true)}
+                className="text-[11px] text-zinc-600 hover:text-indigo-300 transition-colors"
+              >
+                + {t('resources.infoPanel.addPrompt', 'Add Prompt')}
+              </button>
+            </div>
+          )}
 
           {/* URL */}
           <div className="px-4 mt-2">

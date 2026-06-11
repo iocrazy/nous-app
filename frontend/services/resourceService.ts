@@ -77,7 +77,7 @@ export async function renameResource(resourceId: string, filename: string): Prom
 
 export async function updateResource(
   resourceId: string,
-  data: { filename?: string; notes?: string; url?: string; rating?: number },
+  data: { filename?: string; notes?: string; gen_prompt?: string; url?: string; rating?: number },
 ): Promise<Resource> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {

@@ -679,7 +679,12 @@
       "modified": "修改时间",
       "sourceWeb": "网页下载",
       "sourceUpload": "上传",
-      "aiStatus": "AI 状态"
+      "aiStatus": "AI 状态",
+      "prompt": "提示词",
+      "addPrompt": "添加提示词",
+      "promptPlaceholder": "粘贴 AI 生成提示词...",
+      "promptCopied": "提示词已复制",
+      "copyPrompt": "复制"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",

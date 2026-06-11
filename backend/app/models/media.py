@@ -353,6 +353,10 @@ class Resources(Base, UserScoped):
         comment="SHA-256 hex digest of the latest version file content",
     )
     notes: Mapped[str | None] = mapped_column(Text)
+    gen_prompt: Mapped[str | None] = mapped_column(
+        Text,
+        comment="AI generation prompt for this asset (user-entered or auto-extracted)",
+    )
     url: Mapped[str | None] = mapped_column(Text)
     rating: Mapped[int | None] = mapped_column(SmallInteger, server_default=text("0"))
     last_folder_id: Mapped[int | None] = mapped_column(BigInteger)
