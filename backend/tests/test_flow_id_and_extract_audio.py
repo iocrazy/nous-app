@@ -160,7 +160,12 @@ class TestExtractAudioWorkflowLogic:
     function.
     """
 
-    def test_extract_audio_from_video_returns_false_when_no_media(self) -> None:
+    def test_extract_audio_from_video_raises_when_no_media(self) -> None:
+        # 2026-06-11 observability fix: failures now raise AudioExtractError
+        # with the specific reason instead of collapsing to False, so the
+        # reason survives into task_tracking.error_msg.
+        import pytest
+
         from app.tasks import download_helpers
 
         with patch.object(download_helpers, "_MR_extract", create=True):
@@ -171,5 +176,8 @@ class TestExtractAudioWorkflowLogic:
                 instance = MagicMock()
                 instance.get_by_platform_id = AsyncMock(return_value=None)
                 mock_repo_cls.return_value = instance
-                result = download_helpers.extract_audio_from_video("missing")
-        assert result is False
+                with pytest.raises(
+                    download_helpers.AudioExtractError,
+                    match="no parsed_media record",
+                ):
+                    download_helpers.extract_audio_from_video("missing")
