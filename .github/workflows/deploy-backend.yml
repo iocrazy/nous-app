@@ -293,6 +293,19 @@ jobs:
                 STATUS=$(sudo $DOCKER inspect -f '{{.State.Status}}' "$C" 2>/dev/null || echo missing)
                 echo "$C status: $STATUS (check $i/6)"
                 [ "$STATUS" = "running" ] && break
+                if [ "$C" = "mediahub-app-worker" ] && [ "$STATUS" = "missing" ]; then
+                  # 2026-06-11 mode 4: force-recreate lost the canonical name to a
+                  # racing Watchtower recreate ("name already in use" conflict) —
+                  # compose had renamed the old container to <hash>_mediahub-app-worker,
+                  # the new create aborted, and the only survivor was that temp-named
+                  # container stuck in Created (invisible to `docker start $C` AND to
+                  # the healer's canonical-name poll). Clear the leftovers and re-up.
+                  for CID in $(sudo $DOCKER ps -a --filter "name=_mediahub-app-worker" -q); do
+                    echo "Removing temp-named worker leftover $CID"
+                    sudo $DOCKER rm -f "$CID" >/dev/null 2>&1 || true
+                  done
+                  sudo $COMPOSE -f "$CDIR/docker-compose.yml" up -d mediahub-worker 2>&1 | tail -3 || true
+                fi
                 sleep 10
               done
               FINAL=$(sudo $DOCKER inspect -f '{{.State.Status}}' "$C" 2>/dev/null || echo missing)
