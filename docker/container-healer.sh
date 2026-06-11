@@ -51,6 +51,20 @@ IMAGE="${IMAGE:-docker:cli}"
         if [ "$st" = "created" ] || [ "$st" = "exited" ]; then
           echo "[healer] $(date -u +%Y-%m-%dT%H:%M:%SZ) $c is $st -> docker start"
           docker start "$c" >/dev/null 2>&1 || echo "[healer] start $c FAILED"
+        elif [ "$st" = "missing" ]; then
+          # 2026-06-11 mode 4: compose force-recreate renamed the old
+          # container to <hash>_$c, then lost the canonical name to a racing
+          # Watchtower recreate and aborted — no container holds the
+          # canonical name, only a temp-named survivor in Created. Rename it
+          # back and start it: a previous-version container running beats no
+          # container (the deploy guard / Watchtower re-syncs the image).
+          tmp=$(docker ps -a --filter "name=_$c" --format "{{.Names}}" | head -1)
+          if [ -n "$tmp" ]; then
+            echo "[healer] $(date -u +%Y-%m-%dT%H:%M:%SZ) $c missing; restoring temp-named $tmp"
+            docker rename "$tmp" "$c" >/dev/null 2>&1 \
+              && docker start "$c" >/dev/null 2>&1 \
+              || echo "[healer] restore of $tmp FAILED"
+          fi
         fi
       done
       sleep "$POLL_SECONDS"
