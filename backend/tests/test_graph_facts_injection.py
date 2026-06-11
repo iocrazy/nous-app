@@ -125,6 +125,57 @@ async def test_recall_maps_facts_and_scopes_to_user(
 
 
 @pytest.mark.asyncio
+async def test_recall_adds_project_group_for_project_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.ai.chat import ai_library_chat_wiring as wiring
+
+    svc = FakeService(enabled=True, facts=[GraphFact(fact="hero wears red")])
+    monkeypatch.setattr(
+        "app.services.ai.memory.graph_memory.get_graph_memory_service",
+        lambda: svc,
+    )
+
+    async def fake_resolve(session_id):
+        assert session_id == "888"
+        return "777"
+
+    monkeypatch.setattr(wiring, "_resolve_session_project", fake_resolve)
+    facts = await wiring._safe_recall_graph_facts(
+        user_id=UUID(int=42), user_query="who is the hero?", session_id="888"
+    )
+    assert facts == ["hero wears red"]
+    assert svc.queries[0]["group_ids"] == [f"user-{UUID(int=42)}", "project-777"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_project_rejects_non_numeric_ids() -> None:
+    from app.services.ai.chat import ai_library_chat_wiring as wiring
+
+    # BIGINT column — non-numeric ids must short-circuit before the DB.
+    assert await wiring._resolve_session_project(None) is None
+    assert await wiring._resolve_session_project("") is None
+    assert await wiring._resolve_session_project("sess-abc") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_project_binds_int(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.ai.chat import ai_library_chat_wiring as wiring
+
+    calls: list[dict] = []
+
+    async def fake_fetch_one(sql: str, params=None):
+        calls.append({"sql": sql, "params": params})
+        return {"project_id": 777}
+
+    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
+    assert await wiring._resolve_session_project("888") == "777"
+    assert calls[0]["params"] == {"sid": 888}
+
+
+@pytest.mark.asyncio
 async def test_recall_flag_off_returns_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

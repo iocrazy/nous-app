@@ -908,7 +908,9 @@ async def _dispatch_character_episode(character: Dict[str, Any]) -> None:
             "memory_tasks",
             dbos_workflow_callable=write_character_episode_workflow,
             dbos_workflow_kwargs={
-                "project_id": str(character.get("project_id") or ""),
+                # character.project_id is the storyboard_projects.id; the
+                # workflow resolves the canonical projects.id itself.
+                "storyboard_project_id": str(character.get("project_id") or ""),
                 "character_id": str(character["id"]),
                 "name": str(character.get("name") or ""),
                 "description": character.get("description"),

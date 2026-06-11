@@ -8,6 +8,7 @@ from app.services.ai.memory.graph_memory import GraphMemoryConfig, GraphMemorySe
 from app.services.storyboard.storyboard_service import _dispatch_character_episode
 from app.workflows.write_character_memory import (
     _render_character_body,
+    _resolve_canonical_project,
     _write_character_episode,
 )
 
@@ -121,6 +122,62 @@ async def test_blank_name_skips_write(service: RecordingService) -> None:
 
 
 # ============================================================
+# _resolve_canonical_project (storyboard_projects.project_id link)
+# ============================================================
+
+
+def _patch_fetch_one(monkeypatch: pytest.MonkeyPatch, result) -> list[dict]:
+    calls: list[dict] = []
+
+    async def fake_fetch_one(sql: str, params=None):
+        calls.append({"sql": sql, "params": params})
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_resolve_returns_linked_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _patch_fetch_one(monkeypatch, {"project_id": 777})
+    assert await _resolve_canonical_project("55") == "777"
+    # BIGINT column — the bind param must be an int, not a str.
+    assert calls[0]["params"] == {"sid": 55}
+
+
+@pytest.mark.asyncio
+async def test_resolve_unlinked_or_missing_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fetch_one(monkeypatch, {"project_id": None})
+    assert await _resolve_canonical_project("55") is None
+    _patch_fetch_one(monkeypatch, None)
+    assert await _resolve_canonical_project("55") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_non_numeric_id_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _patch_fetch_one(monkeypatch, {"project_id": 777})
+    assert await _resolve_canonical_project("") is None
+    assert await _resolve_canonical_project("not-a-number") is None
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_swallows_db_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fetch_one(monkeypatch, RuntimeError("db down"))
+    assert await _resolve_canonical_project("55") is None
+
+
+# ============================================================
 # _dispatch_character_episode (service-side gating)
 # ============================================================
 
@@ -157,7 +214,7 @@ async def test_dispatch_enqueues_routed_workflow(
     call = dispatched[0]
     assert call["queue"] == "memory_tasks"
     kwargs = call["dbos_workflow_kwargs"]
-    assert kwargs["project_id"] == "55"
+    assert kwargs["storyboard_project_id"] == "55"
     assert kwargs["character_id"] == "9001"
     assert kwargs["name"] == "Ava"
     assert "short black" in kwargs["visual_traits_json"]

@@ -397,11 +397,16 @@ async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
     if not session_id:
         return None
     try:
+        # ai_sessions.id is BIGINT — asyncpg rejects str binds on int8.
+        sid = int(session_id)
+    except (TypeError, ValueError):
+        return None
+    try:
         from app.db import engine as db_engine
 
         row = await db_engine.fetch_one(
             "SELECT project_id FROM public.ai_sessions WHERE id = :sid",
-            {"sid": session_id},
+            {"sid": sid},
         )
         project_id = row.get("project_id") if row else None
         return str(project_id) if project_id else None
