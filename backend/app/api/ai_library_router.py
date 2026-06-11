@@ -1303,6 +1303,30 @@ async def get_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
     ):
         if row.get(field) is not None:
             row[field] = float(row[field])
+
+    # mig 282 task ↔ run linkage: resolve the task_tracking row this run
+    # executed under so the detail pane can render "Tasks Touched"
+    # (paperclip-style). Best-effort — a missing/stale task never 500s
+    # the run detail.
+    if row.get("task_id"):
+        try:
+            client = await get_async_supabase_admin()
+            task_q = (
+                await client.table("task_tracking")
+                .select("dbos_workflow_id,title,phase,task_type")
+                .eq("dbos_workflow_id", str(row["task_id"]))
+                .maybe_single()
+                .execute()
+            )
+            if task_q and task_q.data:
+                row["task"] = {
+                    "id": task_q.data["dbos_workflow_id"],
+                    "title": task_q.data.get("title"),
+                    "phase": task_q.data.get("phase"),
+                    "task_type": task_q.data.get("task_type"),
+                }
+        except Exception as e:  # noqa: BLE001 — decoration, never fatal
+            logger.warning(f"[runs] task ref lookup failed for run {run_id}: {e}")
     return row
 
 

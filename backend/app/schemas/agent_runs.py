@@ -44,6 +44,23 @@ class RunListItem(BaseModel):
     # to show "this is a sub-run" badges and to render Runs lists as a
     # tree.
     parent_run_id: Optional[str] = None
+    # mig 282: task_tracking PK when the run executed inside a tracked
+    # workflow. Lets the list show a "task-linked" hint without a join.
+    task_id: Optional[str] = None
+    # Display-only 500-char summary (RunRecorder.set_summaries) — used as
+    # the list snippet (paperclip-style split pane shows it in the left
+    # column). Full content stays in metadata_json on the detail view.
+    output_summary: Optional[str] = None
+
+
+class RunTaskRef(BaseModel):
+    """Slim task_tracking reference attached to a run detail (mig 282
+    task ↔ run linkage) — powers the "Tasks Touched" block."""
+
+    id: str
+    title: Optional[str] = None
+    phase: Optional[str] = None
+    task_type: Optional[str] = None
 
 
 class RunDetail(RunListItem):
@@ -57,11 +74,14 @@ class RunDetail(RunListItem):
     cancel_requested: bool = False
     prompt_cents_per_1k_snapshot: Optional[float] = None
     completion_cents_per_1k_snapshot: Optional[float] = None
+    cached_input_tokens: int = 0
     input_summary: Optional[str] = None
-    output_summary: Optional[str] = None
     error_message: Optional[str] = None
     metadata_json: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+    # Resolved from task_id by the get_run endpoint (None when the run
+    # wasn't part of a tracked workflow).
+    task: Optional[RunTaskRef] = None
 
 
 class RunListResponse(BaseModel):

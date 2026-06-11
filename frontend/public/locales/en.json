@@ -1686,7 +1686,13 @@
           "failed": "Failed",
           "cancelled": "Cancelled",
           "heartbeat_lost": "Heartbeat lost"
-        }
+        },
+        "tasksTouched": "Tasks Touched",
+        "session": "Session",
+        "statInput": "Input",
+        "statOutput": "Output",
+        "statCached": "Cached",
+        "selectPrompt": "Select a run to view details"
       },
       "budget": {
         "sectionLabel": "Monthly budget",
