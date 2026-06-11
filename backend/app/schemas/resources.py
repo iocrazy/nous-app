@@ -19,6 +19,11 @@ class ResourceUpdate(BaseModel):
 
     filename: Optional[str] = Field(None, min_length=1, max_length=500)
     notes: Optional[str] = Field(None, max_length=5000)
+    gen_prompt: Optional[str] = Field(
+        None,
+        max_length=20000,
+        description="AI generation prompt attached to this asset",
+    )
     url: Optional[str] = Field(None, max_length=2000)
     rating: Optional[int] = Field(None, ge=0, le=5)
     is_trashed: Optional[bool] = None

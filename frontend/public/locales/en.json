@@ -679,7 +679,12 @@
       "modified": "Modified",
       "sourceWeb": "Web Download",
       "sourceUpload": "Upload",
-      "aiStatus": "AI Status"
+      "aiStatus": "AI Status",
+      "prompt": "Prompt",
+      "addPrompt": "Add Prompt",
+      "promptPlaceholder": "Paste the AI generation prompt...",
+      "promptCopied": "Prompt copied",
+      "copyPrompt": "Copy"
     },
     "folderInfoPanel": {
       "title": "Folder Info",

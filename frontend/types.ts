@@ -334,6 +334,7 @@ export interface Resource {
   cover_image_path: string | null;
   current_version: number;
   notes: string | null;
+  gen_prompt: string | null;
   url: string | null;
   rating: number; // 0-5
   // Download status fields used to live here as mirrors of parsed_media;
