@@ -88,6 +88,13 @@ export function installAuthRecovery(): void {
       return !error && !!data.session;
     },
     signOut: async () => {
+      // Leave a one-shot breadcrumb so the login page can explain WHY
+      // the user landed there ("session expired") instead of a silent kick.
+      try {
+        sessionStorage.setItem('mediahub_auth_expired', '1');
+      } catch (err) {
+        console.error('[authRecovery] failed to set expiry breadcrumb:', err);
+      }
       const supabase = getSupabaseClient();
       await supabase?.auth.signOut();
     },
