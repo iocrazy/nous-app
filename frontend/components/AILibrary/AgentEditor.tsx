@@ -33,9 +33,17 @@ import { AgentIconPicker } from './AgentIconPicker';
 import { AgentDashboardTab } from './AgentDashboardTab';
 import { AgentActionBar } from './AgentActionBar';
 import { AgentRunsSplit } from './AgentRunsSplit';
+import { AgentRoutinesTab } from './AgentRoutinesTab';
 import { VersionHistoryPanel } from './VersionHistoryPanel';
 
-type SubTab = 'dashboard' | 'overview' | 'files' | 'skills' | 'runs' | 'versions';
+type SubTab =
+  | 'dashboard'
+  | 'overview'
+  | 'files'
+  | 'skills'
+  | 'runs'
+  | 'routines'
+  | 'versions';
 
 /**
  * Lift a useful message out of an error. Backend errors come back as
@@ -331,7 +339,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     onAgentForked?.(newSlug);
   };
 
-  const subTabs: SubTab[] = ['dashboard', 'overview', 'files', 'skills', 'runs', 'versions'];
+  const subTabs: SubTab[] = [
+    'dashboard',
+    'overview',
+    'files',
+    'skills',
+    'runs',
+    'routines',
+    'versions',
+  ];
 
   return (
     <div>
@@ -646,6 +662,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
       )}
 
       {sub === 'runs' && <AgentRunsSplit slug={slug} />}
+
+      {sub === 'routines' && <AgentRoutinesTab agent={agent} />}
 
       {sub === 'versions' && (
         <VersionHistoryPanel

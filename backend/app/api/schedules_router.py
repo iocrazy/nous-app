@@ -36,7 +36,32 @@ _ALLOWED_TASK_TYPES = {
     "ai_summary",
     "ai_transcription",
     "ai_visual_analysis",
+    # paperclip R1: routine fires create an issue assigned to an agent
+    # (origin_kind='routine') and dispatch execute_issue — see
+    # scheduled_master._fire_agent_routine. Payload contract validated in
+    # _validate_agent_routine_payload.
+    "agent_routine",
 }
+
+_ROUTINE_DELIVERY_POLICIES = {"skip_if_active", "always"}
+
+
+def _validate_agent_routine_payload(payload: Dict[str, Any]) -> None:
+    """agent_routine schedules carry their config in payload jsonb:
+    {agent_slug, prompt_md, delivery_policy?}. Validate at create/update so
+    the master scheduler never has to guess at fire time."""
+    slug = (payload.get("agent_slug") or "").strip()
+    prompt = (payload.get("prompt_md") or "").strip()
+    if not slug:
+        raise HTTPException(400, "agent_routine payload requires agent_slug")
+    if not prompt:
+        raise HTTPException(400, "agent_routine payload requires prompt_md")
+    policy = payload.get("delivery_policy") or "skip_if_active"
+    if policy not in _ROUTINE_DELIVERY_POLICIES:
+        raise HTTPException(
+            400,
+            f"delivery_policy must be one of {sorted(_ROUTINE_DELIVERY_POLICIES)}",
+        )
 
 
 class ScheduleCreatePayload(BaseModel):
@@ -99,6 +124,8 @@ async def create_schedule(
     """Create a new schedule. Validates cron expression and task_type."""
     _validate_task_type(payload.task_type)
     next_at = _validate_cron(payload.cron_expr)
+    if payload.task_type == "agent_routine":
+        _validate_agent_routine_payload(payload.payload)
 
     sb = await get_async_supabase_admin()
     row = {
@@ -165,6 +192,25 @@ async def update_schedule(
     fields = payload.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(400, "no fields to update")
+
+    # agent_routine payload edits must keep the contract the master
+    # scheduler relies on. (task_type itself is immutable on update.)
+    if "payload" in fields and isinstance(fields["payload"], dict):
+        existing_q = (
+            await (await get_async_supabase_admin())
+            .table("user_schedules")
+            .select("task_type")
+            .eq("id", schedule_id)
+            .eq("user_id", str(auth.user_id))
+            .maybe_single()
+            .execute()
+        )
+        if (
+            existing_q
+            and existing_q.data
+            and existing_q.data.get("task_type") == "agent_routine"
+        ):
+            _validate_agent_routine_payload(fields["payload"])
 
     if "cron_expr" in fields:
         next_at = _validate_cron(fields["cron_expr"])

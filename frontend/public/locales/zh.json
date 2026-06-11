@@ -1604,7 +1604,8 @@
         "files": "文件",
         "skills": "技能",
         "runs": "运行记录",
-        "versions": "版本"
+        "versions": "版本",
+        "routines": "例行任务"
       },
       "loadErrorPrefix": "加载智能体失败",
       "listLoadError": "加载智能体列表失败",
@@ -1737,7 +1738,29 @@
       },
       "idCopied": "Agent ID 已复制",
       "copyId": "Copy agent ID",
-      "duplicate": "Duplicate"
+      "duplicate": "Duplicate",
+      "routines": {
+        "intro": "每次触发会创建一个分配给该 Agent 的 Issue 并自动执行 — 结果以 Issue 回复形式呈现。",
+        "add": "新建例行任务",
+        "empty": "还没有例行任务。创建一个让该 Agent 按计划工作。",
+        "nameLabel": "名称",
+        "namePlaceholder": "每日摘要",
+        "scheduleLabel": "计划",
+        "customCron": "自定义 cron…",
+        "policyLabel": "上次运行未结束时",
+        "policySkip": "跳过本次触发（推荐）",
+        "policyAlways": "照常触发",
+        "promptLabel": "指令（每次触发发送给 Agent）",
+        "promptPlaceholder": "总结过去 24 小时下载的资源…",
+        "saved": "例行任务已保存",
+        "fired": "例行任务已触发",
+        "deleteConfirm": "删除这个例行任务？",
+        "disabled": "已停用",
+        "fireNow": "立即运行",
+        "nextFire": "下次",
+        "lastFire": "上次",
+        "lastIssue": "最近 Issue"
+      }
     },
     "skills": {
       "addFile": "+ 添加文件",

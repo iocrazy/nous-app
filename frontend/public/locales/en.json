@@ -1604,7 +1604,8 @@
         "files": "Files",
         "skills": "Skills",
         "runs": "Runs",
-        "versions": "Versions"
+        "versions": "Versions",
+        "routines": "Routines"
       },
       "loadErrorPrefix": "Failed to load agent",
       "listLoadError": "Failed to load agents",
@@ -1737,7 +1738,29 @@
       },
       "idCopied": "Agent ID copied",
       "copyId": "Copy agent ID",
-      "duplicate": "Duplicate"
+      "duplicate": "Duplicate",
+      "routines": {
+        "intro": "Each fire creates an issue assigned to this agent and runs it automatically — results land as issue replies.",
+        "add": "New routine",
+        "empty": "No routines yet. Create one to have this agent work on a schedule.",
+        "nameLabel": "Name",
+        "namePlaceholder": "Daily digest",
+        "scheduleLabel": "Schedule",
+        "customCron": "Custom cron…",
+        "policyLabel": "If previous run still open",
+        "policySkip": "Skip this fire (recommended)",
+        "policyAlways": "Fire anyway",
+        "promptLabel": "Instructions (sent to the agent on each fire)",
+        "promptPlaceholder": "Summarize the resources downloaded in the last 24 hours…",
+        "saved": "Routine saved",
+        "fired": "Routine fired",
+        "deleteConfirm": "Delete this routine?",
+        "disabled": "disabled",
+        "fireNow": "Run now",
+        "nextFire": "Next",
+        "lastFire": "Last",
+        "lastIssue": "Last issue"
+      }
     },
     "skills": {
       "addFile": "+ Add file",
