@@ -115,6 +115,7 @@ async def test_fire_creates_issue_returns_order_and_stashes_last_issue() -> None
 
     repo = MagicMock()
     repo.atomic_create = AsyncMock(side_effect=_atomic_create)
+    repo.update = AsyncMock(return_value={"id": 42})
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
@@ -136,9 +137,10 @@ async def test_fire_creates_issue_returns_order_and_stashes_last_issue() -> None
     assert order["issue_id"] == 42
     assert order["workflow_id"].startswith("issue-42-")
     assert order["sched_id"] == "sched-1"
-    # workflow_id persisted onto the issue before dispatch
-    wf_update = [c for c in execute.await_args_list if "public.issues" in c.args[0]]
-    assert wf_update and wf_update[0].args[1]["wf"] == order["workflow_id"]
+    # workflow_id persisted onto the issue before dispatch — via the
+    # repository (service_role): the mig-172 issues allowlist trigger
+    # blocks dbos_workflow_id writes from the app-role asyncpg engine.
+    repo.update.assert_awaited_once_with(42, {"dbos_workflow_id": order["workflow_id"]})
     # last_issue_id stashed back into the schedule payload (merge)
     stash_call = [c for c in execute.await_args_list if "user_schedules" in c.args[0]]
     assert stash_call, "expected payload stash UPDATE"
@@ -192,6 +194,7 @@ async def test_always_policy_uses_unique_fingerprint() -> None:
 
     repo = MagicMock()
     repo.atomic_create = AsyncMock(side_effect=_atomic_create)
+    repo.update = AsyncMock(return_value={"id": 43})
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
@@ -261,12 +264,12 @@ async def test_always_policy_fires_even_with_open_previous_issue() -> None:
     fetch_one = AsyncMock(return_value={"id": agent_id, "name": "CEO"})
     repo = MagicMock()
     repo.atomic_create = AsyncMock(return_value={"id": 43})
+    repo.update = AsyncMock(return_value={"id": 43})
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
         patch("app.db.engine.execute", AsyncMock()),
         patch("app.repositories.issue_repository.issue_repository", repo),
-        patch("app.api.issues_router._dispatch_execute_issue", MagicMock()),
     ):
         await sm._fire_agent_routine(
             _routine_row(last_issue_id=41, delivery_policy="always")
