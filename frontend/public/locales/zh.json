@@ -715,7 +715,9 @@
       "autoTagging": "正在智能打标...",
       "autoTagged": "已添加标签（新增 {{count}} 个）",
       "autoTagSlow": "仍在打标中 — 请到任务中心查看",
-      "autoTagFailed": "智能打标失败"
+      "autoTagFailed": "智能打标失败",
+      "addNote": "添加备注",
+      "addUrl": "添加来源链接"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",

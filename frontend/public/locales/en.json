@@ -715,7 +715,9 @@
       "autoTagging": "Auto-tagging image...",
       "autoTagged": "Tags added ({{count}} new)",
       "autoTagSlow": "Still tagging — check Task Center",
-      "autoTagFailed": "Auto-tagging failed"
+      "autoTagFailed": "Auto-tagging failed",
+      "addNote": "Add note",
+      "addUrl": "Add source link"
     },
     "folderInfoPanel": {
       "title": "Folder Info",

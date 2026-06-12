@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, File, Film, Image, FileText, Pencil, FolderOpen, Star, Music, Brain, Sparkles, Eye, Loader2, Check } from 'lucide-react';
+import { X, File, Film, Image, FileText, Pencil, FolderOpen, Star, Music, Brain, Sparkles, Eye, Loader2, Check, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, Tag } from '../types';
 import { getResourceCoverUrl } from '../services/resourceService';
@@ -120,9 +120,9 @@ const StarRating: React.FC<{ value: number; onChange: (v: number) => void }> = (
 const InfoRow = ({ label, value, children }: { label: string; value?: string | null | undefined; children?: React.ReactNode }) => {
   if (!value && !children) return null;
   return (
-    <div className="flex justify-between items-center py-1.5">
+    <div className="flex justify-between items-center py-1.5 pr-0.5">
       <span className="text-xs text-zinc-500">{label}</span>
-      {children || <span className="text-xs text-zinc-300 text-right">{value}</span>}
+      {children || <span className="text-xs text-zinc-300 text-right tabular-nums">{value}</span>}
     </div>
   );
 };
@@ -172,10 +172,15 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
 
   // ─── Notes ──────────────────────────────────────────
   const [notesValue, setNotesValue] = useState(resource.notes || '');
+  // Click-to-edit (island redesign D7/spec §5.1): empty fields render as a
+  // dashed "+ Add …" row instead of a permanent empty input. Editing state
+  // only controls the EMPTY-value presentation — commit logic unchanged.
+  const [editingNotes, setEditingNotes] = useState(false);
   const notesTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     setNotesValue(resource.notes || '');
+    setEditingNotes(false);
   }, [resource.id, resource.notes]);
 
   const commitNotes = useCallback(() => {
@@ -188,9 +193,11 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
 
   // ─── URL ────────────────────────────────────────────
   const [urlValue, setUrlValue] = useState(resource.url || '');
+  const [editingUrl, setEditingUrl] = useState(false);
 
   useEffect(() => {
     setUrlValue(resource.url || '');
+    setEditingUrl(false);
   }, [resource.id, resource.url]);
 
   const commitUrl = useCallback(() => {
@@ -288,14 +295,28 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
           <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
             {t('resources.infoPanel.notes')}
           </h4>
-          <textarea
-            value={notesValue}
-            onChange={(e) => setNotesValue(e.target.value)}
-            onBlur={commitNotes}
-            placeholder={t('resources.infoPanel.notesPlaceholder')}
-            rows={3}
-            className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
-          />
+          {notesValue || editingNotes ? (
+            <textarea
+              value={notesValue}
+              onChange={(e) => setNotesValue(e.target.value)}
+              onBlur={() => {
+                commitNotes();
+                if (!notesValue.trim()) setEditingNotes(false);
+              }}
+              autoFocus={editingNotes && !notesValue}
+              placeholder={t('resources.infoPanel.notesPlaceholder')}
+              rows={3}
+              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+            />
+          ) : (
+            <button
+              onClick={() => setEditingNotes(true)}
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-600 hover:text-zinc-400 border border-dashed border-zinc-700/60 hover:border-zinc-600 rounded-lg transition-colors text-left"
+            >
+              <Plus size={12} className="shrink-0" />
+              {t('resources.infoPanel.addNote', 'Add note')}
+            </button>
+          )}
         </div>
       )}
       {readOnly && notesValue && (
@@ -310,14 +331,28 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       {/* URL */}
       {!readOnly && (
         <div className="px-4 mt-2">
-          <input
-            value={urlValue}
-            onChange={(e) => setUrlValue(e.target.value)}
-            onBlur={commitUrl}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-            placeholder={t('resources.infoPanel.urlPlaceholder')}
-            className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
-          />
+          {urlValue || editingUrl ? (
+            <input
+              value={urlValue}
+              onChange={(e) => setUrlValue(e.target.value)}
+              onBlur={() => {
+                commitUrl();
+                if (!urlValue.trim()) setEditingUrl(false);
+              }}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              autoFocus={editingUrl && !urlValue}
+              placeholder={t('resources.infoPanel.urlPlaceholder')}
+              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+            />
+          ) : (
+            <button
+              onClick={() => setEditingUrl(true)}
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-600 hover:text-zinc-400 border border-dashed border-zinc-700/60 hover:border-zinc-600 rounded-lg transition-colors text-left"
+            >
+              <Plus size={12} className="shrink-0" />
+              {t('resources.infoPanel.addUrl', 'Add source link')}
+            </button>
+          )}
         </div>
       )}
       {readOnly && urlValue && (
