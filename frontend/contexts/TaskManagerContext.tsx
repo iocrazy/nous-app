@@ -20,6 +20,8 @@ export type TaskType =
   | 'ai_extract'
   | 'ai_transcription'
   | 'ai_summary'
+  // Image → generation-prompt reverse-engineering (caption_asset workflow).
+  | 'prompt_caption'
   // Agent execution (chat / issue turns) — sourced from agent_runs, not
   // task_tracking; merged into the Task Center view client-side.
   | 'agent'
@@ -89,6 +91,7 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'ai_extract':
     case 'ai_transcription':
     case 'ai_summary':
+    case 'prompt_caption':
     case 'agent':
       return 'ai';
     default:
@@ -774,6 +777,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     ai_extract: 0,
     ai_transcription: 0,
     ai_summary: 0,
+    prompt_caption: 0,
     agent: 0,
     agent_routine: 0,
   };
@@ -862,6 +866,7 @@ export function taskTypeLabel(type: TaskType): string {
     case 'ai_extract': return 'Visual Analysis';
     case 'ai_transcription': return 'Transcription';
     case 'ai_summary': return 'Summary';
+    case 'prompt_caption': return 'Prompt';
     case 'agent': return 'Agent';
     default: return type;
   }

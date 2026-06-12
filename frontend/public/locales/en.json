@@ -689,7 +689,14 @@
       "translatePrompt": "Translate",
       "translatePromptHint": "Translate from the other language",
       "promptTranslated": "Prompt translated",
-      "promptTranslateFailed": "Translation failed"
+      "promptTranslateFailed": "Translation failed",
+      "generatePrompt": "Generate",
+      "generatePromptHint": "Reverse-engineer the prompt from this image",
+      "generateFromImage": "Generate from Image",
+      "promptGenerating": "Generating prompt from image...",
+      "promptGenerated": "Prompt generated",
+      "promptGenerateSlow": "Still generating — check Task Center",
+      "promptGenerateFailed": "Failed to generate prompt"
     },
     "folderInfoPanel": {
       "title": "Folder Info",

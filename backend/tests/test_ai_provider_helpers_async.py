@@ -226,6 +226,30 @@ async def test_resolve_translate_honors_assignment():
     assert slug == "my-translator"
 
 
+async def test_resolve_caption_defaults_to_caption_slug():
+    agents = {"caption": {"model": "qwen-max"}}
+    agent_repo = MagicMock()
+    agent_repo.get_by_slug = AsyncMock(side_effect=lambda slug: agents.get(slug))
+    with (
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.repositories.user_settings_repository.UserSettingsRepository",
+            return_value=_settings_repo({}),
+        ),
+        patch(
+            "app.services.ai.adapters.factory.provider_key_for_model",
+            return_value="qwen",
+        ),
+    ):
+        key, cfg, model, slug = await helpers.resolve_caption_provider_config("u-1")
+    assert key == "qwen"
+    assert model == "qwen-max"
+    assert slug == "caption"
+
+
 async def test_resolve_merges_user_byo_provider_config():
     agent_repo = MagicMock()
     agent_repo.get_by_slug = AsyncMock(return_value={"model": "qwen-max"})

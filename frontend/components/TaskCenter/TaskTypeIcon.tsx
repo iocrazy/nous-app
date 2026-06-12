@@ -38,6 +38,7 @@ export const TaskTypeIcon: React.FC<{ type: TaskType; size?: number }> = ({
       return <Music size={size} />;
     case 'ai_pipeline':
     case 'ai_summary':
+    case 'prompt_caption':
       return <Sparkles size={size} />;
     case 'ai_extract':
       return <Eye size={size} />;

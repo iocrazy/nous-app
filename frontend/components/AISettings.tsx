@@ -841,6 +841,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
             {renderAgentSelect('translation', localSettings.task_assignment.translation ?? '')}
           </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ImageIcon size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Caption (Image → Prompt)</span>
+            </div>
+            {renderAgentSelect('caption', localSettings.task_assignment.caption ?? '')}
+          </div>
         </div>
         )}
 
