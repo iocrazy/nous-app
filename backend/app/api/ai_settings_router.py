@@ -42,8 +42,10 @@ def merge_ai_providers(existing: dict | None, incoming: dict | None) -> dict:
     provider config, blank secret fields fall back to the stored value.
     Returns a new dict — neither input is mutated.
     """
-    merged = {key: dict(cfg) if isinstance(cfg, dict) else cfg
-              for key, cfg in (existing or {}).items()}
+    merged = {
+        key: dict(cfg) if isinstance(cfg, dict) else cfg
+        for key, cfg in (existing or {}).items()
+    }
     if incoming is None:
         return merged
     for key, config in incoming.items():
