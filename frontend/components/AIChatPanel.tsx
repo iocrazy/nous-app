@@ -79,6 +79,26 @@ function extractToolCalls(msg: ChatMessage): ChatToolCall[] {
   );
 }
 
+/**
+ * Extract the Plan Mode paused-for-approval state (Phase 4.5). Backend
+ * folds it into ``metadata_json.awaiting_approval`` when a hook returned
+ * await_approval; absent on the common ran-to-completion turn.
+ */
+function extractAwaitingApproval(
+  msg: ChatMessage,
+): { approvalId: string | null; reason: string; hook?: string } | undefined {
+  const meta = msg.metadata_json;
+  if (!meta || typeof meta !== 'object') return undefined;
+  const raw = (meta as Record<string, unknown>).awaiting_approval;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const entry = raw as Record<string, unknown>;
+  return {
+    approvalId: typeof entry.approval_id === 'string' ? entry.approval_id : null,
+    reason: typeof entry.reason === 'string' ? entry.reason : '',
+    hook: typeof entry.hook === 'string' ? entry.hook : undefined,
+  };
+}
+
 /** Coerce the string project id to a BIGINT-compatible number when possible. */
 function parseProjectId(projectId: string): number | undefined {
   const n = Number(projectId);
@@ -511,6 +531,11 @@ export function AIChatPanel({
                 timestamp={formatTimestamp(msg.created_at)}
                 toolCalls={
                   msg.role === 'assistant' ? extractToolCalls(msg) : undefined
+                }
+                awaitingApproval={
+                  msg.role === 'assistant'
+                    ? extractAwaitingApproval(msg)
+                    : undefined
                 }
                 onApply={
                   msg.role === 'assistant' && onApplyContent

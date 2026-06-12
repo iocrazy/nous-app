@@ -1368,6 +1368,10 @@
     "createSessionFirst": "请先创建会话",
     "copy": "复制",
     "copied": "已复制",
+    "approvalNeeded": "需要批准",
+    "approvedContinue": "已批准——发送消息以继续。",
+    "rejectedNote": "已拒绝——该操作不会执行。",
+    "approvalResolved": "该请求已在别处处理。",
     "suggestions": {
       "outlineStory": "帮我构建故事大纲",
       "reviewChapter": "审阅我的章节",
