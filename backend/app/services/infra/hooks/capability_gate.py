@@ -9,9 +9,11 @@ Profile keys (all optional; empty/missing = that gate is open):
     tool_blacklist          list[str]  tools this agent may never call
     allowed_skills          list[str]  when non-empty, Skill() is limited
                                        to these slugs
-    max_parallel_delegates  int        0 blocks Delegate entirely (the >0
-                                       concurrency cap lands with M2
-                                       concurrent delegate dispatch)
+    max_parallel_delegates  int        0 blocks Delegate AND the
+                                       Skill(skill="task") spawn built-in;
+                                       >0 is the fan-out concurrency cap
+                                       enforced by SubAgentTaskService
+                                       (M2-b)
     context_budget_tokens   int        abort tool calls once accumulated
                                        prompt+completion tokens exceed it
 
@@ -34,6 +36,9 @@ logger = logging.getLogger(__name__)
 # delegation tool (see DelegateToolService).
 _SKILL_TOOL = "Skill"
 _DELEGATE_TOOL = "Delegate"
+# The spawn-and-return sub-agent built-in routed through the Skill tool
+# (SkillToolService dispatches skill=="task" to SubAgentTaskService).
+_TASK_BUILTIN = "task"
 
 
 class CapabilityGateHook:
@@ -80,9 +85,17 @@ class CapabilityGateHook:
                     ),
                 )
 
-        if ctx.tool_name == _DELEGATE_TOOL:
-            max_delegates = self.profile.get("max_parallel_delegates")
-            if isinstance(max_delegates, int) and max_delegates == 0:
+        # Sub-agent spawning has two doors: the Delegate tool (workforce
+        # inbox) and the Skill(skill="task") built-in (spawn-and-return).
+        # max_parallel_delegates == 0 closes both; >0 is the concurrency
+        # cap enforced by SubAgentTaskService's semaphore (M2-b).
+        max_delegates = self.profile.get("max_parallel_delegates")
+        if isinstance(max_delegates, int) and max_delegates == 0:
+            is_task_spawn = (
+                ctx.tool_name == _SKILL_TOOL
+                and str(ctx.tool_args.get("skill") or "") == _TASK_BUILTIN
+            )
+            if ctx.tool_name == _DELEGATE_TOOL or is_task_spawn:
                 return HookResult(
                     decision="abort",
                     abort_reason=(

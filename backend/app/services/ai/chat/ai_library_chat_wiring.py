@@ -107,6 +107,7 @@ async def build_agent_runner_stack(
     settings: Any,
     parent_run_id: Optional[str] = None,
     agent_depth: int = 0,
+    delegation_chain: tuple[str, ...] = (),
 ) -> AgentRunnerStack:
     """Construct a fully-wired AgentRunner for one agent turn.
 
@@ -116,6 +117,11 @@ async def build_agent_runner_stack(
       - Worker runtime (M3): inherits ``parent_run_id`` + ``agent_depth+1``
         from the calling agent's run, so Delegate cycle/depth limits
         and cost-rollup-by-tree continue to work.
+
+    ``delegation_chain`` is the ANCESTOR slug chain (root → caller); this
+    function appends the current agent's slug and threads the result into
+    AgentRunner hook contexts and SubAgentTaskService, so children inherit
+    the extended chain (M2 multi-agent scope).
 
     Steps:
       1. Recall relevant memories (P0-isolated by user_id)
@@ -327,6 +333,19 @@ async def build_agent_runner_stack(
         SubAgentTaskService,
     )
 
+    # Chain = ancestors + current agent (slug may be absent in some test
+    # fixtures — fall back to id so the chain stays meaningful).
+    own_chain = (*delegation_chain, agent.get("slug") or str(agent["id"]))
+
+    # M2-b: parallel fan-out cap from the agent's capability profile.
+    # Non-int / missing → default; 0 disables the parallel form (and
+    # CapabilityGate blocks the spawn before it reaches the service).
+    from app.services.ai.runner.subagent_task_service import DEFAULT_MAX_PARALLEL
+
+    _profile = agent.get("capability_profile")
+    _mp = _profile.get("max_parallel_delegates") if isinstance(_profile, dict) else None
+    max_parallel = _mp if isinstance(_mp, int) and _mp >= 0 else DEFAULT_MAX_PARALLEL
+
     skill_tool = SkillToolService(skill_repo)
     skill_tool.subagent_task = SubAgentTaskService(
         caller_agent_id=UUID(agent["id"]),
@@ -334,6 +353,8 @@ async def build_agent_runner_stack(
         parent_run_id=parent_run_id,
         agent_depth=agent_depth,
         session_id=session_id,
+        delegation_chain=own_chain,
+        max_parallel=max_parallel,
     )
 
     runner = AgentRunner(
@@ -342,6 +363,9 @@ async def build_agent_runner_stack(
         hooks=registry,
         delegate_tool=delegate_tool,
         mcp_registry=mcp_registry,
+        parent_run_id=parent_run_id,
+        agent_depth=agent_depth,
+        delegation_chain=own_chain,
     )
 
     return AgentRunnerStack(

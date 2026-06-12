@@ -33,12 +33,16 @@ What this does NOT do (deferred to Phase 5+):
   - Stream sub-agent progress back to the parent agent (D5: v1 returns
     after completion, no mid-flight events)
   - Handle multi-turn sub-conversations — ``run_turn`` runs once
-  - Spawn multiple sub-agents in parallel — ``Task(parallel=true,...)``
-    is a Phase 6 idea
+
+M2-b (Phase 4.5): parallel fan-out. ``Skill(skill="task", tasks=[...])``
+spawns each entry concurrently, capped by the caller agent's
+``capability_profile.max_parallel_delegates`` (default 3, list length
+hard-capped at MAX_FANOUT). The single-task form is unchanged.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 from uuid import UUID
 
@@ -63,6 +67,13 @@ ENVELOPE_KEYS = (
     "status",
 )
 
+# M2-b parallel fan-out limits. DEFAULT_MAX_PARALLEL applies when the
+# caller agent has no capability_profile.max_parallel_delegates; MAX_FANOUT
+# bounds the tasks list itself (concurrency is the semaphore's job, this
+# is an abuse guard — the per-caller rate limit still applies per child).
+DEFAULT_MAX_PARALLEL = 3
+MAX_FANOUT = 10
+
 
 class SubAgentTaskService:
     """Per-turn service: caller context baked in at construction.
@@ -82,12 +93,21 @@ class SubAgentTaskService:
         agent_depth: int = 0,
         session_id: Optional[str] = None,
         parent_recorder: Optional[Any] = None,
+        delegation_chain: tuple[str, ...] = (),
+        max_parallel: int = DEFAULT_MAX_PARALLEL,
     ) -> None:
         self.caller_agent_id = caller_agent_id
         self.caller_user_id = caller_user_id
         self.parent_run_id = parent_run_id
         self.agent_depth = agent_depth
         self.session_id = session_id
+        # M2: caller's slug chain (root → caller inclusive); spawned
+        # children get this as their ancestor chain.
+        self.delegation_chain = delegation_chain
+        # M2-b: concurrency cap for the parallel ``tasks`` form. 0 means
+        # the parallel form is disabled (CapabilityGate blocks the spawn
+        # earlier; this is defense in depth).
+        self.max_parallel = max_parallel
         # Phase 5 of #199: parent's RunRecorder so we can roll spawn
         # counts up to its metadata as note_subagent() calls. Optional
         # because not every caller hands us a recorder (CLI / batch
@@ -99,6 +119,8 @@ class SubAgentTaskService:
         parent recorder. Wrapping ``_spawn`` keeps the metadata
         side-effect on a single return path so any future early-exit
         added to ``_spawn`` automatically gets counted."""
+        if args.get("tasks") is not None:
+            return await self._spawn_parallel(args)
         envelope = await self._spawn(args)
         if self.parent_recorder is not None and hasattr(
             self.parent_recorder, "note_subagent"
@@ -125,6 +147,60 @@ class SubAgentTaskService:
             envelope.get("tokens_used"),
         )
         return envelope
+
+    async def _spawn_parallel(self, args: dict[str, Any]) -> dict[str, Any]:
+        """M2-b: fan out ``args["tasks"]`` concurrently.
+
+        Each entry is the same shape as a single spawn's args
+        (``subagent_type`` + ``prompt`` [+ ``description``]). Children
+        run under a semaphore sized by ``max_parallel``; each goes
+        through ``spawn`` so per-child telemetry (note_subagent + the
+        structured log line) is identical to the single form. A crashing
+        child becomes a failed envelope — it never sinks its siblings.
+        """
+        tasks = args.get("tasks")
+        if not isinstance(tasks, list) or not tasks:
+            return self._failed("tasks must be a non-empty list")
+        if len(tasks) > MAX_FANOUT:
+            return self._failed(
+                f"too many tasks: {len(tasks)} exceeds the {MAX_FANOUT} fan-out cap"
+            )
+        if self.max_parallel <= 0:
+            return self._failed(
+                "parallel sub-agent spawning is disabled for this agent "
+                "(max_parallel_delegates=0)"
+            )
+
+        semaphore = asyncio.Semaphore(self.max_parallel)
+
+        async def run_one(task_args: Any) -> dict[str, Any]:
+            if not isinstance(task_args, dict):
+                return self._failed("each task must be an object")
+            async with semaphore:
+                try:
+                    return await self.spawn(dict(task_args))
+                except Exception as exc:  # noqa: BLE001 — sibling isolation
+                    logger.exception(
+                        "[subagent_task] parallel child crashed slug={}",
+                        task_args.get("subagent_type"),
+                    )
+                    return self._failed(f"sub-agent crashed: {exc!s:.120}")
+
+        results = list(await asyncio.gather(*(run_one(t) for t in tasks)))
+        ok = sum(1 for r in results if r.get("status") == "success")
+        if ok == len(results):
+            status = "success"
+        elif ok == 0:
+            status = "failed"
+        else:
+            status = "partial"
+
+        return {
+            "status": status,
+            "tasks_run": len(results),
+            "results": results,
+            "summary": f"{ok}/{len(results)} sub-agents succeeded",
+        }
 
     async def _spawn(self, args: dict[str, Any]) -> dict[str, Any]:
         """Inner dispatch (the body of what was originally ``spawn``).
@@ -232,6 +308,7 @@ class SubAgentTaskService:
                 settings=settings,
                 parent_run_id=self.parent_run_id,
                 agent_depth=self.agent_depth + 1,
+                delegation_chain=self.delegation_chain,
             )
         except Exception as exc:
             logger.exception("[subagent_task] stack build failed slug={}", slug)
@@ -355,7 +432,9 @@ class SubAgentTaskService:
 
 
 __all__ = [
+    "DEFAULT_MAX_PARALLEL",
     "ENVELOPE_KEYS",
     "MAX_DELEGATION_DEPTH",
+    "MAX_FANOUT",
     "SubAgentTaskService",
 ]
