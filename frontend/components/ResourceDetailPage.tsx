@@ -59,6 +59,7 @@ import {
   setResourceChorus,
   trashResource,
   translateGenPrompt,
+  generateGenPrompt,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
@@ -381,6 +382,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptLang, setPromptLang] = useState<'en' | 'zh'>('en');
   const [promptTranslating, setPromptTranslating] = useState(false);
+  const [promptGenerating, setPromptGenerating] = useState(false);
+  const promptPollRef = useRef<number | null>(null);
   const [urlValue, setUrlValue] = useState('');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -545,6 +548,64 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       .then(() => addToast(t('resources.infoPanel.promptCopied', 'Prompt copied'), 'success'))
       .catch((err) => console.error('Failed to copy prompt:', err));
   }, [promptLang, resource?.gen_prompt, resource?.gen_prompt_zh, addToast, t]);
+
+  // Clear any in-flight prompt poll on unmount.
+  useEffect(() => () => {
+    if (promptPollRef.current) window.clearInterval(promptPollRef.current);
+  }, []);
+
+  // Reverse-engineer a bilingual prompt from the image via the assigned
+  // caption agent. Async workflow — poll the resource until the prompt
+  // lands (or hand off to Task Center after ~90s).
+  const handleGeneratePrompt = useCallback(async () => {
+    if (!resource || promptGenerating) return;
+    setPromptGenerating(true);
+    try {
+      await generateGenPrompt(resourceId);
+      addToast(
+        t('resources.infoPanel.promptGenerating', 'Generating prompt from image...'),
+        'info',
+      );
+      const before = `${resource.gen_prompt || ''}|${resource.gen_prompt_zh || ''}`;
+      let tries = 0;
+      promptPollRef.current = window.setInterval(async () => {
+        tries += 1;
+        try {
+          const fresh = await fetchResourceById(resourceId);
+          const now = `${fresh?.gen_prompt || ''}|${fresh?.gen_prompt_zh || ''}`;
+          if (fresh && now !== before && now !== '|') {
+            if (promptPollRef.current) window.clearInterval(promptPollRef.current);
+            promptPollRef.current = null;
+            setResource((prev) =>
+              prev
+                ? { ...prev, gen_prompt: fresh.gen_prompt, gen_prompt_zh: fresh.gen_prompt_zh }
+                : prev,
+            );
+            setPromptGenerating(false);
+            addToast(t('resources.infoPanel.promptGenerated', 'Prompt generated'), 'success');
+          } else if (tries >= 30) {
+            if (promptPollRef.current) window.clearInterval(promptPollRef.current);
+            promptPollRef.current = null;
+            setPromptGenerating(false);
+            addToast(
+              t('resources.infoPanel.promptGenerateSlow', 'Still generating — check Task Center'),
+              'info',
+            );
+          }
+        } catch (err) {
+          console.error('Failed to poll for generated prompt:', err);
+        }
+      }, 3000);
+    } catch (err) {
+      console.error('Failed to start prompt generation:', err);
+      setPromptGenerating(false);
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt');
+      addToast(msg, 'error');
+    }
+  }, [resource, resourceId, promptGenerating, addToast, t]);
 
   // Fill the ACTIVE side by translating from the other side via the
   // user's assigned translation agent (Settings → AI → Translation).
@@ -1538,6 +1599,24 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   </div>
                 </div>
                 <div className="flex items-center gap-2.5">
+                  {resource.file_type === 'image' && (
+                    <button
+                      onClick={handleGeneratePrompt}
+                      disabled={promptGenerating}
+                      title={t(
+                        'resources.infoPanel.generatePromptHint',
+                        'Reverse-engineer the prompt from this image',
+                      )}
+                      className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                    >
+                      {promptGenerating ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={11} />
+                      )}{' '}
+                      {t('resources.infoPanel.generatePrompt', 'Generate')}
+                    </button>
+                  )}
                   {Boolean(
                     promptLang === 'zh' ? resource.gen_prompt : resource.gen_prompt_zh,
                   ) && (
@@ -1580,13 +1659,27 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               />
             </div>
           ) : (
-            <div className="px-4 mt-1">
+            <div className="px-4 mt-1 flex items-center gap-3">
               <button
                 onClick={() => setPromptOpen(true)}
                 className="text-[11px] text-zinc-600 hover:text-indigo-300 transition-colors"
               >
                 + {t('resources.infoPanel.addPrompt', 'Add Prompt')}
               </button>
+              {resource.file_type === 'image' && (
+                <button
+                  onClick={handleGeneratePrompt}
+                  disabled={promptGenerating}
+                  className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                >
+                  {promptGenerating ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={11} />
+                  )}{' '}
+                  {t('resources.infoPanel.generateFromImage', 'Generate from Image')}
+                </button>
+              )}
             </div>
           )}
 

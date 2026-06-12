@@ -43,6 +43,7 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
 
 DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
 DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
+DEFAULT_CAPTION_AGENT_SLUG = "caption"
 
 
 async def resolve_task_provider_config(
@@ -159,4 +160,19 @@ async def resolve_translate_provider_config(
     """
     return await resolve_task_provider_config(
         user_id, "translation", DEFAULT_TRANSLATE_AGENT_SLUG
+    )
+
+
+async def resolve_caption_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the image-caption agent slug + model + user's BYO provider config.
+
+    Honors ``task_assignment.caption`` (an AI Library agent slug),
+    defaulting to the built-in ``caption`` agent. The assigned agent's
+    model must be a vision/multimodal one — the caption workflow surfaces
+    a clear error when the provider call fails.
+    """
+    return await resolve_task_provider_config(
+        user_id, "caption", DEFAULT_CAPTION_AGENT_SLUG
     )

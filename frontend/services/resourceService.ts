@@ -97,6 +97,26 @@ export async function updateResource(
   return json.data;
 }
 
+/** Reverse-engineer a bilingual generation prompt from the image via the
+ *  user's assigned caption agent. Async — returns the task id; the
+ *  workflow writes gen_prompt / gen_prompt_zh when it finishes. */
+export async function generateGenPrompt(resourceId: string): Promise<string> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/gen-prompt/generate`,
+    { method: 'POST', headers: await getAuthHeaders() },
+  );
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(detail || 'Failed to start prompt generation');
+  }
+  const json = await response.json();
+  return json.task_id;
+}
+
 /** Translate the asset's generation prompt into `targetLang` via the
  *  user's assigned translation agent. Returns both prompt sides. */
 export async function translateGenPrompt(

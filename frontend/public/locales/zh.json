@@ -689,7 +689,14 @@
       "translatePrompt": "翻译",
       "translatePromptHint": "从另一种语言翻译",
       "promptTranslated": "提示词已翻译",
-      "promptTranslateFailed": "翻译失败"
+      "promptTranslateFailed": "翻译失败",
+      "generatePrompt": "反推",
+      "generatePromptHint": "从图片反推生成提示词",
+      "generateFromImage": "从图片反推",
+      "promptGenerating": "正在从图片反推提示词...",
+      "promptGenerated": "提示词已生成",
+      "promptGenerateSlow": "仍在生成中 — 请到任务中心查看",
+      "promptGenerateFailed": "提示词生成失败"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",
