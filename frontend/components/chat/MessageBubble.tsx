@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import { Copy, Check } from 'lucide-react';
 
 import type { ChatToolCall } from '../../types';
+import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';
 import { SubTaskList } from './SubTaskCard';
 
 export interface MessageBubbleProps {
@@ -19,6 +20,11 @@ export interface MessageBubbleProps {
    * as collapsible cards above the prose body. Ignored on user bubbles.
    */
   toolCalls?: ChatToolCall[];
+  /**
+   * Plan Mode (Phase 4.5): the turn paused on a hook's await_approval.
+   * Renders an inline Approve/Reject card above the prose body.
+   */
+  awaitingApproval?: AwaitingApproval;
 }
 
 export function MessageBubble({
@@ -30,6 +36,7 @@ export function MessageBubble({
   onCopy,
   timestamp,
   toolCalls,
+  awaitingApproval,
 }: MessageBubbleProps): React.ReactElement {
   const { t } = useTranslation();
   const [copied, setCopied] = React.useState(false);
@@ -67,6 +74,8 @@ export function MessageBubble({
         )}
 
         <SubTaskList calls={toolCalls ?? []} />
+
+        {awaitingApproval && <ApprovalCard approval={awaitingApproval} />}
 
         <div
           className="px-3 py-2 prose prose-invert prose-sm max-w-none"

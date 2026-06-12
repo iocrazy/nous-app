@@ -1368,6 +1368,10 @@
     "createSessionFirst": "Create a session first",
     "copy": "Copy",
     "copied": "Copied",
+    "approvalNeeded": "Approval needed",
+    "approvedContinue": "Approved — send a message to continue.",
+    "rejectedNote": "Rejected — the agent will not run this action.",
+    "approvalResolved": "This request was already handled.",
     "suggestions": {
       "outlineStory": "Help me outline a story",
       "reviewChapter": "Review my chapter",

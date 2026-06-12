@@ -949,6 +949,16 @@ class AILibraryChatService:
             asst_metadata["run_id"] = str(run_id)
         if tool_calls_trace:
             asst_metadata["tool_calls"] = tool_calls_trace
+        # Phase 4.5 Plan Mode: fold the paused-for-approval state into the
+        # persisted message so a fresh page-load still renders the inline
+        # approval card (top-level approval_request_id only lives in this
+        # one response).
+        if result.get("awaiting_approval"):
+            asst_metadata["awaiting_approval"] = {
+                "approval_id": approval_row_id,
+                "hook": str(result.get("hook_name") or ""),
+                "reason": str(result.get("approval_reason") or ""),
+            }
         asst_resp = (
             await supabase.table("ai_messages")
             .insert(
