@@ -13,6 +13,9 @@ from __future__ import annotations
 # tick), so the boot-grace window (G2) is anchored to actual process start,
 # not to the first sweeper invocation.
 from app.workflows import sweep_guard  # noqa: F401,E402
+from app.workflows.agent_cost_anomaly import (  # noqa: F401
+    agent_cost_anomaly_workflow,
+)
 from app.workflows.agent_runs_sweeper import agent_runs_sweeper_workflow  # noqa: F401
 from app.workflows.liveness_scanner import (  # noqa: F401
     liveness_scan_scheduled,
