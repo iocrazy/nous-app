@@ -123,6 +123,22 @@ const PROVIDER_META: Record<
     summaryModels: ['qwen3.5-plus', 'qwen3-max', 'qwen-plus', 'qwen-turbo'],
     analysisModels: ['qwen3.5-plus', 'qwen3-vl-plus', 'qwen-vl-max'],
   },
+  modelscope: {
+    name: 'ModelScope',
+    description: 'ModelScope (魔搭) — community inference, free tier',
+    icon: <Brain size={18} />,
+    color: 'violet',
+    badge: 'Free Tier',
+    defaultBaseUrl: 'https://api-inference.modelscope.cn/v1',
+    models: [
+      'Qwen/Qwen3-235B-A22B',
+      'Qwen/Qwen2.5-72B-Instruct',
+      'deepseek-ai/DeepSeek-V3.1',
+      'deepseek-ai/DeepSeek-R1',
+      'ZhipuAI/GLM-4.6',
+    ],
+    summaryModels: ['Qwen/Qwen2.5-72B-Instruct', 'deepseek-ai/DeepSeek-V3.1'],
+  },
   volcengine: {
     name: 'Volcengine',
     description: 'ByteDance — 火山引擎语音识别',

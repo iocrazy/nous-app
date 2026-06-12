@@ -27,11 +27,13 @@ from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.adapters.claude import ClaudeAdapter
 from app.services.ai.adapters.deepseek import DeepSeekAdapter
 from app.services.ai.adapters.doubao import DoubaoAdapter
+from app.services.ai.adapters.modelscope import ModelScopeAdapter
 from app.services.ai.adapters.openai import OpenAIAdapter
 from app.services.ai.adapters.qwen import QwenAdapter
 
 _KNOWN_PREFIXES = (
-    "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*, gpt-*, o1-*, o3-*"
+    "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*, gpt-*, o1-*, o3-*, "
+    "org/name (ModelScope)"
 )
 
 
@@ -52,6 +54,11 @@ def provider_key_for_model(model: str) -> str:
     Raises ValueError for unknown prefixes.
     """
     m = (model or "").lower()
+    # ModelScope model IDs are ``org/name`` — the slash is the
+    # discriminator, and it must be checked BEFORE any prefix rule
+    # (``deepseek-ai/DeepSeek-V3`` starts with ``deepseek-``).
+    if "/" in m:
+        return "modelscope"
     if m.startswith("claude-"):
         return "claude"
     if m.startswith("deepseek-"):
@@ -71,6 +78,17 @@ def get_adapter(model: str, settings: Any) -> AIAdapter:
     """Dispatch by model prefix. ``settings`` is the app settings object
     (duck-typed — must expose LLM_*/DEEPSEEK_*/DOUBAO_*/CLAUDE_API_KEY)."""
     m = (model or "").lower()
+
+    if "/" in m:
+        from app.services.ai.adapters.modelscope import MODELSCOPE_DEFAULT_URL
+
+        # BYO-first provider: global MODELSCOPE_* settings are optional.
+        return ModelScopeAdapter(
+            api_url=getattr(settings, "MODELSCOPE_API_URL", "")
+            or MODELSCOPE_DEFAULT_URL,
+            api_key=getattr(settings, "MODELSCOPE_API_KEY", "") or "",
+            default_model=model,
+        )
 
     if m.startswith("claude-"):
         return ClaudeAdapter(
@@ -189,6 +207,18 @@ def get_adapter_for_user(
             api_key=user_key or fallback_settings.OPENAI_API_KEY,
             default_model=model or fallback_settings.OPENAI_MODEL,
             api_url=user_base or None,
+        )
+
+    if provider_key == "modelscope":
+        # BYO-only provider — no global MODELSCOPE_* settings exist, so a
+        # missing user config builds a keyless adapter (request then fails
+        # with ModelScope's own auth error instead of an AttributeError).
+        from app.services.ai.adapters.modelscope import MODELSCOPE_DEFAULT_URL
+
+        return ModelScopeAdapter(
+            api_url=user_base or MODELSCOPE_DEFAULT_URL,
+            api_key=user_key,
+            default_model=model,
         )
 
     # provider_key == "qwen" (default / only remaining case)
