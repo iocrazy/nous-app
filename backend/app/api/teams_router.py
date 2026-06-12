@@ -34,6 +34,7 @@ async def list_teams(auth: AuthDep):
                 invite_code=t.get("invite_code", ""),
                 description=t.get("description"),
                 created_at=t["created_at"],
+                kind=t.get("kind") or "collaborative",
             )
             for t in teams
         ],
@@ -62,6 +63,7 @@ async def create_team(team: TeamCreate, auth: AuthDep):
         invite_code=created.get("invite_code", ""),
         description=created.get("description"),
         created_at=created["created_at"],
+        kind=created.get("kind") or "collaborative",
     )
 
 
@@ -84,6 +86,7 @@ async def get_team(team_id: str, auth: AuthDep):
         invite_code=team.get("invite_code", ""),
         description=team.get("description"),
         created_at=team["created_at"],
+        kind=team.get("kind") or "collaborative",
     )
 
 
@@ -117,6 +120,7 @@ async def update_team(team_id: str, update: TeamUpdate, auth: AuthDep):
         invite_code=updated.get("invite_code", ""),
         description=updated.get("description"),
         created_at=updated["created_at"],
+        kind=updated.get("kind") or "collaborative",
     )
 
 
@@ -240,4 +244,5 @@ async def join_team(request: JoinTeamRequest, auth: AuthDep):
         invite_code=team.get("invite_code", ""),
         description=team.get("description"),
         created_at=team["created_at"],
+        kind=team.get("kind") or "collaborative",
     )
