@@ -137,6 +137,35 @@ export async function classifyResource(resourceId: string): Promise<string> {
   return json.task_id;
 }
 
+/** Batch-dispatch caption/classify workflows for up to 50 image
+ *  resources. Each image gets its own Task Center row; non-image /
+ *  inaccessible entries come back in `skipped` with a reason. */
+export async function batchAssetAi(
+  resourceIds: string[],
+  operation: 'caption' | 'classify',
+): Promise<{
+  dispatched: Array<{ resource_id: string; task_id: string }>;
+  skipped: Array<{ resource_id: string; reason: string }>;
+}> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/ai/batch`, {
+    method: 'POST',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resource_ids: resourceIds, operation }),
+  });
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(
+      typeof detail === 'string' ? detail : 'Failed to dispatch batch AI tasks',
+    );
+  }
+  const json = await response.json();
+  return { dispatched: json.dispatched ?? [], skipped: json.skipped ?? [] };
+}
+
 /** Translate the asset's generation prompt into `targetLang` via the
  *  user's assigned translation agent. Returns both prompt sides. */
 export async function translateGenPrompt(

@@ -5,15 +5,17 @@
  * Renders restore/delete actions for recycle view, and move/copy/trash for normal view.
  */
 
-import React from 'react';
-import { Trash2, Move, Copy, RefreshCw, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Trash2, Move, Copy, RefreshCw, X, Sparkles, Tag, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Folder, ResourceItem } from '../types';
 import {
   trashResources,
   restoreFolder,
   restoreResource,
+  batchAssetAi,
 } from '../services/resourceService';
+import { useToast } from './Toast';
 
 interface BatchSelectionToolbarProps {
   selectedIds: Set<string>;
@@ -65,8 +67,58 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
   reloadResources,
 }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
+  const [aiBusy, setAiBusy] = useState<'caption' | 'classify' | null>(null);
 
   if (selectedIds.size === 0 || isDownloadsView) return null;
+
+  // Image resources in the current selection — batch AI only applies to them.
+  const selectedImageIds = sortedItems
+    .filter(
+      (i) =>
+        selectedIds.has(`item:${i.id}`) &&
+        i.resource?.id &&
+        i.resource?.file_type === 'image',
+    )
+    .map((i) => String(i.resource!.id));
+
+  const runBatchAi = async (operation: 'caption' | 'classify') => {
+    if (selectedImageIds.length === 0 || aiBusy) return;
+    setAiBusy(operation);
+    try {
+      const { dispatched, skipped } = await batchAssetAi(
+        selectedImageIds.slice(0, 50),
+        operation,
+      );
+      if (dispatched.length > 0) {
+        addToast(
+          t('resources.batchAiDispatched', '{{count}} tasks started — see Task Center', {
+            count: dispatched.length,
+          }),
+          'success',
+        );
+        setSelectedIds(new Set());
+      }
+      if (skipped.length > 0) {
+        addToast(
+          t('resources.batchAiSkipped', '{{count}} items skipped', {
+            count: skipped.length,
+          }),
+          'info',
+        );
+      }
+    } catch (err) {
+      console.error(`Batch ${operation} failed:`, err);
+      addToast(
+        err instanceof Error && err.message
+          ? err.message
+          : t('resources.batchAiFailed', 'Batch AI dispatch failed'),
+        'error',
+      );
+    } finally {
+      setAiBusy(null);
+    }
+  };
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
@@ -138,6 +190,28 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
             <Copy size={14} />
             {t('resources.batchCopy')}
           </button>
+          {selectedImageIds.length > 0 && (
+            <>
+              <button
+                onClick={() => runBatchAi('caption')}
+                disabled={aiBusy !== null}
+                title={t('resources.batchGeneratePromptHint', 'Reverse-engineer prompts for the selected images')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {aiBusy === 'caption' ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                {t('resources.batchGeneratePrompt', 'Prompts')}
+              </button>
+              <button
+                onClick={() => runBatchAi('classify')}
+                disabled={aiBusy !== null}
+                title={t('resources.batchAutoTagHint', 'Auto-tag the selected images across 12 dimensions')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {aiBusy === 'classify' ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
+                {t('resources.batchAutoTag', 'Auto Tag')}
+              </button>
+            </>
+          )}
           <button
             onClick={async () => {
               try {
