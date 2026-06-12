@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Tag,
   Upload,
 } from 'lucide-react';
 import type { TaskType } from '../../contexts/TaskManagerContext';
@@ -42,6 +43,8 @@ export const TaskTypeIcon: React.FC<{ type: TaskType; size?: number }> = ({
       return <Sparkles size={size} />;
     case 'ai_extract':
       return <Eye size={size} />;
+    case 'asset_classify':
+      return <Tag size={size} />;
     case 'ai_transcription':
       return <FileText size={size} />;
     case 'agent':

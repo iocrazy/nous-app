@@ -65,6 +65,7 @@ class AISettingsResponse(BaseModel):
             "visual_analysis": "",
             "translation": "",
             "caption": "",
+            "classification": "",
         },
         description=(
             "Task-to-handler routing. As of migration 142 (Phase 2 PR 2.8b), "

@@ -44,6 +44,7 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
 DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
 DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
 DEFAULT_CAPTION_AGENT_SLUG = "caption"
+DEFAULT_CLASSIFY_AGENT_SLUG = "classify"
 
 
 async def resolve_task_provider_config(
@@ -175,4 +176,17 @@ async def resolve_caption_provider_config(
     """
     return await resolve_task_provider_config(
         user_id, "caption", DEFAULT_CAPTION_AGENT_SLUG
+    )
+
+
+async def resolve_classify_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the asset-classification agent slug + model + BYO config.
+
+    Honors ``task_assignment.classification`` (an AI Library agent slug),
+    defaulting to the built-in ``classify`` agent (vision required).
+    """
+    return await resolve_task_provider_config(
+        user_id, "classification", DEFAULT_CLASSIFY_AGENT_SLUG
     )

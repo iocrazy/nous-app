@@ -696,7 +696,13 @@
       "promptGenerating": "Generating prompt from image...",
       "promptGenerated": "Prompt generated",
       "promptGenerateSlow": "Still generating — check Task Center",
-      "promptGenerateFailed": "Failed to generate prompt"
+      "promptGenerateFailed": "Failed to generate prompt",
+      "autoTag": "Auto Tag",
+      "autoTagHint": "Classify this image into bilingual tags across 12 dimensions",
+      "autoTagging": "Auto-tagging image...",
+      "autoTagged": "Tags added ({{count}} new)",
+      "autoTagSlow": "Still tagging — check Task Center",
+      "autoTagFailed": "Auto-tagging failed"
     },
     "folderInfoPanel": {
       "title": "Folder Info",

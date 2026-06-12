@@ -60,6 +60,7 @@ import {
   trashResource,
   translateGenPrompt,
   generateGenPrompt,
+  classifyResource,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
@@ -384,6 +385,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [promptTranslating, setPromptTranslating] = useState(false);
   const [promptGenerating, setPromptGenerating] = useState(false);
   const promptPollRef = useRef<number | null>(null);
+  const [autoTagging, setAutoTagging] = useState(false);
+  const tagPollRef = useRef<number | null>(null);
   const [urlValue, setUrlValue] = useState('');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -549,10 +552,65 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       .catch((err) => console.error('Failed to copy prompt:', err));
   }, [promptLang, resource?.gen_prompt, resource?.gen_prompt_zh, addToast, t]);
 
-  // Clear any in-flight prompt poll on unmount.
+  // Clear any in-flight prompt/tag polls on unmount.
   useEffect(() => () => {
     if (promptPollRef.current) window.clearInterval(promptPollRef.current);
+    if (tagPollRef.current) window.clearInterval(tagPollRef.current);
   }, []);
+
+  // 12-dimension AI auto-tagging via the assigned classify agent.
+  // Async workflow — poll the resource's tags until new ones land.
+  const handleAutoTag = useCallback(async () => {
+    if (!resource || autoTagging) return;
+    setAutoTagging(true);
+    try {
+      await classifyResource(resourceId);
+      addToast(t('resources.infoPanel.autoTagging', 'Auto-tagging image...'), 'info');
+      const beforeCount = assignedTags.length;
+      let tries = 0;
+      tagPollRef.current = window.setInterval(async () => {
+        tries += 1;
+        try {
+          const updated = await fetchResourceTags(resourceId);
+          if (updated.length > beforeCount) {
+            if (tagPollRef.current) window.clearInterval(tagPollRef.current);
+            tagPollRef.current = null;
+            setAssignedTags(updated);
+            // New AI tags may be brand-new tag rows — refresh the picker's
+            // catalog so they render with names/groups immediately.
+            fetchTags()
+              .then(setAllTags)
+              .catch((err) => console.error('Failed to refresh tags:', err));
+            setAutoTagging(false);
+            addToast(
+              t('resources.infoPanel.autoTagged', 'Tags added ({{count}} new)', {
+                count: updated.length - beforeCount,
+              }),
+              'success',
+            );
+          } else if (tries >= 30) {
+            if (tagPollRef.current) window.clearInterval(tagPollRef.current);
+            tagPollRef.current = null;
+            setAutoTagging(false);
+            addToast(
+              t('resources.infoPanel.autoTagSlow', 'Still tagging — check Task Center'),
+              'info',
+            );
+          }
+        } catch (err) {
+          console.error('Failed to poll for auto tags:', err);
+        }
+      }, 3000);
+    } catch (err) {
+      console.error('Failed to start auto-tagging:', err);
+      setAutoTagging(false);
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : t('resources.infoPanel.autoTagFailed', 'Auto-tagging failed');
+      addToast(msg, 'error');
+    }
+  }, [resource, resourceId, autoTagging, assignedTags.length, addToast, t]);
 
   // Reverse-engineer a bilingual prompt from the image via the assigned
   // caption agent. Async workflow — poll the resource until the prompt
@@ -1695,7 +1753,27 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             />
           </div>
 
-          {/* Tags */}
+          {/* Tags — AI auto-tagging entry (images only, on-demand) */}
+          {resource.file_type === 'image' && (
+            <div className="px-4 mt-2 flex justify-end">
+              <button
+                onClick={handleAutoTag}
+                disabled={autoTagging}
+                title={t(
+                  'resources.infoPanel.autoTagHint',
+                  'Classify this image into bilingual tags across 12 dimensions',
+                )}
+                className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+              >
+                {autoTagging ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <TagIcon size={11} />
+                )}{' '}
+                {t('resources.infoPanel.autoTag', 'Auto Tag')}
+              </button>
+            </div>
+          )}
           <EagleTagPicker
             assignedTags={assignedTags.map(item => item.tag).filter((t): t is Tag => !!t)}
             allTags={allTags}

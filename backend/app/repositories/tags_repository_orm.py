@@ -301,6 +301,57 @@ class TagsRepositoryOrm(TagsRepository):
             logger.error(f"Error in get_tag_by_name: {e}")
         return None
 
+    async def get_or_create_group(self, name: str) -> Optional[dict]:
+        """Find a tag_groups row by exact name, creating it when missing.
+
+        Used by the AI classification write-through (one group per
+        dimension). Race-safe: ON CONFLICT(name) DO NOTHING + re-select.
+        """
+        try:
+            async with write_scope() as session:
+                row = (
+                    (
+                        await session.execute(
+                            select(TagGroups).where(TagGroups.name == name).limit(1)
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if row is None:
+                    row = (
+                        (
+                            await session.execute(
+                                pg_insert(TagGroups)
+                                .values(name=name)
+                                .on_conflict_do_nothing(index_elements=["name"])
+                                .returning(TagGroups)
+                            )
+                        )
+                        .scalars()
+                        .first()
+                    )
+                if row is None:  # lost the insert race — re-select
+                    row = (
+                        (
+                            await session.execute(
+                                select(TagGroups).where(TagGroups.name == name).limit(1)
+                            )
+                        )
+                        .scalars()
+                        .first()
+                    )
+                if row is None:
+                    return None
+                return {
+                    "id": row.id,
+                    "name": row.name,
+                    "sort_order": row.sort_order,
+                }
+        except Exception as e:
+            logger.error(f"Error in get_or_create_group({name}): {e}")
+            return None
+
     async def create_tag(
         self,
         name: str,
@@ -308,6 +359,7 @@ class TagsRepositoryOrm(TagsRepository):
         color: str = "#6366f1",
         icon: Optional[str] = None,
         name_zh: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> dict:
         """Create a new user tag (id fires the server-default snowflake)."""
         values: Dict[str, Any] = {
@@ -319,6 +371,8 @@ class TagsRepositoryOrm(TagsRepository):
         }
         if name_zh:
             values["name_zh"] = name_zh
+        if group_id:
+            values["group_id"] = int(group_id)
 
         async with write_scope() as session:
             row = (

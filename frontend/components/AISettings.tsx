@@ -871,6 +871,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </div>
             {renderAgentSelect('caption', localSettings.task_assignment.caption ?? '')}
           </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Search size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Classification (Auto Tag)</span>
+            </div>
+            {renderAgentSelect('classification', localSettings.task_assignment.classification ?? '')}
+          </div>
         </div>
         )}
 
