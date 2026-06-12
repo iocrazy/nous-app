@@ -144,10 +144,19 @@ class AgentRunner:
         hooks: Optional[HookRegistry] = None,
         delegate_tool: Optional[Any] = None,
         mcp_registry: Optional[Any] = None,
+        parent_run_id: Optional[str] = None,
+        agent_depth: int = 0,
+        delegation_chain: tuple[str, ...] = (),
     ) -> None:
         self.adapter = adapter
         self.skill_tool = skill_tool
         self.hooks = hooks  # None = no hook chain (back-compat default)
+        # M2 multi-agent scope, threaded into every HookContext. Defaults
+        # describe a top-of-tree turn; sub-agent / workforce wiring passes
+        # the inherited values (see build_agent_runner_stack).
+        self.parent_run_id = parent_run_id
+        self.agent_depth = agent_depth
+        self.delegation_chain = delegation_chain
         # Optional cross-agent dispatch tool. When None, ``Delegate`` calls
         # are answered with an explicit "tool not configured" so the LLM
         # gets useful feedback instead of silent skip behaviour.
@@ -1122,6 +1131,9 @@ class AgentRunner:
             accumulated_completion_tokens=completion_tokens,
             accumulated_cost_cents=cost_cents,
             iteration=iteration,
+            parent_run_id=self.parent_run_id,
+            agent_depth=self.agent_depth,
+            delegation_chain=self.delegation_chain,
         )
 
     @staticmethod

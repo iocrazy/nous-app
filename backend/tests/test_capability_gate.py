@@ -103,11 +103,29 @@ async def test_zero_delegates_blocks_delegate_tool() -> None:
 
 @pytest.mark.asyncio
 async def test_positive_delegates_allows_delegate_tool() -> None:
-    # >0 concurrency enforcement is M2; until then any positive value passes.
+    # >0 concurrency is enforced by SubAgentTaskService's semaphore (M2-b);
+    # the gate only blocks the ==0 case.
     hook = CapabilityGateHook({"max_parallel_delegates": 2})
     assert (await hook(_ctx(tool_name="Delegate", tool_args={}))).decision == (
         "continue"
     )
+
+
+@pytest.mark.asyncio
+async def test_zero_delegates_blocks_task_spawn_via_skill() -> None:
+    # Sub-agent spawning has two doors: the Delegate tool and the
+    # Skill(skill="task") built-in. ==0 must close both.
+    hook = CapabilityGateHook({"max_parallel_delegates": 0})
+    result = await hook(_ctx(tool_name="Skill", tool_args={"skill": "task"}))
+    assert result.decision == "abort"
+    assert "delegate" in result.abort_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_zero_delegates_does_not_block_normal_skills() -> None:
+    hook = CapabilityGateHook({"max_parallel_delegates": 0})
+    result = await hook(_ctx(tool_name="Skill", tool_args={"skill": "script-outline"}))
+    assert result.decision == "continue"
 
 
 # ============================================================

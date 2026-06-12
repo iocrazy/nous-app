@@ -58,9 +58,10 @@ HookDecision = Literal["continue", "modify", "abort", "await_approval"]
 class HookContext:
     """Immutable per-tool-call context handed to every hook.
 
-    Multi-agent fields (parent_run_id / root_run_id / agent_depth /
-    delegation_chain) are intentionally absent in M1. Added in M2 break
-    change.
+    M2 (Phase 4.5): multi-agent scope fields are present with
+    top-of-tree defaults, so hooks can reason about delegation trees
+    (depth-aware budgets, per-subtree rate limits) without breaking
+    M1-era hooks that ignore them.
     """
 
     # run_id (agent_runs.id) and session_id (ai_sessions.id) are BIGINT
@@ -82,6 +83,16 @@ class HookContext:
     accumulated_cost_cents: float
 
     iteration: int  # 1-indexed; first tool call in a turn = 1
+
+    # ── M2 multi-agent scope (top-of-tree defaults) ──────────────────
+    # parent_run_id is the spawning run's agent_runs.id (BIGINT Snowflake
+    # → numeric string), None for ChatPanel/top-level turns. agent_depth
+    # mirrors the Delegate/SubAgentTask depth cap (0 = top). The
+    # delegation_chain is agent slugs from root to the CURRENT agent
+    # inclusive — () only in legacy paths that predate chain threading.
+    parent_run_id: Optional[str] = None
+    agent_depth: int = 0
+    delegation_chain: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
