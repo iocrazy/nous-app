@@ -56,9 +56,7 @@ class TestTeamsReadScope:
 
     def test_resources_scope_does_not_grant_teams_list(self):
         required = get_required_scopes("GET", "/teams")
-        assert not check_scope_permission(
-            required, [ApiKeyScope.RESOURCES_ALL.value]
-        )
+        assert not check_scope_permission(required, [ApiKeyScope.RESOURCES_ALL.value])
 
     @pytest.mark.parametrize(
         "user_scopes,expected",
