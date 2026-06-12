@@ -28,6 +28,7 @@ import {
   Plus,
   X,
   Languages,
+  ExternalLink,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent } from '../types';
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi, getNousModels } from '../services/aiService';
@@ -61,6 +62,9 @@ const PROVIDER_META: Record<
     analysisModels?: string[];
     apiKeyLabel?: string;
     appIdField?: boolean;
+    // Provider console / API-key page, rendered as an external link in
+    // the card header so users can jump straight to where keys live.
+    website?: string;
   }
 > = {
   openai: {
@@ -69,6 +73,7 @@ const PROVIDER_META: Record<
     icon: <Sparkles size={18} />,
     color: 'emerald',
     badge: 'Recommended',
+    website: 'https://platform.openai.com/api-keys',
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     whisperModels: ['whisper-1'],
     summaryModels: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
@@ -77,6 +82,7 @@ const PROVIDER_META: Record<
   deepseek: {
     name: 'DeepSeek',
     description: 'Cost-effective cloud AI',
+    website: 'https://platform.deepseek.com/api_keys',
     icon: <Zap size={18} />,
     color: 'blue',
     models: ['deepseek-chat', 'deepseek-reasoner'],
@@ -88,6 +94,7 @@ const PROVIDER_META: Record<
     icon: <Globe size={18} />,
     color: 'violet',
     defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    website: 'https://console.volcengine.com/ark',
     models: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215', 'doubao-pro', 'doubao-lite', 'doubao-pro-32k'],
     summaryModels: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215', 'doubao-pro', 'doubao-lite'],
     analysisModels: ['doubao-seed-2-0-pro-260215', 'doubao-seed-2-0-lite-260215'],
@@ -95,6 +102,7 @@ const PROVIDER_META: Record<
   minimax: {
     name: 'MiniMax',
     description: 'MiniMax cloud AI',
+    website: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
     icon: <MessageSquare size={18} />,
     color: 'amber',
     models: ['MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
@@ -103,6 +111,7 @@ const PROVIDER_META: Record<
   kimi: {
     name: 'Kimi',
     description: 'Moonshot AI',
+    website: 'https://platform.moonshot.cn/console/api-keys',
     icon: <Moon size={18} />,
     color: 'teal',
     models: ['kimi-k2.5', 'kimi-k2', 'moonshot-v1-128k', 'moonshot-v1-32k', 'moonshot-v1-8k'],
@@ -115,6 +124,7 @@ const PROVIDER_META: Record<
     icon: <Cloud size={18} />,
     color: 'rose',
     defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    website: 'https://bailian.console.aliyun.com/?tab=model#/api-key',
     models: [
       'qwen3.5-plus', 'qwen3.5-flash', 'qwen3-max',
       'qwen-plus', 'qwen-flash', 'qwen-turbo',
@@ -122,6 +132,23 @@ const PROVIDER_META: Record<
     ],
     summaryModels: ['qwen3.5-plus', 'qwen3-max', 'qwen-plus', 'qwen-turbo'],
     analysisModels: ['qwen3.5-plus', 'qwen3-vl-plus', 'qwen-vl-max'],
+  },
+  modelscope: {
+    name: 'ModelScope',
+    description: 'ModelScope (魔搭) — community inference, free tier',
+    icon: <Brain size={18} />,
+    color: 'violet',
+    badge: 'Free Tier',
+    website: 'https://modelscope.cn/my/myaccesstoken',
+    defaultBaseUrl: 'https://api-inference.modelscope.cn/v1',
+    models: [
+      'Qwen/Qwen3-235B-A22B',
+      'Qwen/Qwen2.5-72B-Instruct',
+      'deepseek-ai/DeepSeek-V3.1',
+      'deepseek-ai/DeepSeek-R1',
+      'ZhipuAI/GLM-4.6',
+    ],
+    summaryModels: ['Qwen/Qwen2.5-72B-Instruct', 'deepseek-ai/DeepSeek-V3.1'],
   },
   volcengine: {
     name: 'Volcengine',
@@ -132,6 +159,7 @@ const PROVIDER_META: Record<
     models: [],
     apiKeyLabel: 'Access Token / API Key',
     appIdField: true,
+    website: 'https://console.volcengine.com/speech/app',
   },
   ollama: {
     name: 'Ollama',
@@ -140,6 +168,7 @@ const PROVIDER_META: Record<
     color: 'orange',
     isLocal: true,
     defaultBaseUrl: 'http://localhost:11434',
+    website: 'https://ollama.com/download',
     models: ['qwen2.5:7b', 'qwen2.5:14b', 'llama3.1:8b', 'llama3.1:70b', 'mistral:7b', 'gemma2:9b'],
   },
   lmstudio: {
@@ -149,6 +178,7 @@ const PROVIDER_META: Record<
     color: 'pink',
     isLocal: true,
     defaultBaseUrl: 'http://localhost:1234',
+    website: 'https://lmstudio.ai',
     models: [],
   },
 };
@@ -1006,6 +1036,19 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h4 className="font-semibold text-zinc-200">{meta.name}</h4>
+                      {meta.website && (
+                        <a
+                          href={meta.website}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={`Open ${meta.name} console`}
+                          aria-label={`Open ${meta.name} console`}
+                          className="text-zinc-500 hover:text-zinc-200 transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink size={13} />
+                        </a>
+                      )}
                       {meta.badge && (
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${colors.badge}`}>
                           {meta.badge}

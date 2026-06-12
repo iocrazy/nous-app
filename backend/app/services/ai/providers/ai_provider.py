@@ -272,6 +272,45 @@ class QwenProvider(OpenAICompatibleProvider):
         )
 
 
+class ModelScopeProvider(OpenAICompatibleProvider):
+    """ModelScope (魔搭) — community inference, OpenAI-compatible.
+
+    Model IDs are ``org/name`` (e.g. ``Qwen/Qwen3-235B-A22B``); a free
+    tier is available with a ModelScope access token as the API key.
+    """
+
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "Qwen/Qwen3-235B-A22B",
+        **kwargs,
+    ):
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url or "https://api-inference.modelscope.cn/v1",
+            model=model,
+            **kwargs,
+        )
+
+    async def list_models(self) -> List[str]:
+        """Catalog + auth probe.
+
+        ModelScope's ``/v1/models`` is a PUBLIC catalog — it returns 200
+        even with an invalid token, so listing alone would make Test
+        Connection a false positive (the exact #659 bug class). A
+        1-token chat call validates the key for real; its auth failure
+        propagates and test_connection reports it.
+        """
+        models = await super().list_models()
+        await self._client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+        )
+        return models
+
+
 class AIProviderFactory:
     """Factory for creating AI provider instances."""
 
@@ -283,6 +322,7 @@ class AIProviderFactory:
         "minimax": MiniMaxProvider,
         "kimi": KimiProvider,
         "qwen": QwenProvider,
+        "modelscope": ModelScopeProvider,
         "ollama": OllamaProvider,
         "lmstudio": LMStudioProvider,
     }
