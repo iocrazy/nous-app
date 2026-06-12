@@ -24,6 +24,11 @@ class ResourceUpdate(BaseModel):
         max_length=20000,
         description="AI generation prompt attached to this asset",
     )
+    gen_prompt_zh: Optional[str] = Field(
+        None,
+        max_length=20000,
+        description="Chinese-language AI generation prompt for this asset",
+    )
     url: Optional[str] = Field(None, max_length=2000)
     rating: Optional[int] = Field(None, ge=0, le=5)
     is_trashed: Optional[bool] = None
@@ -39,6 +44,16 @@ class ResourceUpdate(BaseModel):
     )
     image_download_status: Optional[str] = Field(
         None, description="User image download status"
+    )
+
+
+class GenPromptTranslateRequest(BaseModel):
+    """Body for POST /resources/{id}/gen-prompt/translate."""
+
+    target_lang: str = Field(
+        ...,
+        pattern="^(en|zh)$",
+        description="Language to translate the prompt into",
     )
 
 

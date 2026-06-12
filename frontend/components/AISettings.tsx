@@ -27,6 +27,7 @@ import {
   Mic,
   Plus,
   X,
+  Languages,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent } from '../types';
 import { saveAISettings as saveAISettingsApi, testAIConnection as testAIConnectionApi, getNousModels } from '../services/aiService';
@@ -831,6 +832,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               <span className="text-sm font-medium text-zinc-300">Visual Analysis</span>
             </div>
             {renderAgentSelect('visual_analysis', localSettings.task_assignment.visual_analysis)}
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Languages size={16} className="text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Translation</span>
+            </div>
+            {renderAgentSelect('translation', localSettings.task_assignment.translation ?? '')}
           </div>
         </div>
         )}

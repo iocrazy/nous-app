@@ -77,7 +77,14 @@ export async function renameResource(resourceId: string, filename: string): Prom
 
 export async function updateResource(
   resourceId: string,
-  data: { filename?: string; notes?: string; gen_prompt?: string; url?: string; rating?: number },
+  data: {
+    filename?: string;
+    notes?: string;
+    gen_prompt?: string;
+    gen_prompt_zh?: string;
+    url?: string;
+    rating?: number;
+  },
 ): Promise<Resource> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
@@ -86,6 +93,32 @@ export async function updateResource(
     body: JSON.stringify(data),
   });
   if (!response.ok) throw new Error('Failed to update resource');
+  const json = await response.json();
+  return json.data;
+}
+
+/** Translate the asset's generation prompt into `targetLang` via the
+ *  user's assigned translation agent. Returns both prompt sides. */
+export async function translateGenPrompt(
+  resourceId: string,
+  targetLang: 'en' | 'zh',
+): Promise<{ gen_prompt: string | null; gen_prompt_zh: string | null }> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/gen-prompt/translate`,
+    {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_lang: targetLang }),
+    },
+  );
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(detail || 'Failed to translate prompt');
+  }
   const json = await response.json();
   return json.data;
 }

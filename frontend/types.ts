@@ -335,6 +335,7 @@ export interface Resource {
   current_version: number;
   notes: string | null;
   gen_prompt: string | null;
+  gen_prompt_zh?: string | null;
   url: string | null;
   rating: number; // 0-5
   // Download status fields used to live here as mirrors of parsed_media;
@@ -553,6 +554,7 @@ export interface AISettings {
     transcription: string;  // provider key
     summarization: string;
     visual_analysis: string;
+    translation?: string;  // zh↔en prompt translation agent slug
     image_generation?: string;  // storyboard image provider
     script_generation?: string;  // storyboard script/prompt LLM
   };
