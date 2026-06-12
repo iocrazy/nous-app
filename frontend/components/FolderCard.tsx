@@ -220,15 +220,15 @@ export const FolderCard: React.FC<FolderCardProps> = ({
       onDrop={handleDrop}
       className={`relative cursor-pointer group ${dropRing}`}
     >
-      {/* ── Folder tab (ear) ── */}
-      <div className="flex items-end">
-        <div className="w-[38%] h-3 bg-zinc-800/60 group-hover:bg-zinc-700/80 rounded-t-lg border-t border-l border-r border-zinc-700/30 group-hover:border-amber-500/30" />
-        <div className="flex-1" />
-      </div>
-      {/* ── Card body (flush with tab) ── */}
-      <div className="relative bg-zinc-800/60 group-hover:bg-zinc-800 border border-zinc-700/30 group-hover:border-amber-500/30 rounded-b-xl rounded-tr-xl overflow-hidden transition-[background-color,box-shadow] duration-150 hover:shadow-lg hover:shadow-amber-500/5">
+      {/* ── Card body — folder tab is INSET at the top (island redesign
+          §5.1: the old protruding ear read as a rendering artifact) ── */}
+      <div className="relative bg-zinc-800/60 group-hover:bg-zinc-800 border border-zinc-700/30 group-hover:border-amber-500/30 rounded-xl overflow-hidden transition-[background-color,box-shadow,transform] duration-150 hover:shadow-lg hover:shadow-amber-500/5 group-hover:-translate-y-0.5">
         {checkbox}
         {moreButton}
+        {/* Inset folder tab strip */}
+        <div className="relative h-2.5">
+          <div className="absolute inset-y-0 left-0 w-[40%] bg-zinc-700/40 group-hover:bg-amber-500/15 rounded-br-lg transition-colors" />
+        </div>
         {/* Preview area — 2x2 thumbnail grid */}
         <div className="relative h-28 bg-zinc-900/80 overflow-hidden">
           {previewSlots.length > 0 ? (
