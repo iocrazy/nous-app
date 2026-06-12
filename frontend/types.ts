@@ -541,15 +541,13 @@ export interface AIProviderConfig {
 
 export interface AISettings {
   ai_enabled: boolean;
+  auto_transcribe?: boolean;
+  auto_summarize?: boolean;
   preferred_language: string;
-  providers: {
-    openai?: AIProviderConfig;
-    deepseek?: AIProviderConfig;
-    doubao?: AIProviderConfig;
-    volcengine?: AIProviderConfig;
-    ollama?: AIProviderConfig;
-    lmstudio?: AIProviderConfig;
-  };
+  // Keyed by provider slug (openai / deepseek / doubao / minimax / kimi /
+  // qwen / volcengine / ollama / lmstudio / ...). Open-keyed so adding a
+  // provider in PROVIDER_META doesn't require touching this type again.
+  providers: Record<string, AIProviderConfig | undefined>;
   task_assignment: {
     transcription: string;  // provider key
     summarization: string;

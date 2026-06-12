@@ -25,6 +25,41 @@ router = APIRouter(prefix="/ai", tags=["AI"])
 # Key used inside user_settings.settings_json to store AI config
 _AI_SETTINGS_KEY = "ai_settings"
 
+# Provider config fields that hold secrets: a blank value in the payload
+# means "unchanged", never "delete" — the form may save before AuthContext
+# has hydrated it, and a wholesale replace would wipe stored keys.
+_SECRET_FIELDS = ("api_key", "app_id")
+
+
+def _is_blank(value) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def merge_ai_providers(existing: dict | None, incoming: dict | None) -> dict:
+    """Merge the ai_providers payload into the stored map, per provider.
+
+    Providers absent from the payload are preserved; within an incoming
+    provider config, blank secret fields fall back to the stored value.
+    Returns a new dict — neither input is mutated.
+    """
+    merged = {key: dict(cfg) if isinstance(cfg, dict) else cfg
+              for key, cfg in (existing or {}).items()}
+    if incoming is None:
+        return merged
+    for key, config in incoming.items():
+        previous = merged.get(key)
+        if not isinstance(config, dict) or not isinstance(previous, dict):
+            merged[key] = dict(config) if isinstance(config, dict) else config
+            continue
+        next_config = dict(config)
+        for secret in _SECRET_FIELDS:
+            if _is_blank(next_config.get(secret)) and not _is_blank(
+                previous.get(secret)
+            ):
+                next_config[secret] = previous[secret]
+        merged[key] = next_config
+    return merged
+
 
 @router.get("/settings", response_model=AISettingsResponse)
 async def get_ai_settings(auth: AuthDep):
@@ -68,7 +103,9 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
         ai_settings = settings_json.get(_AI_SETTINGS_KEY, {})
 
         if body.ai_providers is not None:
-            ai_settings["ai_providers"] = body.ai_providers
+            ai_settings["ai_providers"] = merge_ai_providers(
+                ai_settings.get("ai_providers"), body.ai_providers
+            )
         if body.whisper_provider is not None:
             ai_settings["whisper_provider"] = body.whisper_provider
         if body.default_summary_model is not None:

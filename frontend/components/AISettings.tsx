@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Brain,
   Zap,
@@ -59,6 +59,8 @@ const PROVIDER_META: Record<
     whisperModels?: string[];
     summaryModels?: string[];
     analysisModels?: string[];
+    apiKeyLabel?: string;
+    appIdField?: boolean;
   }
 > = {
   openai: {
@@ -357,6 +359,25 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [nousModels, setNousModels] = useState<NousModelPublic[]>([]);
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
+  const isDirtyRef = useRef(false);
+
+  // AuthContext loads AI settings asynchronously after login, so the prop
+  // may hydrate after this form mounted with empty defaults. Re-sync the
+  // form whenever the prop changes — unless the user has unsaved edits.
+  useEffect(() => {
+    if (!isDirtyRef.current) {
+      setLocalSettings({ ...settings });
+    }
+  }, [settings]);
+
+  // All user-driven mutations go through this so a later prop refresh
+  // can't silently discard unsaved edits.
+  const editLocalSettings = (
+    updater: (prev: AISettingsType) => AISettingsType
+  ) => {
+    isDirtyRef.current = true;
+    setLocalSettings(updater);
+  };
 
   useEffect(() => {
     getNousModels().then(setNousModels).catch(() => {});
@@ -379,7 +400,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
   // Toggle AI globally
   const toggleAIEnabled = () => {
-    setLocalSettings((prev) => ({
+    editLocalSettings((prev) => ({
       ...prev,
       ai_enabled: !prev.ai_enabled,
     }));
@@ -387,7 +408,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
   // Update preferred language
   const setPreferredLanguage = (lang: string) => {
-    setLocalSettings((prev) => ({
+    editLocalSettings((prev) => ({
       ...prev,
       preferred_language: lang,
     }));
@@ -395,7 +416,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
   // Toggle provider enabled
   const toggleProvider = (providerKey: string) => {
-    setLocalSettings((prev) => {
+    editLocalSettings((prev) => {
       const providers = { ...prev.providers };
       const current = providers[providerKey as keyof typeof providers] || { enabled: false };
       const meta = PROVIDER_META[providerKey];
@@ -411,7 +432,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
   // Update provider config field
   const updateProviderField = (providerKey: string, field: keyof AIProviderConfig, value: string | string[] | boolean) => {
-    setLocalSettings((prev) => {
+    editLocalSettings((prev) => {
       const providers = { ...prev.providers };
       const current = providers[providerKey as keyof typeof providers] || { enabled: false };
       providers[providerKey as keyof typeof providers] = {
@@ -424,7 +445,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
   // Add a model to the provider's curated whitelist (de-duped).
   const addEnabledModel = (providerKey: string, modelId: string) => {
-    setLocalSettings((prev) => {
+    editLocalSettings((prev) => {
       const providers = { ...prev.providers };
       const current = providers[providerKey as keyof typeof providers] || { enabled: false };
       const existing = current.enabled_models ?? (current.selected_model ? [current.selected_model] : []);
@@ -443,7 +464,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   // Remove a model from the whitelist. If it was the selected_model,
   // promote the first remaining model so legacy paths don't break.
   const removeEnabledModel = (providerKey: string, modelId: string) => {
-    setLocalSettings((prev) => {
+    editLocalSettings((prev) => {
       const providers = { ...prev.providers };
       const current = providers[providerKey as keyof typeof providers] || { enabled: false };
       const existing = current.enabled_models ?? (current.selected_model ? [current.selected_model] : []);
@@ -460,7 +481,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
   // Update task assignment
   const updateTaskAssignment = (task: keyof AISettingsType['task_assignment'], provider: string) => {
-    setLocalSettings((prev) => ({
+    editLocalSettings((prev) => ({
       ...prev,
       task_assignment: {
         ...prev.task_assignment,
@@ -551,6 +572,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     setSaveError(null);
     try {
       await saveAISettingsApi(localSettings);
+      isDirtyRef.current = false;
       onSave(localSettings);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
