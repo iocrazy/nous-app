@@ -146,22 +146,66 @@ class RunRecorder:
             # Start failed; nothing to finalize.
             return False
 
+        final_status = "completed"
+        final_error: Optional[str] = None
         try:
             if self._cancelled:
+                final_status = "cancelled"
                 await self._finish(status="cancelled")
             elif exc is None:
                 await self._finish(status="completed")
             else:
+                final_status = "failed"
                 error_code = exc_type.__name__ if exc_type else "unknown"
-                error_message = str(exc) if exc else None
+                final_error = str(exc) if exc else None
                 await self._finish(
-                    status="failed", error_code=error_code, error_message=error_message
+                    status="failed", error_code=error_code, error_message=final_error
                 )
         except Exception as err:
             logger.error(f"[RunRecorder] finish failed for run {self.run_id}: {err}")
 
+        self._maybe_export_langfuse(status=final_status, error_message=final_error)
+
         # Never swallow user exceptions — propagate them out.
         return False
+
+    def _maybe_export_langfuse(
+        self, *, status: str, error_message: Optional[str]
+    ) -> None:
+        """Phase 4.5-6: fire-and-forget trace export to the self-hosted
+        Langfuse. Gated inside the exporter (FEATURE_LANGFUSE, default
+        off) — when inoperative this is one cheap config check. Never
+        raises; a Langfuse outage only costs the trace."""
+        try:
+            from app.services.ai.telemetry.langfuse_exporter import (
+                get_langfuse_exporter,
+            )
+
+            exporter = get_langfuse_exporter()
+            if not exporter.config.operative():
+                return
+            import asyncio
+
+            asyncio.get_running_loop().create_task(
+                exporter.export_run(
+                    run_id=str(self.run_id),
+                    agent_slug="",  # recorder holds agent_id, not slug
+                    status=status,
+                    trigger=self.trigger,
+                    user_id=str(self.user_id),
+                    session_id=self.session_id,
+                    model=self.model,
+                    provider=self.provider,
+                    input_summary=self.input_summary,
+                    output_summary=self._output_summary,
+                    prompt_tokens=self._prompt_tokens,
+                    completion_tokens=self._completion_tokens,
+                    cost_cents=self.compute_cost_cents(),
+                    error_message=error_message,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("[RunRecorder] langfuse export skipped", exc_info=True)
 
     # -------- public API for callers inside the `async with` block -------
 
