@@ -19,9 +19,9 @@ const StatChip: React.FC<{ color: string; count: number; label: string }> = ({
   count,
   label,
 }) => (
-  <span className="flex items-center gap-1 text-[11px] text-zinc-400">
+  <span className="flex items-center gap-1 text-[11px] text-ink-400">
     <span className={`w-1.5 h-1.5 rounded-full ${color}`} />
-    <span className="font-medium text-zinc-300">{count}</span>
+    <span className="font-medium text-ink-300">{count}</span>
     <span>{label}</span>
   </span>
 );
@@ -35,12 +35,12 @@ const TabButton: React.FC<{
   <button
     onClick={onClick}
     className={`relative px-1 pb-2 text-xs font-medium transition-colors ${
-      active ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+      active ? 'text-ink-100' : 'text-ink-500 hover:text-ink-300'
     }`}
   >
     {label}
     {count > 0 && (
-      <span className="ml-1.5 text-[10px] text-zinc-500">{count}</span>
+      <span className="ml-1.5 text-[10px] text-ink-500">{count}</span>
     )}
     {active && (
       <span className="absolute -bottom-px left-0 right-0 h-0.5 bg-indigo-400 rounded-full" />
@@ -62,7 +62,7 @@ export const TaskCenterStatusBar: React.FC<TaskCenterStatusBarProps> = ({
 }) => {
   const { t } = useTranslation();
   return (
-    <div className="px-4 pt-2 border-b border-zinc-800">
+    <div className="px-4 pt-2 border-b border-ink-800">
       {/* Tabs */}
       <div className="flex items-center gap-4">
         <TabButton
@@ -82,7 +82,7 @@ export const TaskCenterStatusBar: React.FC<TaskCenterStatusBarProps> = ({
       <div className="flex items-center gap-3 py-2">
         <StatChip color="bg-emerald-500" count={counts.running} label={t('topbar.running')} />
         <StatChip color="bg-amber-500" count={counts.queued} label={t('topbar.queued')} />
-        <StatChip color="bg-zinc-500" count={counts.completed} label={t('topbar.completed')} />
+        <StatChip color="bg-ink-500" count={counts.completed} label={t('topbar.completed')} />
         {counts.failed > 0 && (
           <StatChip color="bg-red-500" count={counts.failed} label={t('topbar.failed')} />
         )}

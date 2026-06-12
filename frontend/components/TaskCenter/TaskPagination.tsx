@@ -58,16 +58,16 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
   };
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900/80 border-t border-zinc-800/80 text-xs shrink-0">
-      <span className="text-zinc-400">
+    <div className="flex items-center gap-2 px-4 py-2 bg-ink-900/80 border-t border-ink-800/80 text-xs shrink-0">
+      <span className="text-ink-400">
         {t('taskCenter.pagination.total', { count: total })}
       </span>
-      <label className="flex items-center gap-1 text-zinc-500">
+      <label className="flex items-center gap-1 text-ink-500">
         <select
           value={pageSize}
           onChange={(e) => onPageSize(Number(e.target.value))}
           disabled={disabled}
-          className="bg-zinc-800/80 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-300 text-xs outline-none focus:border-indigo-500 disabled:opacity-40 cursor-pointer"
+          className="bg-ink-800/80 border border-ink-700 rounded px-1.5 py-0.5 text-ink-300 text-xs outline-none focus:border-indigo-500 disabled:opacity-40 cursor-pointer"
           aria-label={t('taskCenter.pagination.perPage') ?? 'Per page'}
         >
           {TASK_PAGE_SIZE_OPTIONS.map((n) => (
@@ -82,14 +82,14 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
         type="button"
         onClick={() => go(page - 1)}
         disabled={disabled || page <= 1}
-        className="flex items-center px-1.5 py-1 rounded text-zinc-300 hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+        className="flex items-center px-1.5 py-1 rounded text-ink-300 hover:bg-ink-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
         aria-label={t('taskCenter.pagination.prev') ?? 'Previous'}
       >
         <ChevronLeft size={14} />
       </button>
       {pageWindow(page, totalPages).map((p, i) =>
         p === '…' ? (
-          <span key={`gap-${i}`} className="px-1 text-zinc-600">
+          <span key={`gap-${i}`} className="px-1 text-ink-600">
             …
           </span>
         ) : (
@@ -101,7 +101,7 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
             className={`min-w-[1.6rem] px-1.5 py-1 rounded tabular-nums transition disabled:opacity-40 ${
               p === page
                 ? 'bg-indigo-500/20 text-indigo-200 font-medium'
-                : 'text-zinc-400 hover:bg-zinc-800'
+                : 'text-ink-400 hover:bg-ink-800'
             }`}
           >
             {p}
@@ -112,7 +112,7 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
         type="button"
         onClick={() => go(page + 1)}
         disabled={disabled || page >= totalPages}
-        className="flex items-center px-1.5 py-1 rounded text-zinc-300 hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+        className="flex items-center px-1.5 py-1 rounded text-ink-300 hover:bg-ink-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
         aria-label={t('taskCenter.pagination.next') ?? 'Next'}
       >
         <ChevronRight size={14} />

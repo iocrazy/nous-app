@@ -43,20 +43,20 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl max-h-[80vh] flex flex-col bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl overflow-hidden"
+        className="w-full max-w-2xl max-h-[80vh] flex flex-col bg-ink-900 border border-ink-700/60 rounded-xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-zinc-800 shrink-0">
+        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-ink-800 shrink-0">
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-zinc-100 truncate">{task.title}</div>
-            <div className="text-[11px] text-zinc-500">
+            <div className="text-sm font-semibold text-ink-100 truncate">{task.title}</div>
+            <div className="text-[11px] text-ink-500">
               {taskTypeLabel(task.task_type)} · {task.status}
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors shrink-0"
+            className="p-1.5 rounded text-ink-500 hover:text-ink-200 hover:bg-ink-800 transition-colors shrink-0"
             aria-label={t('common.close')}
           >
             <X size={18} />
@@ -66,8 +66,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
           {result.loading && (
-            <div className="flex items-center justify-center py-12 text-zinc-500">
-              <div className="w-5 h-5 border-2 border-zinc-600 border-t-indigo-400 rounded-full animate-spin" />
+            <div className="flex items-center justify-center py-12 text-ink-500">
+              <div className="w-5 h-5 border-2 border-ink-600 border-t-indigo-400 rounded-full animate-spin" />
             </div>
           )}
           {!result.loading && result.error && (
@@ -102,11 +102,11 @@ const GenericResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
         <div className="text-xs text-red-400 whitespace-pre-wrap break-words">{task.error_msg}</div>
       )}
       {hasMeta ? (
-        <pre className="text-[11px] text-zinc-400 font-mono whitespace-pre-wrap break-words bg-zinc-950/50 rounded p-3">
+        <pre className="text-[11px] text-ink-400 font-mono whitespace-pre-wrap break-words bg-ink-950/50 rounded p-3">
           {JSON.stringify(task.metadata, null, 2)}
         </pre>
       ) : (
-        <div className="text-xs text-zinc-500">{t('topbar.noResultDetail')}</div>
+        <div className="text-xs text-ink-500">{t('topbar.noResultDetail')}</div>
       )}
     </div>
   );

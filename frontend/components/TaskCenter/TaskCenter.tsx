@@ -242,16 +242,16 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
 
   if (taskPage.loading && tasks.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
-        <ListTodo size={36} className="mb-3 text-zinc-700 animate-pulse" />
+      <div className="flex flex-col items-center justify-center h-64 text-ink-500">
+        <ListTodo size={36} className="mb-3 text-ink-700 animate-pulse" />
         <p className="text-sm">Loading tasks…</p>
       </div>
     );
   }
 
   const containerClass = embedded
-    ? 'flex flex-col h-full bg-zinc-950 border border-zinc-800/80 rounded-md overflow-hidden'
-    : 'flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950 border-t border-zinc-800/80';
+    ? 'flex flex-col h-full bg-ink-950 border border-ink-800/80 rounded-md overflow-hidden'
+    : 'flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-ink-950 border-t border-ink-800/80';
 
   return (
     <div className={containerClass}>

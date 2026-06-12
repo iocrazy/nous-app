@@ -25,7 +25,7 @@ function taskTypeBg(type: string): string {
     case 'ai_transcription':    return 'bg-fuchsia-500/20 text-fuchsia-400';
     case 'ai_summary':          return 'bg-cyan-500/20 text-cyan-400';
     case 'agent_routine':       return 'bg-emerald-500/20 text-emerald-400';
-    default:                    return 'bg-zinc-700/50 text-zinc-400';
+    default:                    return 'bg-ink-700/50 text-ink-400';
   }
 }
 
@@ -33,7 +33,7 @@ function progressBarColor(status: TaskStatus): string {
   switch (status) {
     case 'completed':  return 'bg-emerald-500';
     case 'failed':     return 'bg-red-500';
-    case 'cancelled':  return 'bg-zinc-600';
+    case 'cancelled':  return 'bg-ink-600';
     default:           return 'bg-indigo-500';
   }
 }
@@ -75,8 +75,8 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
 
   return (
     <div
-      className={`group px-3 py-2.5 border-b border-zinc-800/50 last:border-b-0 ${
-        !isActive ? 'cursor-pointer hover:bg-zinc-800/40 transition-colors' : ''
+      className={`group px-3 py-2.5 border-b border-ink-800/50 last:border-b-0 ${
+        !isActive ? 'cursor-pointer hover:bg-ink-800/40 transition-colors' : ''
       }`}
       onClick={!isActive ? () => onOpenDetail(task) : undefined}
     >
@@ -86,7 +86,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
           <img
             src={getResourceCoverUrl(String(task.resource_id))}
             alt=""
-            className="w-9 h-9 rounded-lg object-cover shrink-0 bg-zinc-800"
+            className="w-9 h-9 rounded-lg object-cover shrink-0 bg-ink-800"
             onError={() => setCoverFailed(true)}
             loading="lazy"
           />
@@ -103,19 +103,19 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
         {/* Task info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-300 truncate max-w-[160px]">{task.title}</span>
+            <span className="text-xs text-ink-300 truncate max-w-[160px]">{task.title}</span>
             <div className="flex items-center gap-1.5 shrink-0 ml-2">
               {isActive && (
                 <>
                   {task.progress > 0 && (
-                    <span className="text-[10px] text-zinc-500">{task.progress}%</span>
+                    <span className="text-[10px] text-ink-500">{task.progress}%</span>
                   )}
                   {task.speed != null && task.speed > 0 && (
-                    <span className="text-[10px] text-zinc-600">{formatSpeed(task.speed)}</span>
+                    <span className="text-[10px] text-ink-600">{formatSpeed(task.speed)}</span>
                   )}
                   <button
                     onClick={(e) => { e.stopPropagation(); onCancel(task.id); }}
-                    className="p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors"
+                    className="p-0.5 rounded text-ink-600 hover:text-red-400 transition-colors"
                     title={t('common.cancel')}
                   >
                     <X size={12} />
@@ -129,7 +129,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                   {actions.open && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleOpen(); }}
-                      className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-0.5 rounded text-ink-500 hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100"
                       title={t('topbar.openResource')}
                     >
                       <ExternalLink size={13} />
@@ -139,7 +139,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                     <a
                       href={getResourceFileUrl(String(task.resource_id), mediaToken ?? undefined)}
                       onClick={(e) => e.stopPropagation()}
-                      className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-0.5 rounded text-ink-500 hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100"
                       title={t('topbar.downloadResult')}
                       download
                     >
@@ -155,7 +155,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                   {actions.open && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleOpen(); }}
-                      className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors"
+                      className="p-0.5 rounded text-ink-500 hover:text-indigo-400 transition-colors"
                       title={t('topbar.openResource')}
                     >
                       <ExternalLink size={13} />
@@ -164,7 +164,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                   {actions.retry && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onRetry(task.id); }}
-                      className="p-0.5 rounded text-zinc-500 hover:text-indigo-400 transition-colors"
+                      className="p-0.5 rounded text-ink-500 hover:text-indigo-400 transition-colors"
                       title={t('common.retry')}
                     >
                       <RotateCcw size={12} />
@@ -173,7 +173,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                   {task.status === 'failed' ? (
                     <XCircle size={14} className="text-red-400 shrink-0" />
                   ) : (
-                    <X size={14} className="text-zinc-500 shrink-0" />
+                    <X size={14} className="text-ink-500 shrink-0" />
                   )}
                 </>
               )}
@@ -181,12 +181,12 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
           </div>
 
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[10px] text-zinc-600">{taskTypeLabel(task.task_type)}</span>
+            <span className="text-[10px] text-ink-600">{taskTypeLabel(task.task_type)}</span>
             {task.subtitle && (
-              <span className="text-[10px] text-zinc-600 truncate">{task.subtitle}</span>
+              <span className="text-[10px] text-ink-600 truncate">{task.subtitle}</span>
             )}
             {task.total_bytes != null && task.total_bytes > 0 && (
-              <span className="text-[10px] text-zinc-600">{formatFileSize(task.total_bytes)}</span>
+              <span className="text-[10px] text-ink-600">{formatFileSize(task.total_bytes)}</span>
             )}
           </div>
 
@@ -200,7 +200,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
 
       {/* Progress bar for active tasks */}
       {isActive && (
-        <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="mt-1.5 h-1 bg-ink-800 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-300 ${progressBarColor(task.status)}`}
             style={{ width: `${Math.max(task.progress, task.status === 'processing' ? 2 : 0)}%` }}
