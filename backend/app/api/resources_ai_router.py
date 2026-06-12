@@ -12,6 +12,10 @@ Provider-routed AI operations on a single resource. Currently:
 - POST /resources/{id}/classify — 12-dimension bilingual auto-tagging via
   the assigned `classify` vision agent (classify_asset DBOS workflow);
   on-demand only, uploads never auto-classify.
+- POST /resources/ai/batch — dispatch caption/classify for ≤50 resources
+  (one workflow + Task Center row per image).
+- POST /resources/export/training-set — LoRA-format zip (image +
+  same-stem .txt caption from gen_prompt/_zh).
 
 Kept separate from resources_crud_router (already >1300 lines) per the
 many-small-files rule.
@@ -26,7 +30,11 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.repositories.resources_repository import ResourcesRepository
-from app.schemas.resources import BatchAssetAiRequest, GenPromptTranslateRequest
+from app.schemas.resources import (
+    BatchAssetAiRequest,
+    GenPromptTranslateRequest,
+    TrainingSetExportRequest,
+)
 
 router = APIRouter(prefix="/resources", dependencies=[Depends(scoped_request)])
 
@@ -273,3 +281,85 @@ async def batch_asset_ai(
             skipped.append({"resource_id": resource_id, "reason": "Dispatch failed"})
 
     return {"success": True, "dispatched": dispatched, "skipped": skipped}
+
+
+@router.post("/export/training-set")
+async def export_training_set(
+    data: TrainingSetExportRequest,
+    auth: AuthDep,
+):
+    """Stream a LoRA-training zip: each image + a same-stem ``.txt``
+    caption holding the asset's generation prompt.
+
+    ``lang`` picks the prompt side for the captions (falling back to the
+    other side when the requested one is empty; no .txt when neither
+    exists — trainers treat caption-less images as uncaptioned). Mirrors
+    the gallery-zip endpoint's in-memory ZIP_STORED streaming.
+    """
+    import io
+    import zipfile
+    from pathlib import Path
+
+    from fastapi.responses import StreamingResponse
+
+    from app.api.media_permissions import check_media_access
+    from app.core.config import settings
+
+    repo = ResourcesRepository()
+    buffer = io.BytesIO()
+    added = 0
+    used_names: set[str] = set()
+
+    def _unique_arcname(filename: str, resource_id: str) -> str:
+        stem, dot, ext = filename.rpartition(".")
+        if not dot:
+            stem, ext = filename, ""
+        candidate = filename
+        if candidate.lower() in used_names:
+            candidate = f"{stem}_{resource_id}{dot}{ext}"
+        used_names.add(candidate.lower())
+        return candidate
+
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as zf:
+        for resource_id in dict.fromkeys(data.resource_ids):
+            resource = await repo.get_resource_by_id(resource_id)
+            if _image_gate_reason(resource):
+                continue
+            if not await check_media_access(resource_id, auth.user_id, None):
+                continue
+            abs_path = Path(settings.DOWNLOAD_PATH) / resource["file_path"]
+            if not abs_path.is_file():
+                logger.warning(
+                    f"[TrainingExport] file missing on disk for {resource_id}"
+                )
+                continue
+
+            filename = resource.get("filename") or abs_path.name
+            if "." not in filename and abs_path.suffix:
+                filename = f"{filename}{abs_path.suffix}"
+            arcname = _unique_arcname(filename, str(resource_id))
+            zf.write(abs_path, arcname=arcname)
+            added += 1
+
+            primary = "gen_prompt_zh" if data.lang == "zh" else "gen_prompt"
+            fallback = "gen_prompt" if data.lang == "zh" else "gen_prompt_zh"
+            caption = (resource.get(primary) or "").strip() or (
+                resource.get(fallback) or ""
+            ).strip()
+            if caption:
+                stem = arcname.rsplit(".", 1)[0]
+                zf.writestr(f"{stem}.txt", caption)
+
+    if added == 0:
+        raise HTTPException(
+            status_code=404, detail="No exportable images in the selection"
+        )
+
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="training-set.zip"',
+        },
+    )

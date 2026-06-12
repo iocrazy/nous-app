@@ -60,3 +60,14 @@ def test_batch_endpoint_dispatches_per_resource_with_skip_reasons() -> None:
         "check_media_access" in source
     ), "batch must access-check every resource individually"
     assert "skipped" in source and "dispatched" in source
+
+
+def test_training_set_export_guards_every_resource() -> None:
+    source = _source("export_training_set")
+    assert "check_media_access" in source, (
+        "export must access-check every resource individually — a zip of "
+        "someone else's files would be a data leak"
+    )
+    assert "_image_gate_reason" in source
+    # LoRA convention: caption .txt shares the image's arcname stem.
+    assert ".txt" in source and "arcname" in source
