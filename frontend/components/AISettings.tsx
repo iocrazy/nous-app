@@ -384,6 +384,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
   const [connectionStatus, setConnectionStatus] = useState<Record<string, 'idle' | 'testing' | 'success' | 'error'>>({});
   const [connectionError, setConnectionError] = useState<Record<string, string>>({});
+  // Daily-quota counters from Test Connection (ModelScope rate-limit headers).
+  const [quotaInfo, setQuotaInfo] = useState<Record<string, Record<string, number> | undefined>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -580,6 +582,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               updateProviderField(providerKey, 'selected_model', result.models[0]);
             }
           }
+          setQuotaInfo((prev) => ({ ...prev, [providerKey]: result.quota || undefined }));
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'success' }));
         } else {
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
@@ -1235,6 +1238,19 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                         {connStatus === 'success' && config.models && config.models.length > 0 && (
                           <p className="mt-2 text-xs text-green-400/70">
                             Detected {config.models.length} model{config.models.length !== 1 ? 's' : ''} from server
+                          </p>
+                        )}
+                        {connStatus === 'success' && quotaInfo[providerKey] && (
+                          <p className="mt-1 text-xs text-zinc-400">
+                            Daily quota
+                            {quotaInfo[providerKey]?.requests_remaining != null && (
+                              <> — account: {quotaInfo[providerKey]?.requests_remaining}
+                              /{quotaInfo[providerKey]?.requests_limit ?? '?'} requests left</>
+                            )}
+                            {quotaInfo[providerKey]?.model_requests_remaining != null && (
+                              <> · this model: {quotaInfo[providerKey]?.model_requests_remaining}
+                              /{quotaInfo[providerKey]?.model_requests_limit ?? '?'} left</>
+                            )}
                           </p>
                         )}
                       </div>

@@ -409,7 +409,14 @@ export const getNousModels = async (category?: string): Promise<NousModelPublic[
 export const testAIConnection = async (
   provider: string,
   config: { base_url?: string; api_key?: string; app_id?: string }
-): Promise<{ success: boolean; models?: string[]; error?: string }> => {
+): Promise<{
+  success: boolean;
+  models?: string[];
+  error?: string;
+  // Daily-quota counters surfaced by providers that expose them on
+  // response headers (currently ModelScope).
+  quota?: Record<string, number> | null;
+}> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/test-connection`, {

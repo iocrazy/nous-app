@@ -10,7 +10,7 @@ OpenAI-compatible providers share a common base class.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -272,6 +272,34 @@ class QwenProvider(OpenAICompatibleProvider):
         )
 
 
+# ModelScope daily-quota response headers → quota dict keys (docs:
+# free-tier rate limits are surfaced on every API response).
+_MODELSCOPE_QUOTA_HEADERS = {
+    "modelscope-ratelimit-requests-limit": "requests_limit",
+    "modelscope-ratelimit-requests-remaining": "requests_remaining",
+    "modelscope-ratelimit-model-requests-limit": "model_requests_limit",
+    "modelscope-ratelimit-model-requests-remaining": "model_requests_remaining",
+}
+
+
+def _quota_from_headers(headers) -> Optional[dict]:
+    """Extract ModelScope daily-quota counters from response headers.
+
+    Returns None when no quota headers are present (non-ModelScope
+    upstreams, or the API stops sending them).
+    """
+    quota: dict = {}
+    for header, key in _MODELSCOPE_QUOTA_HEADERS.items():
+        value = headers.get(header) if headers is not None else None
+        if value is None:
+            continue
+        try:
+            quota[key] = int(value)
+        except (TypeError, ValueError):
+            continue
+    return quota or None
+
+
 class ModelScopeProvider(OpenAICompatibleProvider):
     """ModelScope (魔搭) — community inference, OpenAI-compatible.
 
@@ -292,22 +320,29 @@ class ModelScopeProvider(OpenAICompatibleProvider):
             model=model,
             **kwargs,
         )
+        # Daily-quota counters captured from the last auth-probe response
+        # headers; surfaced by test_connection so the Settings card can
+        # render "account: N/M left · this model: n/m left".
+        self.last_quota: Optional[dict] = None
 
     async def list_models(self) -> List[str]:
-        """Catalog + auth probe.
+        """Catalog + auth probe (+ quota capture).
 
         ModelScope's ``/v1/models`` is a PUBLIC catalog — it returns 200
         even with an invalid token, so listing alone would make Test
         Connection a false positive (the exact #659 bug class). A
         1-token chat call validates the key for real; its auth failure
-        propagates and test_connection reports it.
+        propagates and test_connection reports it. The raw response also
+        carries the modelscope-ratelimit-* daily-quota headers, captured
+        into ``last_quota``.
         """
         models = await super().list_models()
-        await self._client.chat.completions.create(
+        raw = await self._client.chat.completions.with_raw_response.create(
             model=self.model,
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=1,
         )
+        self.last_quota = _quota_from_headers(getattr(raw, "headers", None))
         return models
 
 
@@ -368,7 +403,14 @@ class AIProviderFactory:
         try:
             provider = cls.get_provider(provider_key, config)
             models = await provider.list_models()
-            return {"success": True, "models": models, "error": None}
+            return {
+                "success": True,
+                "models": models,
+                "error": None,
+                # ModelScope surfaces daily-quota counters on response
+                # headers; other providers simply don't set last_quota.
+                "quota": getattr(provider, "last_quota", None),
+            }
         except Exception as e:
             logger.warning(f"Connection test failed for {provider_key}: {e}")
             return {"success": False, "models": None, "error": str(e)}

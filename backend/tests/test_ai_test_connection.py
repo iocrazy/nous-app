@@ -64,7 +64,12 @@ async def test_working_provider_reports_models(
     result = await AIProviderFactory.test_connection(
         provider_key="doubao", config={"api_key": "ok"}
     )
-    assert result == {"success": True, "models": ["m1", "m2"], "error": None}
+    assert result == {
+        "success": True,
+        "models": ["m1", "m2"],
+        "error": None,
+        "quota": None,
+    }
 
 
 @pytest.mark.asyncio
