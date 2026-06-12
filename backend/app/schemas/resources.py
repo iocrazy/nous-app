@@ -57,6 +57,17 @@ class GenPromptTranslateRequest(BaseModel):
     )
 
 
+class BatchAssetAiRequest(BaseModel):
+    """Body for POST /resources/ai/batch (batch caption / classify)."""
+
+    resource_ids: List[str] = Field(..., min_length=1, max_length=50)
+    operation: str = Field(
+        ...,
+        pattern="^(caption|classify)$",
+        description="Which asset-AI workflow to dispatch per resource",
+    )
+
+
 class ChorusUpdate(BaseModel):
     """Body for PUT /resources/{id}/chorus. None clears the marker."""
 
