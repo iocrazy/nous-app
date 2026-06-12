@@ -387,8 +387,12 @@ function setScanStatus(text, type) {
   try {
     const state = await chrome.runtime.sendMessage({ action: 'getImageImportState' });
     if (state?.job && (state.job.phase === 'importing' || state.job.phase === 'tagging')) {
-      tabScan.click();
-      renderJob(state.job);
+      // Defer past popup.js's async init (showPushView callback) so its
+      // "land on Push tab" default doesn't override the switch.
+      setTimeout(() => {
+        tabScan.click();
+        renderJob(state.job);
+      }, 150);
     }
   } catch {
     // background not ready — fine
