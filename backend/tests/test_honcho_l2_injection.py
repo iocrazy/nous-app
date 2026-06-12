@@ -191,8 +191,8 @@ async def test_safe_recall_returns_none_when_flag_off(
 async def test_safe_recall_swallows_exceptions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.services.ai.chat import ai_library_chat_wiring as wiring
     import app.services.ai.memory.honcho_memory as hm
+    from app.services.ai.chat import ai_library_chat_wiring as wiring
 
     class _Boom:
         async def get_user_representation(self, **kwargs):
