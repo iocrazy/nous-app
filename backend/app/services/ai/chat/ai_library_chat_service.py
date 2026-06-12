@@ -510,43 +510,14 @@ class AILibraryChatService:
         # request_instructions. Best-effort — failure logs + skips.
         is_first_turn = len(history) == 0
         if is_first_turn and user_id:
-            try:
-                from app.repositories.commitment_repository import (
-                    get_commitment_repository,
-                )
-
-                _crepo = get_commitment_repository()
-                pending = await _crepo.list_next_session(
-                    agent_id=str(composed.agent_id),
-                    user_id=str(user_id),
-                )
-                if pending:
-                    reminder_lines = [
-                        "<pending_followups>",
-                        f"You committed to {len(pending)} follow-up(s) "
-                        "in earlier sessions. Surface them naturally in "
-                        "your first reply if relevant:",
-                    ]
-                    for c in pending[:5]:  # cap on UI noise
-                        reminder_lines.append(f"  - {c.description}")
-                    reminder_lines.append("</pending_followups>")
-                    request_instructions = (
-                        "\n".join(reminder_lines) + "\n\n" + request_instructions
-                    )
-                    # Mark them fulfilled so they don't fire again.
-                    for c in pending[:5]:
-                        if c.id is not None:
-                            try:
-                                await _crepo.mark_fulfilled(
-                                    c.id, notes="surfaced at session open"
-                                )
-                            except Exception:
-                                pass
-                    logger.info(
-                        f"[chat] G8 surfaced {len(pending)} next_session commitments"
-                    )
-            except Exception as g8_exc:
-                logger.warning(f"next_session surface skipped (non-fatal): {g8_exc}")
+            request_instructions = await _surface_next_session_commitments(
+                # agent_record, NOT composed — compose() runs further down;
+                # referencing it here was a NameError silently swallowed by
+                # the best-effort catch, so G8 reminders never fired at all.
+                agent_id=str(agent_record["id"]),
+                user_id=str(user_id),
+                request_instructions=request_instructions,
+            )
 
         # P1-6: link-injection wire-up. Pull URLs out of the latest user
         # message, fetch via boundary-safe link_understanding, prepend
@@ -1226,6 +1197,51 @@ class AILibraryChatService:
             logger.exception("[chat] compact_messages crashed; sending full history")
 
         return messages
+
+
+async def _surface_next_session_commitments(
+    *,
+    agent_id: str,
+    user_id: str,
+    request_instructions: str,
+) -> str:
+    """G8: prepend pending NEXT_SESSION commitment reminders.
+
+    Returns the (possibly) augmented request_instructions; surfaced
+    commitments are marked fulfilled so they fire once. Best-effort —
+    any failure logs and returns the instructions unchanged."""
+    try:
+        from app.repositories.commitment_repository import (
+            get_commitment_repository,
+        )
+
+        crepo = get_commitment_repository()
+        pending = await crepo.list_next_session(agent_id=agent_id, user_id=user_id)
+        if not pending:
+            return request_instructions
+
+        reminder_lines = [
+            "<pending_followups>",
+            f"You committed to {len(pending)} follow-up(s) "
+            "in earlier sessions. Surface them naturally in "
+            "your first reply if relevant:",
+        ]
+        for c in pending[:5]:  # cap on UI noise
+            reminder_lines.append(f"  - {c.description}")
+        reminder_lines.append("</pending_followups>")
+
+        # Mark them fulfilled so they don't fire again.
+        for c in pending[:5]:
+            if c.id is not None:
+                try:
+                    await crepo.mark_fulfilled(c.id, notes="surfaced at session open")
+                except Exception:  # noqa: BLE001
+                    pass
+        logger.info(f"[chat] G8 surfaced {len(pending)} next_session commitments")
+        return "\n".join(reminder_lines) + "\n\n" + request_instructions
+    except Exception as g8_exc:  # noqa: BLE001
+        logger.warning(f"next_session surface skipped (non-fatal): {g8_exc}")
+        return request_instructions
 
 
 def _format_history_for_summary(messages: List[Dict[str, Any]]) -> str:
