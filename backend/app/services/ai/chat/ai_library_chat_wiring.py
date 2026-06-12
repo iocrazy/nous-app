@@ -94,6 +94,9 @@ class AgentRunnerStack:
     graph_facts: list[str]
     primary_model: str  # the model that will actually be tried first
     fallback_chain_active: bool
+    # Phase 4 L2: Honcho working representation of the user (flag-gated;
+    # None when FEATURE_HONCHO_MEMORY is off or the peer has no model yet).
+    user_context: Optional[str] = None
 
 
 async def build_agent_runner_stack(
@@ -144,6 +147,10 @@ async def build_agent_runner_stack(
 
     graph_facts = await _safe_recall_graph_facts(
         user_id=user_id, user_query=user_query, session_id=session_id
+    )
+
+    honcho_context = await _safe_recall_honcho_context(
+        user_id=str(user_id), session_id=session_id
     )
 
     # ── 2. HookRegistry per-turn ────────────────────────────────────
@@ -374,6 +381,7 @@ async def build_agent_runner_stack(
         graph_facts=graph_facts,
         primary_model=primary_model,
         fallback_chain_active=bool(fallback_models),
+        user_context=honcho_context,
     )
 
 
@@ -457,6 +465,39 @@ async def _safe_recall_graph_facts(
     except Exception:  # noqa: BLE001
         logger.exception("[m3] graph fact recall failed; degrading to none")
         return []
+
+
+async def _safe_recall_honcho_context(
+    *,
+    user_id: str,
+    session_id: Optional[str],
+) -> Optional[str]:
+    """Best-effort Honcho user-model fetch (Phase 4 L2 read side).
+
+    Pulls the peer's working representation — a pure DB read on the
+    Honcho side (the slow LLM-backed dialectic endpoint is deliberately
+    NOT used per turn). Workspace mirrors the write path: ``team-{id}``
+    when the session carries team context, else the deployment default.
+    None when FEATURE_HONCHO_MEMORY is off or anything fails — a Honcho
+    outage must never delay or break a chat turn.
+    """
+    try:
+        from app.services.ai.memory.honcho_memory import get_honcho_memory_service
+
+        service = get_honcho_memory_service()
+        if not service.config.operative():
+            return None
+        workspace = None
+        if session_id:
+            from app.workflows.write_memory import _resolve_team_workspace
+
+            workspace = await _resolve_team_workspace(str(session_id))
+        return await service.get_user_representation(
+            user_id=user_id, workspace_id=workspace
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("[l2] honcho context recall failed; degrading to none")
+        return None
 
 
 async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
