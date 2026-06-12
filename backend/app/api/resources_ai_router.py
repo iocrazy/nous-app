@@ -9,6 +9,9 @@ Provider-routed AI operations on a single resource. Currently:
 - POST /resources/{id}/gen-prompt/generate — reverse-engineer a bilingual
   prompt from the image via the assigned `caption` vision agent
   (dispatched as the caption_asset DBOS workflow).
+- POST /resources/{id}/classify — 12-dimension bilingual auto-tagging via
+  the assigned `classify` vision agent (classify_asset DBOS workflow);
+  on-demand only, uploads never auto-classify.
 
 Kept separate from resources_crud_router (already >1300 lines) per the
 many-small-files rule.
@@ -161,5 +164,65 @@ async def generate_gen_prompt(
     except Exception as e:
         logger.error(f"[CaptionAsset] dispatch failed for {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to start prompt generation")
+
+    return {"success": True, "task_id": wf_id}
+
+
+@router.post("/{resource_id}/classify")
+async def classify_resource(
+    resource_id: str,
+    auth: AuthDep,
+):
+    """Auto-tag an image resource along 12 dimensions (bilingual tags).
+
+    Same dispatch contract as generate_gen_prompt: pre-created
+    task_tracking row with ``dbos_workflow_id=wf_id`` matching the
+    dispatched ``workflow_id``.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.classify_asset import classify_asset_workflow
+
+    repo = ResourcesRepository()
+    resource = await repo.get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if (resource.get("file_type") or "") != "image":
+        raise HTTPException(
+            status_code=400,
+            detail="Auto-tagging is only supported for image resources",
+        )
+    if not resource.get("file_path"):
+        raise HTTPException(status_code=400, detail="Resource has no stored file")
+
+    filename = (resource.get("filename") or str(resource_id))[:40]
+    wf_id = str(_uuid.uuid4())
+    try:
+        await get_task_manager().create(
+            user_id=auth.user_id,
+            task_type="asset_classify",
+            title=f"Auto Tag {filename}",
+            resource_id=str(resource_id),
+            dbos_workflow_id=wf_id,
+        )
+    except Exception as e:
+        logger.warning(f"[ClassifyAsset] pre-create task_tracking row: {e}")
+
+    try:
+        await start_workflow_routed(
+            "asset_classify",
+            dbos_workflow_callable=classify_asset_workflow,
+            dbos_workflow_kwargs={
+                "resource_id": str(resource_id),
+                "user_id": auth.user_id,
+            },
+            workflow_id=wf_id,
+        )
+    except Exception as e:
+        logger.error(f"[ClassifyAsset] dispatch failed for {resource_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to start auto-tagging")
 
     return {"success": True, "task_id": wf_id}

@@ -177,6 +177,40 @@ class TagsRepository:
 
         return None
 
+    async def get_or_create_group(self, name: str) -> Optional[dict]:
+        """Find a tag_groups row by exact name, creating it when missing.
+
+        Used by the AI classification write-through (one group per
+        dimension). Tolerates the unique-name insert race by re-selecting.
+        """
+        try:
+            client = await self._get_client()
+            groups = client.table("tag_groups")
+            found = (
+                await groups.select("id, name, sort_order")
+                .eq("name", name)
+                .limit(1)
+                .execute()
+            )
+            if found.data:
+                return found.data[0]
+            try:
+                created = await groups.insert({"name": name}).execute()
+                if created.data:
+                    return created.data[0]
+            except Exception:
+                pass  # unique-name race — fall through to re-select
+            refound = (
+                await groups.select("id, name, sort_order")
+                .eq("name", name)
+                .limit(1)
+                .execute()
+            )
+            return refound.data[0] if refound.data else None
+        except Exception as e:
+            logger.error(f"Error in get_or_create_group({name}): {e}")
+            return None
+
     async def create_tag(
         self,
         name: str,
@@ -184,6 +218,7 @@ class TagsRepository:
         color: str = "#6366f1",
         icon: Optional[str] = None,
         name_zh: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> dict:
         """Create a new user tag with optional Chinese name."""
         data = {
@@ -195,6 +230,8 @@ class TagsRepository:
         }
         if name_zh:
             data["name_zh"] = name_zh
+        if group_id:
+            data["group_id"] = group_id
 
         table = await self._get_table()
         result = await table.insert(data).execute()

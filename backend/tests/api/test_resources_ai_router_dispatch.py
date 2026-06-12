@@ -40,3 +40,19 @@ def test_generate_gen_prompt_dispatches_caption_workflow() -> None:
     assert (
         "caption_asset_workflow" in source and "start_workflow_routed" in source
     ), "the endpoint must dispatch caption_asset_workflow via the router"
+
+
+def _classify_endpoint_source() -> str:
+    mod = importlib.import_module("app.api.resources_ai_router")
+    return inspect.getsource(mod.classify_resource)
+
+
+def test_classify_creates_row_with_workflow_id() -> None:
+    source = _classify_endpoint_source()
+    assert "dbos_workflow_id=wf_id" in source
+    assert "workflow_id=wf_id" in source
+
+
+def test_classify_dispatches_classify_workflow() -> None:
+    source = _classify_endpoint_source()
+    assert "classify_asset_workflow" in source and "start_workflow_routed" in source

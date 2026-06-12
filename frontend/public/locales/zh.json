@@ -696,7 +696,13 @@
       "promptGenerating": "正在从图片反推提示词...",
       "promptGenerated": "提示词已生成",
       "promptGenerateSlow": "仍在生成中 — 请到任务中心查看",
-      "promptGenerateFailed": "提示词生成失败"
+      "promptGenerateFailed": "提示词生成失败",
+      "autoTag": "智能打标",
+      "autoTagHint": "按 12 个维度为图片智能生成双语标签",
+      "autoTagging": "正在智能打标...",
+      "autoTagged": "已添加标签（新增 {{count}} 个）",
+      "autoTagSlow": "仍在打标中 — 请到任务中心查看",
+      "autoTagFailed": "智能打标失败"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",

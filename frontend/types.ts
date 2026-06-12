@@ -554,6 +554,7 @@ export interface AISettings {
     visual_analysis: string;
     translation?: string;  // zh↔en prompt translation agent slug
     caption?: string;  // image → prompt reverse-engineering agent slug
+    classification?: string;  // 12-dimension auto-tagging agent slug
     image_generation?: string;  // storyboard image provider
     script_generation?: string;  // storyboard script/prompt LLM
   };

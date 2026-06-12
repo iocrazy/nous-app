@@ -117,6 +117,26 @@ export async function generateGenPrompt(resourceId: string): Promise<string> {
   return json.task_id;
 }
 
+/** 12-dimension bilingual auto-tagging via the user's assigned classify
+ *  agent. Async — returns the task id; the workflow attaches
+ *  resource_tags (source='ai') when it finishes. */
+export async function classifyResource(resourceId: string): Promise<string> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/classify`,
+    { method: 'POST', headers: await getAuthHeaders() },
+  );
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(detail || 'Failed to start auto-tagging');
+  }
+  const json = await response.json();
+  return json.task_id;
+}
+
 /** Translate the asset's generation prompt into `targetLang` via the
  *  user's assigned translation agent. Returns both prompt sides. */
 export async function translateGenPrompt(
