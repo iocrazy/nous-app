@@ -44,6 +44,7 @@ export const TaskTypeIcon: React.FC<{ type: TaskType; size?: number }> = ({
     case 'ai_transcription':
       return <FileText size={size} />;
     case 'agent':
+    case 'agent_routine':
       return <Bot size={size} />;
     default:
       return <Circle size={size} />;

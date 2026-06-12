@@ -24,6 +24,7 @@ function taskTypeBg(type: string): string {
     case 'ai_extract':          return 'bg-violet-500/20 text-violet-400';
     case 'ai_transcription':    return 'bg-fuchsia-500/20 text-fuchsia-400';
     case 'ai_summary':          return 'bg-cyan-500/20 text-cyan-400';
+    case 'agent_routine':       return 'bg-emerald-500/20 text-emerald-400';
     default:                    return 'bg-zinc-700/50 text-zinc-400';
   }
 }

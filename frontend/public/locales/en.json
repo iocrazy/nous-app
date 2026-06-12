@@ -1760,7 +1760,8 @@
         "fireNow": "Run now",
         "nextFire": "Next",
         "lastFire": "Last",
-        "lastIssue": "Last issue"
+        "lastIssue": "Last issue",
+        "cronUtcHint": "Cron hours are UTC — your timezone is UTC{{offset}}."
       }
     },
     "skills": {

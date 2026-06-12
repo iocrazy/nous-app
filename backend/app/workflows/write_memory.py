@@ -30,7 +30,9 @@ async def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
     rows = await db_engine.fetch_all(
         "SELECT role, content FROM public.ai_messages WHERE session_id = :sid "
         "ORDER BY created_at DESC LIMIT :lim",
-        {"sid": session_id, "lim": _RECENT_TURNS_PER_CHANNEL * 4},
+        # session_id is a BIGINT snowflake (mig 232) carried as str — asyncpg
+        # rejects str binds on int8 ('str' object cannot be interpreted ...).
+        {"sid": int(session_id), "lim": _RECENT_TURNS_PER_CHANNEL * 4},
     )
     user_msgs: list[str] = []
     asst_msgs: list[str] = []
@@ -213,7 +215,8 @@ async def _resolve_team_workspace(session_id: str) -> Optional[str]:
 
         row = await db_engine.fetch_one(
             "SELECT team_id FROM public.ai_sessions WHERE id = :sid",
-            {"sid": session_id},
+            # BIGINT snowflake carried as str — coerce for asyncpg (mig 232)
+            {"sid": int(session_id)},
         )
         team_id = row.get("team_id") if row else None
         return f"team-{team_id}" if team_id else None
