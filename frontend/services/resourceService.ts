@@ -166,6 +166,38 @@ export async function batchAssetAi(
   return { dispatched: json.dispatched ?? [], skipped: json.skipped ?? [] };
 }
 
+/** Download a LoRA-training zip (image + same-stem .txt caption per
+ *  asset) for up to 100 image resources. Triggers a browser download. */
+export async function exportTrainingSet(
+  resourceIds: string[],
+  lang: 'en' | 'zh',
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/export/training-set`, {
+    method: 'POST',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resource_ids: resourceIds, lang }),
+  });
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(
+      typeof detail === 'string' ? detail : 'Failed to export training set',
+    );
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'training-set.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** Translate the asset's generation prompt into `targetLang` via the
  *  user's assigned translation agent. Returns both prompt sides. */
 export async function translateGenPrompt(

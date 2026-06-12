@@ -68,6 +68,17 @@ class BatchAssetAiRequest(BaseModel):
     )
 
 
+class TrainingSetExportRequest(BaseModel):
+    """Body for POST /resources/export/training-set (LoRA caption format)."""
+
+    resource_ids: List[str] = Field(..., min_length=1, max_length=100)
+    lang: str = Field(
+        "en",
+        pattern="^(en|zh)$",
+        description="Which prompt side becomes the sidecar .txt caption",
+    )
+
+
 class ChorusUpdate(BaseModel):
     """Body for PUT /resources/{id}/chorus. None clears the marker."""
 

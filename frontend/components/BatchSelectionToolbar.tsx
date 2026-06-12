@@ -6,7 +6,9 @@
  */
 
 import React, { useState } from 'react';
-import { Trash2, Move, Copy, RefreshCw, X, Sparkles, Tag, Loader2 } from 'lucide-react';
+import {
+  Trash2, Move, Copy, RefreshCw, X, Sparkles, Tag, Loader2, Package,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Folder, ResourceItem } from '../types';
 import {
@@ -14,6 +16,7 @@ import {
   restoreFolder,
   restoreResource,
   batchAssetAi,
+  exportTrainingSet,
 } from '../services/resourceService';
 import { useToast } from './Toast';
 
@@ -66,9 +69,9 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
   loadTrashedResources,
   reloadResources,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { addToast } = useToast();
-  const [aiBusy, setAiBusy] = useState<'caption' | 'classify' | null>(null);
+  const [aiBusy, setAiBusy] = useState<'caption' | 'classify' | 'export' | null>(null);
 
   if (selectedIds.size === 0 || isDownloadsView) return null;
 
@@ -209,6 +212,35 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
               >
                 {aiBusy === 'classify' ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
                 {t('resources.batchAutoTag', 'Auto Tag')}
+              </button>
+              <button
+                onClick={async () => {
+                  if (aiBusy) return;
+                  setAiBusy('export');
+                  try {
+                    await exportTrainingSet(
+                      selectedImageIds.slice(0, 100),
+                      (i18n.language || '').startsWith('zh') ? 'zh' : 'en',
+                    );
+                    addToast(t('resources.trainingSetExported', 'Training set downloaded'), 'success');
+                  } catch (err) {
+                    console.error('Training-set export failed:', err);
+                    addToast(
+                      err instanceof Error && err.message
+                        ? err.message
+                        : t('resources.trainingSetExportFailed', 'Export failed'),
+                      'error',
+                    );
+                  } finally {
+                    setAiBusy(null);
+                  }
+                }}
+                disabled={aiBusy !== null}
+                title={t('resources.trainingSetHint', 'Download images + .txt prompt captions (LoRA training format)')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {aiBusy === 'export' ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />}
+                {t('resources.trainingSet', 'Training Set')}
               </button>
             </>
           )}
