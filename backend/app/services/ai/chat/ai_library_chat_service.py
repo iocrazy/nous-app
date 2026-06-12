@@ -575,6 +575,7 @@ class AILibraryChatService:
                     request_instructions=request_instructions,
                     recalled_memories=stack.recalled_memories,
                     graph_facts=stack.graph_facts,
+                    user_context=stack.user_context,
                 )
             )
 
