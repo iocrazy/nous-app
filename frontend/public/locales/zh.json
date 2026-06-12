@@ -685,7 +685,11 @@
       "addPrompt": "添加提示词",
       "promptPlaceholder": "粘贴 AI 生成提示词...",
       "promptCopied": "提示词已复制",
-      "copyPrompt": "复制"
+      "copyPrompt": "复制",
+      "translatePrompt": "翻译",
+      "translatePromptHint": "从另一种语言翻译",
+      "promptTranslated": "提示词已翻译",
+      "promptTranslateFailed": "翻译失败"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",

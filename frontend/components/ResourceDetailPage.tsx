@@ -34,6 +34,7 @@ import {
   FolderOpen,
   List,
   AlignLeft,
+  Languages,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
@@ -57,6 +58,7 @@ import {
   uploadResourceCover,
   setResourceChorus,
   trashResource,
+  translateGenPrompt,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
@@ -325,7 +327,7 @@ interface ResourceDetailProps {
 }
 
 export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { addToast } = useToast();
   const { mediaToken } = useAuth();
   const navigate = useNavigate();
@@ -377,6 +379,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [notesValue, setNotesValue] = useState('');
   const [promptValue, setPromptValue] = useState('');
   const [promptOpen, setPromptOpen] = useState(false);
+  const [promptLang, setPromptLang] = useState<'en' | 'zh'>('en');
+  const [promptTranslating, setPromptTranslating] = useState(false);
   const [urlValue, setUrlValue] = useState('');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -462,12 +466,31 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     if (resource) {
       setNameValue(resource.filename);
       setNotesValue(resource.notes || '');
-      setPromptValue(resource.gen_prompt || '');
       setPromptOpen(false);
       setUrlValue(resource.url || '');
       setEditingName(false);
     }
-  }, [resource?.id, resource?.filename, resource?.notes, resource?.gen_prompt, resource?.url]);
+  }, [resource?.id, resource?.filename, resource?.notes, resource?.url]);
+
+  // Prompt language: on resource switch, land on the side with content,
+  // preferring the UI locale when both (or neither) sides have text.
+  useEffect(() => {
+    if (!resource) return;
+    const uiZh = (i18n.language || '').startsWith('zh');
+    const en = resource.gen_prompt || '';
+    const zh = resource.gen_prompt_zh || '';
+    setPromptLang(uiZh ? (zh || !en ? 'zh' : 'en') : (en || !zh ? 'en' : 'zh'));
+    // Intentionally only on resource switch — edits/commits must not flip the tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resource?.id]);
+
+  // Keep the prompt textarea synced with the active language side.
+  useEffect(() => {
+    if (!resource) return;
+    setPromptValue(
+      (promptLang === 'zh' ? resource.gen_prompt_zh : resource.gen_prompt) || '',
+    );
+  }, [resource?.id, resource?.gen_prompt, resource?.gen_prompt_zh, promptLang]);
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.select();
@@ -503,19 +526,46 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
   const commitPrompt = useCallback(() => {
     const val = promptValue.trim();
-    if (val !== (resource?.gen_prompt || '').trim()) {
+    const current = (
+      (promptLang === 'zh' ? resource?.gen_prompt_zh : resource?.gen_prompt) || ''
+    ).trim();
+    if (val !== current) {
       // Empty string (not null) so the PATCH survives exclude_none and clears.
-      handleResourceUpdate({ gen_prompt: val } as Partial<Resource>);
+      const field = promptLang === 'zh' ? 'gen_prompt_zh' : 'gen_prompt';
+      handleResourceUpdate({ [field]: val } as Partial<Resource>);
     }
-  }, [promptValue, resource?.gen_prompt, handleResourceUpdate]);
+  }, [promptValue, promptLang, resource?.gen_prompt, resource?.gen_prompt_zh, handleResourceUpdate]);
 
   const copyPrompt = useCallback(() => {
-    if (!resource?.gen_prompt) return;
+    const text =
+      (promptLang === 'zh' ? resource?.gen_prompt_zh : resource?.gen_prompt) || '';
+    if (!text) return;
     navigator.clipboard
-      .writeText(resource.gen_prompt)
+      .writeText(text)
       .then(() => addToast(t('resources.infoPanel.promptCopied', 'Prompt copied'), 'success'))
       .catch((err) => console.error('Failed to copy prompt:', err));
-  }, [resource?.gen_prompt, addToast, t]);
+  }, [promptLang, resource?.gen_prompt, resource?.gen_prompt_zh, addToast, t]);
+
+  // Fill the ACTIVE side by translating from the other side via the
+  // user's assigned translation agent (Settings → AI → Translation).
+  const handleTranslatePrompt = useCallback(async () => {
+    if (!resource || promptTranslating) return;
+    setPromptTranslating(true);
+    try {
+      const data = await translateGenPrompt(resourceId, promptLang);
+      setResource((prev) => (prev ? { ...prev, ...data } : prev));
+      addToast(t('resources.infoPanel.promptTranslated', 'Prompt translated'), 'success');
+    } catch (err) {
+      console.error('Failed to translate prompt:', err);
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : t('resources.infoPanel.promptTranslateFailed', 'Translation failed');
+      addToast(msg, 'error');
+    } finally {
+      setPromptTranslating(false);
+    }
+  }, [resource, resourceId, promptLang, promptTranslating, addToast, t]);
 
   const commitUrl = useCallback(() => {
     const val = urlValue.trim();
@@ -1464,20 +1514,61 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
           {/* Prompt — AI generation prompt. Card when present (or opened);
               a light add-entry otherwise so non-AI assets stay uncluttered. */}
-          {resource.gen_prompt || promptOpen ? (
+          {resource.gen_prompt || resource.gen_prompt_zh || promptOpen ? (
             <div className="px-4 mt-2">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                  {t('resources.infoPanel.prompt', 'Prompt')}
-                </span>
-                {resource.gen_prompt && (
-                  <button
-                    onClick={copyPrompt}
-                    className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors"
-                  >
-                    <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    {t('resources.infoPanel.prompt', 'Prompt')}
+                  </span>
+                  <div className="flex rounded overflow-hidden border border-zinc-700/60">
+                    {(['en', 'zh'] as const).map((lang) => (
+                      <button
+                        key={lang}
+                        onClick={() => setPromptLang(lang)}
+                        className={`px-1.5 py-0.5 text-[9px] transition-colors ${
+                          promptLang === lang
+                            ? 'bg-indigo-500/30 text-indigo-200'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {lang === 'en' ? 'EN' : '中'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  {Boolean(
+                    promptLang === 'zh' ? resource.gen_prompt : resource.gen_prompt_zh,
+                  ) && (
+                    <button
+                      onClick={handleTranslatePrompt}
+                      disabled={promptTranslating}
+                      title={t(
+                        'resources.infoPanel.translatePromptHint',
+                        'Translate from the other language',
+                      )}
+                      className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                    >
+                      {promptTranslating ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : (
+                        <Languages size={11} />
+                      )}{' '}
+                      {t('resources.infoPanel.translatePrompt', 'Translate')}
+                    </button>
+                  )}
+                  {Boolean(
+                    promptLang === 'zh' ? resource.gen_prompt_zh : resource.gen_prompt,
+                  ) && (
+                    <button
+                      onClick={copyPrompt}
+                      className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors"
+                    >
+                      <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
+                    </button>
+                  )}
+                </div>
               </div>
               <textarea
                 value={promptValue}

@@ -170,6 +170,62 @@ async def test_resolve_no_user_returns_model_only():
     assert slug == "analyze"
 
 
+async def test_resolve_translate_defaults_to_translate_slug():
+    agents = {"translate": {"model": "qwen-max"}}
+    agent_repo = MagicMock()
+    agent_repo.get_by_slug = AsyncMock(side_effect=lambda slug: agents.get(slug))
+    with (
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.repositories.user_settings_repository.UserSettingsRepository",
+            return_value=_settings_repo({}),
+        ),
+        patch(
+            "app.services.ai.adapters.factory.provider_key_for_model",
+            return_value="qwen",
+        ),
+    ):
+        key, cfg, model, slug = await helpers.resolve_translate_provider_config("u-1")
+    assert key == "qwen"
+    assert model == "qwen-max"
+    assert slug == "translate"
+
+
+async def test_resolve_translate_honors_assignment():
+    """task_assignment.translation routes to the user's chosen agent,
+    same #622/#623 contract as visual_analysis."""
+    agents = {
+        "my-translator": {"model": "doubao-seed-2-0-pro-260215"},
+        "translate": {"model": "qwen-max"},
+    }
+    agent_repo = MagicMock()
+    agent_repo.get_by_slug = AsyncMock(side_effect=lambda slug: agents.get(slug))
+    settings_repo = _settings_repo(
+        {
+            "task_assignment": {"translation": "my-translator"},
+            "ai_providers": {"doubao": {"api_key": "sk-d"}},
+        }
+    )
+    with (
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.repositories.user_settings_repository.UserSettingsRepository",
+            return_value=settings_repo,
+        ),
+    ):
+        key, cfg, model, slug = await helpers.resolve_translate_provider_config("u-1")
+    assert key == "doubao"
+    assert model == "doubao-seed-2-0-pro-260215"
+    assert cfg["api_key"] == "sk-d"
+    assert slug == "my-translator"
+
+
 async def test_resolve_merges_user_byo_provider_config():
     agent_repo = MagicMock()
     agent_repo.get_by_slug = AsyncMock(return_value={"model": "qwen-max"})

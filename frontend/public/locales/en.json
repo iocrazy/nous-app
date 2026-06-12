@@ -685,7 +685,11 @@
       "addPrompt": "Add Prompt",
       "promptPlaceholder": "Paste the AI generation prompt...",
       "promptCopied": "Prompt copied",
-      "copyPrompt": "Copy"
+      "copyPrompt": "Copy",
+      "translatePrompt": "Translate",
+      "translatePromptHint": "Translate from the other language",
+      "promptTranslated": "Prompt translated",
+      "promptTranslateFailed": "Translation failed"
     },
     "folderInfoPanel": {
       "title": "Folder Info",

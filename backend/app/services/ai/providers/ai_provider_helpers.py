@@ -42,6 +42,71 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
 
 
 DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
+DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
+
+
+async def resolve_task_provider_config(
+    user_id: Optional[str],
+    task_key: str,
+    default_slug: str,
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve a task's assigned agent slug + model + user's BYO provider config.
+
+    Generic form of ``resolve_analyze_provider_config`` (which delegates
+    here): reads ``task_assignment[task_key]`` for the agent slug (falling
+    back to ``default_slug``), resolves the slug to its ``ai_agents`` row,
+    takes its model, derives the provider key from the model prefix, and
+    merges the user's BYO entry for that provider.
+
+    Returns ``(provider_key, provider_config, model, agent_slug)`` — the
+    resolved slug is returned so the caller composes the SAME agent whose
+    model was resolved (see #622/#623: prompt agent and model agent must
+    match or the composed model overrides the resolved one).
+    """
+    from app.repositories.agent_repository import get_agent_repository
+    from app.services.ai.adapters.factory import provider_key_for_model
+
+    # Load settings first so we can read the user's assigned agent slug.
+    # Reused below for the BYO provider lookup — a single read, not two.
+    ai_settings = await get_ai_settings(user_id) if user_id else {}
+    assigned_slug = (
+        (ai_settings.get("task_assignment") or {}).get(task_key) or default_slug
+    ).strip() or default_slug
+    resolved_slug = assigned_slug
+
+    agent_repo = get_agent_repository()
+    agent = await agent_repo.get_by_slug(assigned_slug)
+    if not agent and assigned_slug != default_slug:
+        logger.warning(
+            f"[AI] {task_key} assigned agent '{assigned_slug}' not found; "
+            f"falling back to '{default_slug}'"
+        )
+        agent = await agent_repo.get_by_slug(default_slug)
+        resolved_slug = default_slug
+
+    model = ((agent or {}).get("model") or "").strip()
+    if not model:
+        logger.warning(
+            f"[AI] {task_key} agent '{assigned_slug}' missing or has no "
+            "model; caller will use built-in default"
+        )
+        return "", {}, "", resolved_slug
+
+    try:
+        provider_key = provider_key_for_model(model)
+    except ValueError:
+        logger.warning(
+            f"[AI] {task_key} agent model '{model}' has unknown provider "
+            "prefix; falling back to generic OpenAI-compatible adapter"
+        )
+        provider_key = ""
+
+    if not user_id or not provider_key:
+        return provider_key, {"model": model}, model, resolved_slug
+
+    provider_config = dict(get_provider_config(ai_settings, provider_key))
+    provider_config["model"] = model
+    return provider_key, provider_config, model, resolved_slug
 
 
 async def resolve_analyze_provider_config(
@@ -78,48 +143,20 @@ async def resolve_analyze_provider_config(
         got 'analyze'\\'s qwen-max with no matching config → empty config →
         "All connection attempts failed".
     """
-    from app.repositories.agent_repository import get_agent_repository
-    from app.services.ai.adapters.factory import provider_key_for_model
+    return await resolve_task_provider_config(
+        user_id, "visual_analysis", DEFAULT_ANALYZE_AGENT_SLUG
+    )
 
-    # Load settings first so we can read the user's assigned agent slug. Reused
-    # below for the BYO provider lookup, so this is a single read, not two.
-    ai_settings = await get_ai_settings(user_id) if user_id else {}
-    assigned_slug = (
-        (ai_settings.get("task_assignment") or {}).get("visual_analysis")
-        or DEFAULT_ANALYZE_AGENT_SLUG
-    ).strip() or DEFAULT_ANALYZE_AGENT_SLUG
-    resolved_slug = assigned_slug
 
-    agent_repo = get_agent_repository()
-    agent = await agent_repo.get_by_slug(assigned_slug)
-    if not agent and assigned_slug != DEFAULT_ANALYZE_AGENT_SLUG:
-        logger.warning(
-            f"[AI] visual_analysis assigned agent '{assigned_slug}' not found; "
-            f"falling back to '{DEFAULT_ANALYZE_AGENT_SLUG}'"
-        )
-        agent = await agent_repo.get_by_slug(DEFAULT_ANALYZE_AGENT_SLUG)
-        resolved_slug = DEFAULT_ANALYZE_AGENT_SLUG
+async def resolve_translate_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the translation agent slug + model + user's BYO provider config.
 
-    model = ((agent or {}).get("model") or "").strip()
-    if not model:
-        logger.warning(
-            f"[AI] visual_analysis agent '{assigned_slug}' missing or has no "
-            "model; VisualAnalysisService will use built-in default"
-        )
-        return "", {}, "", resolved_slug
-
-    try:
-        provider_key = provider_key_for_model(model)
-    except ValueError:
-        logger.warning(
-            f"[AI] visual_analysis agent model '{model}' has unknown provider "
-            "prefix; falling back to generic OpenAI-compatible adapter"
-        )
-        provider_key = ""
-
-    if not user_id or not provider_key:
-        return provider_key, {"model": model}, model, resolved_slug
-
-    provider_config = dict(get_provider_config(ai_settings, provider_key))
-    provider_config["model"] = model
-    return provider_key, provider_config, model, resolved_slug
+    Honors ``task_assignment.translation`` (an AI Library agent slug),
+    defaulting to the built-in ``translate`` agent. Same return shape as
+    the other resolvers: ``(provider_key, provider_config, model, slug)``.
+    """
+    return await resolve_task_provider_config(
+        user_id, "translation", DEFAULT_TRANSLATE_AGENT_SLUG
+    )
