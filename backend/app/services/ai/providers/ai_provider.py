@@ -307,17 +307,23 @@ class ModelScopeProvider(OpenAICompatibleProvider):
     tier is available with a ModelScope access token as the API key.
     """
 
+    # Probe model for the auth-validating chat call. The empty-string
+    # coalesce matters: test_connection passes model="" (frontend sends
+    # no model), which would bypass a plain keyword default and make the
+    # probe fail with "Invalid model id: ".
+    DEFAULT_MODEL = "Qwen/Qwen3-235B-A22B"
+
     def __init__(
         self,
         api_key: str = "",
         base_url: str = "",
-        model: str = "Qwen/Qwen3-235B-A22B",
+        model: str = "",
         **kwargs,
     ):
         super().__init__(
             api_key=api_key,
             base_url=base_url or "https://api-inference.modelscope.cn/v1",
-            model=model,
+            model=model or self.DEFAULT_MODEL,
             **kwargs,
         )
         # Daily-quota counters captured from the last auth-probe response

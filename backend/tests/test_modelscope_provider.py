@@ -237,3 +237,22 @@ def _chat_stub(*, error: Exception | None = None, headers: dict | None = None):
         completions = _Completions()
 
     return _Chat()
+
+
+class TestEmptyModelProbe:
+    """Regression: Settings Test Connection sends model="" (the frontend
+    omits the field, the schema defaults to empty string), which bypassed
+    the keyword default and made the auth probe fail with
+    "Invalid model id: " (400)."""
+
+    def test_empty_model_falls_back_to_default(self) -> None:
+        provider = AIProviderFactory.get_provider(
+            "modelscope", {"api_key": "ms-x", "base_url": "", "model": ""}
+        )
+        assert provider.model == provider.DEFAULT_MODEL
+
+    def test_explicit_model_kept(self) -> None:
+        provider = AIProviderFactory.get_provider(
+            "modelscope", {"api_key": "ms-x", "model": "deepseek-ai/DeepSeek-V3.1"}
+        )
+        assert provider.model == "deepseek-ai/DeepSeek-V3.1"
