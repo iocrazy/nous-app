@@ -95,6 +95,10 @@ class TestConnectionResponse(BaseModel):
     success: bool
     models: Optional[List[str]] = None
     error: Optional[str] = None
+    # Daily-quota counters (ModelScope: requests_limit / requests_remaining /
+    # model_requests_limit / model_requests_remaining). None for providers
+    # that don't expose quota on response headers.
+    quota: Optional[Dict[str, int]] = None
 
 
 # ------------------------------------------------------------------

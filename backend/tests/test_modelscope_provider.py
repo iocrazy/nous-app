@@ -112,26 +112,10 @@ class TestSettingsProvider:
         bad key fails Test Connection instead of showing Connected
         (#659 bug class)."""
         provider = AIProviderFactory.get_provider("modelscope", {"api_key": "bad"})
-
-        class _Models:
-            async def list(self):
-                class _Item:
-                    id = "Qwen/Qwen2.5-72B-Instruct"
-
-                class _Resp:
-                    data = [_Item()]
-
-                return _Resp()
-
-        class _Completions:
-            async def create(self, **kwargs):
-                raise RuntimeError("Error code: 401 - invalid token")
-
-        class _Chat:
-            completions = _Completions()
-
-        provider._client.models = _Models()
-        provider._client.chat = _Chat()
+        provider._client.models = _models_stub(["Qwen/Qwen2.5-72B-Instruct"])
+        provider._client.chat = _chat_stub(
+            error=RuntimeError("Error code: 401 - invalid token")
+        )
 
         with pytest.raises(RuntimeError, match="401"):
             await provider.list_models()
@@ -139,29 +123,117 @@ class TestSettingsProvider:
     @pytest.mark.asyncio
     async def test_list_models_returns_catalog_when_auth_ok(self) -> None:
         provider = AIProviderFactory.get_provider("modelscope", {"api_key": "good"})
-
-        class _Models:
-            async def list(self):
-                class _A:
-                    id = "Qwen/Qwen2.5-72B-Instruct"
-
-                class _B:
-                    id = "deepseek-ai/DeepSeek-V3.1"
-
-                class _Resp:
-                    data = [_A(), _B()]
-
-                return _Resp()
-
-        class _Completions:
-            async def create(self, **kwargs):
-                return {"ok": True}
-
-        class _Chat:
-            completions = _Completions()
-
-        provider._client.models = _Models()
-        provider._client.chat = _Chat()
+        provider._client.models = _models_stub(
+            ["Qwen/Qwen2.5-72B-Instruct", "deepseek-ai/DeepSeek-V3.1"]
+        )
+        provider._client.chat = _chat_stub()
 
         models = await provider.list_models()
         assert models == ["Qwen/Qwen2.5-72B-Instruct", "deepseek-ai/DeepSeek-V3.1"]
+
+    @pytest.mark.asyncio
+    async def test_quota_captured_from_response_headers(self) -> None:
+        provider = AIProviderFactory.get_provider("modelscope", {"api_key": "good"})
+        provider._client.models = _models_stub(["Qwen/Qwen2.5-72B-Instruct"])
+        provider._client.chat = _chat_stub(
+            headers={
+                "modelscope-ratelimit-requests-limit": "2000",
+                "modelscope-ratelimit-requests-remaining": "200",
+                "modelscope-ratelimit-model-requests-limit": "200",
+                "modelscope-ratelimit-model-requests-remaining": "20",
+            }
+        )
+
+        await provider.list_models()
+        assert provider.last_quota == {
+            "requests_limit": 2000,
+            "requests_remaining": 200,
+            "model_requests_limit": 200,
+            "model_requests_remaining": 20,
+        }
+
+    @pytest.mark.asyncio
+    async def test_quota_none_when_headers_absent(self) -> None:
+        provider = AIProviderFactory.get_provider("modelscope", {"api_key": "good"})
+        provider._client.models = _models_stub(["Qwen/Qwen2.5-72B-Instruct"])
+        provider._client.chat = _chat_stub(headers={})
+
+        await provider.list_models()
+        assert provider.last_quota is None
+
+    @pytest.mark.asyncio
+    async def test_test_connection_includes_quota(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _FakeProvider:
+            last_quota = {"requests_limit": 2000, "requests_remaining": 200}
+
+            async def list_models(self):
+                return ["Qwen/Qwen2.5-72B-Instruct"]
+
+        monkeypatch.setattr(
+            AIProviderFactory,
+            "get_provider",
+            classmethod(lambda cls, key, config: _FakeProvider()),
+        )
+        result = await AIProviderFactory.test_connection(
+            provider_key="modelscope", config={"api_key": "ms-x"}
+        )
+        assert result["success"] is True
+        assert result["quota"] == {"requests_limit": 2000, "requests_remaining": 200}
+
+    @pytest.mark.asyncio
+    async def test_test_connection_quota_none_for_plain_providers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _PlainProvider:
+            async def list_models(self):
+                return ["deepseek-chat"]
+
+        monkeypatch.setattr(
+            AIProviderFactory,
+            "get_provider",
+            classmethod(lambda cls, key, config: _PlainProvider()),
+        )
+        result = await AIProviderFactory.test_connection(
+            provider_key="deepseek", config={"api_key": "x"}
+        )
+        assert result["quota"] is None
+
+
+def _models_stub(ids: list[str]):
+    class _Models:
+        async def list(self):
+            class _Resp:
+                data = [type("_Item", (), {"id": i})() for i in ids]
+
+            return _Resp()
+
+    return _Models()
+
+
+def _chat_stub(*, error: Exception | None = None, headers: dict | None = None):
+    """Mimics AsyncOpenAI's chat namespace incl. with_raw_response."""
+
+    class _Raw:
+        def __init__(self):
+            self.headers = headers or {}
+
+    class _RawCompletions:
+        async def create(self, **kwargs):
+            if error:
+                raise error
+            return _Raw()
+
+    class _Completions:
+        with_raw_response = _RawCompletions()
+
+        async def create(self, **kwargs):
+            if error:
+                raise error
+            return {"ok": True}
+
+    class _Chat:
+        completions = _Completions()
+
+    return _Chat()
