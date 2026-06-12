@@ -636,7 +636,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 {uploading ? (
                   <button
                     disabled
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-800 text-white rounded-lg"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo opacity-70"
                   >
                     <Loader2 size={14} className="animate-spin" />
                     <span>{overallProgress}%</span>
@@ -646,14 +646,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     <div className="flex">
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-l-lg transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-l-lg btn-tint-indigo border-r-0 transition-colors"
                       >
                         <Upload size={14} />
                         <span>{t('resources.upload')}</span>
                       </button>
                       <button
                         onClick={() => setShowUploadDropdown(prev => !prev)}
-                        className="px-1.5 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-r-lg border-l border-indigo-500 transition-colors"
+                        className="px-1.5 py-1.5 text-xs font-medium rounded-r-lg btn-tint-indigo transition-colors"
                       >
                         <ChevronDown size={12} />
                       </button>
@@ -683,7 +683,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 <div className="relative" ref={newDropdownRef}>
                   <button
                     onClick={() => setShowNewDropdown(prev => !prev)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-amber transition-colors"
                   >
                     <Sparkles size={14} />
                     <span>{t('resources.new')}</span>
