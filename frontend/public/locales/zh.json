@@ -1764,7 +1764,8 @@
         "fireNow": "立即运行",
         "nextFire": "下次",
         "lastFire": "上次",
-        "lastIssue": "最近 Issue"
+        "lastIssue": "最近 Issue",
+        "cronUtcHint": "Cron 时间按 UTC 解释 — 你的时区是 UTC{{offset}}。"
       }
     },
     "skills": {

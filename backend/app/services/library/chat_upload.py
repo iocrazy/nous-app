@@ -44,7 +44,9 @@ async def _get_session_team_id(session_id: str) -> Optional[int]:
 
     row = await db_engine.fetch_one(
         "SELECT team_id FROM public.ai_sessions WHERE id = :id",
-        {"id": session_id},
+        # ai_sessions.id is a BIGINT snowflake carried as str (mig 232) —
+        # asyncpg rejects str binds on int8.
+        {"id": int(session_id)},
     )
     if row is None:
         logger.debug(f"[chat_upload] session {session_id!r} not found")

@@ -116,12 +116,18 @@ async def test_fire_creates_issue_returns_order_and_stashes_last_issue() -> None
     repo = MagicMock()
     repo.atomic_create = AsyncMock(side_effect=_atomic_create)
     execute_sr = AsyncMock()
+    tracker = MagicMock()
+    tracker.create = AsyncMock(return_value="task-1")
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
         patch("app.db.engine.execute", execute),
         patch("app.db.engine.execute_as_service_role", execute_sr),
         patch("app.repositories.issue_repository.issue_repository", repo),
+        patch(
+            "app.services.infra.unified_task_manager.get_task_manager",
+            lambda: tracker,
+        ),
     ):
         order = await sm._fire_agent_routine(_routine_row())
 
@@ -154,6 +160,12 @@ async def test_fire_creates_issue_returns_order_and_stashes_last_issue() -> None
     merged = json.loads(stash_call[0].args[1]["p"])
     assert merged["last_issue_id"] == 42
     assert merged["agent_slug"] == "ceo"  # config preserved, not replaced
+    # Task Center row pinned to the workflow id (mirror trigger does the rest)
+    tracker.create.assert_awaited_once()
+    tk = tracker.create.await_args.kwargs
+    assert tk["task_type"] == "agent_routine"
+    assert tk["dbos_workflow_id"] == order["workflow_id"]
+    assert tk["metadata"]["issue_id"] == 42
 
 
 @pytest.mark.asyncio

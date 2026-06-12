@@ -339,7 +339,9 @@ class MemoryWriter:
         row = {
             "agent_id": str(agent_id),
             "user_id": str(user_id),
-            "run_id": str(run_id) if run_id else None,
+            # agent_memories.run_id is BIGINT (FK → agent_runs.id, mig 232) —
+            # asyncpg rejects str binds on int8.
+            "run_id": int(run_id) if run_id else None,
             "scope": scope.value,
             "summary": fact.summary,
             "when_to_use": fact.when_to_use,

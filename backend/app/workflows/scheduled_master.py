@@ -291,6 +291,30 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         {"wf": workflow_id, "iid": issue_id},
     )
 
+    # Task Center visibility: create a task_tracking row pinned to the
+    # workflow id — the mirror trigger syncs phase/status as execute_issue
+    # runs, so the user gets queued→running→completed in the Task Center
+    # without polling issues. Best-effort: tracking must never kill a fire.
+    try:
+        from app.services.infra.unified_task_manager import get_task_manager
+
+        await get_task_manager().create(
+            user_id=str(user_id),
+            task_type="agent_routine",
+            title=f"Routine: {row.get('name') or 'Routine'}",
+            subtitle=f"{agent.get('name') or agent_slug} → Issue #{issue_id}",
+            dbos_workflow_id=workflow_id,
+            metadata={
+                "issue_id": issue_id,
+                "schedule_id": str(sched_id),
+                "agent_slug": agent_slug,
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            f"[scheduled_master] task_tracking create failed (non-fatal): {exc}"
+        )
+
     # Stash last_issue_id for the next fire's delivery gate (merge, never
     # replace — the payload also carries the routine's config).
     merged = {**payload, "last_issue_id": issue_id}

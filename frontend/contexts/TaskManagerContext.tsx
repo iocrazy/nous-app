@@ -22,7 +22,10 @@ export type TaskType =
   | 'ai_summary'
   // Agent execution (chat / issue turns) — sourced from agent_runs, not
   // task_tracking; merged into the Task Center view client-side.
-  | 'agent';
+  | 'agent'
+  // Scheduled agent routine fires (paperclip R1) — task_tracking rows pinned
+  // to the execute_issue workflow id, mirrored by the lifecycle trigger.
+  | 'agent_routine';
 
 export type TaskCategory = 'transfer' | 'processing' | 'ai';
 
@@ -772,6 +775,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     ai_transcription: 0,
     ai_summary: 0,
     agent: 0,
+    agent_routine: 0,
   };
   for (const [type, n] of Object.entries(state.activeData.byType)) {
     if (type in activeCounts) {

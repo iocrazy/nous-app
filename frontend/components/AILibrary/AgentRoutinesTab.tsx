@@ -14,11 +14,20 @@ import { useToast } from '../Toast';
 // existing execute_issue chain — results land as issue replies.
 
 const CRON_PRESETS: Array<{ label: string; expr: string }> = [
-  { label: 'Daily 9:00', expr: '0 9 * * *' },
+  { label: 'Daily 09:00 UTC', expr: '0 9 * * *' },
   { label: 'Hourly', expr: '0 * * * *' },
-  { label: 'Weekly Mon 9:00', expr: '0 9 * * 1' },
+  { label: 'Weekly Mon 09:00 UTC', expr: '0 9 * * 1' },
   { label: 'Every 15 min', expr: '*/15 * * * *' },
 ];
+
+// "+8" / "-5:30" — shown in the UTC hint so users can translate cron hours.
+function localUtcOffsetLabel(): string {
+  const tzMin = -new Date().getTimezoneOffset();
+  const sign = tzMin >= 0 ? '+' : '-';
+  const abs = Math.abs(tzMin);
+  const mins = abs % 60;
+  return `${sign}${Math.floor(abs / 60)}${mins ? `:${String(mins).padStart(2, '0')}` : ''}`;
+}
 
 interface RoutineFormState {
   name: string;
@@ -86,6 +95,13 @@ const RoutineForm: React.FC<{
             onChange={(e) => setForm((f) => ({ ...f, cron_expr: e.target.value }))}
             className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-xs text-zinc-300 focus:border-indigo-500 focus:outline-none"
           />
+          <p className="mt-1 text-[10px] text-zinc-500">
+            {t(
+              'aiLibrary.agents.routines.cronUtcHint',
+              'Cron hours are UTC — your timezone is UTC{{offset}}.',
+              { offset: localUtcOffsetLabel() },
+            )}
+          </p>
         </label>
 
         <label className="block text-xs">
