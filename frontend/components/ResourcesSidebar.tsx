@@ -40,6 +40,13 @@ const sidebarItemClass = (active: boolean) =>
     active ? 'bg-zinc-800/80 text-white font-medium' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
   }`;
 
+// Section label (island redesign D3) — visual grouping only, no behavior.
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-600 select-none">
+    {children}
+  </div>
+);
+
 // ─── Component ─────────────────────────────────────────
 
 export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
@@ -128,25 +135,8 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
       </div>
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
-        {/* ── Top section: Shared / Recycle Bin ── */}
-        <button
-          onClick={() => navigate(resPath('/resources/shared'))}
-          className={sidebarItemClass(isSharedView)}
-        >
-          <Share2 size={15} className="shrink-0 opacity-70" />
-          <span className="flex-1">{t('resources.sharedManagement')}</span>
-        </button>
-
-        <button
-          onClick={() => navigate(resPath('/resources/recycle'))}
-          className={sidebarItemClass(isRecycleView)}
-        >
-          <Trash2 size={15} className="shrink-0 opacity-70" />
-          <span className="flex-1">{t('resources.recycleBin')}</span>
-        </button>
-
-        {/* ── Divider ── */}
-        <div className="mx-1 my-2.5 border-t border-zinc-800/60" />
+        {/* ── Locations (island redesign D3: high-frequency content first) ── */}
+        <SectionLabel>{t('resources.sectionLocations', 'Locations')}</SectionLabel>
 
         {/* ── Main section: Team Libraries / Personal Resources ── */}
         {!isPersonal ? (
@@ -354,6 +344,26 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
             )}
           </div>
         )}
+      </div>
+
+      {/* ── Manage section — pinned to the bottom (island redesign D3:
+          low-frequency management items sink below the content groups) ── */}
+      <div className="px-2 pb-3 pt-2 border-t border-zinc-800/60 space-y-0.5">
+        <button
+          onClick={() => navigate(resPath('/resources/shared'))}
+          className={sidebarItemClass(isSharedView)}
+        >
+          <Share2 size={15} className="shrink-0 opacity-70" />
+          <span className="flex-1">{t('resources.sharedManagement')}</span>
+        </button>
+
+        <button
+          onClick={() => navigate(resPath('/resources/recycle'))}
+          className={sidebarItemClass(isRecycleView)}
+        >
+          <Trash2 size={15} className="shrink-0 opacity-70" />
+          <span className="flex-1">{t('resources.recycleBin')}</span>
+        </button>
       </div>
 
       {/* Collapse toggle — same as project sidebar */}
