@@ -715,7 +715,9 @@
       "autoTagging": "Auto-tagging image...",
       "autoTagged": "Tags added ({{count}} new)",
       "autoTagSlow": "Still tagging — check Task Center",
-      "autoTagFailed": "Auto-tagging failed"
+      "autoTagFailed": "Auto-tagging failed",
+      "addNote": "Add note",
+      "addUrl": "Add source link"
     },
     "folderInfoPanel": {
       "title": "Folder Info",
@@ -726,7 +728,8 @@
     "trashFolderFailed": "Failed to move folder to trash",
     "trashFolderConfirm": "This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?",
     "temp": "Temp",
-    "tempEmpty": "No chat uploads yet — files you paste or drop into the chat composer land here for 24h before being moved or expired."
+    "tempEmpty": "No chat uploads yet — files you paste or drop into the chat composer land here for 24h before being moved or expired.",
+    "sectionLocations": "Locations"
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",

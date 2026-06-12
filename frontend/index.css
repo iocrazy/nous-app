@@ -18,6 +18,23 @@
   --color-accent: #6366f1;           /* indigo-500 */
 }
 
+/* ── Tinted button system — island redesign D6
+   (docs/design/island-redesign-spec.md §3). Layout/size stay Tailwind
+   utilities at the call site; these classes own color only:
+   12% tinted bg + 35% same-hue border + bright text, hover deepens. ── */
+@layer components {
+  .btn-tint-indigo { background: rgba(99,102,241,.12); border: 1px solid rgba(99,102,241,.35); color: #a5b4fc; }
+  .btn-tint-indigo:hover:not(:disabled) { background: rgba(99,102,241,.2); border-color: rgba(99,102,241,.55); }
+  .btn-tint-amber { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.35); color: #fcd34d; }
+  .btn-tint-amber:hover:not(:disabled) { background: rgba(245,158,11,.2); border-color: rgba(245,158,11,.55); }
+  .btn-tint-violet { background: rgba(167,139,250,.12); border: 1px solid rgba(167,139,250,.35); color: #c4b5fd; }
+  .btn-tint-violet:hover:not(:disabled) { background: rgba(167,139,250,.2); border-color: rgba(167,139,250,.55); }
+  .btn-tint-green { background: rgba(52,211,153,.12); border: 1px solid rgba(52,211,153,.35); color: #6ee7b7; }
+  .btn-tint-green:hover:not(:disabled) { background: rgba(52,211,153,.2); border-color: rgba(52,211,153,.55); }
+  .btn-tint-red { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3); color: #fca5a5; }
+  .btn-tint-red:hover:not(:disabled) { background: rgba(248,113,113,.18); border-color: rgba(248,113,113,.5); }
+}
+
 /* Global styles */
 html, body {
   overflow-x: hidden;

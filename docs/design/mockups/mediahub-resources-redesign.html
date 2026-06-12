@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MediaHub — Resources Redesign Proposal</title>
+<style>
+  :root {
+    --bg: #09090b;          /* zinc-950 */
+    --panel: #101012;
+    --panel-2: #18181b;     /* zinc-900 */
+    --card: #1c1c20;
+    --border: #26262b;      /* zinc-800 */
+    --border-soft: #1f1f24;
+    --text: #e4e4e7;        /* zinc-200 */
+    --text-2: #a1a1aa;      /* zinc-400 */
+    --text-3: #71717a;      /* zinc-500 */
+    --text-4: #52525b;      /* zinc-600 */
+    --indigo: #6366f1;
+    --indigo-soft: rgba(99,102,241,.14);
+    --emerald: #34d399;
+    --amber: #f59e0b;
+    --radius: 10px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.45 -apple-system, "SF Pro Text", "PingFang SC", Segoe UI, sans-serif;
+    height: 100vh; overflow: hidden;
+  }
+  .app { display: grid; grid-template-columns: 200px 216px 1fr 300px; height: 100vh; }
+
+  /* ───────── primary sidebar ───────── */
+  .nav { background: var(--panel); border-right: 1px solid var(--border-soft); padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
+  .logo { display:flex; align-items:center; gap:8px; font-weight:700; font-size:15px; padding:4px 8px 14px; }
+  .logo .mark { width:26px; height:26px; border-radius:8px; background:linear-gradient(135deg,#818cf8,#6366f1); display:grid; place-items:center; font-size:13px; }
+  .ws { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:8px; color:var(--text-2); font-size:12px; margin-bottom:10px; background:var(--panel-2); }
+  .ws .avatar { width:18px; height:18px; border-radius:6px; background:#3f3f46; display:grid; place-items:center; font-size:10px; }
+  .nav a { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:8px; color:var(--text-2); text-decoration:none; font-size:13px; }
+  .nav a svg { width:15px; height:15px; opacity:.75; }
+  .nav a.active { background:var(--indigo-soft); color:#c7d2fe; }
+  .nav a:hover:not(.active) { background:var(--panel-2); }
+
+  /* ───────── secondary sidebar (IMPROVED) ───────── */
+  .lib { background: var(--panel); border-right:1px solid var(--border-soft); padding:16px 10px 12px; display:flex; flex-direction:column; position:relative; }
+  .lib h1 { font-size:13px; font-weight:600; padding:0 8px 12px; }
+  .sec-label { font-size:10px; letter-spacing:.08em; font-weight:600; color:var(--text-4); padding:14px 8px 5px; text-transform:uppercase; }
+  .sec-label:first-of-type { padding-top:2px; }
+  .lib a { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; color:var(--text-2); text-decoration:none; font-size:13px; position:relative; }
+  .lib a:hover:not(.active) { background:var(--panel-2); }
+  .lib a.active { background:var(--indigo-soft); color:#c7d2fe; }
+  .lib a .count { margin-left:auto; font-size:11px; color:var(--text-4); font-variant-numeric:tabular-nums; }
+  .lib a .ico { width:14px; text-align:center; opacity:.8; }
+  .lib .spacer { flex:1; }
+  .lib .manage { border-top:1px solid var(--border-soft); padding-top:8px; margin-top:8px; }
+  .lib .smart-add { margin-left:auto; color:var(--text-4); font-size:14px; }
+  .collapse { position:absolute; right:-11px; top:50%; transform:translateY(-50%); width:22px; height:44px; border-radius:11px; background:var(--panel-2); border:1px solid var(--border); color:var(--text-3); display:grid; place-items:center; font-size:11px; cursor:pointer; }
+
+  /* ───────── main ───────── */
+  .main { padding:18px 24px 0; overflow:auto; position:relative; }
+  .main-head { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .main-head h2 { font-size:17px; font-weight:650; }
+  .main-head .right { margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .search { display:flex; align-items:center; gap:6px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:6px 10px; color:var(--text-3); width:200px; font-size:12px; }
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:8px; font-size:12.5px; font-weight:550; border:1px solid var(--border); background:var(--panel-2); color:var(--text); cursor:pointer; }
+  .btn.primary { background:var(--indigo); border-color:transparent; }
+  .btn.accent { background:var(--amber); border-color:transparent; color:#1c1303; }
+  .chips { display:flex; gap:6px; margin-bottom:18px; }
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--text-2); background:var(--panel-2); border:1px solid var(--border); padding:4px 10px; border-radius:99px; }
+
+  .group-label { font-size:11px; font-weight:600; letter-spacing:.06em; color:var(--text-3); text-transform:uppercase; margin:4px 0 10px; display:flex; align-items:center; gap:8px; }
+  .group-label .n { color:var(--text-4); font-weight:500; letter-spacing:0; }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:14px; margin-bottom:26px; }
+
+  /* folder card (IMPROVED: real folder shape, tab integrated) */
+  .folder { cursor:pointer; }
+  .folder .body { position:relative; border-radius:var(--radius); background:var(--card); border:1px solid var(--border); overflow:hidden; transition:.15s; }
+  .folder .body::before { /* folder tab — clipped INSIDE the card */
+    content:""; position:absolute; top:0; left:0; width:42%; height:9px;
+    background:#2a2a30; border-radius:0 8px 0 0;
+  }
+  .folder:hover .body { border-color:#3f3f46; transform:translateY(-1px); }
+  .folder .previews { display:grid; grid-template-columns:1fr 1fr; gap:2px; padding:13px 6px 6px; }
+  .folder .previews div { aspect-ratio:16/11; border-radius:5px; background:var(--panel-2); display:grid; place-items:center; font-size:13px; color:var(--text-4); overflow:hidden; }
+  .folder .previews .img1 { background:linear-gradient(135deg,#312e81,#4338ca); }
+  .folder .previews .img2 { background:linear-gradient(135deg,#831843,#9d174d); }
+  .folder .previews .wave { background:repeating-linear-gradient(90deg,#4f46e5 0 2px,transparent 2px 5px); opacity:.7; }
+  .folder .meta, .file .meta { padding:8px 10px 9px; }
+  .name { font-size:12.5px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sub { display:flex; justify-content:space-between; font-size:11px; color:var(--text-4); margin-top:3px; font-variant-numeric:tabular-nums; }
+
+  /* file card */
+  .file { border-radius:var(--radius); background:var(--card); border:1px solid var(--border); overflow:hidden; cursor:pointer; transition:.15s; position:relative; }
+  .file:hover { border-color:#3f3f46; transform:translateY(-1px); }
+  .file.selected { border-color:var(--indigo); box-shadow:0 0 0 1px var(--indigo); }
+  .thumb { aspect-ratio:16/10.5; display:grid; place-items:center; font-size:22px; color:var(--text-3); position:relative; }
+  .thumb.doc   { background:#1e2a4a; color:#93b4f8; }
+  .thumb.img-a { background:linear-gradient(135deg,#3b2f2f,#6d4c41); }
+  .thumb.img-b { background:linear-gradient(135deg,#33415c,#5c6f91); }
+  .thumb.img-c { background:linear-gradient(135deg,#4a3326,#8a6d4f); }
+  .thumb.audio { background:#173f44; color:#6ee7b7; }
+  .thumb.zip   { background:var(--panel-2); }
+  .thumb.video { background:#27272a; }
+  .thumb .dur { position:absolute; right:6px; bottom:6px; font-size:10px; background:rgba(0,0,0,.65); padding:1px 5px; border-radius:4px; color:#ddd; }
+  .check { position:absolute; top:8px; left:8px; width:18px; height:18px; border-radius:6px; background:var(--indigo); display:grid; place-items:center; font-size:11px; color:#fff; }
+
+  /* selection bar */
+  .selbar { position:fixed; left:calc(200px + 216px + (100vw - 200px - 216px - 300px)/2); transform:translateX(-50%); bottom:18px;
+    display:flex; align-items:center; gap:4px; background:rgba(24,24,27,.85); backdrop-filter:blur(12px);
+    border:1px solid var(--border); border-radius:12px; padding:7px 10px; box-shadow:0 8px 28px rgba(0,0,0,.5); }
+  .selbar .label { font-size:12px; color:var(--text-2); padding:0 10px 0 6px; border-right:1px solid var(--border); margin-right:4px; }
+  .selbar button { background:none; border:none; color:var(--text-2); font-size:12px; display:flex; gap:5px; align-items:center; padding:5px 10px; border-radius:7px; cursor:pointer; font-family:inherit; }
+  .selbar button:hover { background:var(--panel-2); color:var(--text); }
+  .selbar button.danger { color:#f87171; }
+
+  /* ───────── right info panel (IMPROVED) ───────── */
+  .info { background:var(--panel); border-left:1px solid var(--border-soft); padding:16px 16px 20px; overflow:auto; }
+  .info .head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .info .head h3 { font-size:13px; font-weight:600; }
+  .info .head .x { color:var(--text-4); cursor:pointer; }
+  .hero { border-radius:10px; overflow:hidden; aspect-ratio:16/9; background:linear-gradient(135deg,#33415c,#5c6f91); display:grid; place-items:center; color:#cbd5e1; font-size:24px; margin-bottom:12px; }
+  .fname { font-size:13.5px; font-weight:600; margin-bottom:14px; word-break:break-all; display:flex; gap:6px; align-items:center; }
+  .fname .edit { color:var(--text-4); font-size:11px; cursor:pointer; }
+
+  /* click-to-edit rows replace empty boxes */
+  .addrow { display:flex; align-items:center; gap:7px; color:var(--text-4); font-size:12px; padding:7px 9px; border:1px dashed var(--border); border-radius:8px; margin-bottom:8px; cursor:pointer; transition:.15s; }
+  .addrow:hover { color:var(--text-2); border-color:#3f3f46; background:var(--panel-2); }
+  .addrow .plus { font-size:13px; }
+
+  .sec { margin-top:16px; }
+  .sec h4 { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--text-4); margin-bottom:8px; }
+  .tags { display:flex; gap:6px; flex-wrap:wrap; }
+  .tag { font-size:11.5px; background:var(--panel-2); border:1px solid var(--border); border-radius:99px; padding:3px 10px; color:var(--text-2); }
+  .tag.add { border-style:dashed; color:var(--text-4); cursor:pointer; }
+  .tag.add:hover { color:var(--text-2); border-color:#3f3f46; }
+
+  .props { display:grid; grid-template-columns:auto 1fr; row-gap:7px; column-gap:18px; font-size:12px; padding-right:2px; }
+  .props .k { color:var(--text-4); }
+  .props .v { color:var(--text-2); text-align:right; font-variant-numeric:tabular-nums; word-break:break-all; }
+  .stars { color:#52525b; letter-spacing:2px; font-size:13px; cursor:pointer; }
+  .stars .on { color:var(--amber); }
+
+  /* annotation dots */
+  .dot { position:absolute; width:18px; height:18px; border-radius:50%; background:var(--emerald); color:#052e22; font-size:11px; font-weight:700; display:grid; place-items:center; box-shadow:0 0 0 3px rgba(52,211,153,.25); z-index:5; }
+  .legend { position:fixed; left:14px; bottom:14px; background:rgba(16,16,18,.92); backdrop-filter:blur(10px); border:1px solid var(--border); border-radius:12px; padding:12px 14px; font-size:11.5px; color:var(--text-2); max-width:300px; box-shadow:0 8px 28px rgba(0,0,0,.5); z-index:10; }
+  .legend b { color:var(--emerald); }
+  .legend div { margin:3px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- primary nav (unchanged) -->
+  <aside class="nav">
+    <div class="logo"><span class="mark">✦</span> MediaHub</div>
+    <div class="ws"><span class="avatar">8</span> 8512939's W… <span style="margin-left:auto">⌄</span></div>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg> Link Parser</a>
+    <a href="#" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg> Resources</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/></svg> Projects</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg> Issues</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8h16v-8M12 2v14m0 0 4-4m-4 4-4-4"/></svg> Sharing</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg> Points</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 2 5 5 .7-3.7 3.5.9 5.1L12 15l-4.2 2.3.9-5.1L5 8.7 10 8z"/></svg> AI Library</a>
+  </aside>
+
+  <!-- ② secondary sidebar — IMPROVED -->
+  <aside class="lib">
+    <div class="dot" style="left:8px; top:46px;">1</div>
+    <h1>Library</h1>
+
+    <div class="sec-label">Locations</div>
+    <a href="#"><span class="ico">⬇︎</span> My Downloads <span class="count">869</span></a>
+    <a href="#" class="active"><span class="ico">⬆︎</span> My Uploads <span class="count">136</span></a>
+    <a href="#"><span class="ico">◷</span> Temporary</a>
+
+    <div class="sec-label" style="display:flex;align-items:center;">Smart Folders <span class="smart-add">＋</span></div>
+    <a href="#"><span class="ico">♪</span> music</a>
+    <a href="#"><span class="ico">✦</span> Prompt Library</a>
+
+    <div class="spacer"></div>
+
+    <div class="dot" style="left:8px; bottom:74px;">2</div>
+    <div class="manage">
+      <a href="#"><span class="ico">⇄</span> Share Manager</a>
+      <a href="#"><span class="ico">🗑</span> Trash</a>
+    </div>
+
+    <div class="collapse">‹</div>
+  </aside>
+
+  <!-- main -->
+  <main class="main">
+    <div class="main-head">
+      <h2>My Uploads</h2>
+      <div class="right">
+        <div class="search">⌕ Search files…</div>
+        <button class="btn">⇅</button>
+        <button class="btn">▦</button>
+        <button class="btn primary">⬆ Upload</button>
+        <button class="btn accent">✦ New</button>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip">🏷 Tags</span><span class="chip">★ Rating</span><span class="chip">▤ Type</span>
+      <span class="chip">✦ AI</span><span class="chip">▦ Date</span>
+    </div>
+
+    <div class="group-label" style="position:relative">Folders <span class="n">· 5</span>
+      <span class="dot" style="position:static; display:inline-grid;">3</span>
+    </div>
+    <div class="grid">
+      <div class="folder"><div class="body"><div class="previews"><div>📄</div><div>📄</div><div>📄</div><div>📄</div></div></div>
+        <div class="meta"><div class="name">Comfyui Workflows</div><div class="sub"><span>12 items</span><span>2026/05/13</span></div></div></div>
+      <div class="folder"><div class="body"><div class="previews"><div class="img1"></div><div class="img2"></div><div>📄</div><div>🖼</div></div></div>
+        <div class="meta"><div class="name">WebUI</div><div class="sub"><span>8 items</span><span>2026/05/27</span></div></div></div>
+      <div class="folder"><div class="body"><div class="previews"><div class="wave"></div><div class="wave"></div><div class="wave"></div><div class="wave"></div></div></div>
+        <div class="meta"><div class="name">music</div><div class="sub"><span>23 items</span><span>2026/06/02</span></div></div></div>
+      <div class="folder"><div class="body"><div class="previews"><div style="grid-column:1/3;grid-row:1/3;font-size:26px;">📁</div></div></div>
+        <div class="meta"><div class="name">Prompt Library</div><div class="sub"><span>Empty</span><span>2026/06/07</span></div></div></div>
+    </div>
+
+    <div class="group-label">Files <span class="n">· 10</span></div>
+    <div class="grid">
+      <div class="file"><div class="thumb doc">📝</div><div class="meta"><div class="name">情绪导演_Skill_V2.1.md</div><div class="sub"><span>17.9 KB</span><span>2026/06/07</span></div></div></div>
+      <div class="file"><div class="thumb img-a">🖼</div><div class="meta"><div class="name">Image.jpg</div><div class="sub"><span>2.5 MB</span><span>2026/06/05</span></div></div></div>
+      <div class="file"><div class="thumb img-c">🖼</div><div class="meta"><div class="name">2026-05-06_18-28.png</div><div class="sub"><span>864.4 KB</span><span>2026/06/02</span></div></div></div>
+      <div class="file selected"><div class="thumb img-b">🖼<span class="check">✓</span></div><div class="meta"><div class="name">2026-05-06_18-49.png</div><div class="sub"><span>604.8 KB</span><span>2026/06/02</span></div></div></div>
+      <div class="file"><div class="thumb zip">📄</div><div class="meta"><div class="name">.env</div><div class="sub"><span>11.2 KB</span><span>2026/04/27</span></div></div></div>
+      <div class="file"><div class="thumb zip">🗜</div><div class="meta"><div class="name">mediahub-push-v1.1.2.zip</div><div class="sub"><span>12.2 KB</span><span>2026/04/16</span></div></div></div>
+      <div class="file"><div class="thumb video">▶<span class="dur">0:59</span></div><div class="meta"><div class="name">bilibili_BV1qt421N7Cb.mp4</div><div class="sub"><span>3.0 MB</span><span>2026/02/27</span></div></div></div>
+      <div class="file"><div class="thumb img-a">🖼</div><div class="meta"><div class="name">【敦煌飞天V4】绪儿-敦煌摇….png</div><div class="sub"><span>322.3 KB</span><span>2026/02/23</span></div></div></div>
+      <div class="file"><div class="thumb audio">♪</div><div class="meta"><div class="name">6月8日.MP3</div><div class="sub"><span>558.4 KB</span><span>2026/02/18</span></div></div></div>
+      <div class="file"><div class="thumb audio">♪</div><div class="meta"><div class="name">1-01.【教养理念】家庭教育….mp3</div><div class="sub"><span>2.6 MB</span><span>2026/02/18</span></div></div></div>
+    </div>
+    <div style="height:80px"></div>
+  </main>
+
+  <!-- ⑤ right info panel — IMPROVED -->
+  <aside class="info" style="position:relative">
+    <div class="dot" style="right:12px; top:330px;">4</div>
+    <div class="dot" style="right:12px; top:470px;">5</div>
+    <div class="head"><h3>Resource Info</h3><span class="x">✕</span></div>
+    <div class="hero">🖼</div>
+    <div class="fname">2026-05-06_18-49.png <span class="edit">✎</span></div>
+
+    <!-- click-to-edit rows (were: two permanent empty inputs) -->
+    <div class="addrow"><span class="plus">＋</span> Add note</div>
+    <div class="addrow"><span class="plus">＋</span> Add source link</div>
+
+    <div class="sec">
+      <h4>Tags</h4>
+      <div class="tags"><span class="tag add">＋ Add tag</span></div>
+    </div>
+
+    <div class="sec">
+      <h4>Properties</h4>
+      <div class="props">
+        <span class="k">Rating</span> <span class="v"><span class="stars"><span class="on">★★★</span>★★</span></span>
+        <span class="k">Size</span> <span class="v">604.8 KB</span>
+        <span class="k">Type</span> <span class="v">image</span>
+        <span class="k">Resolution</span> <span class="v">1416 × 804</span>
+        <span class="k">Source</span> <span class="v">Upload</span>
+        <span class="k">Created</span> <span class="v">Jun 2, 2026 11:31</span>
+        <span class="k">Modified</span> <span class="v">Jun 2, 2026 16:32</span>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- selection bar -->
+<div class="selbar">
+  <span class="label">1 selected</span>
+  <button>⤿ Move to</button>
+  <button>⧉ Copy to</button>
+  <button>✦ Describe</button>
+  <button>🏷 Auto-tag</button>
+  <button>▦ Training Set</button>
+  <button class="danger">🗑 Delete</button>
+  <button style="padding:5px 7px">✕</button>
+</div>
+
+<!-- legend -->
+<div class="legend">
+  <div style="font-weight:600;color:var(--text);margin-bottom:6px;">设计稿 — 5 处改进</div>
+  <div><b>1</b> 二级栏分组标题（Locations / Smart Folders），高频项置顶</div>
+  <div><b>2</b> 管理类（Share / Trash）沉底 + 分隔线；折叠把手只留一个</div>
+  <div><b>3</b> 文件夹卡：folder tab 收进卡片内（不再顶出"碎块"），分组标题带计数</div>
+  <div><b>4</b> 备注/链接：空输入框 → 虚线 click-to-edit 行，无内容时零噪音</div>
+  <div><b>5</b> 属性区：右侧留白不贴边、星标上移进属性首行、等宽数字对齐</div>
+</div>
+</body>
+</html>

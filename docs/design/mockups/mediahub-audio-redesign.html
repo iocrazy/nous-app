@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MediaHub — Audio Detail rev2 (cover-tinted stage · lyrics on page · playlist panel)</title>
+<style>
+  :root {
+    --bg:#08080a; --island:#111114; --island-2:#17171b;
+    --line:rgba(255,255,255,.065); --line-strong:rgba(255,255,255,.12);
+    --text:#e7e7ea; --text-2:#a3a3ad; --text-3:#74747e; --text-4:#55555e;
+    --indigo:#6366f1; --indigo-soft:rgba(99,102,241,.15); --amber:#f59e0b;
+    /* cover palette (demo: SNOW misty green; extracted from cover at runtime) */
+    --tint: 142, 168, 152;
+    --tint-deep: 24, 34, 29;
+    --r-lg:18px; --r-md:12px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+  body{
+    background:radial-gradient(900px 500px at 70% -10%, rgba(var(--tint), .08), transparent 60%), var(--bg);
+    color:var(--text); font:13px/1.45 -apple-system,"SF Pro Text","PingFang SC",Segoe UI,sans-serif;
+    height:100vh; overflow:hidden;
+  }
+  .frame{display:flex;flex-direction:column;gap:10px;height:100vh;padding:10px 12px 12px}
+  .row{display:flex;gap:12px;flex:1;min-height:0}
+  .island{background:var(--island);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:0 10px 40px rgba(0,0,0,.45)}
+
+  .topbar{display:flex;align-items:center;gap:8px;padding:2px 4px;flex-shrink:0}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px}
+  .brand .mark{width:24px;height:24px;border-radius:7px;background:linear-gradient(135deg,#818cf8,#6366f1);display:grid;place-items:center}
+  .brand .mark svg{width:13px;height:13px;stroke:#fff}
+  .grow{flex:1}
+  .iconbtn{width:30px;height:30px;display:grid;place-items:center;border-radius:9px;border:1px solid var(--line);background:var(--island-2);color:var(--text-3);cursor:pointer;position:relative}
+  .iconbtn .badge{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:var(--indigo);border:2px solid var(--bg)}
+  .me{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#4f46e5);display:grid;place-items:center;font-size:12px;font-weight:600}
+
+  .rail{width:54px;padding:12px 8px;display:flex;flex-direction:column;gap:4px;align-items:center;flex-shrink:0}
+  .rail a{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--text-3);position:relative;cursor:pointer}
+  .rail a:hover{background:var(--island-2);color:var(--text)}
+  .rail a.active{background:var(--indigo-soft);color:#c7d2fe}
+  .rail a .tip{position:absolute;left:46px;top:50%;transform:translateY(-50%);background:#222227;border:1px solid var(--line-strong);border-radius:7px;padding:4px 9px;font-size:11.5px;color:var(--text-2);white-space:nowrap;opacity:0;pointer-events:none;transition:.12s;z-index:30}
+  .rail a:hover .tip{opacity:1}
+  .rail .sp{flex:1}
+
+  /* ── stage: FULL cover-tinted (the original vibe, refined) ── */
+  .stage{flex:1;min-width:480px;display:flex;flex-direction:column;overflow:hidden;position:relative;
+    background:
+      radial-gradient(900px 600px at 38% 30%, rgba(var(--tint), .16), transparent 65%),
+      linear-gradient(165deg, rgb(var(--tint-deep)), #0d1210 55%, #0a0d0c);
+  }
+  .stage-head{display:flex;align-items:center;gap:12px;padding:12px 16px;position:relative;z-index:2}
+  .back{width:32px;height:32px;border-radius:50%;border:1px solid rgba(var(--tint),.4);background:rgba(var(--tint),.08);display:grid;place-items:center;color:rgb(var(--tint));cursor:pointer;transition:.2s;flex-shrink:0}
+  .back:hover{box-shadow:0 0 18px rgba(var(--tint),.35)}
+  .trail{position:absolute;left:18px;bottom:-1px;height:2px;width:220px;border-radius:2px;pointer-events:none;
+    background:linear-gradient(90deg,rgb(var(--tint)),rgba(var(--tint),.4) 35%,transparent)}
+  .trail::before{content:"";position:absolute;left:0;top:-2px;width:54px;height:6px;border-radius:6px;background:rgba(var(--tint),.5);filter:blur(7px)}
+  .stage-head .t{font-size:13.5px;font-weight:600}
+  .stage-head .author{font-size:11.5px;color:var(--text-3)}
+  .stage-head .acts{margin-left:auto;display:flex;gap:8px}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:9px;font-size:12.5px;font-weight:550;border:1px solid var(--line-strong);background:rgba(255,255,255,.05);color:var(--text);cursor:pointer;backdrop-filter:blur(6px)}
+  .btn svg{width:13px;height:13px}
+  .btn.share{background:rgba(var(--tint),.12);border-color:rgba(var(--tint),.4);color:rgb(var(--tint))}
+  .btn.share:hover{background:rgba(var(--tint),.2);border-color:rgba(var(--tint),.6)}
+
+  /* cover + overview (left) · lyrics (right) — like the streaming-app reference */
+  .body2{flex:1;display:flex;align-items:center;justify-content:center;gap:60px;padding:10px 48px 0;position:relative;z-index:1;min-height:0}
+  .side{display:flex;flex-direction:column;align-items:center;max-width:340px}
+  .cover{width:min(280px,30vh);aspect-ratio:1;border-radius:14px;
+    background:linear-gradient(155deg,#7d9388,#46584e 50%,#27332c);
+    display:grid;place-items:center;color:rgba(255,255,255,.55);
+    box-shadow:0 26px 70px rgba(0,0,0,.6), 0 0 90px rgba(var(--tint),.22);position:relative;overflow:hidden}
+  .cover::after{content:"";position:absolute;inset:0;background:linear-gradient(160deg,rgba(255,255,255,.13),transparent 35%)}
+  .cover svg{width:44px;height:44px}
+  .song{font-size:19px;font-weight:720;margin-top:20px;text-align:center}
+  .artist{font-size:12.5px;color:var(--text-3);margin-top:4px}
+  /* overview strip: stats + rating + tags, compact under the cover */
+  .ovr{display:flex;gap:16px;margin-top:16px;font-size:12px;color:var(--text-2);align-items:center}
+  .ovr span{display:flex;gap:5px;align-items:center}
+  .ovr svg{width:13px;height:13px}
+  .c-comment{color:#7eb8da}.c-share{color:#8fcf9f}.c-collect{color:#d9c178}
+  .stars{display:flex;gap:3px;margin-top:12px}
+  .stars svg{width:14px;height:14px;color:rgba(255,255,255,.22);cursor:pointer}
+  .stars svg.on{color:var(--amber);fill:var(--amber)}
+  .tagrow{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;justify-content:center}
+  .tag{font-size:11px;border-radius:99px;padding:3px 10px;background:rgba(255,255,255,.06);border:1px solid var(--line-strong);color:var(--text-2);display:inline-flex;gap:5px;align-items:center}
+  .tag.add{border-style:dashed;color:var(--text-4);cursor:pointer}
+  .tag.add svg{width:10px;height:10px}
+
+  /* lyrics column on the page (not a tab) */
+  .lyrics{flex:1;max-width:440px;height:min(420px,52vh);overflow:hidden;position:relative;
+    mask-image:linear-gradient(transparent, #000 15%, #000 85%, transparent)}
+  .lyrics .inner{display:flex;flex-direction:column;gap:18px;padding:120px 4px}
+  .lyrics .ln{font-size:14.5px;color:rgba(255,255,255,.28);transition:.2s;line-height:1.4}
+  .lyrics .ln.now{font-size:17px;font-weight:680;color:rgb(var(--tint));text-shadow:0 0 26px rgba(var(--tint),.4)}
+  .lyrics .ln.near{color:rgba(255,255,255,.5)}
+  .lyrics .credit{font-size:11.5px;color:rgba(255,255,255,.3)}
+
+  /* player capsule */
+  .player{display:flex;align-items:center;gap:12px;margin:14px auto 18px;width:min(680px,82%);
+    background:rgba(0,0,0,.32);border:1px solid var(--line-strong);border-radius:16px;padding:10px 16px;position:relative;z-index:2;backdrop-filter:blur(8px)}
+  .play{width:38px;height:38px;border-radius:50%;background:rgb(var(--tint));color:#10181a;display:grid;place-items:center;cursor:pointer;flex-shrink:0;box-shadow:0 0 22px rgba(var(--tint),.35)}
+  .play svg{width:14px;height:14px;fill:currentColor;stroke:none}
+  .wave{flex:1;height:36px;display:flex;align-items:center;gap:2px;overflow:hidden}
+  .wave i{flex:1;background:rgba(255,255,255,.16);border-radius:1px;min-width:2px}
+  .wave i.on{background:rgb(var(--tint))}
+  .ptime{font-size:11.5px;color:var(--text-2);font-variant-numeric:tabular-nums;flex-shrink:0}
+  .pside{display:flex;gap:10px;align-items:center;color:var(--text-3);font-size:11.5px;flex-shrink:0}
+  .chorus{position:absolute;top:-7px;left:46%;font-size:9px;background:var(--amber);color:#221703;border-radius:4px;padding:1px 5px;font-weight:650}
+
+  .splitter{width:14px;margin:0 -7px;cursor:col-resize;display:grid;place-items:center;flex-shrink:0;z-index:5}
+  .splitter::before{content:"";width:4px;height:44px;border-radius:2px;background:var(--line-strong);transition:.15s}
+  .splitter:hover::before,.splitter.drag::before{background:var(--indigo)}
+
+  /* ── playlist island (future feature) ── */
+  .queue{width:300px;min-width:250px;max-width:440px;display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+  .qhead{display:flex;align-items:center;gap:8px;padding:14px 14px 10px;border-bottom:1px solid var(--line)}
+  .qhead h3{font-size:13px;font-weight:650}
+  .qhead .n{font-size:11px;color:var(--text-4)}
+  .qhead .soon{margin-left:auto;font-size:9.5px;letter-spacing:.05em;background:var(--indigo-soft);color:#a5b4fc;border-radius:5px;padding:2px 7px;font-weight:650}
+  .qhead .collapse{border:1px solid var(--line);border-radius:7px;width:24px;height:24px;display:grid;place-items:center;color:var(--text-3);cursor:pointer;margin-left:6px}
+  .qbody{flex:1;overflow:auto;padding:8px}
+  .qitem{display:flex;gap:10px;align-items:center;padding:8px;border-radius:10px;cursor:pointer}
+  .qitem:hover{background:var(--island-2)}
+  .qitem.now{background:rgba(var(--tint),.08);border:1px solid rgba(var(--tint),.22)}
+  .qthumb{width:38px;height:38px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;color:rgba(255,255,255,.5)}
+  .qthumb svg{width:15px;height:15px}
+  .q1{background:linear-gradient(150deg,#7d9388,#36443c)}
+  .q2{background:linear-gradient(150deg,#5c6f91,#2c3a52)}
+  .q3{background:linear-gradient(150deg,#6d4c41,#3b2f2f)}
+  .q4{background:linear-gradient(150deg,#5a4a6b,#2e2538)}
+  .qmeta{min-width:0;flex:1}
+  .qt{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qa{font-size:11px;color:var(--text-4);margin-top:1px}
+  .qd{font-size:11px;color:var(--text-4);font-variant-numeric:tabular-nums;flex-shrink:0}
+  .eq{display:flex;gap:2px;align-items:flex-end;height:12px;flex-shrink:0}
+  .eq i{width:2.5px;background:rgb(var(--tint));border-radius:1px;animation:eq 1s ease-in-out infinite}
+  .eq i:nth-child(2){animation-delay:.2s}.eq i:nth-child(3){animation-delay:.4s}
+  @keyframes eq{0%,100%{height:4px}50%{height:12px}}
+
+  .reopen{position:fixed;right:0;top:50%;transform:translateY(-50%);background:var(--island-2);border:1px solid var(--line-strong);border-right:none;border-radius:10px 0 0 10px;padding:12px 6px;color:var(--text-3);cursor:pointer;display:none;z-index:20;writing-mode:vertical-rl;font-size:11px}
+  .legend{position:fixed;left:74px;bottom:16px;background:rgba(13,13,16,.94);border:1px solid var(--line-strong);border-radius:14px;padding:12px 14px;font-size:11.5px;color:var(--text-2);max-width:340px;z-index:30}
+  .legend b{color:#818cf8}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <g id="i-spark"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></g>
+  <g id="i-search"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></g>
+  <g id="i-layers"><path d="m12 2 8.5 4.5L12 11 3.5 6.5z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 17 8.5 4.5 8.5-4.5"/></g>
+  <g id="i-folder"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.2 3.9A2 2 0 0 0 7.5 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></g>
+  <g id="i-list"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></g>
+  <g id="i-share2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></g>
+  <g id="i-coins"><circle cx="8" cy="8" r="6"/><path d="M18.1 9.9a6 6 0 1 1-8.2 8.2"/></g>
+  <g id="i-globe"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></g>
+  <g id="i-tasks"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h6M7 13h4"/></g>
+  <g id="i-bell"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></g>
+  <g id="i-shield"><path d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.17 1.17 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/></g>
+  <g id="i-back"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></g>
+  <g id="i-dl"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></g>
+  <g id="i-dots"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></g>
+  <g id="i-play"><polygon points="6 3 20 12 6 21 6 3"/></g>
+  <g id="i-music"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></g>
+  <g id="i-comment"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></g>
+  <g id="i-bookmark"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></g>
+  <g id="i-star"><path d="m12 3 2.7 5.6 6.3.8-4.6 4.3 1.2 6.1L12 16.9 6.4 19.8l1.2-6.1L3 9.4l6.3-.8z"/></g>
+  <g id="i-plus"><path d="M12 5v14M5 12h14"/></g>
+  <g id="i-queue"><path d="M21 15V6M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM12 12H3M16 6H3M12 18H3"/></g>
+</defs></svg>
+
+<div class="frame">
+  <header class="topbar">
+    <div class="brand"><span class="mark"><svg viewBox="0 0 24 24"><use href="#i-spark"/></svg></span> MediaHub</div>
+    <div class="grow"></div>
+    <span class="iconbtn"><svg viewBox="0 0 24 24"><use href="#i-globe"/></svg></span>
+    <span class="iconbtn"><svg viewBox="0 0 24 24"><use href="#i-tasks"/></svg><span class="badge"></span></span>
+    <span class="iconbtn"><svg viewBox="0 0 24 24"><use href="#i-bell"/></svg></span>
+    <span class="iconbtn"><svg viewBox="0 0 24 24"><use href="#i-shield"/></svg></span>
+    <span class="me">8</span>
+  </header>
+
+  <div class="row">
+    <aside class="rail island">
+      <a><svg viewBox="0 0 24 24"><use href="#i-search"/></svg><span class="tip">Link Parser</span></a>
+      <a class="active"><svg viewBox="0 0 24 24"><use href="#i-layers"/></svg><span class="tip">Resources</span></a>
+      <a><svg viewBox="0 0 24 24"><use href="#i-folder"/></svg><span class="tip">Projects</span></a>
+      <a><svg viewBox="0 0 24 24"><use href="#i-list"/></svg><span class="tip">Issues</span></a>
+      <a><svg viewBox="0 0 24 24"><use href="#i-share2"/></svg><span class="tip">Sharing</span></a>
+      <a><svg viewBox="0 0 24 24"><use href="#i-coins"/></svg><span class="tip">Points</span></a>
+      <a><svg viewBox="0 0 24 24"><use href="#i-spark"/></svg><span class="tip">AI Library</span></a>
+      <span class="sp"></span>
+      <a title="Expand"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg><span class="tip">Expand nav</span></a>
+    </aside>
+
+    <main class="stage island">
+      <div class="stage-head">
+        <span class="back"><svg viewBox="0 0 24 24"><use href="#i-back"/></svg></span>
+        <span class="trail"></span>
+        <div><div class="t">Here with me (Slow)</div><div class="author">@人面兽心 · Douyin · 324 kbps</div></div>
+        <div class="acts">
+          <button class="btn share"><svg viewBox="0 0 24 24"><use href="#i-share2"/></svg> Share</button>
+          <button class="btn"><svg viewBox="0 0 24 24"><use href="#i-dl"/></svg> Download</button>
+          <button class="btn" style="padding:6px 9px"><svg viewBox="0 0 24 24"><use href="#i-dots"/></svg></button>
+        </div>
+      </div>
+
+      <div class="body2">
+        <!-- cover + overview essentials -->
+        <div class="side">
+          <div class="cover"><svg viewBox="0 0 24 24"><use href="#i-music"/></svg></div>
+          <div class="song">Here with me (Slow)</div>
+          <div class="artist">@人面兽心</div>
+          <div class="ovr">
+            <span class="c-comment"><svg viewBox="0 0 24 24"><use href="#i-comment"/></svg> 1.2K</span>
+            <span class="c-share"><svg viewBox="0 0 24 24"><use href="#i-share2"/></svg> 4.6K</span>
+            <span class="c-collect"><svg viewBox="0 0 24 24"><use href="#i-bookmark"/></svg> 338.0K</span>
+          </div>
+          <div class="stars">
+            <svg viewBox="0 0 24 24" class="on"><use href="#i-star"/></svg><svg viewBox="0 0 24 24" class="on"><use href="#i-star"/></svg><svg viewBox="0 0 24 24" class="on"><use href="#i-star"/></svg><svg viewBox="0 0 24 24"><use href="#i-star"/></svg><svg viewBox="0 0 24 24"><use href="#i-star"/></svg>
+          </div>
+          <div class="tagrow">
+            <span class="tag">Chill</span>
+            <span class="tag add"><svg viewBox="0 0 24 24"><use href="#i-plus"/></svg> Add tag</span>
+          </div>
+        </div>
+
+        <!-- lyrics on the page (streaming-app style) -->
+        <div class="lyrics"><div class="inner">
+          <div class="ln credit">词/曲：Marshmello · CHVRCHES</div>
+          <div class="ln">Cause I don't really care where you've been</div>
+          <div class="ln near">Loving you is all I'm thinking of</div>
+          <div class="ln now">I don't care how long it takes</div>
+          <div class="ln near">As long as I'm with you, I've got a smile on my face</div>
+          <div class="ln">Save your tears, it'll be okay</div>
+          <div class="ln">All I know is you're here with me</div>
+          <div class="ln">Here with me, here with me…</div>
+        </div></div>
+      </div>
+
+      <div class="player">
+        <span class="chorus">CHORUS</span>
+        <span class="play"><svg viewBox="0 0 24 24"><use href="#i-play"/></svg></span>
+        <div class="wave" id="wave"></div>
+        <span class="ptime">1:24 / 3:59</span>
+        <div class="pside"><span>1×</span></div>
+      </div>
+    </main>
+
+    <div class="splitter" id="split"></div>
+
+    <!-- playlist island (future feature) -->
+    <aside class="queue island" id="info">
+      <div class="qhead">
+        <svg viewBox="0 0 24 24" style="color:var(--text-3)"><use href="#i-queue"/></svg>
+        <h3>Playlist</h3><span class="n">· 4</span>
+        <span class="soon">COMING SOON</span>
+        <span class="collapse" id="hide"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+      </div>
+      <div class="qbody">
+        <div class="qitem now">
+          <div class="qthumb q1"><svg viewBox="0 0 24 24"><use href="#i-music"/></svg></div>
+          <div class="qmeta"><div class="qt">Here with me (Slow)</div><div class="qa">@人面兽心</div></div>
+          <span class="eq"><i></i><i></i><i></i></span>
+        </div>
+        <div class="qitem">
+          <div class="qthumb q2"><svg viewBox="0 0 24 24"><use href="#i-music"/></svg></div>
+          <div class="qmeta"><div class="qt">SNOW</div><div class="qa">@MIRBRO</div></div>
+          <span class="qd">1:58</span>
+        </div>
+        <div class="qitem">
+          <div class="qthumb q3"><svg viewBox="0 0 24 24"><use href="#i-music"/></svg></div>
+          <div class="qmeta"><div class="qt">只字不提</div><div class="qa">@于和伟</div></div>
+          <span class="qd">4:28</span>
+        </div>
+        <div class="qitem">
+          <div class="qthumb q4"><svg viewBox="0 0 24 24"><use href="#i-music"/></svg></div>
+          <div class="qmeta"><div class="qt">6月8日</div><div class="qa">My Uploads</div></div>
+          <span class="qd">2:21</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="reopen" id="reopen">Playlist</div>
+
+<div class="legend">
+  <div style="font-weight:600;color:var(--text);margin-bottom:6px;">音乐内页 rev2 — 三条反馈全落</div>
+  <div><b>整页氛围色回归</b>：stage 整体浸入封面取色（demo 雾绿），不再只是微光</div>
+  <div><b>Overview 上左页</b>：标题/数据/评分/标签收进封面下方，右侧不再重复</div>
+  <div><b>歌词上左页</b>：当前句高亮 + 上下文渐隐（流媒体范式），不再藏 tab</div>
+  <div><b>右侧 = 播放列表</b>：当前曲目均衡器动画 + 队列（COMING SOON 占位）</div>
+</div>
+
+<script>
+  const wave=document.getElementById('wave');
+  for(let i=0;i<90;i++){const b=document.createElement('i');b.style.height=(18+Math.sin(i*.55)*9+Math.random()*46)+'%';if(i<32)b.classList.add('on');wave.appendChild(b)}
+  const split=document.getElementById('split'),info=document.getElementById('info');
+  let dragging=false;
+  split.addEventListener('pointerdown',e=>{dragging=true;split.classList.add('drag');split.setPointerCapture(e.pointerId)});
+  split.addEventListener('pointermove',e=>{if(!dragging)return;info.style.width=Math.min(440,Math.max(250,window.innerWidth-e.clientX-12))+'px'});
+  split.addEventListener('pointerup',()=>{dragging=false;split.classList.remove('drag')});
+  document.getElementById('hide').onclick=()=>{info.style.display='none';split.style.display='none';document.getElementById('reopen').style.display='block'};
+  document.getElementById('reopen').onclick=()=>{info.style.display='flex';split.style.display='grid';document.getElementById('reopen').style.display='none'};
+</script>
+</body>
+</html>

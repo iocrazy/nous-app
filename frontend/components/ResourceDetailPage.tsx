@@ -1266,7 +1266,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         <div className="hidden md:flex items-center gap-1.5 min-w-[140px] justify-end">
           <button
             onClick={() => setShowShareModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
           >
             <Share2 size={14} />
             <span>{t('resources.share')}</span>
@@ -2192,7 +2192,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       <button
                         onClick={handleVisualAnalysis}
                         disabled={visualAnalysisLoading}
-                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium btn-tint-violet transition-colors flex items-center gap-1.5 disabled:opacity-50"
                       >
                         {visualAnalysisLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
                         Analyze
@@ -2212,7 +2212,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       <button
                         onClick={handleVisualAnalysis}
                         disabled={visualAnalysisLoading}
-                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium btn-tint-violet transition-colors flex items-center gap-1.5 disabled:opacity-50"
                       >
                         {visualAnalysisLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
                         Retry

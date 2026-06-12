@@ -386,9 +386,9 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       onClick={(e) => onClick(e)}
       onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
       onContextMenu={onContextMenu}
-      className={`relative hover:bg-zinc-800 border rounded-xl cursor-pointer transition-[background-color,box-shadow] duration-150 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${
+      className={`relative hover:bg-zinc-800 border rounded-xl cursor-pointer transition-[background-color,box-shadow,transform] duration-150 group overflow-hidden hover:shadow-lg hover:shadow-black/20 hover:-translate-y-0.5 ${
         isChecked || isSelected
-          ? 'bg-indigo-500/10 border-indigo-500/30'
+          ? 'bg-indigo-500/10 border-indigo-500/30 shadow-[0_0_0_1px_rgba(99,102,241,0.3)]'
           : 'bg-zinc-800/60 border-zinc-700/30 hover:border-zinc-600'
       }`}
     >

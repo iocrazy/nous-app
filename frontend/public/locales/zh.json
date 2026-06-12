@@ -715,7 +715,9 @@
       "autoTagging": "正在智能打标...",
       "autoTagged": "已添加标签（新增 {{count}} 个）",
       "autoTagSlow": "仍在打标中 — 请到任务中心查看",
-      "autoTagFailed": "智能打标失败"
+      "autoTagFailed": "智能打标失败",
+      "addNote": "添加备注",
+      "addUrl": "添加来源链接"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",
@@ -726,7 +728,8 @@
     "trashFolderFailed": "移动文件夹到回收站失败",
     "trashFolderConfirm": "此文件夹包含 {{contents}}，所有内容将移至回收站。是否继续？",
     "temp": "临时",
-    "tempEmpty": "暂无聊天上传 — 在聊天框粘贴/拖入的文件会先落到这里，24h 内未处理会被自动清理"
+    "tempEmpty": "暂无聊天上传 — 在聊天框粘贴/拖入的文件会先落到这里，24h 内未处理会被自动清理",
+    "sectionLocations": "位置"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",

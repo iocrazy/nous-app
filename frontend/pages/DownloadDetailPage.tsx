@@ -302,7 +302,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             {resourceId && (
               <button
                 onClick={() => setIsShareModalOpen(true)}
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
               >
                 <Share2 size={14} />
                 <span className="hidden sm:inline">Share</span>
