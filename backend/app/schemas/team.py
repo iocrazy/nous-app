@@ -52,6 +52,9 @@ class TeamResponse(BaseModel):
     invite_code: str
     description: Optional[str] = None
     created_at: datetime
+    # personal = auto-created single-member team; collaborative = user-created.
+    # Lets clients (e.g. the browser extension scope picker) label scopes.
+    kind: str = "collaborative"
 
 
 class TeamListResponse(BaseModel):

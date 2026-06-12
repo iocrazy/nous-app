@@ -35,6 +35,10 @@ class ApiKeyScope(str, Enum):
     RESOURCES_WRITE = "resources:write"
     RESOURCES_ALL = "resources:*"
 
+    # Teams related (read-only — used by the browser extension to pick an
+    # upload scope; teams listing only returns the caller's own teams)
+    TEAMS_READ = "teams:read"
+
     # User related
     USER_PROFILE_READ = "user:profile:read"
     USER_PROFILE_WRITE = "user:profile:write"
@@ -188,6 +192,26 @@ ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
         ApiKeyScope.TAGS_WRITE.value,
         ApiKeyScope.TAGS_ALL.value,
     ],
+    # Extension scan-import flow: upload + pickers + optional batch auto-tag.
+    # The upload handler itself re-checks scope membership (verify_scope_access)
+    # and /resources/ai/batch re-checks per-resource access, so the scope here
+    # only gates *which keys* may reach the endpoint at all.
+    ("POST", "/resources/upload"): [
+        ApiKeyScope.RESOURCES_WRITE.value,
+        ApiKeyScope.RESOURCES_ALL.value,
+    ],
+    ("GET", "/resources/folders/list"): [
+        ApiKeyScope.RESOURCES_READ.value,
+        ApiKeyScope.RESOURCES_ALL.value,
+    ],
+    ("POST", "/resources/ai/batch"): [
+        ApiKeyScope.RESOURCES_WRITE.value,
+        ApiKeyScope.RESOURCES_ALL.value,
+    ],
+    # Teams (scope picker — list is already filtered to the caller's teams)
+    ("GET", "/teams"): [
+        ApiKeyScope.TEAMS_READ.value,
+    ],
 }
 
 
@@ -278,6 +302,13 @@ AVAILABLE_SCOPES = [
         "name": "Full Resource Access",
         "description": "All resource-related permissions",
         "category": "Resources",
+    },
+    # Teams
+    {
+        "scope": ApiKeyScope.TEAMS_READ.value,
+        "name": "Read Teams",
+        "description": "List your teams (scope picker for uploads)",
+        "category": "Teams",
     },
 ]
 
