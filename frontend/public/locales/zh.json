@@ -88,7 +88,8 @@
     "noAccount": "没有账户？立即注册",
     "hasAccount": "已有账户？立即登录",
     "registerSuccess": "注册成功，请查收邮件",
-    "passwordMismatch": "两次密码不一致"
+    "passwordMismatch": "两次密码不一致",
+    "sessionExpired": "登录已过期，请重新登录。"
   },
   "notifications": {
     "title": "通知",
@@ -248,6 +249,12 @@
       "mergePreview": "最多 {{count}} 个素材将归到「{{name}}」，{{n}} 个标签将被删除。",
       "merge": "合并",
       "merging": "合并中…"
+    },
+    "theme": {
+      "label": "主题",
+      "system": "跟随系统",
+      "light": "浅色",
+      "dark": "深色"
     }
   },
   "points": {
@@ -510,6 +517,19 @@
     "batchCopy": "复制到",
     "batchDownload": "下载",
     "batchDelete": "删除",
+    "generatePrompt": "反推提示词",
+    "autoTag": "智能打标",
+    "batchGeneratePrompt": "反推",
+    "batchGeneratePromptHint": "为选中的图片批量反推提示词",
+    "batchAutoTag": "智能打标",
+    "batchAutoTagHint": "为选中的图片按 12 个维度批量打标",
+    "batchAiDispatched": "已启动 {{count}} 个任务 — 到任务中心查看",
+    "batchAiSkipped": "跳过 {{count}} 项",
+    "batchAiFailed": "批量 AI 任务启动失败",
+    "trainingSet": "训练集",
+    "trainingSetHint": "下载图片 + 同名 .txt 提示词（LoRA 训练格式）",
+    "trainingSetExported": "训练集已下载",
+    "trainingSetExportFailed": "导出失败",
     "moveSuccess": "已移动 {{count}} 个文件",
     "copySuccess": "已复制 {{count}} 个文件",
     "confirm": "确定",
@@ -679,7 +699,31 @@
       "modified": "修改时间",
       "sourceWeb": "网页下载",
       "sourceUpload": "上传",
-      "aiStatus": "AI 状态"
+      "aiStatus": "AI 状态",
+      "prompt": "提示词",
+      "addPrompt": "添加提示词",
+      "promptPlaceholder": "粘贴 AI 生成提示词...",
+      "promptCopied": "提示词已复制",
+      "copyPrompt": "复制",
+      "translatePrompt": "翻译",
+      "translatePromptHint": "从另一种语言翻译",
+      "promptTranslated": "提示词已翻译",
+      "promptTranslateFailed": "翻译失败",
+      "generatePrompt": "反推",
+      "generatePromptHint": "从图片反推生成提示词",
+      "generateFromImage": "从图片反推",
+      "promptGenerating": "正在从图片反推提示词...",
+      "promptGenerated": "提示词已生成",
+      "promptGenerateSlow": "仍在生成中 — 请到任务中心查看",
+      "promptGenerateFailed": "提示词生成失败",
+      "autoTag": "智能打标",
+      "autoTagHint": "按 12 个维度为图片智能生成双语标签",
+      "autoTagging": "正在智能打标...",
+      "autoTagged": "已添加标签（新增 {{count}} 个）",
+      "autoTagSlow": "仍在打标中 — 请到任务中心查看",
+      "autoTagFailed": "智能打标失败",
+      "addNote": "添加备注",
+      "addUrl": "添加来源链接"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",
@@ -690,7 +734,9 @@
     "trashFolderFailed": "移动文件夹到回收站失败",
     "trashFolderConfirm": "此文件夹包含 {{contents}}，所有内容将移至回收站。是否继续？",
     "temp": "临时",
-    "tempEmpty": "暂无聊天上传 — 在聊天框粘贴/拖入的文件会先落到这里，24h 内未处理会被自动清理"
+    "projectAssets": "工程资产",
+    "tempEmpty": "暂无聊天上传 — 在聊天框粘贴/拖入的文件会先落到这里，24h 内未处理会被自动清理",
+    "sectionLocations": "位置"
   },
   "smartFolder": {
     "createTitle": "创建智能文件夹",
@@ -1362,6 +1408,10 @@
     "createSessionFirst": "请先创建会话",
     "copy": "复制",
     "copied": "已复制",
+    "approvalNeeded": "需要批准",
+    "approvedContinue": "已批准——发送消息以继续。",
+    "rejectedNote": "已拒绝——该操作不会执行。",
+    "approvalResolved": "该请求已在别处处理。",
     "suggestions": {
       "outlineStory": "帮我构建故事大纲",
       "reviewChapter": "审阅我的章节",
@@ -1599,7 +1649,8 @@
         "files": "文件",
         "skills": "技能",
         "runs": "运行记录",
-        "versions": "版本"
+        "versions": "版本",
+        "routines": "例行任务"
       },
       "loadErrorPrefix": "加载智能体失败",
       "listLoadError": "加载智能体列表失败",
@@ -1686,7 +1737,16 @@
           "failed": "失败",
           "cancelled": "已取消",
           "heartbeat_lost": "心跳丢失"
-        }
+        },
+        "tasksTouched": "关联任务",
+        "session": "会话",
+        "statInput": "输入",
+        "statOutput": "输出",
+        "statCached": "缓存",
+        "selectPrompt": "选择一条运行记录查看详情",
+        "transcript": "执行记录",
+        "transcriptNice": "Nice",
+        "transcriptRaw": "Raw"
       },
       "budget": {
         "sectionLabel": "每月预算",
@@ -1702,6 +1762,50 @@
         "resume": "恢复",
         "resuming": "正在恢复...",
         "resumedToast": "Agent 已恢复"
+      },
+      "statusChip": {
+        "idle": "空闲",
+        "running": "运行中",
+        "paused": "已暂停"
+      },
+      "assignTask": "Assign Task",
+      "pause": "Pause",
+      "resume": "Resume",
+      "resumed": "Agent 已恢复",
+      "pausedToast": "Agent 已暂停",
+      "taskAssigned": "任务已指派",
+      "limits": {
+        "sectionLabel": "Run limits",
+        "timeoutLabel": "Timeout (sec)",
+        "timeoutHint": "单次运行的最长耗时，在 LLM 迭代之间检查。留空或 0 = 不限制。",
+        "concurrencyLabel": "Max concurrent runs",
+        "concurrencyHint": "已有这么多运行中时，新运行会被拒绝。留空 = 不限制。"
+      },
+      "idCopied": "Agent ID 已复制",
+      "copyId": "Copy agent ID",
+      "duplicate": "Duplicate",
+      "routines": {
+        "intro": "每次触发会创建一个分配给该 Agent 的 Issue 并自动执行 — 结果以 Issue 回复形式呈现。",
+        "add": "新建例行任务",
+        "empty": "还没有例行任务。创建一个让该 Agent 按计划工作。",
+        "nameLabel": "名称",
+        "namePlaceholder": "每日摘要",
+        "scheduleLabel": "计划",
+        "customCron": "自定义 cron…",
+        "policyLabel": "上次运行未结束时",
+        "policySkip": "跳过本次触发（推荐）",
+        "policyAlways": "照常触发",
+        "promptLabel": "指令（每次触发发送给 Agent）",
+        "promptPlaceholder": "总结过去 24 小时下载的资源…",
+        "saved": "例行任务已保存",
+        "fired": "例行任务已触发",
+        "deleteConfirm": "删除这个例行任务？",
+        "disabled": "已停用",
+        "fireNow": "立即运行",
+        "nextFire": "下次",
+        "lastFire": "上次",
+        "lastIssue": "最近 Issue",
+        "cronUtcHint": "Cron 时间按 UTC 解释 — 你的时区是 UTC{{offset}}。"
       }
     },
     "skills": {
@@ -1780,6 +1884,9 @@
       "newFileContentLabel": "初始内容",
       "deleteFileConfirm": "删除 {{path}}？此操作不可恢复。",
       "deleteFileError": "删除失败：{{err}}"
+    },
+    "workforce": {
+      "runningNow": "运行中"
     }
   },
   "aiUsage": {
@@ -1805,5 +1912,47 @@
     "colTotalTokens": "总 Tokens",
     "colCost": "花费",
     "colFailed": "失败"
+  },
+  "clockDrift": {
+    "warning": "设备时间与服务器相差 {{amount}}（{{direction}}）——这会导致登录异常。请在系统设置中开启自动设置日期与时间。",
+    "behind": "偏慢",
+    "ahead": "偏快"
+  },
+  "projectAssets": {
+    "chatUploads": "Chat Uploads",
+    "noCanvases": "暂无画布",
+    "appearsInCanvases_one": "出现在 {{count}} 个画布",
+    "appearsInCanvases_other": "出现在 {{count}} 个画布",
+    "role": {
+      "reference": "参考图",
+      "output": "生成结果"
+    }
+  },
+  "memory": {
+    "title": "记忆",
+    "subtitle": "AI 在多次对话中记住的关于你的信息。",
+    "learnLabel": "从对话中学习",
+    "learnHint": "让助手从对话中建立你的偏好模型。",
+    "injectLabel": "在对话中使用记忆",
+    "injectHint": "让助手回复时参考已学到的内容。",
+    "serviceOff": "本部署尚未启用记忆服务——开关已保存,启用后即生效。",
+    "aboutLabel": "关于我",
+    "aboutHint": "告诉助手需要长期记住的事(每行一条)。优先级高于它自动推断的内容。",
+    "aboutPlaceholder": "例如:我制作中式街头美食的短视频\n回复时中英双语",
+    "saveAbout": "保存",
+    "observationsLabel": "已了解到的信息",
+    "noObservations": "暂无学习内容——多聊几句,这里会出现观察。",
+    "deleteObservation": "删除此项",
+    "forgetAll": "清除全部记忆",
+    "forgetConfirm": "删除所有已学记忆?你的聊天记录会保留。",
+    "forgetYes": "确认清除"
+  },
+  "aiHealth": {
+    "title": "功能健康检查",
+    "subtitle": "每个 AI 功能实际使用的模型和密钥。",
+    "warningsBadge": "{{count}} 项需处理",
+    "refresh": "刷新",
+    "unset": "未配置",
+    "default": "默认"
   }
 }

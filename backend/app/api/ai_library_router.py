@@ -40,7 +40,6 @@ from app.repositories.agent_runs_repository import (
     get_agent_runs_repository,
 )
 from app.repositories.agent_workforce_repository import (
-    TASK_KIND_AGENT,
     tt_row_to_task_shape,
 )
 from app.repositories.skill_repository import (
@@ -563,6 +562,93 @@ async def resume_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
     row = {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
     enriched = await _enrich_agents_with_scope_names([row])
     return enriched[0]
+
+
+@router.post(
+    "/agents/{slug}/pause",
+    response_model=AgentOut,
+    summary="Pause agent (sets paused_reason='manual')",
+)
+async def pause_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
+    """Manually pause an agent — mirror of /resume (paperclip's Pause action).
+
+    Sets paused_reason='manual'. RunRecorder's pre-flight check raises
+    AgentPausedError before any LLM call while this is set, so a paused
+    agent stops doing work immediately (between runs). 400 when already
+    paused; 403 for presets; 404 when not found.
+    """
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+    if agent.get("is_system_preset"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="system preset agents are read-only in phase 1",
+        )
+    if agent.get("paused_reason") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="agent is already paused",
+        )
+
+    agent_uuid = UUID(str(agent["id"]))
+    await agent_repo.update_fields(agent_uuid, {"paused_reason": "manual"})
+
+    refreshed = await agent_repo.get_by_slug(slug)
+    if refreshed is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="agent disappeared after pause",
+        )
+    row = {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
+    enriched = await _enrich_agents_with_scope_names([row])
+    return enriched[0]
+
+
+@router.get(
+    "/agents/{slug}/status",
+    summary="Live agent status chip (idle / running / paused)",
+)
+async def get_agent_status(slug: str, auth: AuthDep) -> Dict[str, Any]:
+    """Derived status for the agent header chip (paperclip-style).
+
+    paused_reason set → 'paused'; else any of the caller's runs currently
+    status='running' → 'running'; else 'idle'. Scoped to the caller's runs
+    (same scoping as the Runs tab) so one user's chat doesn't light up the
+    chip for everyone.
+    """
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+    if agent.get("paused_reason"):
+        return {
+            "status": "paused",
+            "paused_reason": agent["paused_reason"],
+            "running_count": 0,
+        }
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    client = await get_async_supabase_admin()
+    running_q = (
+        await client.table("agent_runs")
+        .select("id", count="exact", head=True)
+        .eq("agent_id", str(agent["id"]))
+        .eq("user_id", str(user_uuid))
+        .eq("status", "running")
+        .execute()
+    )
+    running = running_q.count or 0
+    return {
+        "status": "running" if running > 0 else "idle",
+        "paused_reason": None,
+        "running_count": running,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1122,6 +1208,13 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
         .execute()
     )
     latest_run = latest_q.data[0] if latest_q.data else None
+    # agent_runs.id is a BIGINT Snowflake (mig 232). This endpoint returns a
+    # raw Dict (no response_model), so unlike the run list/detail endpoints —
+    # whose RunListItem opts into coerce_numbers_to_str — it would otherwise
+    # leak the id as a JS number (precision loss >2^53, and the frontend
+    # `id.slice()` crash). Coerce to str here, matching the RunListItem contract.
+    if latest_run and latest_run.get("id") is not None:
+        latest_run["id"] = str(latest_run["id"])
 
     # 14-day daily series — pre-fill with zeros so the chart's x axis
     # stays continuous when there are gaps. ``window_start`` is already
@@ -1160,15 +1253,16 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
     run_activity_14d = [{"date": d, "count": activity_buckets.get(d, 0)} for d in days]
     success_rate_14d = [{"date": d, **success_buckets[d]} for d in days]
 
-    # Tasks: status counts over 14d. A4: tasks live in task_tracking
-    # WHERE task_kind='agent_task' scoped by user_id (Delegate from chat
-    # carries the caller's user_id, and direct dispatches get their owner
-    # stamped). Match the same window so the dashboard tells one
-    # consistent story.
+    # Tasks: status counts over 14d, scoped by agent_id + user_id. Counts
+    # EVERY task the agent worked, regardless of task_kind: chat-Delegate
+    # dispatches (task_kind='agent_task') AND service workflows (visual
+    # analysis / summary, task_kind='workflow') whose RunRecorder stamped
+    # agent_id back onto the row (mig 282 paperclip-style task↔run linkage).
+    # The old task_kind='agent_task' filter hid all service work, so an
+    # agent that only ran analyses showed an empty task panel.
     tasks_q = await (
         client.table("task_tracking")
         .select("dbos_workflow_id,phase,created_at,title,metadata")
-        .eq("task_kind", TASK_KIND_AGENT)
         .eq("agent_id", str(agent_uuid))
         .eq("user_id", str(user_uuid))
         .gte("created_at", iso_start)
@@ -1183,13 +1277,13 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
 
     # Recent agent tasks (5) — pulled separately in case the 14d
     # window is empty but older tasks still matter for context.
+    # Same agent_id-only scoping as the 14d query above.
     recent_tasks_q = await (
         client.table("task_tracking")
         .select(
             "dbos_workflow_id,phase,created_at,started_at,completed_at,title,"
             "error_code,error_msg,metadata"
         )
-        .eq("task_kind", TASK_KIND_AGENT)
         .eq("agent_id", str(agent_uuid))
         .eq("user_id", str(user_uuid))
         .order("created_at", desc=True)
@@ -1234,7 +1328,10 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
             "run_count": len(runs_14d),
         },
         "recent_tasks": [tt_row_to_task_shape(r) for r in (recent_tasks_q.data or [])],
-        "recent_runs": recent_runs_q.data or [],
+        "recent_runs": [
+            {**r, "id": str(r["id"])} if r.get("id") is not None else r
+            for r in (recent_runs_q.data or [])
+        ],
     }
 
 
@@ -1275,6 +1372,52 @@ async def list_agent_runs(
 
 
 @router.get(
+    "/runs/live",
+    summary="Currently-running agent runs across all agents (Workforce strip)",
+)
+async def list_live_runs(auth: AuthDep) -> Dict[str, Any]:
+    """Caller-scoped status='running' runs, newest first, enriched with the
+    agent's slug/name/icon. Powers the Workforce board's "Running now" strip
+    (paperclip's live-runs dashboard, R4). NOTE: registered BEFORE
+    /runs/{run_id} so the literal path wins route matching."""
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    client = await get_async_supabase_admin()
+    runs_q = (
+        await client.table("agent_runs")
+        .select(
+            "id,agent_id,status,trigger,model,started_at,"
+            "prompt_tokens,completion_tokens,cost_cents,input_summary,task_id"
+        )
+        .eq("user_id", str(user_uuid))
+        .eq("status", "running")
+        .order("started_at", desc=True)
+        .limit(20)
+        .execute()
+    )
+    items = runs_q.data or []
+    agent_ids = sorted({str(r["agent_id"]) for r in items})
+    agents_by_id: Dict[str, Dict[str, Any]] = {}
+    if agent_ids:
+        agents_q = (
+            await client.table("ai_agents")
+            .select("id,slug,name,icon")
+            .in_("id", agent_ids)
+            .execute()
+        )
+        agents_by_id = {str(a["id"]): a for a in (agents_q.data or [])}
+    for r in items:
+        a = agents_by_id.get(str(r["agent_id"])) or {}
+        r["id"] = str(r["id"])
+        r["task_id"] = str(r["task_id"]) if r.get("task_id") else None
+        r["agent_slug"] = a.get("slug")
+        r["agent_name"] = a.get("name")
+        r["agent_icon"] = a.get("icon")
+        if r.get("cost_cents") is not None:
+            r["cost_cents"] = float(r["cost_cents"])
+    return {"items": items, "count": len(items)}
+
+
+@router.get(
     "/runs/{run_id}",
     response_model=RunDetail,
     summary="Get run detail",
@@ -1293,7 +1436,67 @@ async def get_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
     ):
         if row.get(field) is not None:
             row[field] = float(row[field])
+
+    # mig 282 task ↔ run linkage: resolve the task_tracking row this run
+    # executed under so the detail pane can render "Tasks Touched"
+    # (paperclip-style). Best-effort — a missing/stale task never 500s
+    # the run detail.
+    if row.get("task_id"):
+        try:
+            client = await get_async_supabase_admin()
+            task_q = (
+                await client.table("task_tracking")
+                .select("dbos_workflow_id,title,phase,task_type")
+                .eq("dbos_workflow_id", str(row["task_id"]))
+                .maybe_single()
+                .execute()
+            )
+            if task_q and task_q.data:
+                row["task"] = {
+                    "id": task_q.data["dbos_workflow_id"],
+                    "title": task_q.data.get("title"),
+                    "phase": task_q.data.get("phase"),
+                    "task_type": task_q.data.get("task_type"),
+                }
+        except Exception as e:  # noqa: BLE001 — decoration, never fatal
+            logger.warning(f"[runs] task ref lookup failed for run {run_id}: {e}")
     return row
+
+
+@router.get(
+    "/runs/{run_id}/events",
+    summary="Transcript event stream for one run (mig 285, paperclip P3)",
+)
+async def list_run_events(
+    run_id: str,
+    auth: AuthDep,
+    after_seq: int = 0,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Ordered agent_run_events for the Runs detail Transcript section.
+
+    Ownership enforced the same way as the run detail (a foreign run_id
+    reads as 404). ``after_seq`` supports incremental polling while the
+    run is live.
+    """
+    runs_repo = get_agent_runs_repository()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    row = await runs_repo.get_by_id(run_id, user_id=user_uuid)
+    if not row:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    client = await get_async_supabase_admin()
+    q = (
+        await client.table("agent_run_events")
+        .select("seq,event_type,payload,created_at")
+        .eq("run_id", str(run_id))
+        .gt("seq", after_seq)
+        .order("seq", desc=False)
+        .limit(max(1, min(limit, 1000)))
+        .execute()
+    )
+    items = q.data or []
+    return {"items": items, "count": len(items)}
 
 
 @router.get(

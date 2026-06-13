@@ -41,45 +41,152 @@ def get_provider_config(ai_settings: dict, provider_key: str) -> dict:
     return providers.get(provider_key, {})
 
 
-async def resolve_analyze_provider_config(
+DEFAULT_ANALYZE_AGENT_SLUG = "analyze"
+DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
+DEFAULT_CAPTION_AGENT_SLUG = "caption"
+DEFAULT_CLASSIFY_AGENT_SLUG = "classify"
+
+
+async def resolve_task_provider_config(
     user_id: Optional[str],
-) -> Tuple[str, Dict[str, Any], str]:
-    """Resolve analyze agent's model + user's BYO provider config.
+    task_key: str,
+    default_slug: str,
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve a task's assigned agent slug + model + user's BYO provider config.
 
-    Returns ``(provider_key, provider_config, model)``. Reads the
-    ``analyze`` ``ai_agents`` row to get its ``model``, derives the
-    provider prefix, then pulls the user's BYO entry for that provider
-    out of ``ai_settings.ai_providers``.
+    Generic form of ``resolve_analyze_provider_config`` (which delegates
+    here): reads ``task_assignment[task_key]`` for the agent slug (falling
+    back to ``default_slug``), resolves the slug to its ``ai_agents`` row,
+    takes its model, derives the provider key from the model prefix, and
+    merges the user's BYO entry for that provider.
 
-    When ``user_id`` is None or the agent row is missing, returns empty
-    config and lets the service route through the factory's default.
+    Returns ``(provider_key, provider_config, model, agent_slug)`` — the
+    resolved slug is returned so the caller composes the SAME agent whose
+    model was resolved (see #622/#623: prompt agent and model agent must
+    match or the composed model overrides the resolved one).
     """
     from app.repositories.agent_repository import get_agent_repository
     from app.services.ai.adapters.factory import provider_key_for_model
 
+    # Load settings first so we can read the user's assigned agent slug.
+    # Reused below for the BYO provider lookup — a single read, not two.
+    ai_settings = await get_ai_settings(user_id) if user_id else {}
+    assigned_slug = (
+        (ai_settings.get("task_assignment") or {}).get(task_key) or default_slug
+    ).strip() or default_slug
+    resolved_slug = assigned_slug
+
     agent_repo = get_agent_repository()
-    agent = await agent_repo.get_by_slug("analyze")
+    agent = await agent_repo.get_by_slug(assigned_slug)
+    if not agent and assigned_slug != default_slug:
+        logger.warning(
+            f"[AI] {task_key} assigned agent '{assigned_slug}' not found; "
+            f"falling back to '{default_slug}'"
+        )
+        agent = await agent_repo.get_by_slug(default_slug)
+        resolved_slug = default_slug
+
     model = ((agent or {}).get("model") or "").strip()
     if not model:
         logger.warning(
-            "[AI] analyze agent row missing or has no model; "
-            "VisualAnalysisService will use built-in default"
+            f"[AI] {task_key} agent '{assigned_slug}' missing or has no "
+            "model; caller will use built-in default"
         )
-        return "", {}, ""
+        return "", {}, "", resolved_slug
 
     try:
         provider_key = provider_key_for_model(model)
     except ValueError:
         logger.warning(
-            f"[AI] analyze agent model '{model}' has unknown provider prefix; "
-            "falling back to generic OpenAI-compatible adapter"
+            f"[AI] {task_key} agent model '{model}' has unknown provider "
+            "prefix; falling back to generic OpenAI-compatible adapter"
         )
         provider_key = ""
 
     if not user_id or not provider_key:
-        return provider_key, {"model": model}, model
+        return provider_key, {"model": model}, model, resolved_slug
 
-    ai_settings = await get_ai_settings(user_id)
     provider_config = dict(get_provider_config(ai_settings, provider_key))
     provider_config["model"] = model
-    return provider_key, provider_config, model
+    return provider_key, provider_config, model, resolved_slug
+
+
+async def resolve_analyze_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the visual-analysis agent slug + model + user's BYO provider config.
+
+    Returns ``(provider_key, provider_config, model, agent_slug)``. Honors the
+    user's ``task_assignment.visual_analysis`` setting — as of migration 142
+    (Phase 2 PR 2.8b) that key stores an AI Library agent slug (e.g. 'analyze',
+    or a custom 'test-analyze'). We resolve that slug to its ``ai_agents`` row,
+    take its ``model``, derive the provider prefix, then pull the user's BYO
+    entry for that provider out of ``ai_settings.ai_providers``.
+
+    ``agent_slug`` (the resolved slug, after any fallback) is returned so the
+    caller composes the SAME agent's prompt as the one whose model we resolved.
+    VisualAnalysisService composes the agent's IDENTITY/SOUL/AGENT to build its
+    system prompt, and ``composed.model`` (the composed agent's model) is what
+    actually drives the adapter — so the prompt agent and the model agent MUST
+    be the same one, else the composed model overrides the resolved one.
+
+    Falls back to the built-in ``analyze`` agent when the assignment is unset
+    or the assigned slug doesn't resolve. When ``user_id`` is None or the agent
+    row is missing, returns empty config and lets the service route through the
+    factory's default.
+
+    Bug history:
+      - #622 fixed the slug read here, but the run still used qwen-max because
+        VisualAnalysisService hardcoded the prompt agent to 'analyze', and the
+        composed (qwen-max) model overrode the resolved doubao one. Returning
+        ``agent_slug`` lets the caller compose the right agent end-to-end.
+      - Originally hardcoded ``get_by_slug("analyze")``, so a user who assigned a
+        different agent (and only configured that agent's provider as BYO) always
+        got 'analyze'\\'s qwen-max with no matching config → empty config →
+        "All connection attempts failed".
+    """
+    return await resolve_task_provider_config(
+        user_id, "visual_analysis", DEFAULT_ANALYZE_AGENT_SLUG
+    )
+
+
+async def resolve_translate_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the translation agent slug + model + user's BYO provider config.
+
+    Honors ``task_assignment.translation`` (an AI Library agent slug),
+    defaulting to the built-in ``translate`` agent. Same return shape as
+    the other resolvers: ``(provider_key, provider_config, model, slug)``.
+    """
+    return await resolve_task_provider_config(
+        user_id, "translation", DEFAULT_TRANSLATE_AGENT_SLUG
+    )
+
+
+async def resolve_caption_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the image-caption agent slug + model + user's BYO provider config.
+
+    Honors ``task_assignment.caption`` (an AI Library agent slug),
+    defaulting to the built-in ``caption`` agent. The assigned agent's
+    model must be a vision/multimodal one — the caption workflow surfaces
+    a clear error when the provider call fails.
+    """
+    return await resolve_task_provider_config(
+        user_id, "caption", DEFAULT_CAPTION_AGENT_SLUG
+    )
+
+
+async def resolve_classify_provider_config(
+    user_id: Optional[str],
+) -> Tuple[str, Dict[str, Any], str, str]:
+    """Resolve the asset-classification agent slug + model + BYO config.
+
+    Honors ``task_assignment.classification`` (an AI Library agent slug),
+    defaulting to the built-in ``classify`` agent (vision required).
+    """
+    return await resolve_task_provider_config(
+        user_id, "classification", DEFAULT_CLASSIFY_AGENT_SLUG
+    )

@@ -903,14 +903,16 @@ async def get_analysis_by_resource(
     Returns 200 with null fields (NOT 404) when the resource hasn't been
     analyzed yet — same rationale as the transcript/summary endpoints: avoids a
     red request in DevTools on every tab open, and lets the frontend detect
-    presence via `visual_description`. The analysis row is keyed by the linked
-    media id (parsed_media.id), so resolve resource → media first.
+    presence via `visual_description`. ``resource_analysis`` is keyed by
+    ``resource_id`` (FK → resources.id, mig 076/262) — NOT the media id — so we
+    read by the resource's own id. (The write path keys it the same way; reading
+    by ``media.id`` here was why the vision card always showed "not analyzed".)
     """
     resource, _platform_id, media = await _resolve_resource_to_platform_id(resource_id)
     if resource.get("creator_id") != auth.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    analysis = await get_analysis_repository().get_analysis(int(media["id"])) or {}
+    analysis = await get_analysis_repository().get_analysis(int(resource["id"])) or {}
 
     return VisualAnalysisResponse(
         media_id=str(media["id"]),

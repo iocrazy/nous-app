@@ -30,7 +30,7 @@ const getStatusBadge = (status: string) => {
     pending: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
     paid: 'bg-green-500/20 text-green-400 border-green-500/30',
     failed: 'bg-red-500/20 text-red-400 border-red-500/30',
-    expired: 'bg-zinc-700/50 text-zinc-400 border-zinc-600/30',
+    expired: 'bg-ink-700/50 text-ink-400 border-ink-600/30',
     refunded: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   };
   return styles[status] || styles.pending;
@@ -103,7 +103,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-zinc-400">
+      <div className="flex items-center justify-center h-64 text-ink-400">
         <Loader2 className="animate-spin" size={24} />
       </div>
     );
@@ -121,7 +121,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
               <Coins size={28} className="text-amber-400" />
             </div>
             <div>
-              <p className="text-sm text-zinc-400">{t('billing.pointsBalance')}</p>
+              <p className="text-sm text-ink-400">{t('billing.pointsBalance')}</p>
               <p className="text-4xl font-bold text-amber-400">
                 {balance ? balance.points_balance.toLocaleString() : '0'}
               </p>
@@ -143,7 +143,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
         {/* Storage usage bar */}
         {balance && (
           <div className="mt-4">
-            <div className="flex items-center justify-between text-xs text-zinc-400 mb-1.5">
+            <div className="flex items-center justify-between text-xs text-ink-400 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <HardDrive size={12} />
                 {t('billing.storageUsage')}
@@ -153,7 +153,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
                 ({storagePercent.toFixed(1)}%)
               </span>
             </div>
-            <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-ink-800 rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-amber-500 to-orange-500"
                 style={{ width: `${Math.min(storagePercent, 100)}%` }}
@@ -168,7 +168,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
         <section id="billing-packages">
           <div className="flex items-center gap-2 mb-4">
             <Package size={20} className="text-amber-400" />
-            <h2 className="text-lg font-semibold text-zinc-100">{t('billing.packages')}</h2>
+            <h2 className="text-lg font-semibold text-ink-100">{t('billing.packages')}</h2>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -178,17 +178,17 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
                 <button
                   key={pkg.id}
                   onClick={() => onBuyPackage(pkg)}
-                  className="bg-zinc-900 border border-zinc-800 hover:border-amber-500/50 rounded-xl p-5 text-left transition-all duration-200 group"
+                  className="bg-ink-900 border border-ink-800 hover:border-amber-500/50 rounded-xl p-5 text-left transition-all duration-200 group"
                 >
-                  <p className="text-3xl font-bold text-zinc-100 group-hover:text-amber-400 transition-colors">
+                  <p className="text-3xl font-bold text-ink-100 group-hover:text-amber-400 transition-colors">
                     {pkg.points_amount.toLocaleString()}
                   </p>
-                  <p className="text-xs text-zinc-500 mt-1">{pkg.name}</p>
+                  <p className="text-xs text-ink-500 mt-1">{pkg.name}</p>
                   <div className="mt-3 flex items-baseline justify-between">
                     <span className="text-lg font-semibold text-amber-400">
                       {formatPrice(pkg.price_cents)}
                     </span>
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-ink-500">
                       {formatPrice(unitPrice)}/pt
                     </span>
                   </div>
@@ -203,20 +203,20 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
       <section>
         <div className="flex items-center gap-2 mb-4">
           <BarChart3 size={20} className="text-amber-400" />
-          <h2 className="text-lg font-semibold text-zinc-100">{t('billing.teamConsumption')}</h2>
+          <h2 className="text-lg font-semibold text-ink-100">{t('billing.teamConsumption')}</h2>
         </div>
 
-        <div className="border border-zinc-800 rounded-xl p-5 bg-zinc-900">
+        <div className="border border-ink-800 rounded-xl p-5 bg-ink-900">
           <div className="flex items-center gap-8 mb-6">
             <div>
-              <p className="text-xs text-zinc-500 uppercase font-medium">{t('billing.pointsUsedThisMonth')}</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-xs text-ink-500 uppercase font-medium">{t('billing.pointsUsedThisMonth')}</p>
+              <p className="text-2xl font-bold text-ink-50">
                 {usageStats?.total_consumed_this_month?.toLocaleString() ?? '0'}
               </p>
             </div>
             {balance && (
               <div>
-                <p className="text-xs text-zinc-500 uppercase font-medium">{t('billing.currentBalance')}</p>
+                <p className="text-xs text-ink-500 uppercase font-medium">{t('billing.currentBalance')}</p>
                 <p className="text-2xl font-bold text-amber-400">
                   {balance.points_balance.toLocaleString()}
                 </p>
@@ -227,23 +227,23 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
           {/* Top consumers */}
           {usageStats?.top_consumers && usageStats.top_consumers.length > 0 && (
             <div>
-              <p className="text-xs text-zinc-500 uppercase font-medium mb-3">{t('billing.topConsumers')}</p>
+              <p className="text-xs text-ink-500 uppercase font-medium mb-3">{t('billing.topConsumers')}</p>
               <div className="space-y-2">
                 {usageStats.top_consumers.map((consumer: any, idx: number) => {
                   const maxUsage = usageStats.top_consumers[0]?.points_used || 1;
                   const widthPercent = (consumer.points_used / maxUsage) * 100;
                   return (
                     <div key={consumer.user_id || idx} className="flex items-center gap-3">
-                      <span className="text-sm text-zinc-300 w-32 truncate">
+                      <span className="text-sm text-ink-300 w-32 truncate">
                         {consumer.name || consumer.email || 'Unknown'}
                       </span>
-                      <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                      <div className="flex-1 h-2 bg-ink-800 rounded-full overflow-hidden">
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
                           style={{ width: `${widthPercent}%` }}
                         />
                       </div>
-                      <span className="text-xs text-zinc-400 font-mono w-20 text-right">
+                      <span className="text-xs text-ink-400 font-mono w-20 text-right">
                         {consumer.points_used?.toLocaleString() ?? 0} pts
                       </span>
                     </div>
@@ -254,7 +254,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
           )}
 
           {!usageStats && (
-            <p className="text-sm text-zinc-500">{t('billing.noConsumptionData', 'No consumption data available yet.')}</p>
+            <p className="text-sm text-ink-500">{t('billing.noConsumptionData', 'No consumption data available yet.')}</p>
           )}
         </div>
       </section>
@@ -263,18 +263,18 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
       <section>
         <div className="flex items-center gap-2 mb-4">
           <CreditCard size={20} className="text-amber-400" />
-          <h2 className="text-lg font-semibold text-zinc-100">{t('billing.orderHistory')}</h2>
+          <h2 className="text-lg font-semibold text-ink-100">{t('billing.orderHistory')}</h2>
         </div>
 
         {orders.length === 0 ? (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-12 text-center text-zinc-500">
+          <div className="bg-ink-900 border border-ink-800 rounded-xl p-12 text-center text-ink-500">
             {t('billing.noOrders')}
           </div>
         ) : (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+          <div className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="bg-zinc-800/50 text-zinc-400 text-xs uppercase">
+                <tr className="bg-ink-800/50 text-ink-400 text-xs uppercase">
                   <th className="px-5 py-3 font-medium">{t('billing.orderDate')}</th>
                   <th className="px-5 py-3 font-medium">{t('billing.orderPackage')}</th>
                   <th className="px-5 py-3 font-medium text-right">{t('billing.orderPoints')}</th>
@@ -283,24 +283,24 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
                   <th className="px-5 py-3 font-medium text-center">{t('billing.orderStatus')}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody className="divide-y divide-ink-800/50">
                 {orders.map((order) => (
-                  <tr key={order.id} className="hover:bg-zinc-800/30 transition-colors">
-                    <td className="px-5 py-3 text-zinc-300">
+                  <tr key={order.id} className="hover:bg-ink-800/30 transition-colors">
+                    <td className="px-5 py-3 text-ink-300">
                       {new Date(order.created_at).toLocaleDateString()}
                     </td>
-                    <td className="px-5 py-3 text-zinc-300">
+                    <td className="px-5 py-3 text-ink-300">
                       {packages.find((p) => p.id === order.package_id)?.name || order.package_id}
                     </td>
                     <td className="px-5 py-3 text-right font-mono text-amber-400">
                       {order.points_amount.toLocaleString()}
                     </td>
-                    <td className="px-5 py-3 text-right text-zinc-300">
+                    <td className="px-5 py-3 text-right text-ink-300">
                       {formatPrice(order.amount_cents)}
                     </td>
                     <td className="px-5 py-3 text-center">
-                      <MessageSquare size={16} className="inline text-zinc-400" />
-                      <span className="ml-1 text-xs text-zinc-400">
+                      <MessageSquare size={16} className="inline text-ink-400" />
+                      <span className="ml-1 text-xs text-ink-400">
                         {order.payment_method === 'wechat' ? 'WeChat' : 'Alipay'}
                       </span>
                     </td>
@@ -322,29 +322,29 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
         <section>
           <div className="flex items-center gap-2 mb-4">
             <Settings size={20} className="text-amber-400" />
-            <h2 className="text-lg font-semibold text-zinc-100">{t('billing.pointsAdjustment', 'Points Adjustment')}</h2>
+            <h2 className="text-lg font-semibold text-ink-100">{t('billing.pointsAdjustment', 'Points Adjustment')}</h2>
           </div>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+          <div className="bg-ink-900 border border-ink-800 rounded-xl p-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">{t('billing.adjustAmount', 'Amount')}</label>
+                <label className="block text-sm text-ink-400 mb-1.5">{t('billing.adjustAmount', 'Amount')}</label>
                 <input
                   type="number"
                   value={adjustAmount}
                   onChange={(e) => setAdjustAmount(Number(e.target.value))}
                   placeholder="0"
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-colors"
+                  className="w-full px-3 py-2 bg-ink-800 border border-ink-700 rounded-lg text-ink-100 placeholder-ink-500 focus:outline-none focus:border-amber-500/50 transition-colors"
                 />
-                <p className="text-xs text-zinc-500 mt-1">{t('billing.adjustAmountHint', 'Positive to add, negative to deduct')}</p>
+                <p className="text-xs text-ink-500 mt-1">{t('billing.adjustAmountHint', 'Positive to add, negative to deduct')}</p>
               </div>
               <div>
-                <label className="block text-sm text-zinc-400 mb-1.5">{t('billing.adjustDescription', 'Description')}</label>
+                <label className="block text-sm text-ink-400 mb-1.5">{t('billing.adjustDescription', 'Description')}</label>
                 <input
                   type="text"
                   value={adjustDescription}
                   onChange={(e) => setAdjustDescription(e.target.value)}
                   placeholder={t('billing.adjustDescriptionPlaceholder', 'Reason for adjustment...')}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-colors"
+                  className="w-full px-3 py-2 bg-ink-800 border border-ink-700 rounded-lg text-ink-100 placeholder-ink-500 focus:outline-none focus:border-amber-500/50 transition-colors"
                 />
               </div>
             </div>
@@ -352,7 +352,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
               <button
                 onClick={handleAdjustPoints}
                 disabled={adjusting || !adjustAmount || !adjustDescription.trim()}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 text-black font-semibold rounded-lg transition-colors flex items-center gap-2"
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:bg-ink-700 disabled:text-ink-500 text-black font-semibold rounded-lg transition-colors flex items-center gap-2"
               >
                 {adjusting && <Loader2 size={16} className="animate-spin" />}
                 {t('billing.adjustSubmit', 'Adjust Points')}
@@ -372,21 +372,21 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
         <section>
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp size={20} className="text-amber-400" />
-            <h2 className="text-lg font-semibold text-zinc-100">{t('billing.pricingTable')}</h2>
+            <h2 className="text-lg font-semibold text-ink-100">{t('billing.pricingTable')}</h2>
           </div>
 
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+          <div className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="bg-zinc-800/50 text-zinc-400 text-xs uppercase">
+                <tr className="bg-ink-800/50 text-ink-400 text-xs uppercase">
                   <th className="px-6 py-3 font-medium">Action</th>
                   <th className="px-6 py-3 font-medium text-right">Points</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody className="divide-y divide-ink-800/50">
                 {pricing.map((item) => (
-                  <tr key={item.action_type} className="hover:bg-zinc-800/30 transition-colors">
-                    <td className="px-6 py-3 text-zinc-300">
+                  <tr key={item.action_type} className="hover:bg-ink-800/30 transition-colors">
+                    <td className="px-6 py-3 text-ink-300">
                       {item.description || item.action_type}
                     </td>
                     <td className="px-6 py-3 text-right font-mono text-amber-400">

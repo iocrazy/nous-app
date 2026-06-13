@@ -145,20 +145,20 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
       />
 
       {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Layers size={20} className="text-indigo-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('resources.manageVersions', 'Manage Versions')}
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -174,10 +174,10 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
 
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 size={24} className="text-zinc-400 animate-spin" />
+              <Loader2 size={24} className="text-ink-400 animate-spin" />
             </div>
           ) : versions.length === 0 ? (
-            <div className="text-center py-8 text-zinc-500 text-sm">
+            <div className="text-center py-8 text-ink-500 text-sm">
               {t('resources.noVersions', 'No versions found')}
             </div>
           ) : (
@@ -190,7 +190,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                     className={`p-3 rounded-xl border transition-colors ${
                       isCurrent
                         ? 'border-indigo-500/30 bg-indigo-500/5'
-                        : 'border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50'
+                        : 'border-ink-800 hover:border-ink-700 hover:bg-ink-800/50'
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -199,7 +199,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                         className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
                           isCurrent
                             ? 'bg-indigo-500/20 text-indigo-300'
-                            : 'bg-zinc-700 text-zinc-300'
+                            : 'bg-ink-700 text-ink-300'
                         }`}
                       >
                         V{version.version_number}
@@ -208,7 +208,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                       {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-white truncate">
+                          <span className="text-sm text-ink-50 truncate">
                             {version.filename || 'Untitled'}
                           </span>
                           {isCurrent && (
@@ -217,19 +217,19 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500">
+                        <div className="flex items-center gap-2 mt-1 text-xs text-ink-500">
                           {version.created_at && (
                             <span>{formatDate(version.created_at)}</span>
                           )}
                           {version.file_size_bytes !== null && (
                             <>
-                              <span className="text-zinc-700">|</span>
+                              <span className="text-ink-700">|</span>
                               <span>{formatFileSize(version.file_size_bytes)}</span>
                             </>
                           )}
                           {version.resolution && (
                             <>
-                              <span className="text-zinc-700">|</span>
+                              <span className="text-ink-700">|</span>
                               <span>{version.resolution?.replace(/:/g, 'x')}</span>
                             </>
                           )}
@@ -242,7 +242,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                           <button
                             onClick={() => handleSetCurrent(version.version_number)}
                             disabled={settingCurrent !== null}
-                            className="p-1.5 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                            className="p-1.5 text-ink-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
                             title={t('resources.setAsCurrent', 'Set as current')}
                           >
                             {settingCurrent === version.version_number ? (
@@ -255,7 +255,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                         {versions.length > 1 && (
                           <button
                             onClick={() => setPendingDelete(version)}
-                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                            className="p-1.5 text-ink-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                             title={t('resources.deleteVersion', 'Delete version')}
                           >
                             <Trash2 size={14} />
@@ -271,7 +271,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
         </div>
 
         {/* Upload Button */}
-        <div className="p-6 border-t border-zinc-800">
+        <div className="p-6 border-t border-ink-800">
           <input
             ref={fileInputRef}
             type="file"
@@ -305,17 +305,17 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => setPendingDelete(null)}
           />
-          <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
+          <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4">
             <div className="p-6">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2 bg-red-500/20 rounded-lg">
                   <AlertTriangle size={20} className="text-red-400" />
                 </div>
-                <h3 className="text-base font-semibold text-white">
+                <h3 className="text-base font-semibold text-ink-50">
                   {t('resources.confirmDeleteVersion', 'Delete Version')}
                 </h3>
               </div>
-              <p className="text-sm text-zinc-400 mb-6">
+              <p className="text-sm text-ink-400 mb-6">
                 {t(
                   'resources.deleteVersionWarning',
                   'This will permanently delete V{{version}} and its files. This action cannot be undone.',
@@ -324,7 +324,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
               <div className="flex gap-3">
                 <button
                   onClick={() => setPendingDelete(null)}
-                  className="flex-1 px-4 py-2 text-sm text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-colors"
+                  className="flex-1 px-4 py-2 text-sm text-ink-300 bg-ink-800 hover:bg-ink-700 rounded-xl transition-colors"
                 >
                   {t('common.cancel', 'Cancel')}
                 </button>

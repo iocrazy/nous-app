@@ -80,11 +80,11 @@ const getStatusDisplay = (status: string): { label: string; color: string; icon:
     case 'error':
       return { label: 'ERROR', color: 'text-red-400 bg-red-500/10 border-red-500/20', icon: AlertCircle };
     case 'pending':
-      return { label: 'PENDING', color: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20', icon: Clock };
+      return { label: 'PENDING', color: 'text-ink-400 bg-ink-500/10 border-ink-500/20', icon: Clock };
     case 'debug':
       return { label: 'DEBUG', color: 'text-purple-400 bg-purple-500/10 border-purple-500/20', icon: Bug };
     default:
-      return { label: 'INFO', color: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20', icon: Info };
+      return { label: 'INFO', color: 'text-ink-400 bg-ink-500/10 border-ink-500/20', icon: Info };
   }
 };
 
@@ -267,8 +267,8 @@ export const LogsPanel: React.FC = () => {
           <FileText size={20} />
         </div>
         <div>
-          <h2 className="font-semibold text-zinc-200">Activity Logs</h2>
-          <p className="text-sm text-zinc-500">View your activity history</p>
+          <h2 className="font-semibold text-ink-200">Activity Logs</h2>
+          <p className="text-sm text-ink-500">View your activity history</p>
         </div>
       </div>
 
@@ -276,11 +276,11 @@ export const LogsPanel: React.FC = () => {
       <div className="flex flex-wrap items-center gap-3">
         {/* Level Filter */}
         <div className="relative">
-          <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
           <select
             value={level}
             onChange={(e) => setLevel(e.target.value)}
-            className="bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-8 py-2 text-sm text-zinc-300 outline-none focus:border-indigo-500 transition-colors appearance-none cursor-pointer"
+            className="bg-ink-950 border border-ink-800 rounded-lg pl-9 pr-8 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors appearance-none cursor-pointer"
           >
             {LEVEL_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -290,11 +290,11 @@ export const LogsPanel: React.FC = () => {
 
         {/* Date Range Filter */}
         <div className="relative">
-          <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
           <select
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
-            className="bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-8 py-2 text-sm text-zinc-300 outline-none focus:border-indigo-500 transition-colors appearance-none cursor-pointer"
+            className="bg-ink-950 border border-ink-800 rounded-lg pl-9 pr-8 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors appearance-none cursor-pointer"
           >
             {DATE_RANGE_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -309,14 +309,14 @@ export const LogsPanel: React.FC = () => {
               type="date"
               value={customStartDate}
               onChange={(e) => setCustomStartDate(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-300 outline-none focus:border-indigo-500 transition-colors"
+              className="bg-ink-950 border border-ink-800 rounded-lg px-3 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors"
             />
-            <span className="text-zinc-500">to</span>
+            <span className="text-ink-500">to</span>
             <input
               type="date"
               value={customEndDate}
               onChange={(e) => setCustomEndDate(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-300 outline-none focus:border-indigo-500 transition-colors"
+              className="bg-ink-950 border border-ink-800 rounded-lg px-3 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors"
             />
           </>
         )}
@@ -324,20 +324,20 @@ export const LogsPanel: React.FC = () => {
         {/* Search */}
         <form onSubmit={handleSearchSubmit} className="flex-1 min-w-[200px]">
           <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
             <input
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search logs..."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-2 text-sm text-zinc-300 outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-600"
+              className="w-full bg-ink-950 border border-ink-800 rounded-lg pl-9 pr-4 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors placeholder:text-ink-600"
             />
           </div>
         </form>
       </div>
 
       {/* Logs List */}
-      <div className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden">
+      <div className="bg-ink-950 border border-ink-800 rounded-xl overflow-hidden">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 size={24} className="animate-spin text-indigo-400" />
@@ -348,12 +348,12 @@ export const LogsPanel: React.FC = () => {
             {error}
           </div>
         ) : logs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
+          <div className="flex flex-col items-center justify-center py-16 text-ink-500">
             <FileText size={32} className="mb-2 opacity-50" />
             <p>No logs found</p>
           </div>
         ) : (
-          <div className="divide-y divide-zinc-800/50 max-h-[500px] overflow-y-auto">
+          <div className="divide-y divide-ink-800/50 max-h-[500px] overflow-y-auto">
             {logs.map((log) => {
               const statusDisplay = getStatusDisplay(log.status);
               const StatusIcon = statusDisplay.icon;
@@ -363,14 +363,14 @@ export const LogsPanel: React.FC = () => {
               return (
                 <div
                   key={log.id}
-                  className={`${hasDetails ? 'cursor-pointer' : ''} hover:bg-zinc-900/50 transition-colors`}
+                  className={`${hasDetails ? 'cursor-pointer' : ''} hover:bg-ink-900/50 transition-colors`}
                   onClick={() => hasDetails && setExpandedLogId(isExpanded ? null : log.id)}
                 >
                   <div className="flex items-start gap-3 px-4 py-3">
                     {/* Time */}
-                    <div className="flex-shrink-0 text-xs text-zinc-500 font-mono w-20">
+                    <div className="flex-shrink-0 text-xs text-ink-500 font-mono w-20">
                       <div>{formatTime(log.created_at)}</div>
-                      <div className="text-zinc-600">{formatDate(log.created_at)}</div>
+                      <div className="text-ink-600">{formatDate(log.created_at)}</div>
                     </div>
 
                     {/* Status Badge */}
@@ -383,16 +383,16 @@ export const LogsPanel: React.FC = () => {
 
                     {/* Action Tag */}
                     {log.action && (
-                      <div className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
+                      <div className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-ink-800 text-ink-400 border border-ink-700">
                         {log.action}
                       </div>
                     )}
 
                     {/* Message */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-zinc-300 break-words">{log.message}</p>
+                      <p className="text-sm text-ink-300 break-words">{log.message}</p>
                       {log.platform_id && (
-                        <p className="text-xs text-zinc-600 mt-0.5 font-mono">
+                        <p className="text-xs text-ink-600 mt-0.5 font-mono">
                           Video: {log.platform_id}
                         </p>
                       )}
@@ -400,7 +400,7 @@ export const LogsPanel: React.FC = () => {
 
                     {/* Expand indicator */}
                     {hasDetails && (
-                      <div className={`flex-shrink-0 text-zinc-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                      <div className={`flex-shrink-0 text-ink-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
                         <ChevronRight size={14} />
                       </div>
                     )}
@@ -409,11 +409,11 @@ export const LogsPanel: React.FC = () => {
                   {/* Expanded Details */}
                   {isExpanded && hasDetails && (
                     <div className="px-4 pb-3 ml-24 mr-4">
-                      <div className="bg-zinc-900/80 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono space-y-1">
+                      <div className="bg-ink-900/80 border border-ink-800 rounded-lg px-3 py-2 text-xs font-mono space-y-1">
                         {Object.entries(log.details!).map(([key, value]) => (
                           <div key={key} className="flex gap-2">
-                            <span className="text-zinc-500">{key}:</span>
-                            <span className="text-zinc-300 break-all">{String(value)}</span>
+                            <span className="text-ink-500">{key}:</span>
+                            <span className="text-ink-300 break-all">{String(value)}</span>
                           </div>
                         ))}
                       </div>
@@ -429,17 +429,17 @@ export const LogsPanel: React.FC = () => {
       {/* Pagination & Actions */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         {/* Info */}
-        <div className="text-sm text-zinc-500">
+        <div className="text-sm text-ink-500">
           Showing {logs.length} of {total} logs
         </div>
 
         {/* Page Size */}
         <div className="flex items-center gap-2">
-          <span className="text-sm text-zinc-500">Per page:</span>
+          <span className="text-sm text-ink-500">Per page:</span>
           <select
             value={pageSize}
             onChange={(e) => setPageSize(Number(e.target.value))}
-            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-300 outline-none focus:border-indigo-500 transition-colors"
+            className="bg-ink-950 border border-ink-800 rounded-lg px-3 py-1.5 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors"
           >
             {PAGE_SIZE_OPTIONS.map(size => (
               <option key={size} value={size}>{size}</option>
@@ -452,17 +452,17 @@ export const LogsPanel: React.FC = () => {
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page <= 1}
-            className="p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-2 rounded-lg border border-ink-800 text-ink-400 hover:bg-ink-800 hover:text-ink-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <ChevronLeft size={16} />
           </button>
-          <span className="text-sm text-zinc-400 px-2">
+          <span className="text-sm text-ink-400 px-2">
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
-            className="p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-2 rounded-lg border border-ink-800 text-ink-400 hover:bg-ink-800 hover:text-ink-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <ChevronRight size={16} />
           </button>
@@ -473,7 +473,7 @@ export const LogsPanel: React.FC = () => {
           <button
             onClick={handleRefresh}
             disabled={isLoading}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-sm"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-ink-800 text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors text-sm"
           >
             <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
             Refresh
@@ -482,7 +482,7 @@ export const LogsPanel: React.FC = () => {
           <button
             onClick={handleCopyAll}
             disabled={logs.length === 0}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-ink-800 text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {copiedAll ? <CheckCircle size={14} className="text-green-400" /> : <Copy size={14} />}
             {copiedAll ? 'Copied!' : 'Copy'}
@@ -492,21 +492,21 @@ export const LogsPanel: React.FC = () => {
           <div className="relative group">
             <button
               disabled={logs.length === 0}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-ink-800 text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Download size={14} />
               Export
             </button>
-            <div className="absolute right-0 top-full mt-1 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+            <div className="absolute right-0 top-full mt-1 bg-ink-900 border border-ink-800 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
               <button
                 onClick={() => handleExport('json')}
-                className="block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors rounded-t-lg"
+                className="block w-full text-left px-4 py-2 text-sm text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors rounded-t-lg"
               >
                 Export as JSON
               </button>
               <button
                 onClick={() => handleExport('csv')}
-                className="block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors rounded-b-lg"
+                className="block w-full text-left px-4 py-2 text-sm text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors rounded-b-lg"
               >
                 Export as CSV
               </button>

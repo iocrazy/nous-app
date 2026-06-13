@@ -175,19 +175,19 @@ export const MCPServersPanel: React.FC = () => {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
         <div className="flex items-center gap-2">
           <Plug className="w-4 h-4 text-blue-400" />
-          <h2 className="text-sm font-semibold text-zinc-200">{t('mcp.title')}</h2>
+          <h2 className="text-sm font-semibold text-ink-200">{t('mcp.title')}</h2>
           {items.length > 0 && (
-            <span className="text-xs text-zinc-500">({items.length})</span>
+            <span className="text-xs text-ink-500">({items.length})</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={reload}
-            className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="p-1.5 rounded hover:bg-ink-800 text-ink-500 hover:text-ink-300 transition-colors"
             title={t('mcp.refresh')}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -206,20 +206,20 @@ export const MCPServersPanel: React.FC = () => {
       </div>
 
       {/* Help text */}
-      <div className="px-4 py-2 bg-zinc-900/50 border-b border-zinc-800 text-[11px] text-zinc-500">
+      <div className="px-4 py-2 bg-ink-900/50 border-b border-ink-800 text-[11px] text-ink-500">
         {t('mcp.helpText')}
       </div>
 
       {/* Add/Edit form */}
       {showForm && (
-        <div className="border-b border-zinc-800 bg-zinc-900/30 p-4 space-y-3">
-          <div className="text-xs font-medium text-zinc-400">
+        <div className="border-b border-ink-800 bg-ink-900/30 p-4 space-y-3">
+          <div className="text-xs font-medium text-ink-400">
             {creating ? t('mcp.addModalTitle') : t('mcp.editModalTitle')}
           </div>
 
           {creating && (
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1">
+              <label className="block text-[11px] text-ink-500 mb-1">
                 {t('mcp.namespaceLabel')} *
               </label>
               <input
@@ -227,27 +227,27 @@ export const MCPServersPanel: React.FC = () => {
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="notion"
-                className="w-full px-2 py-1 text-sm rounded bg-zinc-900 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-blue-600"
+                className="w-full px-2 py-1 text-sm rounded bg-ink-900 border border-ink-800 text-ink-200 focus:outline-none focus:border-blue-600"
               />
-              <div className="text-[10px] text-zinc-600 mt-0.5">
+              <div className="text-[10px] text-ink-600 mt-0.5">
                 {t('mcp.namespaceHint')}
               </div>
             </div>
           )}
 
           <div>
-            <label className="block text-[11px] text-zinc-500 mb-1">{t('mcp.urlLabel')} *</label>
+            <label className="block text-[11px] text-ink-500 mb-1">{t('mcp.urlLabel')} *</label>
             <input
               type="url"
               value={form.url}
               onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
               placeholder="https://mcp.example.com/jsonrpc"
-              className="w-full px-2 py-1 text-sm rounded bg-zinc-900 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-blue-600"
+              className="w-full px-2 py-1 text-sm rounded bg-ink-900 border border-ink-800 text-ink-200 focus:outline-none focus:border-blue-600"
             />
           </div>
 
           <div>
-            <label className="block text-[11px] text-zinc-500 mb-1">
+            <label className="block text-[11px] text-ink-500 mb-1">
               {creating ? t('mcp.tokenLabel') : t('mcp.tokenLabelEdit')}
             </label>
             <input
@@ -257,12 +257,12 @@ export const MCPServersPanel: React.FC = () => {
                 setForm((f) => ({ ...f, bearer_token: e.target.value }))
               }
               placeholder={t('mcp.tokenPlaceholder')}
-              className="w-full px-2 py-1 text-sm rounded bg-zinc-900 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-blue-600"
+              className="w-full px-2 py-1 text-sm rounded bg-ink-900 border border-ink-800 text-ink-200 focus:outline-none focus:border-blue-600"
             />
           </div>
 
           <div>
-            <label className="block text-[11px] text-zinc-500 mb-1">
+            <label className="block text-[11px] text-ink-500 mb-1">
               {t('mcp.descriptionLabel')}
             </label>
             <input
@@ -272,11 +272,11 @@ export const MCPServersPanel: React.FC = () => {
                 setForm((f) => ({ ...f, description: e.target.value }))
               }
               placeholder={t('mcp.descriptionPlaceholder')}
-              className="w-full px-2 py-1 text-sm rounded bg-zinc-900 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-blue-600"
+              className="w-full px-2 py-1 text-sm rounded bg-ink-900 border border-ink-800 text-ink-200 focus:outline-none focus:border-blue-600"
             />
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+          <label className="flex items-center gap-2 text-xs text-ink-400 cursor-pointer">
             <input
               type="checkbox"
               checked={form.enabled}
@@ -301,7 +301,7 @@ export const MCPServersPanel: React.FC = () => {
               type="button"
               disabled={submitting}
               onClick={cancelForm}
-              className="flex items-center gap-1 px-3 py-1 text-xs rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1 px-3 py-1 text-xs rounded bg-ink-800 hover:bg-ink-700 text-ink-300 transition-colors disabled:opacity-50"
             >
               <X className="w-3 h-3" />
               {t('mcp.cancel')}
@@ -313,28 +313,28 @@ export const MCPServersPanel: React.FC = () => {
       {/* List */}
       <div className="flex-1 overflow-y-auto">
         {loading && items.length === 0 ? (
-          <div className="text-center py-8 text-xs text-zinc-500">Loading...</div>
+          <div className="text-center py-8 text-xs text-ink-500">Loading...</div>
         ) : items.length === 0 ? (
-          <div className="text-center py-12 text-sm text-zinc-500">
+          <div className="text-center py-12 text-sm text-ink-500">
             <Plug className="w-8 h-8 mx-auto mb-2 opacity-30" />
             <p>{t('mcp.emptyTitle')}</p>
-            <p className="text-xs text-zinc-600 mt-1">
+            <p className="text-xs text-ink-600 mt-1">
               {t('mcp.emptyHint')}
             </p>
           </div>
         ) : (
-          <ul className="divide-y divide-zinc-800">
+          <ul className="divide-y divide-ink-800">
             {items.map((server) => (
               <li
                 key={server.id}
-                className="px-4 py-3 hover:bg-zinc-900/40 transition-colors"
+                className="px-4 py-3 hover:bg-ink-900/40 transition-colors"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span
                         className={`text-sm font-medium ${
-                          server.enabled ? 'text-zinc-200' : 'text-zinc-500'
+                          server.enabled ? 'text-ink-200' : 'text-ink-500'
                         }`}
                       >
                         {server.name}
@@ -346,16 +346,16 @@ export const MCPServersPanel: React.FC = () => {
                         />
                       )}
                       {!server.enabled && (
-                        <span className="text-[10px] uppercase text-zinc-600 tracking-wider">
+                        <span className="text-[10px] uppercase text-ink-600 tracking-wider">
                           {t('mcp.disabledLabel')}
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-zinc-500 truncate mt-0.5">
+                    <div className="text-xs text-ink-500 truncate mt-0.5">
                       {server.url}
                     </div>
                     {server.description && (
-                      <div className="text-xs text-zinc-600 mt-0.5 italic">
+                      <div className="text-xs text-ink-600 mt-0.5 italic">
                         {server.description}
                       </div>
                     )}
@@ -364,19 +364,19 @@ export const MCPServersPanel: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleToggleEnabled(server)}
-                      className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+                      className="p-1.5 rounded hover:bg-ink-800 transition-colors"
                       title={server.enabled ? t('mcp.disable') : t('mcp.enable')}
                     >
                       {server.enabled ? (
                         <Power className="w-3.5 h-3.5 text-green-500" />
                       ) : (
-                        <PowerOff className="w-3.5 h-3.5 text-zinc-500" />
+                        <PowerOff className="w-3.5 h-3.5 text-ink-500" />
                       )}
                     </button>
                     <button
                       type="button"
                       onClick={() => startEdit(server)}
-                      className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+                      className="p-1.5 rounded hover:bg-ink-800 text-ink-500 hover:text-ink-300 transition-colors"
                       title={t('mcp.edit')}
                     >
                       <Edit3 className="w-3.5 h-3.5" />
@@ -384,7 +384,7 @@ export const MCPServersPanel: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleDelete(server)}
-                      className="p-1.5 rounded hover:bg-red-900/30 text-zinc-500 hover:text-red-400 transition-colors"
+                      className="p-1.5 rounded hover:bg-red-900/30 text-ink-500 hover:text-red-400 transition-colors"
                       title={t('mcp.delete')}
                     >
                       <Trash2 className="w-3.5 h-3.5" />

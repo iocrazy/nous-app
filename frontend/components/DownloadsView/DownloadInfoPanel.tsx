@@ -79,14 +79,14 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
     <>
       {/* Info Panel */}
       <div
-        className={`hidden md:flex fixed top-14 bottom-0 right-0 z-40 bg-zinc-900 border-l border-zinc-800 transition-transform duration-300 ease-in-out shadow-2xl ${
+        className={`hidden md:flex fixed top-14 bottom-0 right-0 z-40 bg-ink-900 border-l border-ink-800 transition-transform duration-300 ease-in-out shadow-2xl ${
           showInfoPanel ? 'translate-x-0' : 'translate-x-full'
         }`}
         style={{ width: `${infoPanelWidth}px` }}
       >
         <button
           onClick={() => onTogglePanel(false)}
-          className="absolute -left-10 bottom-8 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-colors z-10"
+          className="absolute -left-10 bottom-8 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl flex items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-colors z-10"
         >
           <ChevronRight size={20} />
         </button>
@@ -98,11 +98,11 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
 
         <div className="flex-1 overflow-y-auto">
           {/* Header */}
-          <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2 border-b border-zinc-800/80 bg-zinc-900">
-            <h3 className="text-sm font-semibold text-white truncate">{t('resources.details', 'Details')}</h3>
+          <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2 border-b border-ink-800/80 bg-ink-900">
+            <h3 className="text-sm font-semibold text-ink-50 truncate">{t('resources.details', 'Details')}</h3>
             <button
               onClick={onClose}
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
             >
               <X size={16} />
             </button>
@@ -119,18 +119,18 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
-                <MonitorPlay size={32} className="text-zinc-700" />
+                <MonitorPlay size={32} className="text-ink-700" />
               </div>
             )}
           </div>
 
           {/* Title */}
           <div className="px-4 mt-4">
-            <h4 className="text-sm font-medium text-white break-words leading-snug">
+            <h4 className="text-sm font-medium text-ink-50 break-words leading-snug">
               {selectedVideo.title || 'Untitled'}
             </h4>
             {selectedVideo.description && (
-              <p className="mt-1.5 text-xs text-zinc-500 line-clamp-3">
+              <p className="mt-1.5 text-xs text-ink-500 line-clamp-3">
                 {selectedVideo.description}
               </p>
             )}
@@ -150,12 +150,12 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {/* Platform hashtags (read-only) */}
           {selectedVideo?.hashtags && (
             <div className="px-4 mt-3">
-              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+              <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
                 Platform Tags
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {selectedVideo.hashtags.split(/\s+/).filter(h => h.startsWith('#') && h.length > 1).map((ht, i) => (
-                  <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-zinc-800/50 text-zinc-500 border border-zinc-700/50">
+                  <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-ink-800/50 text-ink-500 border border-ink-700/50">
                     {ht}
                   </span>
                 ))}
@@ -165,7 +165,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
 
           {/* Rating */}
           <div className="px-4 mt-4">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+            <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
               Rating
             </h4>
             <div className="flex items-center gap-0.5">
@@ -181,7 +181,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                     size={16}
                     className={(panelHoverRating || panelRating) >= star
                       ? 'text-amber-400 fill-amber-400'
-                      : 'text-zinc-600'}
+                      : 'text-ink-600'}
                   />
                 </button>
               ))}
@@ -191,7 +191,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           {/* Notes */}
           {selectedResourceData && (
             <div className="px-4 mt-4">
-              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
+              <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-1.5">
                 Notes
               </h4>
               <textarea
@@ -199,7 +199,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                 onChange={e => onNotesChange(e.target.value)}
                 onBlur={onNotesBlur}
                 placeholder="Add notes..."
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 placeholder-zinc-600 resize-none min-h-[60px] focus:outline-none focus:border-zinc-600 transition-colors"
+                className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-xs text-ink-300 placeholder-ink-600 resize-none min-h-[60px] focus:outline-none focus:border-ink-600 transition-colors"
                 rows={3}
               />
             </div>
@@ -207,8 +207,8 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
 
           {/* AI Status */}
           {(selectedVideo.transcript_status || selectedVideo.summary_status || selectedVideo.visual_analysis_status) && (
-            <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-              <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+            <div className="px-4 mt-4 border-t border-ink-800/60 pt-3">
+              <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
                 AI
               </h4>
               <div className="space-y-1.5">
@@ -216,7 +216,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                   <div className="flex items-center justify-between py-1">
                     <div className="flex items-center gap-2">
                       <Brain size={12} className="text-indigo-400" />
-                      <span className="text-xs text-zinc-400">Transcript</span>
+                      <span className="text-xs text-ink-400">Transcript</span>
                     </div>
                     <AIStatusBadge status={selectedVideo.transcript_status} />
                   </div>
@@ -225,7 +225,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                   <div className="flex items-center justify-between py-1">
                     <div className="flex items-center gap-2">
                       <Sparkles size={12} className="text-indigo-400" />
-                      <span className="text-xs text-zinc-400">Summary</span>
+                      <span className="text-xs text-ink-400">Summary</span>
                     </div>
                     <AIStatusBadge status={selectedVideo.summary_status} />
                   </div>
@@ -234,7 +234,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                   <div className="flex items-center justify-between py-1">
                     <div className="flex items-center gap-2">
                       <Eye size={12} className="text-purple-400" />
-                      <span className="text-xs text-zinc-400">Visual Analysis</span>
+                      <span className="text-xs text-ink-400">Visual Analysis</span>
                     </div>
                     <AIStatusBadge status={selectedVideo.visual_analysis_status} />
                   </div>
@@ -244,45 +244,45 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           )}
 
           {/* Properties */}
-          <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-            <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+          <div className="px-4 mt-4 border-t border-ink-800/60 pt-3">
+            <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
               Properties
             </h4>
             <div className="space-y-0">
               {selectedVideo.author && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className="text-xs text-zinc-500">Author</span>
-                  <span className="text-xs text-zinc-300">@{selectedVideo.author}</span>
+                  <span className="text-xs text-ink-500">Author</span>
+                  <span className="text-xs text-ink-300">@{selectedVideo.author}</span>
                 </div>
               )}
               {selectedVideo.duration && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className="text-xs text-zinc-500">Duration</span>
-                  <span className="text-xs text-zinc-300">{selectedVideo.duration}s</span>
+                  <span className="text-xs text-ink-500">Duration</span>
+                  <span className="text-xs text-ink-300">{selectedVideo.duration}s</span>
                 </div>
               )}
               {selectedVideo.resolution && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className="text-xs text-zinc-500">Resolution</span>
-                  <span className="text-xs text-zinc-300">{formatResolution(selectedVideo.resolution)}</span>
+                  <span className="text-xs text-ink-500">Resolution</span>
+                  <span className="text-xs text-ink-300">{formatResolution(selectedVideo.resolution)}</span>
                 </div>
               )}
               {selectedVideo.datasize && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className="text-xs text-zinc-500">Size</span>
-                  <span className="text-xs text-zinc-300">{selectedVideo.datasize}</span>
+                  <span className="text-xs text-ink-500">Size</span>
+                  <span className="text-xs text-ink-300">{selectedVideo.datasize}</span>
                 </div>
               )}
               {selectedVideo.source_platform && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className="text-xs text-zinc-500">Platform</span>
-                  <span className="text-xs text-zinc-300 capitalize">{selectedVideo.source_platform}</span>
+                  <span className="text-xs text-ink-500">Platform</span>
+                  <span className="text-xs text-ink-300 capitalize">{selectedVideo.source_platform}</span>
                 </div>
               )}
               {selectedVideo.published_at && (
                 <div className="flex justify-between items-center py-1.5">
-                  <span className="text-xs text-zinc-500">Published</span>
-                  <span className="text-xs text-zinc-300">{formatDate(selectedVideo.published_at)}</span>
+                  <span className="text-xs text-ink-500">Published</span>
+                  <span className="text-xs text-ink-300">{formatDate(selectedVideo.published_at)}</span>
                 </div>
               )}
             </div>
@@ -297,7 +297,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
       {!showInfoPanel && (
         <button
           onClick={() => onTogglePanel(true)}
-          className="hidden md:flex fixed bottom-8 right-0 w-10 h-12 bg-zinc-900 border-l border-y border-zinc-800 rounded-l-xl items-center justify-center text-zinc-400 hover:text-white cursor-pointer hover:bg-zinc-800 transition-all z-50"
+          className="hidden md:flex fixed bottom-8 right-0 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-all z-50"
         >
           <ChevronLeft size={20} />
         </button>

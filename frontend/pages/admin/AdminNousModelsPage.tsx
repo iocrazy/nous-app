@@ -182,13 +182,13 @@ export function AdminNousModelsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen bg-ink-950 text-ink-100">
       <div className="max-w-6xl mx-auto px-6 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
         {/* Header */}
         <div className="flex items-center gap-4 mb-2">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="p-2 rounded-lg text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors"
           >
             <ArrowLeft size={18} />
           </button>
@@ -197,15 +197,15 @@ export function AdminNousModelsPage() {
               <Brain size={20} className="text-indigo-400" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white">Nous Models</h1>
-              <p className="text-xs text-zinc-500">Manage AI model configurations</p>
+              <h1 className="text-xl font-bold text-ink-50">Nous Models</h1>
+              <p className="text-xs text-ink-500">Manage AI model configurations</p>
             </div>
           </div>
         </div>
 
         {/* Toolbar */}
         <div className="flex items-center justify-between mb-6 mt-6">
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-ink-500">
             {models.length} model{models.length !== 1 ? 's' : ''} configured
           </p>
           <button onClick={openCreate}
@@ -218,72 +218,72 @@ export function AdminNousModelsPage() {
         {/* Table */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 size={28} className="animate-spin text-zinc-500" />
+            <Loader2 size={28} className="animate-spin text-ink-500" />
           </div>
         ) : models.length === 0 ? (
           <div className="text-center py-20">
-            <Brain size={40} className="mx-auto text-zinc-700 mb-3" />
-            <p className="text-zinc-500 text-sm">No models configured yet</p>
+            <Brain size={40} className="mx-auto text-ink-700 mb-3" />
+            <p className="text-ink-500 text-sm">No models configured yet</p>
             <button onClick={openCreate}
               className="mt-4 text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
               Add your first model
             </button>
           </div>
         ) : (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+          <div className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-zinc-800 text-left">
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Name</th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Category</th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Provider : Model</th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">API Key</th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Pricing</th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider text-center">Enabled</th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider text-right">Actions</th>
+                <tr className="border-b border-ink-800 text-left">
+                  <th className="px-4 py-3 text-xs font-medium text-ink-500 uppercase tracking-wider">Name</th>
+                  <th className="px-4 py-3 text-xs font-medium text-ink-500 uppercase tracking-wider">Category</th>
+                  <th className="px-4 py-3 text-xs font-medium text-ink-500 uppercase tracking-wider">Provider : Model</th>
+                  <th className="px-4 py-3 text-xs font-medium text-ink-500 uppercase tracking-wider">API Key</th>
+                  <th className="px-4 py-3 text-xs font-medium text-ink-500 uppercase tracking-wider">Pricing</th>
+                  <th className="px-4 py-3 text-xs font-medium text-ink-500 uppercase tracking-wider text-center">Enabled</th>
+                  <th className="px-4 py-3 text-xs font-medium text-ink-500 uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody className="divide-y divide-ink-800/50">
                 {models.map((model) => (
-                  <tr key={model.id} className="hover:bg-zinc-800/30 transition-colors">
+                  <tr key={model.id} className="hover:bg-ink-800/30 transition-colors">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-zinc-200">{model.display_name}</div>
-                      <div className="text-xs text-zinc-500 mt-0.5">{model.name}</div>
+                      <div className="font-medium text-ink-200">{model.display_name}</div>
+                      <div className="text-xs text-ink-500 mt-0.5">{model.name}</div>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full border ${CATEGORY_COLORS[model.category] ?? ''}`}>
                         {CATEGORY_LABELS[model.category] ?? model.category}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-zinc-300">
-                      <span className="text-zinc-400">{model.actual_provider}</span>
-                      <span className="text-zinc-600 mx-1">:</span>
+                    <td className="px-4 py-3 text-ink-300">
+                      <span className="text-ink-400">{model.actual_provider}</span>
+                      <span className="text-ink-600 mx-1">:</span>
                       <span>{model.actual_model}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <code className="text-xs text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
+                      <code className="text-xs text-ink-500 bg-ink-800 px-1.5 py-0.5 rounded">
                         {model.api_key_masked}
                       </code>
                     </td>
-                    <td className="px-4 py-3 text-zinc-300">
+                    <td className="px-4 py-3 text-ink-300">
                       <span className="font-mono">{model.pricing_value}</span>
-                      <span className="text-zinc-500 text-xs ml-1">{PRICING_LABELS[model.pricing_type] ?? ''}</span>
+                      <span className="text-ink-500 text-xs ml-1">{PRICING_LABELS[model.pricing_type] ?? ''}</span>
                     </td>
                     <td className="px-4 py-3 text-center">
                       <button onClick={() => handleToggleEnabled(model)} className="inline-flex">
                         {model.is_enabled
                           ? <ToggleRight size={22} className="text-indigo-400" />
-                          : <ToggleLeft size={22} className="text-zinc-600" />}
+                          : <ToggleLeft size={22} className="text-ink-600" />}
                       </button>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button onClick={() => openEdit(model)}
-                          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
+                          className="p-1.5 rounded-lg text-ink-500 hover:text-ink-200 hover:bg-ink-800 transition-colors">
                           <Pencil size={15} />
                         </button>
                         <button onClick={() => handleDelete(model)}
-                          className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                          className="p-1.5 rounded-lg text-ink-500 hover:text-red-400 hover:bg-red-500/10 transition-colors">
                           <Trash2 size={15} />
                         </button>
                       </div>

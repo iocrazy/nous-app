@@ -530,7 +530,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const frameNumber = Math.floor((currentTime || 0) * effectiveFps);
 
   if (authError) {
-    return <ErrorPage code={authError} className="bg-zinc-950 rounded-lg" />;
+    return <ErrorPage code={authError} className="bg-ink-950 rounded-lg" />;
   }
 
   return (
@@ -554,14 +554,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* Loading spinner */}
       {isLoading && !loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
-          <div className="w-10 h-10 border-3 border-zinc-600 border-t-white rounded-full animate-spin" />
+          <div className="w-10 h-10 border-3 border-ink-600 border-t-white rounded-full animate-spin" />
         </div>
       )}
 
       {/* Error overlay */}
       {loadError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 pointer-events-none">
-          <p className="text-zinc-400 text-sm">{loadError}</p>
+          <p className="text-ink-400 text-sm">{loadError}</p>
         </div>
       )}
 
@@ -582,7 +582,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             onChange={handleSeek}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
           />
-          <div className="w-full h-1 group-hover/seek:h-1.5 bg-zinc-700 rounded-full transition-all relative">
+          <div className="w-full h-1 group-hover/seek:h-1.5 bg-ink-700 rounded-full transition-all relative">
             <div
               className="h-full bg-white rounded-full transition-all relative"
               style={{ width: `${seekProgress}%` }}
@@ -609,7 +609,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {!isPlaying && (
             <button
               onClick={() => stepFrame(-1)}
-              className="p-1.5 text-zinc-400 hover:text-white transition-colors"
+              className="p-1.5 text-ink-400 hover:text-white transition-colors"
               aria-label="Previous Frame"
               title="Previous Frame (,)"
             >
@@ -620,7 +620,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {/* Play / Pause */}
           <button
             onClick={togglePlayPause}
-            className="p-1.5 text-white hover:text-zinc-300 transition-colors"
+            className="p-1.5 text-white hover:text-ink-300 transition-colors"
             aria-label={isPlaying ? 'Pause' : 'Play'}
           >
             {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
@@ -630,7 +630,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {!isPlaying && (
             <button
               onClick={() => stepFrame(1)}
-              className="p-1.5 text-zinc-400 hover:text-white transition-colors"
+              className="p-1.5 text-ink-400 hover:text-white transition-colors"
               aria-label="Next Frame"
               title="Next Frame (.)"
             >
@@ -642,7 +642,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="flex items-center gap-1 group/vol">
             <button
               onClick={toggleMute}
-              className="p-1.5 text-white hover:text-zinc-300 transition-colors"
+              className="p-1.5 text-white hover:text-ink-300 transition-colors"
               aria-label={isMuted ? 'Unmute' : 'Mute'}
             >
               {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
@@ -661,7 +661,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
 
           {/* Time display with frame number */}
-          <span className="text-xs font-mono text-zinc-300 select-none ml-1">
+          <span className="text-xs font-mono text-ink-300 select-none ml-1">
             {isPlaying ? (
               <>
                 {formatTime(currentTime)} / {formatTime(duration)}
@@ -669,7 +669,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             ) : (
               <>
                 {formatTimeWithFrames(currentTime, effectiveFps)}{' '}
-                <span className="text-zinc-500">[F{frameNumber}]</span>
+                <span className="text-ink-500">[F{frameNumber}]</span>
                 {' / '}
                 {formatTime(duration)}
               </>
@@ -689,13 +689,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             )}
             <button
               onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-              className="px-2 py-1 text-xs font-mono text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors"
+              className="px-2 py-1 text-xs font-mono text-ink-300 hover:text-white hover:bg-white/10 rounded transition-colors"
               title="Playback Speed"
             >
               {playbackRate === 1 ? '1.0x' : `${playbackRate}x`}
             </button>
             {showSpeedMenu && (
-              <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-lg shadow-xl py-1 min-w-[80px] z-20">
+              <div className="absolute bottom-full right-0 mb-2 bg-ink-900/95 backdrop-blur-sm border border-ink-700 rounded-lg shadow-xl py-1 min-w-[80px] z-20">
                 {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((rate) => (
                   <button
                     key={rate}
@@ -703,7 +703,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
                       playbackRate === rate
                         ? 'text-indigo-400 bg-indigo-500/10'
-                        : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                        : 'text-ink-300 hover:bg-ink-800 hover:text-white'
                     }`}
                   >
                     {rate}x
@@ -724,7 +724,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               )}
               <button
                 onClick={() => setShowQualityMenu(!showQualityMenu)}
-                className="px-2 py-1 text-xs font-mono text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
+                className="px-2 py-1 text-xs font-mono text-ink-300 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
                 title="Quality"
               >
                 {isOriginalMode
@@ -738,13 +738,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       : 'Auto'}
               </button>
               {showQualityMenu && (
-                <div className="absolute bottom-full right-0 mb-2 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700 rounded-lg shadow-xl py-1 min-w-[100px] z-20">
+                <div className="absolute bottom-full right-0 mb-2 bg-ink-900/95 backdrop-blur-sm border border-ink-700 rounded-lg shadow-xl py-1 min-w-[100px] z-20">
                   <button
                     onClick={() => changeQuality(-1)}
                     className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
                       isAutoQuality && !isOriginalMode
                         ? 'text-indigo-400 bg-indigo-500/10'
-                        : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                        : 'text-ink-300 hover:bg-ink-800 hover:text-white'
                     }`}
                   >
                     Auto
@@ -760,7 +760,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
                           !isAutoQuality && !isOriginalMode && currentHlsLevel === idx
                             ? 'text-indigo-400 bg-indigo-500/10'
-                            : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                            : 'text-ink-300 hover:bg-ink-800 hover:text-white'
                         }`}
                       >
                         {level.height}p
@@ -772,7 +772,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
                         isOriginalMode
                           ? 'text-indigo-400 bg-indigo-500/10'
-                          : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                          : 'text-ink-300 hover:bg-ink-800 hover:text-white'
                       }`}
                     >
                       Original
@@ -782,7 +782,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               )}
             </div>
           ) : resolution ? (
-            <span className="px-2 py-1 text-xs font-mono text-zinc-400 select-none">
+            <span className="px-2 py-1 text-xs font-mono text-ink-400 select-none">
               {resolution.height >= 2160 ? '4K' : resolution.height >= 1080 ? '1080p' : resolution.height >= 720 ? '720p' : `${resolution.height}p`}
             </span>
           ) : null}
@@ -791,7 +791,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {onToggleShortcuts && (
             <button
               onClick={onToggleShortcuts}
-              className="p-1.5 text-zinc-400 hover:text-white transition-colors"
+              className="p-1.5 text-ink-400 hover:text-white transition-colors"
               aria-label="Keyboard Shortcuts"
               title="Keyboard Shortcuts (?)"
             >
@@ -802,7 +802,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {/* Fullscreen */}
           <button
             onClick={handleFullscreen}
-            className="p-1.5 text-white hover:text-zinc-300 transition-colors"
+            className="p-1.5 text-white hover:text-ink-300 transition-colors"
             aria-label="Fullscreen"
           >
             <Maximize size={16} />

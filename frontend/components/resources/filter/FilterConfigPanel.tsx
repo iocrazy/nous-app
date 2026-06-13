@@ -68,15 +68,15 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-full mt-1.5 z-40 w-64 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-2 animate-dropdown"
+      className="absolute right-0 top-full mt-1.5 z-40 w-64 bg-ink-900/95 backdrop-blur-sm border border-ink-700/80 rounded-xl shadow-2xl py-2 animate-dropdown"
       role="dialog"
       aria-label={t('resources.filter.filterConfig', 'Filter Settings')}
     >
-      <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+      <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-widest text-ink-500">
         {t('resources.filter.pinned', 'Pinned')}
       </div>
       {visiblePinned.length === 0 && (
-        <div className="px-3 py-2 text-xs text-zinc-500">
+        <div className="px-3 py-2 text-xs text-ink-500">
           {t('resources.filter.noneYet', 'None yet')}
         </div>
       )}
@@ -86,7 +86,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
         return (
           <div
             key={id}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-800/60 rounded-md mx-1"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-ink-200 hover:bg-ink-800/60 rounded-md mx-1"
           >
             <span className="flex-1 truncate px-1">{chipLabel(id)}</span>
             <button
@@ -94,7 +94,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
               onClick={() => onReorder(id, 'up')}
               disabled={!canMoveUp}
               aria-label={t('resources.filter.moveUp', 'Move up')}
-              className="p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-1 text-ink-400 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ArrowUp size={12} />
             </button>
@@ -103,7 +103,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
               onClick={() => onReorder(id, 'down')}
               disabled={!canMoveDown}
               aria-label={t('resources.filter.moveDown', 'Move down')}
-              className="p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-1 text-ink-400 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ArrowDown size={12} />
             </button>
@@ -111,7 +111,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
               type="button"
               onClick={() => onUnpin(id)}
               aria-label={t('resources.filter.unpin', 'Unpin')}
-              className="ml-1 p-1 text-zinc-400 hover:text-rose-300"
+              className="ml-1 p-1 text-ink-400 hover:text-rose-300"
               title={t('resources.filter.unpin', 'Unpin')}
             >
               <Minus size={12} />
@@ -120,27 +120,27 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
         );
       })}
 
-      <div className="mx-2.5 my-2 border-t border-zinc-700/60" />
+      <div className="mx-2.5 my-2 border-t border-ink-700/60" />
 
-      <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+      <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-ink-500">
         {t('resources.filter.available', 'Available')}
       </div>
       {visibleAvailable.length === 0 && (
-        <div className="px-3 py-2 text-xs text-zinc-500">
+        <div className="px-3 py-2 text-xs text-ink-500">
           {t('resources.filter.allPinned', 'All filters pinned')}
         </div>
       )}
       {visibleAvailable.map((id) => (
         <div
           key={id}
-          className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800/60 rounded-md mx-1"
+          className="flex items-center gap-1 px-2 py-1 text-xs text-ink-300 hover:bg-ink-800/60 rounded-md mx-1"
         >
           <span className="flex-1 truncate px-1">{chipLabel(id)}</span>
           <button
             type="button"
             onClick={() => onPin(id)}
             aria-label={t('resources.filter.pin', 'Pin')}
-            className="p-1 text-zinc-400 hover:text-indigo-300"
+            className="p-1 text-ink-400 hover:text-indigo-300"
             title={t('resources.filter.pin', 'Pin')}
           >
             <Plus size={12} />

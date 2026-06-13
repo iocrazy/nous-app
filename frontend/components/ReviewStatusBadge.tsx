@@ -10,7 +10,7 @@ const statusConfig = {
   pending: {
     icon: Clock,
     label: 'Pending',
-    className: 'bg-zinc-500/15 text-zinc-400',
+    className: 'bg-ink-500/15 text-ink-400',
   },
   approved: {
     icon: CheckCircle2,

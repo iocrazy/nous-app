@@ -123,8 +123,8 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-        <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-ink-800">
+        <div className="flex items-center gap-2 text-xs font-semibold text-ink-300">
           <History className="w-3.5 h-3.5 text-blue-400" />
           {t('versionHistory.title')}
           {currentVersion !== null && (
@@ -136,7 +136,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
         <button
           type="button"
           onClick={reload}
-          className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          className="p-1 rounded text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors"
           title={t('versionHistory.refresh')}
         >
           <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
@@ -146,23 +146,23 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
       {/* List */}
       <div className="flex-1 overflow-y-auto">
         {loading && items.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-zinc-500 text-center">
+          <div className="px-3 py-4 text-xs text-ink-500 text-center">
             {t('versionHistory.loading')}
           </div>
         ) : items.length === 0 ? (
-          <div className="px-3 py-6 text-xs text-zinc-500 text-center">
+          <div className="px-3 py-6 text-xs text-ink-500 text-center">
             <History className="w-6 h-6 mx-auto mb-2 opacity-30" />
             {t('versionHistory.empty')}
           </div>
         ) : (
-          <ul className="divide-y divide-zinc-800">
+          <ul className="divide-y divide-ink-800">
             {items.map((v) => {
               const isCurrent = v.version_number === currentVersion;
               const isExpanded = expandedId === v.id;
               return (
                 <li
                   key={v.id}
-                  className={`px-3 py-2 hover:bg-zinc-900/50 transition-colors ${
+                  className={`px-3 py-2 hover:bg-ink-900/50 transition-colors ${
                     isCurrent ? 'bg-blue-950/20' : ''
                   }`}
                 >
@@ -170,7 +170,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                     <button
                       type="button"
                       onClick={() => handleToggleExpand(v.id, v.version_number)}
-                      className="text-zinc-500 hover:text-zinc-300 mt-0.5"
+                      className="text-ink-500 hover:text-ink-300 mt-0.5"
                       title={isExpanded ? t('versionHistory.collapse') : t('versionHistory.expand')}
                     >
                       {isExpanded ? (
@@ -181,7 +181,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                     </button>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-xs">
-                        <span className="font-semibold text-zinc-200">
+                        <span className="font-semibold text-ink-200">
                           v{v.version_number}
                         </span>
                         {isCurrent && (
@@ -190,48 +190,48 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                           </span>
                         )}
                         {v.notes && (
-                          <span className="text-zinc-400 truncate italic">
+                          <span className="text-ink-400 truncate italic">
                             {v.notes}
                           </span>
                         )}
                       </div>
-                      <div className="text-[10px] text-zinc-500 mt-0.5">
+                      <div className="text-[10px] text-ink-500 mt-0.5">
                         {_fmtTime(v.created_at)}
                       </div>
                       {isExpanded && kind === 'agent' && (
-                        <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-zinc-500 bg-zinc-950/50 rounded p-2">
+                        <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-ink-500 bg-ink-950/50 rounded p-2">
                           <div>
-                            <div className="text-zinc-600">
+                            <div className="text-ink-600">
                               {t('aiLibrary.agents.modelLabel', 'Model')}
                             </div>
-                            <div className="text-zinc-300">{v.model ?? '—'}</div>
+                            <div className="text-ink-300">{v.model ?? '—'}</div>
                           </div>
                           <div>
-                            <div className="text-zinc-600">
+                            <div className="text-ink-600">
                               {t('aiLibrary.agents.temperatureLabel', 'Temperature')}
                             </div>
-                            <div className="text-zinc-300">{v.temperature ?? '—'}</div>
+                            <div className="text-ink-300">{v.temperature ?? '—'}</div>
                           </div>
                           <div>
-                            <div className="text-zinc-600">
+                            <div className="text-ink-600">
                               {t('aiLibrary.agents.maxTokensLabel', 'Max tokens')}
                             </div>
-                            <div className="text-zinc-300">{v.max_tokens ?? '—'}</div>
+                            <div className="text-ink-300">{v.max_tokens ?? '—'}</div>
                           </div>
                         </div>
                       )}
                       {isExpanded && kind === 'skill' && (
-                        <div className="mt-2 bg-zinc-950/50 rounded p-2">
+                        <div className="mt-2 bg-ink-950/50 rounded p-2">
                           {skillBodies[v.id]?.loading ? (
-                            <div className="text-[10px] text-zinc-500">
+                            <div className="text-[10px] text-ink-500">
                               {t('versionHistory.loading')}
                             </div>
                           ) : skillBodies[v.id]?.body ? (
-                            <pre className="text-[10px] text-zinc-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto font-mono">
+                            <pre className="text-[10px] text-ink-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto font-mono">
                               {skillBodies[v.id]?.body}
                             </pre>
                           ) : (
-                            <div className="text-[10px] text-zinc-500">
+                            <div className="text-[10px] text-ink-500">
                               {t('versionHistory.empty')}
                             </div>
                           )}
@@ -243,7 +243,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
                         type="button"
                         disabled={rollingBack === v.version_number}
                         onClick={() => handleRollback(v.version_number)}
-                        className="flex items-center gap-1 px-2 py-1 text-xs rounded text-zinc-400 hover:text-blue-300 hover:bg-blue-950/30 transition-colors disabled:opacity-40"
+                        className="flex items-center gap-1 px-2 py-1 text-xs rounded text-ink-400 hover:text-blue-300 hover:bg-blue-950/30 transition-colors disabled:opacity-40"
                         title={t('versionHistory.rollback')}
                       >
                         <RotateCcw className="w-3 h-3" />

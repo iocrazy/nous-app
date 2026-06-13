@@ -83,8 +83,8 @@ export const SearchScopePicker: React.FC<SearchScopePickerProps> = ({
     value.length === DEFAULT_SEARCH_FIELDS.length &&
     DEFAULT_SEARCH_FIELDS.every((f) => value.includes(f));
   const buttonClass = compact
-    ? 'p-1.5 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/40 transition-colors'
-    : 'p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors';
+    ? 'p-1.5 rounded-full text-ink-400 hover:text-ink-100 hover:bg-ink-800/40 transition-colors'
+    : 'p-1.5 rounded-lg text-ink-500 hover:text-ink-200 hover:bg-ink-800/80 transition-colors';
 
   return (
     <div ref={wrapRef} className="relative">
@@ -100,8 +100,8 @@ export const SearchScopePicker: React.FC<SearchScopePickerProps> = ({
         <Filter size={compact ? 14 : 14} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 min-w-[200px] rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl">
-          <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[200px] rounded-lg border border-ink-700 bg-ink-900 shadow-2xl">
+          <div className="px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-ink-500 border-b border-ink-800">
             {t('search.scopeHeader', 'Search Scope')}
           </div>
           <div className="py-1">
@@ -112,7 +112,7 @@ export const SearchScopePicker: React.FC<SearchScopePickerProps> = ({
                   key={field}
                   type="button"
                   onClick={() => toggle(field)}
-                  className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-zinc-200 hover:bg-zinc-800/60"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-ink-200 hover:bg-ink-800/60"
                 >
                   <span>
                     {t(`search.scope.${field}`, defaultLabel(field))}

@@ -12,12 +12,12 @@ interface FileCardProps {
 }
 
 const getFileIcon = (fileType: string | null) => {
-  if (!fileType) return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  if (!fileType) return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
   const ft = fileType.toLowerCase();
   if (ft === 'video' || ft.startsWith('video')) return { icon: Video, color: 'text-purple-400', bg: 'bg-purple-500/20' };
   if (ft === 'image' || ft.startsWith('image')) return { icon: Image, color: 'text-green-400', bg: 'bg-green-500/20' };
   if (ft === 'document' || ft === 'pdf' || ft === 'text') return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
-  return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
 };
 
 const formatFileSize = (bytes: number | null): string => {
@@ -69,8 +69,8 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
     return (
       <div
         onClick={handleClick}
-        className={`flex items-center gap-4 px-4 py-3 bg-zinc-800/60 hover:bg-zinc-800 border rounded-xl cursor-pointer transition-all duration-200 group ${
-          isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-zinc-700/30 hover:border-zinc-600'
+        className={`flex items-center gap-4 px-4 py-3 bg-ink-800/60 hover:bg-ink-800 border rounded-xl cursor-pointer transition-all duration-200 group ${
+          isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-ink-700/30 hover:border-ink-600'
         }`}
       >
         {onToggleSelect && (
@@ -79,7 +79,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
             className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center cursor-pointer transition-colors ${
               isSelected
                 ? 'bg-indigo-500 border-indigo-500 text-white'
-                : 'border-zinc-600 hover:border-zinc-400'
+                : 'border-ink-600 hover:border-ink-400'
             }`}
           >
             {isSelected && <span className="text-[10px] font-bold">✓</span>}
@@ -89,7 +89,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
           <IconComponent size={18} className={color} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors">
+          <p className="text-sm text-ink-50 truncate group-hover:text-indigo-300 transition-colors">
             {file.filename}
           </p>
         </div>
@@ -98,10 +98,10 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
             <StatusBadge status={file.review_status} />
           </div>
         )}
-        <div className="text-xs text-zinc-500 flex-shrink-0">
+        <div className="text-xs text-ink-500 flex-shrink-0">
           {formatFileSize(file.file_size_bytes)}
         </div>
-        <div className="text-xs text-zinc-500 flex-shrink-0 flex items-center gap-1">
+        <div className="text-xs text-ink-500 flex-shrink-0 flex items-center gap-1">
           <Clock size={12} />
           {formatDate(file.created_at)}
         </div>
@@ -112,8 +112,8 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
   return (
     <div
       onClick={handleClick}
-      className={`bg-zinc-800/80 hover:bg-zinc-800 border rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden relative ${
-        isSelected ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-zinc-700/50 hover:border-zinc-600'
+      className={`bg-ink-800/80 hover:bg-ink-800 border rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden relative ${
+        isSelected ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-ink-700/50 hover:border-ink-600'
       }`}
     >
       {/* Selection checkbox */}
@@ -123,7 +123,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
           className={`absolute top-2 left-2 z-10 w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-all ${
             isSelected
               ? 'bg-indigo-500 border-indigo-500 text-white opacity-100'
-              : 'border-zinc-500 opacity-0 group-hover:opacity-100 hover:border-zinc-300'
+              : 'border-ink-500 opacity-0 group-hover:opacity-100 hover:border-ink-300'
           }`}
         >
           {isSelected && <span className="text-[10px] font-bold">✓</span>}
@@ -135,10 +135,10 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
       </div>
       {/* Info */}
       <div className="p-3">
-        <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors font-medium">
+        <p className="text-sm text-ink-50 truncate group-hover:text-indigo-300 transition-colors font-medium">
           {file.filename}
         </p>
-        <div className="flex items-center justify-between mt-2 text-xs text-zinc-500">
+        <div className="flex items-center justify-between mt-2 text-xs text-ink-500">
           <span>{formatFileSize(file.file_size_bytes)}</span>
           {file.review_status ? (
             <StatusBadge status={file.review_status} />

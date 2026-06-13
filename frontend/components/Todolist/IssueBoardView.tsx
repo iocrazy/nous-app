@@ -17,9 +17,9 @@ interface IssueBoardViewProps {
   issues: UiIssue[];
 }
 
-const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-zinc-600', size = 18 }) => (
+const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 18 }) => (
   <span
-    className={`inline-flex items-center justify-center rounded-full text-[9px] font-semibold text-white ${color}`}
+    className={`inline-flex items-center justify-center rounded-full text-[9px] font-semibold text-ink-50 ${color}`}
     style={{ width: size, height: size }}
   >
     {initials}
@@ -31,17 +31,17 @@ const BoardCard: React.FC<{ issue: UiIssue; teamId: string }> = ({ issue, teamId
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
-      className="block p-2 mb-1.5 rounded border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-800/60 transition"
+      className="block p-2 mb-1.5 rounded border border-ink-800 bg-ink-900/60 hover:border-ink-700 hover:bg-ink-800/60 transition"
     >
       <div className="flex items-center gap-1.5 mb-1.5">
-        <span className="font-mono text-[9px] text-zinc-500 uppercase tracking-wider">{issue.identifier}</span>
+        <span className="font-mono text-[9px] text-ink-500 uppercase tracking-wider">{issue.identifier}</span>
         <span title={issue.priority} className="ml-auto"><PriorityIcon priority={issue.priority} /></span>
       </div>
-      <div className="text-[12px] text-zinc-100 mb-2 line-clamp-2 leading-snug">{issue.title}</div>
-      <div className="flex items-center gap-1.5 text-[9px] text-zinc-500">
+      <div className="text-[12px] text-ink-100 mb-2 line-clamp-2 leading-snug">{issue.title}</div>
+      <div className="flex items-center gap-1.5 text-[9px] text-ink-500">
         {issue.project && (
-          <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">
-            <span className={`w-1 h-1 rounded-full ${issue.project.color ?? 'bg-zinc-500'}`} />
+          <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded bg-ink-800 text-ink-400">
+            <span className={`w-1 h-1 rounded-full ${issue.project.color ?? 'bg-ink-500'}`} />
             {issue.project.name}
           </span>
         )}
@@ -71,16 +71,16 @@ export const IssueBoardView: React.FC<IssueBoardViewProps> = ({ issues }) => {
     <div className="flex gap-3 px-4 py-3 overflow-x-auto h-full">
       {grouped.map((g) => (
         <div key={g.status} className="flex-shrink-0 w-[260px] flex flex-col">
-          <div className="flex items-center gap-2 px-2 py-1.5 mb-2 border-b border-zinc-800/80 sticky top-0 bg-zinc-950/40 z-10">
+          <div className="flex items-center gap-2 px-2 py-1.5 mb-2 border-b border-ink-800/80 sticky top-0 bg-ink-950/40 z-10">
             <IssueStatusIcon status={g.status} size={11} />
-            <span className="text-[11px] font-medium text-zinc-300 uppercase tracking-wider">
+            <span className="text-[11px] font-medium text-ink-300 uppercase tracking-wider">
               {STATUS_LABEL[g.status]}
             </span>
-            <span className="text-[10px] text-zinc-500 ml-auto">{g.items.length}</span>
+            <span className="text-[10px] text-ink-500 ml-auto">{g.items.length}</span>
           </div>
           <div className="flex-1 overflow-y-auto pr-1">
             {g.items.length === 0 ? (
-              <div className="text-[10px] text-zinc-600 italic px-2 py-3 text-center">empty</div>
+              <div className="text-[10px] text-ink-600 italic px-2 py-3 text-center">empty</div>
             ) : (
               g.items.map((issue) => (
                 <BoardCard key={issue.id} issue={issue} teamId={teamId ?? ''} />

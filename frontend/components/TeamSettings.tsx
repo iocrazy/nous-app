@@ -180,7 +180,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       case 'admin':
         return <Shield size={14} className="text-indigo-400" />;
       default:
-        return <User size={14} className="text-zinc-500" />;
+        return <User size={14} className="text-ink-500" />;
     }
   };
 
@@ -200,7 +200,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
         );
       default:
         return (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-700/50 text-zinc-400 border border-zinc-600/30">
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-ink-700/50 text-ink-400 border border-ink-600/30">
             Member
           </span>
         );
@@ -225,18 +225,18 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       {/* Team Name */}
       {isOwner && (
         <div className="space-y-2">
-          <label className="text-sm font-medium text-zinc-400">Team Name</label>
+          <label className="text-sm font-medium text-ink-400">Team Name</label>
           <div className="flex gap-3">
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 focus:outline-none focus:border-indigo-500"
+              className="flex-1 bg-ink-900 border border-ink-800 rounded-lg px-4 py-3 text-ink-200 focus:outline-none focus:border-indigo-500"
             />
             <button
               onClick={handleSaveName}
               disabled={isSaving || name === teamName}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white rounded-lg font-medium transition-colors"
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-ink-800 disabled:text-ink-500 text-white rounded-lg font-medium transition-colors"
             >
               {isSaving ? <Loader2 size={16} className="animate-spin" /> : 'Save'}
             </button>
@@ -247,28 +247,28 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       {/* Team Consumption Stats (owner and admin only) */}
       {canViewStats && (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-ink-50 flex items-center gap-2">
             <BarChart3 size={18} />
             Team Consumption
           </h3>
-          <div className="border border-zinc-800 rounded-lg p-4 bg-zinc-900/30">
+          <div className="border border-ink-800 rounded-lg p-4 bg-ink-900/30">
             {isLoadingStats ? (
               <div className="flex items-center justify-center py-6">
-                <Loader2 className="animate-spin text-zinc-500" size={20} />
+                <Loader2 className="animate-spin text-ink-500" size={20} />
               </div>
             ) : (
               <div className="space-y-4">
                 {/* Summary row */}
                 <div className="flex items-center gap-6">
                   <div>
-                    <p className="text-xs text-zinc-500 uppercase font-medium">Points Used This Month</p>
-                    <p className="text-2xl font-bold text-white">
+                    <p className="text-xs text-ink-500 uppercase font-medium">Points Used This Month</p>
+                    <p className="text-2xl font-bold text-ink-50">
                       {usageStats?.total_consumed_this_month?.toLocaleString() ?? '0'}
                     </p>
                   </div>
                   {teamBalance !== null && (
                     <div>
-                      <p className="text-xs text-zinc-500 uppercase font-medium">Current Balance</p>
+                      <p className="text-xs text-ink-500 uppercase font-medium">Current Balance</p>
                       <p className="text-2xl font-bold text-indigo-400">
                         {teamBalance.toLocaleString()}
                       </p>
@@ -279,14 +279,14 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 {/* Top consumers */}
                 {usageStats?.top_consumers && usageStats.top_consumers.length > 0 && (
                   <div>
-                    <p className="text-xs text-zinc-500 uppercase font-medium mb-2">Top Consumers</p>
+                    <p className="text-xs text-ink-500 uppercase font-medium mb-2">Top Consumers</p>
                     <div className="space-y-1.5">
                       {usageStats.top_consumers.map((consumer: any, idx: number) => (
                         <div key={consumer.user_id || idx} className="flex items-center justify-between text-sm">
-                          <span className="text-zinc-300">
+                          <span className="text-ink-300">
                             {consumer.name || consumer.email || 'Unknown'}
                           </span>
-                          <span className="text-zinc-400 font-mono">
+                          <span className="text-ink-400 font-mono">
                             {consumer.points_used?.toLocaleString() ?? 0} pts
                           </span>
                         </div>
@@ -296,7 +296,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 )}
 
                 {!usageStats && (
-                  <p className="text-sm text-zinc-500">No consumption data available yet.</p>
+                  <p className="text-sm text-ink-500">No consumption data available yet.</p>
                 )}
               </div>
             )}
@@ -307,7 +307,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       {/* Members Section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-white">Members</h3>
+          <h3 className="text-lg font-semibold text-ink-50">Members</h3>
           {isOwner && (
             <button
               onClick={onOpenInviteModal}
@@ -321,30 +321,30 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
 
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="animate-spin text-zinc-500" size={24} />
+            <Loader2 className="animate-spin text-ink-500" size={24} />
           </div>
         ) : (
-          <div className="border border-zinc-800 rounded-lg overflow-hidden">
+          <div className="border border-ink-800 rounded-lg overflow-hidden">
             <table className="w-full">
-              <thead className="bg-zinc-900/50 border-b border-zinc-800">
+              <thead className="bg-ink-900/50 border-b border-ink-800">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Member</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Role</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Member</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Role</th>
                   {canViewStats && (
-                    <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Monthly Usage</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Monthly Usage</th>
                   )}
-                  <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase">Joined</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Joined</th>
                   {isOwner && (
-                    <th className="px-4 py-3 text-right text-xs font-medium text-zinc-500 uppercase">Actions</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-ink-500 uppercase">Actions</th>
                   )}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody className="divide-y divide-ink-800/50">
                 {members.map((member) => {
                   const { name, email, isCurrentUser } = getMemberDisplayInfo(member);
                   const usage = getMemberUsage(member.user_id);
                   return (
-                  <tr key={member.user_id} className="hover:bg-zinc-800/30">
+                  <tr key={member.user_id} className="hover:bg-ink-800/30">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
@@ -353,15 +353,15 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                           </span>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+                          <p className="text-sm font-medium text-ink-200 flex items-center gap-2">
                             <span>{name || email || 'Unknown'}</span>
                             {getRoleBadge(member.role)}
                             {isCurrentUser && (
-                              <span className="text-xs text-zinc-500">(You)</span>
+                              <span className="text-xs text-ink-500">(You)</span>
                             )}
                           </p>
                           {email && name && (
-                            <p className="text-xs text-zinc-500">{email}</p>
+                            <p className="text-xs text-ink-500">{email}</p>
                           )}
                         </div>
                       </div>
@@ -374,24 +374,24 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                             value={member.role}
                             onChange={(e) => handleRoleChange(member.user_id, e.target.value as 'admin' | 'member')}
                             disabled={updatingRoleFor === member.user_id}
-                            className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-300 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-50"
+                            className="bg-ink-800 border border-ink-700 rounded px-2 py-1 text-sm text-ink-300 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-50"
                           >
                             <option value="member">Member</option>
                             <option value="admin">Admin</option>
                           </select>
                           {updatingRoleFor === member.user_id && (
-                            <Loader2 size={12} className="animate-spin text-zinc-500" />
+                            <Loader2 size={12} className="animate-spin text-ink-500" />
                           )}
                         </div>
                       ) : (
-                        <span className="flex items-center gap-1.5 text-sm text-zinc-300">
+                        <span className="flex items-center gap-1.5 text-sm text-ink-300">
                           {getRoleIcon(member.role)}
                           {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
                         </span>
                       )}
                     </td>
                     {canViewStats && (
-                      <td className="px-4 py-3 text-sm text-zinc-400">
+                      <td className="px-4 py-3 text-sm text-ink-400">
                         {usage ? (
                           usage.monthly_limit !== null ? (
                             <span>
@@ -400,15 +400,15 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                           ) : (
                             <span>
                               {usage.points_used.toLocaleString()} points used
-                              <span className="ml-1 text-zinc-600">(Unlimited)</span>
+                              <span className="ml-1 text-ink-600">(Unlimited)</span>
                             </span>
                           )
                         ) : (
-                          <span className="text-zinc-600">--</span>
+                          <span className="text-ink-600">--</span>
                         )}
                       </td>
                     )}
-                    <td className="px-4 py-3 text-sm text-zinc-500">
+                    <td className="px-4 py-3 text-sm text-ink-500">
                       {new Date(member.joined_at).toLocaleDateString()}
                     </td>
                     {isOwner && (
@@ -416,7 +416,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                         {member.role !== 'owner' && (
                           <button
                             onClick={() => handleRemoveMember(member.user_id)}
-                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                            className="p-1.5 text-ink-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -428,7 +428,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 })}
                 {members.length === 0 && (
                   <tr>
-                    <td colSpan={isOwner ? (canViewStats ? 5 : 4) : (canViewStats ? 4 : 3)} className="px-4 py-8 text-center text-zinc-500">
+                    <td colSpan={isOwner ? (canViewStats ? 5 : 4) : (canViewStats ? 4 : 3)} className="px-4 py-8 text-center text-ink-500">
                       No members found
                     </td>
                   </tr>
@@ -440,7 +440,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       </div>
 
       {/* Danger Zone */}
-      <div className="border-t border-zinc-800 pt-8">
+      <div className="border-t border-ink-800 pt-8">
         <h3 className="text-lg font-semibold text-red-400 mb-4 flex items-center gap-2">
           <AlertTriangle size={18} />
           Danger Zone
@@ -451,8 +451,8 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
           <div className="p-4 border border-red-500/20 bg-red-500/5 rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="font-medium text-zinc-200">Delete Team</h4>
-                <p className="text-sm text-zinc-500">
+                <h4 className="font-medium text-ink-200">Delete Team</h4>
+                <p className="text-sm text-ink-500">
                   Permanently delete this team and all its data
                 </p>
               </div>
@@ -465,21 +465,21 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
             </div>
 
             {showDeleteConfirm && (
-              <div className="mt-4 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                <p className="text-sm text-zinc-300 mb-3">
-                  Type <strong className="text-white">{teamName}</strong> to confirm:
+              <div className="mt-4 p-4 bg-ink-900 border border-ink-800 rounded-lg">
+                <p className="text-sm text-ink-300 mb-3">
+                  Type <strong className="text-ink-50">{teamName}</strong> to confirm:
                 </p>
                 <input
                   type="text"
                   value={deleteConfirmText}
                   onChange={(e) => setDeleteConfirmText(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-200 focus:outline-none focus:border-red-500 mb-3"
+                  className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2 text-ink-200 focus:outline-none focus:border-red-500 mb-3"
                 />
                 <div className="flex gap-3">
                   <button
                     onClick={handleDeleteTeam}
                     disabled={deleteConfirmText !== teamName || isDeleting}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-ink-800 disabled:text-ink-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                   >
                     {isDeleting && <Loader2 size={14} className="animate-spin" />}
                     Delete Forever
@@ -489,7 +489,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                       setShowDeleteConfirm(false);
                       setDeleteConfirmText('');
                     }}
-                    className="px-4 py-2 text-zinc-400 hover:text-white transition-colors"
+                    className="px-4 py-2 text-ink-400 hover:text-ink-50 transition-colors"
                   >
                     Cancel
                   </button>
@@ -499,11 +499,11 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
           </div>
         ) : (
           // Leave Team
-          <div className="p-4 border border-zinc-800 bg-zinc-900/50 rounded-lg">
+          <div className="p-4 border border-ink-800 bg-ink-900/50 rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="font-medium text-zinc-200">Leave Team</h4>
-                <p className="text-sm text-zinc-500">
+                <h4 className="font-medium text-ink-200">Leave Team</h4>
+                <p className="text-sm text-ink-500">
                   Remove yourself from this team
                 </p>
               </div>
@@ -517,8 +517,8 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
             </div>
 
             {showLeaveConfirm && (
-              <div className="mt-4 p-4 bg-zinc-950 border border-zinc-800 rounded-lg">
-                <p className="text-sm text-zinc-300 mb-4">
+              <div className="mt-4 p-4 bg-ink-950 border border-ink-800 rounded-lg">
+                <p className="text-sm text-ink-300 mb-4">
                   Are you sure you want to leave <strong>{teamName}</strong>?
                 </p>
                 <div className="flex gap-3">
@@ -532,7 +532,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                   </button>
                   <button
                     onClick={() => setShowLeaveConfirm(false)}
-                    className="px-4 py-2 text-zinc-400 hover:text-white transition-colors"
+                    className="px-4 py-2 text-ink-400 hover:text-ink-50 transition-colors"
                   >
                     Cancel
                   </button>

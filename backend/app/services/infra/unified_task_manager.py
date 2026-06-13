@@ -236,6 +236,25 @@ class UnifiedTaskManager:
             "dbos_workflow_id", task_id
         ).execute()
 
+    async def patch_metadata(self, task_id: str, patch: Dict[str, Any]) -> None:
+        """Merge ``patch`` into task_tracking.metadata.
+
+        metadata is a shared business-decorated jsonb column — always
+        read-merge-write, never replace wholesale (same rule as
+        user_settings.settings_json, see #485)."""
+        client = await self._get_client()
+        existing = (
+            await client.table("task_tracking")
+            .select("metadata")
+            .eq("dbos_workflow_id", task_id)
+            .maybe_single()
+            .execute()
+        )
+        current = ((existing.data if existing else None) or {}).get("metadata") or {}
+        await client.table("task_tracking").update(
+            {"metadata": {**current, **patch}}
+        ).eq("dbos_workflow_id", task_id).execute()
+
     async def _row_exists(self, task_id: str) -> bool:
         """Return True if a task_tracking row exists for this workflow id.
 
@@ -888,8 +907,24 @@ class UnifiedTaskManager:
         result = await query.execute()
         return len(result.data or [])
 
-    async def retry_task(self, task_id: str, user_id: str) -> Optional[dict]:
-        """Reset a failed task for retry (phase -> QUEUED)."""
+    async def retry_task(
+        self,
+        task_id: str,
+        user_id: str,
+        *,
+        new_workflow_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Reset a failed task for retry (phase -> QUEUED).
+
+        'lost' is retryable too — the sweeper's lost message explicitly
+        tells the user to Retry, so refusing it here was a dead end.
+
+        ``new_workflow_id`` re-keys the row to a fresh DBOS workflow_uuid.
+        Without it the row keeps pointing at the OLD (terminal) workflow:
+        the lifecycle trigger never fires for it again and the sweeper
+        marks the row lost once more an hour later — the "Retry doesn't
+        actually retry" half of the 3-layer observability bug. Callers
+        that re-dispatch MUST pass the id they dispatch with."""
         client = await self._get_client()
         result = await (
             client.table("task_tracking")
@@ -900,22 +935,25 @@ class UnifiedTaskManager:
             .execute()
         )
         task = result.data
-        if not task or task["status"] not in ("failed", "cancelled"):
+        if not task or task["status"] not in ("failed", "cancelled", "lost"):
             return None
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        await client.table("task_tracking").update(
-            {
-                "phase": TaskPhase.QUEUED.value,
-                "status": "pending",
-                "progress": 0,
-                "error_msg": None,
-                "error_code": None,
-                "started_at": None,
-                "completed_at": None,
-                "updated_at": now_iso,
-            }
-        ).eq("dbos_workflow_id", task_id).execute()
+        update: Dict[str, Any] = {
+            "phase": TaskPhase.QUEUED.value,
+            "status": "pending",
+            "progress": 0,
+            "error_msg": None,
+            "error_code": None,
+            "started_at": None,
+            "completed_at": None,
+            "updated_at": now_iso,
+        }
+        if new_workflow_id:
+            update["dbos_workflow_id"] = new_workflow_id
+        await client.table("task_tracking").update(update).eq(
+            "dbos_workflow_id", task_id
+        ).execute()
 
         return task
 

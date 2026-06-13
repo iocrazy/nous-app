@@ -71,12 +71,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl py-1 min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
+      className="fixed z-50 bg-ink-900 border border-ink-700 rounded-lg shadow-2xl py-1 min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
       style={{ left: x, top: y }}
     >
       {items.map((item, idx) => (
         <React.Fragment key={idx}>
-          {item.divider && <div className="my-1 border-t border-zinc-700/50" />}
+          {item.divider && <div className="my-1 border-t border-ink-700/50" />}
           <button
             onClick={() => {
               if (!item.disabled) {
@@ -88,10 +88,10 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }
             className={`
               w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors
               ${item.disabled
-                ? 'text-zinc-600 cursor-not-allowed'
+                ? 'text-ink-600 cursor-not-allowed'
                 : item.danger
                   ? 'text-red-400 hover:bg-red-900/30 hover:text-red-300'
-                  : 'text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100'
+                  : 'text-ink-300 hover:bg-ink-800 hover:text-ink-100'
               }
             `}
           >

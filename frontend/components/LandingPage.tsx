@@ -11,8 +11,11 @@ interface LandingPageProps {
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetStarted }) => {
+  // Always-dark marketing page (literal bg-black). Pin the subtree to the dark
+  // palette so its theme-aware ink tokens keep resolving to their dark values
+  // for light-OS visitors (otherwise text-ink-100 inverts dark = invisible).
   return (
-    <div className="min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+    <div data-theme="dark" className="min-h-screen bg-black text-ink-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
       
       {/* Navbar */}
       {/* pt = iOS safe-area inset so the Log in / Get Started row clears the
@@ -24,7 +27,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
             <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
+            <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-ink-400">
               MediaHub
             </span>
           </div>
@@ -32,13 +35,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
           <div className="flex items-center gap-4">
             <button 
               onClick={onLoginClick}
-              className="px-5 py-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors"
+              className="px-5 py-2 text-sm font-medium text-ink-300 hover:text-white transition-colors"
             >
               Log in
             </button>
             <button 
               onClick={onGetStarted}
-              className="px-5 py-2 text-sm font-medium bg-white text-black rounded-full hover:bg-zinc-200 transition-colors shadow-lg shadow-white/10"
+              className="px-5 py-2 text-sm font-medium bg-white text-black rounded-full hover:bg-ink-200 transition-colors shadow-lg shadow-white/10"
             >
               Get Started
             </button>
@@ -66,7 +69,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
             </span>
           </h1>
           
-          <p className="text-lg md:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100">
+          <p className="text-lg md:text-xl text-ink-400 max-w-2xl mx-auto leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100">
             Parse, download, and organize content from social platforms with professional-grade tools. 
             Watermark-free downloads, batch processing, and detailed analytics.
           </p>
@@ -79,7 +82,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
               Start for free
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
-            <button className="w-full md:w-auto px-8 py-4 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 rounded-xl font-semibold transition-all flex items-center justify-center gap-2">
+            <button className="w-full md:w-auto px-8 py-4 bg-ink-900 hover:bg-ink-800 text-ink-200 border border-ink-800 rounded-xl font-semibold transition-all flex items-center justify-center gap-2">
               <PlayCircle className="w-4 h-4" />
               Watch Demo
             </button>
@@ -88,7 +91,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
       </section>
 
       {/* Feature Grid */}
-      <section className="py-20 bg-zinc-950/50 border-t border-white/5">
+      <section className="py-20 bg-ink-950/50 border-t border-white/5">
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <FeatureCard 
@@ -112,15 +115,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
 
       {/* Preview Section */}
       <section className="py-24 px-6 relative overflow-hidden">
-        <div className="max-w-6xl mx-auto bg-zinc-900 border border-zinc-800 rounded-2xl p-2 md:p-4 shadow-2xl relative z-10">
+        <div className="max-w-6xl mx-auto bg-ink-900 border border-ink-800 rounded-2xl p-2 md:p-4 shadow-2xl relative z-10">
            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-indigo-500/10 to-transparent pointer-events-none rounded-2xl" />
-           <div className="bg-black rounded-xl border border-zinc-800 overflow-hidden aspect-video relative flex items-center justify-center group cursor-default">
+           <div className="bg-black rounded-xl border border-ink-800 overflow-hidden aspect-video relative flex items-center justify-center group cursor-default">
               {/* Mock UI Representation */}
               <div className="text-center space-y-4 opacity-50 group-hover:opacity-100 transition-opacity">
-                 <div className="w-16 h-16 bg-zinc-800 rounded-full mx-auto flex items-center justify-center mb-4">
-                    <PlayCircle className="w-8 h-8 text-zinc-400" />
+                 <div className="w-16 h-16 bg-ink-800 rounded-full mx-auto flex items-center justify-center mb-4">
+                    <PlayCircle className="w-8 h-8 text-ink-400" />
                  </div>
-                 <p className="text-zinc-500 font-mono text-sm">Interactive Dashboard Preview</p>
+                 <p className="text-ink-500 font-mono text-sm">Interactive Dashboard Preview</p>
               </div>
            </div>
         </div>
@@ -129,13 +132,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
       {/* Footer */}
       <footer className="py-12 border-t border-white/5 bg-black">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="text-zinc-500 text-sm">
+          <div className="text-ink-500 text-sm">
             © 2024 MediaHub. All rights reserved.
           </div>
-          <div className="flex gap-6 text-zinc-500 text-sm">
-            <a href="#" className="hover:text-zinc-300">Privacy</a>
-            <a href="#" className="hover:text-zinc-300">Terms</a>
-            <a href="#" className="hover:text-zinc-300">Twitter</a>
+          <div className="flex gap-6 text-ink-500 text-sm">
+            <a href="#" className="hover:text-ink-300">Privacy</a>
+            <a href="#" className="hover:text-ink-300">Terms</a>
+            <a href="#" className="hover:text-ink-300">Twitter</a>
           </div>
         </div>
       </footer>
@@ -144,11 +147,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
 };
 
 const FeatureCard = ({ icon: Icon, title, desc }: { icon: any, title: string, desc: string }) => (
-  <div className="p-8 rounded-2xl bg-zinc-900/50 border border-white/5 hover:border-indigo-500/30 hover:bg-zinc-900 transition-all group">
-    <div className="w-12 h-12 bg-zinc-800 rounded-xl flex items-center justify-center mb-6 group-hover:bg-indigo-500/20 group-hover:text-indigo-400 transition-colors">
-      <Icon className="w-6 h-6 text-zinc-400 group-hover:text-indigo-400" />
+  <div className="p-8 rounded-2xl bg-ink-900/50 border border-white/5 hover:border-indigo-500/30 hover:bg-ink-900 transition-all group">
+    <div className="w-12 h-12 bg-ink-800 rounded-xl flex items-center justify-center mb-6 group-hover:bg-indigo-500/20 group-hover:text-indigo-400 transition-colors">
+      <Icon className="w-6 h-6 text-ink-400 group-hover:text-indigo-400" />
     </div>
-    <h3 className="text-xl font-semibold text-zinc-100 mb-3">{title}</h3>
-    <p className="text-zinc-400 leading-relaxed">{desc}</p>
+    <h3 className="text-xl font-semibold text-ink-100 mb-3">{title}</h3>
+    <p className="text-ink-400 leading-relaxed">{desc}</p>
   </div>
 );

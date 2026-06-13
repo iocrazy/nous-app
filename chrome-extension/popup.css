@@ -406,3 +406,211 @@ button:disabled {
   color: #a1a1aa;
   background: none;
 }
+
+/* Mode tabs */
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.mode-tab {
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #71717a;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.mode-tab:hover {
+  background: #27272a;
+  color: #a1a1aa;
+}
+
+.mode-tab.active {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+/* Scan view */
+body.scan-mode {
+  width: 560px;
+  max-height: 580px;
+}
+
+.scan-pickers {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.scan-pickers .field {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.scan-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #27272a;
+  border-radius: 6px;
+  background: #18181b;
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+}
+
+.scan-select:focus {
+  border-color: #6366f1;
+}
+
+.scan-select-small {
+  width: auto;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+.scan-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 10px 0 8px;
+}
+
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #a1a1aa;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.check-label input[type="checkbox"] {
+  width: auto;
+  accent-color: #6366f1;
+  cursor: pointer;
+}
+
+#autoTagRow {
+  margin: 10px 0 8px;
+}
+
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+  max-height: 290px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.image-grid::-webkit-scrollbar {
+  width: 4px;
+}
+
+.image-grid::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 2px;
+}
+
+.image-cell {
+  position: relative;
+  aspect-ratio: 1;
+  border: 2px solid #27272a;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #18181b;
+}
+
+.image-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-cell.selected {
+  border-color: #6366f1;
+  box-shadow: 0 0 6px rgba(99, 102, 241, 0.5);
+}
+
+.image-cell .dims {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #d4d4d8;
+  font-size: 10px;
+  text-align: right;
+  pointer-events: none;
+}
+
+.image-cell .checkmark {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #6366f1;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  display: none;
+  pointer-events: none;
+}
+
+.image-cell.selected .checkmark {
+  display: block;
+}
+
+.image-cell.load-error img {
+  visibility: hidden;
+}
+
+.image-cell.load-error::after {
+  content: "No preview";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #52525b;
+}
+
+/* Import progress */
+.import-progress {
+  margin-top: 8px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #27272a;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: #6366f1;
+  transition: width 0.2s;
+}

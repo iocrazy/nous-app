@@ -34,7 +34,7 @@ Timer safety guards (borrowed from openclaw cron/service/timer.ts:780)
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from dbos import DBOS
 from loguru import logger
@@ -44,9 +44,12 @@ _BATCH_SIZE = 100  # don't dispatch more than this per tick
 
 
 @DBOS.step()
-async def fire_due_schedules_step() -> Dict[str, int]:
+async def fire_due_schedules_step() -> Dict[str, Any]:
     """Scan user_schedules for due rows; dispatch each; advance
-    next_fire_at via croniter. Returns counters for telemetry."""
+    next_fire_at via croniter. Returns counters for telemetry plus
+    `orders` — routine dispatch orders the WORKFLOW body must start
+    (DBOS forbids start_workflow from inside a step — the empty-string
+    AssertionError of PR #495; never dispatch workflows in here)."""
     # Direct PG via SQLAlchemy engine (no httpx) — supabase-py's PostgREST
     # path leaked a CLOSE_WAIT connection per call (Issue #199 Bug C).
     from app.db import engine as db_engine
@@ -75,9 +78,12 @@ async def fire_due_schedules_step() -> Dict[str, int]:
 
     fired = 0
     errors = 0
+    orders: List[Dict[str, Any]] = []
     for row in rows:
         try:
-            await _dispatch_one(row)
+            order = await _dispatch_one(row)
+            if order is not None:
+                orders.append(order)
             fired += 1
         except Exception as exc:
             errors += 1
@@ -97,11 +103,13 @@ async def fire_due_schedules_step() -> Dict[str, int]:
             except Exception:
                 pass
 
-    return {"due": len(rows), "fired": fired, "errors": errors}
+    return {"due": len(rows), "fired": fired, "errors": errors, "orders": orders}
 
 
-async def _dispatch_one(row: Dict[str, Any]) -> None:
-    """Dispatch a single due row + advance its next_fire_at."""
+async def _dispatch_one(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Dispatch a single due row + advance its next_fire_at. Returns a
+    dispatch order for the workflow body when the row is an agent
+    routine (workflows can't be started from inside a step), else None."""
     task_type = row.get("task_type") or ""
     payload = row.get("payload") or {}
     user_id = row.get("user_id")
@@ -132,6 +140,14 @@ async def _dispatch_one(row: Dict[str, Any]) -> None:
             "id": sched_id,
         },
     )
+
+    # paperclip R1: agent routines don't dispatch a media workflow — a fire
+    # creates an issue assigned to the agent (origin_kind='routine') and
+    # returns a dispatch order; the WORKFLOW body starts execute_issue
+    # (start_workflow inside a step raises an empty AssertionError, #495).
+    # Handled before the generic task_type → workflow registry below.
+    if task_type == "agent_routine":
+        return await _fire_agent_routine(row)
 
     # Dispatch via the task_type → workflow registry. For now we route
     # through start_workflow_routed so the existing routing table
@@ -165,6 +181,157 @@ async def _dispatch_one(row: Dict[str, Any]) -> None:
         f"[scheduled_master] fired schedule={sched_id} task_type={task_type} "
         f"user={user_id} next_at={next_at.isoformat()}"
     )
+
+
+_ROUTINE_TERMINAL_ISSUE_STATUSES = ("done", "cancelled")
+
+
+async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """One agent-routine fire: delivery-policy gate → create issue assigned
+    to the agent → stash last_issue_id back onto the schedule payload —
+    then RETURN a dispatch order for the workflow body to start
+    execute_issue (paperclip R1). Runs inside fire_due_schedules_step, so
+    it must never start a workflow itself.
+
+    delivery_policy:
+      - skip_if_active (default): if the issue created by the PREVIOUS fire
+        is still open (not done/cancelled), skip this fire — prevents a slow
+        agent from accumulating a backlog of identical issues (paperclip's
+        coalesce_if_active analogue). Backed twice: the payload
+        last_issue_id check below, and the DB partial unique index
+        `issues_open_routine_execution_uq` (one open issue per routine) —
+        a unique violation here is a quiet skip, not an error.
+      - always: fire regardless (unique origin_fingerprint per fire so the
+        index never blocks it).
+    """
+    import json as _json
+    import uuid as _uuid
+
+    from app.db import engine as db_engine
+
+    payload = row.get("payload") or {}
+    if isinstance(payload, str):  # asyncpg may hand jsonb back as str
+        payload = _json.loads(payload)
+    sched_id = row["id"]
+    user_id = row.get("user_id")
+    agent_slug = (payload.get("agent_slug") or "").strip()
+    prompt_md = (payload.get("prompt_md") or "").strip()
+    policy = payload.get("delivery_policy") or "skip_if_active"
+
+    if not agent_slug or not prompt_md or not user_id:
+        raise RuntimeError(
+            f"agent_routine {sched_id} payload incomplete "
+            f"(agent_slug={agent_slug!r}, prompt_md={'set' if prompt_md else 'empty'}, "
+            f"user_id={'set' if user_id else 'empty'})"
+        )
+
+    # Delivery gate: previous fire's issue still open → skip quietly.
+    last_issue_id = payload.get("last_issue_id")
+    if policy == "skip_if_active" and last_issue_id:
+        prev = await db_engine.fetch_one(
+            "SELECT status FROM public.issues WHERE id = :iid",
+            {"iid": int(last_issue_id)},
+        )
+        if prev and prev.get("status") not in _ROUTINE_TERMINAL_ISSUE_STATUSES:
+            logger.info(
+                f"[scheduled_master] routine {sched_id} skipped — previous "
+                f"issue {last_issue_id} still {prev.get('status')}"
+            )
+            return
+
+    agent = await db_engine.fetch_one(
+        "SELECT id, name FROM public.ai_agents WHERE slug = :slug",
+        {"slug": agent_slug},
+    )
+    if not agent:
+        raise RuntimeError(f"agent_routine {sched_id}: agent '{agent_slug}' not found")
+
+    from app.repositories.issue_repository import issue_repository
+
+    now_label = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    body: Dict[str, Any] = {
+        "title": f"{row.get('name') or 'Routine'} — {now_label}",
+        "description": prompt_md,
+        "status": "todo",
+        "priority": "medium",
+        "assignee_agent_id": str(agent["id"]),
+        "created_by_user_id": str(user_id),
+        "origin_kind": "routine",
+        "origin_id": str(sched_id),
+    }
+    if policy == "always":
+        # Dodge issues_open_routine_execution_uq — `always` legitimately
+        # allows several open issues for the same routine.
+        body["origin_fingerprint"] = _uuid.uuid4().hex
+
+    try:
+        issue_row = await issue_repository.atomic_create(body)
+    except Exception as exc:
+        # DB-enforced delivery gate: an open issue from a previous fire
+        # already exists (e.g. the payload stash was lost). Quiet skip.
+        if "issues_open_routine_execution_uq" in repr(exc):
+            logger.info(
+                f"[scheduled_master] routine {sched_id} skipped — open issue "
+                "already exists (db unique gate)"
+            )
+            return None
+        raise
+    issue_id = int(issue_row["id"])
+
+    # Pin the workflow id now and persist it; the WORKFLOW body performs
+    # the actual dispatch (same path as POST /issues/{id}/dispatch).
+    # dbos_workflow_id is guarded by the mig-170 column-allowlist trigger
+    # (service_role only) — and with USE_ORM_ISSUES the repository writes
+    # via the app-role engine too, so neither raw execute nor repo.update
+    # passes. execute_as_service_role (SET LOCAL ROLE service_role) is the
+    # established pattern (see issue_lifecycle.py execution-field writes).
+    workflow_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
+    await db_engine.execute_as_service_role(
+        "UPDATE public.issues SET dbos_workflow_id = :wf WHERE id = :iid",
+        {"wf": workflow_id, "iid": issue_id},
+    )
+
+    # Task Center visibility: create a task_tracking row pinned to the
+    # workflow id — the mirror trigger syncs phase/status as execute_issue
+    # runs, so the user gets queued→running→completed in the Task Center
+    # without polling issues. Best-effort: tracking must never kill a fire.
+    try:
+        from app.services.infra.unified_task_manager import get_task_manager
+
+        await get_task_manager().create(
+            user_id=str(user_id),
+            task_type="agent_routine",
+            title=f"Routine: {row.get('name') or 'Routine'}",
+            subtitle=f"{agent.get('name') or agent_slug} → Issue #{issue_id}",
+            dbos_workflow_id=workflow_id,
+            metadata={
+                "issue_id": issue_id,
+                "schedule_id": str(sched_id),
+                "agent_slug": agent_slug,
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            f"[scheduled_master] task_tracking create failed (non-fatal): {exc}"
+        )
+
+    # Stash last_issue_id for the next fire's delivery gate (merge, never
+    # replace — the payload also carries the routine's config).
+    merged = {**payload, "last_issue_id": issue_id}
+    await db_engine.execute(
+        "UPDATE public.user_schedules SET payload = CAST(:p AS jsonb) "
+        "WHERE id = :id",
+        {"p": _json.dumps(merged), "id": sched_id},
+    )
+    logger.info(
+        f"[scheduled_master] routine {sched_id} fired → issue {issue_id} "
+        f"(agent={agent_slug}, wf={workflow_id}) — dispatch deferred to workflow"
+    )
+    return {
+        "sched_id": str(sched_id),
+        "issue_id": issue_id,
+        "workflow_id": workflow_id,
+    }
 
 
 async def _resolve_workflow_callable(task_type: str):
@@ -217,6 +384,55 @@ def _compute_next_fire(cron_expr: str) -> datetime:
         return datetime.now(timezone.utc) + timedelta(hours=1)
 
 
+@DBOS.step()
+async def record_routine_dispatch_error_step(sched_id: str, err: str) -> None:
+    """Persist a routine dispatch failure onto its schedule row so the
+    Routines UI surfaces it (the in-step error path can't see workflow-
+    level dispatch failures)."""
+    from app.db import engine as db_engine
+
+    await db_engine.execute(
+        "UPDATE public.user_schedules SET fail_count = fail_count + 1, "
+        "last_error = :err WHERE id = :id",
+        {"err": err[:500], "id": sched_id},
+    )
+
+
+async def _dispatch_routine_orders(
+    orders: List[Dict[str, Any]], counters: Dict[str, Any]
+) -> None:
+    """Start execute_issue for each routine order. Runs in WORKFLOW
+    context (child workflow starts are legal here, unlike in steps).
+    Duplicate workflow_id is a soft success — DBOS already has the pinned
+    workflow from a previous (recovered) run."""
+    for order in orders:
+        issue_id = int(order["issue_id"])
+        workflow_id = str(order["workflow_id"])
+        try:
+            from app.api.issues_router import _dispatch_execute_issue
+
+            _dispatch_execute_issue(issue_id, workflow_id)
+            logger.info(
+                f"[scheduled_master] routine issue {issue_id} dispatched "
+                f"(wf={workflow_id})"
+            )
+        except Exception as exc:
+            low = repr(exc).lower()
+            if "already exists" in low or "duplicate" in low:
+                continue
+            counters["errors"] = (counters.get("errors") or 0) + 1
+            logger.opt(exception=True).warning(
+                f"[scheduled_master] routine issue {issue_id} dispatch "
+                f"failed: {exc}"
+            )
+            try:
+                await record_routine_dispatch_error_step(
+                    str(order["sched_id"]), f"dispatch failed: {exc}"
+                )
+            except Exception:
+                pass
+
+
 @DBOS.scheduled("* * * * *")  # every minute
 @DBOS.workflow()
 async def scheduled_master_workflow(
@@ -225,6 +441,9 @@ async def scheduled_master_workflow(
     """One tick. Counters are logged at INFO when there's actual work
     so a quiet system doesn't spam the log."""
     counters = await fire_due_schedules_step()
+    orders = counters.pop("orders", None) or []
+    if orders:
+        await _dispatch_routine_orders(orders, counters)
     if counters.get("fired") or counters.get("errors"):
         logger.info(f"[scheduled_master] tick: {counters}")
 

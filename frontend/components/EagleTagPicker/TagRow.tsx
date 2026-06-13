@@ -31,7 +31,7 @@ export const TagRow: React.FC<TagRowProps> = ({
       className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors w-full min-w-0 ${
         isSelected
           ? 'bg-indigo-500/20 text-indigo-300'
-          : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+          : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
       }`}
     >
       <span
@@ -41,7 +41,7 @@ export const TagRow: React.FC<TagRowProps> = ({
       <span className="truncate flex-1 text-left">{label}</span>
       {isStarred && <Star size={10} className="text-yellow-500 shrink-0 fill-yellow-500" />}
       {showCount && count > 0 && (
-        <span className="text-[10px] text-zinc-600 shrink-0">({count})</span>
+        <span className="text-[10px] text-ink-600 shrink-0">({count})</span>
       )}
     </button>
   );

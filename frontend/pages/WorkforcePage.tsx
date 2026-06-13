@@ -37,6 +37,7 @@ import {
   type WorkforceStateHistoryRow,
 } from '../services/workforceService';
 import { getAgentIcon } from '../components/AILibrary/agentIcons';
+import { LiveRunsStrip } from '../components/AILibrary/LiveRunsStrip';
 import { getSupabaseClient } from '../supabaseClient';
 import { AgentDetailDrawer } from '../components/Workforce/AgentDetailDrawer';
 
@@ -184,10 +185,10 @@ export const WorkforcePage: React.FC = () => {
     <div className="max-w-6xl mx-auto space-y-6">
       <header className="flex items-end justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100">
+          <h1 className="text-xl font-semibold text-ink-100">
             {t('workforce.title', 'Workforce')}
           </h1>
-          <p className="text-sm text-zinc-500 mt-1">
+          <p className="text-sm text-ink-500 mt-1">
             {t(
               'workforce.subtitle',
               'Persistent agents — current state, queue depth, and recent activity.',
@@ -195,7 +196,7 @@ export const WorkforcePage: React.FC = () => {
           </p>
         </div>
         <div className="text-right">
-          <div className="text-[11px] text-zinc-500">
+          <div className="text-[11px] text-ink-500">
             {lastFetchedAt
               ? new Date(lastFetchedAt).toLocaleTimeString()
               : t('workforce.loading', 'Loading…')}
@@ -214,10 +215,13 @@ export const WorkforcePage: React.FC = () => {
         </div>
       )}
 
+      {/* paperclip live-runs port (R4): running agent_runs across all agents */}
+      <LiveRunsStrip />
+
       {!board ? (
-        <div className="text-sm text-zinc-500">{t('workforce.loading', 'Loading…')}</div>
+        <div className="text-sm text-ink-500">{t('workforce.loading', 'Loading…')}</div>
       ) : board.agents.length === 0 ? (
-        <div className="rounded-md border border-zinc-800/60 bg-zinc-900/40 px-4 py-12 text-center text-sm text-zinc-500">
+        <div className="rounded-md border border-ink-800/60 bg-ink-900/40 px-4 py-12 text-center text-sm text-ink-500">
           {t(
             'workforce.empty',
             'No persistent agents yet. Mark an agent as persistent in its settings to schedule recurring runs here.',
@@ -284,7 +288,7 @@ const AgentCard: React.FC<AgentCardProps> = ({
     typeof window !== 'undefined' ? window.confirm(msg) : true;
 
   return (
-    <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-4 space-y-3 hover:border-zinc-700/60 transition-colors">
+    <div className="rounded-lg border border-ink-800/60 bg-ink-900/40 p-4 space-y-3 hover:border-ink-700/60 transition-colors">
       <div className="flex items-start gap-3">
         <button
           type="button"
@@ -292,13 +296,13 @@ const AgentCard: React.FC<AgentCardProps> = ({
           className="flex items-start gap-3 flex-1 min-w-0 text-left hover:opacity-90"
           title="Open detail drawer"
         >
-          <Icon size={20} className="text-zinc-300 shrink-0 mt-0.5" />
+          <Icon size={20} className="text-ink-300 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-zinc-100">{agent.name}</span>
+              <span className="text-sm font-semibold text-ink-100">{agent.name}</span>
               <StateBadge state={state} />
             </div>
-            <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+            <div className="text-[11px] text-ink-500 mt-0.5 truncate">
               {agent.slug}{agent.model ? ` · ${agent.model}` : ''}
             </div>
           </div>
@@ -368,10 +372,10 @@ const AgentCard: React.FC<AgentCardProps> = ({
       {/* Recent runs */}
       {agent.recent_runs.length > 0 && (
         <div className="space-y-1">
-          <div className="text-[11px] uppercase tracking-wider text-zinc-600 px-1">
+          <div className="text-[11px] uppercase tracking-wider text-ink-600 px-1">
             Recent runs
           </div>
-          <div className="divide-y divide-zinc-800/40 rounded border border-zinc-800/40 bg-zinc-950/40 overflow-hidden">
+          <div className="divide-y divide-ink-800/40 rounded border border-ink-800/40 bg-ink-950/40 overflow-hidden">
             {agent.recent_runs.map((run) => (
               <RunRow key={run.id} run={run} />
             ))}
@@ -398,10 +402,10 @@ const IconButton: React.FC<IconButtonProps> = ({
   tone,
 }) => {
   const toneClass = {
-    amber: 'text-zinc-500 hover:text-amber-300 hover:bg-amber-500/10',
-    emerald: 'text-zinc-500 hover:text-emerald-300 hover:bg-emerald-500/10',
-    red: 'text-zinc-500 hover:text-red-300 hover:bg-red-500/10',
-    zinc: 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800',
+    amber: 'text-ink-500 hover:text-amber-300 hover:bg-amber-500/10',
+    emerald: 'text-ink-500 hover:text-emerald-300 hover:bg-emerald-500/10',
+    red: 'text-ink-500 hover:text-red-300 hover:bg-red-500/10',
+    zinc: 'text-ink-500 hover:text-ink-200 hover:bg-ink-800',
   }[tone];
   return (
     <button
@@ -422,10 +426,10 @@ const CountTile: React.FC<{ label: string; value: React.ReactNode; accent: 'ambe
   value,
   accent,
 }) => {
-  const valueClass = accent === 'amber' ? 'text-amber-300' : 'text-zinc-200';
+  const valueClass = accent === 'amber' ? 'text-amber-300' : 'text-ink-200';
   return (
-    <div className="rounded bg-zinc-950/40 border border-zinc-800/40 px-2 py-1.5">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-600">{label}</div>
+    <div className="rounded bg-ink-950/40 border border-ink-800/40 px-2 py-1.5">
+      <div className="text-[10px] uppercase tracking-wider text-ink-600">{label}</div>
       <div className={`text-sm font-medium tabular-nums ${valueClass}`}>{value}</div>
     </div>
   );
@@ -438,12 +442,12 @@ const RunRow: React.FC<{ run: WorkforceRecentRun }> = ({ run }) => {
   return (
     <div className="flex items-center gap-3 px-3 py-1.5 text-[11px]">
       <RunStatusIcon status={run.status} />
-      <span className="text-zinc-400 tabular-nums w-14 shrink-0">
+      <span className="text-ink-400 tabular-nums w-14 shrink-0">
         {dur != null ? `${dur.toFixed(1)}s` : '—'}
       </span>
-      <span className="text-zinc-500 tabular-nums w-16 shrink-0">{total}t</span>
-      <span className="text-zinc-500 tabular-nums w-14 shrink-0">{cost}</span>
-      <span className="text-zinc-600 truncate">
+      <span className="text-ink-500 tabular-nums w-16 shrink-0">{total}t</span>
+      <span className="text-ink-500 tabular-nums w-14 shrink-0">{cost}</span>
+      <span className="text-ink-600 truncate">
         {run.trigger}{' · '}{fmtTime(run.started_at)}
       </span>
     </div>
@@ -459,9 +463,9 @@ const RunStatusIcon: React.FC<{ status: string }> = ({ status }) => {
     case 'failed':
       return <XCircle size={12} className="text-red-400 shrink-0" />;
     case 'cancelled':
-      return <CircleDashed size={12} className="text-zinc-500 shrink-0" />;
+      return <CircleDashed size={12} className="text-ink-500 shrink-0" />;
     default:
-      return <Activity size={12} className="text-zinc-500 shrink-0" />;
+      return <Activity size={12} className="text-ink-500 shrink-0" />;
   }
 };
 
@@ -494,7 +498,7 @@ const StateIcon: React.FC<{ state: string }> = ({ state }) => {
 function stateClass(state: string): string {
   switch (state) {
     case 'idle':
-      return 'bg-zinc-800/60 text-zinc-300';
+      return 'bg-ink-800/60 text-ink-300';
     case 'working':
       return 'bg-indigo-500/15 text-indigo-300';
     case 'paused':
@@ -505,7 +509,7 @@ function stateClass(state: string): string {
     case 'waiting_for_other':
       return 'bg-violet-500/15 text-violet-300';
     default:
-      return 'bg-zinc-800/60 text-zinc-500';
+      return 'bg-ink-800/60 text-ink-500';
   }
 }
 
@@ -515,21 +519,21 @@ const RecentHistory: React.FC<{ rows: WorkforceStateHistoryRow[] }> = ({ rows })
   if (!rows.length) return null;
   return (
     <div className="space-y-2">
-      <div className="text-[11px] uppercase tracking-wider text-zinc-600 px-1">
+      <div className="text-[11px] uppercase tracking-wider text-ink-600 px-1">
         Recent state transitions
       </div>
-      <div className="rounded-md border border-zinc-800/60 bg-zinc-900/40 divide-y divide-zinc-800/40">
+      <div className="rounded-md border border-ink-800/60 bg-ink-900/40 divide-y divide-ink-800/40">
         {rows.map((row, i) => (
           <div
             key={`${row.agent_slug}-${row.changed_at}-${i}`}
             className="flex items-center gap-3 px-3 py-1.5 text-[11px]"
           >
-            <span className="text-zinc-500 tabular-nums w-16 shrink-0">{fmtTime(row.changed_at)}</span>
-            <span className="text-zinc-300 w-20 truncate">{row.agent_slug}</span>
-            <span className="text-zinc-600 truncate">
-              {row.from_state ?? '·'} → <span className="text-zinc-300">{row.to_state}</span>
+            <span className="text-ink-500 tabular-nums w-16 shrink-0">{fmtTime(row.changed_at)}</span>
+            <span className="text-ink-300 w-20 truncate">{row.agent_slug}</span>
+            <span className="text-ink-600 truncate">
+              {row.from_state ?? '·'} → <span className="text-ink-300">{row.to_state}</span>
               {' · '}
-              <span className="text-zinc-500">{row.trigger}</span>
+              <span className="text-ink-500">{row.trigger}</span>
             </span>
           </div>
         ))}

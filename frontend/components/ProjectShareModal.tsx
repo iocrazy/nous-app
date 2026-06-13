@@ -67,31 +67,31 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={handleClose}>
       <div
-        className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-md mx-4 overflow-hidden shadow-2xl"
+        className="bg-ink-900 border border-ink-700 rounded-2xl w-full max-w-md mx-4 overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-          <h3 className="text-base font-medium text-zinc-100">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
+          <h3 className="text-base font-medium text-ink-100">
             {t('projects.share.title', 'Share File')}
           </h3>
-          <button onClick={handleClose} className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors">
+          <button onClick={handleClose} className="p-1 text-ink-500 hover:text-ink-300 transition-colors">
             <X size={18} />
           </button>
         </div>
 
         <div className="px-5 py-4 space-y-4">
           {/* File info */}
-          <div className="flex items-center gap-3 bg-zinc-800/50 rounded-xl px-3 py-2.5">
+          <div className="flex items-center gap-3 bg-ink-800/50 rounded-xl px-3 py-2.5">
             <Link2 size={16} className="text-indigo-400 shrink-0" />
-            <span className="text-sm text-zinc-300 truncate">{file.filename}</span>
+            <span className="text-sm text-ink-300 truncate">{file.filename}</span>
           </div>
 
           {!createdShare ? (
             <>
               {/* Share type */}
               <div>
-                <label className="text-xs text-zinc-500 mb-1.5 block">
+                <label className="text-xs text-ink-500 mb-1.5 block">
                   {t('projects.share.type', 'Share Type')}
                 </label>
                 <div className="flex gap-2">
@@ -102,7 +102,7 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
                       className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                         shareType === type
                           ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                          : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:border-zinc-600'
+                          : 'bg-ink-800 text-ink-400 border border-ink-700 hover:border-ink-600'
                       }`}
                     >
                       {type === 'link'
@@ -116,15 +116,15 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
               {/* Password */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Lock size={14} className="text-zinc-500" />
-                  <span className="text-sm text-zinc-300">
+                  <Lock size={14} className="text-ink-500" />
+                  <span className="text-sm text-ink-300">
                     {t('projects.share.password', 'Password Protection')}
                   </span>
                 </div>
                 <button
                   onClick={() => setUsePassword(!usePassword)}
                   className={`w-9 h-5 rounded-full transition-colors relative ${
-                    usePassword ? 'bg-indigo-500' : 'bg-zinc-700'
+                    usePassword ? 'bg-indigo-500' : 'bg-ink-700'
                   }`}
                 >
                   <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-all ${
@@ -138,22 +138,22 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={t('projects.share.passwordPlaceholder', 'Set a password')}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 placeholder-ink-600 focus:outline-none focus:border-indigo-500"
                 />
               )}
 
               {/* Allow download */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Download size={14} className="text-zinc-500" />
-                  <span className="text-sm text-zinc-300">
+                  <Download size={14} className="text-ink-500" />
+                  <span className="text-sm text-ink-300">
                     {t('projects.share.allowDownload', 'Allow Download')}
                   </span>
                 </div>
                 <button
                   onClick={() => setAllowDownload(!allowDownload)}
                   className={`w-9 h-5 rounded-full transition-colors relative ${
-                    allowDownload ? 'bg-indigo-500' : 'bg-zinc-700'
+                    allowDownload ? 'bg-indigo-500' : 'bg-ink-700'
                   }`}
                 >
                   <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-all ${
@@ -165,15 +165,15 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
               {/* Expiration */}
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
-                  <Clock size={14} className="text-zinc-500" />
-                  <label className="text-sm text-zinc-300">
+                  <Clock size={14} className="text-ink-500" />
+                  <label className="text-sm text-ink-300">
                     {t('projects.share.expiration', 'Expiration')}
                   </label>
                 </div>
                 <select
                   value={expiresHours ?? ''}
                   onChange={(e) => setExpiresHours(e.target.value ? Number(e.target.value) : null)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
                 >
                   <option value="">{t('projects.share.noExpiry', 'Never')}</option>
                   <option value="24">{t('projects.share.expiry24h', '24 hours')}</option>
@@ -204,7 +204,7 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
                 <input
                   readOnly
                   value={shareUrl}
-                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none"
+                  className="flex-1 bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none"
                 />
                 <button
                   onClick={handleCopy}
@@ -214,7 +214,7 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
                 </button>
               </div>
               {createdShare.password && (
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-ink-500">
                   {t('projects.share.passwordHint', 'Password: {{password}}', { password: createdShare.password })}
                 </p>
               )}

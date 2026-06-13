@@ -55,7 +55,7 @@ function formatUpdatedAt(isoString: string): string {
 function StatusBadge({ status }: { status: CookieStatus | undefined }) {
   if (!status || !status.has_cookie) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-ink-800 text-ink-400 border border-ink-700">
         Not configured
       </span>
     );
@@ -197,18 +197,18 @@ export const CookiesSettings: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Header */}
       <div>
-        <h2 className="text-base font-semibold text-white flex items-center gap-2">
+        <h2 className="text-base font-semibold text-ink-50 flex items-center gap-2">
           <Cookie size={18} className="text-indigo-400" />
           Cookie Management
         </h2>
-        <p className="text-sm text-zinc-500 mt-1">
+        <p className="text-sm text-ink-500 mt-1">
           Configure platform cookies for enhanced parsing quality
         </p>
       </div>
 
       {/* Loading state */}
       {loading && (
-        <div className="flex items-center justify-center gap-3 py-16 text-zinc-500">
+        <div className="flex items-center justify-center gap-3 py-16 text-ink-500">
           <Loader2 size={20} className="animate-spin" />
           <span className="text-sm">Loading cookie statuses...</span>
         </div>
@@ -238,22 +238,22 @@ export const CookiesSettings: React.FC = () => {
             return (
               <div
                 key={platform.id}
-                className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden transition-all duration-200"
+                className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden transition-all duration-200"
               >
                 {/* Card header — click to expand */}
                 <button
                   onClick={() => toggleExpand(platform.id)}
-                  className="w-full text-left px-4 py-4 flex items-start justify-between gap-3 hover:bg-zinc-800/40 transition-colors"
+                  className="w-full text-left px-4 py-4 flex items-start justify-between gap-3 hover:bg-ink-800/40 transition-colors"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <img src={platform.icon} alt={platform.name} className="w-6 h-6 flex-shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-white">{platform.name}</p>
+                      <p className="text-sm font-semibold text-ink-50">{platform.name}</p>
                       <div className="mt-1.5">
                         <StatusBadge status={status} />
                       </div>
                       {status?.has_cookie && status.updated_at && (
-                        <p className="text-xs text-zinc-600 mt-1.5">
+                        <p className="text-xs text-ink-600 mt-1.5">
                           Updated {formatUpdatedAt(status.updated_at)}
                         </p>
                       )}
@@ -261,7 +261,7 @@ export const CookiesSettings: React.FC = () => {
                   </div>
                   <ChevronDown
                     size={16}
-                    className={`flex-shrink-0 text-zinc-500 mt-0.5 transition-transform duration-200 ${card.expanded ? 'rotate-180' : ''}`}
+                    className={`flex-shrink-0 text-ink-500 mt-0.5 transition-transform duration-200 ${card.expanded ? 'rotate-180' : ''}`}
                   />
                 </button>
 
@@ -275,17 +275,17 @@ export const CookiesSettings: React.FC = () => {
 
                 {/* Expanded edit area */}
                 {card.expanded && (
-                  <div className="border-t border-zinc-800 px-4 pb-4 pt-3 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="border-t border-ink-800 px-4 pb-4 pt-3 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
                     {/* Tabs */}
-                    <div className="flex gap-1 bg-zinc-950/60 rounded-lg p-1">
+                    <div className="flex gap-1 bg-ink-950/60 rounded-lg p-1">
                       {(['paste', 'upload'] as InputTab[]).map((tab) => (
                         <button
                           key={tab}
                           onClick={() => updateCard(platform.id, { activeTab: tab })}
                           className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors capitalize ${
                             card.activeTab === tab
-                              ? 'bg-zinc-700 text-white'
-                              : 'text-zinc-500 hover:text-zinc-300'
+                              ? 'bg-ink-700 text-ink-50'
+                              : 'text-ink-500 hover:text-ink-300'
                           }`}
                         >
                           {tab}
@@ -300,7 +300,7 @@ export const CookiesSettings: React.FC = () => {
                         placeholder="Paste cookie string here..."
                         value={card.pasteValue}
                         onChange={(e) => updateCard(platform.id, { pasteValue: e.target.value })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-xs text-zinc-300 placeholder-zinc-600 resize-none outline-none focus:border-indigo-500 transition-colors font-mono"
+                        className="w-full bg-ink-950 border border-ink-800 rounded-lg px-3 py-2.5 text-xs text-ink-300 placeholder-ink-600 resize-none outline-none focus:border-indigo-500 transition-colors font-mono"
                       />
                     )}
 
@@ -314,18 +314,18 @@ export const CookiesSettings: React.FC = () => {
                         className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg py-6 cursor-pointer transition-colors text-center ${
                           card.isDragging
                             ? 'border-indigo-500 bg-indigo-500/10'
-                            : 'border-zinc-700 hover:border-zinc-600 bg-zinc-950/40'
+                            : 'border-ink-700 hover:border-ink-600 bg-ink-950/40'
                         }`}
                       >
-                        <Upload size={20} className="text-zinc-500" />
+                        <Upload size={20} className="text-ink-500" />
                         {card.fileName ? (
                           <p className="text-xs text-indigo-400 font-medium px-2 truncate max-w-full">
                             {card.fileName}
                           </p>
                         ) : (
                           <>
-                            <p className="text-xs text-zinc-400">Drop a .txt file here</p>
-                            <p className="text-xs text-zinc-600">or click to browse</p>
+                            <p className="text-xs text-ink-400">Drop a .txt file here</p>
+                            <p className="text-xs text-ink-600">or click to browse</p>
                           </>
                         )}
                         <input
@@ -430,11 +430,11 @@ const HeadersSection: React.FC = () => {
   return (
     <div className="space-y-4 pt-2">
       <div>
-        <h2 className="text-base font-semibold text-white flex items-center gap-2">
+        <h2 className="text-base font-semibold text-ink-50 flex items-center gap-2">
           <FileCode2 size={18} className="text-cyan-400" />
           Custom Headers
         </h2>
-        <p className="text-sm text-zinc-500 mt-1">
+        <p className="text-sm text-ink-500 mt-1">
           Configure HTTP headers for LightHTTP parser requests
         </p>
       </div>
@@ -447,20 +447,20 @@ const HeadersSection: React.FC = () => {
           return (
             <div
               key={platform.id}
-              className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+              className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden"
             >
               <button
                 onClick={() => setExpandedPlatform(isExpanded ? null : platform.id)}
-                className="w-full text-left px-4 py-4 flex items-start justify-between gap-3 hover:bg-zinc-800/40 transition-colors"
+                className="w-full text-left px-4 py-4 flex items-start justify-between gap-3 hover:bg-ink-800/40 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <img src={platform.icon} alt={platform.name} className="w-6 h-6 flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold text-white">{platform.name}</p>
+                    <p className="text-sm font-semibold text-ink-50">{platform.name}</p>
                     <span className={`inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
                       hasCustom
                         ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                        : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                        : 'bg-ink-800 text-ink-400 border border-ink-700'
                     }`}>
                       {hasCustom ? 'Customized' : 'Default'}
                     </span>
@@ -468,21 +468,21 @@ const HeadersSection: React.FC = () => {
                 </div>
                 <ChevronDown
                   size={16}
-                  className={`flex-shrink-0 text-zinc-500 mt-0.5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                  className={`flex-shrink-0 text-ink-500 mt-0.5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
                 />
               </button>
 
               {isExpanded && (
-                <div className="border-t border-zinc-800 px-4 pb-4 pt-3 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                  <p className="text-xs text-zinc-500">
-                    One header per line in <code className="text-zinc-400">Key: Value</code> format. Leave empty to use defaults.
+                <div className="border-t border-ink-800 px-4 pb-4 pt-3 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <p className="text-xs text-ink-500">
+                    One header per line in <code className="text-ink-400">Key: Value</code> format. Leave empty to use defaults.
                   </p>
                   <textarea
                     rows={8}
                     placeholder={DEFAULT_DOUYIN_HEADERS}
                     value={headersMap[platform.id] ?? ''}
                     onChange={(e) => setHeadersMap(prev => ({ ...prev, [platform.id]: e.target.value }))}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-xs text-zinc-300 placeholder-zinc-700 resize-none outline-none focus:border-cyan-500 transition-colors font-mono"
+                    className="w-full bg-ink-950 border border-ink-800 rounded-lg px-3 py-2.5 text-xs text-ink-300 placeholder-ink-700 resize-none outline-none focus:border-cyan-500 transition-colors font-mono"
                   />
                   <div className="flex items-center gap-2">
                     <button
@@ -499,7 +499,7 @@ const HeadersSection: React.FC = () => {
                           setHeadersMap(prev => ({ ...prev, [platform.id]: '' }));
                           handleSave(platform.id);
                         }}
-                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs font-semibold rounded-lg transition-colors"
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-ink-800 hover:bg-ink-700 text-ink-400 text-xs font-semibold rounded-lg transition-colors"
                       >
                         <Trash2 size={13} />
                         Reset to Default

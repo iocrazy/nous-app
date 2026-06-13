@@ -134,24 +134,24 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       />
 
       {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-white">{pkg.name}</h2>
+            <h2 className="text-lg font-semibold text-ink-50">{pkg.name}</h2>
             <div className="flex items-center gap-3 mt-1">
               <span className="text-amber-400 font-medium">
                 {pkg.points_amount.toLocaleString()} Points
               </span>
-              <span className="text-zinc-500">|</span>
-              <span className="text-zinc-300 font-medium">
+              <span className="text-ink-500">|</span>
+              <span className="text-ink-300 font-medium">
                 {formatPrice(pkg.price_cents)}
               </span>
             </div>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -164,14 +164,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <div className="space-y-6">
               {/* Payment method tabs */}
               <div>
-                <p className="text-sm text-zinc-400 mb-3">Payment Method</p>
+                <p className="text-sm text-ink-400 mb-3">Payment Method</p>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setPaymentMethod('wechat')}
                     className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
                       paymentMethod === 'wechat'
                         ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
-                        : 'border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300'
+                        : 'border-ink-700 bg-ink-800/50 text-ink-400 hover:border-ink-600 hover:text-ink-300'
                     }`}
                   >
                     <Wallet size={18} />
@@ -182,7 +182,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
                       paymentMethod === 'alipay'
                         ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
-                        : 'border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300'
+                        : 'border-ink-700 bg-ink-800/50 text-ink-400 hover:border-ink-600 hover:text-ink-300'
                     }`}
                   >
                     <CreditCard size={18} />
@@ -192,19 +192,19 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </div>
 
               {/* Order summary */}
-              <div className="p-4 bg-zinc-800/50 rounded-xl space-y-2">
+              <div className="p-4 bg-ink-800/50 rounded-xl space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-400">Package</span>
-                  <span className="text-zinc-200">{pkg.name}</span>
+                  <span className="text-ink-400">Package</span>
+                  <span className="text-ink-200">{pkg.name}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-400">Points</span>
+                  <span className="text-ink-400">Points</span>
                   <span className="text-amber-400">{pkg.points_amount.toLocaleString()}</span>
                 </div>
-                <div className="border-t border-zinc-700 my-2" />
+                <div className="border-t border-ink-700 my-2" />
                 <div className="flex justify-between text-sm font-medium">
-                  <span className="text-zinc-300">Total</span>
-                  <span className="text-white text-lg">{formatPrice(pkg.price_cents)}</span>
+                  <span className="text-ink-300">Total</span>
+                  <span className="text-ink-50 text-lg">{formatPrice(pkg.price_cents)}</span>
                 </div>
               </div>
 
@@ -236,10 +236,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </div>
 
               <div>
-                <h3 className="text-lg font-semibold text-white mb-2">
+                <h3 className="text-lg font-semibold text-ink-50 mb-2">
                   Waiting for Payment
                 </h3>
-                <p className="text-sm text-zinc-400">
+                <p className="text-sm text-ink-400">
                   Please complete the payment in your{' '}
                   {paymentMethod === 'wechat' ? 'WeChat' : 'Alipay'} app
                 </p>
@@ -247,7 +247,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
               {/* Payment URL / QR code placeholder */}
               {paymentUrl && (
-                <div className="p-4 bg-zinc-800/50 rounded-xl">
+                <div className="p-4 bg-ink-800/50 rounded-xl">
                   <div className="w-48 h-48 mx-auto bg-white rounded-lg flex items-center justify-center p-2">
                     <QRCodeSVG
                       value={paymentUrl}
@@ -256,28 +256,28 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                       includeMargin={false}
                     />
                   </div>
-                  <p className="text-xs text-zinc-500 mt-3">
+                  <p className="text-xs text-ink-500 mt-3">
                     Scan with {paymentMethod === 'wechat' ? 'WeChat' : 'Alipay'} to pay
                   </p>
                 </div>
               )}
 
               {!paymentUrl && (
-                <div className="p-4 bg-zinc-800/50 rounded-xl">
-                  <p className="text-sm text-zinc-400">
+                <div className="p-4 bg-ink-800/50 rounded-xl">
+                  <p className="text-sm text-ink-400">
                     Order created. Checking payment status...
                   </p>
                 </div>
               )}
 
-              <div className="flex items-center justify-center gap-2 text-xs text-zinc-500">
+              <div className="flex items-center justify-center gap-2 text-xs text-ink-500">
                 <Loader2 size={12} className="animate-spin" />
                 Checking payment status...
               </div>
 
               <button
                 onClick={handleClose}
-                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="text-sm text-ink-500 hover:text-ink-300 transition-colors"
               >
                 Cancel
               </button>
@@ -293,10 +293,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
               </div>
               <div>
-                <h3 className="text-xl font-semibold text-white mb-2">
+                <h3 className="text-xl font-semibold text-ink-50 mb-2">
                   Payment Successful!
                 </h3>
-                <p className="text-sm text-zinc-400">
+                <p className="text-sm text-ink-400">
                   <span className="text-amber-400 font-medium">
                     {pkg.points_amount.toLocaleString()}
                   </span>{' '}
@@ -315,7 +315,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-white mb-2">
+                <h3 className="text-lg font-semibold text-ink-50 mb-2">
                   Payment Failed
                 </h3>
                 {errorMessage && (
@@ -325,7 +325,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               <div className="flex gap-3">
                 <button
                   onClick={handleClose}
-                  className="flex-1 px-4 py-3 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-xl font-medium transition-colors"
+                  className="flex-1 px-4 py-3 text-ink-300 bg-ink-800 hover:bg-ink-700 rounded-xl font-medium transition-colors"
                 >
                   Close
                 </button>

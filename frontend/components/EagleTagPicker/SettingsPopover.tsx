@@ -27,12 +27,12 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     label, checked, disabled, onChange,
   }) => (
     <div className="flex items-center justify-between py-1">
-      <span className={`text-xs ${disabled ? 'text-zinc-600' : 'text-zinc-300'}`}>{label}</span>
+      <span className={`text-xs ${disabled ? 'text-ink-600' : 'text-ink-300'}`}>{label}</span>
       <button
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={`w-8 h-4 rounded-full transition-colors relative ${
-          disabled ? 'bg-zinc-800 cursor-not-allowed' : checked ? 'bg-indigo-500' : 'bg-zinc-700'
+          disabled ? 'bg-ink-800 cursor-not-allowed' : checked ? 'bg-indigo-500' : 'bg-ink-700'
         }`}
       >
         <span
@@ -47,21 +47,21 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 z-[70] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-52 p-3 space-y-2"
+      className="absolute right-0 top-full mt-1 z-[70] bg-ink-900 border border-ink-700 rounded-lg shadow-xl w-52 p-3 space-y-2"
     >
       {/* Layout */}
       <div className="flex items-center justify-between py-1">
-        <span className="text-xs text-zinc-300">Layout</span>
+        <span className="text-xs text-ink-300">Layout</span>
         <div className="flex gap-1">
           <button
             onClick={() => onUpdate({ layout: 'list' })}
-            className={`p-1 rounded ${settings.layout === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-500'}`}
+            className={`p-1 rounded ${settings.layout === 'list' ? 'bg-ink-700 text-ink-50' : 'text-ink-500'}`}
           >
             <List size={14} />
           </button>
           <button
             onClick={() => onUpdate({ layout: 'grid' })}
-            className={`p-1 rounded ${settings.layout === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-500'}`}
+            className={`p-1 rounded ${settings.layout === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-500'}`}
           >
             <LayoutGrid size={14} />
           </button>
@@ -70,11 +70,11 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
 
       {/* Column Width */}
       <div className="flex items-center justify-between py-1">
-        <span className="text-xs text-zinc-300">Column Width</span>
+        <span className="text-xs text-ink-300">Column Width</span>
         <select
           value={settings.columnWidth}
           onChange={(e) => onUpdate({ columnWidth: e.target.value as any })}
-          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-xs text-zinc-300"
+          className="bg-ink-800 border border-ink-700 rounded px-2 py-0.5 text-xs text-ink-300"
         >
           <option value="small">Small</option>
           <option value="medium">Medium</option>
@@ -82,7 +82,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
         </select>
       </div>
 
-      <div className="border-t border-zinc-800 my-1" />
+      <div className="border-t border-ink-800 my-1" />
 
       {/* Toggles */}
       <Toggle label="Starred" checked={settings.showStarred} onChange={(v) => onUpdate({ showStarred: v })} />

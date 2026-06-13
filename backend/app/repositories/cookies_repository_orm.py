@@ -17,7 +17,7 @@ SQLAlchemy ``Text``. **The legacy repo performs NO encryption/decryption and
 NO masking.** It imports no crypto helper (no Fernet / KMS / app.core.crypto);
 ``upsert`` writes ``data`` verbatim into the row, and every read returns the
 raw ``SELECT *`` dict including the plaintext cookie. Consumers
-(abogus_parser / ies_parser / ytdlp_service / soda_music cookie_source) read
+(abogus_parser / ytdlp_service / soda_music cookie_source) read
 ``row["cookie_text"]`` / ``row["cookie_file"]`` / ``row["custom_headers"]`` as
 plaintext to drive a browser/yt-dlp session — they REQUIRE the raw value.
 

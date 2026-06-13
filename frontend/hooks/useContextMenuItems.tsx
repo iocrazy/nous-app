@@ -9,6 +9,7 @@ import React, { useMemo } from 'react';
 import {
   FolderOpen, Upload, Trash2, Share2, Download,
   FolderPlus, ExternalLink, Pencil, Copy, Move, RefreshCw, Eye,
+  Sparkles, Tag,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ContextMenuItem } from '../components/ContextMenu';
@@ -17,6 +18,8 @@ import {
   getFolderContentCount,
   getResourceFileUrl,
   copyResourceItem,
+  generateGenPrompt,
+  classifyResource,
 } from '../services/resourceService';
 import { downloadWithAuth } from '../utils/download';
 
@@ -105,6 +108,41 @@ export function useContextMenuItems({
       ];
       if (canDo('download')) {
         items.push({ label: t('resources.downloadOriginal'), icon: <Download size={14} />, onClick: () => { if (resourceId) downloadWithAuth(getResourceFileUrl(String(resourceId)), item.resource?.filename ?? 'download', { onSuccess: (f: string) => addToast(`Downloaded: ${f}`, 'success'), onError: (msg: string) => addToast(`Download failed (${msg})`, 'error') }); }, disabled: !resourceId });
+      }
+      // Asset AI (images only): reverse-prompt + 12-dimension auto-tag.
+      // Both dispatch DBOS workflows — progress lives in the Task Center.
+      if (item.resource?.file_type === 'image') {
+        items.push({
+          label: t('resources.generatePrompt', 'Generate Prompt'),
+          icon: <Sparkles size={14} />,
+          onClick: async () => {
+            if (!resourceId) return;
+            try {
+              await generateGenPrompt(String(resourceId));
+              addToast(t('resources.infoPanel.promptGenerating', 'Generating prompt from image...'), 'info');
+            } catch (err) {
+              console.error('Failed to start prompt generation:', err);
+              addToast(err instanceof Error && err.message ? err.message : t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt'), 'error');
+            }
+          },
+          disabled: !resourceId,
+        });
+        items.push({
+          label: t('resources.autoTag', 'Auto Tag'),
+          icon: <Tag size={14} />,
+          onClick: async () => {
+            if (!resourceId) return;
+            try {
+              await classifyResource(String(resourceId));
+              addToast(t('resources.infoPanel.autoTagging', 'Auto-tagging image...'), 'info');
+            } catch (err) {
+              console.error('Failed to start auto-tagging:', err);
+              addToast(err instanceof Error && err.message ? err.message : t('resources.infoPanel.autoTagFailed', 'Auto-tagging failed'), 'error');
+            }
+          },
+          disabled: !resourceId,
+          divider: true,
+        });
       }
       if (canDo('update')) {
         items.push({ label: t('resources.rename'), icon: <Pencil size={14} />, onClick: () => { if (resourceId) { ops.setRenamingResourceId(item.id); ops.setRenameValue(item.resource?.filename ?? ''); } } });

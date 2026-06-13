@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 
 from loguru import logger
 
+from app.db.scope import system_request_scope
 from app.repositories.tags_repository import get_tags_repository
 
 
@@ -182,49 +183,61 @@ class ClassificationService:
         added_tags: List[dict] = []
         repo = get_tags_repository()
 
-        # Tags attach to the resource row, not parsed_media directly. Resolve the
-        # media_id → resource_id ONCE (not per-tag) to avoid duplicate lookups.
-        resource_id = await repo.resolve_media_id_to_resource_id(str(media_id))
-        if resource_id is None:
-            logger.warning(
-                f"auto_tag_media: no resource exists for media {media_id} yet — "
-                "skipping auto-tagging"
-            )
-            return added_tags
+        # Auto-tagging is a SYSTEM-initiated enrichment running inside the parse
+        # workflow (via parse_helpers._run_async) — there is NO request scope on
+        # the contextvar here. After SCOPE_ENFORCE_RESOURCES flipped on (2026-06-08)
+        # the resources SELECT in resolve_media_id_to_resource_id below trips the
+        # choke point with UnscopedQueryError, so auto-tagging silently failed for
+        # every parse. Wrap the resources access in a system scope (no tenant
+        # filtering): media_id is trusted (just parsed) and we touch exactly that
+        # one resource, so seeing all rows to resolve it is safe. Scope is set
+        # INSIDE this coroutine (not at the sync _run_async bridge) so it survives
+        # the run_async thread/loop boundary (the Pass-3 lesson).
+        async with system_request_scope("auto-tag-media"):
+            # Tags attach to the resource row, not parsed_media directly. Resolve
+            # the media_id → resource_id ONCE (not per-tag) to avoid duplicate
+            # lookups.
+            resource_id = await repo.resolve_media_id_to_resource_id(str(media_id))
+            if resource_id is None:
+                logger.warning(
+                    f"auto_tag_media: no resource exists for media {media_id} yet — "
+                    "skipping auto-tagging"
+                )
+                return added_tags
 
-        # Get the system tag
-        primary_tag = await repo.get_tag_by_name(result.primary_tag)
+            # Get the system tag
+            primary_tag = await repo.get_tag_by_name(result.primary_tag)
 
-        if primary_tag and result.confidence >= min_confidence:
-            await repo.add_tag_to_resource(
-                resource_id=resource_id,
-                tag_id=primary_tag["id"],
-                confidence=result.confidence,
-                source=result.source,
-            )
-            added_tags.append({"tag": primary_tag, "confidence": result.confidence})
-            logger.info(
-                f"Auto-tagged media {media_id} as '{result.primary_tag}' (confidence: {result.confidence})"
-            )
-
-        # Add secondary tag if confidence is reasonable
-        if result.secondary_tag and result.confidence >= 0.5:
-            secondary_tag = await repo.get_tag_by_name(result.secondary_tag)
-            if secondary_tag:
-                secondary_confidence = round(
-                    result.confidence * 0.7, 2
-                )  # Lower confidence for secondary
+            if primary_tag and result.confidence >= min_confidence:
                 await repo.add_tag_to_resource(
                     resource_id=resource_id,
-                    tag_id=secondary_tag["id"],
-                    confidence=secondary_confidence,
+                    tag_id=primary_tag["id"],
+                    confidence=result.confidence,
                     source=result.source,
                 )
-                added_tags.append(
-                    {"tag": secondary_tag, "confidence": secondary_confidence}
-                )
+                added_tags.append({"tag": primary_tag, "confidence": result.confidence})
                 logger.info(
-                    f"Auto-tagged media {media_id} with secondary tag '{result.secondary_tag}'"
+                    f"Auto-tagged media {media_id} as '{result.primary_tag}' (confidence: {result.confidence})"
                 )
+
+            # Add secondary tag if confidence is reasonable
+            if result.secondary_tag and result.confidence >= 0.5:
+                secondary_tag = await repo.get_tag_by_name(result.secondary_tag)
+                if secondary_tag:
+                    secondary_confidence = round(
+                        result.confidence * 0.7, 2
+                    )  # Lower confidence for secondary
+                    await repo.add_tag_to_resource(
+                        resource_id=resource_id,
+                        tag_id=secondary_tag["id"],
+                        confidence=secondary_confidence,
+                        source=result.source,
+                    )
+                    added_tags.append(
+                        {"tag": secondary_tag, "confidence": secondary_confidence}
+                    )
+                    logger.info(
+                        f"Auto-tagged media {media_id} with secondary tag '{result.secondary_tag}'"
+                    )
 
         return added_tags

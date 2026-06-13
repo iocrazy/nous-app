@@ -27,7 +27,6 @@ from app.services.media.parsers.douyin_parse import (
     ABogusDouyinParser,
     DouyinFormatter,
     DrissionPageParser,
-    IesDouyinParser,
 )
 from app.services.media.parsers.media_service import MediaService
 
@@ -35,7 +34,6 @@ __all__ = [
     "ABogusDouyinParser",
     "DouyinFormatter",
     "DrissionPageParser",
-    "IesDouyinParser",
     "DownloaderService",
     "MediaService",
     "SupabaseAuthService",

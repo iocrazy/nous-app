@@ -79,8 +79,9 @@ class VisualAnalysisService:
         self,
         provider_key: str = "",
         provider_config: Optional[Dict[str, Any]] = None,
+        agent_slug: str = AGENT_SLUG,
     ) -> None:
-        """Hold per-call BYO credentials.
+        """Hold per-call BYO credentials + the agent slug to compose.
 
         ``provider_key`` / ``provider_config`` come from the Celery task
         layer (which reads the user's ``ai_settings.ai_providers`` per the
@@ -88,9 +89,20 @@ class VisualAnalysisService:
         falls back to the factory's per-model default using global settings
         — that path is only exercised by the smoke-test / no-user
         invocations.
+
+        ``agent_slug`` is the user's assigned visual-analysis agent (resolved
+        from ``task_assignment.visual_analysis``; defaults to the built-in
+        ``analyze``). We compose THIS agent's prompt, so ``composed.model``
+        (which drives the adapter) matches the model whose BYO config the
+        caller passed. Hardcoding it to ``analyze`` here was the second half of
+        the visual-analysis bug: the resolver picked the user's doubao model but
+        this composed 'analyze' (qwen-max), and the composed model won.
         """
         self._provider_key = (provider_key or "").strip()
         self._provider_config: Dict[str, Any] = dict(provider_config or {})
+        # Instance attr shadows the class default; _run_multimodal composes
+        # ``self.AGENT_SLUG``.
+        self.AGENT_SLUG = (agent_slug or AGENT_SLUG).strip() or AGENT_SLUG
         # Cost estimate coefficients (informational only; authoritative
         # cost lives on the agent_runs row via RunRecorder's price-snapshot
         # columns). Kept as GPT-4o pricing historically; deliberately not
@@ -238,6 +250,7 @@ class VisualAnalysisService:
         metadata: Dict[str, Any],
         user_id: Optional[Any],
         trigger: str,
+        task_id: Optional[str] = None,
     ) -> Optional[VisualAnalysisResult]:
         """Compose prompt + run one turn with multimodal content.
 
@@ -301,6 +314,7 @@ class VisualAnalysisService:
                 agent_id=composed.agent_id,
                 user_id=uid,
                 trigger=trigger,
+                task_id=task_id,
                 model=model or None,
                 provider=provider,
                 input_summary=input_summary,
@@ -333,13 +347,40 @@ class VisualAnalysisService:
     # ── Public API ────────────────────────────────────────────────────
 
     async def analyze_l1(
-        self, cover_url: str, *, user_id: Optional[Any] = None
+        self,
+        cover_url: str,
+        *,
+        user_id: Optional[Any] = None,
+        on_progress: Optional[Any] = None,
+        task_id: Optional[str] = None,
     ) -> Optional[VisualAnalysisResult]:
-        """L1 Analysis: cover image only. Cost: ~$0.001 per image."""
+        """L1 Analysis: cover image only. Cost: ~$0.001 per image.
+
+        ``on_progress``: optional ``async (pct: int, subtitle: str)`` callback
+        fired at real milestones (image encoded → model called). The caller
+        (analyze_l1 workflow) maps these onto task_tracking progress so the UI
+        sees honest intermediate progress instead of jumping 20→100. Progress
+        failures must never break the analysis — callers should swallow their
+        own errors, but we guard anyway.
+
+        ``task_id``: the task_tracking PK (dbos_workflow_id) when running
+        inside a tracked workflow — threaded into RunRecorder for the
+        paperclip-style task ↔ run bidirectional linkage (mig 282).
+        """
+
+        async def _progress(pct: int, subtitle: str) -> None:
+            if on_progress is None:
+                return
+            try:
+                await on_progress(pct, subtitle)
+            except Exception as e:  # noqa: BLE001 — progress is best-effort
+                logger.warning(f"[VisualAnalysis] progress callback failed: {e}")
+
         image_data = await self._encode_image_from_url(cover_url)
         if not image_data:
             logger.error(f"Failed to encode cover image: {cover_url}")
             return None
+        await _progress(40, "Cover image downloaded")
 
         image_blocks = [
             {
@@ -350,6 +391,7 @@ class VisualAnalysisService:
                 },
             },
         ]
+        await _progress(50, "Calling vision model...")
         return await self._run_multimodal(
             instruction=_L1_INSTRUCTION,
             image_content_blocks=image_blocks,
@@ -357,6 +399,7 @@ class VisualAnalysisService:
             metadata={"mode": "L1", "cover_url": cover_url},
             user_id=user_id,
             trigger="visual_analysis_l1",
+            task_id=task_id,
         )
 
     async def analyze_l2(

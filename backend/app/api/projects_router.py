@@ -28,6 +28,7 @@ from app.schemas.projects import (
     ProjectUpdate,
     RenameFolderRequest,
     ReviewStatusUpdate,
+    StyleProfileUpdate,
     TaskCreateRequest,
     TaskUpdateRequest,
     UpdateMemberRoleRequest,
@@ -139,6 +140,65 @@ async def delete_project(project_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to delete project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete project")
+
+
+# ============================================
+# Style profile (Phase 4 M8 — one row per project)
+# ============================================
+
+
+@router.get("/{project_id}/style-profile")
+async def get_style_profile(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """The project's style profile, or null when none has been saved yet.
+
+    Access: project owner or a member of the project's team (the guard
+    despite its name checks membership, which is also the read rule)."""
+    from app.repositories.project_style_profile_repository import (
+        get_project_style_profile_repository,
+    )
+
+    try:
+        profile = await get_project_style_profile_repository().get(int(project_id))
+        return {"success": True, "data": profile}
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid project id")
+    except Exception as e:
+        logger.error(f"Failed to get style profile for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get style profile")
+
+
+@router.put("/{project_id}/style-profile")
+async def put_style_profile(
+    project_id: str,
+    data: StyleProfileUpdate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Create-or-merge the project's style profile. Absent fields keep
+    their stored value — a PUT carrying only style_md never clobbers
+    visual_style / reference_links."""
+    from app.repositories.project_style_profile_repository import (
+        get_project_style_profile_repository,
+    )
+
+    try:
+        profile = await get_project_style_profile_repository().upsert(
+            int(project_id),
+            style_md=data.style_md,
+            visual_style=data.visual_style,
+            reference_links=data.reference_links,
+            updated_by=auth.user_id,
+        )
+        return {"success": True, "data": profile}
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid project id")
+    except Exception as e:
+        logger.error(f"Failed to save style profile for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save style profile")
 
 
 # ============================================

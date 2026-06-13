@@ -27,36 +27,36 @@ export const MarkdownBody: React.FC<MarkdownBodyProps> = ({
   // in font sizes that fight the rest of the editor chrome.
   return (
     <div
-      className={`text-[14px] leading-relaxed text-zinc-200 ${className}`}
+      className={`text-[14px] leading-relaxed text-ink-200 ${className}`}
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         components={{
           h1: ({ children }) => (
-            <h1 className="mt-6 mb-3 text-2xl font-bold text-zinc-100 first:mt-0">
+            <h1 className="mt-6 mb-3 text-2xl font-bold text-ink-100 first:mt-0">
               {children}
             </h1>
           ),
           h2: ({ children }) => (
-            <h2 className="mt-5 mb-2 text-xl font-semibold text-zinc-100">
+            <h2 className="mt-5 mb-2 text-xl font-semibold text-ink-100">
               {children}
             </h2>
           ),
           h3: ({ children }) => (
-            <h3 className="mt-4 mb-2 text-lg font-semibold text-zinc-100">
+            <h3 className="mt-4 mb-2 text-lg font-semibold text-ink-100">
               {children}
             </h3>
           ),
           p: ({ children }) => (
-            <p className="my-3 text-zinc-300">{children}</p>
+            <p className="my-3 text-ink-300">{children}</p>
           ),
           ul: ({ children }) => (
-            <ul className="my-3 ml-6 list-disc space-y-1 text-zinc-300 marker:text-zinc-500">
+            <ul className="my-3 ml-6 list-disc space-y-1 text-ink-300 marker:text-ink-500">
               {children}
             </ul>
           ),
           ol: ({ children }) => (
-            <ol className="my-3 ml-6 list-decimal space-y-1 text-zinc-300 marker:text-zinc-500">
+            <ol className="my-3 ml-6 list-decimal space-y-1 text-ink-300 marker:text-ink-500">
               {children}
             </ol>
           ),
@@ -76,7 +76,7 @@ export const MarkdownBody: React.FC<MarkdownBodyProps> = ({
             if (inline) {
               return (
                 <code
-                  className="rounded bg-zinc-800 px-1.5 py-0.5 text-[13px] font-mono text-amber-300"
+                  className="rounded bg-ink-800 px-1.5 py-0.5 text-[13px] font-mono text-amber-300"
                   {...rest}
                 >
                   {children}
@@ -90,12 +90,12 @@ export const MarkdownBody: React.FC<MarkdownBodyProps> = ({
             );
           },
           pre: ({ children }) => (
-            <pre className="my-3 overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-[13px] leading-relaxed text-zinc-200">
+            <pre className="my-3 overflow-x-auto rounded-lg border border-ink-800 bg-ink-950 p-3 text-[13px] leading-relaxed text-ink-200">
               {children}
             </pre>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="my-3 border-l-2 border-zinc-700 pl-4 italic text-zinc-400">
+            <blockquote className="my-3 border-l-2 border-ink-700 pl-4 italic text-ink-400">
               {children}
             </blockquote>
           ),
@@ -107,16 +107,16 @@ export const MarkdownBody: React.FC<MarkdownBodyProps> = ({
             </div>
           ),
           th: ({ children }) => (
-            <th className="border-b border-zinc-800 px-3 py-1.5 text-left font-semibold text-zinc-200">
+            <th className="border-b border-ink-800 px-3 py-1.5 text-left font-semibold text-ink-200">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="border-b border-zinc-900 px-3 py-1.5 text-zinc-300">
+            <td className="border-b border-ink-900 px-3 py-1.5 text-ink-300">
               {children}
             </td>
           ),
-          hr: () => <hr className="my-6 border-zinc-800" />,
+          hr: () => <hr className="my-6 border-ink-800" />,
         }}
       >
         {source}

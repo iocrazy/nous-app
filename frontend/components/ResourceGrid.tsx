@@ -66,11 +66,11 @@ function aspectRatioOf(resource?: { resolution?: string | null; mime_type?: stri
 const SkeletonGrid: React.FC = () => (
   <div className="grid grid-cols-2 gap-4 downloads-grid">
     {Array.from({ length: 8 }).map((_, i) => (
-      <div key={i} className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl overflow-hidden animate-pulse">
-        <div className="h-32 bg-zinc-800" />
+      <div key={i} className="bg-ink-800/80 border border-ink-700/50 rounded-xl overflow-hidden animate-pulse">
+        <div className="h-32 bg-ink-800" />
         <div className="p-3 space-y-2">
-          <div className="h-4 bg-zinc-700 rounded w-3/4" />
-          <div className="h-3 bg-zinc-700 rounded w-1/2" />
+          <div className="h-4 bg-ink-700 rounded w-3/4" />
+          <div className="h-3 bg-ink-700 rounded w-1/2" />
         </div>
       </div>
     ))}
@@ -80,11 +80,11 @@ const SkeletonGrid: React.FC = () => (
 const SkeletonList: React.FC = () => (
   <div className="space-y-2">
     {Array.from({ length: 6 }).map((_, i) => (
-      <div key={i} className="flex items-center gap-4 px-4 py-3 bg-zinc-800/60 border border-zinc-700/30 rounded-xl animate-pulse">
-        <div className="w-10 h-10 bg-zinc-700 rounded-lg" />
-        <div className="flex-1 h-4 bg-zinc-700 rounded w-1/3" />
-        <div className="w-16 h-3 bg-zinc-700 rounded" />
-        <div className="w-20 h-3 bg-zinc-700 rounded" />
+      <div key={i} className="flex items-center gap-4 px-4 py-3 bg-ink-800/60 border border-ink-700/30 rounded-xl animate-pulse">
+        <div className="w-10 h-10 bg-ink-700 rounded-lg" />
+        <div className="flex-1 h-4 bg-ink-700 rounded w-1/3" />
+        <div className="w-16 h-3 bg-ink-700 rounded" />
+        <div className="w-20 h-3 bg-ink-700 rounded" />
       </div>
     ))}
   </div>
@@ -452,7 +452,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 navigate(resPath('/resources'));
               }
             }}
-            className="p-2.5 -ml-2 text-zinc-400 hover:text-zinc-200 active:bg-zinc-700/50 rounded-lg"
+            className="p-2.5 -ml-2 text-ink-400 hover:text-ink-200 active:bg-ink-700/50 rounded-lg"
           >
             <ChevronLeft size={22} />
           </button>
@@ -468,7 +468,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
           <div className="pointer-events-auto flex items-center justify-end">
             {isMobileSearchOpen ? (
               <div className="flex items-center bg-black/50 backdrop-blur-md rounded-full px-4 py-2.5 w-[calc(100vw-80px)] max-w-sm animate-in slide-in-from-right-10 duration-200 border border-white/10 shadow-lg">
-                <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
+                <Search size={16} className="text-ink-300 mr-2 flex-shrink-0" />
                 <input
                   autoFocus
                   type="text"
@@ -484,14 +484,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     }
                   }}
                   placeholder={t('resources.searchFiles')}
-                  className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-zinc-400"
+                  className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-ink-400"
                 />
                 <button
                   onClick={() => {
                     setIsMobileSearchOpen(false);
                     onSearchClear();
                   }}
-                  className="ml-2 text-zinc-400 hover:text-white"
+                  className="ml-2 text-ink-400 hover:text-white"
                 >
                   <X size={16} />
                 </button>
@@ -511,14 +511,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
       {/* Toolbar -- desktop only */}
       <div
-        className="hidden md:block px-3 md:px-6 pt-3 pb-2 border-b border-zinc-800/80 space-y-2"
+        className="hidden md:block px-3 md:px-6 pt-3 pb-2 border-b border-ink-800/80 space-y-2"
         style={{ paddingRight: (selectedResource?.resource || selectedFolder) && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             {breadcrumbSegments.length <= 1 ? (
               <div>
-                <h2 className="text-lg font-semibold text-zinc-100">{breadcrumbSegments[0]?.label}</h2>
+                <h2 className="text-lg font-semibold text-ink-100">{breadcrumbSegments[0]?.label}</h2>
               </div>
             ) : (
               <Breadcrumb segments={breadcrumbSegments} />
@@ -549,7 +549,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 className={`p-1.5 rounded-lg transition-colors ${
                   isFilterBarVisible
                     ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                    : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
                 }`}
                 title={
                   isFilterBarVisible
@@ -574,7 +574,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 className={`p-1.5 rounded-lg transition-colors ${
                   sortBy !== 'newest'
                     ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                    : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
                 }`}
                 title={currentSortLabel}
               >
@@ -583,7 +583,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               {showSortMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1.5 z-20 bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
+                  <div className="absolute right-0 top-full mt-1.5 z-20 bg-ink-900/95 backdrop-blur-sm border border-ink-700/80 rounded-xl shadow-2xl py-1.5 w-44 animate-dropdown">
                     {sortOptions.map((opt) => (
                       <button
                         key={opt.value}
@@ -591,7 +591,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                         className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
                           sortBy === opt.value
                             ? 'bg-indigo-500/10 text-indigo-400'
-                            : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                            : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
                         }`}
                       >
                         <span>{opt.label}</span>
@@ -612,7 +612,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   viewMode === 'grid' ? 'justified' : viewMode === 'justified' ? 'list' : 'grid',
                 )
               }
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              className="p-1.5 rounded-lg text-ink-400 hover:text-ink-200 hover:bg-ink-800 transition-colors"
               title={
                 viewMode === 'grid'
                   ? t('resources.gridView')
@@ -636,7 +636,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 {uploading ? (
                   <button
                     disabled
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-800 text-white rounded-lg"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo opacity-70"
                   >
                     <Loader2 size={14} className="animate-spin" />
                     <span>{overallProgress}%</span>
@@ -646,30 +646,30 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     <div className="flex">
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-l-lg transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-l-lg btn-tint-indigo border-r-0 transition-colors"
                       >
                         <Upload size={14} />
                         <span>{t('resources.upload')}</span>
                       </button>
                       <button
                         onClick={() => setShowUploadDropdown(prev => !prev)}
-                        className="px-1.5 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-r-lg border-l border-indigo-500 transition-colors"
+                        className="px-1.5 py-1.5 text-xs font-medium rounded-r-lg btn-tint-indigo transition-colors"
                       >
                         <ChevronDown size={12} />
                       </button>
                     </div>
                     {showUploadDropdown && (
-                      <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-40">
+                      <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-40">
                         <button
                           onClick={() => { fileInputRef.current?.click(); setShowUploadDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
+                          className="w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors flex items-center gap-2"
                         >
                           <Upload size={12} />
                           {t('resources.uploadFile')}
                         </button>
                         <button
                           onClick={() => { folderInputRef.current?.click(); setShowUploadDropdown(false); }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors flex items-center gap-2"
+                          className="w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors flex items-center gap-2"
                         >
                           <FolderOpen size={12} />
                           {t('resources.uploadFolder')}
@@ -683,69 +683,69 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 <div className="relative" ref={newDropdownRef}>
                   <button
                     onClick={() => setShowNewDropdown(prev => !prev)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-amber transition-colors"
                   >
                     <Sparkles size={14} />
                     <span>{t('resources.new')}</span>
                     <ChevronDown size={12} />
                   </button>
                   {showNewDropdown && (
-                    <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
+                    <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-48">
                       {/* Group 1 -- Containers */}
                       <button
                         onClick={() => { onStartCreateFolder(); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <FolderPlus size={14} className="text-amber-400" />
                         {t('resources.newFolder')}
                       </button>
                       <button
                         onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <LayoutGrid size={14} className="text-blue-400" />
                         {t('resources.newProject')}
                       </button>
                       <button
                         onClick={() => { onShowSmartFolderEditor(); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <FolderSearch size={14} className="text-purple-400" />
                         {t('resources.newSmartFolder')}
                       </button>
                       {/* Divider */}
-                      <div className="border-t border-zinc-800 my-1" />
+                      <div className="border-t border-ink-800 my-1" />
                       {/* Group 2 -- Documents */}
                       <button
                         onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <FileText size={14} className="text-emerald-400" />
                         {t('resources.newDocument')}
                       </button>
                       <button
                         onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <Table2 size={14} className="text-cyan-400" />
                         {t('resources.newSpreadsheet')}
                       </button>
                       <button
                         onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <Presentation size={14} className="text-orange-400" />
                         {t('resources.newPresentation')}
                       </button>
                       {/* Divider */}
-                      <div className="border-t border-zinc-800 my-1" />
+                      <div className="border-t border-ink-800 my-1" />
                       {/* Group 3 -- Other */}
                       <button
                         onClick={() => {
                           setShowFetchUrlModal(true);
                           setShowNewDropdown(false);
                         }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <Globe size={14} className="text-indigo-400" />
                         {t('resources.newWebUrl')}
@@ -773,20 +773,20 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
       {/* Multi-select mode toolbar */}
       {multiSelectMode && (
-        <div className="px-6 py-2 border-b border-zinc-800/80 bg-zinc-900/80 flex items-center gap-3">
+        <div className="px-6 py-2 border-b border-ink-800/80 bg-ink-900/80 flex items-center gap-3">
           <button
             onClick={() => setSelectedIds(new Set(allSelectableIds))}
-            className="px-3 py-1 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+            className="px-3 py-1 text-xs font-medium text-ink-300 bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
           >
             {t('resources.selectAll')}
           </button>
           <button
             onClick={() => { setSelectedIds(new Set()); setMultiSelectMode(false); setSelectedResource(null); }}
-            className="px-3 py-1 text-xs font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+            className="px-3 py-1 text-xs font-medium text-ink-400 bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
           >
             {t('common.cancel')}
           </button>
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-ink-500">
             {t('resources.multiSelectCount', {
               total: visibleFolders.length + sortedItems.length,
               selected: selectedIds.size,
@@ -822,17 +822,17 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       >
         {/* Drag-and-drop overlay */}
         {dragOver && canUploadDrop && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-zinc-950/80 backdrop-blur-sm border-2 border-dashed border-indigo-500 rounded-xl m-2 pointer-events-none">
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-ink-950/80 backdrop-blur-sm border-2 border-dashed border-indigo-500 rounded-xl m-2 pointer-events-none">
             <UploadCloud size={56} className="text-indigo-400 mb-4 animate-bounce" />
             <p className="text-lg font-medium text-indigo-300">{t('resources.dropToUpload')}</p>
-            <p className="text-sm text-zinc-400 mt-1">{t('resources.dropToUploadHint')}</p>
+            <p className="text-sm text-ink-400 mt-1">{t('resources.dropToUploadHint')}</p>
           </div>
         )}
 
         {/* Recycle bin auto-cleanup notice */}
         {isRecycleView && (
-          <div className="mb-4 flex items-center gap-2 px-3 py-2.5 bg-zinc-800/50 border border-zinc-700/50 rounded-lg text-xs text-zinc-400">
-            <Clock size={14} className="shrink-0 text-zinc-500" />
+          <div className="mb-4 flex items-center gap-2 px-3 py-2.5 bg-ink-800/50 border border-ink-700/50 rounded-lg text-xs text-ink-400">
+            <Clock size={14} className="shrink-0 text-ink-500" />
             <span>{t('resources.recycleBinAutoCleanup')}</span>
           </div>
         )}
@@ -840,8 +840,8 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         {/* Shared view placeholder */}
         {isSharedView && (
           <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-            <Share2 size={48} className="text-zinc-600 mb-4" />
-            <p className="text-zinc-400 text-sm">{t('resources.sharedComingSoon')}</p>
+            <Share2 size={48} className="text-ink-600 mb-4" />
+            <p className="text-ink-400 text-sm">{t('resources.sharedComingSoon')}</p>
           </div>
         )}
 
@@ -851,15 +851,15 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
             <button
               onClick={() => navigate(resPath('/resources/recycle'))}
               data-context-item
-              className="w-full flex items-center gap-3 px-4 py-3 bg-zinc-800/30 hover:bg-zinc-800/60 rounded-xl border border-zinc-700/30 transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-3 bg-ink-800/30 hover:bg-ink-800/60 rounded-xl border border-ink-700/30 transition-colors"
             >
-              <div className="w-10 h-10 rounded-lg bg-zinc-700/40 flex items-center justify-center">
-                <Trash2 size={18} className="text-zinc-400" />
+              <div className="w-10 h-10 rounded-lg bg-ink-700/40 flex items-center justify-center">
+                <Trash2 size={18} className="text-ink-400" />
               </div>
               <div className="flex-1 text-left">
-                <span className="text-sm text-zinc-300 font-medium">Recycle Bin</span>
+                <span className="text-sm text-ink-300 font-medium">Recycle Bin</span>
               </div>
-              <ChevronRight size={16} className="text-zinc-600" />
+              <ChevronRight size={16} className="text-ink-600" />
             </button>
           </div>
         )}
@@ -882,10 +882,10 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               }}
               placeholder={t('resources.folderName')}
               disabled={savingFolder}
-              className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+              className="flex-1 bg-ink-900 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
             />
             {savingFolder && (
-              <Loader2 size={14} className="animate-spin text-zinc-400" />
+              <Loader2 size={14} className="animate-spin text-ink-400" />
             )}
           </div>
         )}
@@ -900,7 +900,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               {isRecycleView && recycleSubFolders.length > 0 && (
                 <div>
                   {sortedItems.length > 0 && (
-                    <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
+                    <h3 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
                   <div className="grid grid-cols-2 gap-3 downloads-grid">
                     {recycleSubFolders.map((folder) => (
@@ -936,7 +936,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               {visibleFolders.length > 0 && (
                 <div>
                   {sortedItems.length > 0 && (
-                    <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
+                    <h3 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
                   {viewMode === 'grid' || viewMode === 'justified' ? (
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
@@ -1056,19 +1056,19 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               {sortedItems.length > 0 && (
                 <div>
                   {(visibleFolders.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) && (
-                    <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
+                    <h3 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
                   )}
                   {viewMode === 'list' && (
-                    <div className="flex items-center gap-4 px-4 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-800/60 mb-1">
+                    <div className="flex items-center gap-4 px-4 py-2 text-[11px] font-semibold text-ink-500 uppercase tracking-wider border-b border-ink-800/60 mb-1">
                       <div className="w-10" />
-                      <button onClick={() => setSortBy(sortBy === 'name-az' ? 'name-za' : 'name-az')} className="flex-1 text-left hover:text-zinc-300 transition-colors cursor-pointer">
+                      <button onClick={() => setSortBy(sortBy === 'name-az' ? 'name-za' : 'name-az')} className="flex-1 text-left hover:text-ink-300 transition-colors cursor-pointer">
                         {t('resources.listHeaderName')} {sortBy === 'name-az' ? '\u2191' : sortBy === 'name-za' ? '\u2193' : ''}
                       </button>
                       <span className="w-24 text-left">{t('resources.listHeaderType')}</span>
-                      <button onClick={() => setSortBy(sortBy === 'largest' ? 'smallest' : 'largest')} className="w-20 text-right hover:text-zinc-300 transition-colors cursor-pointer">
+                      <button onClick={() => setSortBy(sortBy === 'largest' ? 'smallest' : 'largest')} className="w-20 text-right hover:text-ink-300 transition-colors cursor-pointer">
                         {t('resources.listHeaderSize')} {sortBy === 'largest' ? '\u2193' : sortBy === 'smallest' ? '\u2191' : ''}
                       </button>
-                      <button onClick={() => setSortBy(sortBy === 'newest' ? 'oldest' : 'newest')} className="w-28 text-right hover:text-zinc-300 transition-colors cursor-pointer">
+                      <button onClick={() => setSortBy(sortBy === 'newest' ? 'oldest' : 'newest')} className="w-28 text-right hover:text-ink-300 transition-colors cursor-pointer">
                         {t('resources.modifiedAt')} {sortBy === 'newest' ? '\u2193' : sortBy === 'oldest' ? '\u2191' : ''}
                       </button>
                     </div>
@@ -1119,7 +1119,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                         />
                         {isTempContext && (
-                          <div className="flex items-center gap-2 px-2 py-1.5 bg-zinc-900/60 rounded-b-xl border-t border-zinc-800/50">
+                          <div className="flex items-center gap-2 px-2 py-1.5 bg-ink-900/60 rounded-b-xl border-t border-ink-800/50">
                             {badge && (
                               <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
                                 {badge}
@@ -1176,7 +1176,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                         />
                         {isTempContext && (
-                          <div className="flex items-center gap-2 px-2 py-1.5 bg-zinc-900/60 rounded-b-xl border-t border-zinc-800/50">
+                          <div className="flex items-center gap-2 px-2 py-1.5 bg-ink-900/60 rounded-b-xl border-t border-ink-800/50">
                             {badge && (
                               <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
                                 {badge}
@@ -1233,7 +1233,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                         />
                         {isTempContext && (
-                          <div className="flex items-center gap-2 px-4 py-1.5 border-t border-zinc-800/50">
+                          <div className="flex items-center gap-2 px-4 py-1.5 border-t border-ink-800/50">
                             {badge && (
                               <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
                                 {badge}
@@ -1260,19 +1260,19 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
             <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
               {isRecycleView ? (
                 <>
-                  <Trash2 size={48} className="text-zinc-700 mb-4" />
-                  <p className="text-zinc-500 text-sm">{t('resources.recycleBinEmpty')}</p>
+                  <Trash2 size={48} className="text-ink-700 mb-4" />
+                  <p className="text-ink-500 text-sm">{t('resources.recycleBinEmpty')}</p>
                 </>
               ) : isTempView ? (
                 <>
-                  <Clock size={48} className="text-zinc-700 mb-4" />
-                  <p className="text-zinc-500 text-sm">{t('resources.tempEmpty')}</p>
+                  <Clock size={48} className="text-ink-700 mb-4" />
+                  <p className="text-ink-500 text-sm">{t('resources.tempEmpty')}</p>
                 </>
               ) : (
                 <>
-                  <FolderOpen size={48} className="text-zinc-700 mb-4" />
-                  <p className="text-zinc-500 text-sm">{t('resources.noResources')}</p>
-                  <p className="text-zinc-600 text-xs mt-1">{t('resources.noResourcesHint')}</p>
+                  <FolderOpen size={48} className="text-ink-700 mb-4" />
+                  <p className="text-ink-500 text-sm">{t('resources.noResources')}</p>
+                  <p className="text-ink-600 text-xs mt-1">{t('resources.noResourcesHint')}</p>
                 </>
               )}
             </div>
@@ -1285,7 +1285,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         {(isResourcesView || isRecycleView) && (hasMore || isLoadingMore) && (
           <div ref={loadMoreRef} className="w-full flex justify-center py-6">
             {isLoadingMore && (
-              <span className="text-zinc-500 text-sm">{t('common.loading')}</span>
+              <span className="text-ink-500 text-sm">{t('common.loading')}</span>
             )}
           </div>
         )}

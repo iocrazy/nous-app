@@ -11,15 +11,20 @@ import {
   CheckCircle2,
   ShieldAlert,
   Upload as UploadIcon,
+  Sparkles,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ApprovalsPanel } from './ApprovalsPanel';
-import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
 import { TaskDetailModal } from './TaskCenter/TaskDetailModal';
-import { ActiveTaskCard } from './TaskCenter/ActiveTaskCard';
 import { TaskCenterStatusBar, type TaskTab } from './TaskCenter/TaskCenterStatusBar';
-import { summarizeTasks, isActiveStatus } from './TaskCenter/taskCenterSummary';
+import { FlowTaskList } from './TaskCenter/FlowStepCard';
+import {
+  groupTasksByFlow,
+  isActiveItem,
+  summarizeFlowItems,
+  type PanelItem,
+} from './TaskCenter/flowGrouping';
 import { useAgentRunTasks } from './TaskCenter/useAgentRunTasks';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -37,6 +42,8 @@ interface TopBarProps {
   onSignOut: () => void;
   onOpenSettings?: (tab?: string) => void;
   sidebarCollapsed?: boolean;
+  /** Render inside the island shell: static full-width strip with brand on the left. */
+  island?: boolean;
 }
 
 type PanelType = 'taskCenter' | 'notifications' | 'approvals' | 'avatar' | null;
@@ -87,8 +94,8 @@ const IconButton: React.FC<{
     onClick={onClick}
     className={`relative p-2 rounded-lg transition-colors ${
       active
-        ? 'bg-zinc-800 text-zinc-100'
-        : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+        ? 'bg-ink-800 text-ink-100'
+        : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
     }`}
   >
     {children}
@@ -109,7 +116,7 @@ const PanelShell: React.FC<{
   className?: string;
 }> = ({ children, className = '' }) => (
   <div
-    className={`fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-2 bg-zinc-900 border border-zinc-700/50 rounded-xl shadow-2xl z-50 ${className}`}
+    className={`fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-2 bg-ink-900 border border-ink-700/50 rounded-xl shadow-2xl z-50 ${className}`}
   >
     {children}
   </div>
@@ -146,28 +153,25 @@ const TaskCenterPanel: React.FC<{
   );
   const allTasks = [...backendTasks, ...agentTasks];
 
-  const counts = summarizeTasks(allTasks, uploadingItems.length);
+  // One user submission (parse → download → thumbnail/extract_audio/
+  // transcode/ai_*) shares a flow_id and renders as ONE card with step
+  // circles. Counts are in flow units — what the user calls "a task".
+  const panelItems = groupTasksByFlow(allTasks);
+  const flowCounts = summarizeFlowItems(panelItems);
+  const counts = { ...flowCounts, running: flowCounts.running + uploadingItems.length };
   const completedCount = counts.completed + counts.failed;
   const activeTotal = counts.running + counts.queued;
   const hasTasks = allTasks.length > 0 || uploadingItems.length > 0;
 
-  // Newest first; within the Active tab, running sorts above queued.
-  const byRecency = (a: UnifiedTask, b: UnifiedTask) =>
-    (b.created_at || '').localeCompare(a.created_at || '');
-  const activeList = allTasks
-    .filter((tk) => isActiveStatus(tk.status))
-    .sort((a, b) => {
-      const ar = a.status === 'processing' ? 1 : 0;
-      const br = b.status === 'processing' ? 1 : 0;
-      return ar !== br ? br - ar : byRecency(a, b);
-    });
-  const historyList = allTasks
-    .filter((tk) => !isActiveStatus(tk.status))
-    .sort(byRecency)
-    .slice(0, 50);
-
-  const runningTasks = activeList.filter((tk) => tk.status === 'processing');
-  const queuedTasks = activeList.filter((tk) => tk.status === 'pending');
+  // Active tab: items with something processing sort above purely-queued.
+  const hasProcessing = (i: PanelItem) =>
+    i.kind === 'flow'
+      ? i.steps.some((s) => s.status === 'processing')
+      : i.task.status === 'processing';
+  const activeItems = panelItems
+    .filter(isActiveItem)
+    .sort((a, b) => Number(hasProcessing(b)) - Number(hasProcessing(a)));
+  const historyItems = panelItems.filter((i) => !isActiveItem(i)).slice(0, 50);
   const showActive = tab === 'active';
 
   // Shared 1s clock for the live running cards' elapsed time — only ticks while
@@ -182,12 +186,12 @@ const TaskCenterPanel: React.FC<{
   return (
     <PanelShell className="w-[calc(100vw-2rem)] sm:w-96 right-0 sm:right-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-        <span className="text-sm font-semibold text-zinc-200">{t('topbar.taskCenter')}</span>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
+        <span className="text-sm font-semibold text-ink-200">{t('topbar.taskCenter')}</span>
         {completedCount > 0 && (
           <button
             onClick={() => clearCompleted()}
-            className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="text-[10px] text-ink-500 hover:text-ink-300 transition-colors"
           >
             {t('topbar.clearCompleted')}
           </button>
@@ -195,8 +199,8 @@ const TaskCenterPanel: React.FC<{
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
-          <div className="w-5 h-5 border-2 border-zinc-600 border-t-indigo-400 rounded-full animate-spin mb-2" />
+        <div className="flex flex-col items-center justify-center py-10 text-ink-500">
+          <div className="w-5 h-5 border-2 border-ink-600 border-t-indigo-400 rounded-full animate-spin mb-2" />
           <span className="text-sm">{t('common.loading')}</span>
         </div>
       ) : hasTasks ? (
@@ -213,42 +217,32 @@ const TaskCenterPanel: React.FC<{
           <div className="max-h-80 overflow-y-auto">
             {showActive ? (
               <>
-                {/* Running now — prominent live cards */}
-                {runningTasks.length > 0 && (
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                    {t('topbar.running')} · {runningTasks.length}
-                  </div>
-                )}
-                {runningTasks.map((task) => (
-                  <ActiveTaskCard key={task.id} task={task} now={now} onCancel={cancelTask} />
-                ))}
-
                 {/* Active uploads from UploadContext (client-side progress) */}
                 {uploadingItems.map((item) => (
-                  <div key={item.id} className="px-3 py-2.5 border-b border-zinc-800/50">
+                  <div key={item.id} className="px-3 py-2.5 border-b border-ink-800/50">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-blue-500/20 text-blue-400">
                         <UploadIcon size={14} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-zinc-300 truncate max-w-[180px]">{item.filename}</span>
+                          <span className="text-xs text-ink-300 truncate max-w-[180px]">{item.filename}</span>
                           <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                            <span className="text-[10px] text-zinc-500">{item.percent}%</span>
+                            <span className="text-[10px] text-ink-500">{item.percent}%</span>
                             {item.speed > 0 && (
-                              <span className="text-[10px] text-zinc-600">{uploadFormatSpeed(item.speed)}</span>
+                              <span className="text-[10px] text-ink-600">{uploadFormatSpeed(item.speed)}</span>
                             )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] text-zinc-600">Upload</span>
+                          <span className="text-[10px] text-ink-600">Upload</span>
                           {item.fileSize > 0 && (
-                            <span className="text-[10px] text-zinc-600">{uploadFormatFileSize(item.fileSize)}</span>
+                            <span className="text-[10px] text-ink-600">{uploadFormatFileSize(item.fileSize)}</span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <div className="mt-1.5 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="mt-1.5 h-1 bg-ink-800 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-300 bg-indigo-500"
                         style={{ width: `${Math.max(item.percent, 2)}%` }}
@@ -257,45 +251,36 @@ const TaskCenterPanel: React.FC<{
                   </div>
                 ))}
 
-                {/* Queued */}
-                {queuedTasks.length > 0 && (
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500 border-t border-zinc-800/50">
-                    {t('topbar.queued')} · {queuedTasks.length}
-                  </div>
-                )}
-                {queuedTasks.map((task) => (
-                  <TaskCenterRow
-                    key={task.id}
-                    task={task}
-                    onCancel={cancelTask}
-                    onRetry={retryTask}
-                    onOpenResource={openResource}
-                    onOpenDetail={onOpenDetail}
-                  />
-                ))}
+                {/* Flow cards (step circles) + standalone tasks */}
+                <FlowTaskList
+                  items={activeItems}
+                  now={now}
+                  onCancel={cancelTask}
+                  onRetry={retryTask}
+                  onOpenResource={openResource}
+                  onOpenDetail={onOpenDetail}
+                />
 
-                {uploadingItems.length === 0 && activeList.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
-                    <CheckCircle2 size={24} className="mb-2 text-zinc-600" />
+                {uploadingItems.length === 0 && activeItems.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-8 text-ink-500">
+                    <CheckCircle2 size={24} className="mb-2 text-ink-600" />
                     <span className="text-xs">{t('topbar.noActiveTasks')}</span>
                   </div>
                 )}
               </>
             ) : (
               <>
-                {historyList.map((task) => (
-                  <TaskCenterRow
-                    key={task.id}
-                    task={task}
-                    onCancel={cancelTask}
-                    onRetry={retryTask}
-                    onOpenResource={openResource}
-                    onOpenDetail={onOpenDetail}
-                  />
-                ))}
-                {historyList.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
-                    <Inbox size={24} className="mb-2 text-zinc-600" />
+                <FlowTaskList
+                  items={historyItems}
+                  now={now}
+                  onCancel={cancelTask}
+                  onRetry={retryTask}
+                  onOpenResource={openResource}
+                  onOpenDetail={onOpenDetail}
+                />
+                {historyItems.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-8 text-ink-500">
+                    <Inbox size={24} className="mb-2 text-ink-600" />
                     <span className="text-xs">{t('topbar.noItems')}</span>
                   </div>
                 )}
@@ -304,8 +289,8 @@ const TaskCenterPanel: React.FC<{
           </div>
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
-          <Inbox size={28} className="mb-2 text-zinc-600" />
+        <div className="flex flex-col items-center justify-center py-10 text-ink-500">
+          <Inbox size={28} className="mb-2 text-ink-600" />
           <span className="text-sm">{t('topbar.noItems')}</span>
         </div>
       )}
@@ -321,11 +306,11 @@ const NotificationsPanel: React.FC = () => {
   const { t } = useTranslation();
   return (
     <PanelShell className="w-[calc(100vw-2rem)] sm:w-80">
-      <div className="px-4 py-3 border-b border-zinc-800">
-        <span className="text-sm font-semibold text-zinc-200">{t('topbar.notifications')}</span>
+      <div className="px-4 py-3 border-b border-ink-800">
+        <span className="text-sm font-semibold text-ink-200">{t('topbar.notifications')}</span>
       </div>
-      <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
-        <Bell size={28} className="mb-2 text-zinc-600" />
+      <div className="flex flex-col items-center justify-center py-10 text-ink-500">
+        <Bell size={28} className="mb-2 text-ink-600" />
         <span className="text-sm">{t('topbar.noNotifications')}</span>
       </div>
     </PanelShell>
@@ -345,9 +330,9 @@ const AvatarMenu: React.FC<{
   return (
     <PanelShell className="w-56">
       {/* User info header */}
-      <div className="px-4 py-3 border-b border-zinc-800">
-        <p className="text-sm font-semibold text-zinc-200 truncate">{user.name}</p>
-        <p className="text-xs text-zinc-500 truncate">{user.email}</p>
+      <div className="px-4 py-3 border-b border-ink-800">
+        <p className="text-sm font-semibold text-ink-200 truncate">{user.name}</p>
+        <p className="text-xs text-ink-500 truncate">{user.email}</p>
       </div>
 
       {/* Menu items */}
@@ -364,7 +349,7 @@ const AvatarMenu: React.FC<{
         />
       </div>
 
-      <div className="border-t border-zinc-800" />
+      <div className="border-t border-ink-800" />
 
       <div className="py-1">
         <MenuButton
@@ -376,7 +361,7 @@ const AvatarMenu: React.FC<{
         />
       </div>
 
-      <div className="border-t border-zinc-800" />
+      <div className="border-t border-ink-800" />
 
       <div className="py-1">
         <MenuButton icon={LogOut} label={t('user.signOut')} onClick={onSignOut} danger />
@@ -396,7 +381,7 @@ const MenuButton: React.FC<{
     className={`w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors ${
       danger
         ? 'text-red-400 hover:bg-red-500/10'
-        : 'text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100'
+        : 'text-ink-300 hover:bg-ink-800 hover:text-ink-100'
     }`}
   >
     <Icon size={16} />
@@ -440,7 +425,7 @@ const UserAvatar: React.FC<{
 // TopBar
 // ---------------------------------------------------------------------------
 
-export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigate, onSignOut, onOpenSettings, sidebarCollapsed = false }) => {
+export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigate, onSignOut, onOpenSettings, sidebarCollapsed = false, island = false }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
   const upload = useUpload();
@@ -500,7 +485,26 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
   return (
-    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm z-50 hidden sm:flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`}>
+    <header
+      className={
+        island
+          ? 'relative h-12 z-50 hidden sm:flex items-center gap-1.5 sm:gap-2 px-1'
+          : `fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-ink-800 bg-ink-950/80 backdrop-blur-sm z-50 hidden sm:flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`
+      }
+    >
+      {/* Island mode: brand on the left (spec §2 "global zone"); spacer pushes
+          controls to the right. Classic mode keeps justify-end with no brand. */}
+      {island && (
+        <>
+          <div className="flex items-center gap-2 font-bold text-sm text-ink-100 pl-1 pr-2 select-none">
+            <span className="w-6 h-6 rounded-[7px] grid place-items-center bg-gradient-to-br from-indigo-400 to-indigo-500 shadow-[0_0_16px_rgba(99,102,241,0.4)]">
+              <Sparkles size={13} className="text-white" />
+            </span>
+            <span>MediaHub</span>
+          </div>
+          <div className="flex-1" />
+        </>
+      )}
       {/* Language Switcher — desktop only (mobile: accessible via Settings) */}
       <div className="hidden sm:block">
         <LanguageSwitcher />
@@ -576,7 +580,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
         <button
           title={t('topbar.account')}
           onClick={() => togglePanel('avatar')}
-          className="p-1 rounded-lg transition-colors hover:bg-zinc-800"
+          className="p-1 rounded-lg transition-colors hover:bg-ink-800"
         >
           <UserAvatar
             name={user?.name || '?'}

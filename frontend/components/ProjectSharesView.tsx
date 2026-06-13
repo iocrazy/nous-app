@@ -54,13 +54,13 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
   if (shares.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <div className="p-4 bg-zinc-800 rounded-2xl mb-4">
-          <Share2 size={40} className="text-zinc-500" />
+        <div className="p-4 bg-ink-800 rounded-2xl mb-4">
+          <Share2 size={40} className="text-ink-500" />
         </div>
-        <h3 className="text-lg font-medium text-zinc-300 mb-2">
+        <h3 className="text-lg font-medium text-ink-300 mb-2">
           {t('projects.shares.empty', 'No Shares Yet')}
         </h3>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-ink-500">
           {t('projects.shares.emptyHint', 'Share project files to collaborate with others')}
         </p>
       </div>
@@ -68,35 +68,35 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
   }
 
   return (
-    <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl overflow-hidden">
+    <div className="bg-ink-800/50 border border-ink-700/50 rounded-xl overflow-hidden">
       <table className="w-full">
         <thead>
-          <tr className="border-b border-zinc-700/50">
-            <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+          <tr className="border-b border-ink-700/50">
+            <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
               {t('projects.shares.code', 'Share Code')}
             </th>
-            <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
               {t('projects.shares.type', 'Type')}
             </th>
-            <th className="text-center px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            <th className="text-center px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
               {t('projects.shares.views', 'Views')}
             </th>
-            <th className="text-center px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            <th className="text-center px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
               {t('projects.shares.status', 'Status')}
             </th>
-            <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
               {t('projects.shares.created', 'Created')}
             </th>
-            <th className="text-right px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            <th className="text-right px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
               {t('projects.shares.actions', 'Actions')}
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-700/30">
+        <tbody className="divide-y divide-ink-700/30">
           {shares.map(share => (
-            <tr key={share.id} className="hover:bg-zinc-700/20 transition-colors">
+            <tr key={share.id} className="hover:bg-ink-700/20 transition-colors">
               <td className="px-4 py-3">
-                <span className="text-sm text-white font-mono">{share.share_code}</span>
+                <span className="text-sm text-ink-50 font-mono">{share.share_code}</span>
                 {share.password && (
                   <span className="ml-2 text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
                     {t('projects.shares.protected', 'Protected')}
@@ -104,12 +104,12 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
                 )}
               </td>
               <td className="px-4 py-3">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${shareTypeColors[share.share_type] || 'text-zinc-400 bg-zinc-700/50'}`}>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${shareTypeColors[share.share_type] || 'text-ink-400 bg-ink-700/50'}`}>
                   {t(`shares.type.${share.share_type}`, share.share_type)}
                 </span>
               </td>
               <td className="px-4 py-3 text-center">
-                <span className="text-sm text-zinc-300">{share.view_count}</span>
+                <span className="text-sm text-ink-300">{share.view_count}</span>
               </td>
               <td className="px-4 py-3 text-center">
                 {share.is_active ? (
@@ -117,26 +117,26 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
                     {t('shares.status.active', 'Active')}
                   </span>
                 ) : (
-                  <span className="text-xs text-zinc-500 bg-zinc-700/50 px-2 py-0.5 rounded-full">
+                  <span className="text-xs text-ink-500 bg-ink-700/50 px-2 py-0.5 rounded-full">
                     {t('shares.status.expired', 'Expired')}
                   </span>
                 )}
               </td>
               <td className="px-4 py-3">
-                <span className="text-sm text-zinc-500">{formatDate(share.created_at)}</span>
+                <span className="text-sm text-ink-500">{formatDate(share.created_at)}</span>
               </td>
               <td className="px-4 py-3 text-right">
                 <div className="flex items-center justify-end gap-1">
                   <button
                     onClick={() => copyShareLink(share)}
-                    className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 rounded-lg transition-colors"
+                    className="p-1.5 text-ink-500 hover:text-ink-200 hover:bg-ink-700 rounded-lg transition-colors"
                     title={t('projects.shares.copyLink', 'Copy Link')}
                   >
                     <Copy size={14} />
                   </button>
                   <button
                     onClick={() => window.open(`/share/${share.share_code}`, '_blank')}
-                    className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 rounded-lg transition-colors"
+                    className="p-1.5 text-ink-500 hover:text-ink-200 hover:bg-ink-700 rounded-lg transition-colors"
                     title={t('projects.shares.openLink', 'Open Link')}
                   >
                     <ExternalLink size={14} />

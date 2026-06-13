@@ -19,8 +19,8 @@ interface TaskRowExpandedProps {
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div className="min-w-0">
-    <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{label}</div>
-    <div className="text-xs text-zinc-200 truncate">{children}</div>
+    <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-0.5">{label}</div>
+    <div className="text-xs text-ink-200 truncate">{children}</div>
   </div>
 );
 
@@ -55,14 +55,14 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
   };
 
   return (
-    <div className="bg-zinc-950/60 border-y border-zinc-800/80 px-6 py-3 space-y-3">
+    <div className="bg-ink-950/60 border-y border-ink-800/80 px-6 py-3 space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2.5">
         <Field label="Task ID">
           <span className="font-mono text-[11px]">{taskIdLabel(task)}</span>
-          <span className="text-zinc-500 ml-1.5 font-mono text-[10px]">{task.id.slice(0, 8)}</span>
+          <span className="text-ink-500 ml-1.5 font-mono text-[10px]">{task.id.slice(0, 8)}</span>
         </Field>
         <Field label="Type">
-          <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px]">{taskTypeLabel(task.task_type)}</span>
+          <span className="px-1.5 py-0.5 rounded bg-ink-800 text-ink-300 text-[10px]">{taskTypeLabel(task.task_type)}</span>
         </Field>
         <Field label="Status">
           <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider ${v.badgeBg} ${v.badgeText} ring-1 ${v.border} font-semibold`}>
@@ -96,21 +96,21 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
         )}
         {typeof md.original_url === 'string' && (
           <div className="col-span-2 md:col-span-3 min-w-0">
-            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">Original URL</div>
-            <div className="text-xs text-zinc-300 break-all">{md.original_url}</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-0.5">Original URL</div>
+            <div className="text-xs text-ink-300 break-all">{md.original_url}</div>
           </div>
         )}
       </div>
 
       {task.subtitle && (
         <div className="text-xs">
-          <span className="text-zinc-500 font-medium">Subtitle: </span>
-          <span className="text-zinc-300">{task.subtitle}</span>
+          <span className="text-ink-500 font-medium">Subtitle: </span>
+          <span className="text-ink-300">{task.subtitle}</span>
         </div>
       )}
 
       {task.status === 'processing' && (
-        <div className="h-1 bg-zinc-800 rounded overflow-hidden">
+        <div className="h-1 bg-ink-800 rounded overflow-hidden">
           <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.min(100, task.progress)}%` }} />
         </div>
       )}
@@ -128,10 +128,10 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
       )}
 
       <details className="text-xs">
-        <summary className="cursor-pointer text-[10px] text-zinc-500 uppercase tracking-wider hover:text-zinc-300 inline-block">
+        <summary className="cursor-pointer text-[10px] text-ink-500 uppercase tracking-wider hover:text-ink-300 inline-block">
           Metadata · DBOS workflow
         </summary>
-        <pre className="mt-2 text-[10px] text-zinc-400 bg-zinc-900 border border-zinc-800 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+        <pre className="mt-2 text-[10px] text-ink-400 bg-ink-900 border border-ink-800 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
 {`workflow_uuid: ${task.dbos_workflow_id ?? task.id}\n`}
 {`metadata: ${JSON.stringify(task.metadata ?? {}, null, 2)}`}
         </pre>
@@ -156,7 +156,7 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
         )}
         <button
           onClick={onDelete}
-          className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 ml-auto"
+          className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded text-ink-400 hover:text-rose-400 hover:bg-rose-500/10 ml-auto"
         >
           <Trash2 size={12} /> Delete
         </button>

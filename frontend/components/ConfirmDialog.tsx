@@ -88,11 +88,11 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
           />
 
           {/* Dialog */}
-          <div className="relative w-full max-w-md mx-4 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="relative w-full max-w-md mx-4 bg-ink-900 border border-ink-700 rounded-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             {/* Close */}
             <button
               onClick={() => handleResult(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="absolute top-4 right-4 text-ink-500 hover:text-ink-300 transition-colors"
             >
               <X size={18} />
             </button>
@@ -102,19 +102,19 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${config.iconBg}`}>
                 {state.icon || config.icon}
               </div>
-              <h3 className="text-base font-semibold text-white">{state.title}</h3>
+              <h3 className="text-base font-semibold text-ink-50">{state.title}</h3>
             </div>
 
             {/* Body */}
             <div className="px-6 py-3">
-              <p className="text-sm text-zinc-400 leading-relaxed">{state.message}</p>
+              <p className="text-sm text-ink-400 leading-relaxed">{state.message}</p>
             </div>
 
             {/* Actions */}
             <div className="flex gap-3 px-6 pb-6 pt-2">
               <button
                 onClick={() => handleResult(false)}
-                className="flex-1 px-4 py-2.5 text-sm font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl transition-colors"
+                className="flex-1 px-4 py-2.5 text-sm font-medium text-ink-300 bg-ink-800 hover:bg-ink-700 border border-ink-700 rounded-xl transition-colors"
               >
                 {state.cancelLabel ?? 'Cancel'}
               </button>

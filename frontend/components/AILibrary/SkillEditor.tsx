@@ -205,7 +205,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
         {!hideBack && (
           <button
             onClick={onBack}
-            className="mb-3 text-sm text-zinc-400 hover:text-zinc-100"
+            className="mb-3 text-sm text-ink-400 hover:text-ink-100"
           >
             ← {t('aiLibrary.skills.back')}
           </button>
@@ -218,7 +218,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   }
 
   if (!skill) {
-    return <div className="p-6 text-sm text-zinc-500">{t('common.loading')}</div>;
+    return <div className="p-6 text-sm text-ink-500">{t('common.loading')}</div>;
   }
 
   const isPreset =
@@ -342,15 +342,15 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden">
       {/* ── Header ────────────────────────────────────────────────── */}
-      <div className="border-b border-zinc-800/80 px-5 py-4">
+      <div className="border-b border-ink-800/80 px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="flex items-center gap-2 truncate text-2xl font-semibold text-zinc-100">
-              <SourceIcon className="h-5 w-5 shrink-0 text-zinc-500" />
+            <h1 className="flex items-center gap-2 truncate text-2xl font-semibold text-ink-100">
+              <SourceIcon className="h-5 w-5 shrink-0 text-ink-500" />
               {skill.name}
             </h1>
             {skill.description && (
-              <p className="mt-2 max-w-3xl text-sm text-zinc-400">
+              <p className="mt-2 max-w-3xl text-sm text-ink-400">
                 {skill.description}
               </p>
             )}
@@ -361,7 +361,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                 type="button"
                 onClick={handleDelete}
                 disabled={deleting || saving}
-                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-ink-400 transition-colors hover:bg-ink-800/60 hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 {deleting
@@ -375,7 +375,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
               className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
                 showVersions
                   ? 'bg-blue-600/20 text-blue-300'
-                  : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100'
+                  : 'text-ink-400 hover:bg-ink-800/60 hover:text-ink-100'
               }`}
               title={t('versionHistory.title', 'Version History')}
             >
@@ -386,7 +386,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
               <button
                 type="button"
                 onClick={() => setEditMode((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100"
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-ink-400 transition-colors hover:bg-ink-800/60 hover:text-ink-100"
               >
                 <Pencil className="h-3.5 w-3.5" />
                 {editMode
@@ -408,7 +408,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
         </div>
 
         {/* Metadata strip */}
-        <div className="mt-4 space-y-3 border-t border-zinc-800/60 pt-4 text-sm">
+        <div className="mt-4 space-y-3 border-t border-ink-800/60 pt-4 text-sm">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <MetaLabel
               label={t('aiLibrary.skills.metaSource', 'Source')}
@@ -430,7 +430,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
             />
           </div>
           <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-            <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+            <span className="text-[11px] uppercase tracking-[0.18em] text-ink-500">
               {t('aiLibrary.skills.metaUsedBy', 'Used by')}
             </span>
             {skill.agents && skill.agents.length > 0 ? (
@@ -446,7 +446,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                 ))}
               </span>
             ) : (
-              <span className="text-zinc-500">
+              <span className="text-ink-500">
                 {t('aiLibrary.skills.usedByPlaceholder', 'No agents attached')}
               </span>
             )}
@@ -461,10 +461,10 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
       </div>
 
       {/* ── Sub-header: file path + toggle ────────────────────────── */}
-      <div className="border-b border-zinc-800/80 px-5 py-3">
+      <div className="border-b border-ink-800/80 px-5 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="truncate font-mono text-sm text-zinc-300">
+            <div className="truncate font-mono text-sm text-ink-300">
               {activeTab}
             </div>
           </div>
@@ -478,7 +478,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                     setDrafts((d) => ({ ...d, [activeTab]: activeContent }));
                   }}
                   disabled={saving}
-                  className="rounded-md px-2.5 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100 disabled:opacity-50"
+                  className="rounded-md px-2.5 py-1.5 text-sm text-ink-400 hover:bg-ink-800/60 hover:text-ink-100 disabled:opacity-50"
                 >
                   {t('common.cancel', 'Cancel')}
                 </button>
@@ -495,14 +495,14 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                 </button>
               </>
             ) : isMarkdown ? (
-              <div className="flex items-center overflow-hidden rounded border border-zinc-800">
+              <div className="flex items-center overflow-hidden rounded border border-ink-800">
                 <button
                   type="button"
                   onClick={() => setViewMode('preview')}
                   className={`flex items-center gap-1.5 px-3 py-1 text-sm transition-colors ${
                     viewMode === 'preview'
-                      ? 'bg-zinc-800 text-zinc-100'
-                      : 'text-zinc-500 hover:text-zinc-200'
+                      ? 'bg-ink-800 text-ink-100'
+                      : 'text-ink-500 hover:text-ink-200'
                   }`}
                 >
                   <Eye className="h-3.5 w-3.5" />
@@ -511,10 +511,10 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                 <button
                   type="button"
                   onClick={() => setViewMode('code')}
-                  className={`flex items-center gap-1.5 border-l border-zinc-800 px-3 py-1 text-sm transition-colors ${
+                  className={`flex items-center gap-1.5 border-l border-ink-800 px-3 py-1 text-sm transition-colors ${
                     viewMode === 'code'
-                      ? 'bg-zinc-800 text-zinc-100'
-                      : 'text-zinc-500 hover:text-zinc-200'
+                      ? 'bg-ink-800 text-ink-100'
+                      : 'text-ink-500 hover:text-ink-200'
                   }`}
                 >
                   <Code2 className="h-3.5 w-3.5" />
@@ -543,14 +543,14 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
             <textarea
               value={activeDraft}
               onChange={(e) => updateActive(e.target.value)}
-              className="h-[560px] w-full border-0 bg-transparent p-0 font-mono text-sm text-zinc-200 focus:outline-none"
+              className="h-[560px] w-full border-0 bg-transparent p-0 font-mono text-sm text-ink-200 focus:outline-none"
               spellCheck={false}
             />
           )
         ) : isMarkdown && viewMode === 'preview' ? (
           <MarkdownBody source={activeBody} />
         ) : (
-          <pre className="whitespace-pre-wrap break-words font-mono text-sm text-zinc-200">
+          <pre className="whitespace-pre-wrap break-words font-mono text-sm text-ink-200">
             <code>{activeContent}</code>
           </pre>
         )}
@@ -576,11 +576,11 @@ const MetaLabel: React.FC<{
   mono?: boolean;
 }> = ({ label, value, icon: Icon, mono = false }) => (
   <div className="flex items-center gap-2">
-    <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+    <span className="text-[11px] uppercase tracking-[0.18em] text-ink-500">
       {label}
     </span>
-    <span className="flex items-center gap-1.5 text-zinc-300">
-      {Icon && <Icon className="h-3.5 w-3.5 text-zinc-500" />}
+    <span className="flex items-center gap-1.5 text-ink-300">
+      {Icon && <Icon className="h-3.5 w-3.5 text-ink-500" />}
       <span className={mono ? 'font-mono text-xs' : ''}>{value}</span>
     </span>
   </div>

@@ -288,7 +288,7 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     cls._inject_cookies_cdp(instance.page, cookie_text)
 
                 # 覆盖本次任务的 navigator.userAgent，使 DrissionPage 与
-                # LightHTTP/ABogus/yt-dlp 共用同一条 Douyin UA。
+                # ABogus/yt-dlp 共用同一条 Douyin UA。
                 try:
                     ua_js = (
                         "Object.defineProperty(navigator, 'userAgent', "

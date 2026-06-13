@@ -374,19 +374,19 @@ export function MobileAudioShell({
             {showMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-40 min-w-[160px] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1">
+                <div className="absolute right-0 top-full mt-1 z-40 min-w-[160px] bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1">
                   {menuItems.map((item) => {
                     const { Icon } = item;
                     return (
                       <React.Fragment key={item.key}>
-                        {item.dividerBefore && <div className="border-t border-zinc-700 my-1" />}
+                        {item.dividerBefore && <div className="border-t border-ink-700 my-1" />}
                         {item.href ? (
                           <a
                             href={item.href}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={() => setShowMenu(false)}
-                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
                           >
                             <Icon size={13} className={item.color} /> {item.label}
                           </a>
@@ -396,7 +396,7 @@ export function MobileAudioShell({
                             className={
                               item.danger
                                 ? 'flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors'
-                                : 'flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors'
+                                : 'flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors'
                             }
                           >
                             <Icon size={13} className={item.color} /> {item.label}

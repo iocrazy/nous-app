@@ -149,7 +149,7 @@ const TreeRow: React.FC<TreeProps> = ({
         className={`group flex w-full items-center gap-1 pr-1 text-[12px] transition-colors ${
           active
             ? 'bg-indigo-500/12 text-indigo-200'
-            : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
+            : 'text-ink-400 hover:bg-ink-800/40 hover:text-ink-200'
         }`}
       >
         <button
@@ -160,7 +160,7 @@ const TreeRow: React.FC<TreeProps> = ({
         >
           <Icon
             size={12}
-            className={`shrink-0 ${active ? 'text-indigo-300' : 'text-zinc-500'}`}
+            className={`shrink-0 ${active ? 'text-indigo-300' : 'text-ink-500'}`}
           />
           <span className="truncate">{node.name}</span>
         </button>
@@ -171,7 +171,7 @@ const TreeRow: React.FC<TreeProps> = ({
               e.stopPropagation();
               onDeleteFile(node.path);
             }}
-            className="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-zinc-500 hover:bg-red-500/15 hover:text-red-400 group-hover:flex"
+            className="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-red-500/15 hover:text-red-400 group-hover:flex"
             title={deleteLabel ?? 'Delete'}
             aria-label={deleteLabel ?? 'Delete'}
           >
@@ -189,15 +189,15 @@ const TreeRow: React.FC<TreeProps> = ({
       <button
         type="button"
         onClick={() => onToggleDir(node.path)}
-        className="flex w-full items-center gap-1.5 py-1 text-left text-[12px] text-zinc-400 transition-colors hover:bg-zinc-800/40 hover:text-zinc-200"
+        className="flex w-full items-center gap-1.5 py-1 text-left text-[12px] text-ink-400 transition-colors hover:bg-ink-800/40 hover:text-ink-200"
         style={{ paddingLeft }}
       >
         {expanded ? (
-          <ChevronDown size={10} className="shrink-0 text-zinc-600" />
+          <ChevronDown size={10} className="shrink-0 text-ink-600" />
         ) : (
-          <ChevronRight size={10} className="shrink-0 text-zinc-600" />
+          <ChevronRight size={10} className="shrink-0 text-ink-600" />
         )}
-        <FolderIcon size={12} className="shrink-0 text-zinc-600" />
+        <FolderIcon size={12} className="shrink-0 text-ink-600" />
         <span className="truncate">{node.name}/</span>
       </button>
       {expanded && (
@@ -297,14 +297,14 @@ export const SkillList: React.FC<SkillListProps> = ({
   };
 
   return (
-    <div className="flex h-full w-[19rem] flex-col border-r border-zinc-800/60 bg-zinc-950/40">
+    <div className="flex h-full w-[19rem] flex-col border-r border-ink-800/60 bg-ink-950/40">
       {/* Header — Paperclip: "Skills" title + count; + button to the right */}
-      <div className="flex items-start justify-between border-b border-zinc-800/60 px-4 py-3">
+      <div className="flex items-start justify-between border-b border-ink-800/60 px-4 py-3">
         <div className="flex flex-col">
-          <span className="text-[15px] font-semibold text-zinc-100">
+          <span className="text-[15px] font-semibold text-ink-100">
             {t('aiLibrary.skills.listTitle', 'Skills')}
           </span>
-          <span className="text-[11px] text-zinc-500">
+          <span className="text-[11px] text-ink-500">
             {t('aiLibrary.skills.countAvailable', '{{count}} available', {
               count: skills.length,
             })}
@@ -313,7 +313,7 @@ export const SkillList: React.FC<SkillListProps> = ({
         <button
           type="button"
           onClick={onNewSkill}
-          className="flex h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100"
+          className="flex h-7 w-7 items-center justify-center rounded text-ink-400 hover:bg-ink-800/60 hover:text-ink-100"
           title={t('aiLibrary.skills.newSkillButton', 'New Skill')}
           aria-label={t('aiLibrary.skills.newSkillButton', 'New Skill')}
         >
@@ -322,18 +322,18 @@ export const SkillList: React.FC<SkillListProps> = ({
       </div>
 
       {/* Filter */}
-      <div className="border-b border-zinc-800/60 px-3 py-2">
+      <div className="border-b border-ink-800/60 px-3 py-2">
         <div className="relative">
           <Search
             size={12}
-            className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-600"
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-600"
           />
           <input
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder={t('aiLibrary.skills.filterPlaceholder', 'Filter skills...')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900 py-1.5 pl-7 pr-2 text-[12px] text-zinc-200 placeholder-zinc-600 focus:border-indigo-500 focus:outline-none"
+            className="w-full rounded-md border border-ink-800 bg-ink-900 py-1.5 pl-7 pr-2 text-[12px] text-ink-200 placeholder-ink-600 focus:border-indigo-500 focus:outline-none"
           />
         </div>
       </div>
@@ -341,7 +341,7 @@ export const SkillList: React.FC<SkillListProps> = ({
       {/* List */}
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
         {filtered.length === 0 ? (
-          <div className="px-4 py-6 text-center text-[12px] text-zinc-600">
+          <div className="px-4 py-6 text-center text-[12px] text-ink-600">
             {t('aiLibrary.skills.noMatches', 'No skills match your filter.')}
           </div>
         ) : (
@@ -362,23 +362,23 @@ export const SkillList: React.FC<SkillListProps> = ({
             return (
               <div
                 key={s.slug ?? String(s.id)}
-                className="border-b border-zinc-900/50 last:border-b-0"
+                className="border-b border-ink-900/50 last:border-b-0"
               >
-                <div className="group flex items-center gap-1 px-3 py-1.5 hover:bg-zinc-800/30">
+                <div className="group flex items-center gap-1 px-3 py-1.5 hover:bg-ink-800/30">
                   <button
                     type="button"
                     onClick={() => onSelectSkill(s.slug ?? String(s.id))}
                     className={`flex min-w-0 flex-1 items-center gap-2 text-left transition-colors ${
                       skillActive
-                        ? 'text-zinc-100'
-                        : 'text-zinc-300 hover:text-zinc-100'
+                        ? 'text-ink-100'
+                        : 'text-ink-300 hover:text-ink-100'
                     }`}
                     title={preset ? t('aiLibrary.skills.presetTooltip', 'Bundled MediaHub preset') : s.name}
                   >
                     <SrcIcon
                       size={12}
                       className={`shrink-0 ${
-                        skillActive ? 'text-zinc-300' : 'text-zinc-500'
+                        skillActive ? 'text-ink-300' : 'text-ink-500'
                       }`}
                     />
                     <span className="min-w-0 truncate text-[13px] font-medium">
@@ -388,7 +388,7 @@ export const SkillList: React.FC<SkillListProps> = ({
                   <button
                     type="button"
                     onClick={() => toggleSkill(s.slug ?? String(s.id))}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 opacity-70 transition-opacity hover:bg-zinc-800/60 hover:text-zinc-200 group-hover:opacity-100"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-500 opacity-70 transition-opacity hover:bg-ink-800/60 hover:text-ink-200 group-hover:opacity-100"
                     aria-label={expanded ? 'Collapse' : 'Expand'}
                   >
                     {expanded ? (
@@ -408,7 +408,7 @@ export const SkillList: React.FC<SkillListProps> = ({
                       className={`flex w-full items-center gap-2 py-1 pl-6 pr-2 text-left text-[12px] transition-colors ${
                         skillActive && !activeFilePath
                           ? 'bg-indigo-500/12 text-indigo-200'
-                          : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
+                          : 'text-ink-400 hover:bg-ink-800/40 hover:text-ink-200'
                       }`}
                     >
                       <FileText
@@ -416,7 +416,7 @@ export const SkillList: React.FC<SkillListProps> = ({
                         className={`shrink-0 ${
                           skillActive && !activeFilePath
                             ? 'text-indigo-300'
-                            : 'text-zinc-500'
+                            : 'text-ink-500'
                         }`}
                       />
                       <span className="truncate">SKILL.md</span>
@@ -447,7 +447,7 @@ export const SkillList: React.FC<SkillListProps> = ({
                       <button
                         type="button"
                         onClick={() => onNewFile(s.slug ?? String(s.id))}
-                        className="mt-1 flex w-full items-center gap-2 py-1 pl-6 pr-2 text-left text-[11px] text-zinc-500 transition-colors hover:bg-zinc-800/40 hover:text-zinc-300"
+                        className="mt-1 flex w-full items-center gap-2 py-1 pl-6 pr-2 text-left text-[11px] text-ink-500 transition-colors hover:bg-ink-800/40 hover:text-ink-300"
                       >
                         <Plus size={11} className="shrink-0" />
                         <span>

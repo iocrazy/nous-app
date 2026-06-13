@@ -79,6 +79,26 @@ function extractToolCalls(msg: ChatMessage): ChatToolCall[] {
   );
 }
 
+/**
+ * Extract the Plan Mode paused-for-approval state (Phase 4.5). Backend
+ * folds it into ``metadata_json.awaiting_approval`` when a hook returned
+ * await_approval; absent on the common ran-to-completion turn.
+ */
+function extractAwaitingApproval(
+  msg: ChatMessage,
+): { approvalId: string | null; reason: string; hook?: string } | undefined {
+  const meta = msg.metadata_json;
+  if (!meta || typeof meta !== 'object') return undefined;
+  const raw = (meta as Record<string, unknown>).awaiting_approval;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const entry = raw as Record<string, unknown>;
+  return {
+    approvalId: typeof entry.approval_id === 'string' ? entry.approval_id : null,
+    reason: typeof entry.reason === 'string' ? entry.reason : '',
+    hook: typeof entry.hook === 'string' ? entry.hook : undefined,
+  };
+}
+
 /** Coerce the string project id to a BIGINT-compatible number when possible. */
 function parseProjectId(projectId: string): number | undefined {
   const n = Number(projectId);
@@ -438,10 +458,10 @@ export function AIChatPanel({
   const hasMessages = messages.length > 0 || sending;
 
   return (
-    <div className="w-full h-full flex-1 flex flex-col bg-zinc-900 overflow-hidden min-h-0">
+    <div className="w-full h-full flex-1 flex flex-col bg-ink-900 overflow-hidden min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 flex-shrink-0">
-        <span className="text-sm font-medium text-zinc-200 flex-1">AI Chat</span>
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-ink-800 flex-shrink-0">
+        <span className="text-sm font-medium text-ink-200 flex-1">AI Chat</span>
 
         <AgentSelector
           agents={agentOptions}
@@ -452,7 +472,7 @@ export function AIChatPanel({
         <button
           type="button"
           onClick={handleNewSession}
-          className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="p-1 rounded hover:bg-ink-800 text-ink-500 hover:text-ink-300 transition-colors"
           title={t('chat.newSession', 'New session')}
         >
           <Plus size={15} />
@@ -462,7 +482,7 @@ export function AIChatPanel({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="p-1 rounded hover:bg-ink-800 text-ink-500 hover:text-ink-300 transition-colors"
             title={t('common.close', 'Close')}
           >
             <X size={15} />
@@ -512,6 +532,11 @@ export function AIChatPanel({
                 toolCalls={
                   msg.role === 'assistant' ? extractToolCalls(msg) : undefined
                 }
+                awaitingApproval={
+                  msg.role === 'assistant'
+                    ? extractAwaitingApproval(msg)
+                    : undefined
+                }
                 onApply={
                   msg.role === 'assistant' && onApplyContent
                     ? () => onApplyContent(msg.content)
@@ -522,7 +547,7 @@ export function AIChatPanel({
 
             {sending && (
               <div className="flex justify-start mb-3">
-                <div className="max-w-[85%] rounded-xl bg-zinc-800 text-zinc-200 text-sm leading-relaxed overflow-hidden">
+                <div className="max-w-[85%] rounded-xl bg-ink-800 text-ink-200 text-sm leading-relaxed overflow-hidden">
                   <TypingIndicator />
                 </div>
               </div>
@@ -539,7 +564,7 @@ export function AIChatPanel({
         {/* B: Attachment chip strip — only render when staged or actively
             uploading. The picker button itself lives next to ChatInput. */}
         {activeSessionId && selectedAgentSlug && stagedAttachments.length > 0 && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 bg-zinc-900/30">
+          <div className="flex items-center gap-2 px-3 py-1.5 border-t border-ink-800 bg-ink-900/30">
             <ChatAttachmentPicker
               attachments={stagedAttachments}
               onChange={setStagedAttachments}
@@ -550,8 +575,8 @@ export function AIChatPanel({
 
         {/* O3: PlanMode toggle bar */}
         {activeSessionId && selectedAgentSlug && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border-t border-zinc-800 text-xs text-zinc-400 bg-zinc-900/50">
-            <span className="font-medium text-zinc-500">{t('chat.planMode.label')}</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 border-t border-ink-800 text-xs text-ink-400 bg-ink-900/50">
+            <span className="font-medium text-ink-500">{t('chat.planMode.label')}</span>
             {(['auto', 'prompt_user', 'dry_run'] as const).map((m) => (
               <button
                 key={m}
@@ -560,7 +585,7 @@ export function AIChatPanel({
                 className={`px-2 py-0.5 rounded transition-colors ${
                   planMode === m
                     ? 'bg-blue-600 text-white'
-                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+                    : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800'
                 }`}
                 title={
                   m === 'auto'
@@ -598,7 +623,7 @@ export function AIChatPanel({
         )}
 
         {/* Chat input + B: attachment picker (when no staged chips above) */}
-        <div className="flex items-end gap-1 bg-zinc-900 border-t border-zinc-700/50">
+        <div className="flex items-end gap-1 bg-ink-900 border-t border-ink-700/50">
           {activeSessionId && selectedAgentSlug && stagedAttachments.length === 0 && (
             <div className="pl-2 pb-2">
               <ChatAttachmentPicker

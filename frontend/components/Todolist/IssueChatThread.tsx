@@ -23,14 +23,14 @@ const LIVENESS_VISUAL: Record<AgentLivenessState, { dot: string; label: string; 
   silent:    { dot: 'bg-amber-400',   label: 'silent',    tooltip: 'No useful action recently — watching' },
   stuck:     { dot: 'bg-orange-500',  label: 'stuck',     tooltip: 'Stuck long enough to attempt continuation' },
   dead:      { dot: 'bg-rose-500',    label: 'dead',      tooltip: 'Marked dead by liveness scanner' },
-  cancelled: { dot: 'bg-zinc-500',    label: 'cancelled', tooltip: 'Cancelled by user / system' },
+  cancelled: { dot: 'bg-ink-500',    label: 'cancelled', tooltip: 'Cancelled by user / system' },
 };
 
 const LivenessPill: React.FC<{ state: AgentLivenessState }> = ({ state }) => {
   const v = LIVENESS_VISUAL[state] ?? LIVENESS_VISUAL.running;
   return (
     <span
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-900/60 ring-1 ring-zinc-800 text-[12px] text-zinc-300"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-ink-900/60 ring-1 ring-ink-800 text-[12px] text-ink-300"
       title={v.tooltip}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${v.dot}`} />
@@ -52,9 +52,9 @@ interface IssueChatThreadProps {
   streamingText?: string;
 }
 
-const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-zinc-600', size = 22 }) => (
+const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 22 }) => (
   <span
-    className={`inline-flex items-center justify-center rounded-full text-[12px] font-semibold text-white ${color}`}
+    className={`inline-flex items-center justify-center rounded-full text-[12px] font-semibold text-ink-50 ${color}`}
     style={{ width: size, height: size }}
   >
     {initials}
@@ -76,9 +76,9 @@ const SystemStatusEvent: React.FC<{ msg: IssueMessage; selfUserId?: string }> = 
   return (
     <div
       data-testid="system-status-row"
-      className="text-center text-[11px] text-zinc-500 italic my-2"
+      className="text-center text-[11px] text-ink-500 italic my-2"
     >
-      <span className="text-zinc-400 not-italic font-medium">{author}</span>
+      <span className="text-ink-400 not-italic font-medium">{author}</span>
       {' '}updated this task —{' '}
       <span className="not-italic">STATUS</span>{' '}
       {from && (
@@ -87,7 +87,7 @@ const SystemStatusEvent: React.FC<{ msg: IssueMessage; selfUserId?: string }> = 
           {STATUS_LABEL[from].toLowerCase()}
         </span>
       )}
-      {' '}<span className="text-zinc-600 not-italic">→</span>{' '}
+      {' '}<span className="text-ink-600 not-italic">→</span>{' '}
       {to && (
         <span className={`${STATUS_COLOR[to]} not-italic font-medium inline-flex items-center gap-0.5`}>
           <IssueStatusIcon status={to} size={10} />
@@ -134,15 +134,15 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
     <div className="my-3">
       <div className="flex items-center gap-2 mb-1.5">
         <AgentAvatar initials={initials} color={agent?.avatar_color} />
-        <span className="text-xs font-medium text-zinc-200">{agent?.name ?? 'Agent'}</span>
+        <span className="text-xs font-medium text-ink-200">{agent?.name ?? 'Agent'}</span>
         {isRunning ? (
-          <span className="text-[12px] text-zinc-500">working for {formatDuration(elapsedLive)}</span>
+          <span className="text-[12px] text-ink-500">working for {formatDuration(elapsedLive)}</span>
         ) : msg.duration_seconds != null ? (
-          <span className="text-[12px] text-zinc-500">worked for {formatDuration(msg.duration_seconds)}</span>
+          <span className="text-[12px] text-ink-500">worked for {formatDuration(msg.duration_seconds)}</span>
         ) : null}
         {liveness && <LivenessPill state={liveness} />}
         {metaStatus && metaStatus !== 'completed' && (
-          <span className="text-[12px] text-zinc-500 italic">({metaStatus})</span>
+          <span className="text-[12px] text-ink-500 italic">({metaStatus})</span>
         )}
         {isRunning && msg.agent_run_id && (
           <button
@@ -159,7 +159,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
             {errorCode}
           </span>
         )}
-        <span className="ml-auto inline-flex items-center gap-2 text-[12px] text-zinc-500">
+        <span className="ml-auto inline-flex items-center gap-2 text-[12px] text-ink-500">
           {boardSignoff && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 text-[12px]">
               Board <span className="font-mono text-[12px]">{boardSignoff}</span>
@@ -169,7 +169,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
         </span>
       </div>
       {msg.body && (
-        <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/50 p-3 text-[14px] text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+        <div className="ml-7 rounded border border-ink-800/80 bg-ink-900/50 p-3 text-[14px] text-ink-300 leading-relaxed whitespace-pre-wrap break-words">
           {msg.body}
         </div>
       )}
@@ -182,7 +182,7 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
   const isSelf = msg.author_user_id && msg.author_user_id === selfUserId;
   const displayName = agent?.name ?? (isSelf ? 'You' : msg.author_user_id ? `User ${msg.author_user_id.slice(0, 6)}` : 'Anonymous');
   const initials = displayName.slice(0, 2).toUpperCase();
-  const color = agent?.avatar_color ?? (isSelf ? 'bg-indigo-500' : 'bg-zinc-600');
+  const color = agent?.avatar_color ?? (isSelf ? 'bg-indigo-500' : 'bg-ink-600');
   return (
     <div
       data-testid="comment-row"
@@ -192,14 +192,14 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
         data-testid="comment-bubble"
         className={`max-w-[80%] rounded-lg px-3 py-2 ${
           isSelf
-            ? 'bg-blue-600/15 border border-blue-700/40 text-zinc-100'
-            : 'bg-zinc-800 border border-zinc-700 text-zinc-200'
+            ? 'bg-blue-600/15 border border-blue-700/40 text-ink-100'
+            : 'bg-ink-800 border border-ink-700 text-ink-200'
         }`}
       >
         <div className="flex items-center gap-2 mb-1.5">
           <AgentAvatar initials={initials} color={color} />
           <span className="text-xs font-medium">{displayName}</span>
-          <span className="text-[12px] text-zinc-500">commented · {relativeTime(msg.created_at)}</span>
+          <span className="text-[12px] text-ink-500">commented · {relativeTime(msg.created_at)}</span>
         </div>
         {msg.body && (
           <div className="rounded text-[14px] leading-relaxed whitespace-pre-wrap break-words">
@@ -214,7 +214,7 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
 /** Blinking text cursor shown while the agent is streaming. */
 const StreamingCursor: React.FC = () => (
   <span
-    className="inline-block w-[2px] h-[1em] bg-zinc-300 ml-0.5 align-middle animate-pulse"
+    className="inline-block w-[2px] h-[1em] bg-ink-300 ml-0.5 align-middle animate-pulse"
     aria-hidden="true"
   />
 );
@@ -224,10 +224,10 @@ const StreamingBubble: React.FC<{ text: string }> = ({ text }) => (
   <div className="my-3">
     <div className="flex items-center gap-2 mb-1.5">
       <AgentAvatar initials="AI" color="bg-indigo-600" />
-      <span className="text-xs font-medium text-zinc-200">Agent</span>
-      <span className="text-[12px] text-zinc-500 italic">streaming…</span>
+      <span className="text-xs font-medium text-ink-200">Agent</span>
+      <span className="text-[12px] text-ink-500 italic">streaming…</span>
     </div>
-    <div className="ml-7 rounded border border-zinc-800/80 bg-zinc-900/50 p-3 text-[14px] text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+    <div className="ml-7 rounded border border-ink-800/80 bg-ink-900/50 p-3 text-[14px] text-ink-300 leading-relaxed whitespace-pre-wrap break-words">
       {text}
       <StreamingCursor />
     </div>
@@ -239,7 +239,7 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
 
   if (messages.length === 0 && !hasStreaming) {
     return (
-      <div className="text-sm text-zinc-500 italic px-4 py-12 text-center">
+      <div className="text-sm text-ink-500 italic px-4 py-12 text-center">
         No activity yet. Reply below to start the conversation or dispatch the issue to an agent.
       </div>
     );

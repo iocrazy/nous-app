@@ -116,7 +116,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded transition text-[11px] ${
         active
           ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-500/40'
-          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 ring-1 ring-zinc-800'
+          : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/80 ring-1 ring-ink-800'
       }`}
     >
       {children}
@@ -127,31 +127,31 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
     <button
       type="button"
       onClick={onClick}
-      className="w-full flex items-center gap-2 px-2 py-1 text-left hover:bg-zinc-900/60 rounded transition"
+      className="w-full flex items-center gap-2 px-2 py-1 text-left hover:bg-ink-900/60 rounded transition"
     >
       <span className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded border ${
-        checked ? 'bg-indigo-500/80 border-indigo-400 text-white' : 'border-zinc-700 bg-transparent'
+        checked ? 'bg-indigo-500/80 border-indigo-400 text-white' : 'border-ink-700 bg-transparent'
       }`}>
         {checked && <Check size={10} strokeWidth={3} />}
       </span>
-      <span className="text-[11px] text-zinc-300 flex-1 inline-flex items-center gap-1.5">{label}</span>
+      <span className="text-[11px] text-ink-300 flex-1 inline-flex items-center gap-1.5">{label}</span>
     </button>
   );
 
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 w-[42rem] bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl z-30"
+      className="absolute right-0 top-full mt-1 w-[42rem] bg-ink-950 border border-ink-800 rounded-lg shadow-2xl z-30"
     >
-      <header className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-        <h3 className="text-sm font-semibold text-zinc-200">Filters</h3>
-        <button onClick={onClose} className="p-1 text-zinc-500 hover:text-zinc-300 rounded hover:bg-zinc-800">
+      <header className="flex items-center justify-between px-3 py-2 border-b border-ink-800">
+        <h3 className="text-sm font-semibold text-ink-200">Filters</h3>
+        <button onClick={onClose} className="p-1 text-ink-500 hover:text-ink-300 rounded hover:bg-ink-800">
           <X size={12} />
         </button>
       </header>
 
-      <div className="px-3 py-2 border-b border-zinc-800/60">
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Quick filters</div>
+      <div className="px-3 py-2 border-b border-ink-800/60">
+        <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1.5">Quick filters</div>
         <div className="flex items-center gap-1.5">
           {(['all', 'active', 'backlog', 'done'] as QuickFilter[]).map((q) => (
             <Pill key={q} active={activeQuick === q} onClick={() => setQuick(q)}>
@@ -163,7 +163,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
 
       <div className="grid grid-cols-3 gap-3 px-3 py-3">
         <section>
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Status</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Status</div>
           <div className="space-y-0.5">
             {STATUS_ORDER.map((s) => (
               <CheckRow
@@ -182,12 +182,12 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
         </section>
 
         <section>
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Assignee</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Assignee</div>
           <div className="space-y-0.5">
             <CheckRow
               checked={filters.assigneeNone}
               onClick={() => update({ assigneeNone: !filters.assigneeNone })}
-              label={<span className="text-zinc-400">No assignee</span>}
+              label={<span className="text-ink-400">No assignee</span>}
             />
             <CheckRow
               checked={filters.assigneeMe}
@@ -201,7 +201,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
                 onClick={() => toggleSetItem<string>('assigneeAgents', a.id)}
                 label={
                   <>
-                    <span className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white ${a.avatar_color ?? 'bg-zinc-600'}`}>
+                    <span className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-ink-50 ${a.avatar_color ?? 'bg-ink-600'}`}>
                       {a.name.slice(0, 1).toUpperCase()}
                     </span>
                     {a.name}
@@ -213,7 +213,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
         </section>
 
         <section>
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Visibility</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Visibility</div>
           <div className="space-y-0.5">
             <CheckRow
               checked={filters.liveRunsOnly}
@@ -226,15 +226,15 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
               label={<>Hide routine runs</>}
             />
           </div>
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mt-3 mb-1">Creator</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-500 mt-3 mb-1">Creator</div>
           <div className="relative mb-1">
-            <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-500" />
             <input
               type="text"
               value={filters.creatorSearch}
               onChange={(e) => update({ creatorSearch: e.target.value })}
               placeholder="Search creators…"
-              className="w-full pl-6 pr-2 py-1 text-[11px] bg-zinc-900 border border-zinc-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-zinc-200 placeholder-zinc-600"
+              className="w-full pl-6 pr-2 py-1 text-[11px] bg-ink-900 border border-ink-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-ink-200 placeholder-ink-600"
             />
           </div>
           <div className="space-y-0.5 max-h-32 overflow-y-auto">
@@ -250,7 +250,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
                 onClick={() => toggleSetItem<string>('creatorsAgents', a.id)}
                 label={
                   <>
-                    <span className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white ${a.avatar_color ?? 'bg-zinc-600'}`}>
+                    <span className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-ink-50 ${a.avatar_color ?? 'bg-ink-600'}`}>
                       {a.name.slice(0, 1).toUpperCase()}
                     </span>
                     {a.name}
@@ -262,7 +262,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
         </section>
 
         <section>
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Priority</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Priority</div>
           <div className="space-y-0.5">
             {PRIORITY_ORDER.map((p) => (
               <CheckRow
@@ -281,9 +281,9 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
         </section>
 
         <section className="col-span-2">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Project</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Project</div>
           {projects.length === 0 ? (
-            <div className="text-[11px] text-zinc-600 italic px-2 py-1">No projects on visible issues.</div>
+            <div className="text-[11px] text-ink-600 italic px-2 py-1">No projects on visible issues.</div>
           ) : (
             <div className="space-y-0.5 max-h-24 overflow-y-auto">
               {projects.map((p) => (
@@ -293,7 +293,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
                   onClick={() => toggleSetItem<number>('projects', p.id)}
                   label={
                     <>
-                      <span className={`w-1.5 h-1.5 rounded-full ${p.color ?? 'bg-zinc-500'}`} />
+                      <span className={`w-1.5 h-1.5 rounded-full ${p.color ?? 'bg-ink-500'}`} />
                       {p.name}
                     </>
                   }
@@ -304,11 +304,11 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
         </section>
       </div>
 
-      <footer className="flex items-center justify-end gap-2 px-3 py-2 border-t border-zinc-800 text-[11px]">
+      <footer className="flex items-center justify-end gap-2 px-3 py-2 border-t border-ink-800 text-[11px]">
         <button
           type="button"
           onClick={() => onChange(EMPTY_FILTERS)}
-          className="text-zinc-300 hover:text-white"
+          className="text-ink-300 hover:text-ink-50"
         >
           Reset
         </button>

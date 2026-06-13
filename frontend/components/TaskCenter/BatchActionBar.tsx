@@ -43,7 +43,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
   const { t } = useTranslation();
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-zinc-900/95 border-t border-indigo-500/30 shadow-[0_-4px_12px_rgba(0,0,0,0.3)] text-xs shrink-0">
+    <div className="flex items-center gap-2 px-4 py-2 bg-ink-900/95 border-t border-indigo-500/30 shadow-[0_-4px_12px_rgba(0,0,0,0.3)] text-xs shrink-0">
       {busy && progress ? (
         <span className="flex items-center gap-2 text-indigo-300">
           <Loader2 size={13} className="animate-spin" />
@@ -53,7 +53,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
           })}
         </span>
       ) : (
-        <span className="text-zinc-300 font-medium">
+        <span className="text-ink-300 font-medium">
           {allMatchingActive
             ? t('taskCenter.batch.selectedAllMatching', { count: selectedCount })
             : t('taskCenter.batch.selected', { count: selectedCount })}
@@ -76,7 +76,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
         type="button"
         onClick={onSelectAll}
         disabled={busy}
-        className="flex items-center gap-1.5 px-2 py-1 rounded text-zinc-300 hover:bg-zinc-800 disabled:opacity-40 transition"
+        className="flex items-center gap-1.5 px-2 py-1 rounded text-ink-300 hover:bg-ink-800 disabled:opacity-40 transition"
         title={t('taskCenter.batch.selectAll') ?? ''}
       >
         <CheckSquare size={13} />
@@ -107,7 +107,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
         type="button"
         onClick={onClear}
         disabled={busy}
-        className="flex items-center gap-1 px-2 py-1 rounded text-zinc-400 hover:bg-zinc-800 disabled:opacity-40 transition"
+        className="flex items-center gap-1 px-2 py-1 rounded text-ink-400 hover:bg-ink-800 disabled:opacity-40 transition"
         title={t('taskCenter.batch.clear') ?? ''}
       >
         <X size={13} />

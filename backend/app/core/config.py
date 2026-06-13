@@ -1020,7 +1020,7 @@ class Settings(BaseSettings):
         "str. content_embedding is written as a pgvector Vector(1536). The vector "
         "similarity search keeps using the match_videos_by_embedding RPC "
         "(executed as a raw statement — parity with the REST .rpc() path); "
-        "get_videos_without_analysis / by_level keep their cross-table semantics. "
+        "get_videos_by_analysis_level keeps its cross-table semantics. "
         "Writes COMMIT via write_scope() with ON CONFLICT (resource_id, "
         "analysis_level) idempotency. Table created in final post-076 form by mig "
         "262; model + repo validated against live dev DB. Inert; flip false to "
@@ -1038,6 +1038,14 @@ class Settings(BaseSettings):
     )
     HTTP_TIMEOUT: float = Field(default=30.0, description="HTTP请求超时(秒)")
     DOWNLOAD_TIMEOUT: float = Field(default=60.0, description="下载超时(秒)")
+    COVER_DOWNLOAD_TIMEOUT: float = Field(
+        default=45.0,
+        description=(
+            "封面下载的总时限(秒)。DOWNLOAD_TIMEOUT 是 httpx 的 per-read 超时,"
+            "对慢速 trickle 的 CDN 无总上界 → 封面拉取可 hang 数十分钟拖垮整个任务。"
+            "用 asyncio.wait_for 包一层总 deadline,超时即放弃该 URL 试下一个。"
+        ),
+    )
 
     # 用户代理列表（通用）
     USER_AGENTS: list[str] = Field(
@@ -1047,7 +1055,7 @@ class Settings(BaseSettings):
         ]
     )
 
-    # Douyin 专用 UA 池。一次解析任务挑一条，贯穿 LightHTTP/ABogus/DrissionPage
+    # Douyin 专用 UA 池。一次解析任务挑一条，贯穿 ABogus/DrissionPage
     # 和 yt-dlp 下载——ABogus 签名绑定 UA，混用会让服务端验签失败。
     DOUYIN_USER_AGENTS: list[str] = Field(
         default_factory=lambda: [

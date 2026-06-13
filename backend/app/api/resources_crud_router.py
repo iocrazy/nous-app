@@ -28,7 +28,14 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.core.scope_guards import verify_scope_access
 from app.db.scope import Scope, request_scope, system_request_scope
-from app.repositories.resources_repository import ResourcesRepository
+from app.repositories.resources_repository import (
+    UNTRANSCODED_BATCH,
+    ResourcesRepository,
+)
+from app.schemas.canvas_crop_schema import CropDeriveRequest
+from app.schemas.canvas_grid_schema import GridDeriveRequest
+from app.schemas.canvas_mask_schema import MaskDeriveRequest
+from app.schemas.canvas_outpaint_schema import OutpaintDeriveRequest
 from app.schemas.resources import (
     ChorusUpdate,
     ResourceMoveRequest,
@@ -346,8 +353,24 @@ async def batch_transcode(auth: AuthDep, _scope: ScopedRequestDep):
                     f"[Transcode/Batch] Failed to queue version {v['id']}: {e}"
                 )
 
+        # A full batch means more untranscoded versions remain (the repo caps
+        # the working set so the request never balloons / never silently clips
+        # at PostgREST's 1000 row ceiling). Each queued version is now `pending`
+        # so it leaves the set — re-invoking drains the rest.
+        has_more = len(versions) >= UNTRANSCODED_BATCH
+        if has_more:
+            logger.info(
+                "[Transcode/Batch] Batch full (%s) — more untranscoded versions "
+                "remain; re-invoke to continue.",
+                UNTRANSCODED_BATCH,
+            )
         logger.info(f"[Transcode/Batch] Queued {queued}/{len(versions)} versions")
-        return {"success": True, "queued": queued, "total_found": len(versions)}
+        return {
+            "success": True,
+            "queued": queued,
+            "total_found": len(versions),
+            "has_more": has_more,
+        }
     except Exception as e:
         logger.error(f"Failed to batch transcode: {e}")
         raise HTTPException(status_code=500, detail="Failed to batch transcode")
@@ -396,13 +419,23 @@ async def serve_resource_file(
     from app.core.deps import get_auth
 
     try:
-        # Accept token as query parameter for HTML element src usage
+        user_id: Optional[str] = None
+
+        # ?token= is the URL-auth transport for <a download>/<img>/<video>
+        # src (no headers possible there). It may carry the signed media
+        # token (frontend's `mediaToken`, purpose-built for URLs) OR a
+        # Supabase JWT (legacy callers e.g. canvas OutputNodeView). Try
+        # the media token first, fall back to treating it as a JWT.
+        if token and not authorization and not x_api_key:
+            from app.api.media_auth import validate_media_cookie
+
+            user_id = await validate_media_cookie(token)
+
         effective_auth = authorization
-        if not effective_auth and not x_api_key and token:
+        if not effective_auth and not x_api_key and token and user_id is None:
             effective_auth = f"Bearer {token}"
 
-        user_id: Optional[str] = None
-        if effective_auth or x_api_key:
+        if user_id is None and (effective_auth or x_api_key):
             try:
                 auth = await get_auth(request, effective_auth, x_api_key)
                 user_id = auth.user_id
@@ -1096,3 +1129,190 @@ async def remove_resource_tag(
     except Exception as e:
         logger.error(f"Failed to remove tag {tag_id} from resource {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to remove tag")
+
+
+@router.post("/{resource_id}/derive-crop")
+async def derive_crop_resource_endpoint(
+    resource_id: str,
+    body: CropDeriveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Crop the image at ``resource_id`` and persist the result as a
+    new sibling resource (same scope, source_type='derived').
+
+    The request body is a ``CropDeriveRequest`` (region + optional
+    filename). Access is gated by ``check_media_access`` against the
+    source resource — the new resource inherits the source's scope.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.canvas.crop_derive_service import (
+        CropDeriveError,
+        derive_crop_resource,
+    )
+    from app.services.canvas.image_crop import CropRegion
+
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await derive_crop_resource(
+            source_resource_id=resource_id,
+            user_id=auth.user_id,
+            region=CropRegion(
+                x=body.region.x,
+                y=body.region.y,
+                width=body.region.width,
+                height=body.region.height,
+            ),
+            filename_override=body.filename,
+        )
+        return {"success": True, "data": result.resource}
+    except CropDeriveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"derive_crop failed for {resource_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to derive crop")
+
+
+@router.post("/{resource_id}/derive-grid")
+async def derive_grid_resource_endpoint(
+    resource_id: str,
+    body: GridDeriveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Split the image at ``resource_id`` along normalized split lines
+    and persist every tile as a new sibling resource (same scope,
+    source_type='derived').
+
+    The request body is a ``GridDeriveRequest`` (xs / ys split lines +
+    optional filename prefix). Access is gated by ``check_media_access``
+    against the source resource — the new resources inherit its scope.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.canvas.grid_derive_service import (
+        GridDeriveError,
+        derive_grid_resources,
+    )
+
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await derive_grid_resources(
+            source_resource_id=resource_id,
+            user_id=auth.user_id,
+            xs=body.xs,
+            ys=body.ys,
+            filename_prefix=body.filename_prefix,
+        )
+        return {
+            "success": True,
+            "data": {
+                "rows": result.rows,
+                "cols": result.cols,
+                "tiles": [
+                    {"row": t.row, "col": t.col, "resource": t.resource}
+                    for t in result.tiles
+                ],
+            },
+        }
+    except GridDeriveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"derive_grid failed for {resource_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to derive grid split")
+
+
+@router.post("/{resource_id}/derive-mask-cutout")
+async def derive_mask_cutout_endpoint(
+    resource_id: str,
+    body: MaskDeriveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Apply a painted mask to the image at ``resource_id`` and persist
+    the RGBA cutout as a new sibling resource (same scope,
+    source_type='derived', always image/png).
+
+    The request body is a ``MaskDeriveRequest`` (base64 mask PNG +
+    optional filename). Access is gated by ``check_media_access``
+    against the source resource — the new resource inherits its scope.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.canvas.mask_derive_service import (
+        MaskDeriveError,
+        derive_mask_cutout,
+    )
+
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await derive_mask_cutout(
+            source_resource_id=resource_id,
+            user_id=auth.user_id,
+            mask_png_base64=body.mask_png_base64,
+            filename_override=body.filename,
+        )
+        return {"success": True, "data": result.resource}
+    except MaskDeriveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"derive_mask_cutout failed for {resource_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to derive mask cutout")
+
+
+@router.post("/{resource_id}/derive-outpaint")
+async def derive_outpaint_endpoint(
+    resource_id: str,
+    body: OutpaintDeriveRequest,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+):
+    """Extend the canvas of the image at ``resource_id`` (blur-fill
+    v1) and persist the result as a new sibling resource (same scope,
+    source_type='derived').
+
+    The request body is an ``OutpaintDeriveRequest`` (per-side padding
+    fractions + optional prompt/filename). Access is gated by
+    ``check_media_access`` against the source resource.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.services.canvas.image_outpaint import Padding
+    from app.services.canvas.outpaint_derive_service import (
+        OutpaintDeriveError,
+        derive_outpaint_resource,
+    )
+
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await derive_outpaint_resource(
+            source_resource_id=resource_id,
+            user_id=auth.user_id,
+            padding=Padding(
+                left=body.left,
+                top=body.top,
+                right=body.right,
+                bottom=body.bottom,
+            ),
+            prompt=body.prompt,
+            filename_override=body.filename,
+        )
+        return {"success": True, "data": result.resource}
+    except OutpaintDeriveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"derive_outpaint failed for {resource_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to derive outpaint")

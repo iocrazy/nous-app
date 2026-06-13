@@ -23,6 +23,8 @@ from app.workflows.agent_workforce import (  # noqa: F401
 from app.workflows.ai_summary import ai_summary_workflow  # noqa: F401
 from app.workflows.ai_transcription import ai_transcription_workflow  # noqa: F401
 from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
+from app.workflows.caption_asset import caption_asset_workflow  # noqa: F401
+from app.workflows.classify_asset import classify_asset_workflow  # noqa: F401
 from app.workflows.download import (  # noqa: F401
     download_user_queue,
     download_workflow,

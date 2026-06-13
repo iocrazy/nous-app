@@ -19,7 +19,7 @@ import {
   addResourceTag,
   removeResourceTag,
   fetchSmartFolders,
-  fetchSmartFolderResults,
+  fetchSmartFolderResultsPaginated,
   trashResources,
   getFolderPreview,
   updateResource,
@@ -42,7 +42,7 @@ import type { Resource } from '../types';
 
 // ─── Types ─────────────────────────────────────────────
 
-export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'temp';
+export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'temp' | 'project-assets';
 export type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 /** Subset of fetchResources params that the filter bar contributes.
@@ -73,6 +73,7 @@ export interface ResourcesContextType {
   isSharedView: boolean;
   isDownloadsView: boolean;
   isTempView: boolean;
+  isProjectAssetsView: boolean;
   canUpload: boolean;
 
   // ── Temp view state ──
@@ -224,7 +225,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // ── URL-driven state ──
   const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
     ? 'resources'
-    : (['shared', 'recycle', 'downloads', 'temp'].includes(section || '') ? section as SidebarView : 'resources');
+    : (['shared', 'recycle', 'downloads', 'temp', 'project-assets'].includes(section || '') ? section as SidebarView : 'resources');
   const selectedFolderId = urlFolderId ?? null;
   const selectedSmartFolderId = urlSmartFolderId ?? null;
   const selectedLibraryId = urlLibraryId ?? null;
@@ -299,22 +300,47 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const filterParamsRef = useRef(filterParams);
   filterParamsRef.current = filterParams;
 
+  // Ref mirror of the loaded smart folders so fetchResourcesPage can read the
+  // selected folder's rules without taking smartFolders as a callback dep.
+  // The fetch is (re)triggered instead by `selectedSmartRulesKey` below, which
+  // also covers the load race (smartFolders arrives after the folder is
+  // selected) and live rule edits.
+  const smartFoldersRef = useRef(smartFolders);
+  smartFoldersRef.current = smartFolders;
+  const selectedSmartRulesKey = useMemo(() => {
+    if (!selectedSmartFolderId) return '';
+    const f = smartFolders.find(
+      (x) => String(x.id) === String(selectedSmartFolderId),
+    );
+    return f?.smart_rules ? JSON.stringify(f.smart_rules) : '';
+  }, [selectedSmartFolderId, smartFolders]);
+
   // ── Keyset-paginated resource list (scale-safe). Replaces the old bulk
   //    fetchResources → setResources, which silently capped at PostgREST's
-  //    1000-row ceiling once a scope exceeded 1000 items. Smart folders are
-  //    not keyset-paginated yet, so they return as a single page. ──
+  //    1000-row ceiling once a scope exceeded 1000 items. Smart folders page
+  //    the same way via the search_smart_folder RPC (mig 276). ──
   const RESOURCE_PAGE_SIZE =
     typeof window !== 'undefined' && window.innerWidth < 768 ? 20 : 40;
   const fetchResourcesPage = useCallback(
     async (cursor: KeysetCursor | null, signal: AbortSignal) => {
       if (selectedSmartFolderId) {
-        const items = await fetchSmartFolderResults(selectedSmartFolderId, scopeId);
-        return {
-          data: cursor === null ? items : [],
-          hasMore: false,
-          nextCursor: null,
-          totalCount: items.length,
-        };
+        const folder = smartFoldersRef.current.find(
+          (f) => String(f.id) === String(selectedSmartFolderId),
+        );
+        const rules = folder?.smart_rules;
+        // No rules loaded yet, or a smart folder with zero conditions →
+        // nothing to evaluate. selectedSmartRulesKey re-triggers this fetch
+        // once the rules arrive.
+        if (!rules || !rules.conditions || rules.conditions.length === 0) {
+          return { data: [], hasMore: false, nextCursor: null, totalCount: 0 };
+        }
+        return fetchSmartFolderResultsPaginated(
+          scopeId,
+          rules,
+          cursor,
+          RESOURCE_PAGE_SIZE,
+          signal,
+        );
       }
       return fetchResourcesPaginated(
         {
@@ -329,9 +355,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
         signal,
       );
     },
-    // filterParamsKey is the JSON fingerprint read via filterParamsRef.current.
+    // filterParamsKey is the JSON fingerprint read via filterParamsRef.current;
+    // selectedSmartRulesKey re-triggers when the selected smart folder's rules
+    // load or change (rules themselves are read via smartFoldersRef.current).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, filterParamsKey],
+    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, selectedSmartRulesKey, filterParamsKey],
   );
   const {
     items: resources,
@@ -365,6 +393,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const isSharedView = sidebarView === 'shared';
   const isDownloadsView = sidebarView === 'downloads';
   const isTempView = sidebarView === 'temp';
+  const isProjectAssetsView = sidebarView === 'project-assets';
 
   // ── Temp view state ──
   const [tempFolderId, setTempFolderId] = useState<string | null>(null);
@@ -784,9 +813,12 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     }
   }, [sidebarView, loadDownloadedResources]);
 
-  // Load temp folder resources
+  // Load temp folder resources.
+  // Also fires for the Project Assets view: its "Chat Uploads" group reuses
+  // this same temp-folder fetch (a later task renders that group from
+  // tempResources), so the effect must run for both views.
   useEffect(() => {
-    if (!isTempView) return;
+    if (!isTempView && !isProjectAssetsView) return;
     let cancelled = false;
     setSelectedIds(new Set());
     setLoading(true);
@@ -816,7 +848,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     };
     loadTemp();
     return () => { cancelled = true; };
-  }, [isTempView, isPersonal, scopeId, selectedLibraryId, tempRefreshTick]);
+  }, [isTempView, isProjectAssetsView, isPersonal, scopeId, selectedLibraryId, tempRefreshTick]);
 
   // Load tags when selected resource changes
   useEffect(() => {
@@ -1015,6 +1047,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     isSharedView,
     isDownloadsView,
     isTempView,
+    isProjectAssetsView,
     canUpload,
 
     tempFolderId,
@@ -1110,7 +1143,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     transcodingResourceIds,
   }), [
     isPersonal, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, canUpload,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, isProjectAssetsView, canUpload,
     tempFolderId, tempResources, reloadTemp,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
     libraries, smartFolders, allTags, refreshTags, myResourcesCount, downloadsCount, refreshSidebarCounts,

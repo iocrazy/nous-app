@@ -8,8 +8,8 @@ export function AuthGuard() {
   // Wait for session check before deciding
   if (isAuthLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black">
-        <div className="w-8 h-8 rounded-full border-2 border-zinc-700 border-t-indigo-400 animate-spin" />
+      <div className="flex items-center justify-center h-screen bg-ink-950">
+        <div className="w-8 h-8 rounded-full border-2 border-ink-700 border-t-indigo-400 animate-spin" />
       </div>
     );
   }

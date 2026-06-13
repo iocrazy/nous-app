@@ -29,13 +29,13 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
         type="button"
         onClick={() => onChange(0)}
         className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-3 transition-colors ${
-          minRating === 0 ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800'
+          minRating === 0 ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800'
         }`}
       >
         <span className="flex-1">{t('resources.filter.anyRating', 'Any rating')}</span>
         {minRating === 0 && <Check size={12} className="text-indigo-400 shrink-0" />}
       </button>
-      <div className="mx-2.5 my-1 border-t border-zinc-700/60" />
+      <div className="mx-2.5 my-1 border-t border-ink-700/60" />
       {CHOICES.map((value) => {
         const active = minRating === value;
         return (
@@ -44,11 +44,11 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
             type="button"
             onClick={() => onChange(value)}
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-3 transition-colors ${
-              active ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800'
+              active ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800'
             }`}
           >
             <span className="flex items-center gap-1">
-              <span className="text-zinc-400 mr-1">{'≥'}</span>
+              <span className="text-ink-400 mr-1">{'≥'}</span>
               {Array.from({ length: value }).map((_, i) => (
                 <Star
                   key={i}

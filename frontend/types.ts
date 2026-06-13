@@ -334,6 +334,8 @@ export interface Resource {
   cover_image_path: string | null;
   current_version: number;
   notes: string | null;
+  gen_prompt: string | null;
+  gen_prompt_zh?: string | null;
   url: string | null;
   rating: number; // 0-5
   // Download status fields used to live here as mirrors of parsed_media;
@@ -539,19 +541,20 @@ export interface AIProviderConfig {
 
 export interface AISettings {
   ai_enabled: boolean;
+  auto_transcribe?: boolean;
+  auto_summarize?: boolean;
   preferred_language: string;
-  providers: {
-    openai?: AIProviderConfig;
-    deepseek?: AIProviderConfig;
-    doubao?: AIProviderConfig;
-    volcengine?: AIProviderConfig;
-    ollama?: AIProviderConfig;
-    lmstudio?: AIProviderConfig;
-  };
+  // Keyed by provider slug (openai / deepseek / doubao / minimax / kimi /
+  // qwen / volcengine / ollama / lmstudio / ...). Open-keyed so adding a
+  // provider in PROVIDER_META doesn't require touching this type again.
+  providers: Record<string, AIProviderConfig | undefined>;
   task_assignment: {
     transcription: string;  // provider key
     summarization: string;
     visual_analysis: string;
+    translation?: string;  // zh↔en prompt translation agent slug
+    caption?: string;  // image → prompt reverse-engineering agent slug
+    classification?: string;  // 12-dimension auto-tagging agent slug
     image_generation?: string;  // storyboard image provider
     script_generation?: string;  // storyboard script/prompt LLM
   };
@@ -1003,6 +1006,9 @@ export interface AILibraryAgent {
   project_name?: string | null;
   // Budget-guard columns (migration 148). Null budget = unlimited.
   monthly_token_budget?: number | null;
+  /** mig 286 run limits — null = unlimited. */
+  timeout_sec?: number | null;
+  max_concurrent_runs?: number | null;
   monthly_cost_cents_budget?: number | null;
   /** 'budget' when sweeper detects over-spend, 'manual' when admin pauses. */
   paused_reason?: 'budget' | 'manual' | null;
@@ -1120,6 +1126,44 @@ export interface AgentRunListItem {
   ended_at?: string | null;
   error_code?: string | null;
   skill_slugs_used: string[];
+  /** task_tracking PK when the run executed inside a tracked workflow (mig 282). */
+  task_id?: string | null;
+  /** 500-char display summary — left-column snippet in the split-pane Runs tab. */
+  output_summary?: string | null;
+}
+
+/** Slim task_tracking ref attached to a run detail ("Tasks Touched"). */
+export interface AgentRunTaskRef {
+  id: string;
+  title?: string | null;
+  phase?: string | null;
+  task_type?: string | null;
+}
+
+/** One currently-running run in the Workforce live strip. */
+export interface LiveAgentRun {
+  id: string;
+  agent_id: string;
+  status: 'running';
+  trigger: string;
+  model?: string | null;
+  started_at: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_cents?: number | null;
+  input_summary?: string | null;
+  task_id?: string | null;
+  agent_slug?: string | null;
+  agent_name?: string | null;
+  agent_icon?: string | null;
+}
+
+/** One transcript event of a run (mig 285 agent_run_events). */
+export interface AgentRunEvent {
+  seq: number;
+  event_type: 'user' | 'assistant' | 'tool_call' | 'error' | 'system';
+  payload: Record<string, unknown>;
+  created_at: string;
 }
 
 /** Full detail view — adds summaries, metadata, snapshots, and cancel state. */
@@ -1131,11 +1175,13 @@ export interface AgentRunDetail extends AgentRunListItem {
   cancel_requested: boolean;
   prompt_cents_per_1k_snapshot?: number | null;
   completion_cents_per_1k_snapshot?: number | null;
+  cached_input_tokens?: number;
   input_summary?: string | null;
-  output_summary?: string | null;
   error_message?: string | null;
   metadata_json: Record<string, unknown>;
   created_at: string;
+  /** Resolved from task_id by the backend (null when not workflow-linked). */
+  task?: AgentRunTaskRef | null;
 }
 
 export interface AgentRunListResponse {

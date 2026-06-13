@@ -163,3 +163,66 @@ async def test_max_iterations_exceeded_returns_error():
     result = await runner.run_turn(_composed(), [])
     assert result.get("error") == "max_tool_iterations_exceeded"
     assert adapter.call.await_count == MAX_TOOL_ITERATIONS
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_timeout_sec_zero_or_none_means_no_cap():
+    """mig 286: timeout_sec None/0 → no deadline; turn completes normally."""
+    adapter = AsyncMock()
+    adapter.call.return_value = {"choices": [{"message": {"content": "ok"}}]}
+    runner = AgentRunner(adapter=adapter, skill_tool=FakeSkillTool())
+    composed = _composed().model_copy(update={"timeout_sec": 0})
+    result = await runner.run_turn(composed, [{"role": "user", "content": "hi"}])
+    assert result["content"] == "ok"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_timeout_sec_exceeded_returns_run_timeout(monkeypatch):
+    """mig 286: when the wall-clock cap is exceeded between iterations the
+    turn returns error_code='run_timeout' instead of calling the LLM again."""
+    import time as _time
+
+    adapter = AsyncMock()
+    # First call returns a tool_call so the loop re-enters; the deadline
+    # check on iteration 2 must fire before the second adapter.call.
+    adapter.call.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "function": {
+                                "name": "Skill",
+                                "arguments": json.dumps({"skill": "x"}),
+                            },
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+    runner = AgentRunner(adapter=adapter, skill_tool=FakeSkillTool())
+    composed = _composed().model_copy(update={"timeout_sec": 30})
+
+    # Freeze-then-jump monotonic clock: first call (deadline init) returns
+    # t0; later calls return t0 + 120 so iteration 2 sees the cap exceeded.
+    t0 = _time.monotonic()
+    calls = {"n": 0}
+
+    def fake_monotonic():
+        # call 1 = deadline init, call 2 = iteration-1 check (still inside
+        # budget so the first LLM call happens), call 3+ = iteration-2 check
+        # (past the cap).
+        calls["n"] += 1
+        return t0 if calls["n"] <= 2 else t0 + 120
+
+    monkeypatch.setattr(_time, "monotonic", fake_monotonic)
+
+    result = await runner.run_turn(composed, [{"role": "user", "content": "hi"}])
+    assert result.get("error_code") == "run_timeout"
+    # LLM called once (iteration 1); iteration 2 was cut off by the cap.
+    assert adapter.call.await_count == 1

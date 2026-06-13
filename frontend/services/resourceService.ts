@@ -77,7 +77,14 @@ export async function renameResource(resourceId: string, filename: string): Prom
 
 export async function updateResource(
   resourceId: string,
-  data: { filename?: string; notes?: string; url?: string; rating?: number },
+  data: {
+    filename?: string;
+    notes?: string;
+    gen_prompt?: string;
+    gen_prompt_zh?: string;
+    url?: string;
+    rating?: number;
+  },
 ): Promise<Resource> {
   const apiUrl = getApiUrl();
   const response = await fetch(`${apiUrl}/api/v1/resources/${resourceId}`, {
@@ -86,6 +93,133 @@ export async function updateResource(
     body: JSON.stringify(data),
   });
   if (!response.ok) throw new Error('Failed to update resource');
+  const json = await response.json();
+  return json.data;
+}
+
+/** Reverse-engineer a bilingual generation prompt from the image via the
+ *  user's assigned caption agent. Async — returns the task id; the
+ *  workflow writes gen_prompt / gen_prompt_zh when it finishes. */
+export async function generateGenPrompt(resourceId: string): Promise<string> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/gen-prompt/generate`,
+    { method: 'POST', headers: await getAuthHeaders() },
+  );
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(detail || 'Failed to start prompt generation');
+  }
+  const json = await response.json();
+  return json.task_id;
+}
+
+/** 12-dimension bilingual auto-tagging via the user's assigned classify
+ *  agent. Async — returns the task id; the workflow attaches
+ *  resource_tags (source='ai') when it finishes. */
+export async function classifyResource(resourceId: string): Promise<string> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/classify`,
+    { method: 'POST', headers: await getAuthHeaders() },
+  );
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(detail || 'Failed to start auto-tagging');
+  }
+  const json = await response.json();
+  return json.task_id;
+}
+
+/** Batch-dispatch caption/classify workflows for up to 50 image
+ *  resources. Each image gets its own Task Center row; non-image /
+ *  inaccessible entries come back in `skipped` with a reason. */
+export async function batchAssetAi(
+  resourceIds: string[],
+  operation: 'caption' | 'classify',
+): Promise<{
+  dispatched: Array<{ resource_id: string; task_id: string }>;
+  skipped: Array<{ resource_id: string; reason: string }>;
+}> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/ai/batch`, {
+    method: 'POST',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resource_ids: resourceIds, operation }),
+  });
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(
+      typeof detail === 'string' ? detail : 'Failed to dispatch batch AI tasks',
+    );
+  }
+  const json = await response.json();
+  return { dispatched: json.dispatched ?? [], skipped: json.skipped ?? [] };
+}
+
+/** Download a LoRA-training zip (image + same-stem .txt caption per
+ *  asset) for up to 100 image resources. Triggers a browser download. */
+export async function exportTrainingSet(
+  resourceIds: string[],
+  lang: 'en' | 'zh',
+): Promise<void> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/v1/resources/export/training-set`, {
+    method: 'POST',
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resource_ids: resourceIds, lang }),
+  });
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(
+      typeof detail === 'string' ? detail : 'Failed to export training set',
+    );
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'training-set.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Translate the asset's generation prompt into `targetLang` via the
+ *  user's assigned translation agent. Returns both prompt sides. */
+export async function translateGenPrompt(
+  resourceId: string,
+  targetLang: 'en' | 'zh',
+): Promise<{ gen_prompt: string | null; gen_prompt_zh: string | null }> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/gen-prompt/translate`,
+    {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_lang: targetLang }),
+    },
+  );
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(detail || 'Failed to translate prompt');
+  }
   const json = await response.json();
   return json.data;
 }
@@ -1381,18 +1515,78 @@ export async function deleteSmartFolder(folderId: string): Promise<void> {
   if (!response.ok) throw new Error('Failed to delete smart folder');
 }
 
-export async function fetchSmartFolderResults(
-  folderId: string,
+/**
+ * Resolve a smart-folder `relative:-7d` value to an absolute ISO timestamp.
+ * Mirrors the backend `ResourcesRepository._resolve_value` so the value the
+ * RPC receives is already an absolute date it can cast with `::timestamptz`.
+ * Units: d = days, h = hours, m = minutes (default days). Non-relative values
+ * pass through unchanged.
+ */
+function resolveRelativeDate(value: string): string {
+  if (!value.startsWith('relative:')) return value;
+  const offsetStr = value.split(':')[1] ?? '';
+  const unit = offsetStr.slice(-1);
+  const amount = parseInt(offsetStr.slice(0, -1), 10);
+  if (Number.isNaN(amount)) return value;
+  const msPerUnit = unit === 'h' ? 3_600_000 : unit === 'm' ? 60_000 : 86_400_000;
+  return new Date(Date.now() + amount * msPerUnit).toISOString();
+}
+
+/**
+ * Keyset-paginated smart-folder evaluation via the `search_smart_folder` RPC
+ * (mig 276). Replaces the legacy drain-all `GET /smart-folders/{id}/results`,
+ * which silently capped at PostgREST's 1000-row ceiling once a smart folder
+ * matched more than 1000 resources.
+ *
+ * Calls the RPC DIRECTLY through the supabase client (not the backend) so
+ * `bigIntSafeFetch` keeps Snowflake ids precision-safe in the jsonb rows — the
+ * same pattern as `fetchResourcesViaRpc`. RLS (SECURITY INVOKER on the RPC)
+ * enforces scope access. Relative-date conditions are resolved to absolute
+ * timestamps here before dispatch, parity with the legacy Python path.
+ */
+export async function fetchSmartFolderResultsPaginated(
   scopeId: string,
-): Promise<ResourceItem[]> {
-  const apiUrl = getApiUrl();
-  const params = new URLSearchParams({ scope_id: scopeId });
-  const response = await fetch(`${apiUrl}/api/v1/resources/smart-folders/${folderId}/results?${params}`, {
-    headers: await getAuthHeaders(),
+  rules: SmartFolderRules,
+  cursor: KeysetCursor | null,
+  pageSize: number,
+  signal?: AbortSignal,
+): Promise<KeysetListPage<ResourceItem>> {
+  const resolvedRules = {
+    operator: rules.operator,
+    match: rules.match,
+    conditions: (rules.conditions || []).map((c) => ({
+      field: c.field,
+      op: c.op,
+      value: resolveRelativeDate(String(c.value)),
+    })),
+  };
+
+  let req = supabase.rpc('search_smart_folder', {
+    p_scope_id: scopeId,
+    p_rules: resolvedRules,
+    p_search: null,
+    p_cursor_ts: cursor?.ts ?? null,
+    p_cursor_id: cursor?.id ?? null,
+    p_limit: pageSize + 1,
+    p_with_count: cursor === null,
   });
-  if (!response.ok) throw new Error('Failed to fetch smart folder results');
-  const json = await response.json();
-  return json.data || [];
+  if (signal) req = req.abortSignal(signal);
+
+  const { data, error } = await req;
+  if (error) throw error;
+
+  const result = (data ?? { rows: [], total_count: null }) as {
+    rows: ResourceItem[];
+    total_count: number | null;
+  };
+  const rows = result.rows ?? [];
+  const page = sliceKeysetPage(rows, pageSize, (row) => {
+    const r = row as { id?: string | number; created_at?: string };
+    return r.created_at && r.id != null
+      ? { ts: r.created_at, id: String(r.id) }
+      : null;
+  });
+  return { ...page, totalCount: result.total_count ?? -1 };
 }
 
 /**

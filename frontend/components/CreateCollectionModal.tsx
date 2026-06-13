@@ -57,13 +57,13 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md mx-4 shadow-2xl animate-in zoom-in-95 fade-in duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md mx-4 shadow-2xl animate-in zoom-in-95 fade-in duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-white">{t('collections.create')}</h2>
+        <div className="flex items-center justify-between p-5 border-b border-ink-800">
+          <h2 className="text-lg font-semibold text-ink-50">{t('collections.create')}</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            className="p-2 rounded-lg text-ink-400 hover:text-ink-50 hover:bg-ink-800 transition-colors"
           >
             <X size={20} />
           </button>
@@ -79,20 +79,20 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
 
           {/* Collection Name */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-400">{t('collections.name')}</label>
+            <label className="text-sm font-medium text-ink-400">{t('collections.name')}</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('collections.namePlaceholder') || 'Enter collection name'}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:border-indigo-500 outline-none transition-colors"
+              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-4 py-2.5 text-ink-50 focus:border-indigo-500 outline-none transition-colors"
               autoFocus
             />
           </div>
 
           {/* Share with Team */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-400">{t('collections.shareWith')}</label>
+            <label className="text-sm font-medium text-ink-400">{t('collections.shareWith')}</label>
             <div className="space-y-2">
               <button
                 type="button"
@@ -100,7 +100,7 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${
                   selectedTeamId === null
                     ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-400'
-                    : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+                    : 'border-ink-700 text-ink-400 hover:bg-ink-800'
                 }`}
               >
                 <Lock size={18} />
@@ -115,7 +115,7 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${
                     selectedTeamId === team.id
                       ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-400'
-                      : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+                      : 'border-ink-700 text-ink-400 hover:bg-ink-800'
                   }`}
                 >
                   <Users size={18} />

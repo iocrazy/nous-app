@@ -73,20 +73,20 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
     <button
       onClick={() => onMarkRead(item.id)}
       className={`w-full text-left p-3 rounded-lg transition-colors ${
-        item.read ? 'bg-transparent hover:bg-zinc-800/30' : 'bg-zinc-800/50 hover:bg-zinc-800'
+        item.read ? 'bg-transparent hover:bg-ink-800/30' : 'bg-ink-800/50 hover:bg-ink-800'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium truncate ${item.read ? 'text-zinc-400' : 'text-zinc-200'}`}>
+          <p className={`text-sm font-medium truncate ${item.read ? 'text-ink-400' : 'text-ink-200'}`}>
             {item.title}
           </p>
           {item.content && (
-            <p className="text-xs text-zinc-500 truncate mt-0.5">{item.content}</p>
+            <p className="text-xs text-ink-500 truncate mt-0.5">{item.content}</p>
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-xs text-zinc-600">{formatTime(item.createdAt)}</span>
+          <span className="text-xs text-ink-600">{formatTime(item.createdAt)}</span>
           {!item.read && <div className="w-2 h-2 rounded-full bg-indigo-500" />}
         </div>
       </div>
@@ -96,11 +96,11 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
   return (
     <div
       ref={panelRef}
-      className="absolute top-full right-0 mt-2 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-200 overflow-hidden"
+      className="absolute top-full right-0 mt-2 w-80 bg-ink-900 border border-ink-800 rounded-xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-200 overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-        <h3 className="font-semibold text-zinc-200">{t('notifications.title')}</h3>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
+        <h3 className="font-semibold text-ink-200">{t('notifications.title')}</h3>
         {hasUnread && (
           <button
             onClick={onMarkAllRead}
@@ -115,7 +115,7 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
       {/* Content */}
       <div className="max-h-[400px] overflow-y-auto">
         {notifications.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-zinc-500">
+          <div className="flex flex-col items-center justify-center py-10 text-ink-500">
             <Bell size={32} className="mb-2 opacity-50" />
             <p className="text-sm">{t('notifications.empty')}</p>
           </div>
@@ -124,7 +124,7 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
             {/* System Notifications */}
             {systemNotifications.length > 0 && (
               <div>
-                <p className="px-2 py-1 text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1">
+                <p className="px-2 py-1 text-xs font-semibold text-ink-500 uppercase tracking-wider flex items-center gap-1">
                   <Bell size={12} />
                   {t('notifications.system')}
                 </p>
@@ -139,7 +139,7 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
             {/* Team Notifications */}
             {teamNotifications.length > 0 && (
               <div>
-                <p className="px-2 py-1 text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1">
+                <p className="px-2 py-1 text-xs font-semibold text-ink-500 uppercase tracking-wider flex items-center gap-1">
                   <Users size={12} />
                   {t('notifications.team')}
                 </p>

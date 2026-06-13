@@ -76,7 +76,7 @@ export const FilterChip: React.FC<FilterChipProps> = ({
         className={`inline-flex items-center rounded-lg border transition-colors ${
           isActive
             ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
-            : 'border-zinc-700/80 bg-zinc-900/40 text-zinc-300 hover:border-zinc-600 hover:text-zinc-100'
+            : 'border-ink-700/80 bg-ink-900/40 text-ink-300 hover:border-ink-600 hover:text-ink-100'
         }`}
       >
         <button
@@ -96,7 +96,7 @@ export const FilterChip: React.FC<FilterChipProps> = ({
               e.stopPropagation();
               onClear();
             }}
-            className="pr-1.5 pl-0.5 py-1 text-zinc-400 hover:text-zinc-100"
+            className="pr-1.5 pl-0.5 py-1 text-ink-400 hover:text-ink-100"
             aria-label={`Clear ${label}`}
           >
             <X size={12} />
@@ -104,7 +104,7 @@ export const FilterChip: React.FC<FilterChipProps> = ({
         )}
       </div>
       {isOpen && (
-        <div className="absolute left-0 top-full mt-1.5 z-30 min-w-[14rem] bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/80 rounded-xl shadow-2xl animate-dropdown">
+        <div className="absolute left-0 top-full mt-1.5 z-30 min-w-[14rem] bg-ink-900/95 backdrop-blur-sm border border-ink-700/80 rounded-xl shadow-2xl animate-dropdown">
           {children}
         </div>
       )}

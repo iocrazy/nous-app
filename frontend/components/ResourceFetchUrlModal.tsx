@@ -85,16 +85,16 @@ export const ResourceFetchUrlModal: React.FC<ResourceFetchUrlModalProps> = ({
         onClick={isSubmitting ? undefined : onClose}
       />
 
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md mx-4 shadow-2xl animate-in zoom-in-95 fade-in duration-200">
-        <div className="flex items-center justify-between p-5 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md mx-4 shadow-2xl animate-in zoom-in-95 fade-in duration-200">
+        <div className="flex items-center justify-between p-5 border-b border-ink-800">
+          <h2 className="text-lg font-semibold text-ink-50 flex items-center gap-2">
             <Globe size={20} className="text-indigo-400" />
             {t('resources.fetchUrl.title') || 'Fetch from URL'}
           </h2>
           <button
             onClick={onClose}
             disabled={isSubmitting}
-            className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50"
+            className="p-2 rounded-lg text-ink-400 hover:text-ink-50 hover:bg-ink-800 transition-colors disabled:opacity-50"
           >
             <X size={20} />
           </button>
@@ -108,13 +108,13 @@ export const ResourceFetchUrlModal: React.FC<ResourceFetchUrlModalProps> = ({
           )}
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-zinc-400">
+            <label className="text-sm font-medium text-ink-400">
               {t('resources.fetchUrl.label') || 'Media link'}
             </label>
             <div className="relative">
               <Link2
                 size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500"
               />
               <input
                 type="url"
@@ -124,12 +124,12 @@ export const ResourceFetchUrlModal: React.FC<ResourceFetchUrlModalProps> = ({
                   t('resources.fetchUrl.placeholder')
                   || 'Paste a YouTube / Bilibili / Douyin / X link'
                 }
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-10 pr-4 py-2.5 text-white focus:border-indigo-500 outline-none transition-colors"
+                className="w-full bg-ink-800 border border-ink-700 rounded-lg pl-10 pr-4 py-2.5 text-ink-50 focus:border-indigo-500 outline-none transition-colors"
                 autoFocus
                 disabled={isSubmitting}
               />
             </div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-ink-500">
               {t('resources.fetchUrl.hint')
                 || 'The download will appear in Task Center, then in your library.'}
             </p>

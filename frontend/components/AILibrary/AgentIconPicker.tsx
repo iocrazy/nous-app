@@ -68,10 +68,10 @@ export const AgentIconPicker: React.FC<AgentIconPickerProps> = ({
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen((v) => !v)}
-        className={`inline-flex items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 p-2 transition-colors ${
+        className={`inline-flex items-center justify-center rounded-lg border border-ink-700 bg-ink-800 p-2 transition-colors ${
           disabled
             ? 'cursor-not-allowed opacity-60'
-            : 'hover:border-indigo-500/50 hover:bg-zinc-700'
+            : 'hover:border-indigo-500/50 hover:bg-ink-700'
         }`}
         title={disabled ? undefined : t('aiLibrary.agents.pickIcon', 'Pick icon')}
         aria-label={t('aiLibrary.agents.pickIcon', 'Pick icon')}
@@ -82,14 +82,14 @@ export const AgentIconPicker: React.FC<AgentIconPickerProps> = ({
       {open && (
         <div
           ref={popoverRef}
-          className="absolute left-0 top-full z-50 mt-2 w-72 rounded-lg border border-zinc-700 bg-zinc-900 p-3 shadow-2xl"
+          className="absolute left-0 top-full z-50 mt-2 w-72 rounded-lg border border-ink-700 bg-ink-900 p-3 shadow-2xl"
         >
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('aiLibrary.agents.searchIcons', 'Search icons...')}
-            className="mb-2 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none"
+            className="mb-2 w-full rounded-md border border-ink-700 bg-ink-800 px-2 py-1.5 text-sm text-ink-200 placeholder:text-ink-500 focus:border-indigo-500 focus:outline-none"
             autoFocus
           />
           <div className="grid max-h-56 grid-cols-7 gap-1 overflow-y-auto">
@@ -108,7 +108,7 @@ export const AgentIconPicker: React.FC<AgentIconPickerProps> = ({
                   className={`flex h-8 w-8 items-center justify-center rounded transition-colors ${
                     active
                       ? 'bg-indigo-500/20 text-indigo-300'
-                      : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                      : 'text-ink-400 hover:bg-ink-800 hover:text-ink-100'
                   }`}
                 >
                   <Icon size={16} />
@@ -116,7 +116,7 @@ export const AgentIconPicker: React.FC<AgentIconPickerProps> = ({
               );
             })}
             {filtered.length === 0 && (
-              <div className="col-span-7 px-2 py-4 text-center text-xs text-zinc-500">
+              <div className="col-span-7 px-2 py-4 text-center text-xs text-ink-500">
                 {t('common.noResults', 'No results')}
               </div>
             )}

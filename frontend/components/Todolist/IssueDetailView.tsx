@@ -202,61 +202,61 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950 border-t border-zinc-800/80">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/80 text-[13px] text-zinc-500">
-        <Link to={`/team/${teamId}/todolist`} className="inline-flex items-center gap-1 hover:text-zinc-300">
+    <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-ink-950 border-t border-ink-800/80">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-ink-800/80 text-[13px] text-ink-500">
+        <Link to={`/team/${teamId}/todolist`} className="inline-flex items-center gap-1 hover:text-ink-300">
           <ChevronLeft size={13} />
           Issues
         </Link>
-        <span className="text-zinc-600">/</span>
-        <span className="text-zinc-300 truncate">{issue.title}</span>
+        <span className="text-ink-600">/</span>
+        <span className="text-ink-300 truncate">{issue.title}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6">
           <div className="flex items-center gap-2 mb-3">
             <IssueStatusIcon status={issue.status} size={15} />
-            <span className="font-mono text-[12px] text-zinc-500 uppercase tracking-wider">{issue.identifier}</span>
+            <span className="font-mono text-[12px] text-ink-500 uppercase tracking-wider">{issue.identifier}</span>
             <span title={issue.priority}>
               <PriorityIcon priority={issue.priority} />
             </span>
             {issue.project && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[12px]">
-                <span className={`w-1.5 h-1.5 rounded-full ${issue.project.color ?? 'bg-zinc-500'}`} />
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-ink-800 text-ink-400 text-[12px]">
+                <span className={`w-1.5 h-1.5 rounded-full ${issue.project.color ?? 'bg-ink-500'}`} />
                 {issue.project.name}
               </span>
             )}
             <div className="ml-auto flex items-center gap-1">
-              <button className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded" title="Properties">
+              <button className="p-1.5 text-ink-500 hover:text-ink-300 hover:bg-ink-800 rounded" title="Properties">
                 <AlignLeft size={14} />
               </button>
-              <button className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded" title="More">
+              <button className="p-1.5 text-ink-500 hover:text-ink-300 hover:bg-ink-800 rounded" title="More">
                 <MoreHorizontal size={14} />
               </button>
             </div>
           </div>
 
-          <h1 className="text-xl font-semibold text-zinc-100 leading-tight">{issue.title}</h1>
+          <h1 className="text-xl font-semibold text-ink-100 leading-tight">{issue.title}</h1>
           {issue.description && (
-            <p className="mt-2 text-[14px] text-zinc-400 leading-relaxed whitespace-pre-wrap">{issue.description}</p>
+            <p className="mt-2 text-[14px] text-ink-400 leading-relaxed whitespace-pre-wrap">{issue.description}</p>
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
             <button
               onClick={() => onCreateSubIssue(issue.id)}
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-zinc-800 bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800/60"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-ink-800 bg-ink-900/50 text-ink-300 hover:bg-ink-800/60"
             >
               <Plus size={13} /> New Sub-issue
             </button>
             <button
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-zinc-800 bg-zinc-900/50 text-zinc-500 cursor-not-allowed"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-ink-800 bg-ink-900/50 text-ink-500 cursor-not-allowed"
               disabled
               title="Attachments backend not in place yet"
             >
               <Paperclip size={13} /> Upload attachment
             </button>
             <button
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-zinc-800 bg-zinc-900/50 text-zinc-500 cursor-not-allowed"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-ink-800 bg-ink-900/50 text-ink-500 cursor-not-allowed"
               disabled
               title="Documents backend not in place yet"
             >
@@ -274,7 +274,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             )}
           </div>
 
-          <div className="flex items-center border-b border-zinc-800/80 mt-6">
+          <div className="flex items-center border-b border-ink-800/80 mt-6">
             {(['chat', 'activity', 'related'] as DetailTab[]).map((t) => {
               const label = t === 'chat' ? 'Chat' : t === 'activity' ? 'Activity' : 'Related work';
               const Icon = t === 'chat' ? MessageSquare : t === 'activity' ? Activity : Link2;
@@ -285,8 +285,8 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                   onClick={() => setTab(t)}
                   className={`inline-flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium border-b-2 transition ${
                     active
-                      ? 'border-indigo-400 text-zinc-100'
-                      : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                      ? 'border-indigo-400 text-ink-100'
+                      : 'border-transparent text-ink-500 hover:text-ink-300'
                   }`}
                 >
                   <Icon size={13} />
@@ -294,7 +294,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                 </button>
               );
             })}
-            <span className="ml-auto text-[12px] text-zinc-600 pr-2">{messages.length} message{messages.length === 1 ? '' : 's'}</span>
+            <span className="ml-auto text-[12px] text-ink-600 pr-2">{messages.length} message{messages.length === 1 ? '' : 's'}</span>
           </div>
 
           {tab === 'chat' && (
@@ -305,15 +305,15 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                 </div>
               )}
               {loading && messages.length === 0
-                ? <div className="text-[14px] text-zinc-500 italic px-4 py-12 text-center">Loading messages…</div>
+                ? <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading messages…</div>
                 : <IssueChatThread messages={messages} agentsById={agentsById} selfUserId={selfUserId} streamingText={streamingText} />}
               {isAgentWorking && (
-                <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-zinc-400">
+                <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-ink-400">
                   <span
                     className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"
                     style={{ boxShadow: '0 0 6px 1px rgba(16,185,129,0.45)' }}
                   />
-                  <span className="text-zinc-400">Agent is working…</span>
+                  <span className="text-ink-400">Agent is working…</span>
                 </div>
               )}
             </>

@@ -139,7 +139,7 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
 
       <div className="flex-1 min-w-0 h-full">
         {loading ? (
-          <div className="p-6 text-sm text-zinc-500">
+          <div className="p-6 text-sm text-ink-500">
             {t('aiLibrary.skills.loading', 'Loading skills...')}
           </div>
         ) : error ? (
@@ -149,11 +149,11 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
             </div>
           </div>
         ) : skills.length === 0 ? (
-          <div className="flex h-full items-center justify-center p-6 text-sm text-zinc-500">
+          <div className="flex h-full items-center justify-center p-6 text-sm text-ink-500">
             {t('aiLibrary.skills.empty', 'No skills yet. Create your first one.')}
           </div>
         ) : !selectedSlug ? (
-          <div className="flex h-full items-center justify-center p-6 text-sm text-zinc-500">
+          <div className="flex h-full items-center justify-center p-6 text-sm text-ink-500">
             {t(
               'aiLibrary.skills.selectPrompt',
               'Select a skill on the left to view and edit.',

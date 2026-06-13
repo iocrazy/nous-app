@@ -117,11 +117,11 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-zinc-100">
+      <div className="w-full max-w-md rounded-lg border border-ink-800 bg-ink-900 p-6 shadow-xl">
+        <h2 className="text-lg font-semibold text-ink-100">
           {t('aiLibrary.skills.newSkillTitle', 'New Skill')}
         </h2>
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="mt-1 text-xs text-ink-500">
           {t(
             'aiLibrary.skills.newSkillHint',
             'Create a custom skill. You can start from scratch or fork an existing skill as a starting point.',
@@ -130,7 +130,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.skills.slugLabel', 'Slug')}
             </label>
             <input
@@ -138,7 +138,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
               placeholder="my-custom-skill"
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
               required
             />
@@ -153,7 +153,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.skills.nameLabel', 'Name')}
             </label>
             <input
@@ -161,16 +161,16 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="My Custom Skill"
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.skills.descriptionLabel', 'Description')}
-              <span className="ml-1 text-zinc-600">
+              <span className="ml-1 text-ink-600">
                 ({t('common.optional', 'optional')})
               </span>
             </label>
@@ -178,16 +178,16 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-400">
+              <label className="block text-xs font-medium text-ink-400">
                 {t('aiLibrary.skills.categoryLabel', 'Category')}
-                <span className="ml-1 text-zinc-600">
+                <span className="ml-1 text-ink-600">
                   ({t('common.optional', 'optional')})
                 </span>
               </label>
@@ -196,14 +196,14 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 placeholder="writing"
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
                 disabled={submitting}
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-400">
+              <label className="block text-xs font-medium text-ink-400">
                 {t('aiLibrary.skills.iconLabel', 'Icon')}
-                <span className="ml-1 text-zinc-600">
+                <span className="ml-1 text-ink-600">
                   ({t('common.optional', 'optional')})
                 </span>
               </label>
@@ -213,14 +213,14 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                 onChange={(e) => setIcon(e.target.value)}
                 placeholder="✨"
                 maxLength={4}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
                 disabled={submitting}
               />
             </div>
           </div>
 
           <fieldset className="space-y-2">
-            <legend className="block text-xs font-medium text-zinc-400">
+            <legend className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.skills.scopeLabel', 'Scope')}
             </legend>
             <div className="flex gap-2">
@@ -247,7 +247,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               <select
                 value={teamId}
                 onChange={(e) => setTeamId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
                 disabled={submitting || scopeLoading}
                 required
               >
@@ -267,7 +267,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               <select
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
                 disabled={submitting || scopeLoading}
                 required
               >
@@ -283,7 +283,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                 ))}
               </select>
             )}
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-ink-500">
               {t(
                 'aiLibrary.skills.scopeHint',
                 'Private = only you. Team / Project = everyone in that scope.',
@@ -292,16 +292,16 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
           </fieldset>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.skills.forkFromLabel', 'Fork from')}
-              <span className="ml-1 text-zinc-600">
+              <span className="ml-1 text-ink-600">
                 ({t('common.optional', 'optional')})
               </span>
             </label>
             <select
               value={forkFrom}
               onChange={(e) => setForkFrom(e.target.value)}
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
             >
               <option value="">
@@ -315,7 +315,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                   </option>
                 ))}
             </select>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-ink-500">
               {t(
                 'aiLibrary.skills.forkFromHint',
                 'Copies the SKILL.md body + metadata from the source. Sub-files (references/, scripts/, assets/) are NOT copied.',
@@ -334,7 +334,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+              className="rounded-md border border-ink-700 px-4 py-2 text-sm text-ink-300 hover:bg-ink-800"
             >
               {t('common.cancel', 'Cancel')}
             </button>
@@ -375,7 +375,7 @@ const ScopeRadio: React.FC<ScopeRadioProps> = ({
     className={`inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
       checked
         ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
-        : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-750'
+        : 'border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-750'
     } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
   >
     <input

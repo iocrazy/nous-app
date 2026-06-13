@@ -13,6 +13,7 @@ Sub-modules:
 
 from fastapi import APIRouter
 
+from app.api.resources_ai_router import router as ai_router
 from app.api.resources_crud_router import router as crud_router
 from app.api.resources_folders_router import router as folders_router
 from app.api.resources_search_router import router as search_router
@@ -32,4 +33,5 @@ router.include_router(search_router)
 router.include_router(upload_router)
 router.include_router(folders_router)
 router.include_router(versions_router)
+router.include_router(ai_router)
 router.include_router(crud_router)

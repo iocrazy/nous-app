@@ -66,13 +66,13 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
   if (trashedFiles.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <div className="p-4 bg-zinc-800 rounded-2xl mb-4">
-          <Trash2 size={40} className="text-zinc-500" />
+        <div className="p-4 bg-ink-800 rounded-2xl mb-4">
+          <Trash2 size={40} className="text-ink-500" />
         </div>
-        <h3 className="text-lg font-medium text-zinc-300 mb-2">
+        <h3 className="text-lg font-medium text-ink-300 mb-2">
           {t('projects.trash.empty', 'Trash is empty')}
         </h3>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-ink-500">
           {t('projects.trash.emptyHint', 'Deleted files will appear here')}
         </p>
       </div>
@@ -83,42 +83,42 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
     <div>
       <div className="flex items-center gap-2 mb-4">
         <AlertTriangle size={14} className="text-amber-400" />
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-ink-500">
           {t('projects.trash.hint', 'Files in trash can be restored or permanently deleted')}
         </span>
       </div>
 
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl overflow-hidden">
+      <div className="bg-ink-800/50 border border-ink-700/50 rounded-xl overflow-hidden">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-zinc-700/50">
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            <tr className="border-b border-ink-700/50">
+              <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
                 {t('projects.trash.fileName', 'File Name')}
               </th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+              <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
                 {t('projects.trash.type', 'Type')}
               </th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+              <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
                 {t('projects.trash.deletedAt', 'Deleted')}
               </th>
-              <th className="text-right px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">
+              <th className="text-right px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">
                 {t('projects.trash.actions', 'Actions')}
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-700/30">
+          <tbody className="divide-y divide-ink-700/30">
             {trashedFiles.map(file => (
-              <tr key={file.id} className="hover:bg-zinc-700/20 transition-colors">
+              <tr key={file.id} className="hover:bg-ink-700/20 transition-colors">
                 <td className="px-4 py-3">
-                  <span className="text-sm text-white">{file.filename}</span>
+                  <span className="text-sm text-ink-50">{file.filename}</span>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="text-xs text-zinc-400 bg-zinc-700/50 px-2 py-0.5 rounded-full">
+                  <span className="text-xs text-ink-400 bg-ink-700/50 px-2 py-0.5 rounded-full">
                     {file.file_type || file.mime_type || '—'}
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="text-sm text-zinc-500">{formatDate(file.trashed_at)}</span>
+                  <span className="text-sm text-ink-500">{formatDate(file.trashed_at)}</span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">

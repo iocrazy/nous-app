@@ -891,19 +891,19 @@ export const DownloadsView: React.FC = () => {
     <div className={`flex-1 min-w-0 flex flex-col ${libraryViewMode === 'feed' ? '' : 'md:h-full'}`}>
       {/* Toolbar */}
       <div
-        className="hidden md:block px-6 py-2 border-b border-zinc-800/80 space-y-2"
+        className="hidden md:block px-6 py-2 border-b border-ink-800/80 space-y-2"
         style={{ paddingRight: selectedVideo && showInfoPanel ? `${infoPanelWidth + 24}px` : undefined }}
       >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="text-sm text-zinc-200 font-medium truncate">{t('resources.downloads')}</span>
+            <span className="text-sm text-ink-200 font-medium truncate">{t('resources.downloads')}</span>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={loadLibraryData}
               disabled={isLoadingLibrary}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 transition-colors"
+              className="p-1.5 rounded-lg text-ink-500 hover:text-ink-200 hover:bg-ink-800/80 transition-colors"
               title="Refresh Data"
             >
               <RefreshCw size={14} className={isLoadingLibrary ? 'animate-spin' : ''} />
@@ -940,7 +940,7 @@ export const DownloadsView: React.FC = () => {
               className={`p-1.5 rounded-lg transition-colors ${
                 isFilterBarVisible
                   ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
-                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80'
+                  : 'text-ink-500 hover:text-ink-200 hover:bg-ink-800/80'
               }`}
               title={
                 isFilterBarVisible
@@ -960,21 +960,21 @@ export const DownloadsView: React.FC = () => {
             <div className="hidden md:flex items-center">
               <button
                 onClick={() => setLibraryViewMode('list')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-zinc-800/60 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-ink-800/60 text-ink-200' : 'text-ink-500 hover:text-ink-300'}`}
                 title="List View"
               >
                 <LayoutList size={14} />
               </button>
               <button
                 onClick={() => setLibraryViewMode('grid')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-zinc-800/60 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-ink-800/60 text-ink-200' : 'text-ink-500 hover:text-ink-300'}`}
                 title="Grid View"
               >
                 <LayoutGrid size={14} />
               </button>
               <button
                 onClick={() => setLibraryViewMode('feed')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-zinc-800/60 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-ink-800/60 text-ink-200' : 'text-ink-500 hover:text-ink-300'}`}
                 title="Feed View"
               >
                 <Smartphone size={14} />
@@ -1040,7 +1040,7 @@ export const DownloadsView: React.FC = () => {
           >
             <RefreshCw
               size={18}
-              className={`text-zinc-400 transition-transform ${pullRefreshing ? 'animate-spin' : ''}`}
+              className={`text-ink-400 transition-transform ${pullRefreshing ? 'animate-spin' : ''}`}
               style={{ transform: `rotate(${Math.min(pullDistance * 3, 360)}deg)` }}
             />
           </div>
@@ -1054,14 +1054,14 @@ export const DownloadsView: React.FC = () => {
 
         {isLoadingLibrary && library.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[300px]">
-            <Loader2 size={24} className="animate-spin text-zinc-500 mb-3" />
-            <p className="text-zinc-500 text-sm">{t('common.loading', 'Loading...')}</p>
+            <Loader2 size={24} className="animate-spin text-ink-500 mb-3" />
+            <p className="text-ink-500 text-sm">{t('common.loading', 'Loading...')}</p>
           </div>
         ) : filteredLibrary.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-            <Download size={48} className="text-zinc-600 mb-4" />
-            <p className="text-zinc-400 text-sm">{t('resources.noDownloads', 'No downloaded content yet')}</p>
-            <p className="text-zinc-500 text-xs mt-1">{t('resources.noDownloadsHint', 'Use Parser to download media and they will appear here')}</p>
+            <Download size={48} className="text-ink-600 mb-4" />
+            <p className="text-ink-400 text-sm">{t('resources.noDownloads', 'No downloaded content yet')}</p>
+            <p className="text-ink-500 text-xs mt-1">{t('resources.noDownloadsHint', 'Use Parser to download media and they will appear here')}</p>
           </div>
         ) : (
           <>
@@ -1120,7 +1120,7 @@ export const DownloadsView: React.FC = () => {
                 lands. */}
             {hasActiveQuery && filteredLibrary.length > 0 && libraryViewMode !== 'feed' && (
               <div className="w-full py-6 flex justify-center">
-                <span className="text-zinc-600 text-xs">
+                <span className="text-ink-600 text-xs">
                   {t('library.searchResultsCount', 'Found {{count}} matching items', {
                     count: filteredLibrary.length,
                   })}
@@ -1140,7 +1140,7 @@ export const DownloadsView: React.FC = () => {
                     active, otherwise equals library.length. */}
                 {!hasMoreData && filteredLibrary.length > 0 && (
                   <div className="w-full py-6 flex justify-center">
-                    <span className="text-zinc-600 text-xs">
+                    <span className="text-ink-600 text-xs">
                       All {filteredLibrary.length} items loaded
                     </span>
                   </div>
@@ -1150,11 +1150,11 @@ export const DownloadsView: React.FC = () => {
                 {hasMoreData && (
                   <div className="hidden md:flex w-full py-6 justify-center">
                     {isLoadingMore ? (
-                      <Loader2 size={20} className="animate-spin text-zinc-500" />
+                      <Loader2 size={20} className="animate-spin text-ink-500" />
                     ) : (
                       <button
                         onClick={() => loadMoreLibrary()}
-                        className="px-6 py-2 text-sm text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 rounded-full transition-colors"
+                        className="px-6 py-2 text-sm text-ink-400 hover:text-ink-200 bg-ink-800/60 hover:bg-ink-800 rounded-full transition-colors"
                       >
                         Load More
                       </button>
@@ -1183,13 +1183,13 @@ export const DownloadsView: React.FC = () => {
                     }}
                   >
                     {isLoadingMore ? (
-                      <div className="px-5 py-2 bg-zinc-900/95 backdrop-blur-md border border-zinc-800/60 rounded-full shadow-2xl">
-                        <Loader2 size={18} className="animate-spin text-zinc-400" />
+                      <div className="px-5 py-2 bg-ink-900/95 backdrop-blur-md border border-ink-800/60 rounded-full shadow-2xl">
+                        <Loader2 size={18} className="animate-spin text-ink-400" />
                       </div>
                     ) : (
                       <button
                         onClick={() => loadMoreLibrary()}
-                        className="px-5 py-2 text-sm text-zinc-200 bg-zinc-900/95 backdrop-blur-md border border-zinc-700/60 hover:bg-zinc-800 rounded-full shadow-2xl transition-colors"
+                        className="px-5 py-2 text-sm text-ink-200 bg-ink-900/95 backdrop-blur-md border border-ink-700/60 hover:bg-ink-800 rounded-full shadow-2xl transition-colors"
                       >
                         Load More
                       </button>
@@ -1230,11 +1230,11 @@ export const DownloadsView: React.FC = () => {
 
       {/* Batch Selection Toolbar */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
-          <span className="text-sm text-zinc-300 font-medium">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-ink-900 border border-ink-700 rounded-xl px-5 py-3 shadow-2xl">
+          <span className="text-sm text-ink-300 font-medium">
             {t('resources.selected', { count: selectedIds.size })}
           </span>
-          <div className="w-px h-5 bg-zinc-700" />
+          <div className="w-px h-5 bg-ink-700" />
           <button
             onClick={handleBatchDelete}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
@@ -1242,10 +1242,10 @@ export const DownloadsView: React.FC = () => {
             <Trash2 size={14} />
             {t('common.delete', 'Delete')}
           </button>
-          <div className="w-px h-5 bg-zinc-700" />
+          <div className="w-px h-5 bg-ink-700" />
           <button
             onClick={() => { setSelectedIds(new Set()); setMultiSelectMode(false); }}
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={14} />
           </button>
@@ -1279,12 +1279,12 @@ export const DownloadsView: React.FC = () => {
                     className="mr-2 flex-shrink-0 animate-spin text-indigo-300"
                   />
                 ) : (
-                  <Search size={16} className="text-zinc-300 mr-2 flex-shrink-0" />
+                  <Search size={16} className="text-ink-300 mr-2 flex-shrink-0" />
                 )}
                 <input
                   autoFocus
                   enterKeyHint="search"
-                  className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-zinc-400"
+                  className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-ink-400"
                   placeholder="Search (press Enter for library)"
                   value={mobileSearchQuery}
                   onChange={(e) => {
@@ -1325,7 +1325,7 @@ export const DownloadsView: React.FC = () => {
                     handleSearchQueryChange('');
                     handleSearchClear();
                   }}
-                  className="ml-2 text-zinc-400 hover:text-white"
+                  className="ml-2 text-ink-400 hover:text-white"
                 >
                   <X size={16} />
                 </button>
@@ -1385,21 +1385,21 @@ export const DownloadsView: React.FC = () => {
           onClick={() => setRenameTarget(null)}
         >
           <div
-            className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5"
+            className="bg-ink-900 border border-ink-700 rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold text-white mb-3">Rename</h3>
+            <h3 className="text-sm font-semibold text-ink-50 mb-3">Rename</h3>
             <input
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') setRenameTarget(null); }}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 transition-colors"
+              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-50 focus:outline-none focus:border-ink-500 transition-colors"
             />
             <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => setRenameTarget(null)}
-                className="px-3 py-1.5 text-xs text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+                className="px-3 py-1.5 text-xs text-ink-400 hover:text-ink-50 bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
               >
                 Cancel
               </button>

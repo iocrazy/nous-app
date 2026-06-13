@@ -80,39 +80,39 @@ const InlineToolbar: React.FC<{
   onDone: () => void;
   onCancel: () => void;
 }> = ({ tool, color, strokeWidth, canUndo, onToolChange, onColorChange, onStrokeWidthChange, onUndo, onDone, onCancel }) => (
-  <div className="flex items-center gap-2.5 px-3 py-2 bg-zinc-900/95 backdrop-blur border border-zinc-700 rounded-xl shadow-2xl">
+  <div className="flex items-center gap-2.5 px-3 py-2 bg-ink-900/95 backdrop-blur border border-ink-700 rounded-xl shadow-2xl">
     <div className="flex items-center gap-0.5">
       {TOOL_ITEMS.map(({ id, icon: Icon, label }) => (
         <button key={id} onClick={() => onToolChange(id)} title={label}
-          className={`p-1.5 rounded-lg transition-colors ${tool === id ? 'bg-indigo-500/20 text-indigo-400' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}`}
+          className={`p-1.5 rounded-lg transition-colors ${tool === id ? 'bg-indigo-500/20 text-indigo-400' : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'}`}
         ><Icon size={16} /></button>
       ))}
     </div>
-    <div className="w-px h-5 bg-zinc-700" />
+    <div className="w-px h-5 bg-ink-700" />
     <div className="flex items-center gap-1">
       {COLORS.map((c) => (
         <button key={c} onClick={() => onColorChange(c)}
-          className={`w-4.5 h-4.5 rounded-full border-2 transition-all ${color === c ? 'border-white scale-110' : 'border-transparent hover:border-zinc-500'}`}
+          className={`w-4.5 h-4.5 rounded-full border-2 transition-all ${color === c ? 'border-white scale-110' : 'border-transparent hover:border-ink-500'}`}
           style={{ backgroundColor: c, width: 18, height: 18 }}
         />
       ))}
     </div>
-    <div className="w-px h-5 bg-zinc-700" />
+    <div className="w-px h-5 bg-ink-700" />
     <div className="flex items-center gap-0.5">
       {[2, 4].map((w) => (
         <button key={w} onClick={() => onStrokeWidthChange(w)}
-          className={`px-1.5 py-1 rounded transition-colors ${strokeWidth === w ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+          className={`px-1.5 py-1 rounded transition-colors ${strokeWidth === w ? 'bg-ink-700 text-ink-50' : 'text-ink-500 hover:text-ink-300'}`}
         ><div className="rounded-full bg-current" style={{ width: 14, height: w }} /></button>
       ))}
     </div>
-    <div className="w-px h-5 bg-zinc-700" />
+    <div className="w-px h-5 bg-ink-700" />
     <button onClick={onUndo} disabled={!canUndo} title="Undo"
-      className={`p-1.5 rounded-lg transition-colors ${canUndo ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800' : 'text-zinc-700 cursor-not-allowed'}`}
+      className={`p-1.5 rounded-lg transition-colors ${canUndo ? 'text-ink-400 hover:text-ink-200 hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'}`}
     ><Undo2 size={16} /></button>
     <button onClick={onDone} className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors">
       <Check size={14} /> Done
     </button>
-    <button onClick={onCancel} className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors" title="Cancel">
+    <button onClick={onCancel} className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors" title="Cancel">
       <X size={16} />
     </button>
   </div>

@@ -14,13 +14,22 @@ export type TaskType =
   | 'download'
   | 'upload'
   | 'transcode'
+  | 'thumbnail'
+  | 'extract_audio'
   | 'ai_pipeline'
   | 'ai_extract'
   | 'ai_transcription'
   | 'ai_summary'
+  // Image → generation-prompt reverse-engineering (caption_asset workflow).
+  | 'prompt_caption'
+  // 12-dimension bilingual auto-tagging (classify_asset workflow).
+  | 'asset_classify'
   // Agent execution (chat / issue turns) — sourced from agent_runs, not
   // task_tracking; merged into the Task Center view client-side.
-  | 'agent';
+  | 'agent'
+  // Scheduled agent routine fires (paperclip R1) — task_tracking rows pinned
+  // to the execute_issue workflow id, mirrored by the lifecycle trigger.
+  | 'agent_routine';
 
 export type TaskCategory = 'transfer' | 'processing' | 'ai';
 
@@ -84,6 +93,8 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'ai_extract':
     case 'ai_transcription':
     case 'ai_summary':
+    case 'prompt_caption':
+    case 'asset_classify':
     case 'agent':
       return 'ai';
     default:
@@ -763,11 +774,16 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     download: 0,
     upload: 0,
     transcode: 0,
+    thumbnail: 0,
+    extract_audio: 0,
     ai_pipeline: 0,
     ai_extract: 0,
     ai_transcription: 0,
     ai_summary: 0,
+    prompt_caption: 0,
+    asset_classify: 0,
     agent: 0,
+    agent_routine: 0,
   };
   for (const [type, n] of Object.entries(state.activeData.byType)) {
     if (type in activeCounts) {
@@ -842,31 +858,20 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / 1073741824).toFixed(2)} GB`;
 }
 
-export function taskTypeIcon(type: TaskType): string {
-  switch (type) {
-    case 'parse': return '\uD83D\uDD0D';         // 🔍
-    case 'upload': return '\u2191';              // ↑
-    case 'download': return '\u2193';            // ↓
-    case 'transcode': return '\u27F3';           // ⟳
-    case 'ai_pipeline': return '\u2726';         // ✦
-    case 'ai_extract': return '\uD83C\uDFA4';    // 🎤 (audio extract)
-    case 'ai_transcription': return '\uD83D\uDCDD'; // 📝 (transcription)
-    case 'ai_summary': return '\u2726';           // ✦ (summary)
-    case 'agent': return '\ud83e\udd16';     // \ud83e\udd16 (agent run)
-    default: return '\u2022';
-  }
-}
-
 export function taskTypeLabel(type: TaskType): string {
   switch (type) {
     case 'parse': return 'Parse';
     case 'upload': return 'Upload';
     case 'download': return 'Download';
     case 'transcode': return 'Transcode';
+    case 'thumbnail': return 'Thumbnail';
+    case 'extract_audio': return 'Audio';
     case 'ai_pipeline': return 'AI Pipeline';
-    case 'ai_extract': return 'Audio Extract';
+    case 'ai_extract': return 'Visual Analysis';
     case 'ai_transcription': return 'Transcription';
     case 'ai_summary': return 'Summary';
+    case 'prompt_caption': return 'Prompt';
+    case 'asset_classify': return 'Auto Tag';
     case 'agent': return 'Agent';
     default: return type;
   }

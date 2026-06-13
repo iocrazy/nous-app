@@ -387,7 +387,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border transition-colors text-xs ${
             isConfigOpen
               ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
-              : 'border-zinc-700/80 bg-zinc-900/40 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+              : 'border-ink-700/80 bg-ink-900/40 text-ink-400 hover:text-ink-200 hover:border-ink-600'
           }`}
           title={t('resources.filter.filterConfig', 'Filter Settings')}
           aria-label={t('resources.filter.filterConfig', 'Filter Settings')}
@@ -414,7 +414,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         <button
           type="button"
           onClick={clearAll}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60"
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-ink-400 hover:text-ink-100 hover:bg-ink-800/60"
           title={t('resources.filter.clearAll', 'Clear all filters')}
         >
           <X size={12} />

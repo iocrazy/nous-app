@@ -112,7 +112,7 @@ const CommentItem: React.FC<{
           {isResolved ? (
             <button
               onClick={() => onReopen(comment.id)}
-              className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="p-1 text-ink-500 hover:text-ink-300 transition-colors"
               title="Reopen"
             >
               <RotateCcw size={12} />
@@ -120,7 +120,7 @@ const CommentItem: React.FC<{
           ) : (
             <button
               onClick={() => onResolve(comment.id)}
-              className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors"
+              className="p-1 text-ink-500 hover:text-emerald-400 transition-colors"
               title="Resolve"
             >
               <CheckCircle2 size={12} />
@@ -129,7 +129,7 @@ const CommentItem: React.FC<{
           {isAuthor && (
             <button
               onClick={() => onDelete(comment.id)}
-              className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+              className="p-1 text-ink-500 hover:text-red-400 transition-colors"
               title="Delete"
             >
               <Trash2 size={12} />
@@ -139,18 +139,18 @@ const CommentItem: React.FC<{
       </div>
 
       {/* Content */}
-      <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">{comment.content}</p>
+      <p className="text-xs text-ink-300 leading-relaxed whitespace-pre-wrap">{comment.content}</p>
 
       {/* Footer */}
-      <p className="text-[10px] text-zinc-600 mt-1">{timeAgo(comment.created_at)}</p>
+      <p className="text-[10px] text-ink-600 mt-1">{timeAgo(comment.created_at)}</p>
 
       {/* Replies */}
       {comment.replies && comment.replies.length > 0 && (
-        <div className="ml-3 mt-2 pl-2 border-l border-zinc-800 space-y-2">
+        <div className="ml-3 mt-2 pl-2 border-l border-ink-800 space-y-2">
           {comment.replies.map((reply) => (
             <div key={reply.id} className="text-xs">
-              <p className="text-zinc-400">{reply.content}</p>
-              <p className="text-[10px] text-zinc-600 mt-0.5">{timeAgo(reply.created_at)}</p>
+              <p className="text-ink-400">{reply.content}</p>
+              <p className="text-[10px] text-ink-600 mt-0.5">{timeAgo(reply.created_at)}</p>
             </div>
           ))}
         </div>
@@ -197,9 +197,9 @@ const StatusControls: React.FC<{
   };
 
   return (
-    <div className="px-3 py-2 border-b border-zinc-800">
+    <div className="px-3 py-2 border-b border-ink-800">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">
+        <span className="text-[10px] font-semibold text-ink-500 uppercase tracking-widest">
           Review Status
         </span>
         {myStatus && <ReviewStatusBadge status={myStatus.status} />}
@@ -222,22 +222,22 @@ const StatusControls: React.FC<{
         <div className="relative">
           <button
             onClick={() => setShowDropdown(!showDropdown)}
-            className="flex items-center gap-0.5 px-2 py-1 text-[10px] font-medium bg-zinc-800 text-zinc-400 rounded hover:bg-zinc-700 transition-colors"
+            className="flex items-center gap-0.5 px-2 py-1 text-[10px] font-medium bg-ink-800 text-ink-400 rounded hover:bg-ink-700 transition-colors"
           >
             More
             <ChevronDown size={10} />
           </button>
           {showDropdown && (
-            <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-36">
+            <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-36">
               <button
                 onClick={() => handleSetStatus('needs_changes')}
-                className="w-full text-left px-3 py-1.5 text-[10px] text-amber-400 hover:bg-zinc-800 transition-colors"
+                className="w-full text-left px-3 py-1.5 text-[10px] text-amber-400 hover:bg-ink-800 transition-colors"
               >
                 Needs Changes
               </button>
               <button
                 onClick={() => handleSetStatus('pending')}
-                className="w-full text-left px-3 py-1.5 text-[10px] text-zinc-400 hover:bg-zinc-800 transition-colors"
+                className="w-full text-left px-3 py-1.5 text-[10px] text-ink-400 hover:bg-ink-800 transition-colors"
               >
                 Reset to Pending
               </button>
@@ -250,7 +250,7 @@ const StatusControls: React.FC<{
         <div className="mt-2 space-y-1">
           {statuses.filter((s) => s.reviewer_id !== currentUserId).map((s) => (
             <div key={s.id} className="flex items-center justify-between">
-              <span className="text-[10px] text-zinc-500 truncate">Reviewer</span>
+              <span className="text-[10px] text-ink-500 truncate">Reviewer</span>
               <ReviewStatusBadge status={s.status} />
             </div>
           ))}
@@ -373,15 +373,15 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
       />
 
       {/* Filter tabs */}
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-zinc-800">
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-ink-800">
         {['all', 'open', 'resolved'].map((f) => (
           <button
             key={f}
             onClick={() => setFilterStatus(f)}
             className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
               filterStatus === f
-                ? 'bg-zinc-700 text-zinc-200'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'bg-ink-700 text-ink-200'
+                : 'text-ink-500 hover:text-ink-300'
             }`}
           >
             {f === 'all' ? `All (${comments.length})` : f.charAt(0).toUpperCase() + f.slice(1)}
@@ -390,13 +390,13 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
       </div>
 
       {/* Comments list */}
-      <div className="flex-1 overflow-y-auto min-h-0 divide-y divide-zinc-800/50">
+      <div className="flex-1 overflow-y-auto min-h-0 divide-y divide-ink-800/50">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 size={18} className="animate-spin text-zinc-500" />
+            <Loader2 size={18} className="animate-spin text-ink-500" />
           </div>
         ) : comments.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
+          <div className="flex flex-col items-center justify-center py-12 text-ink-500">
             <MessageSquare size={24} className="mb-2 opacity-40" />
             <span className="text-xs">{t('review.noComments', 'No comments yet')}</span>
           </div>
@@ -417,14 +417,14 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
       </div>
 
       {/* Add comment input */}
-      <div className="p-3 border-t border-zinc-800 shrink-0">
+      <div className="p-3 border-t border-ink-800 shrink-0">
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('review.commentPlaceholder', 'Add a comment... (Cmd+Enter to send)')}
           rows={2}
-          className="w-full bg-zinc-800/60 border border-zinc-700/30 rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none focus:border-indigo-500/50 transition-colors"
+          className="w-full bg-ink-800/60 border border-ink-700/30 rounded-lg px-3 py-2 text-xs text-ink-200 placeholder-ink-600 resize-none focus:outline-none focus:border-indigo-500/50 transition-colors"
         />
         <div className="flex items-center justify-between mt-1.5">
           <div className="flex items-center gap-1.5">
@@ -432,14 +432,14 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
               <>
                 <button
                   onClick={() => setCapturedTime(currentTime)}
-                  className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
+                  className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded transition-colors"
                 >
                   <Clock size={11} />
                   Pin Time
                 </button>
                 <button
                   onClick={onStartAnnotation}
-                  className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
+                  className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded transition-colors"
                 >
                   <PenTool size={11} />
                   Draw

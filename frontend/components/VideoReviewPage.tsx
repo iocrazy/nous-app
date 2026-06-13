@@ -208,15 +208,15 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-sm flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800 bg-ink-900/80 backdrop-blur-sm flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onBack}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors flex-shrink-0"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-xl transition-colors flex-shrink-0"
           >
             <ArrowLeft size={20} />
           </button>
-          <h1 className="text-lg font-semibold text-white truncate">
+          <h1 className="text-lg font-semibold text-ink-50 truncate">
             {file.filename}
           </h1>
 
@@ -230,7 +230,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
               <ChevronDown size={12} />
             </button>
             {isVersionDropdownOpen && versions.length > 0 && (
-              <div className="absolute top-full left-0 mt-1 w-48 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-50 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute top-full left-0 mt-1 w-48 bg-ink-800 border border-ink-700 rounded-xl shadow-xl z-50 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
                 {versions.map(v => (
                   <button
                     key={v.id}
@@ -241,11 +241,11 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                     className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
                       selectedVersion?.id === v.id
                         ? 'bg-indigo-500/20 text-indigo-300'
-                        : 'text-zinc-300 hover:bg-zinc-700'
+                        : 'text-ink-300 hover:bg-ink-700'
                     }`}
                   >
                     <span className="font-medium">V{v.version_number}</span>
-                    <span className="text-xs text-zinc-500 truncate">{v.filename}</span>
+                    <span className="text-xs text-ink-500 truncate">{v.filename}</span>
                     {v.version_number === file.current_version && (
                       <span className="ml-auto text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded-full">
                         {t('mediatrack.review.currentVersion')}
@@ -253,13 +253,13 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                     )}
                   </button>
                 ))}
-                <div className="border-t border-zinc-700 mt-1 pt-1">
+                <div className="border-t border-ink-700 mt-1 pt-1">
                   <button
                     onClick={() => {
                       setIsVersionDropdownOpen(false);
                       setIsVersionModalOpen(true);
                     }}
-                    className="w-full text-left px-3 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+                    className="w-full text-left px-3 py-2 text-sm text-ink-400 hover:text-ink-50 hover:bg-ink-700 transition-colors"
                   >
                     {t('mediatrack.review.manageVersions')}...
                   </button>
@@ -282,25 +282,25 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
               ) : (
                 <button
                   onClick={() => setIsCompareDropdownOpen(!isCompareDropdownOpen)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-700/50 text-zinc-300 text-xs font-medium rounded-full hover:bg-zinc-700 transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-ink-700/50 text-ink-300 text-xs font-medium rounded-full hover:bg-ink-700 transition-colors"
                 >
                   <Columns2 size={12} />
                   {t('mediatrack.review.compareVersions')}
                 </button>
               )}
               {isCompareDropdownOpen && !compareMode && comparableVersions.length > 0 && (
-                <div className="absolute top-full left-0 mt-1 w-56 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-50 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
-                  <div className="px-3 py-1.5 text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">
+                <div className="absolute top-full left-0 mt-1 w-56 bg-ink-800 border border-ink-700 rounded-xl shadow-xl z-50 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="px-3 py-1.5 text-[10px] text-ink-500 uppercase tracking-wider font-semibold">
                     {t('mediatrack.review.selectVersionToCompare')}
                   </div>
                   {comparableVersions.map(v => (
                     <button
                       key={v.id}
                       onClick={() => handleEnterCompareMode(v.id)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-ink-300 hover:bg-ink-700 transition-colors"
                     >
                       <span className="font-medium">V{v.version_number}</span>
-                      <span className="text-xs text-zinc-500 truncate">{v.filename}</span>
+                      <span className="text-xs text-ink-500 truncate">{v.filename}</span>
                     </button>
                   ))}
                 </div>
@@ -315,7 +315,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
             onStatusChange={handleStatusChange}
           />
           <button
-            className="flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors text-sm"
+            className="flex items-center gap-2 px-3 py-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-xl transition-colors text-sm"
           >
             <Share2 size={16} />
             {t('mediatrack.review.share')}
@@ -395,7 +395,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                       />
                       <button
                         onClick={handleCloseViewAnnotation}
-                        className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-zinc-900/90 backdrop-blur border border-zinc-700 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                        className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-ink-900/90 backdrop-blur border border-ink-700 rounded-lg text-xs text-ink-300 hover:text-ink-50 hover:bg-ink-800 transition-colors"
                       >
                         {t('annotations.done')}
                       </button>
@@ -406,7 +406,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                   {!isAnnotating && !viewingDrawingData && (
                     <button
                       onClick={handleAnnotateToggle}
-                      className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900/80 backdrop-blur border border-zinc-700 rounded-lg text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                      className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-3 py-1.5 bg-ink-900/80 backdrop-blur border border-ink-700 rounded-lg text-xs font-medium text-ink-300 hover:text-ink-50 hover:bg-ink-800 transition-colors"
                       title={t('annotations.annotate')}
                     >
                       <PenTool size={14} />
@@ -415,22 +415,22 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                   )}
                 </>
               ) : (
-                <div className="text-zinc-500 text-sm">No video source available</div>
+                <div className="text-ink-500 text-sm">No video source available</div>
               )}
             </div>
           )}
         </div>
 
         {/* Right: Comments/Info panel */}
-        <div className="w-[400px] flex-shrink-0 border-l border-zinc-800 flex flex-col bg-zinc-900">
+        <div className="w-[400px] flex-shrink-0 border-l border-ink-800 flex flex-col bg-ink-900">
           {/* Tab headers */}
-          <div className="flex border-b border-zinc-800 flex-shrink-0">
+          <div className="flex border-b border-ink-800 flex-shrink-0">
             <button
               onClick={() => setActiveTab('comments')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'comments'
-                  ? 'text-white border-b-2 border-indigo-500'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                  ? 'text-ink-50 border-b-2 border-indigo-500'
+                  : 'text-ink-400 hover:text-ink-200'
               }`}
             >
               <MessageSquare size={16} />
@@ -440,8 +440,8 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
               onClick={() => setActiveTab('info')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'info'
-                  ? 'text-white border-b-2 border-indigo-500'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                  ? 'text-ink-50 border-b-2 border-indigo-500'
+                  : 'text-ink-400 hover:text-ink-200'
               }`}
             >
               <Info size={16} />

@@ -33,6 +33,9 @@ chrome.storage.local.get(['apiUrl', 'apiKey'], (config) => {
 function showSettingsView() {
   settingsView.style.display = 'block';
   pushView.style.display = 'none';
+  document.getElementById('scanView').style.display = 'none';
+  document.getElementById('modeTabs').style.display = 'none';
+  document.body.classList.remove('scan-mode');
   chrome.storage.local.get(['apiUrl', 'apiKey'], (result) => {
     apiUrlInput.value = result.apiUrl || 'https://mediahubserver.heygo.cn:88';
     if (result.apiKey) apiKeyInput.value = result.apiKey;
@@ -63,6 +66,13 @@ function showMessage(text, type) {
 async function showPushView(config) {
   settingsView.style.display = 'none';
   pushView.style.display = 'block';
+  document.getElementById('modeTabs').style.display = 'flex';
+  // Re-entering from Settings always lands on the Push tab — keep the tab
+  // indicator and the scan view in sync with that.
+  document.getElementById('scanView').style.display = 'none';
+  document.getElementById('tabPush').classList.add('active');
+  document.getElementById('tabScan').classList.remove('active');
+  document.body.classList.remove('scan-mode');
 
   // Pre-fill with current tab URL, but input is editable so user can paste anything
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

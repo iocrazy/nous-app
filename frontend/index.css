@@ -18,6 +18,135 @@
   --color-accent: #6366f1;           /* indigo-500 */
 }
 
+/* ── Theme-aware neutral ladder (island redesign D11) ──────────────
+   `ink` mirrors zinc 1:1 in dark mode (provable visual no-op for the
+   zinc→ink codemod). Light mode re-maps the ladder. Components must
+   use ink-* (or the semantic tokens below) — new `*-zinc-*` usages
+   are forbidden after the migration. */
+:root, [data-theme="dark"] {
+  color-scheme: dark;
+  --ink-50:  #fafafa;
+  --ink-100: #f4f4f5;
+  --ink-200: #e4e4e7;
+  --ink-300: #d4d4d8;
+  --ink-400: #a1a1aa;
+  --ink-500: #71717a;
+  --ink-600: #52525b;
+  --ink-700: #3f3f46;
+  --ink-800: #27272a;
+  --ink-900: #18181b;
+  --ink-950: #09090b;
+
+  /* island semantic tokens (spec §1) — for shell + new code */
+  --app-bg: #08080a;
+  --island: #111114;
+  --island-2: #17171b;
+  --card: #1d1d22;
+  --line: rgba(255,255,255,.065);
+  --line-strong: rgba(255,255,255,.12);
+  --content: #e7e7ea;
+  --content-2: #a3a3ad;
+  --content-3: #74747e;
+  --content-4: #55555e;
+}
+
+@theme inline {
+  --color-ink-50: var(--ink-50);
+  --color-ink-100: var(--ink-100);
+  --color-ink-200: var(--ink-200);
+  --color-ink-300: var(--ink-300);
+  --color-ink-400: var(--ink-400);
+  --color-ink-500: var(--ink-500);
+  --color-ink-600: var(--ink-600);
+  --color-ink-700: var(--ink-700);
+  --color-ink-800: var(--ink-800);
+  --color-ink-900: var(--ink-900);
+  --color-ink-950: var(--ink-950);
+  --color-app-bg: var(--app-bg);
+  --color-island: var(--island);
+  --color-island-2: var(--island-2);
+  --color-card: var(--card);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-content: var(--content);
+  --color-content-2: var(--content-2);
+  --color-content-3: var(--content-3);
+  --color-content-4: var(--content-4);
+}
+
+/* Light theme — ladder inverted + tuned (spec §5.4). Semantic colors
+   (indigo/green/amber/red/violet) intentionally unchanged. */
+[data-theme="light"] {
+  color-scheme: light;
+  --ink-50:  #18181b;
+  --ink-100: #27272a;
+  --ink-200: #3f3f46;
+  --ink-300: #52525b;
+  --ink-400: #71717a;
+  --ink-500: #a1a1aa;
+  --ink-600: #d4d4d8;
+  --ink-700: #e4e4e7;
+  --ink-800: #f0f0f2;
+  --ink-900: #f7f7f8;
+  --ink-950: #fcfcfd;
+
+  --app-bg: #f4f4f6;
+  --island: #ffffff;
+  --island-2: #f4f4f5;
+  --card: #fafafa;
+  --line: rgba(0,0,0,.08);
+  --line-strong: rgba(0,0,0,.16);
+  --content: #1c1c21;
+  --content-2: #52525b;
+  --content-3: #8b8b94;
+  --content-4: #b0b0b8;
+}
+
+/* ── Tinted button system — island redesign D6
+   (docs/design/island-redesign-spec.md §3). Layout/size stay Tailwind
+   utilities at the call site; these classes own color only:
+   12% tinted bg + 35% same-hue border + bright text, hover deepens. ── */
+@layer components {
+  .btn-tint-indigo { background: rgba(99,102,241,.12); border: 1px solid rgba(99,102,241,.35); color: #a5b4fc; }
+  .btn-tint-indigo:hover:not(:disabled) { background: rgba(99,102,241,.2); border-color: rgba(99,102,241,.55); }
+  .btn-tint-amber { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.35); color: #fcd34d; }
+  .btn-tint-amber:hover:not(:disabled) { background: rgba(245,158,11,.2); border-color: rgba(245,158,11,.55); }
+  .btn-tint-violet { background: rgba(167,139,250,.12); border: 1px solid rgba(167,139,250,.35); color: #c4b5fd; }
+  .btn-tint-violet:hover:not(:disabled) { background: rgba(167,139,250,.2); border-color: rgba(167,139,250,.55); }
+  .btn-tint-green { background: rgba(52,211,153,.12); border: 1px solid rgba(52,211,153,.35); color: #6ee7b7; }
+  .btn-tint-green:hover:not(:disabled) { background: rgba(52,211,153,.2); border-color: rgba(52,211,153,.55); }
+  .btn-tint-red { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3); color: #fca5a5; }
+  .btn-tint-red:hover:not(:disabled) { background: rgba(248,113,113,.18); border-color: rgba(248,113,113,.5); }
+}
+
+/* ── Island app shell — island redesign v2 P1b (docs/design/island-redesign-spec.md §2).
+   Frame = background micro-glow + flex column (topbar row + content row). The
+   `.island-card` chrome reuses the semantic tokens that already flip per theme,
+   so the shell is dual-theme for free. Desktop-only; mobile keeps the flat frame. */
+.island-frame {
+  height: 100dvh;
+  overflow: hidden;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  background:
+    radial-gradient(900px 500px at 75% -10%, rgba(99, 102, 241, .07), transparent 60%),
+    radial-gradient(700px 400px at -10% 110%, rgba(99, 102, 241, .05), transparent 60%),
+    var(--app-bg);
+}
+.island-frame__row {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+.island-card {
+  background: var(--island);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg, 18px);
+  box-shadow: var(--shadow-island, 0 10px 40px rgba(0, 0, 0, .45));
+}
+
 /* Global styles */
 html, body {
   overflow-x: hidden;
@@ -60,26 +189,28 @@ label {
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--color-background);
-  color: var(--color-foreground);
+  background-color: var(--ink-950);
+  color: var(--ink-100);
 }
 
-/* Custom scrollbar for dark theme */
+/* Theme-aware scrollbars (island redesign D11). Values track the ink ladder
+   so the bar flips with [data-theme]; dark resolves to the original
+   #18181b/#3f3f46/#52525b (byte-identical no-op). */
 ::-webkit-scrollbar {
   width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #18181b;
+  background: var(--ink-900);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--ink-700);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--ink-600);
 }
 
 /* Custom scrollbar class */
@@ -92,7 +223,7 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--ink-700);
   border-radius: 3px;
 }
 

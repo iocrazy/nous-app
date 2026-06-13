@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MediaHub — Button System Proposal</title>
+<style>
+  :root {
+    --bg:#08080a; --island:#111114; --island-2:#17171b;
+    --line:rgba(255,255,255,.065); --line-strong:rgba(255,255,255,.12);
+    --text:#e7e7ea; --text-2:#a3a3ad; --text-3:#74747e; --text-4:#55555e;
+    --indigo:99,102,241; --green:52,211,153; --red:248,113,113; --amber:245,158,11; --violet:167,139,250;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  body{background:radial-gradient(900px 500px at 75% -10%, rgba(99,102,241,.07), transparent 60%), var(--bg);
+    color:var(--text);font:13px/1.5 -apple-system,"SF Pro Text","PingFang SC",Segoe UI,sans-serif;padding:36px 44px}
+  h1{font-size:18px;margin-bottom:6px}
+  .sub{color:var(--text-3);font-size:12.5px;margin-bottom:28px}
+  .panel{background:var(--island);border:1px solid var(--line);border-radius:18px;padding:22px 26px;margin-bottom:18px}
+  .panel h2{font-size:13.5px;margin-bottom:4px;display:flex;gap:10px;align-items:center}
+  .panel .note{font-size:11.5px;color:var(--text-3);margin-bottom:16px}
+  .rowlab{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-4);margin:14px 0 8px}
+  .btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .pick{font-size:9.5px;letter-spacing:.05em;background:rgba(var(--green),.14);color:rgb(110,231,183);border:1px solid rgba(var(--green),.3);border-radius:5px;padding:2px 8px;font-weight:650}
+
+  button{font:inherit;font-size:12.5px;font-weight:550;border-radius:9px;padding:7px 14px;cursor:pointer;display:inline-flex;gap:6px;align-items:center;transition:.15s;border:1px solid transparent}
+
+  /* ── A. Solid（mockup 现状）── */
+  .a-pri{background:rgb(var(--indigo));color:#fff}
+  .a-pri:hover{background:#787bf3}
+  .a-sec{background:var(--island-2);border-color:var(--line-strong);color:var(--text)}
+  .a-ok{background:rgb(16,150,96);color:#fff}
+  .a-danger{background:#dc2626;color:#fff}
+
+  /* ── B. Tinted（你 AI 设置页风格）── */
+  .t{background:rgba(var(--c),.12);border-color:rgba(var(--c),.35);color:rgb(var(--c-text))}
+  .t:hover{background:rgba(var(--c),.2);border-color:rgba(var(--c),.55)}
+  .t:active{transform:translateY(1px)}
+  .t.indigo{--c:var(--indigo);--c-text:165,180,252}
+  .t.green{--c:var(--green);--c-text:110,231,183}
+  .t.red{--c:var(--red);--c-text:252,165,165}
+  .t.amber{--c:var(--amber);--c-text:252,211,77}
+  .t.violet{--c:var(--violet);--c-text:196,181,253}
+  .t.neutral{--c:255,255,255;background:rgba(255,255,255,.05);border-color:var(--line-strong);color:var(--text-2)}
+  .t.neutral:hover{background:rgba(255,255,255,.09);color:var(--text)}
+  .t:disabled{opacity:.4;cursor:not-allowed}
+
+  /* ── C. Hybrid：tinted 为主，唯一主 CTA 用「亮底描边+辉光」── */
+  .c-cta{background:linear-gradient(180deg, rgba(var(--indigo),.9), rgba(79,82,221,.9));border-color:rgba(165,180,252,.4);color:#fff;box-shadow:0 2px 16px rgba(var(--indigo),.35), inset 0 1px 0 rgba(255,255,255,.18)}
+  .c-cta:hover{box-shadow:0 2px 22px rgba(var(--indigo),.5), inset 0 1px 0 rgba(255,255,255,.18)}
+
+  .ghost{background:none;border-color:transparent;color:var(--text-3)}
+  .ghost:hover{background:var(--island-2);color:var(--text)}
+
+  .demo{background:#0b0b0e;border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:8px;margin-top:14px}
+  .demo .t-label{font-size:12px;color:var(--text-3);margin-right:auto}
+  .small{padding:4.5px 11px;font-size:11.5px;border-radius:8px}
+  .iconb{padding:7px;border-radius:9px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <g id="share"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></g>
+  <g id="dl"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></g>
+  <g id="check"><path d="M20 6 9 17l-5-5"/></g>
+  <g id="spark"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></g>
+  <g id="pen"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></g>
+  <g id="trash"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></g>
+  <g id="file"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/></g>
+  <g id="up"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></g>
+  <g id="dots"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></g>
+</defs></svg>
+
+<h1>Button System — 全局统一方案</h1>
+<div class="sub">三套并排对比。语义色固定：indigo=主操作 / green=成功·连接 / violet·blue=AI / red=危险 / 中性=次要。</div>
+
+<div class="panel">
+  <h2>A · Solid 实底（mockup 现状）</h2>
+  <div class="note">高对比但「重」，多个并排时互相抢；dark UI 里大面积实底显闷。</div>
+  <div class="btns">
+    <button class="a-pri"><svg viewBox="0 0 24 24"><use href="#share"/></svg>Share</button>
+    <button class="a-sec"><svg viewBox="0 0 24 24"><use href="#dl"/></svg>Download</button>
+    <button class="a-ok"><svg viewBox="0 0 24 24"><use href="#check"/></svg>Connected</button>
+    <button class="a-danger"><svg viewBox="0 0 24 24"><use href="#trash"/></svg>Delete</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>B · Tinted 浅染（你 AI 设置页的风格） <span class="pick">你的偏好</span></h2>
+  <div class="note">12% 染色底 + 35% 同色描边 + 亮色文字；hover 加深到 20%/55%。优雅、多按钮并排不打架。</div>
+  <div class="rowlab">语义全家桶</div>
+  <div class="btns">
+    <button class="t indigo"><svg viewBox="0 0 24 24"><use href="#share"/></svg>Share</button>
+    <button class="t neutral"><svg viewBox="0 0 24 24"><use href="#dl"/></svg>Download</button>
+    <button class="t green"><svg viewBox="0 0 24 24"><use href="#check"/></svg>Connected</button>
+    <button class="t violet"><svg viewBox="0 0 24 24"><use href="#spark"/></svg>Analyze</button>
+    <button class="t amber"><svg viewBox="0 0 24 24"><use href="#pen"/></svg>Summary</button>
+    <button class="t red"><svg viewBox="0 0 24 24"><use href="#trash"/></svg>Delete</button>
+    <button class="t indigo" disabled>Disabled</button>
+  </div>
+  <div class="rowlab">尺寸 / 形态</div>
+  <div class="btns">
+    <button class="t indigo small">Small</button>
+    <button class="t neutral small">Cancel</button>
+    <button class="t indigo iconb" title="Share"><svg viewBox="0 0 24 24"><use href="#share"/></svg></button>
+    <button class="t neutral iconb" title="More"><svg viewBox="0 0 24 24"><use href="#dots"/></svg></button>
+    <button class="ghost">Ghost / tertiary</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>C · Hybrid：Tinted 为主 + 唯一主 CTA 发光（推荐）</h2>
+  <div class="note">全站默认 = B 的 tinted；每个页面<b>最多一个</b>「真正想让你点」的按钮用渐变亮底+辉光（如列表页 Upload、设置页 Save）。层级一眼分明：CTA &gt; tinted 语义 &gt; 中性 &gt; ghost。</div>
+  <div class="btns">
+    <button class="c-cta"><svg viewBox="0 0 24 24"><use href="#up"/></svg>Upload</button>
+    <button class="t indigo"><svg viewBox="0 0 24 24"><use href="#share"/></svg>Share</button>
+    <button class="t neutral"><svg viewBox="0 0 24 24"><use href="#dl"/></svg>Download</button>
+    <button class="ghost">Cancel</button>
+  </div>
+
+  <div class="demo">
+    <span class="t-label">详情页头部 ——</span>
+    <button class="t indigo small"><svg viewBox="0 0 24 24"><use href="#share"/></svg>Share</button>
+    <button class="t neutral small"><svg viewBox="0 0 24 24"><use href="#dl"/></svg>Download</button>
+    <button class="t neutral iconb small"><svg viewBox="0 0 24 24"><use href="#dots"/></svg></button>
+  </div>
+  <div class="demo">
+    <span class="t-label">AI 动作行 ——</span>
+    <button class="t neutral small"><svg viewBox="0 0 24 24"><use href="#file"/></svg>Copy</button>
+    <button class="t green small"><svg viewBox="0 0 24 24"><use href="#file"/></svg>Transcript</button>
+    <button class="t amber small"><svg viewBox="0 0 24 24"><use href="#pen"/></svg>Summary</button>
+    <button class="t violet small"><svg viewBox="0 0 24 24"><use href="#spark"/></svg>Analyze</button>
+  </div>
+  <div class="demo">
+    <span class="t-label">列表页头部 ——</span>
+    <button class="c-cta small"><svg viewBox="0 0 24 24"><use href="#up"/></svg>Upload</button>
+    <button class="t amber small"><svg viewBox="0 0 24 24"><use href="#spark"/></svg>New</button>
+  </div>
+</div>
+</body>
+</html>

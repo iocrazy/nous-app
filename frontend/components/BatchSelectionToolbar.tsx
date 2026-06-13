@@ -5,15 +5,20 @@
  * Renders restore/delete actions for recycle view, and move/copy/trash for normal view.
  */
 
-import React from 'react';
-import { Trash2, Move, Copy, RefreshCw, X } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Trash2, Move, Copy, RefreshCw, X, Sparkles, Tag, Loader2, Package,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Folder, ResourceItem } from '../types';
 import {
   trashResources,
   restoreFolder,
   restoreResource,
+  batchAssetAi,
+  exportTrainingSet,
 } from '../services/resourceService';
+import { useToast } from './Toast';
 
 interface BatchSelectionToolbarProps {
   selectedIds: Set<string>;
@@ -64,16 +69,66 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
   loadTrashedResources,
   reloadResources,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { addToast } = useToast();
+  const [aiBusy, setAiBusy] = useState<'caption' | 'classify' | 'export' | null>(null);
 
   if (selectedIds.size === 0 || isDownloadsView) return null;
 
+  // Image resources in the current selection — batch AI only applies to them.
+  const selectedImageIds = sortedItems
+    .filter(
+      (i) =>
+        selectedIds.has(`item:${i.id}`) &&
+        i.resource?.id &&
+        i.resource?.file_type === 'image',
+    )
+    .map((i) => String(i.resource!.id));
+
+  const runBatchAi = async (operation: 'caption' | 'classify') => {
+    if (selectedImageIds.length === 0 || aiBusy) return;
+    setAiBusy(operation);
+    try {
+      const { dispatched, skipped } = await batchAssetAi(
+        selectedImageIds.slice(0, 50),
+        operation,
+      );
+      if (dispatched.length > 0) {
+        addToast(
+          t('resources.batchAiDispatched', '{{count}} tasks started — see Task Center', {
+            count: dispatched.length,
+          }),
+          'success',
+        );
+        setSelectedIds(new Set());
+      }
+      if (skipped.length > 0) {
+        addToast(
+          t('resources.batchAiSkipped', '{{count}} items skipped', {
+            count: skipped.length,
+          }),
+          'info',
+        );
+      }
+    } catch (err) {
+      console.error(`Batch ${operation} failed:`, err);
+      addToast(
+        err instanceof Error && err.message
+          ? err.message
+          : t('resources.batchAiFailed', 'Batch AI dispatch failed'),
+        'error',
+      );
+    } finally {
+      setAiBusy(null);
+    }
+  };
+
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-3 shadow-2xl">
-      <span className="text-sm text-zinc-300 font-medium">
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-ink-900 border border-ink-700 rounded-xl px-5 py-3 shadow-2xl">
+      <span className="text-sm text-ink-300 font-medium">
         {t('resources.selected', { count: selectedIds.size })}
       </span>
-      <div className="w-px h-5 bg-zinc-700" />
+      <div className="w-px h-5 bg-ink-700" />
       {isRecycleView ? (
         <>
           <button
@@ -121,7 +176,7 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
               setOperationTargetFolders(flds);
               setFolderPickerMode('move');
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <Move size={14} />
             {t('resources.batchMove')}
@@ -133,11 +188,62 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
               setOperationTargetFolders([]);
               setFolderPickerMode('copy');
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <Copy size={14} />
             {t('resources.batchCopy')}
           </button>
+          {selectedImageIds.length > 0 && (
+            <>
+              <button
+                onClick={() => runBatchAi('caption')}
+                disabled={aiBusy !== null}
+                title={t('resources.batchGeneratePromptHint', 'Reverse-engineer prompts for the selected images')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {aiBusy === 'caption' ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                {t('resources.batchGeneratePrompt', 'Prompts')}
+              </button>
+              <button
+                onClick={() => runBatchAi('classify')}
+                disabled={aiBusy !== null}
+                title={t('resources.batchAutoTagHint', 'Auto-tag the selected images across 12 dimensions')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {aiBusy === 'classify' ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
+                {t('resources.batchAutoTag', 'Auto Tag')}
+              </button>
+              <button
+                onClick={async () => {
+                  if (aiBusy) return;
+                  setAiBusy('export');
+                  try {
+                    await exportTrainingSet(
+                      selectedImageIds.slice(0, 100),
+                      (i18n.language || '').startsWith('zh') ? 'zh' : 'en',
+                    );
+                    addToast(t('resources.trainingSetExported', 'Training set downloaded'), 'success');
+                  } catch (err) {
+                    console.error('Training-set export failed:', err);
+                    addToast(
+                      err instanceof Error && err.message
+                        ? err.message
+                        : t('resources.trainingSetExportFailed', 'Export failed'),
+                      'error',
+                    );
+                  } finally {
+                    setAiBusy(null);
+                  }
+                }}
+                disabled={aiBusy !== null}
+                title={t('resources.trainingSetHint', 'Download images + .txt prompt captions (LoRA training format)')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink-300 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {aiBusy === 'export' ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />}
+                {t('resources.trainingSet', 'Training Set')}
+              </button>
+            </>
+          )}
           <button
             onClick={async () => {
               try {
@@ -170,10 +276,10 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
           </button>
         </>
       )}
-      <div className="w-px h-5 bg-zinc-700" />
+      <div className="w-px h-5 bg-ink-700" />
       <button
         onClick={() => setSelectedIds(new Set())}
-        className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+        className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
       >
         <X size={14} />
       </button>

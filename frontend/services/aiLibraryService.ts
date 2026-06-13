@@ -16,7 +16,9 @@ import { getApiUrl } from '../utils/apiConfig';
 import type {
   AgentDashboard,
   AgentRunDetail,
+  AgentRunEvent,
   AgentRunListResponse,
+  LiveAgentRun,
   AILibraryAgent,
   AILibraryApprovalRequest,
   AILibraryCommitment,
@@ -120,6 +122,51 @@ export const aiLibraryService = {
       },
     );
     return handle<AILibraryAgent>(resp);
+  },
+
+  /** Manually pause an agent (paused_reason='manual'). 400 if already paused. */
+  async pauseAgent(slug: string): Promise<AILibraryAgent> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/pause`,
+      {
+        method: 'POST',
+        headers: await getAuthHeaders(),
+      },
+    );
+    return handle<AILibraryAgent>(resp);
+  },
+
+  /** Derived header-chip status: paused / running / idle (caller-scoped runs). */
+  async getAgentStatus(slug: string): Promise<{
+    status: 'idle' | 'running' | 'paused';
+    paused_reason: string | null;
+    running_count: number;
+  }> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/status`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  /** Caller's currently-running runs across all agents (Workforce live strip). */
+  async getLiveRuns(): Promise<{ items: LiveAgentRun[]; count: number }> {
+    const resp = await fetch(`${base()}/runs/live`, {
+      headers: await getAuthHeaders(),
+    });
+    return handle(resp);
+  },
+
+  /** Transcript event stream for one run (mig 285). after_seq = incremental poll. */
+  async getRunEvents(
+    runId: string,
+    afterSeq = 0,
+  ): Promise<{ items: AgentRunEvent[]; count: number }> {
+    const resp = await fetch(
+      `${base()}/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
   },
 
   // ─── Skills ────────────────────────────────────────────────────────────────

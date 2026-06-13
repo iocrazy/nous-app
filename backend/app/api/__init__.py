@@ -10,10 +10,11 @@ from fastapi import APIRouter
 
 from app.api.admin import admin_router
 from app.api.ai_library_router import router as ai_library_router
+from app.api.ai_memory_router import router as ai_memory_router
 from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
-from app.api.analysis_router import router as analysis_router
 from app.api.api_key_router import router as api_key_router
+from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.error_report_router import router as error_report_router
@@ -29,6 +30,7 @@ from app.api.media_router import router as media_router
 from app.api.notifications_router import router as notifications_router
 from app.api.payment_router import router as payment_router
 from app.api.points_router import router as points_router
+from app.api.project_assets_router import router as _project_assets_router
 from app.api.projects_router import router as projects_router
 from app.api.realtime_router import router as realtime_router
 from app.api.resources_router import router as resources_router
@@ -88,8 +90,6 @@ api_router.include_router(router=task_router, tags=["任务管理"])
 
 api_router.include_router(router=tags_router, tags=["Tags"])
 
-api_router.include_router(router=analysis_router, tags=["Analysis"])
-
 api_router.include_router(router=search_router, tags=["Search"])
 
 api_router.include_router(router=collections_router, tags=["Collections"])
@@ -102,6 +102,7 @@ api_router.include_router(router=system_router, tags=["系统监控"])
 
 
 api_router.include_router(router=ai_settings_router, tags=["AI"])
+api_router.include_router(router=ai_memory_router, tags=["AI Memory"])
 
 api_router.include_router(router=ai_pipeline_router, tags=["AI"])
 
@@ -110,6 +111,8 @@ api_router.include_router(router=points_router, tags=["Points"])
 api_router.include_router(router=payment_router, tags=["Payment"])
 
 api_router.include_router(router=projects_router, tags=["MediaTrack"])
+api_router.include_router(router=canvases_router, tags=["Canvas"])
+api_router.include_router(router=_project_assets_router, tags=["Project Assets"])
 
 api_router.include_router(router=resources_router, tags=["Resources"])
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
   Clock, Tag, ChevronRight, Brain, AlertCircle, List, AlignLeft, ChevronDown, Music,
@@ -13,9 +13,11 @@ import {
   getTranscript, getTranscriptByResource,
   triggerSummary, triggerSummaryByResource,
   getSummary, getSummaryByResource,
-  triggerVisualAnalysis,
+  triggerVisualAnalysis, triggerVisualAnalysisByResource,
+  getVisualAnalysisByResource,
   pollForResult,
 } from '../services/aiService';
+import type { VisualAnalysisData } from '../services/aiService';
 import { useTaskManager } from '../contexts/TaskManagerContext';
 
 interface VideoDetailPanelProps {
@@ -110,9 +112,18 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
   const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysisData | null>(null);
+  // Task-driven phase for the Visual Analysis section — independent of
+  // video.visual_analysis_status (the parent's onUpdate prop chain doesn't
+  // reliably flow back; see the watcher effect below).
+  const [analysisTaskPhase, setAnalysisTaskPhase] = useState<
+    'processing' | 'completed' | 'failed' | null
+  >(null);
+  const analysisFetchAttemptedRef = useRef(false);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [visualAnalysisLoading, setVisualAnalysisLoading] = useState(false);
+  const [visualAnalysisFetching, setVisualAnalysisFetching] = useState(false);
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [visualAnalysisError, setVisualAnalysisError] = useState<string | null>(null);
@@ -127,6 +138,9 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     }
     if (activeTab === 'analysis' && !summary && !summaryLoading) {
       loadSummary();
+    }
+    if (activeTab === 'analysis' && !visualAnalysis && !visualAnalysisFetching) {
+      loadVisualAnalysis();
     }
   }, [activeTab]);
 
@@ -186,6 +200,31 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     }
   }, [video.platform_id, resourceId]);
 
+  // The completed analysis lives in resource_analysis (read via
+  // GET /ai/analysis/resource/:rid — same source as the Task Center result
+  // card). The legacy parsed_media.ai_analyze_text column is never written by
+  // the analyze_l1 workflow, so without this fetch the panel could never show
+  // a result — it sat on the Trigger button forever even after success.
+  const loadVisualAnalysis = useCallback(async () => {
+    if (!resourceId) return;
+    try {
+      setVisualAnalysisFetching(true);
+      const data = await getVisualAnalysisByResource(resourceId);
+      // The endpoint deliberately returns 200 with null fields when the
+      // resource was never analyzed (no 404, to avoid red DevTools rows on
+      // every tab open) — presence is detected via visual_description.
+      // Treating any 200 as "has analysis" rendered an EMPTY result card and
+      // swallowed the Trigger button on un-analyzed videos.
+      if (data.description) {
+        setVisualAnalysis(data);
+      }
+    } catch {
+      // network error — stay on the trigger/processing state
+    } finally {
+      setVisualAnalysisFetching(false);
+    }
+  }, [resourceId]);
+
   const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
   const { tasks } = useTaskManager();
 
@@ -207,6 +246,53 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
       setTranscriptLoading(false);
     }
   }, [tasks, resourceId, transcribeStatus]);
+
+  // Visual analysis is TASK-DRIVEN: the panel mirrors the latest ai_extract
+  // task for this resource into LOCAL state (analysisTaskPhase) and fetches
+  // the result on completion. It deliberately does NOT gate on
+  // video.visual_analysis_status — the earlier version did
+  // (`if (status !== 'processing') return`), relying on onUpdate writing
+  // 'processing' back into the video prop, but DownloadDetailPage's prop
+  // chain doesn't flow updates back, so the watcher never fired: the run
+  // completed, the result row existed, and the panel never fetched it
+  // (api_request_logs showed zero GETs after completion).
+  useEffect(() => {
+    if (!resourceId) return;
+    const latest = tasks
+      .filter(
+        (t) =>
+          t.task_type === 'ai_extract'
+          && String(t.resource_id) === String(resourceId),
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )[0];
+    if (!latest) return;
+    if (latest.status === 'completed') {
+      setAnalysisTaskPhase('completed');
+      setVisualAnalysisLoading(false);
+      if (!visualAnalysis && !analysisFetchAttemptedRef.current) {
+        analysisFetchAttemptedRef.current = true;
+        loadVisualAnalysis();
+      }
+      if (onUpdate && video.visual_analysis_status === 'processing') {
+        onUpdate(video.platform_id, { visual_analysis_status: 'completed' });
+      }
+    } else if (latest.status === 'failed' || latest.status === 'cancelled') {
+      setAnalysisTaskPhase('failed');
+      setVisualAnalysisError(latest.error_msg || 'Visual analysis failed');
+      setVisualAnalysisLoading(false);
+    } else {
+      // queued / processing — a retry resets the fetch guard so the NEXT
+      // completion fetches fresh data.
+      setAnalysisTaskPhase('processing');
+      analysisFetchAttemptedRef.current = false;
+    }
+  }, [
+    tasks, resourceId, video.visual_analysis_status, video.platform_id,
+    onUpdate, visualAnalysis, loadVisualAnalysis,
+  ]);
 
   const handleTranscribe = async () => {
     try {
@@ -261,7 +347,18 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     try {
       setVisualAnalysisLoading(true);
       setVisualAnalysisError(null);
-      await triggerVisualAnalysis(video.platform_id);
+      // Prefer the resource-based trigger (dispatches analyze_l1_workflow) —
+      // same migration transcript/summary already got. The platform_id path
+      // (triggerVisualAnalysis) is the legacy 501 "not implemented" stub.
+      if (resourceId) {
+        await triggerVisualAnalysisByResource(resourceId);
+      } else {
+        await triggerVisualAnalysis(video.platform_id);
+      }
+      // Optimistic local phase — the task row arrives via realtime a beat
+      // later; until then the spinner (not the trigger button) should show.
+      setAnalysisTaskPhase('processing');
+      analysisFetchAttemptedRef.current = false;
       if (onUpdate) {
         onUpdate(video.platform_id, { visual_analysis_status: 'processing' });
       }
@@ -332,7 +429,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   return (
     <div className="flex flex-col h-full">
       {/* Tab Navigation */}
-      <div className="flex border-b border-zinc-800 mb-4 shrink-0">
+      <div className="flex border-b border-ink-800 mb-4 shrink-0">
         {visibleTabs.map((tab) => {
           const status = tab.key === 'transcript'
             ? video.transcript_status
@@ -347,7 +444,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === tab.key
                   ? 'border-indigo-500 text-indigo-400'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                  : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
               }`}
             >
               {tab.icon}
@@ -401,8 +498,8 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     <Brain size={24} className="text-indigo-400" />
                   </div>
                 </div>
-                <h3 className="text-base font-medium text-zinc-200">Transcribing Audio...</h3>
-                <p className="text-sm text-zinc-500 mt-2 max-w-[280px]">
+                <h3 className="text-base font-medium text-ink-200">Transcribing Audio...</h3>
+                <p className="text-sm text-ink-500 mt-2 max-w-[280px]">
                   AI is processing the audio. This may take a few minutes depending on the length.
                 </p>
                 <div className="mt-4 flex items-center gap-2">
@@ -416,18 +513,18 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             {transcriptLoading && transcribeStatus !== 'processing' && !transcript && (
               <div className="flex flex-col items-center justify-center py-16">
                 <Loader2 size={24} className="animate-spin text-indigo-400 mb-3" />
-                <p className="text-xs text-zinc-500">Loading transcript...</p>
+                <p className="text-xs text-ink-500">Loading transcript...</p>
               </div>
             )}
 
             {/* Not started — no transcript and not loading/processing */}
             {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="p-4 bg-zinc-800/50 rounded-full mb-4">
-                  <FileText size={32} className="text-zinc-500" />
+                <div className="p-4 bg-ink-800/50 rounded-full mb-4">
+                  <FileText size={32} className="text-ink-500" />
                 </div>
-                <h3 className="text-lg font-medium text-zinc-200">No Transcript Available</h3>
-                <p className="text-sm text-zinc-500 mt-1 mb-6 max-w-md">
+                <h3 className="text-lg font-medium text-ink-200">No Transcript Available</h3>
+                <p className="text-sm text-ink-500 mt-1 mb-6 max-w-md">
                   Generate a transcript to see timestamped text from this video's audio.
                 </p>
                 <button
@@ -451,7 +548,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             {transcript && (
               <div className="space-y-4">
                 {/* Meta info */}
-                <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-ink-500">
                   <span className="flex items-center gap-1">
                     <Clock size={12} />
                     {formatTimestamp(transcript.duration)} total
@@ -464,14 +561,14 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 </div>
 
                 {/* Content area */}
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                <div className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
                   <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
                     {transcriptView === 'segments' ? (
-                      <div className="divide-y divide-zinc-800/50">
+                      <div className="divide-y divide-ink-800/50">
                         {transcript.segments.map((seg, i) => (
                           <div
                             key={i}
-                            className="flex gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors group"
+                            className="flex gap-3 px-4 py-3 hover:bg-ink-800/30 transition-colors group"
                           >
                             <button
                               className="text-xs font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
@@ -479,13 +576,13 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                             >
                               [{formatTimestamp(seg.start)}]
                             </button>
-                            <p className="text-sm text-zinc-300 leading-relaxed">{seg.text}</p>
+                            <p className="text-sm text-ink-300 leading-relaxed">{seg.text}</p>
                           </div>
                         ))}
                       </div>
                     ) : (
                       <div className="p-4">
-                        <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                        <p className="text-sm text-ink-300 leading-relaxed whitespace-pre-wrap">
                           {transcript.text}
                         </p>
                       </div>
@@ -496,13 +593,13 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 {/* Toolbar */}
                 <div className="flex items-center gap-2">
                   {/* View toggle */}
-                  <div className="flex bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+                  <div className="flex bg-ink-800 border border-ink-700 rounded-lg overflow-hidden">
                     <button
                       onClick={() => setTranscriptView('segments')}
                       className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
                         transcriptView === 'segments'
                           ? 'bg-indigo-600 text-white'
-                          : 'text-zinc-400 hover:text-zinc-200'
+                          : 'text-ink-400 hover:text-ink-200'
                       }`}
                     >
                       <List size={12} />
@@ -513,7 +610,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                       className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
                         transcriptView === 'fulltext'
                           ? 'bg-indigo-600 text-white'
-                          : 'text-zinc-400 hover:text-zinc-200'
+                          : 'text-ink-400 hover:text-ink-200'
                       }`}
                     >
                       <AlignLeft size={12} />
@@ -524,7 +621,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   {/* Copy */}
                   <button
                     onClick={handleCopyTranscript}
-                    className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                    className="px-3 py-1.5 text-xs bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors flex items-center gap-1.5 border border-ink-700"
                   >
                     {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
                     {copied ? 'Copied!' : 'Copy'}
@@ -534,23 +631,23 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   <div className="relative">
                     <button
                       onClick={() => setExportOpen(!exportOpen)}
-                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1.5 border border-zinc-700"
+                      className="px-3 py-1.5 text-xs bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors flex items-center gap-1.5 border border-ink-700"
                     >
                       <Download size={12} />
                       Export
                       <ChevronDown size={10} />
                     </button>
                     {exportOpen && (
-                      <div className="absolute bottom-full mb-1 left-0 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[120px]">
+                      <div className="absolute bottom-full mb-1 left-0 bg-ink-800 border border-ink-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[120px]">
                         <button
                           onClick={() => { handleExportSRT(); setExportOpen(false); }}
-                          className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                          className="w-full px-3 py-2 text-xs text-ink-300 hover:bg-ink-700 text-left transition-colors"
                         >
                           Export SRT
                         </button>
                         <button
                           onClick={() => { handleExportTXT(); setExportOpen(false); }}
-                          className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                          className="w-full px-3 py-2 text-xs text-ink-300 hover:bg-ink-700 text-left transition-colors"
                         >
                           Export TXT
                         </button>
@@ -572,22 +669,22 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 <div className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-400">
                   <Sparkles size={16} />
                 </div>
-                <h3 className="font-medium text-zinc-200">Summary</h3>
+                <h3 className="font-medium text-ink-200">Summary</h3>
                 {getStatusIndicator(video.summary_status)}
               </div>
 
               {/* Summary processing */}
               {video.summary_status === 'processing' && (
-                <div className="flex items-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
+                <div className="flex items-center gap-3 p-4 bg-ink-900 border border-ink-800 rounded-lg">
                   <Loader2 size={18} className="animate-spin text-indigo-400" />
-                  <span className="text-sm text-zinc-400">Generating summary...</span>
+                  <span className="text-sm text-ink-400">Generating summary...</span>
                 </div>
               )}
 
               {/* Summary not started */}
               {(!video.summary_status || video.summary_status === 'pending') && !summary && (
-                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                  <p className="text-sm text-zinc-500 mb-3">
+                <div className="p-4 bg-ink-900 border border-ink-800 rounded-lg">
+                  <p className="text-sm text-ink-500 mb-3">
                     Generate an AI summary with key points and topics.
                   </p>
                   <button
@@ -641,19 +738,19 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               {summary && (
                 <div className="space-y-4">
                   {/* Summary text */}
-                  <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                    <p className="text-sm text-zinc-300 leading-relaxed">{summary.summary}</p>
+                  <div className="p-4 bg-ink-900 border border-ink-800 rounded-lg">
+                    <p className="text-sm text-ink-300 leading-relaxed">{summary.summary}</p>
                   </div>
 
                   {/* Key points */}
                   {summary.key_points.length > 0 && (
                     <div>
-                      <h4 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">
+                      <h4 className="text-xs font-medium text-ink-400 uppercase tracking-wider mb-2">
                         Key Points
                       </h4>
                       <ul className="space-y-2">
                         {summary.key_points.map((point, i) => (
-                          <li key={i} className="flex items-start gap-2 text-sm text-zinc-300">
+                          <li key={i} className="flex items-start gap-2 text-sm text-ink-300">
                             <ChevronRight size={14} className="text-indigo-400 mt-0.5 shrink-0" />
                             {point}
                           </li>
@@ -665,7 +762,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   {/* Topics */}
                   {summary.topics.length > 0 && (
                     <div>
-                      <h4 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">
+                      <h4 className="text-xs font-medium text-ink-400 uppercase tracking-wider mb-2">
                         Topics
                       </h4>
                       <div className="flex flex-wrap gap-2">
@@ -700,44 +797,112 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 <div className="p-1.5 bg-purple-500/10 rounded-lg text-purple-400">
                   <Eye size={16} />
                 </div>
-                <h3 className="font-medium text-zinc-200">Visual Analysis</h3>
+                <h3 className="font-medium text-ink-200">Visual Analysis</h3>
                 {getStatusIndicator(video.visual_analysis_status)}
               </div>
 
-              {video.visual_analysis_status === 'processing' && (
-                <div className="flex items-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                  <Loader2 size={18} className="animate-spin text-purple-400" />
-                  <span className="text-sm text-zinc-400">Analyzing visual content...</span>
-                </div>
-              )}
-
-              {(!video.visual_analysis_status || video.visual_analysis_status === 'pending') && (
-                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                  <p className="text-sm text-zinc-500 mb-3">
-                    Analyze video frames to detect objects, scenes, and visual content.
-                  </p>
-                  <button
-                    onClick={handleVisualAnalysis}
-                    disabled={visualAnalysisLoading}
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
-                  >
-                    {visualAnalysisLoading ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Eye size={14} />
-                    )}
-                    Trigger Visual Analysis
-                  </button>
-                  {visualAnalysisError && (
-                    <p className="mt-2 text-xs text-red-400 flex items-center gap-1">
-                      <AlertCircle size={12} />
-                      {visualAnalysisError}
+              {/* Result card — fetched from resource_analysis, the table the
+                  analyze_l1 workflow actually writes. Takes priority over the
+                  status branches: fetched data is ground truth. */}
+              {visualAnalysis && (
+                <div className="p-4 bg-ink-900 border border-ink-800 rounded-lg space-y-3">
+                  {visualAnalysis.description && (
+                    <p className="text-sm text-ink-300 leading-relaxed whitespace-pre-wrap">
+                      {visualAnalysis.description}
                     </p>
+                  )}
+                  {(() => {
+                    const chips = [
+                      ...(visualAnalysis.objects ?? []),
+                      ...(visualAnalysis.scenes ?? []),
+                      ...(visualAnalysis.people ?? []),
+                    ].filter(Boolean);
+                    return chips.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {chips.map((c, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-0.5 rounded-full text-[10px] bg-ink-800 text-ink-300"
+                          >
+                            {String(c)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
+                  {visualAnalysis.text && (
+                    <p className="text-xs text-ink-400 whitespace-pre-wrap break-words bg-ink-950/40 rounded p-2 border border-ink-800">
+                      {visualAnalysis.text}
+                    </p>
+                  )}
+                  {visualAnalysis.model && (
+                    <p className="text-[11px] text-ink-500">{visualAnalysis.model}</p>
                   )}
                 </div>
               )}
 
-              {video.visual_analysis_status === 'failed' && (
+              {!visualAnalysis
+                && (analysisTaskPhase === 'processing'
+                  || (analysisTaskPhase === null
+                    && video.visual_analysis_status === 'processing')) && (
+                <div className="flex items-center gap-3 p-4 bg-ink-900 border border-ink-800 rounded-lg">
+                  <Loader2 size={18} className="animate-spin text-purple-400" />
+                  <span className="text-sm text-ink-400">Analyzing visual content...</span>
+                </div>
+              )}
+
+              {/* Trigger is the catch-all: anything that's not actively
+                  processing/failed and has no fetched result shows the button.
+                  An allowlist here broke twice — the column's DB default is
+                  'none' (not 'pending'; ResourceDetailPage checks it
+                  explicitly), and unknown future values would blank the
+                  section again. analysisTaskPhase (task-driven local state)
+                  takes precedence over the video prop, whose updates don't
+                  reliably flow back from the parent. */}
+              {!visualAnalysis
+                && analysisTaskPhase !== 'processing'
+                && analysisTaskPhase !== 'failed'
+                && !(analysisTaskPhase === null
+                  && (video.visual_analysis_status === 'processing'
+                    || video.visual_analysis_status === 'failed')) && (
+                <div className="p-4 bg-ink-900 border border-ink-800 rounded-lg">
+                  {visualAnalysisFetching ? (
+                    <div className="flex items-center gap-3">
+                      <Loader2 size={18} className="animate-spin text-purple-400" />
+                      <span className="text-sm text-ink-400">Loading analysis...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-ink-500 mb-3">
+                        Analyze video frames to detect objects, scenes, and visual content.
+                      </p>
+                      <button
+                        onClick={handleVisualAnalysis}
+                        disabled={visualAnalysisLoading}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        {visualAnalysisLoading ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Eye size={14} />
+                        )}
+                        Trigger Visual Analysis
+                      </button>
+                      {visualAnalysisError && (
+                        <p className="mt-2 text-xs text-red-400 flex items-center gap-1">
+                          <AlertCircle size={12} />
+                          {visualAnalysisError}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {!visualAnalysis
+                && (analysisTaskPhase === 'failed'
+                  || (analysisTaskPhase === null
+                    && video.visual_analysis_status === 'failed')) && (
                 <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-lg">
                   <p className="text-sm text-red-400 mb-3">Visual analysis failed. Please try again.</p>
                   <button
@@ -752,14 +917,6 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     )}
                     Retry
                   </button>
-                </div>
-              )}
-
-              {video.visual_analysis_status === 'completed' && video.ai_analyze_text && (
-                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
-                  <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
-                    {video.ai_analyze_text}
-                  </p>
                 </div>
               )}
             </section>

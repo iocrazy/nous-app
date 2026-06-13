@@ -45,6 +45,24 @@ from app.services.workforce.delegate_tool import DelegateToolService
 logger = logging.getLogger(__name__)
 
 
+def _resolve_tool_rate_limit(capability_profile: dict[str, Any]) -> int:
+    """Tool-calls-per-minute cap for the RateLimit hook.
+
+    Per-agent ``capability_profile.rate_limit_tool_calls_per_min`` wins;
+    ``AGENT_TOOL_CALLS_PER_MIN`` env is the fleet default. 0 (the default)
+    disables the brake. Malformed values resolve to 0 — a config typo
+    must not brick the agent."""
+    override = capability_profile.get("rate_limit_tool_calls_per_min")
+    if isinstance(override, int) and override >= 0:
+        return override
+    raw = os.getenv("AGENT_TOOL_CALLS_PER_MIN", "0")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
 def _llm_total_deadline_s() -> Optional[float]:
     """AI-007: chain-wide wall-time ceiling for LLM retry + fallback.
 
@@ -71,8 +89,14 @@ class AgentRunnerStack:
 
     runner: AgentRunner
     recalled_memories: list[RecalledMemory]
+    # Phase 4 M3: bi-temporal facts from the Graphiti graph (flag-gated;
+    # empty when FEATURE_GRAPH_MEMORY is off).
+    graph_facts: list[str]
     primary_model: str  # the model that will actually be tried first
     fallback_chain_active: bool
+    # Phase 4 L2: Honcho working representation of the user (flag-gated;
+    # None when FEATURE_HONCHO_MEMORY is off or the peer has no model yet).
+    user_context: Optional[str] = None
 
 
 async def build_agent_runner_stack(
@@ -86,6 +110,7 @@ async def build_agent_runner_stack(
     settings: Any,
     parent_run_id: Optional[str] = None,
     agent_depth: int = 0,
+    delegation_chain: tuple[str, ...] = (),
 ) -> AgentRunnerStack:
     """Construct a fully-wired AgentRunner for one agent turn.
 
@@ -95,6 +120,11 @@ async def build_agent_runner_stack(
       - Worker runtime (M3): inherits ``parent_run_id`` + ``agent_depth+1``
         from the calling agent's run, so Delegate cycle/depth limits
         and cost-rollup-by-tree continue to work.
+
+    ``delegation_chain`` is the ANCESTOR slug chain (root → caller); this
+    function appends the current agent's slug and threads the result into
+    AgentRunner hook contexts and SubAgentTaskService, so children inherit
+    the extended chain (M2 multi-agent scope).
 
     Steps:
       1. Recall relevant memories (P0-isolated by user_id)
@@ -115,14 +145,47 @@ async def build_agent_runner_stack(
         settings=settings,
     )
 
+    graph_facts = await _safe_recall_graph_facts(
+        user_id=user_id, user_query=user_query, session_id=session_id
+    )
+
+    honcho_context = await _safe_recall_honcho_context(
+        user_id=str(user_id), session_id=session_id
+    )
+
     # ── 2. HookRegistry per-turn ────────────────────────────────────
     registry = HookRegistry()
+
+    # Phase 4.5: tool-call rate brake (Layer-2 budget). Per-agent profile
+    # overrides the env default; 0/absent = never registered, zero overhead.
+    capability_profile = agent.get("capability_profile") or {}
+    rate_limit = _resolve_tool_rate_limit(capability_profile)
+    if rate_limit > 0:
+        from app.services.infra.hooks.rate_limit import RateLimitHook
+
+        registry.register_pre(
+            RateLimitHook(limit_per_min=rate_limit),
+            name="rate_limit",
+            priority=15,
+        )
 
     if budget_cents is not None:
         registry.register_pre(
             BudgetGuardHook(budget_cents=float(budget_cents)),
             name="budget_guard",
             priority=20,
+        )
+
+    # Phase 4.5: per-agent capability gating. Only registered when the
+    # agent actually carries a profile — the common (empty) case pays
+    # zero per-tool-call overhead.
+    if capability_profile:
+        from app.services.infra.hooks.capability_gate import CapabilityGateHook
+
+        registry.register_pre(
+            CapabilityGateHook(capability_profile),
+            name="capability_gate",
+            priority=25,
         )
 
     registry.register_post(
@@ -277,6 +340,19 @@ async def build_agent_runner_stack(
         SubAgentTaskService,
     )
 
+    # Chain = ancestors + current agent (slug may be absent in some test
+    # fixtures — fall back to id so the chain stays meaningful).
+    own_chain = (*delegation_chain, agent.get("slug") or str(agent["id"]))
+
+    # M2-b: parallel fan-out cap from the agent's capability profile.
+    # Non-int / missing → default; 0 disables the parallel form (and
+    # CapabilityGate blocks the spawn before it reaches the service).
+    from app.services.ai.runner.subagent_task_service import DEFAULT_MAX_PARALLEL
+
+    _profile = agent.get("capability_profile")
+    _mp = _profile.get("max_parallel_delegates") if isinstance(_profile, dict) else None
+    max_parallel = _mp if isinstance(_mp, int) and _mp >= 0 else DEFAULT_MAX_PARALLEL
+
     skill_tool = SkillToolService(skill_repo)
     skill_tool.subagent_task = SubAgentTaskService(
         caller_agent_id=UUID(agent["id"]),
@@ -284,6 +360,8 @@ async def build_agent_runner_stack(
         parent_run_id=parent_run_id,
         agent_depth=agent_depth,
         session_id=session_id,
+        delegation_chain=own_chain,
+        max_parallel=max_parallel,
     )
 
     runner = AgentRunner(
@@ -292,13 +370,18 @@ async def build_agent_runner_stack(
         hooks=registry,
         delegate_tool=delegate_tool,
         mcp_registry=mcp_registry,
+        parent_run_id=parent_run_id,
+        agent_depth=agent_depth,
+        delegation_chain=own_chain,
     )
 
     return AgentRunnerStack(
         runner=runner,
         recalled_memories=recalled,
+        graph_facts=graph_facts,
         primary_model=primary_model,
         fallback_chain_active=bool(fallback_models),
+        user_context=honcho_context,
     )
 
 
@@ -353,6 +436,108 @@ async def _safe_recall_memories(
         RecalledMemory(id=r.id, summary=r.summary, when_to_use=r.when_to_use)
         for r in records
     ]
+
+
+async def _safe_recall_graph_facts(
+    *,
+    user_id: UUID,
+    user_query: str,
+    session_id: Optional[str] = None,
+    limit: int = 5,
+) -> list[str]:
+    """Best-effort Graphiti fact recall (Phase 4 M3/M7). Searches the
+    user's personal group plus — when the session belongs to a project
+    — the project group (storyboard characters etc. live there).
+    Empty list when the FEATURE_GRAPH_MEMORY flag is off or anything
+    fails — graph outages must never delay or break a chat turn."""
+    try:
+        from app.services.ai.memory.graph_memory import get_graph_memory_service
+
+        service = get_graph_memory_service()
+        if not service.config.enabled:
+            return []
+        group_ids = [f"user-{user_id}"]
+        project_id = await _resolve_session_project(session_id)
+        if project_id:
+            group_ids.append(f"project-{project_id}")
+        facts = await service.search(user_query, group_ids=group_ids, limit=limit)
+        return [f.fact for f in facts]
+    except Exception:  # noqa: BLE001
+        logger.exception("[m3] graph fact recall failed; degrading to none")
+        return []
+
+
+async def _safe_recall_honcho_context(
+    *,
+    user_id: str,
+    session_id: Optional[str],
+) -> Optional[str]:
+    """Best-effort Honcho user-model fetch (Phase 4 L2 read side).
+
+    Pulls the peer's working representation — a pure DB read on the
+    Honcho side (the slow LLM-backed dialectic endpoint is deliberately
+    NOT used per turn). Workspace mirrors the write path: ``team-{id}``
+    when the session carries team context, else the deployment default.
+    None when FEATURE_HONCHO_MEMORY is off or anything fails — a Honcho
+    outage must never delay or break a chat turn.
+    """
+    try:
+        from app.services.ai.memory.honcho_memory import get_honcho_memory_service
+        from app.services.ai.memory.memory_prefs import get_memory_prefs
+
+        service = get_honcho_memory_service()
+        if not service.config.operative():
+            return None
+        prefs = await get_memory_prefs(user_id)
+        if not prefs.inject:
+            return None
+        workspace = None
+        if session_id:
+            from app.workflows.write_memory import _resolve_team_workspace
+
+            workspace = await _resolve_team_workspace(str(session_id))
+        representation = await service.get_user_representation(
+            user_id=user_id, workspace_id=workspace
+        )
+        # User-curated "About me" card outranks derived observations —
+        # it's the user's own words about themselves.
+        card: Optional[list[str]] = None
+        get_card = getattr(service, "get_peer_card", None)
+        if get_card is not None:
+            card = await get_card(user_id=user_id, workspace_id=workspace)
+        if not card:
+            return representation
+        card_block = "## About (user-provided)\n" + "\n".join(
+            f"- {line}" for line in card
+        )
+        if not representation:
+            return card_block
+        return f"{card_block}\n\n{representation}"
+    except Exception:  # noqa: BLE001
+        logger.exception("[l2] honcho context recall failed; degrading to none")
+        return None
+
+
+async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
+    """ai_sessions.project_id lookup; None on missing/failure."""
+    if not session_id:
+        return None
+    try:
+        # ai_sessions.id is BIGINT — asyncpg rejects str binds on int8.
+        sid = int(session_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        from app.db import engine as db_engine
+
+        row = await db_engine.fetch_one(
+            "SELECT project_id FROM public.ai_sessions WHERE id = :sid",
+            {"sid": sid},
+        )
+        project_id = row.get("project_id") if row else None
+        return str(project_id) if project_id else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _memory_recall_enabled() -> bool:

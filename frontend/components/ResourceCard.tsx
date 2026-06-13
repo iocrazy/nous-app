@@ -67,7 +67,7 @@ function formatDuration(seconds: number): string {
 }
 
 function getFileIcon(mimeType: string | null | undefined) {
-  if (!mimeType) return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  if (!mimeType) return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
   if (mimeType.startsWith('video/')) return { icon: Film, color: 'text-purple-400', bg: 'bg-purple-500/20' };
   if (mimeType.startsWith('image/')) return { icon: Image, color: 'text-green-400', bg: 'bg-green-500/20' };
   if (mimeType.startsWith('audio/')) return { icon: Music, color: 'text-cyan-400', bg: 'bg-cyan-500/20' };
@@ -86,7 +86,7 @@ function getFileIcon(mimeType: string | null | undefined) {
   // Generic text
   if (mimeType.startsWith('text/'))
     return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
-  return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
 }
 
 export const ResourceCard: React.FC<ResourceCardProps> = ({
@@ -265,7 +265,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
           isChecked
             ? 'bg-indigo-500 text-white shadow-lg'
-            : 'bg-black/50 border border-zinc-400 text-transparent hover:border-zinc-200'
+            : 'bg-black/50 border border-ink-400 text-transparent hover:border-ink-200'
         }`}
       >
         <Check size={12} />
@@ -277,7 +277,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   const moreButton = onContextMenu ? (
     <button
       onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
-      className="p-1.5 bg-zinc-900/80 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+      className="p-1.5 bg-ink-900/80 hover:bg-ink-700 rounded-lg text-ink-400 hover:text-ink-50 transition-colors opacity-0 group-hover:opacity-100"
       title={t('resources.moreActions')}
     >
       <MoreVertical size={14} />
@@ -293,7 +293,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         onClick={(e) => onClick(e)}
         onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-800/60 rounded-lg cursor-pointer transition-[background-color] duration-150 group relative ${
+        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-ink-800/60 rounded-lg cursor-pointer transition-[background-color] duration-150 group relative ${
           isChecked || isSelected
             ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/30'
             : ''
@@ -315,28 +315,28 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
               }}
               onBlur={() => onRenameCancel?.()}
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+              className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
             />
           ) : (
             <p
-              className="text-sm text-zinc-200 truncate group-hover:text-white transition-colors font-medium select-none cursor-default"
+              className="text-sm text-ink-200 truncate group-hover:text-ink-50 transition-colors font-medium select-none cursor-default"
               onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
             >
               {filename}
             </p>
           )}
         </div>
-        <span className="text-[11px] text-zinc-500 flex-shrink-0 tabular-nums">
+        <span className="text-[11px] text-ink-500 flex-shrink-0 tabular-nums">
           {formatFileSize(fileSize)}
         </span>
-        <span className="text-[11px] text-zinc-600 flex-shrink-0">
+        <span className="text-[11px] text-ink-600 flex-shrink-0">
           {formatDate(createdAt)}
         </span>
         {showRestoreAction && resource?.trashed_at && (() => {
           const days = getDaysUntilDeletion(resource.trashed_at);
           if (days === null) return null;
           return (
-            <span className={`text-[11px] flex-shrink-0 flex items-center gap-1 ${days <= 3 ? 'text-red-400' : days <= 7 ? 'text-amber-400' : 'text-zinc-500'}`}>
+            <span className={`text-[11px] flex-shrink-0 flex items-center gap-1 ${days <= 3 ? 'text-red-400' : days <= 7 ? 'text-amber-400' : 'text-ink-500'}`}>
               <Clock size={11} />
               {t('resources.daysLeft', { count: days })}
             </span>
@@ -348,7 +348,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           {!showRestoreAction && onTrash && resource && (
             <button
               onClick={(e) => { e.stopPropagation(); onTrash(resource.id); }}
-              className="p-1.5 hover:bg-red-900/80 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
+              className="p-1.5 hover:bg-red-900/80 rounded-lg text-ink-400 hover:text-red-400 transition-colors"
               title={t('resources.moveToTrash')}
             >
               <Trash2 size={14} />
@@ -357,7 +357,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           {showRestoreAction && onRestore && resource && (
             <button
               onClick={(e) => { e.stopPropagation(); onRestore(resource.id); }}
-              className="p-1.5 hover:bg-emerald-900/80 rounded-lg text-zinc-400 hover:text-emerald-400 transition-colors"
+              className="p-1.5 hover:bg-emerald-900/80 rounded-lg text-ink-400 hover:text-emerald-400 transition-colors"
               title={t('resources.restore')}
             >
               <RotateCcw size={14} />
@@ -366,7 +366,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           {showRestoreAction && onPermanentDelete && resource && (
             <button
               onClick={(e) => { e.stopPropagation(); onPermanentDelete(resource.id); }}
-              className="p-1.5 hover:bg-red-900/80 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
+              className="p-1.5 hover:bg-red-900/80 rounded-lg text-ink-400 hover:text-red-400 transition-colors"
               title={t('resources.deletePermanently')}
             >
               <X size={14} />
@@ -386,10 +386,10 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       onClick={(e) => onClick(e)}
       onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick?.(e); }}
       onContextMenu={onContextMenu}
-      className={`relative hover:bg-zinc-800 border rounded-xl cursor-pointer transition-[background-color,box-shadow] duration-150 group overflow-hidden hover:shadow-lg hover:shadow-black/20 ${
+      className={`relative hover:bg-ink-800 border rounded-xl cursor-pointer transition-[background-color,box-shadow,transform] duration-150 group overflow-hidden hover:shadow-lg hover:shadow-black/20 hover:-translate-y-0.5 ${
         isChecked || isSelected
-          ? 'bg-indigo-500/10 border-indigo-500/30'
-          : 'bg-zinc-800/60 border-zinc-700/30 hover:border-zinc-600'
+          ? 'bg-indigo-500/10 border-indigo-500/30 shadow-[0_0_0_1px_rgba(99,102,241,0.3)]'
+          : 'bg-ink-800/60 border-ink-700/30 hover:border-ink-600'
       }`}
     >
       {checkbox}
@@ -445,7 +445,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         {!showRestoreAction && onTrash && resource && !moreButton && (
           <button
             onClick={(e) => { e.stopPropagation(); onTrash(resource.id); }}
-            className="p-1.5 bg-zinc-900/80 hover:bg-red-900/80 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
+            className="p-1.5 bg-ink-900/80 hover:bg-red-900/80 rounded-lg text-ink-400 hover:text-red-400 transition-colors"
             title={t('resources.moveToTrash')}
           >
             <Trash2 size={14} />
@@ -454,7 +454,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         {showRestoreAction && onRestore && resource && (
           <button
             onClick={(e) => { e.stopPropagation(); onRestore(resource.id); }}
-            className="p-1.5 bg-zinc-900/80 hover:bg-emerald-900/80 rounded-lg text-zinc-400 hover:text-emerald-400 transition-colors"
+            className="p-1.5 bg-ink-900/80 hover:bg-emerald-900/80 rounded-lg text-ink-400 hover:text-emerald-400 transition-colors"
             title={t('resources.restore')}
           >
             <RotateCcw size={14} />
@@ -463,7 +463,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         {showRestoreAction && onPermanentDelete && resource && (
           <button
             onClick={(e) => { e.stopPropagation(); onPermanentDelete(resource.id); }}
-            className="p-1.5 bg-zinc-900/80 hover:bg-red-900/80 rounded-lg text-zinc-400 hover:text-red-400 transition-colors"
+            className="p-1.5 bg-ink-900/80 hover:bg-red-900/80 rounded-lg text-ink-400 hover:text-red-400 transition-colors"
             title={t('resources.deletePermanently')}
           >
             <X size={14} />
@@ -471,7 +471,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         )}
       </div>
       {/* Info */}
-      <div className="px-3 py-2.5 border-t border-zinc-700/20">
+      <div className="px-3 py-2.5 border-t border-ink-700/20">
         {renaming ? (
           <input
             autoFocus
@@ -483,11 +483,11 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             }}
             onBlur={() => onRenameCancel?.()}
             onClick={(e) => e.stopPropagation()}
-            className="w-full bg-zinc-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+            className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
           />
         ) : (
           <p
-            className="text-[13px] text-zinc-200 truncate group-hover:text-white transition-colors font-medium select-none cursor-default"
+            className="text-[13px] text-ink-200 truncate group-hover:text-ink-50 transition-colors font-medium select-none cursor-default"
             onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
           >
             {filename}
@@ -503,13 +503,13 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           const days = getDaysUntilDeletion(resource.trashed_at);
           if (days === null) return null;
           return (
-            <div className={`flex items-center gap-1 mt-1 text-[11px] ${days <= 3 ? 'text-red-400' : days <= 7 ? 'text-amber-400' : 'text-zinc-500'}`}>
+            <div className={`flex items-center gap-1 mt-1 text-[11px] ${days <= 3 ? 'text-red-400' : days <= 7 ? 'text-amber-400' : 'text-ink-500'}`}>
               <Clock size={11} />
               {t('resources.daysLeft', { count: days })}
             </div>
           );
         })() : (
-          <div className="flex items-center justify-between mt-1 text-[11px] text-zinc-600">
+          <div className="flex items-center justify-between mt-1 text-[11px] text-ink-600">
             <span>{formatFileSize(fileSize)}</span>
             <span>{formatDate(createdAt)}</span>
           </div>

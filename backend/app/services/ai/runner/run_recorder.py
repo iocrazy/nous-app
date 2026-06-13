@@ -59,6 +59,17 @@ class AgentPausedError(Exception):
     """
 
 
+class AgentBusyError(AgentPausedError):
+    """Raised by RunRecorder.start() when the agent already has
+    max_concurrent_runs live runs (mig 286, paperclip P4).
+
+    Subclasses AgentPausedError ON PURPOSE: every existing call site that
+    surfaces a pre-flight pause ("agent paused") handles this identically
+    without modification — the run is rejected before any LLM call and no
+    agent_runs row is created.
+    """
+
+
 class RunCancelledError(Exception):
     """Raised internally when cancel_requested=true is observed.
 
@@ -80,6 +91,15 @@ class RunRecorder:
     team_id: Optional[int] = None
     project_id: Optional[int] = None
     issue_id: Optional[int] = None  # links this run to an issue via mig-208 triggers
+    # Paperclip-style bidirectional task linkage (mig 282). When the run
+    # executes inside a tracked workflow, pass the task_tracking PK
+    # (dbos_workflow_id, text). The recorder then:
+    #   run → task: agent_runs.task_id = task_id (insert)
+    #   task → run: task_tracking.agent_id = agent_id +
+    #               metadata.run_id = run id   (post-insert stamp)
+    # so the agent Dashboard's task panels see service work, not just
+    # chat-Delegate dispatches.
+    task_id: Optional[str] = None
     model: Optional[str] = None
     provider: Optional[str] = None
     input_summary: Optional[str] = None
@@ -98,8 +118,10 @@ class RunRecorder:
     _cached_rate: Optional[float] = field(default=None, init=False)  # cents per 1k
     _last_heartbeat_monotonic: float = field(default=0.0, init=False)
     _cancelled: bool = field(default=False, init=False)
+    _event_seq: int = field(default=0, init=False)
 
     HEARTBEAT_RATE_LIMIT_S: float = 15.0  # local, DB-write throttle
+    EVENT_VALUE_MAX_CHARS: int = 4000  # per-field payload truncation
 
     async def __aenter__(self) -> "RunRecorder":
         try:
@@ -124,22 +146,66 @@ class RunRecorder:
             # Start failed; nothing to finalize.
             return False
 
+        final_status = "completed"
+        final_error: Optional[str] = None
         try:
             if self._cancelled:
+                final_status = "cancelled"
                 await self._finish(status="cancelled")
             elif exc is None:
                 await self._finish(status="completed")
             else:
+                final_status = "failed"
                 error_code = exc_type.__name__ if exc_type else "unknown"
-                error_message = str(exc) if exc else None
+                final_error = str(exc) if exc else None
                 await self._finish(
-                    status="failed", error_code=error_code, error_message=error_message
+                    status="failed", error_code=error_code, error_message=final_error
                 )
         except Exception as err:
             logger.error(f"[RunRecorder] finish failed for run {self.run_id}: {err}")
 
+        self._maybe_export_langfuse(status=final_status, error_message=final_error)
+
         # Never swallow user exceptions — propagate them out.
         return False
+
+    def _maybe_export_langfuse(
+        self, *, status: str, error_message: Optional[str]
+    ) -> None:
+        """Phase 4.5-6: fire-and-forget trace export to the self-hosted
+        Langfuse. Gated inside the exporter (FEATURE_LANGFUSE, default
+        off) — when inoperative this is one cheap config check. Never
+        raises; a Langfuse outage only costs the trace."""
+        try:
+            from app.services.ai.telemetry.langfuse_exporter import (
+                get_langfuse_exporter,
+            )
+
+            exporter = get_langfuse_exporter()
+            if not exporter.config.operative():
+                return
+            import asyncio
+
+            asyncio.get_running_loop().create_task(
+                exporter.export_run(
+                    run_id=str(self.run_id),
+                    agent_slug="",  # recorder holds agent_id, not slug
+                    status=status,
+                    trigger=self.trigger,
+                    user_id=str(self.user_id),
+                    session_id=self.session_id,
+                    model=self.model,
+                    provider=self.provider,
+                    input_summary=self.input_summary,
+                    output_summary=self._output_summary,
+                    prompt_tokens=self._prompt_tokens,
+                    completion_tokens=self._completion_tokens,
+                    cost_cents=self.compute_cost_cents(),
+                    error_message=error_message,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("[RunRecorder] langfuse export skipped", exc_info=True)
 
     # -------- public API for callers inside the `async with` block -------
 
@@ -245,6 +311,42 @@ class RunRecorder:
         if output_summary is not None:
             self._output_summary = _truncate(output_summary, 500)
 
+    async def record_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Append one transcript event (mig 285, paperclip port P3).
+
+        AgentRunner calls this as the run executes (user message → tool
+        calls → assistant output); the Runs detail pane renders the stream
+        as the Transcript section. Best-effort like every other telemetry
+        write — a failed insert never breaks the run. Payload string values
+        are truncated so a huge tool result can't bloat the table.
+        """
+        if self.run_id is None:
+            return
+        self._event_seq += 1
+        try:
+            from app.db import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            await (
+                client.table("agent_run_events")
+                .insert(
+                    {
+                        "run_id": str(self.run_id),
+                        "seq": self._event_seq,
+                        "event_type": event_type,
+                        "payload": _truncate_payload(
+                            payload, self.EVENT_VALUE_MAX_CHARS
+                        ),
+                    }
+                )
+                .execute()
+            )
+        except Exception as err:
+            logger.warning(
+                f"[RunRecorder] record_event failed "
+                f"(run={self.run_id} seq={self._event_seq}): {err}"
+            )
+
     async def heartbeat(self) -> None:
         """Refresh heartbeat_at if >=15s since last write.
 
@@ -302,7 +404,7 @@ class RunRecorder:
         client = await get_async_supabase_admin()
         result = (
             await client.table("ai_agents")
-            .select("paused_reason")
+            .select("paused_reason,max_concurrent_runs")
             .eq("id", str(self.agent_id))
             .maybe_single()
             .execute()
@@ -310,6 +412,26 @@ class RunRecorder:
         if result and result.data and result.data.get("paused_reason"):
             reason = result.data["paused_reason"]
             raise AgentPausedError(f"agent paused (reason={reason})")
+
+        # mig 286 (paperclip P4): per-agent concurrency cap. Counted across
+        # ALL users — the limit protects the agent/provider, not one caller.
+        # Race window between count and insert is accepted (paperclip's is
+        # too): the cap is a throttle, not a mutex.
+        limit = (result.data or {}).get("max_concurrent_runs") if result else None
+        if limit:
+            running_q = (
+                await client.table("agent_runs")
+                .select("id", count="exact", head=True)
+                .eq("agent_id", str(self.agent_id))
+                .eq("status", "running")
+                .execute()
+            )
+            running = running_q.count or 0
+            if running >= int(limit):
+                raise AgentBusyError(
+                    f"agent at max_concurrent_runs ({running}/{limit}) — "
+                    "try again when a run finishes"
+                )
 
     async def _snapshot_price(self) -> None:
         """Look up the most-recent ai_model_prices row as-of now for this model.
@@ -356,6 +478,7 @@ class RunRecorder:
             "session_id": str(self.session_id) if self.session_id else None,
             "team_id": self.team_id,
             "project_id": self.project_id,
+            "task_id": self.task_id,
             "status": "running",
             "trigger": self.trigger,
             "model": self.model,
@@ -379,6 +502,45 @@ class RunRecorder:
             # → no agent_runs row was finalised for any run after mig 232.
             self.run_id = str(result.data[0]["id"])
             self._last_heartbeat_monotonic = time.monotonic()
+            await self._link_task()
+
+    async def _link_task(self) -> None:
+        """Stamp the task → run/agent backlink on task_tracking (mig 282).
+
+        Sets task_tracking.agent_id (business column — phase/status/progress
+        stay trigger-owned per the task-system discipline) and merges
+        metadata.run_id (MERGE, never replace — the user_settings clobber
+        lesson applies to every shared jsonb column). Best-effort: linkage
+        failure never breaks the run.
+        """
+        if not self.task_id or self.run_id is None:
+            return
+        try:
+            from app.db import get_async_supabase_admin
+
+            client = await get_async_supabase_admin()
+            current = (
+                await client.table("task_tracking")
+                .select("metadata")
+                .eq("dbos_workflow_id", self.task_id)
+                .maybe_single()
+                .execute()
+            )
+            if not current or current.data is None:
+                return
+            merged = dict(current.data.get("metadata") or {})
+            merged["run_id"] = self.run_id
+            await (
+                client.table("task_tracking")
+                .update({"agent_id": str(self.agent_id), "metadata": merged})
+                .eq("dbos_workflow_id", self.task_id)
+                .execute()
+            )
+        except Exception as err:
+            logger.warning(
+                f"[RunRecorder] task linkage failed "
+                f"(task_id={self.task_id} run_id={self.run_id}): {err}"
+            )
 
     async def _finish(
         self,
@@ -458,3 +620,28 @@ def _truncate(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + "..."
+
+
+def _truncate_payload(payload: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    """JSON-safe copy of an event payload with long string values truncated.
+
+    One level deep is enough — event payloads are flat ({content}, {tool,
+    args, result}); nested dicts are stringified-then-truncated so a deep
+    tool result can't sneak megabytes past the cap.
+    """
+    out: dict[str, Any] = {}
+    for k, v in (payload or {}).items():
+        if isinstance(v, str):
+            out[k] = _truncate(v, max_chars)
+        elif isinstance(v, (int, float, bool)) or v is None:
+            out[k] = v
+        else:
+            try:
+                import json as _json
+
+                out[k] = _truncate(
+                    _json.dumps(v, ensure_ascii=False, default=str), max_chars
+                )
+            except Exception:  # noqa: BLE001 — telemetry only
+                out[k] = _truncate(repr(v), max_chars)
+    return out

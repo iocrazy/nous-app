@@ -8,6 +8,12 @@
   <div class="container">
     <h1>MediaHub Push</h1>
 
+    <!-- Mode tabs (shown when configured) -->
+    <div id="modeTabs" class="mode-tabs" style="display:none;">
+      <button id="tabPush" class="mode-tab active" type="button">Push</button>
+      <button id="tabScan" class="mode-tab" type="button">Scan Images</button>
+    </div>
+
     <!-- Settings view -->
     <div id="settingsView">
       <div class="field">
@@ -59,7 +65,53 @@
         <button id="settingsToggle" class="link-btn">Settings</button>
       </div>
     </div>
+    <!-- Scan Images view -->
+    <div id="scanView" style="display:none;">
+      <div class="scan-pickers">
+        <div class="field">
+          <label for="scopeSelect">Scope</label>
+          <select id="scopeSelect" class="scan-select">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="folderSelect">Folder</label>
+          <select id="folderSelect" class="scan-select">
+            <option value="">Library root</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="scanBtn" type="button">Scan Page Images</button>
+      <div id="scanStatus" class="status info"></div>
+
+      <div id="scanToolbar" class="scan-toolbar" style="display:none;">
+        <label class="check-label">
+          <input type="checkbox" id="selectAllChk">
+          <span id="selectInfo">0 selected</span>
+        </label>
+        <select id="minSizeSelect" class="scan-select scan-select-small">
+          <option value="0">Any size</option>
+          <option value="200" selected>&ge; 200px</option>
+          <option value="500">&ge; 500px</option>
+        </select>
+      </div>
+
+      <div id="imageGrid" class="image-grid"></div>
+
+      <label class="check-label" id="autoTagRow" style="display:none;">
+        <input type="checkbox" id="autoTagChk">
+        <span>Auto Tag after import (AI)</span>
+      </label>
+      <button id="importBtn" type="button" style="display:none;">Import Selected</button>
+
+      <div id="importProgress" class="import-progress" style="display:none;">
+        <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
+        <div id="importStatus" class="status info"></div>
+      </div>
+    </div>
   </div>
   <script src="popup.js"></script>
+  <script src="scan.js"></script>
 </body>
 </html>

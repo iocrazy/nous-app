@@ -132,6 +132,7 @@ class SummarizeService:
         user_id: Optional[Any],
         parsed_media_id: Optional[int] = None,
         title: Optional[str] = None,
+        task_id: Optional[str] = None,
     ) -> Optional[SummarizeResult]:
         """Run the summarize agent on a transcript.
 
@@ -139,6 +140,10 @@ class SummarizeService:
         ``agent_runs`` row lands (telemetry / cost / outcome). Bare
         path (None user) is for smoke tests only — no agent_runs row,
         no cost capture.
+
+        ``task_id``: the task_tracking PK (dbos_workflow_id) when running
+        inside a tracked workflow — threaded into RunRecorder for the
+        paperclip-style task ↔ run bidirectional linkage (mig 282).
         """
         if not transcript:
             return None
@@ -220,6 +225,7 @@ class SummarizeService:
                 agent_id=composed.agent_id,
                 user_id=uid,
                 trigger="summarize_workflow",
+                task_id=task_id,
                 model=model or None,
                 provider=provider,
                 input_summary=(transcript[:200] or "").replace("\n", " "),

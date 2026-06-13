@@ -10,8 +10,8 @@ export function BillingPage() {
 
   if (!selectedTeamId) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
-        <p className="text-lg font-medium text-zinc-400">No team selected</p>
+      <div className="flex flex-col items-center justify-center h-64 text-ink-500">
+        <p className="text-lg font-medium text-ink-400">No team selected</p>
         <p className="text-sm mt-1">Select a team to view billing</p>
       </div>
     );

@@ -142,12 +142,12 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
         <div className="fixed inset-0 bg-black/60 z-[59]" onClick={onClose} />
         <div
           ref={panelRef}
-          className="fixed inset-x-0 bottom-0 z-[60] bg-zinc-900 rounded-t-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-200"
+          className="fixed inset-x-0 bottom-0 z-[60] bg-ink-900 rounded-t-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-200"
           style={{ maxHeight: '85vh' }}
         >
           {/* Drag handle */}
           <div className="flex justify-center pt-2 pb-1">
-            <div className="w-10 h-1 rounded-full bg-zinc-700" />
+            <div className="w-10 h-1 rounded-full bg-ink-700" />
           </div>
 
           {browser}
@@ -161,7 +161,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   return createPortal(
     <div
       ref={panelRef}
-      className="fixed z-[60] bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl flex flex-col overflow-hidden"
+      className="fixed z-[60] bg-ink-900 border border-ink-700 rounded-xl shadow-2xl flex flex-col overflow-hidden"
       style={{ top: position.top, left: position.left, width: size.width, height: size.height }}
     >
       {browser}

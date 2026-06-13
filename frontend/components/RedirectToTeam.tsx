@@ -15,7 +15,7 @@ export function RedirectToTeam({ view }: { view: string }) {
   if (teamsLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-black">
-        <div className="w-8 h-8 rounded-full border-2 border-zinc-700 border-t-indigo-400 animate-spin" />
+        <div className="w-8 h-8 rounded-full border-2 border-ink-700 border-t-indigo-400 animate-spin" />
       </div>
     );
   }
@@ -24,7 +24,7 @@ export function RedirectToTeam({ view }: { view: string }) {
   if (!teamId) {
     // No teams at all — show message instead of redirect loop
     return (
-      <div className="flex items-center justify-center h-screen bg-black text-zinc-400">
+      <div className="flex items-center justify-center h-screen bg-black text-ink-400">
         <p>No workspace available. Please create a team first.</p>
       </div>
     );
@@ -44,7 +44,7 @@ export function RedirectToDefaultTeam() {
   if (teamsLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-black">
-        <div className="w-8 h-8 rounded-full border-2 border-zinc-700 border-t-indigo-400 animate-spin" />
+        <div className="w-8 h-8 rounded-full border-2 border-ink-700 border-t-indigo-400 animate-spin" />
       </div>
     );
   }
@@ -52,7 +52,7 @@ export function RedirectToDefaultTeam() {
   const teamId = selectedTeamId || personalTeamId || (teams.length > 0 ? teams[0].id : null);
   if (!teamId) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black text-zinc-400">
+      <div className="flex items-center justify-center h-screen bg-black text-ink-400">
         <p>No workspace available. Please create a team first.</p>
       </div>
     );

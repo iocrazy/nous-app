@@ -294,7 +294,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
           <div className="absolute top-2 left-2 z-10 px-2.5 py-1 bg-black/70 backdrop-blur-sm rounded-lg text-xs font-medium text-blue-300 border border-blue-500/30">
             V{versionA.version_number}
           </div>
-          <div className="flex-1 min-h-0 flex items-center justify-center bg-zinc-950 rounded-sm overflow-hidden">
+          <div className="flex-1 min-h-0 flex items-center justify-center bg-ink-950 rounded-sm overflow-hidden">
             <video
               ref={videoARef}
               className="w-full h-full object-contain"
@@ -310,7 +310,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
           <div className="absolute top-2 left-2 z-10 px-2.5 py-1 bg-black/70 backdrop-blur-sm rounded-lg text-xs font-medium text-emerald-300 border border-emerald-500/30">
             V{versionB.version_number}
           </div>
-          <div className="flex-1 min-h-0 flex items-center justify-center bg-zinc-950 rounded-sm overflow-hidden">
+          <div className="flex-1 min-h-0 flex items-center justify-center bg-ink-950 rounded-sm overflow-hidden">
             <video
               ref={videoBRef}
               className="w-full h-full object-contain"
@@ -325,12 +325,12 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
       {/* Loading indicator */}
       {!bothLoaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50 pointer-events-none z-20">
-          <div className="w-8 h-8 border-2 border-zinc-600 border-t-white rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-ink-600 border-t-white rounded-full animate-spin" />
         </div>
       )}
 
       {/* Unified controls bar */}
-      <div className="flex-shrink-0 bg-zinc-900/95 backdrop-blur border-t border-zinc-800 px-3 py-2">
+      <div className="flex-shrink-0 bg-ink-900/95 backdrop-blur border-t border-ink-800 px-3 py-2">
         {/* Seek bar */}
         <div className="relative w-full h-5 flex items-center mb-1 group/seek">
           <input
@@ -342,7 +342,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
             onChange={handleSeek}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
           />
-          <div className="w-full h-1 group-hover/seek:h-1.5 bg-zinc-700 rounded-full transition-all relative">
+          <div className="w-full h-1 group-hover/seek:h-1.5 bg-ink-700 rounded-full transition-all relative">
             <div
               className="h-full bg-white rounded-full transition-all relative"
               style={{ width: `${seekProgress}%` }}
@@ -358,7 +358,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
           {!isPlaying && (
             <button
               onClick={() => stepFrame(-1)}
-              className="p-1.5 text-zinc-400 hover:text-white transition-colors"
+              className="p-1.5 text-ink-400 hover:text-white transition-colors"
               aria-label="Previous Frame"
               title="Previous Frame (Left Arrow)"
             >
@@ -369,7 +369,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
           {/* Play / Pause */}
           <button
             onClick={togglePlayPause}
-            className="p-1.5 text-white hover:text-zinc-300 transition-colors"
+            className="p-1.5 text-white hover:text-ink-300 transition-colors"
             aria-label={isPlaying ? 'Pause' : 'Play'}
             disabled={!bothLoaded}
           >
@@ -380,7 +380,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
           {!isPlaying && (
             <button
               onClick={() => stepFrame(1)}
-              className="p-1.5 text-zinc-400 hover:text-white transition-colors"
+              className="p-1.5 text-ink-400 hover:text-white transition-colors"
               aria-label="Next Frame"
               title="Next Frame (Right Arrow)"
             >
@@ -392,7 +392,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
           <div className="flex items-center gap-1 group/vol">
             <button
               onClick={toggleMute}
-              className="p-1.5 text-white hover:text-zinc-300 transition-colors"
+              className="p-1.5 text-white hover:text-ink-300 transition-colors"
               aria-label={isMuted ? 'Unmute' : 'Mute'}
             >
               {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
@@ -411,7 +411,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
           </div>
 
           {/* Time display */}
-          <span className="text-xs font-mono text-zinc-300 select-none ml-1">
+          <span className="text-xs font-mono text-ink-300 select-none ml-1">
             {isPlaying ? (
               <>
                 {formatTime(currentTime)} / {formatTime(duration)}
@@ -419,7 +419,7 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
             ) : (
               <>
                 {formatTimeWithFrames(currentTime, effectiveFps)}{' '}
-                <span className="text-zinc-500">[F{frameNumber}]</span>
+                <span className="text-ink-500">[F{frameNumber}]</span>
                 {' / '}
                 {formatTime(duration)}
               </>
@@ -429,14 +429,14 @@ export const VersionCompareView: React.FC<VersionCompareViewProps> = ({
           <div className="flex-1" />
 
           {/* Synced badge */}
-          <span className="text-[10px] text-zinc-500 font-medium px-2 py-0.5 bg-zinc-800 rounded-full select-none">
+          <span className="text-[10px] text-ink-500 font-medium px-2 py-0.5 bg-ink-800 rounded-full select-none">
             {t('mediatrack.review.syncedPlayback')}
           </span>
 
           {/* Fullscreen */}
           <button
             onClick={handleFullscreen}
-            className="p-1.5 text-white hover:text-zinc-300 transition-colors"
+            className="p-1.5 text-white hover:text-ink-300 transition-colors"
             aria-label="Fullscreen"
           >
             <Maximize size={16} />

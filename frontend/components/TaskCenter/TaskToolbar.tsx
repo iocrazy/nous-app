@@ -71,15 +71,15 @@ const GroupByPicker: React.FC<{
         onClick={() => setOpen((v) => !v)}
         className={`p-1.5 rounded border transition ${
           open || value !== 'none'
-            ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
-            : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+            ? 'bg-ink-800 border-ink-700 text-ink-100'
+            : 'bg-ink-900 border-ink-800 text-ink-400 hover:text-ink-200'
         }`}
         title={`Group by: ${GROUP_OPTIONS.find((o) => o.value === value)?.label ?? 'None'}`}
       >
         <Layers size={13} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-44 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl z-30 py-1">
+        <div className="absolute right-0 top-full mt-1 w-44 bg-ink-950 border border-ink-800 rounded-lg shadow-2xl z-30 py-1">
           {GROUP_OPTIONS.map((o) => {
             const active = o.value === value;
             return (
@@ -88,7 +88,7 @@ const GroupByPicker: React.FC<{
                 type="button"
                 onClick={() => { onChange(o.value); setOpen(false); }}
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition ${
-                  active ? 'bg-zinc-900 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-900/60'
+                  active ? 'bg-ink-900 text-ink-100' : 'text-ink-300 hover:bg-ink-900/60'
                 }`}
               >
                 <span className="flex-1">{o.label}</span>
@@ -115,7 +115,7 @@ const Pill: React.FC<{ active: boolean; onClick: () => void; children: React.Rea
     className={`px-2 py-0.5 text-[11px] rounded transition ${
       active
         ? 'bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-500/40'
-        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+        : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
     }`}
   >
     {children}
@@ -132,7 +132,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
   onRefresh, isRefreshing, totalCount,
 }) => {
   return (
-    <div className="space-y-2 px-4 py-3 border-b border-zinc-800 bg-zinc-950/40 sticky top-0 z-10">
+    <div className="space-y-2 px-4 py-3 border-b border-ink-800 bg-ink-950/40 sticky top-0 z-10">
       <div className="flex items-center gap-3">
         {/* Tasks are auto-created by parser/AI/workforce. The user-facing
            "create something" path is the Schedules feature — link there
@@ -145,20 +145,20 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           <Calendar size={13} /> Schedule
         </a>
         <span
-          className="text-zinc-500 hover:text-zinc-300 cursor-help"
+          className="text-ink-500 hover:text-ink-300 cursor-help"
           title="Tasks in this list are created automatically when you submit a URL to the parser, kick off an AI pipeline, or when an agent dispatches work. To run a task on a recurring cadence, use Schedules."
         >
           <Info size={12} />
         </span>
 
         <div className="relative flex-1 max-w-md">
-          <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-500" />
           <input
             type="text"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search tasks…"
-            className="w-full pl-7 pr-2 py-1 text-xs bg-zinc-900 border border-zinc-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-zinc-200 placeholder-zinc-600"
+            className="w-full pl-7 pr-2 py-1 text-xs bg-ink-900 border border-ink-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-ink-200 placeholder-ink-600"
           />
         </div>
 
@@ -166,7 +166,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           <select
             value={sortBy}
             onChange={(e) => onSortByChange(e.target.value as SortBy)}
-            className="text-xs bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-zinc-300"
+            className="text-xs bg-ink-900 border border-ink-800 rounded px-2 py-1 text-ink-300"
             title="Sort"
           >
             {SORT_OPTIONS.map((o) => (
@@ -176,11 +176,11 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           <GroupByPicker value={groupBy} onChange={onGroupByChange} />
         </div>
 
-        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5">
+        <div className="flex items-center bg-ink-900 border border-ink-800 rounded p-0.5">
           <button
             type="button"
             onClick={() => onViewModeChange('list')}
-            className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'}`}
             title="List view"
           >
             <LayoutList size={13} />
@@ -188,7 +188,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           <button
             type="button"
             onClick={() => onViewModeChange('kanban')}
-            className={`p-1.5 rounded transition ${viewMode === 'kanban' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`p-1.5 rounded transition ${viewMode === 'kanban' ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'}`}
             title="Kanban view"
           >
             <LayoutGrid size={13} />
@@ -199,26 +199,26 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           type="button"
           onClick={onRefresh}
           disabled={isRefreshing}
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 rounded hover:bg-zinc-800"
+          className="p-1.5 text-ink-400 hover:text-ink-200 rounded hover:bg-ink-800"
           title="Refresh"
         >
           <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
         </button>
 
-        <span className="text-[11px] text-zinc-500 ml-auto">
+        <span className="text-[11px] text-ink-500 ml-auto">
           <Layers size={11} className="inline mr-1" />
           {totalCount} task{totalCount === 1 ? '' : 's'}
         </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <span className="text-zinc-600 inline-flex items-center gap-1 mr-1">
+        <span className="text-ink-600 inline-flex items-center gap-1 mr-1">
           <ListFilter size={11} /> Status:
         </span>
         {STATUS_OPTIONS.map((s) => (
           <Pill key={s} active={statusFilter.has(s)} onClick={() => onToggleStatus(s)}>{s}</Pill>
         ))}
-        <span className="text-zinc-600 inline-flex items-center gap-1 mx-2">
+        <span className="text-ink-600 inline-flex items-center gap-1 mx-2">
           <ArrowDownNarrowWide size={11} /> Type:
         </span>
         {TYPE_OPTIONS.map((t) => (

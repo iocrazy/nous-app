@@ -62,6 +62,31 @@ _DEFAULT_COMPACTOR = ContextCompactor()
 SUPPORTED_TOOLS: frozenset[str] = frozenset({"Skill", "Delegate", "ResourceFetch"})
 
 
+def _last_user_text(user_messages: list[dict]) -> str:
+    """Last user-role message content as display text (P3 transcript).
+
+    Multimodal content arrives as a list of blocks — summarise non-text
+    blocks (image_url etc.) instead of dumping base64 into the event log.
+    """
+    for m in reversed(user_messages or []):
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                btype = block.get("type") if isinstance(block, dict) else None
+                if btype == "text":
+                    parts.append(str(block.get("text") or ""))
+                elif btype:
+                    parts.append(f"[{btype}]")
+            return " ".join(p for p in parts if p) or "[non-text content]"
+        return str(content or "")
+    return ""
+
+
 def _is_mcp_tool_name(name: str, mcp_registry) -> bool:
     """Q5: check if a tool name maps to a registered MCP server.
 
@@ -119,10 +144,19 @@ class AgentRunner:
         hooks: Optional[HookRegistry] = None,
         delegate_tool: Optional[Any] = None,
         mcp_registry: Optional[Any] = None,
+        parent_run_id: Optional[str] = None,
+        agent_depth: int = 0,
+        delegation_chain: tuple[str, ...] = (),
     ) -> None:
         self.adapter = adapter
         self.skill_tool = skill_tool
         self.hooks = hooks  # None = no hook chain (back-compat default)
+        # M2 multi-agent scope, threaded into every HookContext. Defaults
+        # describe a top-of-tree turn; sub-agent / workforce wiring passes
+        # the inherited values (see build_agent_runner_stack).
+        self.parent_run_id = parent_run_id
+        self.agent_depth = agent_depth
+        self.delegation_chain = delegation_chain
         # Optional cross-agent dispatch tool. When None, ``Delegate`` calls
         # are answered with an explicit "tool not configured" so the LLM
         # gets useful feedback instead of silent skip behaviour.
@@ -259,9 +293,40 @@ class AgentRunner:
         messages = list(user_messages)
         iteration = 0
         MAX_STREAM_ITERATIONS = 10
+        # mig 286: same wall-clock cap as run_turn (see comment there).
+        import time as _time
+
+        _deadline = (
+            _time.monotonic() + composed.timeout_sec
+            if getattr(composed, "timeout_sec", None)
+            else None
+        )
+
+        # P3 transcript (mig 285): open the event stream with the user turn.
+        # Streaming runs skip the final 'assistant' event — the chat layer
+        # persists the full message itself; tool_call events below are the
+        # part the Transcript adds over chat history.
+        if recorder is not None and hasattr(recorder, "record_event"):
+            await recorder.record_event(
+                "user", {"content": _last_user_text(user_messages)}
+            )
 
         while iteration < MAX_STREAM_ITERATIONS:
             iteration += 1
+            if _deadline is not None and _time.monotonic() > _deadline:
+                logger.warning(
+                    f"[stream_turn] run timeout_sec={composed.timeout_sec} "
+                    f"exceeded at iter={iteration}"
+                )
+                yield StreamChunk(
+                    delta_text=(
+                        f"\n\n[run exceeded the agent's timeout_sec "
+                        f"({composed.timeout_sec}s)]"
+                    ),
+                    finish_reason="length",
+                    usage={"warning": "timeout_sec_exceeded"},
+                )
+                return
             if abort is not None and abort.is_aborted():
                 inc_metric("streaming_aborted_mid")
                 raise RunAborted("user cancel between stream iterations")
@@ -426,6 +491,18 @@ class AgentRunner:
                     }
                 )
 
+                # P3 transcript (mig 285): mirror of run_turn's tool event.
+                if recorder is not None and hasattr(recorder, "record_event"):
+                    await recorder.record_event(
+                        "tool_call",
+                        {
+                            "tool": tool_name,
+                            "args": args,
+                            "result": result,
+                            "iteration": iteration,
+                        },
+                    )
+
                 if loop_guard.is_looping():
                     warning = loop_guard.render_warning()
                     if warning:
@@ -525,6 +602,23 @@ class AgentRunner:
 
         messages = list(user_messages)
         iteration = 0
+        # mig 286 (paperclip P4): per-run wall-clock cap. Checked between
+        # LLM iterations — bounds the tool loop; a single hung HTTP call is
+        # bounded by the adapter's own client timeout.
+        import time as _time
+
+        _deadline = (
+            _time.monotonic() + composed.timeout_sec
+            if getattr(composed, "timeout_sec", None)
+            else None
+        )
+
+        # P3 transcript (mig 285): open the event stream with the user turn.
+        # Best-effort — record_event never raises.
+        if recorder is not None and hasattr(recorder, "record_event"):
+            await recorder.record_event(
+                "user", {"content": _last_user_text(user_messages)}
+            )
 
         # Wave G (G3): per-run loop guard. Detects "same (tool, args)
         # called >= N times in last M calls" and warns the LLM mid-run
@@ -579,6 +673,21 @@ class AgentRunner:
 
         for _ in range(MAX_TOOL_ITERATIONS):
             iteration += 1
+
+            if _deadline is not None and _time.monotonic() > _deadline:
+                logger.warning(
+                    f"[AgentRunner] run timeout_sec={composed.timeout_sec} "
+                    f"exceeded at iter={iteration}"
+                )
+                return {
+                    "content": "",
+                    "raw": None,
+                    "error": (
+                        f"run exceeded the agent's timeout_sec "
+                        f"({composed.timeout_sec}s)"
+                    ),
+                    "error_code": "run_timeout",
+                }
 
             if recorder is not None:
                 await recorder.heartbeat()
@@ -657,6 +766,10 @@ class AgentRunner:
                 # msg.get("content") can be None (e.g. Claude emits null
                 # content on a pure-tool-use turn). The `or ""` guarantees
                 # the contract — callers always receive a str.
+                if recorder is not None and hasattr(recorder, "record_event"):
+                    await recorder.record_event(
+                        "assistant", {"content": msg.get("content") or ""}
+                    )
                 return {
                     "content": msg.get("content") or "",
                     "raw": resp,
@@ -803,6 +916,20 @@ class AgentRunner:
                         "iteration": iteration,
                     }
                 )
+
+                # P3 transcript (mig 285): one event per executed tool call
+                # (args + result in one payload — the Nice renderer shows it
+                # as a folded card). record_event truncates long values.
+                if recorder is not None and hasattr(recorder, "record_event"):
+                    await recorder.record_event(
+                        "tool_call",
+                        {
+                            "tool": tool_name,
+                            "args": args,
+                            "result": result,
+                            "iteration": iteration,
+                        },
+                    )
 
                 # Wave G (G3): observe for loop detection. Args
                 # canonicalized to a stable string (sorted keys).
@@ -1004,6 +1131,9 @@ class AgentRunner:
             accumulated_completion_tokens=completion_tokens,
             accumulated_cost_cents=cost_cents,
             iteration=iteration,
+            parent_run_id=self.parent_run_id,
+            agent_depth=self.agent_depth,
+            delegation_chain=self.delegation_chain,
         )
 
     @staticmethod

@@ -221,12 +221,19 @@ def storyboard_video_workflow(
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-def split_script_step(script_text: str, style_guide: str) -> list[dict[str, Any]]:
+def split_script_step(
+    script_text: str, style_guide: str, project_id: str = ""
+) -> list[dict[str, Any]]:
     from app.services.storyboard.storyboard_ai_service import StoryboardAIService
 
     async def _do() -> list[dict[str, Any]]:
         svc = StoryboardAIService()
-        return await svc.split_script(script_text=script_text, style_guide=style_guide)
+        guide = style_guide
+        if not guide and project_id:
+            # Default to the project's saved style profile (Phase 4 M9);
+            # build_project_style_fragment swallows failures to "".
+            guide = await svc.build_project_style_fragment(project_id)
+        return await svc.split_script(script_text=script_text, style_guide=guide)
 
     return run_async(_do())
 
@@ -300,7 +307,7 @@ async def storyboard_script_split_workflow(
     task_id: Optional[str] = None,
     style_guide: str = "",
 ) -> dict[str, Any]:
-    scenes = split_script_step(script_text, style_guide)
+    scenes = split_script_step(script_text, style_guide, project_id)
     node_ids = await persist_split_scenes_step(project_id, scenes)
     return {
         "status": "success",

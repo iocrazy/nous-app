@@ -62,20 +62,20 @@ export const CreateTeamModal: React.FC<CreateTeamModalProps> = ({
       />
 
       {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Users size={20} className="text-indigo-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('user.createTeam') || 'Create Team'}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -84,7 +84,7 @@ export const CreateTeamModal: React.FC<CreateTeamModalProps> = ({
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6">
           <div className="mb-4">
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
+            <label className="block text-sm font-medium text-ink-300 mb-2">
               {t('user.teamName') || 'Team Name'}
             </label>
             <input
@@ -92,7 +92,7 @@ export const CreateTeamModal: React.FC<CreateTeamModalProps> = ({
               value={teamName}
               onChange={(e) => setTeamName(e.target.value)}
               placeholder={t('user.teamNamePlaceholder') || 'Enter team name'}
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
               autoFocus
             />
           </div>
@@ -107,7 +107,7 @@ export const CreateTeamModal: React.FC<CreateTeamModalProps> = ({
             <button
               type="button"
               onClick={handleClose}
-              className="flex-1 px-4 py-3 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-xl font-medium transition-colors"
+              className="flex-1 px-4 py-3 text-ink-300 bg-ink-800 hover:bg-ink-700 rounded-xl font-medium transition-colors"
             >
               {t('common.cancel') || 'Cancel'}
             </button>

@@ -102,8 +102,8 @@ export function ChatInput({
       attributes: {
         class: [
           'flex-1 resize-none rounded-lg px-3 py-2',
-          'bg-zinc-800 border border-zinc-700',
-          'text-sm text-zinc-200 placeholder-zinc-500',
+          'bg-ink-800 border border-ink-700',
+          'text-sm text-ink-200 placeholder-ink-500',
           'focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50',
           'disabled:opacity-40 disabled:cursor-not-allowed',
           'leading-6 min-h-[36px] max-h-[120px] overflow-y-auto',
@@ -204,7 +204,7 @@ export function ChatInput({
   }, [disabled, editor, onSend]);
 
   return (
-    <div className="flex items-end gap-2 p-2 bg-zinc-900 border-t border-zinc-700/50">
+    <div className="flex items-end gap-2 p-2 bg-ink-900 border-t border-ink-700/50">
       <div className="flex-1 min-w-0">
         <EditorContent editor={editor} />
       </div>

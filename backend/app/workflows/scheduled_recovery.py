@@ -31,6 +31,46 @@ from loguru import logger
 from app.workflows.workflow_health_sweeper import _dbos_claims_workflow  # noqa: F401
 
 
+def _readable_dbos_error(raw: str | None, *, clip: int = 300) -> str:
+    """Best-effort human-readable text from DBOS's base64-pickled error.
+
+    Extracts string opcodes via pickletools (NO unpickling — never
+    executes pickle payloads) so messages like "RuntimeError: audio
+    extraction failed for X" survive into task_tracking.error_msg.
+    Falls back to a generic marker when the payload is unreadable."""
+    fallback = "DBOS workflow errored (unreadable error payload)"
+    if not raw:
+        return fallback
+    try:
+        import base64
+        import io
+        import pickletools
+
+        blob = base64.b64decode(raw)
+        parts: list[str] = []
+        for opcode, arg, _pos in pickletools.genops(io.BytesIO(blob)):
+            if isinstance(arg, str) and arg.strip():
+                parts.append(arg.strip())
+            elif isinstance(arg, bytes):
+                try:
+                    text = arg.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    continue
+                if text:
+                    parts.append(text)
+        # Drop module/class plumbing ("builtins", dotted import paths
+        # without spaces) — keep the human sentence fragments.
+        readable = [
+            p
+            for p in parts
+            if (" " in p or len(p) > 40) and not p.startswith(("_", "builtins"))
+        ]
+        msg = " | ".join(dict.fromkeys(readable)) or " | ".join(dict.fromkeys(parts))
+        return msg[:clip] if msg else fallback
+    except Exception:  # noqa: BLE001
+        return fallback
+
+
 def _max_download_retry_attempts() -> int:
     """Give-up threshold for retry_failed_downloads. Past this many attempts a
     FAILED download is no longer re-dispatched (it stays 'failed') so a
@@ -189,6 +229,40 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     now_dt = datetime.now(timezone.utc)
 
+    # Pass A (3-layer observability fix, 2026-06-11): rows whose DBOS
+    # workflow ALREADY ended in ERROR are real failures the lifecycle
+    # trigger missed (e.g. rows created before the trigger linked them).
+    # Surface the actual workflow error instead of letting them fall
+    # through to the generic "never claimed" lost text below — that
+    # text told users to Retry tasks that had genuinely run and failed.
+    errored_failed = 0
+    try:
+        errored = await db_engine.fetch_all(
+            "SELECT tt.dbos_workflow_id, ws.error "
+            "FROM public.task_tracking tt "
+            "JOIN dbos.workflow_status ws "
+            "  ON ws.workflow_uuid = tt.dbos_workflow_id "
+            "WHERE tt.status = 'pending' AND tt.phase = 'queued' "
+            "AND tt.created_at < :cutoff AND ws.status = 'ERROR' "
+            "LIMIT 100",
+            {"cutoff": cutoff},
+        )
+        for row in errored:
+            await db_engine.execute(
+                "UPDATE public.task_tracking SET status = 'failed', "
+                "phase = 'failed', error_msg = :msg, "
+                "error_code = 'DBOS_ERROR', updated_at = :now "
+                "WHERE dbos_workflow_id = :wid",
+                {
+                    "msg": _readable_dbos_error(row.get("error")),
+                    "now": now_dt,
+                    "wid": row["dbos_workflow_id"],
+                },
+            )
+            errored_failed += 1
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[reap] DBOS-error pass failed (non-fatal): {e!r}")
+
     # status/phase 'lost' on orphaned tasks: a deliberate "writer of last
     # resort" exception to the trigger-owns-phase rule — the DBOS lifecycle
     # trigger never fires for tasks the worker never claimed.
@@ -197,6 +271,7 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     # DBOS still owns (PENDING/ENQUEUED). DBOS will recover/finalize it and
     # the lifecycle trigger mirrors the real outcome. Only flip rows DBOS
     # has no live/queued claim on (terminal status, or no row at all).
+    # (Rows with ws.status='ERROR' were converted to real failures above.)
     tasks_reaped = await db_engine.execute(
         "UPDATE public.task_tracking tt SET status = 'lost', phase = 'lost', "
         "error_msg = :msg, error_code = 'WORKER_LOST', updated_at = :now "
@@ -205,8 +280,10 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
         "AND NOT EXISTS ("
         "  SELECT 1 FROM dbos.workflow_status ws "
         "  WHERE ws.workflow_uuid = tt.dbos_workflow_id "
-        "  AND ws.status IN ('PENDING', 'ENQUEUED')"
-        ")",
+        # ERROR rows belong to the pass above (real failure, real msg);
+        # SUCCESS rows must never read "never claimed" either — if the
+        # trigger missed one, lost would be a lie twice over.
+        "  AND ws.status IN ('PENDING', 'ENQUEUED', 'ERROR', 'SUCCESS')" ")",
         {
             "msg": (
                 "Worker never claimed this task within 1h — DBOS workflow "
@@ -243,6 +320,7 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     return {
         "status": "success",
         "tasks_reaped": tasks_reaped,
+        "errored_failed": errored_failed,
         "resources_reaped": resources_reaped,
     }
 

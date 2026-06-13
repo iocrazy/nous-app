@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ClockDriftBanner } from './ClockDriftBanner';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Search, Library as LibraryIcon, User, FolderOpen, Download, Check,
@@ -29,6 +30,8 @@ import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
 import { CreateProjectModal } from './CreateProjectModal';
 import { PaymentModal } from './PaymentModal';
+import { IslandShell } from './IslandShell';
+import { islandUI } from '../utils/featureFlags';
 
 // ---------------------------------------------------------------------------
 // AppLayout
@@ -218,31 +221,37 @@ function AppLayoutInner() {
     setIsMobileMenuOpen(false);
   };
 
-  // Re-evaluate the tab bar against the window when the page / overlay changes,
-  // and close any open tab popup whenever the bar collapses on scroll.
-  useEffect(() => { resetTabBar(); }, [view, location.pathname, isMobileTasksOpen, resetTabBar]);
+  // Re-evaluate the tab bar when the page / overlay changes, and close any open
+  // tab popup whenever the bar collapses on scroll. Opening the Tasks overlay
+  // starts a fresh scroll surface at its top, so force-expand there instead of
+  // reading the (possibly mid-scrolled) underlying window — otherwise opening
+  // Tasks from a scrolled page would show the bar collapsed.
+  useEffect(() => {
+    if (isMobileTasksOpen) expandTabBar();
+    else resetTabBar();
+  }, [view, location.pathname, isMobileTasksOpen, resetTabBar, expandTabBar]);
   useEffect(() => {
     if (tabBarCollapsed) { setIsResourcesMenuOpen(false); setIsDownloadsMenuOpen(false); }
   }, [tabBarCollapsed]);
 
   // ── Mobile bottom-bar tab config (consumed by <MobileTabBar/>) ──
   const downloadsPopup = isDownloadsMenuOpen ? (
-    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-ink-900/98 backdrop-blur-xl border border-ink-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
       <div className="flex p-1.5 gap-1">
-        <button onClick={() => { setLibraryViewMode('grid'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><LayoutGrid size={18} /></button>
-        <button onClick={() => { setLibraryViewMode('list'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><LayoutList size={18} /></button>
-        <button onClick={() => { setLibraryViewMode('feed'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}><Smartphone size={18} /></button>
+        <button onClick={() => { setLibraryViewMode('grid'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-ink-800 text-ink-50' : 'text-ink-500 hover:text-ink-300'}`}><LayoutGrid size={18} /></button>
+        <button onClick={() => { setLibraryViewMode('list'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-ink-800 text-ink-50' : 'text-ink-500 hover:text-ink-300'}`}><LayoutList size={18} /></button>
+        <button onClick={() => { setLibraryViewMode('feed'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-ink-800 text-ink-50' : 'text-ink-500 hover:text-ink-300'}`}><Smartphone size={18} /></button>
       </div>
     </div>
   ) : null;
 
   const resourcesPopup = isResourcesMenuOpen ? (
-    <div className="absolute bottom-full right-0 mb-3 w-56 bg-zinc-900/98 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden max-h-[60vh] overflow-y-auto">
+    <div className="absolute bottom-full right-0 mb-3 w-56 bg-ink-900/98 backdrop-blur-xl border border-ink-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden max-h-[60vh] overflow-y-auto">
       <div className="py-1.5">
         <button
           onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources')); setIsResourcesMenuOpen(false); }}
           className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-            view === 'resources' && !isDownloadsRoute && !location.pathname.includes('/shared') && !location.pathname.includes('/recycle') && !location.pathname.includes('/library/') && !location.pathname.includes('/smart/') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+            view === 'resources' && !isDownloadsRoute && !location.pathname.includes('/shared') && !location.pathname.includes('/recycle') && !location.pathname.includes('/library/') && !location.pathname.includes('/smart/') ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
           }`}
         >
           <FolderOpen size={16} className="shrink-0" />
@@ -251,7 +260,7 @@ function AppLayoutInner() {
         <button
           onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/shared')); setIsResourcesMenuOpen(false); }}
           className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-            location.pathname.includes('/shared') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+            location.pathname.includes('/shared') ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
           }`}
         >
           <Share2 size={16} className="shrink-0" />
@@ -260,7 +269,7 @@ function AppLayoutInner() {
         <button
           onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/recycle')); setIsResourcesMenuOpen(false); }}
           className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-            location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+            location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
           }`}
         >
           <Trash2 size={16} className="shrink-0" />
@@ -270,17 +279,17 @@ function AppLayoutInner() {
 
       {mobileLibraries.length > 0 && (
         <>
-          <div className="h-px bg-zinc-800/60 mx-3" />
+          <div className="h-px bg-ink-800/60 mx-3" />
           <div className="py-1.5">
             <div className="px-3.5 py-1.5">
-              <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Libraries</span>
+              <span className="text-[10px] font-semibold text-ink-500 uppercase tracking-wider">Libraries</span>
             </div>
             {mobileLibraries.map(lib => (
               <button
                 key={lib.id}
                 onClick={(e) => { e.stopPropagation(); navigate(teamPath(`/resources/library/${lib.id}`)); setIsResourcesMenuOpen(false); }}
                 className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-                  location.pathname.includes(`/library/${lib.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                  location.pathname.includes(`/library/${lib.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
                 }`}
               >
                 <BookOpen size={16} className="shrink-0" />
@@ -293,17 +302,17 @@ function AppLayoutInner() {
 
       {mobileSmartFolders.length > 0 && (
         <>
-          <div className="h-px bg-zinc-800/60 mx-3" />
+          <div className="h-px bg-ink-800/60 mx-3" />
           <div className="py-1.5">
             <div className="px-3.5 py-1.5">
-              <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Smart Folders</span>
+              <span className="text-[10px] font-semibold text-ink-500 uppercase tracking-wider">Smart Folders</span>
             </div>
             {mobileSmartFolders.map(sf => (
               <button
                 key={sf.id}
                 onClick={(e) => { e.stopPropagation(); navigate(teamPath(`/resources/smart/${sf.id}`)); setIsResourcesMenuOpen(false); }}
                 className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-                  location.pathname.includes(`/smart/${sf.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-zinc-300 hover:bg-zinc-800/60'
+                  location.pathname.includes(`/smart/${sf.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
                 }`}
               >
                 <Zap size={16} className="shrink-0" />
@@ -348,6 +357,66 @@ function AppLayoutInner() {
     },
   ];
 
+  // Island shell (spec D1–D12) — flag-gated. Hoist the Sidebar/TopBar props so
+  // the classic frame and the IslandShell frame share IDENTICAL wiring (D12).
+  const island = islandUI();
+
+  // Typed via ComponentProps so the arrow params get the SAME contextual types
+  // the original inline JSX inferred (e.g. SmartCollection.id) — D12 no-op.
+  const sidebarProps: React.ComponentProps<typeof Sidebar> = {
+    mode: sidebarMode,
+    view,
+    settingsTab,
+    collapsed: sidebarCollapsed,
+    onToggleCollapse: handleToggleSidebar,
+    teams,
+    activeTeamId: selectedTeamId,
+    personalTeamId,
+    currentTeam,
+    permissions: userPermissions,
+    isViewEnabled,
+    userName: userProfile?.name,
+    userRole: userProfile?.role,
+    activeProject: selectedProject,
+    isLibraryOpen,
+    isSettingsOpen,
+    activeSmartCollectionId,
+    onViewChange: (v) => {
+      if (v === 'mediatrack') { setSelectedProject(null); setReviewFile(null); }
+    },
+    onSettingsTabChange: (tab) => setSettingsTab(tab as any),
+    onToggleLibrary: toggleLibraryMenu,
+    onToggleSettings: toggleSettingsMenu,
+    onTeamChange: () => {
+      setActiveCollectionId(null);
+      setSelectedProject(null);
+      setReviewFile(null);
+    },
+    onCreateTeam: handleCreateTeam,
+    onProjectBack: () => { setSelectedProject(null); setReviewFile(null); },
+    onSmartCollectionSelect: (collection) => {
+      setIsSearchActive(false);
+      setSearchResults([]);
+      setSearchQueryText('');
+      setActiveSmartCollectionId(collection?.id || null);
+      navigate(teamPath('/resources/downloads'));
+      setActiveCollectionId(null);
+      setActiveLibraryTab('my-library');
+    },
+    onProjectSelect: setSelectedProject,
+  };
+
+  const topBarProps: React.ComponentProps<typeof TopBar> = {
+    user: userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null,
+    unreadCount: notifications.filter(n => !n.read).length,
+    onSignOut: handleAuthLogout,
+    onOpenSettings: (tab) => {
+      setSettingsModalInitialTab(tab || 'personal');
+      setIsSettingsModalOpen(true);
+    },
+    sidebarCollapsed,
+  };
+
   return (
     <ToastProvider>
     <ConfirmProvider>
@@ -357,7 +426,10 @@ function AppLayoutInner() {
         scroll container — `overflow-x:hidden` silently turns the y-axis into a
         scroll container, which breaks `position: sticky` for everything inside
         (the mobile filter chip bar wouldn't pin). */}
-    <div className="flex min-h-[100dvh] bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-clip">
+    <div className="flex min-h-[100dvh] bg-ink-950 text-ink-100 font-sans selection:bg-indigo-500/30 overflow-x-clip">
+
+      {/* Device clock-drift warning (breaks token refresh — May-20-clock incident) */}
+      <ClockDriftBanner />
 
       {/* User Profile Modal */}
       <UserProfileModal
@@ -446,70 +518,24 @@ function AppLayoutInner() {
         hidden={isDetailPage}
       />
 
-      {/* Sidebar */}
-      <Sidebar
-        mode={sidebarMode}
-        view={view}
-        settingsTab={settingsTab}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={handleToggleSidebar}
-        teams={teams}
-        activeTeamId={selectedTeamId}
-        personalTeamId={personalTeamId}
-        currentTeam={currentTeam}
-        permissions={userPermissions}
-        isViewEnabled={isViewEnabled}
-        userName={userProfile?.name}
-        userRole={userProfile?.role}
-        activeProject={selectedProject}
-        isLibraryOpen={isLibraryOpen}
-        isSettingsOpen={isSettingsOpen}
-        activeSmartCollectionId={activeSmartCollectionId}
-        onViewChange={(v) => {
-          // Side effects only — Sidebar handles navigation directly via useNavigate
-          if (v === 'mediatrack') { setSelectedProject(null); setReviewFile(null); }
-        }}
-        onSettingsTabChange={(tab) => setSettingsTab(tab as any)}
-        onToggleLibrary={toggleLibraryMenu}
-        onToggleSettings={toggleSettingsMenu}
-        onTeamChange={(teamId) => {
-          // WorkspaceSwitcher navigates via URL; just reset local state
-          setActiveCollectionId(null);
-          setSelectedProject(null);
-          setReviewFile(null);
-        }}
-        onCreateTeam={handleCreateTeam}
-        onProjectBack={() => { setSelectedProject(null); setReviewFile(null); }}
-        onSmartCollectionSelect={(collection) => {
-          setIsSearchActive(false);
-          setSearchResults([]);
-          setSearchQueryText('');
-          setActiveSmartCollectionId(collection?.id || null);
-          navigate(teamPath('/resources/downloads'));
-          setActiveCollectionId(null);
-          setActiveLibraryTab('my-library');
-        }}
-        onProjectSelect={setSelectedProject}
-      />
-
-      {/* TopBar — fixed, sibling to Sidebar for clean positioning */}
-      <TopBar
-        user={userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null}
-        unreadCount={notifications.filter(n => !n.read).length}
-        onSignOut={handleAuthLogout}
-        onOpenSettings={(tab) => {
-          setSettingsModalInitialTab(tab || 'personal');
-          setIsSettingsModalOpen(true);
-        }}
-        sidebarCollapsed={sidebarCollapsed}
-      />
+      {/* Desktop frame — classic fixed Sidebar+TopBar (flag OFF). Island frame
+          (flag ON) is rendered below in place of <main>. Both are `sm:flex`
+          / `hidden`-gated so mobile chrome below is unaffected. */}
+      {!island && (
+        <>
+          {/* Sidebar */}
+          <Sidebar {...sidebarProps} />
+          {/* TopBar — fixed, sibling to Sidebar for clean positioning */}
+          <TopBar {...topBarProps} />
+        </>
+      )}
 
       {/* Mobile workspace avatar — hidden on detail pages */}
       <button
         className={`sm:hidden fixed top-[calc(env(safe-area-inset-top,0px)+10px)] left-3 z-[31] w-9 h-9 rounded-full transition-all active:scale-95 ${isDetailPage ? 'hidden' : ''}`}
         onClick={() => setIsMobileProfileOpen(true)}
       >
-        <div className={`w-full h-full rounded-full flex items-center justify-center text-sm font-bold shadow-lg ring-2 ring-offset-2 ring-offset-zinc-950 ${
+        <div className={`w-full h-full rounded-full flex items-center justify-center text-sm font-bold shadow-lg ring-2 ring-offset-2 ring-offset-ink-950 ${
           selectedTeamId === personalTeamId
             ? 'bg-indigo-600 text-white ring-indigo-500/50'
             : 'bg-emerald-600 text-white ring-emerald-500/50'
@@ -520,11 +546,18 @@ function AppLayoutInner() {
         </div>
       </button>
 
-      {/* Main Content */}
-      <main className={mainContentClass}>
-        {/* Routed content */}
-        <Outlet />
-      </main>
+      {/* Main Content — island shell (flag ON) draws the full desktop frame
+          (topbar + nav island + workspace island); otherwise the classic main. */}
+      {island ? (
+        <IslandShell isDetailPage={isDetailPage} topBarProps={topBarProps} sidebarProps={sidebarProps}>
+          <Outlet />
+        </IslandShell>
+      ) : (
+        <main className={mainContentClass}>
+          {/* Routed content */}
+          <Outlet />
+        </main>
+      )}
 
       {/* Payment Modal */}
       {selectedPaymentPackage && selectedTeamId && (

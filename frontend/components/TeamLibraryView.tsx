@@ -31,7 +31,7 @@ export const TeamLibraryView: React.FC<TeamLibraryViewProps> = ({
       <div className="h-full">
         {/* No Team Selected */}
         {!currentTeam && (
-          <div className="flex flex-col items-center justify-center h-96 text-zinc-500">
+          <div className="flex flex-col items-center justify-center h-96 text-ink-500">
             <p className="text-lg">Select a team to view collections</p>
             <p className="text-sm mt-2">Use the team selector in the header to choose a team</p>
           </div>
@@ -39,7 +39,7 @@ export const TeamLibraryView: React.FC<TeamLibraryViewProps> = ({
 
         {/* Loading */}
         {currentTeam && isLoading && (
-          <div className="flex flex-col items-center justify-center h-96 text-zinc-500">
+          <div className="flex flex-col items-center justify-center h-96 text-ink-500">
             <Loader2 className="w-8 h-8 animate-spin mb-4 text-indigo-500" />
             <p>Loading collections...</p>
           </div>
@@ -58,7 +58,7 @@ export const TeamLibraryView: React.FC<TeamLibraryViewProps> = ({
                 />
               ))}
               {collections.length === 0 && (
-                <div className="col-span-full text-center py-12 text-zinc-500">
+                <div className="col-span-full text-center py-12 text-ink-500">
                   <p>No collections yet</p>
                   <p className="text-sm mt-1">Create your first collection to start organizing</p>
                 </div>
@@ -72,17 +72,17 @@ export const TeamLibraryView: React.FC<TeamLibraryViewProps> = ({
 
   // Breadcrumb navigation (when inside a collection)
   return (
-    <div className="flex items-center gap-2 text-sm text-zinc-400 mb-4 px-6 pt-4">
+    <div className="flex items-center gap-2 text-sm text-ink-400 mb-4 px-6 pt-4">
       <button
         onClick={onBackToFolders}
-        className="hover:text-white transition-colors"
+        className="hover:text-ink-50 transition-colors"
       >
         Team Library
       </button>
       <ChevronRight size={14} />
-      <span className="text-white">{currentCollection?.name || 'Collection'}</span>
+      <span className="text-ink-50">{currentCollection?.name || 'Collection'}</span>
       {currentCollection && (
-        <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-zinc-800 rounded text-zinc-400">
+        <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-ink-800 rounded text-ink-400">
           <span>{currentCollection.video_count || 0}</span>
           <Video size={12} className="text-indigo-400" />
         </span>

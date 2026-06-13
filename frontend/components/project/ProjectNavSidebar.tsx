@@ -145,7 +145,7 @@ export function ProjectNavSidebar({
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
-            className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors"
             title="Expand sidebar"
           >
             <ChevronRight size={12} />
@@ -156,12 +156,12 @@ export function ProjectNavSidebar({
   }
 
   return (
-    <div className="group relative w-52 h-full flex flex-col border-r border-zinc-800/40 pt-16">
+    <div className="group relative w-52 h-full flex flex-col border-r border-ink-800/40 pt-16">
       {/* Collapse toggle */}
       {onToggleCollapse && (
         <button
           onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
+          className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors opacity-0 group-hover:opacity-100"
           title="Collapse sidebar"
         >
           <ChevronLeft size={12} />
@@ -173,38 +173,38 @@ export function ProjectNavSidebar({
         <div className="flex items-center gap-2">
           <button
             onClick={onBackToList}
-            className="p-1 rounded hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors duration-120"
+            className="p-1 rounded hover:bg-ink-700 text-ink-400 hover:text-ink-200 transition-colors duration-120"
             title="Back to projects"
           >
             <ArrowLeft size={16} />
           </button>
           <button
             onClick={handleToggleDropdown}
-            className="flex items-center gap-2 flex-1 min-w-0 rounded-md px-1.5 py-1 hover:bg-zinc-800 transition-colors duration-120"
+            className="flex items-center gap-2 flex-1 min-w-0 rounded-md px-1.5 py-1 hover:bg-ink-800 transition-colors duration-120"
           >
             <ProjectAvatar name={project.name} />
             <div className="flex-1 min-w-0 text-left">
-              <div className="text-sm font-medium text-zinc-100 truncate">{project.name}</div>
-              <div className="text-[11px] text-zinc-500 truncate">{metaText}</div>
+              <div className="text-sm font-medium text-ink-100 truncate">{project.name}</div>
+              <div className="text-[11px] text-ink-500 truncate">{metaText}</div>
             </div>
-            <ChevronDown size={14} className={`text-zinc-500 shrink-0 transition-transform duration-150 ${dropdownOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown size={14} className={`text-ink-500 shrink-0 transition-transform duration-150 ${dropdownOpen ? 'rotate-180' : ''}`} />
           </button>
         </div>
 
         {/* Dropdown */}
         {dropdownOpen && (
-          <div className="absolute left-2 right-2 top-full mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl animate-in slide-in-from-top-1 duration-150 overflow-hidden">
+          <div className="absolute left-2 right-2 top-full mt-1 z-50 bg-ink-900 border border-ink-700 rounded-lg shadow-2xl animate-in slide-in-from-top-1 duration-150 overflow-hidden">
             {/* Search */}
-            <div className="p-2 border-b border-zinc-800">
-              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-zinc-800">
-                <Search size={14} className="text-zinc-500 shrink-0" />
+            <div className="p-2 border-b border-ink-800">
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-ink-800">
+                <Search size={14} className="text-ink-500 shrink-0" />
                 <input
                   ref={searchInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="Switch project..."
-                  className="flex-1 bg-transparent text-sm text-zinc-200 placeholder-zinc-500 outline-none"
+                  className="flex-1 bg-transparent text-sm text-ink-200 placeholder-ink-500 outline-none"
                 />
               </div>
             </div>
@@ -229,15 +229,15 @@ export function ProjectNavSidebar({
               )}
 
               {filteredStarred.length === 0 && filteredRecent.length === 0 && (
-                <div className="px-3 py-4 text-center text-xs text-zinc-500">No projects found</div>
+                <div className="px-3 py-4 text-center text-xs text-ink-500">No projects found</div>
               )}
             </div>
 
             {/* Footer */}
-            <div className="border-t border-zinc-800">
+            <div className="border-t border-ink-800">
               <button
                 onClick={() => { handleCloseDropdown(); onBackToList(); }}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors duration-120"
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-ink-400 hover:text-ink-200 hover:bg-ink-800 transition-colors duration-120"
               >
                 <LayoutGrid size={14} />
                 All Projects
@@ -251,7 +251,7 @@ export function ProjectNavSidebar({
       <nav className="px-2 py-2 space-y-0.5">
         {NAV_SECTIONS.map(section => {
           if (section.key.startsWith('divider')) {
-            return <div key={section.key} className="my-2.5 mx-3 border-t border-zinc-800/40" />;
+            return <div key={section.key} className="my-2.5 mx-3 border-t border-ink-800/40" />;
           }
           const Icon = section.icon!;
           const isActive = activeSection === section.key;
@@ -262,14 +262,14 @@ export function ProjectNavSidebar({
               onClick={() => onSectionChange(section.key)}
               className={`flex items-center gap-3 w-full px-3 py-2 rounded-md text-[13px] transition-colors duration-120 ${
                 isActive
-                  ? 'text-zinc-100 bg-zinc-800/80'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+                  ? 'text-ink-100 bg-ink-800/80'
+                  : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/50'
               }`}
             >
               <Icon size={16} className={`shrink-0 ${!isActive && section.iconColor ? section.iconColor : ''}`} />
               <span className="flex-1 text-left">{section.label}</span>
               {count != null && count > 0 && (
-                <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400 font-medium">
+                <span className="text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-ink-800 text-ink-400 font-medium">
                   {count}
                 </span>
               )}
@@ -292,7 +292,7 @@ export function ProjectNavSidebar({
 function DropdownSection({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
     <div className="py-1">
-      <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+      <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium text-ink-500 uppercase tracking-wider">
         {icon}
         {label}
       </div>
@@ -305,7 +305,7 @@ function DropdownItem({ project, onClick }: { project: Project; onClick: () => v
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors duration-120"
+      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-ink-300 hover:text-ink-100 hover:bg-ink-800 transition-colors duration-120"
     >
       <ProjectAvatar name={project.name} />
       <span className="truncate">{project.name}</span>
@@ -320,18 +320,18 @@ function ProjectInfoFooter({ project }: { project: Project }) {
   const year = created.getFullYear();
 
   return (
-    <div className="px-3 py-3 border-t border-zinc-800/40">
+    <div className="px-3 py-3 border-t border-ink-800/40">
       {project.description && (
-        <p className="text-[11px] text-zinc-500 mb-3 line-clamp-3 leading-relaxed">
+        <p className="text-[11px] text-ink-500 mb-3 line-clamp-3 leading-relaxed">
           {project.description}
         </p>
       )}
       <div className="space-y-1.5">
-        <div className="flex items-center gap-2 text-[11px] text-zinc-600">
+        <div className="flex items-center gap-2 text-[11px] text-ink-600">
           <Calendar size={12} className="shrink-0" />
           <span>Created {month} {day}, {year}</span>
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-zinc-600">
+        <div className="flex items-center gap-2 text-[11px] text-ink-600">
           <Tag size={12} className="shrink-0" />
           <span>{project.project_type === 'external' ? 'External' : 'Internal'}</span>
         </div>

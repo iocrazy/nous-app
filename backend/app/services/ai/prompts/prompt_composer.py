@@ -68,6 +68,12 @@ class ComposerInput:
     # M1.B: caller (chat service) recalls memories first then passes them
     # in. PromptComposer doesn't do retrieval — separation of concerns.
     recalled_memories: list[RecalledMemory] = field(default_factory=list)
+    # Phase 4 M3: bi-temporal facts retrieved from the Graphiti graph
+    # (plain strings — graph edges have no agent_memories identity).
+    graph_facts: list[str] = field(default_factory=list)
+    # Phase 4 L2: Honcho working representation of the user (markdown
+    # observation list). Caller fetches it; composer only renders.
+    user_context: Optional[str] = None
 
 
 class PromptComposer:
@@ -115,6 +121,8 @@ class PromptComposer:
             workers=workers,
             request_instructions=inp.request_instructions,
             recalled_memories=inp.recalled_memories,
+            graph_facts=inp.graph_facts,
+            user_context=inp.user_context,
         )
         tools = self._build_tools(skills)
         manifest = [
@@ -127,7 +135,12 @@ class PromptComposer:
         ]
 
         prefix_fp = self._prefix_fingerprint(agent, skills, workers)
-        dynamic_fp = self._dynamic_fingerprint(prefix_fp, inp.recalled_memories)
+        dynamic_fp = self._dynamic_fingerprint(
+            prefix_fp,
+            inp.recalled_memories,
+            inp.graph_facts,
+            user_context=inp.user_context,
+        )
 
         return ComposedSystemPrompt(
             agent_id=UUID(agent["id"]),
@@ -142,6 +155,9 @@ class PromptComposer:
             prefix_fingerprint=prefix_fp,
             dynamic_fingerprint=dynamic_fp,
             recalled_memory_ids=[m.id for m in inp.recalled_memories],
+            # mig 286: per-run wall-clock cap, enforced by AgentRunner
+            # between LLM iterations.
+            timeout_sec=agent.get("timeout_sec"),
         )
 
     # ------------------------------------------------------------------
@@ -155,6 +171,8 @@ class PromptComposer:
         request_instructions: Optional[str],
         recalled_memories: list["RecalledMemory"] = None,
         workers: list[dict[str, Any]] = None,
+        graph_facts: list[str] = None,
+        user_context: Optional[str] = None,
     ) -> str:
         """Render the full system message string, sections joined by \\n\\n.
 
@@ -174,6 +192,7 @@ class PromptComposer:
         """
         parts: list[str] = []
         recalled_memories = recalled_memories or []
+        graph_facts = graph_facts or []
 
         identity = (agent.get("identity_md") or "").strip()
         if identity:
@@ -205,6 +224,16 @@ class PromptComposer:
         if recalled_memories:
             parts.append(self._render_memory_section(recalled_memories))
 
+        # Graph facts share the post-boundary zone for the same cache-
+        # safety reason — they change per turn and per user.
+        if graph_facts:
+            parts.append(self._render_graph_facts_section(graph_facts))
+
+        # Phase 4 L2: Honcho user model (working representation) — also
+        # post-boundary; it evolves as the deriver processes turns.
+        if user_context and user_context.strip():
+            parts.append(self._render_user_context_section(user_context))
+
         if request_instructions and request_instructions.strip():
             parts.append(f"# Request Instructions\n{request_instructions.strip()}")
 
@@ -233,6 +262,34 @@ class PromptComposer:
             xml.append(f"    <fact>{summary}</fact>")
             xml.append("  </memory>")
         xml.append("</recalled_memories>")
+        return header + "\n" + "\n".join(xml)
+
+    def _render_user_context_section(self, user_context: str) -> str:
+        """Render <user_context> — the Honcho working representation of
+        this user (Phase 4 L2). Observations the deriver has extracted
+        from past conversations across sessions."""
+        header = (
+            "## User Model\n"
+            "What the system has learned about this user from past "
+            "conversations. Treat as background context; the user's "
+            "current message wins when they conflict.\n"
+        )
+        return f"{header}<user_context>\n{user_context.strip()}\n</user_context>"
+
+    def _render_graph_facts_section(self, facts: list[str]) -> str:
+        """Render <graph_facts> — relationship facts from the knowledge
+        graph (Phase 4 M3). Plain strings; no ref ids needed."""
+        header = (
+            "## Knowledge Graph Facts\n"
+            "Relationship facts the system has extracted about this user's "
+            "world from past conversations. Treat them as background "
+            "context; prefer the user's current message when they conflict.\n"
+        )
+        xml: list[str] = ["<graph_facts>"]
+        for fact in facts:
+            safe = (fact or "").replace("<", "&lt;").replace(">", "&gt;")
+            xml.append(f"  <fact>{safe}</fact>")
+        xml.append("</graph_facts>")
         return header + "\n" + "\n".join(xml)
 
     def _render_skills_section(self, skills: list[dict[str, Any]]) -> str:
@@ -455,6 +512,8 @@ class PromptComposer:
         self,
         prefix_fp: str,
         recalled_memories: list["RecalledMemory"],
+        graph_facts: list[str] | None = None,
+        user_context: Optional[str] = None,
     ) -> str:
         """Prefix fingerprint extended with recalled memory id set hash.
 
@@ -469,6 +528,16 @@ class PromptComposer:
         for mid in sorted(str(m.id) for m in recalled_memories):
             h.update(mid.encode())
             h.update(b"|")
+        # Phase 4 M3: graph facts are content-hashed (no row ids) — a
+        # changed fact set must change the fingerprint too.
+        for fact in sorted(graph_facts or []):
+            h.update(fact.encode())
+            h.update(b"#")
+        # Phase 4 L2: Honcho user representation is content-hashed for
+        # the same reason — a changed user model must change the key.
+        if user_context:
+            h.update(b"|user_context|")
+            h.update(user_context.encode())
         return h.hexdigest()
 
 

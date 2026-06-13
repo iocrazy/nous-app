@@ -154,7 +154,7 @@ export function CanvasEditorPage() {
     navigate(teamId ? `/team/${teamId}/projects/${parentProjectId}?tab=storyboard` : '/projects');
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-zinc-950">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-ink-950">
       {/* Fullscreen loading overlay */}
       <EditorLoadingScreen visible={loading} />
 
@@ -162,7 +162,7 @@ export function CanvasEditorPage() {
       {!loading && loadError && (
         <div className="flex flex-col items-center justify-center flex-1 gap-4">
           <p className="text-sm text-red-400">Failed to load project</p>
-          <p className="text-xs text-zinc-500">{loadError}</p>
+          <p className="text-xs text-ink-500">{loadError}</p>
           <button
             type="button"
             onClick={handleBack}
@@ -191,7 +191,7 @@ export function CanvasEditorPage() {
               </ReactFlowProvider>
 
               {/* Floating panel toolbar — left side vertical */}
-              <div className="absolute top-4 left-4 flex flex-col gap-0.5 bg-zinc-900/90 backdrop-blur-sm rounded-xl p-1 border border-zinc-800/40 shadow-lg z-10">
+              <div className="absolute top-4 left-4 flex flex-col gap-0.5 bg-ink-900/90 backdrop-blur-sm rounded-xl p-1 border border-ink-800/40 shadow-lg z-10">
                 <FloatingIconButton
                   icon={<FileText size={16} />}
                   tooltip="Script Import"
@@ -214,7 +214,7 @@ export function CanvasEditorPage() {
                     was removed when chat migrated from
                     storyboardService.chatWithAI to the AI Library /
                     AgentRunner pipeline. */}
-                <div className="my-0.5 mx-1.5 border-t border-zinc-700/50" />
+                <div className="my-0.5 mx-1.5 border-t border-ink-700/50" />
                 <FloatingIconButton
                   icon={<Download size={16} />}
                   tooltip="Export"
@@ -225,7 +225,7 @@ export function CanvasEditorPage() {
 
             {/* Right side panel */}
             {sidePanel === 'characters' && projectId && (
-              <div className="w-80 flex-shrink-0 border-l border-zinc-800/50 overflow-y-auto">
+              <div className="w-80 flex-shrink-0 border-l border-ink-800/50 overflow-y-auto">
                 <CharacterPanel projectId={projectId} onClose={() => setSidePanel(null)} />
               </div>
             )}
@@ -286,8 +286,8 @@ function FloatingIconButton({
       title={tooltip}
       className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
         active
-          ? 'bg-zinc-700 text-zinc-100'
-          : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80'
+          ? 'bg-ink-700 text-ink-100'
+          : 'text-ink-500 hover:text-ink-200 hover:bg-ink-800/80'
       }`}
     >
       {icon}

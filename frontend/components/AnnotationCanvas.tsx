@@ -326,7 +326,7 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
             onChange={(e) => setTextValue(e.target.value)}
             onKeyDown={handleTextKeyDown}
             onBlur={handleTextSubmit}
-            className="bg-zinc-900/90 border border-zinc-600 text-white text-sm px-2 py-1 rounded outline-none min-w-[120px]"
+            className="bg-ink-900/90 border border-ink-600 text-ink-50 text-sm px-2 py-1 rounded outline-none min-w-[120px]"
             placeholder="Type text..."
           />
         </div>

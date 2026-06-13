@@ -4,8 +4,10 @@ import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
 import AISettings from './AISettings';
 import {
   Save, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
-  CheckCircle, Power, Zap, Check, Loader2, AlertCircle
+  CheckCircle, Power, Zap, Check, Loader2, AlertCircle, SunMoon
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { useTheme } from '../contexts/ThemeContext';
 import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
 import { TaskCenter } from './TaskCenter/TaskCenter';
@@ -51,6 +53,8 @@ const DEFAULT_SCOPES = [
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings, embedded = false, currentUserId, userTeams = [] }) => {
   const confirmDialog = useConfirm();
+  const { t } = useTranslation();
+  const { preference, setPreference } = useTheme();
   const [localSettings, setLocalSettings] = useState<UserSettings>(settings);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
@@ -305,21 +309,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* Header - hidden in embedded mode */}
       {!embedded && (
       <div>
-         <h1 className="text-2xl font-bold text-white mb-2">Settings</h1>
-         <p className="text-zinc-400">Manage your application preferences and API access credentials.</p>
+         <h1 className="text-2xl font-bold text-ink-50 mb-2">Settings</h1>
+         <p className="text-ink-400">Manage your application preferences and API access credentials.</p>
       </div>
       )}
 
       {/* General Settings Tab */}
       {activeTab === 'general' && (
-        <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
-           
+        <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
+
+           {/* Section 0: Appearance — Theme (island redesign D11) */}
+           <div className="px-6 py-4 border-y border-ink-800 bg-ink-900/50 flex items-center gap-3">
+              <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+                 <SunMoon size={20} />
+              </div>
+              <h2 className="font-semibold text-ink-200">Appearance</h2>
+           </div>
+           <div className="px-6 py-1">
+              {/* Theme (island redesign D11) */}
+              <div className="flex items-center justify-between py-3">
+                <span className="text-sm text-ink-300">{t('settings.theme.label', 'Theme')}</span>
+                <div className="flex gap-1 bg-ink-900 border border-ink-800 rounded-lg p-0.5">
+                  {(['system', 'light', 'dark'] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setPreference(p)}
+                      className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                        preference === p ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'
+                      }`}
+                    >
+                      {t(`settings.theme.${p}`, p === 'system' ? 'System' : p === 'light' ? 'Light' : 'Dark')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+           </div>
+
            {/* Section 1: Download Progress Style */}
-           <div className="px-6 py-4 border-y border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+           <div className="px-6 py-4 border-y border-ink-800 bg-ink-900/50 flex items-center gap-3">
               <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
                  <Zap size={20} />
               </div>
-              <h2 className="font-semibold text-zinc-200">Download Progress Style</h2>
+              <h2 className="font-semibold text-ink-200">Download Progress Style</h2>
            </div>
            <div className="p-6">
               <div className="grid grid-cols-2 gap-4">
@@ -328,12 +359,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                     className={`relative cursor-pointer rounded-xl border-2 p-4 transition-all ${
                        localSettings.progressStyle === 'neon' || !localSettings.progressStyle
                           ? 'border-purple-500 bg-purple-500/10'
-                          : 'border-zinc-800 hover:border-zinc-700'
+                          : 'border-ink-800 hover:border-ink-700'
                     }`}
                     onClick={() => setLocalSettings({...localSettings, progressStyle: 'neon'})}
                  >
                     <div className="flex flex-col items-center gap-3">
-                       <div className="w-full aspect-video rounded-lg bg-zinc-950 border border-purple-500/50 flex items-center justify-center relative overflow-hidden">
+                       <div className="w-full aspect-video rounded-lg bg-ink-950 border border-purple-500/50 flex items-center justify-center relative overflow-hidden">
                           {/* Neon border preview - animated only when selected */}
                           <svg className="absolute inset-0 w-full h-full" style={{
                              filter: (localSettings.progressStyle === 'neon' || !localSettings.progressStyle)
@@ -352,13 +383,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                                 </linearGradient>
                              </defs>
                           </svg>
-                          <span className="text-2xl font-bold text-white z-10">
+                          <span className="text-2xl font-bold text-ink-50 z-10">
                              {(localSettings.progressStyle === 'neon' || !localSettings.progressStyle) ? `${animatedProgress}%` : '50%'}
                           </span>
                        </div>
                        <div className="text-center">
-                          <div className="font-medium text-zinc-200">Neon Border</div>
-                          <div className="text-xs text-zinc-500">Glowing border animation</div>
+                          <div className="font-medium text-ink-200">Neon Border</div>
+                          <div className="text-xs text-ink-500">Glowing border animation</div>
                        </div>
                     </div>
                     {(localSettings.progressStyle === 'neon' || !localSettings.progressStyle) && (
@@ -373,12 +404,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                     className={`relative cursor-pointer rounded-xl border-2 p-4 transition-all ${
                        localSettings.progressStyle === 'wave'
                           ? 'border-purple-500 bg-purple-500/10'
-                          : 'border-zinc-800 hover:border-zinc-700'
+                          : 'border-ink-800 hover:border-ink-700'
                     }`}
                     onClick={() => setLocalSettings({...localSettings, progressStyle: 'wave'})}
                  >
                     <div className="flex flex-col items-center gap-3">
-                       <div className="w-full aspect-video rounded-lg bg-zinc-950 border border-indigo-500/50 flex items-center justify-center relative overflow-hidden">
+                       <div className="w-full aspect-video rounded-lg bg-ink-950 border border-indigo-500/50 flex items-center justify-center relative overflow-hidden">
                           {/* Wave preview - animated only when selected */}
                           <div
                              className="absolute inset-x-0 bottom-0 transition-all duration-300 ease-out"
@@ -436,13 +467,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                                 <path d="M0,15 C80,40 160,0 240,20 C320,45 400,0 480,20 C560,45 640,0 720,20 C800,45 880,0 960,20 C1040,45 1120,0 1200,15 L1200,200 L0,200 Z" fill="url(#waveGrad3)" />
                              </svg>
                           </div>
-                          <span className="text-2xl font-bold text-white z-10 drop-shadow-lg">
+                          <span className="text-2xl font-bold text-ink-50 z-10 drop-shadow-lg">
                              {localSettings.progressStyle === 'wave' ? `${animatedProgress}%` : '50%'}
                           </span>
                        </div>
                        <div className="text-center">
-                          <div className="font-medium text-zinc-200">Wave Liquid</div>
-                          <div className="text-xs text-zinc-500">Rising wave animation</div>
+                          <div className="font-medium text-ink-200">Wave Liquid</div>
+                          <div className="text-xs text-ink-500">Rising wave animation</div>
                        </div>
                     </div>
                     {localSettings.progressStyle === 'wave' && (
@@ -455,14 +486,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
            </div>
 
            {/* Section 2: Batch Download Concurrency */}
-           <div className="px-6 py-4 border-y border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+           <div className="px-6 py-4 border-y border-ink-800 bg-ink-900/50 flex items-center gap-3">
               <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
                  <Zap size={20} />
               </div>
-              <h2 className="font-semibold text-zinc-200">Batch Download Concurrency</h2>
+              <h2 className="font-semibold text-ink-200">Batch Download Concurrency</h2>
            </div>
            <div className="p-6">
-              <label className="block text-sm font-medium text-zinc-300 mb-2">
+              <label className="block text-sm font-medium text-ink-300 mb-2">
                  Max simultaneous downloads
               </label>
               <div className="flex items-center gap-3">
@@ -472,7 +503,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                       ...localSettings,
                       maxConcurrentDownloads: Math.max(1, (localSettings.maxConcurrentDownloads ?? 3) - 1),
                     })}
-                    className="w-9 h-9 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-lg font-semibold transition-colors disabled:opacity-40"
+                    className="w-9 h-9 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-200 text-lg font-semibold transition-colors disabled:opacity-40"
                     disabled={(localSettings.maxConcurrentDownloads ?? 3) <= 1}
                     aria-label="Decrease"
                  >
@@ -488,7 +519,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                       const clamped = Number.isNaN(raw) ? 3 : Math.min(20, Math.max(1, raw));
                       setLocalSettings({ ...localSettings, maxConcurrentDownloads: clamped });
                     }}
-                    className="w-20 text-center bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    className="w-20 text-center bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-ink-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
                  />
                  <button
                     type="button"
@@ -496,23 +527,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                       ...localSettings,
                       maxConcurrentDownloads: Math.min(20, (localSettings.maxConcurrentDownloads ?? 3) + 1),
                     })}
-                    className="w-9 h-9 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-lg font-semibold transition-colors disabled:opacity-40"
+                    className="w-9 h-9 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-200 text-lg font-semibold transition-colors disabled:opacity-40"
                     disabled={(localSettings.maxConcurrentDownloads ?? 3) >= 20}
                     aria-label="Increase"
                  >
                     +
                  </button>
               </div>
-              <p className="mt-2 text-xs text-zinc-500">
+              <p className="mt-2 text-xs text-ink-500">
                  Max simultaneous downloads per user — lower to avoid rate-limits / bans. Applies on save (no restart).
               </p>
            </div>
 
-           {/* Chat Attachment TTL */}
-           {currentUserId && (
-             <div className="px-6 pb-2 border-t border-zinc-800">
+           {/* Chat attachment TTL retired (IC-port P4) — files no longer auto-expire.
+               Hidden behind `false` so the control can be restored if the policy changes. */}
+           {false && currentUserId && (
+             <div className="px-6 pb-2 border-t border-ink-800">
                <div className="pt-4">
-                 <h3 className="text-base font-semibold text-zinc-200 mb-2">Chat attachment TTL</h3>
+                 <h3 className="text-base font-semibold text-ink-200 mb-2">Chat attachment TTL</h3>
                  <ChatTempTtlPanel scopeType="personal" scopeId={currentUserId} label="Personal" />
                  {userTeams.map((t) => (
                    <ChatTempTtlPanel key={t.id} scopeType="team" scopeId={t.id} label={t.name} />
@@ -522,7 +554,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
            )}
 
            {/* Actions Footer */}
-           <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-end">
+           <div className="px-6 py-4 border-t border-ink-800 bg-ink-950/50 flex justify-end">
               <button
                   onClick={handleSaveSettings}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-lg shadow-indigo-900/20"
@@ -537,17 +569,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* API Management Tab */}
       {activeTab === 'api' && (
         <>
-        <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
-           <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
+        <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
+           <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center justify-between">
               <div className="flex items-center gap-3">
                  <div className="p-2 bg-pink-500/10 rounded-lg text-pink-400">
                     <Key size={20} />
                  </div>
-                 <h2 className="font-semibold text-zinc-200">API Access Management</h2>
+                 <h2 className="font-semibold text-ink-200">API Access Management</h2>
               </div>
               <button
                  onClick={openCreateModal}
-                 className="bg-zinc-100 hover:bg-white text-zinc-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+                 className="bg-ink-100 hover:bg-ink-50 text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
               >
                  <Plus size={16} />
                  Create API Key
@@ -556,7 +588,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
            {/* Loading/Error State */}
            {apiKeysLoading && (
-              <div className="p-12 flex items-center justify-center gap-3 text-zinc-500">
+              <div className="p-12 flex items-center justify-center gap-3 text-ink-500">
                  <Loader2 size={20} className="animate-spin" />
                  <span>Loading API keys...</span>
               </div>
@@ -577,8 +609,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
            {!apiKeysLoading && !apiKeysError && (
            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-zinc-400">
-                 <thead className="bg-zinc-950/50 text-zinc-500 border-b border-zinc-800 uppercase text-xs">
+              <table className="w-full text-left text-sm text-ink-400">
+                 <thead className="bg-ink-950/50 text-ink-500 border-b border-ink-800 uppercase text-xs">
                     <tr>
                        <th className="px-6 py-4 font-medium">Name</th>
                        <th className="px-6 py-4 font-medium">Key Prefix</th>
@@ -589,23 +621,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                        <th className="px-6 py-4 font-medium text-right">Actions</th>
                     </tr>
                  </thead>
-                 <tbody className="divide-y divide-zinc-800/50">
+                 <tbody className="divide-y divide-ink-800/50">
                     {apiKeys.map((key) => (
-                       <tr key={key.id} className="group hover:bg-zinc-800/30 transition-colors">
+                       <tr key={key.id} className="group hover:bg-ink-800/30 transition-colors">
                           <td className="px-6 py-4">
                              <div className="flex flex-col">
-                                <span className="font-medium text-zinc-300">{key.name}</span>
+                                <span className="font-medium text-ink-300">{key.name}</span>
                                 {key.description && (
-                                   <span className="text-xs text-zinc-500 truncate max-w-[200px]">{key.description}</span>
+                                   <span className="text-xs text-ink-500 truncate max-w-[200px]">{key.description}</span>
                                 )}
                              </div>
                           </td>
                           <td className="px-6 py-4 font-mono text-xs">
                              <div className="flex items-center gap-2">
-                                <span className="opacity-70 bg-zinc-950 px-2 py-1 rounded border border-zinc-800 select-all">{key.key_prefix}</span>
+                                <span className="opacity-70 bg-ink-950 px-2 py-1 rounded border border-ink-800 select-all">{key.key_prefix}</span>
                                 <button
                                   onClick={() => handleCopyKey(key.key_value || key.key_prefix, key.id.toString())}
-                                  className={`transition-colors flex-shrink-0 ${copiedKeyId === key.id.toString() ? 'text-green-500' : 'text-zinc-500 hover:text-indigo-400'}`}
+                                  className={`transition-colors flex-shrink-0 ${copiedKeyId === key.id.toString() ? 'text-green-500' : 'text-ink-500 hover:text-indigo-400'}`}
                                   title="Copy full key"
                                 >
                                    {copiedKeyId === key.id.toString() ? <CheckCircle size={14} /> : <Copy size={14} />}
@@ -629,18 +661,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                           </td>
                           <td className="px-6 py-4">
                              {!key.expires_at ? (
-                                <span className="text-zinc-500">Never</span>
+                                <span className="text-ink-500">Never</span>
                              ) : (
                                 <div className="flex flex-col">
                                    <span className="text-xs">{new Date(key.expires_at).toLocaleDateString()}</span>
-                                   <span className="text-xs text-zinc-600">{calculateDaysLeft(key.expires_at)} days left</span>
+                                   <span className="text-xs text-ink-600">{calculateDaysLeft(key.expires_at)} days left</span>
                                 </div>
                              )}
                           </td>
                           <td className="px-6 py-4 text-xs">
-                             <span className="text-zinc-400">{key.usage_count || 0}</span>
+                             <span className="text-ink-400">{key.usage_count || 0}</span>
                              {key.last_used_at && (
-                                <div className="text-zinc-600 text-xs">
+                                <div className="text-ink-600 text-xs">
                                    Last: {new Date(key.last_used_at).toLocaleDateString()}
                                 </div>
                              )}
@@ -649,14 +681,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                              <div className="flex items-center justify-end gap-2">
                                 <button
                                   onClick={() => openEditModal(key)}
-                                  className="p-1.5 hover:bg-zinc-800 rounded text-zinc-500 hover:text-zinc-300 transition-colors"
+                                  className="p-1.5 hover:bg-ink-800 rounded text-ink-500 hover:text-ink-300 transition-colors"
                                   title="Edit"
                                 >
                                    <Edit2 size={14} />
                                 </button>
                                 <button
                                    onClick={() => handleDeleteKey(key.key_id)}
-                                   className="p-1.5 hover:bg-red-900/30 rounded text-zinc-500 hover:text-red-400 transition-colors"
+                                   className="p-1.5 hover:bg-red-900/30 rounded text-ink-500 hover:text-red-400 transition-colors"
                                    title="Delete"
                                 >
                                    <Trash2 size={14} />
@@ -667,7 +699,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                     ))}
                     {apiKeys.length === 0 && (
                        <tr>
-                          <td colSpan={7} className="px-6 py-12 text-center text-zinc-500 italic">
+                          <td colSpan={7} className="px-6 py-12 text-center text-ink-500 italic">
                              No API keys generated yet.
                           </td>
                        </tr>
@@ -735,12 +767,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* Create/Edit Key Modal */}
       {isKeyModalOpen && (
          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-20 flex items-start justify-center pt-12 p-4 overflow-y-auto">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
-               <div className="px-6 py-5 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/50">
-                  <h3 className="text-lg font-bold text-white">
+            <div className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+               <div className="px-6 py-5 border-b border-ink-800 flex justify-between items-center bg-ink-950/50">
+                  <h3 className="text-lg font-bold text-ink-50">
                      {newKeySecret ? 'API Key Created!' : editingKeyId ? 'Edit API Key' : 'Create New API Key'}
                   </h3>
-                  <button onClick={closeKeyModal} className="text-zinc-500 hover:text-zinc-300">
+                  <button onClick={closeKeyModal} className="text-ink-500 hover:text-ink-300">
                      <X size={20} />
                   </button>
                </div>
@@ -759,18 +791,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                      </div>
 
                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-zinc-300">Your API Key</label>
+                        <label className="text-sm font-medium text-ink-300">Your API Key</label>
                         <div className="flex items-center gap-2">
                            <div className="flex-1 relative">
                               <input
                                  type="text"
                                  value={newKeySecret}
                                  readOnly
-                                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 font-mono text-sm pr-12"
+                                 className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-3 text-ink-200 font-mono text-sm pr-12"
                               />
                               <button
                                  onClick={() => handleCopyKey(newKeySecret, 'new-key')}
-                                 className={`absolute right-3 top-1/2 -translate-y-1/2 ${copiedKeyId === 'new-key' ? 'text-green-500' : 'text-zinc-500 hover:text-indigo-400'}`}
+                                 className={`absolute right-3 top-1/2 -translate-y-1/2 ${copiedKeyId === 'new-key' ? 'text-green-500' : 'text-ink-500 hover:text-indigo-400'}`}
                               >
                                  {copiedKeyId === 'new-key' ? <CheckCircle size={18} /> : <Copy size={18} />}
                               </button>
@@ -781,7 +813,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                         )}
                      </div>
 
-                     <div className="pt-4 border-t border-zinc-800">
+                     <div className="pt-4 border-t border-ink-800">
                         <button
                            onClick={closeKeyModal}
                            className="w-full px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium text-sm"
@@ -801,32 +833,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                   )}
 
                   <div className="space-y-2">
-                     <label className="text-sm font-medium text-zinc-300">Key Name</label>
+                     <label className="text-sm font-medium text-ink-300">Key Name</label>
                      <input
                         type="text"
                         placeholder="e.g. Production Web Client"
                         value={keyForm.name}
                         onChange={(e) => setKeyForm({...keyForm, name: e.target.value})}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 outline-none focus:border-indigo-500 transition-colors"
+                        className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-3 text-ink-200 outline-none focus:border-indigo-500 transition-colors"
                      />
                   </div>
 
                   <div className="space-y-2">
-                     <label className="text-sm font-medium text-zinc-300">Description (Optional)</label>
+                     <label className="text-sm font-medium text-ink-300">Description (Optional)</label>
                      <input
                         type="text"
                         placeholder="e.g. Used for automated scripts"
                         value={keyForm.description}
                         onChange={(e) => setKeyForm({...keyForm, description: e.target.value})}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-200 outline-none focus:border-indigo-500 transition-colors"
+                        className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-3 text-ink-200 outline-none focus:border-indigo-500 transition-colors"
                      />
                   </div>
 
                   {!editingKeyId && (
                   <div className="space-y-2">
-                     <label className="text-sm font-medium text-zinc-300">Expiration</label>
+                     <label className="text-sm font-medium text-ink-300">Expiration</label>
                      <div className="flex gap-4 mb-2">
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
+                        <label className="flex items-center gap-2 cursor-pointer text-sm text-ink-400 hover:text-ink-200">
                            <input
                               type="radio"
                               name="expirationType"
@@ -836,7 +868,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                            />
                            Never Expires
                         </label>
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
+                        <label className="flex items-center gap-2 cursor-pointer text-sm text-ink-400 hover:text-ink-200">
                            <input
                               type="radio"
                               name="expirationType"
@@ -850,13 +882,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
                      {keyForm.expirationType === 'date' && (
                        <div className="relative animate-in fade-in slide-in-from-top-2">
-                          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 w-4 h-4" />
+                          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500 w-4 h-4" />
                           <input
                              type="date"
                              value={keyForm.expirationDate}
                              min={new Date().toISOString().split('T')[0]}
                              onChange={(e) => setKeyForm({...keyForm, expirationDate: e.target.value})}
-                             className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-3 text-zinc-200 outline-none focus:border-indigo-500 transition-colors"
+                             className="w-full bg-ink-950 border border-ink-800 rounded-lg pl-10 pr-4 py-3 text-ink-200 outline-none focus:border-indigo-500 transition-colors"
                           />
                           {keyForm.expirationDate && (
                              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-medium">
@@ -870,7 +902,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
                   <div className="space-y-3">
                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+                        <label className="text-sm font-medium text-ink-300 flex items-center gap-2">
                            <Shield size={14} className="text-indigo-400"/>
                            API Scopes (Required)
                         </label>
@@ -886,7 +918,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                            Select All
                         </button>
                      </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-48 overflow-y-auto border border-zinc-800 rounded-lg p-3 bg-zinc-950/30">
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-48 overflow-y-auto border border-ink-800 rounded-lg p-3 bg-ink-950/30">
                         {(availableScopes.length > 0 ? availableScopes : DEFAULT_SCOPES.map(s => ({ scope: s, name: s, description: '', category: '' }))).map((scopeInfo) => {
                            const scope = typeof scopeInfo === 'string' ? scopeInfo : scopeInfo.scope;
                            const name = typeof scopeInfo === 'string' ? scopeInfo : scopeInfo.name;
@@ -901,17 +933,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                               className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
                                  keyForm.scopes.includes(scope)
                                     ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-300'
-                                    : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                                    : 'bg-ink-900 border-ink-800 text-ink-400 hover:border-ink-700'
                               }`}
                            >
                               <div className={`w-4 h-4 rounded flex items-center justify-center border flex-shrink-0 ${
-                                 keyForm.scopes.includes(scope) ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600'
+                                 keyForm.scopes.includes(scope) ? 'bg-indigo-500 border-indigo-500' : 'border-ink-600'
                               }`}>
                                  {keyForm.scopes.includes(scope) && <Check size={10} className="text-white" />}
                               </div>
                               <div className="min-w-0 flex-1">
                                  <span className="text-xs font-medium block truncate" title={scope}>{name}</span>
-                                 {desc && <span className="text-xs text-zinc-500 block truncate">{desc}</span>}
+                                 {desc && <span className="text-xs text-ink-500 block truncate">{desc}</span>}
                               </div>
                            </label>
                         )})}
@@ -919,10 +951,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                   </div>
                </div>
 
-               <div className="px-6 py-5 border-t border-zinc-800 bg-zinc-950/50 flex justify-end gap-3">
+               <div className="px-6 py-5 border-t border-ink-800 bg-ink-950/50 flex justify-end gap-3">
                   <button
                      onClick={closeKeyModal}
-                     className="px-5 py-2.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors font-medium text-sm"
+                     className="px-5 py-2.5 rounded-lg border border-ink-700 text-ink-300 hover:bg-ink-800 transition-colors font-medium text-sm"
                      disabled={formLoading}
                   >
                      Cancel

@@ -140,17 +140,17 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-white">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
+        <h1 className="text-2xl font-bold text-ink-50">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
         <div className="flex items-center gap-2">
           {/* Search */}
           <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500" />
             <input
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder={t('projects.searchProjects', 'Search projects')}
-              className="w-44 pl-8 pr-3 py-1.5 text-xs bg-zinc-800/60 border border-zinc-700/50
-                         rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none
+              className="w-44 pl-8 pr-3 py-1.5 text-xs bg-ink-800/60 border border-ink-700/50
+                         rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none
                          focus:border-indigo-500 transition-colors"
             />
           </div>
@@ -167,13 +167,13 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
       </div>
 
       {/* Tab bar (underline style) */}
-      <div className="flex gap-6 border-b border-zinc-800 mb-4">
+      <div className="flex gap-6 border-b border-ink-800 mb-4">
         {tabs.map(tab => (
           <button key={tab.key} onClick={() => setFilter(tab.key)}
             className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
               filter === tab.key
-                ? 'border-indigo-500 text-white'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                ? 'border-indigo-500 text-ink-50'
+                : 'border-transparent text-ink-500 hover:text-ink-300'
             }`}
           >
             {tab.label}
@@ -183,13 +183,13 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
       {/* Stats + sort + view toggle */}
       <div className="flex items-center justify-between mb-4">
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-ink-500">
           {t('projects.totalProjects', '{{count}} projects', { count: filteredProjects.length })}
         </span>
         <div className="flex items-center gap-2">
           {/* Sort */}
           <select value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)}
-            className="text-xs bg-zinc-800 border border-zinc-700/50 rounded-lg px-2 py-1.5 text-zinc-300
+            className="text-xs bg-ink-800 border border-ink-700/50 rounded-lg px-2 py-1.5 text-ink-300
                        focus:outline-none focus:border-indigo-500 cursor-pointer">
             <option value="updated_at">{t('projects.sortUpdatedAt', 'Last active')}</option>
             <option value="created_at">{t('projects.sortCreatedAt', 'Created')}</option>
@@ -197,18 +197,18 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           </select>
           <button
             onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
-            className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
             title={sortDir === 'desc' ? 'Descending' : 'Ascending'}
           >
             <ArrowUpDown size={14} />
           </button>
 
           {/* View toggle */}
-          <div className="flex bg-zinc-800 rounded-lg p-0.5">
+          <div className="flex bg-ink-800 rounded-lg p-0.5">
             <button
               onClick={() => setViewMode('grid')}
               className={`p-1.5 rounded-md transition-colors ${
-                viewMode === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                viewMode === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
               }`}
             >
               <LayoutGrid size={14} />
@@ -216,7 +216,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
             <button
               onClick={() => setViewMode('table')}
               className={`p-1.5 rounded-md transition-colors ${
-                viewMode === 'table' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                viewMode === 'table' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
               }`}
             >
               <LayoutList size={14} />
@@ -228,12 +228,12 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
       {/* Empty state */}
       {filteredProjects.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="p-4 bg-zinc-800 rounded-2xl mb-4">
-            <FolderOpen size={40} className="text-zinc-500" />
+          <div className="p-4 bg-ink-800 rounded-2xl mb-4">
+            <FolderOpen size={40} className="text-ink-500" />
           </div>
-          <h3 className="text-lg font-medium text-zinc-300 mb-2">{t('mediatrack.noProjects', 'No projects')}</h3>
+          <h3 className="text-lg font-medium text-ink-300 mb-2">{t('mediatrack.noProjects', 'No projects')}</h3>
           {searchQuery ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-ink-500">
               {t('projects.noSearchResults', 'No projects match your search')}
             </p>
           ) : (
@@ -266,34 +266,34 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
       {/* Table view */}
       {filteredProjects.length > 0 && viewMode === 'table' && (
-        <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl overflow-hidden">
+        <div className="bg-ink-800/50 border border-ink-700/50 rounded-xl overflow-hidden">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-zinc-700/50">
-                <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.projectName', 'Project Name')}</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.projectType', 'Type')}</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.projectGroup', 'Group')}</th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.files', 'Files')}</th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.starred', 'Starred')}</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-zinc-400 uppercase tracking-wider">{t('mediatrack.updatedAt', 'Updated')}</th>
+              <tr className="border-b border-ink-700/50">
+                <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">{t('mediatrack.projectName', 'Project Name')}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">{t('mediatrack.projectType', 'Type')}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">{t('mediatrack.projectGroup', 'Group')}</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">{t('mediatrack.files', 'Files')}</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">{t('mediatrack.starred', 'Starred')}</th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-ink-400 uppercase tracking-wider">{t('mediatrack.updatedAt', 'Updated')}</th>
                 <th className="w-10"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-700/30">
+            <tbody className="divide-y divide-ink-700/30">
               {filteredProjects.map(project => (
                 <tr
                   key={project.id}
                   onClick={() => onProjectSelect(project)}
-                  className="hover:bg-zinc-700/30 cursor-pointer transition-colors"
+                  className="hover:bg-ink-700/30 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       {project.color_label && colorLabelDots[project.color_label] && (
                         <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colorLabelDots[project.color_label]}`} />
                       )}
-                      <span className="text-sm text-white font-medium">{project.name}</span>
+                      <span className="text-sm text-ink-50 font-medium">{project.name}</span>
                       {project.display_code && (
-                        <span className="text-[11px] font-mono text-zinc-500">{project.display_code}</span>
+                        <span className="text-[11px] font-mono text-ink-500">{project.display_code}</span>
                       )}
                     </div>
                   </td>
@@ -303,29 +303,29 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-sm text-zinc-400">{project.project_group || '—'}</span>
+                    <span className="text-sm text-ink-400">{project.project_group || '—'}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className="text-sm text-zinc-300">{project.file_count}</span>
+                    <span className="text-sm text-ink-300">{project.file_count}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <button
                       onClick={(e) => handleToggleStar(e, project)}
-                      className="p-1 rounded hover:bg-zinc-600 transition-colors inline-flex"
+                      className="p-1 rounded hover:bg-ink-600 transition-colors inline-flex"
                     >
                       <Star
                         size={14}
-                        className={project.is_starred ? 'text-yellow-400 fill-yellow-400' : 'text-zinc-500'}
+                        className={project.is_starred ? 'text-yellow-400 fill-yellow-400' : 'text-ink-500'}
                       />
                     </button>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <span className="text-sm text-zinc-500">{formatRelativeTime(project.updated_at)}</span>
+                    <span className="text-sm text-ink-500">{formatRelativeTime(project.updated_at)}</span>
                   </td>
                   <td className="px-2 py-3 text-center">
                     <button
                       onClick={(e) => handleContextMenu(e, project)}
-                      className="p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-zinc-200 transition-colors inline-flex"
+                      className="p-1 rounded hover:bg-ink-600 text-ink-500 hover:text-ink-200 transition-colors inline-flex"
                     >
                       <MoreVertical size={14} />
                     </button>

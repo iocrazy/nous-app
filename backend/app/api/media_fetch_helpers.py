@@ -8,7 +8,7 @@ Shared helper functions and models used by media fetch routes.
 
 from typing import Optional
 
-from fastapi import BackgroundTasks, HTTPException, Request
+from fastapi import BackgroundTasks, Request
 from loguru import logger
 from pydantic import BaseModel, field_validator
 
@@ -16,12 +16,6 @@ from app.boundary import ValidatedURL
 from app.core.deps import AuthDep
 from app.repositories.tags_repository import get_tags_repository
 from app.repositories.user_logs_repository import log_user_action
-from app.repositories.user_settings_repository import UserSettingsRepository
-from app.services.media.parsers.douyin_parse.drissionpage_parser import (
-    DrissionPageParser,
-)
-from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
-from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
 from app.services.media.parsers.ytdlp_service import YtdlpService
 
 # ============================================
@@ -303,89 +297,6 @@ async def dedup_and_dispatch(
     }
 
 
-# ============================================
-# Douyin parse fallback
-# ============================================
-
-
-async def douyin_parse_fallback(url: str, user_id: str) -> tuple[dict, str, str]:
-    """Douyin parse fallback: LightHTTP → DrissionPage."""
-    aweme_detail = None
-    parse_method = "unknown"
-    parse_method_name = "Unknown"
-
-    user_parse_mode = "lighthttp"
-    try:
-        settings_repo = UserSettingsRepository()
-        user_settings = await settings_repo.get_by_user_id(user_id)
-        if user_settings and user_settings.get("settings_json"):
-            user_parse_mode = user_settings["settings_json"].get(
-                "parse_mode", "lighthttp"
-            )
-        logger.info(f"[Douyin Fallback] User {user_id} parse_mode: {user_parse_mode}")
-    except Exception as e:
-        logger.warning(f"Failed to read user parse mode, using default: {e}")
-
-    # Pick a Douyin UA once per request so LightHTTP + BrowserAuto share it.
-    from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
-
-    douyin_ua = pick_ua()
-
-    if user_parse_mode == "drissionpage":
-        try:
-            logger.info(f"[BrowserAuto] User selected browser parsing: {url}")
-            aweme_detail = await DrissionPageParser.fetch_one_video(
-                url, user_agent=douyin_ua
-            )
-            if aweme_detail:
-                parse_method = "browser_auto"
-                parse_method_name = "BrowserAuto"
-                logger.success("[BrowserAuto] Parse successful")
-        except Exception as e:
-            logger.error(f"[BrowserAuto] Parse failed: {e}")
-    else:
-        try:
-            logger.info(f"[LightHTTP] Attempting parse: {url}")
-            aweme_detail = await IesDouyinParser.parse(url, user_agent=douyin_ua)
-            if aweme_detail:
-                parse_method = "light_http"
-                parse_method_name = "LightHTTP"
-                logger.success("[LightHTTP] Parse successful")
-        except Exception as e:
-            logger.warning(f"[LightHTTP] Parse failed: {e}")
-
-        if not aweme_detail:
-            try:
-                logger.info(f"[BrowserAuto] Falling back to browser parsing: {url}")
-                aweme_detail = await DrissionPageParser.fetch_one_video(
-                    url, user_agent=douyin_ua
-                )
-                if aweme_detail:
-                    parse_method = "browser_auto"
-                    parse_method_name = "BrowserAuto"
-                    logger.success("[BrowserAuto] Parse successful")
-            except Exception as e:
-                logger.error(f"[BrowserAuto] Parse failed: {e}")
-
-    if not aweme_detail:
-        raise HTTPException(
-            status_code=404,
-            detail="Cannot fetch video info (yt-dlp, LightHTTP and BrowserAuto all failed)",
-        )
-
-    parsed_data = await DouyinFormatter.parse_aweme_detail(
-        aweme_detail=aweme_detail,
-        valid_url=url,
-        download_video=True,
-        download_music=False,
-        download_cover=True,
-    )
-    if not parsed_data:
-        raise HTTPException(status_code=500, detail="Douyin video parsing failed")
-
-    return parsed_data, parse_method, parse_method_name
-
-
 async def mark_cookie_if_auth_failure(user_id: str, platform: str, error: str) -> None:
     """Mark a user's platform cookie as invalid when yt-dlp encounters auth errors."""
     auth_keywords = ["login", "401", "403", "cookie", "sign in", "authenticated"]
@@ -428,7 +339,7 @@ async def handle_media_fetch_dispatch(
 
     Despite the legacy `handle_ytdlp_fetch` name (renamed to this), the
     function is NOT yt-dlp specific. Branch by platform:
-      - douyin → DrissionPage / ABogus / LightHTTP fallback chain (httpx)
+      - douyin → unified ABogus / DrissionPage chain (parse_workflow step)
       - yt-dlp platforms → yt-dlp
     All branches end on the same DBOS parse_workflow dispatch path.
 
@@ -615,7 +526,6 @@ async def handle_media_fetch_dispatch(
 _resolve_team_id = resolve_team_id
 _resolve_and_attach_tags = resolve_and_attach_tags
 _dedup_and_dispatch = dedup_and_dispatch
-_douyin_parse_fallback = douyin_parse_fallback
 _mark_cookie_if_auth_failure = mark_cookie_if_auth_failure
 _handle_ytdlp_fetch = (
     handle_media_fetch_dispatch  # legacy alias, drop after callers migrate

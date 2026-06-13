@@ -8,7 +8,7 @@ export function TypingIndicator(): React.ReactElement {
       {DOT_DELAYS.map((delay) => (
         <span
           key={delay}
-          className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce"
+          className="w-1.5 h-1.5 rounded-full bg-ink-500 animate-bounce"
           style={{ animationDelay: delay, animationDuration: '0.8s' }}
         />
       ))}

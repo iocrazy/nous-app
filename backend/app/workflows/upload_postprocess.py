@@ -80,6 +80,17 @@ async def upload_postprocess_probe_step(
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
+async def upload_postprocess_png_prompt_step(file_path: str) -> Optional[str]:
+    """Extract an embedded AI generation prompt from a PNG upload
+    (A1111 ``parameters`` / ComfyUI ``prompt`` text chunks). Pure read
+    I/O — returns the prompt text or None; the body persists it."""
+    from app.services.library.png_prompt_extractor import extract_png_prompt
+
+    abs_path = Path(settings.DOWNLOAD_PATH) / file_path
+    return extract_png_prompt(abs_path)
+
+
+@DBOS.step(retries_allowed=True, max_attempts=2)
 async def upload_postprocess_thumbnail_step(
     resource_id: str, file_path: str, mime_type: str
 ) -> Optional[str]:
@@ -163,6 +174,25 @@ async def upload_postprocess_workflow(
                 f"[upload_postprocess] metadata phase failed for "
                 f"{resource_id} (non-fatal): {e}"
             )
+
+        # ── Phase A2: PNG generation-prompt extraction (non-fatal) ─────
+        # AI-generated PNGs (A1111/ComfyUI) carry their prompt in text
+        # chunks — surface it into gen_prompt for free. Never clobbers a
+        # user-entered prompt (new-version uploads re-run this workflow).
+        if mime_type == "image/png" or file_path.lower().endswith(".png"):
+            try:
+                prompt = await upload_postprocess_png_prompt_step(file_path)
+                if prompt:
+                    current = await svc.repo.get_resource_by_id(resource_id)
+                    if current and not (current.get("gen_prompt") or "").strip():
+                        await svc.repo.update_resource(
+                            resource_id, {"gen_prompt": prompt}
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"[upload_postprocess] png-prompt phase failed for "
+                    f"{resource_id} (non-fatal): {e}"
+                )
 
         # ── Phase B: thumbnail (non-fatal) ─────────────────────────────
         try:

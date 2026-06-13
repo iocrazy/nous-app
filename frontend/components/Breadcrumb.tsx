@@ -14,18 +14,18 @@ export const Breadcrumb: React.FC<BreadcrumbProps> = ({ segments }) => {
   if (segments.length === 0) return null;
 
   return (
-    <nav className="flex items-center gap-1 text-sm text-zinc-400">
+    <nav className="flex items-center gap-1 text-sm text-ink-400">
       {segments.map((segment, idx) => {
         const isLast = idx === segments.length - 1;
         return (
           <React.Fragment key={idx}>
-            {idx > 0 && <ChevronRight size={12} className="text-zinc-600 shrink-0" />}
+            {idx > 0 && <ChevronRight size={12} className="text-ink-600 shrink-0" />}
             {isLast ? (
-              <span className="text-zinc-200 font-medium truncate">{segment.label}</span>
+              <span className="text-ink-200 font-medium truncate">{segment.label}</span>
             ) : (
               <button
                 onClick={segment.onClick}
-                className="hover:text-zinc-200 transition-colors truncate cursor-pointer"
+                className="hover:text-ink-200 transition-colors truncate cursor-pointer"
               >
                 {segment.label}
               </button>

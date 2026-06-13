@@ -25,13 +25,13 @@ def test_fetch_media_by_type_reparses_yt_dlp_platforms() -> None:
     router_mod = importlib.import_module("app.api.media_fetch_router")
     source = inspect.getsource(router_mod.fetch_media_by_type)
 
-    # The handler branches by platform: douyin path uses IesDouyinParser,
-    # yt-dlp path uses YtdlpService. Both must be present.
+    # The handler branches by platform: douyin path uses the unified
+    # chain (reparse_douyin), yt-dlp path uses YtdlpService.
     assert "YtdlpService.fetch_metadata" in source, (
         "fetch_media_by_type must call YtdlpService.fetch_metadata in "
         "the non-douyin branch so bilibili / youtube etc. re-parse on "
         "every Fetch Video request — matches the douyin branch's "
-        "IesDouyinParser._fetch_share_page call."
+        "unified-chain reparse_douyin call."
     )
     assert "YtdlpService._map_metadata_to_media" in source, (
         "fetch_media_by_type must feed the yt-dlp info_dict through "

@@ -50,7 +50,7 @@ export function AgentSelector({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 px-2 py-1 rounded hover:bg-zinc-800 text-sm text-zinc-300 transition-colors"
+        className="flex items-center gap-1 px-2 py-1 rounded hover:bg-ink-800 text-sm text-ink-300 transition-colors"
         title="Switch agent"
       >
         <span className="max-w-[120px] truncate">
@@ -58,27 +58,27 @@ export function AgentSelector({
         </span>
         <ChevronDown
           size={12}
-          className={`flex-shrink-0 text-zinc-500 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`flex-shrink-0 text-ink-500 transition-transform ${open ? 'rotate-180' : ''}`}
         />
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 mt-1 w-52 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+        <div className="absolute top-full right-0 mt-1 w-52 bg-ink-800 border border-ink-700 rounded-lg shadow-xl z-50 py-1 overflow-hidden">
           {agents.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-zinc-500">No agents available</p>
+            <p className="px-3 py-2 text-xs text-ink-500">No agents available</p>
           ) : (
             agents.map((agent) => (
               <button
                 key={agent.id}
                 type="button"
                 onClick={() => handleSelect(agent.id)}
-                className={`w-full flex flex-col items-start px-3 py-2 text-left transition-colors hover:bg-zinc-700 ${
-                  agent.id === selectedId ? 'bg-zinc-700' : ''
+                className={`w-full flex flex-col items-start px-3 py-2 text-left transition-colors hover:bg-ink-700 ${
+                  agent.id === selectedId ? 'bg-ink-700' : ''
                 }`}
               >
-                <span className="text-sm text-zinc-200 truncate w-full">{agent.name}</span>
+                <span className="text-sm text-ink-200 truncate w-full">{agent.name}</span>
                 {agent.description && (
-                  <span className="text-[11px] text-zinc-500 mt-0.5 line-clamp-1">
+                  <span className="text-[11px] text-ink-500 mt-0.5 line-clamp-1">
                     {agent.description}
                   </span>
                 )}

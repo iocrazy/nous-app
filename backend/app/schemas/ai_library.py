@@ -50,6 +50,9 @@ class AgentOut(AgentBase):
     monthly_token_budget: Optional[int] = None
     monthly_cost_cents_budget: Optional[int] = None
     paused_reason: Optional[Literal["budget", "manual"]] = None
+    # Run limits (mig 286, paperclip P4). NULL = unlimited.
+    timeout_sec: Optional[int] = None
+    max_concurrent_runs: Optional[int] = None
 
 
 class AgentUpdate(BaseModel):
@@ -73,6 +76,9 @@ class AgentUpdate(BaseModel):
     # rejected here via the Literal so a client can't forge a fake budget
     # pause. Pass null to resume from either a manual or a budget pause.
     paused_reason: Optional[Literal["manual"]] = None
+    # Run limits (mig 286). 0/None timeout = no cap; concurrency >= 1.
+    timeout_sec: Optional[int] = Field(default=None, ge=0)
+    max_concurrent_runs: Optional[int] = Field(default=None, ge=1)
 
 
 class AgentCreate(BaseModel):
@@ -245,6 +251,9 @@ class ComposedSystemPrompt(BaseModel):
     tools: list[dict]  # function-calling schema array
     skill_manifest: list[dict]  # [{slug, name, description}]
     cache_fingerprint: str  # alias of prefix_fingerprint (back-compat)
+    # mig 286: per-run wall-clock cap (seconds) carried from the agent row.
+    # AgentRunner checks it between LLM iterations. None/0 = no cap.
+    timeout_sec: Optional[int] = None
     prefix_fingerprint: str = ""  # M1.B: stable prefix hash
     dynamic_fingerprint: str = ""  # M1.B: prefix + memory recall hash
     recalled_memory_ids: list[UUID] = Field(default_factory=list)

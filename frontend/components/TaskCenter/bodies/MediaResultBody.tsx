@@ -1,6 +1,7 @@
 import React from 'react';
 import { ExternalLink, Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useAuth } from '../../../contexts/AuthContext';
 import type { UnifiedTask } from '../../../contexts/TaskManagerContext';
 import {
   getResourceCoverUrl,
@@ -22,6 +23,7 @@ export const MediaResultBody: React.FC<MediaResultBodyProps> = ({
   onOpenResource,
 }) => {
   const { t } = useTranslation();
+  const { mediaToken } = useAuth();
   const rid = String(task.resource_id);
   const r = (resource ?? {}) as {
     filename?: string;
@@ -36,7 +38,7 @@ export const MediaResultBody: React.FC<MediaResultBodyProps> = ({
     <div className="p-4 space-y-4">
       {isAudio ? (
         <AudioWaveformPlayer
-          src={getResourceMediaUrl(rid)}
+          src={getResourceMediaUrl(rid, mediaToken ?? undefined)}
           filename={r.filename || task.title}
           duration={r.duration_seconds ?? undefined}
         />
@@ -44,7 +46,7 @@ export const MediaResultBody: React.FC<MediaResultBodyProps> = ({
         <img
           src={getResourceCoverUrl(rid)}
           alt=""
-          className="w-full max-h-72 object-contain rounded-lg bg-zinc-950"
+          className="w-full max-h-72 object-contain rounded-lg bg-ink-950"
         />
       )}
 
@@ -67,9 +69,9 @@ export const MediaResultBody: React.FC<MediaResultBodyProps> = ({
           <ExternalLink size={13} /> {t('topbar.openResource')}
         </button>
         <a
-          href={getResourceFileUrl(rid)}
+          href={getResourceFileUrl(rid, mediaToken ?? undefined)}
           download
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-zinc-300 bg-zinc-800 hover:bg-zinc-700 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-ink-300 bg-ink-800 hover:bg-ink-700 transition-colors"
         >
           <Download size={13} /> {t('topbar.downloadResult')}
         </a>
@@ -80,7 +82,7 @@ export const MediaResultBody: React.FC<MediaResultBodyProps> = ({
 
 const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <div className="flex flex-col">
-    <dt className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</dt>
-    <dd className="text-zinc-200 truncate">{value}</dd>
+    <dt className="text-[10px] uppercase tracking-wide text-ink-500">{label}</dt>
+    <dd className="text-ink-200 truncate">{value}</dd>
   </div>
 );

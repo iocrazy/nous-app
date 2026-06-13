@@ -120,9 +120,88 @@ def _do_douyin_download(
                     f"[Download/Exec] video failed for {platform_id}: {error_msg}"
                 )
 
-                # ── yt-dlp fallback: try downloading via yt-dlp if httpx failed ──
                 original_url = media.get("original_url") if media else None
-                if original_url:
+                source_platform = (media or {}).get("source_platform") or "douyin"
+
+                # ── douyin/tiktok recovery: unified-chain re-parse, NO yt-dlp ──
+                # yt-dlp is banned for douyin: its format-selector
+                # fallthrough grabs HEVC streams browsers can't decode —
+                # the "black screen, audio only" P1 (2026-06-10). Fresh
+                # URLs from the unified chain (ABogus → DrissionPage) +
+                # an httpx retry is the correct recovery.
+                if source_platform in ("douyin", "tiktok"):
+                    logger.info(
+                        f"[Download/Exec] video: httpx failed, re-parsing via "
+                        f"unified douyin chain for {platform_id}"
+                    )
+                    try:
+                        from app.repositories.media_repository import (
+                            MediaRepository as _MR_chain,
+                        )
+                        from app.tasks.download_helpers import (
+                            reparse_douyin_via_chain,
+                        )
+
+                        new_parsed, parse_method = reparse_douyin_via_chain(
+                            platform_id,
+                            original_url,
+                            user_id=user_id,
+                            user_agent=user_agent,
+                        )
+                        fresh_urls = (
+                            new_parsed.get("video_download_urls")
+                            if new_parsed
+                            else None
+                        )
+                        if fresh_urls:
+                            run_async(
+                                _MR_chain().update(
+                                    platform_id,
+                                    {"video_download_urls": fresh_urls},
+                                )
+                            )
+                            logger.info(
+                                f"[Download/Exec] video: chain re-parse "
+                                f"({parse_method}) got {len(fresh_urls)} fresh "
+                                f"URLs, retrying httpx for {platform_id}"
+                            )
+                            video_result = run_async(
+                                DownloaderService.download_video_by_platform_id(
+                                    platform_id,
+                                    user_id=user_id,
+                                    progress_tracker=tracker,
+                                    user_agent=user_agent,
+                                )
+                            )
+                            results["video"] = (
+                                video_result.video_download_status.value
+                                if hasattr(video_result, "video_download_status")
+                                else "unknown"
+                            )
+                            if results["video"] == "completed":
+                                logger.success(
+                                    f"[Download/Exec] video: chain re-parse "
+                                    f"recovery succeeded for {platform_id}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"[Download/Exec] video: retry after chain "
+                                    f"re-parse also failed for {platform_id}"
+                                )
+                        else:
+                            logger.warning(
+                                f"[Download/Exec] video: chain re-parse yielded "
+                                f"no video URLs for {platform_id}"
+                            )
+                    except Exception as chain_err:
+                        logger.warning(
+                            f"[Download/Exec] video: chain re-parse recovery "
+                            f"error for {platform_id}: "
+                            f"{type(chain_err).__name__}: {chain_err}"
+                        )
+
+                # ── yt-dlp fallback (non-douyin platforms only) ──
+                elif original_url:
                     logger.info(
                         f"[Download/Exec] video: httpx failed, trying yt-dlp fallback "
                         f"with original URL for {platform_id}"
@@ -195,109 +274,6 @@ def _do_douyin_download(
                         f"[Download/Exec] video: no original_url available for yt-dlp fallback: {platform_id}"
                     )
 
-                # ── BrowserAuto fallback: re-parse via DrissionPage when httpx+yt-dlp both fail ──
-                # DrissionPage + DouyinFormatter are douyin-specific (the
-                # browser scraper targets douyin's share page DOM, and the
-                # formatter expects aweme_detail-shaped input). Running
-                # them on bilibili / youtube / etc. wastes ~30s loading a
-                # headless Chromium and always returns empty parsed data.
-                # 2026-05-13: confirmed on prod — bilibili tasks reached
-                # this branch and spent 30s in DrissionPage before the
-                # PR #264 partial-fail raise kicked in. Skip for non-
-                # douyin platforms; let the raise fire immediately.
-                source_platform = (
-                    (media or {}).get("source_platform") if media else None
-                )
-                if (
-                    results["video"] != "completed"
-                    and original_url
-                    and source_platform in ("douyin", "tiktok")
-                ):
-                    logger.info(
-                        f"[Download/Exec] video: httpx+yt-dlp both failed, trying BrowserAuto "
-                        f"(DrissionPage) to get fresh URLs for {platform_id}"
-                    )
-                    try:
-                        from app.repositories.media_repository import (
-                            MediaRepository as _MR_browser,
-                        )
-                        from app.services.media.parsers.douyin_parse.drissionpage_parser import (
-                            DrissionPageParser,
-                        )
-                        from app.services.media.parsers.douyin_parse.formatter import (
-                            DouyinFormatter,
-                        )
-
-                        browser_detail = run_async(
-                            DrissionPageParser.fetch_one_video(
-                                original_url, user_agent=user_agent
-                            )
-                        )
-                        if browser_detail:
-                            browser_parsed = run_async(
-                                DouyinFormatter.parse_aweme_detail(
-                                    aweme_detail=browser_detail,
-                                    valid_url=original_url,
-                                    download_video=True,
-                                    download_music=False,
-                                    download_cover=False,
-                                )
-                            )
-                            fresh_urls = (
-                                browser_parsed.get("video_download_urls")
-                                if browser_parsed
-                                else None
-                            )
-                            if fresh_urls:
-                                run_async(
-                                    _MR_browser().update(
-                                        platform_id,
-                                        {"video_download_urls": fresh_urls},
-                                    )
-                                )
-                                logger.info(
-                                    f"[Download/Exec] video: BrowserAuto got {len(fresh_urls)} "
-                                    f"fresh URLs, retrying httpx for {platform_id}"
-                                )
-                                video_result = run_async(
-                                    DownloaderService.download_video_by_platform_id(
-                                        platform_id,
-                                        user_id=user_id,
-                                        progress_tracker=tracker,
-                                        user_agent=user_agent,
-                                    )
-                                )
-                                results["video"] = (
-                                    video_result.video_download_status.value
-                                    if hasattr(video_result, "video_download_status")
-                                    else "unknown"
-                                )
-                                if results["video"] == "completed":
-                                    logger.success(
-                                        f"[Download/Exec] video: BrowserAuto fallback "
-                                        f"succeeded for {platform_id}"
-                                    )
-                                else:
-                                    logger.warning(
-                                        f"[Download/Exec] video: BrowserAuto fallback "
-                                        f"download also failed for {platform_id}"
-                                    )
-                            else:
-                                logger.warning(
-                                    f"[Download/Exec] video: BrowserAuto parse yielded no "
-                                    f"video URLs for {platform_id}"
-                                )
-                        else:
-                            logger.warning(
-                                f"[Download/Exec] video: BrowserAuto returned empty "
-                                f"for {platform_id}"
-                            )
-                    except Exception as browser_err:
-                        logger.warning(
-                            f"[Download/Exec] video: BrowserAuto fallback error for "
-                            f"{platform_id}: {type(browser_err).__name__}: {browser_err}"
-                        )
-
             # Mark video stage complete
             if "video" in stages:
                 video_end = stages["video"][0] + stages["video"][1]
@@ -346,23 +322,19 @@ def _do_douyin_download(
                 )
 
                 # Fallback: re-parse to get fresh image URLs and retry.
-                # Image slides only exist on douyin/tiktok — IES is the right
-                # tool there. For yt-dlp platforms image fallback never
-                # applies; skip to avoid noisy "URL 模式不匹配" / NO_ROUTER_DATA logs.
+                # Image slides only exist on douyin/tiktok; for yt-dlp
+                # platforms image fallback never applies.
                 image_source_platform = (media or {}).get("source_platform")
                 if image_source_platform not in ("douyin", "tiktok"):
                     logger.info(
-                        f"[Download/Exec] image: skip IES re-parse for "
+                        f"[Download/Exec] image: skip douyin re-parse for "
                         f"{image_source_platform} platform_id={platform_id}"
                     )
                 else:
                     try:
                         from app.repositories.media_repository import MediaRepository
-                        from app.services.media.parsers.douyin_parse.formatter import (
-                            DouyinFormatter,
-                        )
-                        from app.services.media.parsers.douyin_parse.ies_parser import (
-                            IesDouyinParser,
+                        from app.tasks.download_helpers import (
+                            reparse_douyin_via_chain,
                         )
 
                         logger.info(
@@ -370,61 +342,45 @@ def _do_douyin_download(
                         )
                         # Use the task's chosen UA so re-parse request is
                         # consistent with the original parse+download chain.
-                        _re_ua = user_agent
-                        if not _re_ua:
-                            from app.services.media.parsers.douyin_parse.ua_pool import (
-                                pick_ua,
-                            )
-
-                            _re_ua = pick_ua()
-                        aweme_detail = run_async(
-                            IesDouyinParser._fetch_share_page(
-                                platform_id, user_agent=_re_ua
-                            )
+                        new_parsed, parse_method = reparse_douyin_via_chain(
+                            platform_id,
+                            (media or {}).get("original_url"),
+                            user_id=user_id,
+                            user_agent=user_agent,
                         )
-                        if aweme_detail:
-                            IesDouyinParser._process_video_urls(aweme_detail)
-                            new_parsed = run_async(
-                                DouyinFormatter.parse_aweme_detail(
-                                    aweme_detail=aweme_detail,
-                                    valid_url=media.get("original_url", ""),
-                                    download_video=True,
-                                    download_music=False,
-                                    download_cover=False,
+                        if new_parsed:
+                            # Update DB with fresh URLs
+                            update_fields = {}
+                            for field in (
+                                "image_download_urls",
+                                "video_download_urls",
+                            ):
+                                if new_parsed.get(field):
+                                    update_fields[field] = new_parsed[field]
+                            if update_fields:
+                                repo = MediaRepository()
+                                run_async(repo.update(platform_id, update_fields))
+                                logger.info(
+                                    f"[Download/Exec] image: re-parsed {platform_id} "
+                                    f"via {parse_method}, "
+                                    f"updated {list(update_fields.keys())}"
+                                )
+
+                            # Retry download with fresh URLs
+                            video_result = run_async(
+                                DownloaderService.download_images_by_platform_id(
+                                    platform_id, user_id=user_id
                                 )
                             )
-                            if new_parsed:
-                                # Update DB with fresh URLs
-                                update_fields = {}
-                                for field in (
-                                    "image_download_urls",
-                                    "video_download_urls",
-                                ):
-                                    if new_parsed.get(field):
-                                        update_fields[field] = new_parsed[field]
-                                if update_fields:
-                                    repo = MediaRepository()
-                                    run_async(repo.update(platform_id, update_fields))
-                                    logger.info(
-                                        f"[Download/Exec] image: re-parsed {platform_id}, "
-                                        f"updated {list(update_fields.keys())}"
-                                    )
-
-                                # Retry download with fresh URLs
-                                video_result = run_async(
-                                    DownloaderService.download_images_by_platform_id(
-                                        platform_id, user_id=user_id
-                                    )
-                                )
-                                results["video"] = (
-                                    video_result.video_download_status.value
-                                    if hasattr(video_result, "video_download_status")
-                                    else "unknown"
-                                )
-                                logger.info(
-                                    f"[Download/Exec] image retry: "
-                                    f"{results['video']} for {platform_id}"
-                                )
+                            results["video"] = (
+                                video_result.video_download_status.value
+                                if hasattr(video_result, "video_download_status")
+                                else "unknown"
+                            )
+                            logger.info(
+                                f"[Download/Exec] image retry: "
+                                f"{results['video']} for {platform_id}"
+                            )
                     except Exception as reparse_err:
                         logger.warning(
                             f"[Download/Exec] image: re-parse fallback failed "

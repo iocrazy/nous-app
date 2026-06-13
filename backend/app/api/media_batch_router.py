@@ -20,13 +20,8 @@ from app.core.scope_dep import ScopedRequestDep
 from app.core.utils import Utils
 from app.repositories.tags_repository import get_tags_repository
 from app.repositories.user_logs_repository import log_user_action
-from app.repositories.user_settings_repository import UserSettingsRepository
 from app.services.billing.points_service import PointsService
-from app.services.media.parsers.douyin_parse.drissionpage_parser import (
-    DrissionPageParser,
-)
-from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
-from app.services.media.parsers.douyin_parse.ies_parser import IesDouyinParser
+from app.services.media.parsers.douyin_parse.parse_chain import fetch_douyin_detail
 from app.services.media.parsers.media_service import MediaService
 
 router = APIRouter()
@@ -110,18 +105,6 @@ async def fetch_videos_batch(
     results = []
     errors = []
 
-    user_parse_mode = "lighthttp"
-    try:
-        settings_repo = UserSettingsRepository()
-        user_settings = await settings_repo.get_by_user_id(auth.user_id)
-        if user_settings and user_settings.get("settings_json"):
-            user_parse_mode = user_settings["settings_json"].get(
-                "parse_mode", "lighthttp"
-            )
-        logger.info(f"[Batch Parse] User {auth.user_id} parse mode: {user_parse_mode}")
-    except Exception as e:
-        logger.warning(f"Failed to read user parse mode, using default: {e}")
-
     for raw_url in request.urls:
         url = raw_url
         try:
@@ -132,42 +115,20 @@ async def fetch_videos_batch(
                 errors.append({"url": raw_url, "error": "Cannot extract valid link"})
                 continue
 
-            aweme_detail = None
+            # Unified douyin chain (ABogus → DrissionPage) — replaces the
+            # legacy per-user parse_mode branch whose LightHTTP first tier
+            # was permanently anti-bot blocked (every batch URL burned a
+            # dead HTTP attempt before the browser fallback).
+            chain_result = await fetch_douyin_detail(
+                url,
+                user_id=auth.user_id,
+                download_video=request.video_bool,
+                download_music=False,
+                download_cover=request.cover_bool,
+            )
 
-            # One UA per URL — shared across LightHTTP + BrowserAuto fallbacks.
-            from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
-
-            item_ua = pick_ua()
-
-            if user_parse_mode == "drissionpage":
-                try:
-                    aweme_detail = await DrissionPageParser.fetch_one_video(
-                        url, user_agent=item_ua
-                    )
-                except Exception as e:
-                    logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
-            else:
-                try:
-                    aweme_detail = await IesDouyinParser.parse(url, user_agent=item_ua)
-                except Exception as e:
-                    logger.warning(f"[Batch Parse] Lightweight parsing failed: {e}")
-
-                if not aweme_detail:
-                    try:
-                        aweme_detail = await DrissionPageParser.fetch_one_video(
-                            url, user_agent=item_ua
-                        )
-                    except Exception as e:
-                        logger.warning(f"[Batch Parse] Browser parsing failed: {e}")
-
-            if aweme_detail:
-                parsed_data = await DouyinFormatter.parse_aweme_detail(
-                    aweme_detail=aweme_detail,
-                    valid_url=url,
-                    download_video=request.video_bool,
-                    download_music=False,
-                    download_cover=request.cover_bool,
-                )
+            if chain_result:
+                _aweme_detail, parsed_data, _parse_method = chain_result
 
                 if parsed_data:
                     platform_id = parsed_data.get("platform_id")
@@ -294,24 +255,27 @@ async def debug_raw_parse(
     url: str = Query(..., description="Share URL to parse"),
 ):
     """
-    Debug endpoint: return raw aweme_detail JSON from IesDouyinParser.
-    No DB writes, no downloads — just raw parsed data.
+    Debug endpoint: return raw aweme_detail JSON from the unified douyin
+    chain (ABogus → DrissionPage). No DB writes, no downloads — just raw
+    parsed data.
     """
     # Boundary: SSRF guard. URLBlockedError -> global handler -> 400.
     validated = await validate_url_async(url)
 
-    aweme_detail = await IesDouyinParser.parse(validated)
-    if not aweme_detail:
-        raise HTTPException(status_code=404, detail="IesDouyinParser returned None")
-
-    parsed = await DouyinFormatter.parse_aweme_detail(
-        aweme_detail=aweme_detail,
-        valid_url=validated,
+    chain_result = await fetch_douyin_detail(
+        validated,
+        user_id=auth.user_id,
         download_video=False,
         download_music=False,
+        download_cover=False,
     )
+    if not chain_result:
+        raise HTTPException(status_code=404, detail="Douyin parse chain returned None")
+
+    aweme_detail, parsed, parse_method = chain_result
 
     return {
         "raw_aweme_detail": aweme_detail,
         "parsed_data": parsed,
+        "parse_method": parse_method,
     }

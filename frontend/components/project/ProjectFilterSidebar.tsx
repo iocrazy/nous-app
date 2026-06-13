@@ -28,7 +28,7 @@ const VIEW_FILTERS = [
   { key: 'archived', label: 'Archived', icon: Archive },
 ] as const;
 
-const iconBtnClass = 'rounded p-1 text-zinc-500 transition-colors hover:text-zinc-300';
+const iconBtnClass = 'rounded p-1 text-ink-500 transition-colors hover:text-ink-300';
 
 function FilterItem({
   icon: Icon, label, count, active, onClick,
@@ -41,7 +41,7 @@ function FilterItem({
 }) {
   const style = active
     ? 'bg-indigo-500/8 text-indigo-300'
-    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/40';
+    : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800/40';
 
   return (
     <button
@@ -50,14 +50,14 @@ function FilterItem({
     >
       <Icon size={16} className="shrink-0" />
       <span className="flex-1 truncate text-left">{label}</span>
-      <span className="text-xs text-zinc-600">{count}</span>
+      <span className="text-xs text-ink-600">{count}</span>
     </button>
   );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <span className="px-2 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
+    <span className="px-2 text-[11px] font-medium uppercase tracking-wider text-ink-600">
       {children}
     </span>
   );
@@ -72,7 +72,7 @@ export function ProjectFilterSidebar({
       <div className="relative w-4 flex-shrink-0">
         <button
           onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+          className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors"
           title="Expand sidebar"
         >
           <ChevronRight size={12} />
@@ -82,10 +82,10 @@ export function ProjectFilterSidebar({
   }
 
   return (
-    <div className="group relative flex w-52 flex-col border-r border-zinc-800/40 pt-16">
+    <div className="group relative flex w-52 flex-col border-r border-ink-800/40 pt-16">
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
-        <span className="text-sm font-semibold text-zinc-200">Projects</span>
+        <span className="text-sm font-semibold text-ink-200">Projects</span>
       </div>
 
       {/* View filters */}
@@ -108,7 +108,7 @@ export function ProjectFilterSidebar({
       {/* Folders */}
       {folders.length > 0 && (
         <>
-          <div className="mx-3 my-2 border-t border-zinc-800/80" />
+          <div className="mx-3 my-2 border-t border-ink-800/80" />
           <div className="px-2 pb-2 space-y-0.5">
             <SectionLabel>Folders</SectionLabel>
             <div className="mt-1 flex flex-col gap-0.5">
@@ -130,7 +130,7 @@ export function ProjectFilterSidebar({
       {/* Collapse toggle — right edge, mid-height */}
       <button
         onClick={onToggleCollapse}
-        className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
+        className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors opacity-0 group-hover:opacity-100"
         title="Collapse sidebar"
       >
         <ChevronLeft size={12} />

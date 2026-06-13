@@ -2,11 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { CheckCircle2, Inbox, Upload as UploadIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { TaskCenterRow } from './TaskCenter/TaskCenterRow';
 import { TaskDetailModal } from './TaskCenter/TaskDetailModal';
-import { ActiveTaskCard } from './TaskCenter/ActiveTaskCard';
 import { TaskCenterStatusBar, type TaskTab } from './TaskCenter/TaskCenterStatusBar';
-import { summarizeTasks, isActiveStatus } from './TaskCenter/taskCenterSummary';
+import { FlowTaskList } from './TaskCenter/FlowStepCard';
+import {
+  groupTasksByFlow,
+  isActiveItem,
+  summarizeFlowItems,
+  type PanelItem,
+} from './TaskCenter/flowGrouping';
 import { useAgentRunTasks } from './TaskCenter/useAgentRunTasks';
 import {
   useUpload,
@@ -19,9 +23,9 @@ import { useTaskManager, type UnifiedTask } from '../contexts/TaskManagerContext
 // MobileTasksPage — full-screen Task Center for mobile.
 //
 // Reuses the exact same building blocks + assembly logic as TopBar's desktop
-// TaskCenterPanel (backendTasks + agentTasks merge, summarizeTasks counts,
-// active/history split, ActiveTaskCard for running + TaskCenterRow for
-// queued/history + live UploadContext rows + TaskDetailModal). The only
+// TaskCenterPanel (backendTasks + agentTasks merge, flow grouping via
+// groupTasksByFlow + FlowTaskList, flow-unit counts, live UploadContext
+// rows + TaskDetailModal). The only
 // difference is the shell: a full-height slide-up overlay with larger touch
 // targets instead of the floating dropdown panel.
 // ---------------------------------------------------------------------------
@@ -74,28 +78,25 @@ function MobileTasksPanel({
   );
   const allTasks = [...backendTasks, ...agentTasks];
 
-  const counts = summarizeTasks(allTasks, uploadingItems.length);
+  // One user submission (parse → download → followups) shares a flow_id and
+  // renders as ONE card with step circles — counts are in flow units. Same
+  // grouping as TopBar's desktop panel (FlowTaskList).
+  const panelItems = groupTasksByFlow(allTasks);
+  const flowCounts = summarizeFlowItems(panelItems);
+  const counts = { ...flowCounts, running: flowCounts.running + uploadingItems.length };
   const completedCount = counts.completed + counts.failed;
   const activeTotal = counts.running + counts.queued;
   const hasTasks = allTasks.length > 0 || uploadingItems.length > 0;
 
-  // Newest first; within the Active tab, running sorts above queued.
-  const byRecency = (a: UnifiedTask, b: UnifiedTask) =>
-    (b.created_at || '').localeCompare(a.created_at || '');
-  const activeList = allTasks
-    .filter((tk) => isActiveStatus(tk.status))
-    .sort((a, b) => {
-      const ar = a.status === 'processing' ? 1 : 0;
-      const br = b.status === 'processing' ? 1 : 0;
-      return ar !== br ? br - ar : byRecency(a, b);
-    });
-  const historyList = allTasks
-    .filter((tk) => !isActiveStatus(tk.status))
-    .sort(byRecency)
-    .slice(0, 50);
-
-  const runningTasks = activeList.filter((tk) => tk.status === 'processing');
-  const queuedTasks = activeList.filter((tk) => tk.status === 'pending');
+  // Active tab: items with something processing sort above purely-queued.
+  const hasProcessing = (i: PanelItem) =>
+    i.kind === 'flow'
+      ? i.steps.some((s) => s.status === 'processing')
+      : i.task.status === 'processing';
+  const activeItems = panelItems
+    .filter(isActiveItem)
+    .sort((a, b) => Number(hasProcessing(b)) - Number(hasProcessing(a)));
+  const historyItems = panelItems.filter((i) => !isActiveItem(i)).slice(0, 50);
   const showActive = tab === 'active';
 
   // Shared 1s clock for the live running cards' elapsed time — only ticks while
@@ -112,15 +113,15 @@ function MobileTasksPanel({
     // sits BELOW the bottom tab bar (z-[49]) so the pill stays visible &
     // tappable here, and below modals/Profile (z-50). TaskDetailModal portals
     // at z-60, above everything.
-    <div className="sm:hidden fixed inset-0 z-[48] bg-zinc-950 flex flex-col">
+    <div className="sm:hidden fixed inset-0 z-[48] bg-ink-950 flex flex-col">
       {/* Header — leave the page via the bottom tab bar. Clear button deferred. */}
-      <div className="flex items-center justify-center px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800/80">
-        <h1 className="text-[17px] font-semibold text-zinc-100">{t('topbar.taskCenter')}</h1>
+      <div className="flex items-center justify-center px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-ink-800/80">
+        <h1 className="text-[17px] font-semibold text-ink-100">{t('topbar.taskCenter')}</h1>
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center flex-1 text-zinc-500">
-          <div className="w-6 h-6 border-2 border-zinc-600 border-t-indigo-400 rounded-full animate-spin mb-3" />
+        <div className="flex flex-col items-center justify-center flex-1 text-ink-500">
+          <div className="w-6 h-6 border-2 border-ink-600 border-t-indigo-400 rounded-full animate-spin mb-3" />
           <span className="text-sm">{t('common.loading')}</span>
         </div>
       ) : hasTasks ? (
@@ -140,42 +141,32 @@ function MobileTasksPanel({
           >
             {showActive ? (
               <>
-                {/* Running now — prominent live cards */}
-                {runningTasks.length > 0 && (
-                  <div className="px-4 pt-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-                    {t('topbar.running')} · {runningTasks.length}
-                  </div>
-                )}
-                {runningTasks.map((task) => (
-                  <ActiveTaskCard key={task.id} task={task} now={now} onCancel={cancelTask} />
-                ))}
-
                 {/* Active uploads from UploadContext (client-side progress) */}
                 {uploadingItems.map((item) => (
-                  <div key={item.id} className="px-4 py-3 border-b border-zinc-800/50">
+                  <div key={item.id} className="px-4 py-3 border-b border-ink-800/50">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-blue-500/20 text-blue-400">
                         <UploadIcon size={16} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <span className="text-sm text-zinc-300 truncate max-w-[200px]">{item.filename}</span>
+                          <span className="text-sm text-ink-300 truncate max-w-[200px]">{item.filename}</span>
                           <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                            <span className="text-[11px] text-zinc-500">{item.percent}%</span>
+                            <span className="text-[11px] text-ink-500">{item.percent}%</span>
                             {item.speed > 0 && (
-                              <span className="text-[11px] text-zinc-600">{uploadFormatSpeed(item.speed)}</span>
+                              <span className="text-[11px] text-ink-600">{uploadFormatSpeed(item.speed)}</span>
                             )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[11px] text-zinc-600">Upload</span>
+                          <span className="text-[11px] text-ink-600">Upload</span>
                           {item.fileSize > 0 && (
-                            <span className="text-[11px] text-zinc-600">{uploadFormatFileSize(item.fileSize)}</span>
+                            <span className="text-[11px] text-ink-600">{uploadFormatFileSize(item.fileSize)}</span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <div className="mt-2 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="mt-2 h-1.5 bg-ink-800 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-300 bg-indigo-500"
                         style={{ width: `${Math.max(item.percent, 2)}%` }}
@@ -184,45 +175,36 @@ function MobileTasksPanel({
                   </div>
                 ))}
 
-                {/* Queued */}
-                {queuedTasks.length > 0 && (
-                  <div className="px-4 pt-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500 border-t border-zinc-800/50">
-                    {t('topbar.queued')} · {queuedTasks.length}
-                  </div>
-                )}
-                {queuedTasks.map((task) => (
-                  <TaskCenterRow
-                    key={task.id}
-                    task={task}
-                    onCancel={cancelTask}
-                    onRetry={retryTask}
-                    onOpenResource={openResource}
-                    onOpenDetail={setDetailTask}
-                  />
-                ))}
+                {/* Flow cards (step circles) + standalone tasks */}
+                <FlowTaskList
+                  items={activeItems}
+                  now={now}
+                  onCancel={cancelTask}
+                  onRetry={retryTask}
+                  onOpenResource={openResource}
+                  onOpenDetail={setDetailTask}
+                />
 
-                {uploadingItems.length === 0 && activeList.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
-                    <CheckCircle2 size={32} className="mb-3 text-zinc-600" />
+                {uploadingItems.length === 0 && activeItems.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-16 text-ink-500">
+                    <CheckCircle2 size={32} className="mb-3 text-ink-600" />
                     <span className="text-sm">{t('topbar.noActiveTasks')}</span>
                   </div>
                 )}
               </>
             ) : (
               <>
-                {historyList.map((task) => (
-                  <TaskCenterRow
-                    key={task.id}
-                    task={task}
-                    onCancel={cancelTask}
-                    onRetry={retryTask}
-                    onOpenResource={openResource}
-                    onOpenDetail={setDetailTask}
-                  />
-                ))}
-                {historyList.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
-                    <Inbox size={32} className="mb-3 text-zinc-600" />
+                <FlowTaskList
+                  items={historyItems}
+                  now={now}
+                  onCancel={cancelTask}
+                  onRetry={retryTask}
+                  onOpenResource={openResource}
+                  onOpenDetail={setDetailTask}
+                />
+                {historyItems.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-16 text-ink-500">
+                    <Inbox size={32} className="mb-3 text-ink-600" />
                     <span className="text-sm">{t('topbar.noItems')}</span>
                   </div>
                 )}
@@ -231,8 +213,8 @@ function MobileTasksPanel({
           </div>
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center flex-1 text-zinc-500">
-          <Inbox size={36} className="mb-3 text-zinc-600" />
+        <div className="flex flex-col items-center justify-center flex-1 text-ink-500">
+          <Inbox size={36} className="mb-3 text-ink-600" />
           <span className="text-sm">{t('topbar.noItems')}</span>
         </div>
       )}

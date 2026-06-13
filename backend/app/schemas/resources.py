@@ -19,6 +19,16 @@ class ResourceUpdate(BaseModel):
 
     filename: Optional[str] = Field(None, min_length=1, max_length=500)
     notes: Optional[str] = Field(None, max_length=5000)
+    gen_prompt: Optional[str] = Field(
+        None,
+        max_length=20000,
+        description="AI generation prompt attached to this asset",
+    )
+    gen_prompt_zh: Optional[str] = Field(
+        None,
+        max_length=20000,
+        description="Chinese-language AI generation prompt for this asset",
+    )
     url: Optional[str] = Field(None, max_length=2000)
     rating: Optional[int] = Field(None, ge=0, le=5)
     is_trashed: Optional[bool] = None
@@ -34,6 +44,38 @@ class ResourceUpdate(BaseModel):
     )
     image_download_status: Optional[str] = Field(
         None, description="User image download status"
+    )
+
+
+class GenPromptTranslateRequest(BaseModel):
+    """Body for POST /resources/{id}/gen-prompt/translate."""
+
+    target_lang: str = Field(
+        ...,
+        pattern="^(en|zh)$",
+        description="Language to translate the prompt into",
+    )
+
+
+class BatchAssetAiRequest(BaseModel):
+    """Body for POST /resources/ai/batch (batch caption / classify)."""
+
+    resource_ids: List[str] = Field(..., min_length=1, max_length=50)
+    operation: str = Field(
+        ...,
+        pattern="^(caption|classify)$",
+        description="Which asset-AI workflow to dispatch per resource",
+    )
+
+
+class TrainingSetExportRequest(BaseModel):
+    """Body for POST /resources/export/training-set (LoRA caption format)."""
+
+    resource_ids: List[str] = Field(..., min_length=1, max_length=100)
+    lang: str = Field(
+        "en",
+        pattern="^(en|zh)$",
+        description="Which prompt side becomes the sidecar .txt caption",
     )
 
 

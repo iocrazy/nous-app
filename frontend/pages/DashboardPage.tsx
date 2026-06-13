@@ -52,7 +52,7 @@ export function DashboardPage() {
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* A6: dashboard sub-view nav strip — surfaces tasks/schedules/lanes/etc. */}
-      <div className="mb-6 flex flex-wrap items-center gap-1 p-1 bg-zinc-900 border border-zinc-800 rounded-lg overflow-x-auto">
+      <div className="mb-6 flex flex-wrap items-center gap-1 p-1 bg-ink-900 border border-ink-800 rounded-lg overflow-x-auto">
         {visibleTabs.map((tab) => (
           <button
             key={tab.value}
@@ -60,7 +60,7 @@ export function DashboardPage() {
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition ${
               dashboardSubView === tab.value
                 ? 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+                : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/50'
             }`}
           >
             {tab.icon}
@@ -72,8 +72,8 @@ export function DashboardPage() {
       {dashboardSubView === 'overview' && (
         <div className="space-y-8">
           <header className="mb-8">
-            <h1 className="text-2xl font-bold text-white">{t('dashboard.title')}</h1>
-            <p className="text-zinc-400 text-sm">{t('dashboard.subtitle')}</p>
+            <h1 className="text-2xl font-bold text-ink-50">{t('dashboard.title')}</h1>
+            <p className="text-ink-400 text-sm">{t('dashboard.subtitle')}</p>
           </header>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -92,11 +92,11 @@ export function DashboardPage() {
                 { label: t('dashboard.successRate'), val: stats?.totalVideos ? `${Math.round((stats.completedDownloads / stats.totalVideos) * 100)}%` : "0%", change: "overall", color: "text-green-400" },
               ];
             })().map((stat, i) => (
-              <div key={i} className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-sm">
-                <p className="text-zinc-500 text-sm font-medium mb-2">{stat.label}</p>
+              <div key={i} className="bg-ink-900 border border-ink-800 p-6 rounded-xl shadow-sm">
+                <p className="text-ink-500 text-sm font-medium mb-2">{stat.label}</p>
                 <div className="flex items-end justify-between">
-                  <span className="text-2xl font-bold text-white">{stat.val}</span>
-                  <span className={`text-xs ${stat.color} bg-zinc-950 px-1.5 py-0.5 rounded`}>{stat.change}</span>
+                  <span className="text-2xl font-bold text-ink-50">{stat.val}</span>
+                  <span className={`text-xs ${stat.color} bg-ink-950 px-1.5 py-0.5 rounded`}>{stat.change}</span>
                 </div>
               </div>
             ))}
@@ -109,11 +109,11 @@ export function DashboardPage() {
           />
 
           {dashboardStats?.recentLogs && dashboardStats.recentLogs.length > 0 && (
-            <div className="mt-8 bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+            <div className="mt-8 bg-ink-900 border border-ink-800 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <Activity size={18} className="text-amber-400" />
-                  <h3 className="text-sm font-semibold text-zinc-200">Recent Activity</h3>
+                  <h3 className="text-sm font-semibold text-ink-200">Recent Activity</h3>
                 </div>
                 <button
                   onClick={() => setDashboardSubView('logs')}
@@ -128,10 +128,10 @@ export function DashboardPage() {
                     <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                       log.status === 'success' ? 'bg-green-400' :
                       log.status === 'error' ? 'bg-red-400' :
-                      'bg-zinc-500'
+                      'bg-ink-500'
                     }`} />
-                    <span className="text-sm text-zinc-300 truncate flex-1">{log.message}</span>
-                    <span className="text-xs text-zinc-600 flex-shrink-0">{log.time}</span>
+                    <span className="text-sm text-ink-300 truncate flex-1">{log.message}</span>
+                    <span className="text-xs text-ink-600 flex-shrink-0">{log.time}</span>
                   </div>
                 ))}
               </div>

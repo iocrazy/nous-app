@@ -93,13 +93,13 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
               active
                 ? 'bg-indigo-500/10 text-indigo-300'
-                : 'text-zinc-300 hover:bg-zinc-800'
+                : 'text-ink-300 hover:bg-ink-800'
             }`}
           >
             <span className="flex items-center gap-2">
               <Icon
                 size={12}
-                className={active ? 'text-indigo-300' : 'text-zinc-500'}
+                className={active ? 'text-indigo-300' : 'text-ink-500'}
                 aria-hidden="true"
               />
               <span>{labels[preset]}</span>
@@ -109,11 +109,11 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
         );
       })}
       {value.preset === 'custom' && (
-        <div className="px-3 py-2 space-y-1.5 border-t border-zinc-700/60 mt-1">
+        <div className="px-3 py-2 space-y-1.5 border-t border-ink-700/60 mt-1">
           <div className="flex items-center gap-2">
             <label
               htmlFor="filter-date-after"
-              className="text-[10px] uppercase tracking-wider text-zinc-500 w-8 shrink-0"
+              className="text-[10px] uppercase tracking-wider text-ink-500 w-8 shrink-0"
             >
               {t('resources.filter.date.from', 'From')}
             </label>
@@ -122,13 +122,13 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
               type="date"
               value={value.customAfter ?? ''}
               onChange={(e) => setCustom('customAfter', e.target.value)}
-              className="flex-1 bg-zinc-900/60 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-indigo-500"
+              className="flex-1 bg-ink-900/60 border border-ink-700 rounded px-1.5 py-1 text-[11px] text-ink-200 focus:outline-none focus:border-indigo-500"
             />
           </div>
           <div className="flex items-center gap-2">
             <label
               htmlFor="filter-date-before"
-              className="text-[10px] uppercase tracking-wider text-zinc-500 w-8 shrink-0"
+              className="text-[10px] uppercase tracking-wider text-ink-500 w-8 shrink-0"
             >
               {t('resources.filter.date.to', 'To')}
             </label>
@@ -137,18 +137,18 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
               type="date"
               value={value.customBefore ?? ''}
               onChange={(e) => setCustom('customBefore', e.target.value)}
-              className="flex-1 bg-zinc-900/60 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-indigo-500"
+              className="flex-1 bg-ink-900/60 border border-ink-700 rounded px-1.5 py-1 text-[11px] text-ink-200 focus:outline-none focus:border-indigo-500"
             />
           </div>
         </div>
       )}
       {value.preset !== null && (
         <>
-          <div className="mx-2.5 my-1 border-t border-zinc-700/60" />
+          <div className="mx-2.5 my-1 border-t border-ink-700/60" />
           <button
             type="button"
             onClick={onClearAll}
-            className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="w-full text-left px-3 py-2 text-xs text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors"
           >
             {t('resources.filter.clearSelection', 'Clear selection')}
           </button>
