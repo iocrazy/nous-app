@@ -121,6 +121,7 @@ from uuid import UUID
 
 from loguru import logger
 from sqlalchemy import delete, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
 from app.models import AgentSkills, AiAgents
@@ -306,17 +307,24 @@ class AgentRepositoryOrm(AgentRepository):
     # ------------------------------------------------------------------
 
     async def update_skill_bindings(self, agent_id: UUID, skill_ids: List[int]) -> None:
-        """Replace all skill bindings for an agent (delete existing + insert
-        new, preserving order via sort_order). Atomic + committing in one
-        write_scope(). Idempotent (delete-then-insert converges)."""
+        """Set an agent's skill bindings to exactly ``skill_ids`` (ordered via
+        sort_order). Atomic + committing in one write_scope().
+
+        Concurrency-safe: uses per-row ``INSERT ... ON CONFLICT DO UPDATE``
+        (upsert) for the desired set, then deletes any binding no longer
+        desired — instead of delete-then-insert, which raced when two
+        startup ``seed_loader`` runs (gateway + worker, or multiple uvicorn
+        workers) re-bound the same agent concurrently: the second committer's
+        plain INSERT collided with the rows the first had just committed,
+        raising ``agent_skills_pkey`` UniqueViolation (harmless — bindings
+        ended up correct — but a recurring startup ERROR). ON CONFLICT makes
+        each row write atomic, so concurrent identical re-binds converge
+        without raising.
+        """
         try:
             async with write_scope() as session:
-                await session.execute(
-                    delete(AgentSkills).where(AgentSkills.agent_id == agent_id)
-                )
                 if skill_ids:
-                    await session.execute(
-                        insert(AgentSkills),
+                    stmt = pg_insert(AgentSkills).values(
                         [
                             {
                                 "agent_id": agent_id,
@@ -325,12 +333,31 @@ class AgentRepositoryOrm(AgentRepository):
                                 "enabled": True,
                             }
                             for i, sid in enumerate(skill_ids)
-                        ],
+                        ]
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[AgentSkills.agent_id, AgentSkills.skill_id],
+                        set_={
+                            "sort_order": stmt.excluded.sort_order,
+                            "enabled": stmt.excluded.enabled,
+                        },
+                    )
+                    await session.execute(stmt)
+                    # Drop bindings that are no longer desired.
+                    await session.execute(
+                        delete(AgentSkills).where(
+                            AgentSkills.agent_id == agent_id,
+                            AgentSkills.skill_id.not_in(skill_ids),
+                        )
+                    )
+                else:
+                    # Empty desired set → clear all bindings for the agent.
+                    await session.execute(
+                        delete(AgentSkills).where(AgentSkills.agent_id == agent_id)
                     )
             logger.info(
-                "Updated skill bindings for agent %s (%d skills)",
-                agent_id,
-                len(skill_ids),
+                f"Updated skill bindings for agent {agent_id} "
+                f"({len(skill_ids)} skills)"
             )
         except Exception as e:
             logger.error(f"Failed to update skill bindings for agent {agent_id}: {e}")

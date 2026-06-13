@@ -496,6 +496,41 @@ async def test_update_skill_bindings_replace_commits(
     assert await _repo().get_skill_ids(agent["id"]) == []
 
 
+async def test_update_skill_bindings_concurrent_same_set_no_conflict(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """Two concurrent re-binds of the SAME set must converge without raising.
+
+    Regression for the startup race: gateway + worker (or multiple uvicorn
+    workers) both run seed_loader and re-bind the same agent concurrently.
+    The old delete-then-insert raced — the second committer's plain INSERT
+    hit agent_skills_pkey UniqueViolation. The ON CONFLICT upsert path makes
+    each row write atomic, so both calls succeed and the final state is exact.
+    """
+    import asyncio
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        agent = await _seed_agent(conn)
+        s1 = await _seed_skill(conn)
+        s2 = await _seed_skill(conn)
+    finally:
+        await conn.close()
+
+    # Run N identical re-binds concurrently — each its own write_scope()
+    # session/connection, so this is genuine concurrency. With the old
+    # delete-then-insert at least one would raise UniqueViolation.
+    results = await asyncio.gather(
+        *[_repo().update_skill_bindings(agent["id"], [s1, s2]) for _ in range(4)],
+        return_exceptions=True,
+    )
+    raised = [r for r in results if isinstance(r, Exception)]
+    assert not raised, f"concurrent re-bind raised: {raised}"
+
+    # Final state is exactly the desired set, in order, with no duplicates.
+    assert await _repo().get_skill_ids(agent["id"]) == [s1, s2]
+
+
 async def test_update_fields_versioned_snapshots_and_commits(
     integration_db_url, patched_engine, cleanup_test_rows
 ):
