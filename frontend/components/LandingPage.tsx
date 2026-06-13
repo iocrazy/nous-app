@@ -11,8 +11,11 @@ interface LandingPageProps {
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetStarted }) => {
+  // Always-dark marketing page (literal bg-black). Pin the subtree to the dark
+  // palette so its theme-aware ink tokens keep resolving to their dark values
+  // for light-OS visitors (otherwise text-ink-100 inverts dark = invisible).
   return (
-    <div className="min-h-screen bg-black text-ink-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+    <div data-theme="dark" className="min-h-screen bg-black text-ink-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
       
       {/* Navbar */}
       {/* pt = iOS safe-area inset so the Log in / Get Started row clears the

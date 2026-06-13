@@ -157,7 +157,7 @@ export function StatCard({
   const inner = (
     <>
       {icon}
-      <span className="text-xs sm:text-sm font-bold text-white">{value}</span>
+      <span className="text-xs sm:text-sm font-bold text-ink-50">{value}</span>
       <span className="text-[9px] sm:text-[10px] text-ink-500 uppercase tracking-wider mt-0.5">{label}</span>
     </>
   );

@@ -105,13 +105,13 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <FolderPlus size={20} className="text-indigo-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('mediatrack.createProject')}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -134,7 +134,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value.slice(0, 30))}
               placeholder={t('projects.create.namePlaceholder', 'Enter project name')}
-              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
               autoFocus
             />
           </div>
@@ -149,7 +149,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t('projects.create.descriptionPlaceholder', 'Optional description')}
               rows={2}
-              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
             />
           </div>
 
@@ -168,7 +168,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               onChange={(e) => setAnnouncement(e.target.value.slice(0, 100))}
               placeholder={t('projects.create.announcementPlaceholder', 'Help new members understand this project')}
               rows={2}
-              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
             />
           </div>
 
@@ -181,7 +181,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               <select
                 value={projectType}
                 onChange={(e) => setProjectType(e.target.value as 'personal' | 'internal' | 'external')}
-                className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+                className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
               >
                 <option value="personal">{t('mediatrack.personal')}</option>
                 <option value="internal">{t('mediatrack.internal')}</option>
@@ -197,7 +197,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 value={projectGroup}
                 onChange={(e) => setProjectGroup(e.target.value)}
                 placeholder={t('projects.create.noGroup', 'No group')}
-                className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
               />
             </div>
           </div>
@@ -210,7 +210,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             <select
               value={teamId}
               onChange={(e) => setTeamId(e.target.value)}
-              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
             >
               <option value="">{t('mediatrack.personal')}</option>
               {teams.map(team => (

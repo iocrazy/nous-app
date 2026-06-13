@@ -110,7 +110,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-ink-800 shrink-0">
         <div className="flex items-center gap-3">
           <Layers size={18} className="text-indigo-400" />
-          <h2 className="text-sm font-semibold text-white">
+          <h2 className="text-sm font-semibold text-ink-50">
             {t('resources.compareVersions', 'Compare Versions')}
           </h2>
           <span className="text-xs text-ink-500">
@@ -122,14 +122,14 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
             <>
               <button
                 onClick={togglePlay}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-ink-300 hover:text-white bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-ink-300 hover:text-ink-50 bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
               >
                 {isPlaying ? <Pause size={14} /> : <Play size={14} />}
                 <span>{isPlaying ? 'Pause' : 'Play'}</span>
               </button>
               <button
                 onClick={resetBoth}
-                className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+                className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
                 title="Reset"
               >
                 <RotateCcw size={14} />
@@ -147,7 +147,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
           )}
           <button
             onClick={onClose}
-            className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors ml-2"
+            className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors ml-2"
           >
             <X size={18} />
           </button>

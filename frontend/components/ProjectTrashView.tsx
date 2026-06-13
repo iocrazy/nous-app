@@ -110,7 +110,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
             {trashedFiles.map(file => (
               <tr key={file.id} className="hover:bg-ink-700/20 transition-colors">
                 <td className="px-4 py-3">
-                  <span className="text-sm text-white">{file.filename}</span>
+                  <span className="text-sm text-ink-50">{file.filename}</span>
                 </td>
                 <td className="px-4 py-3">
                   <span className="text-xs text-ink-400 bg-ink-700/50 px-2 py-0.5 rounded-full">

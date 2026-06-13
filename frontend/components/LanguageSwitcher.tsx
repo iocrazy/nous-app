@@ -51,7 +51,7 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ variant = 'd
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors disabled:opacity-50 ${
               i18n.language === lang.code
                 ? 'bg-indigo-600 text-white'
-                : 'text-ink-400 hover:text-white hover:bg-ink-800'
+                : 'text-ink-400 hover:text-ink-50 hover:bg-ink-800'
             }`}
           >
             {lang.label}
@@ -66,7 +66,7 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ variant = 'd
       <button
         onClick={() => setIsOpen(!isOpen)}
         disabled={isChanging}
-        className="flex items-center gap-2 px-3 py-2 rounded-lg text-ink-400 hover:text-white hover:bg-ink-800/50 transition-colors disabled:opacity-50"
+        className="flex items-center gap-2 px-3 py-2 rounded-lg text-ink-400 hover:text-ink-50 hover:bg-ink-800/50 transition-colors disabled:opacity-50"
       >
         <Globe size={18} />
         <span className="text-sm font-medium">{currentLang.short}</span>

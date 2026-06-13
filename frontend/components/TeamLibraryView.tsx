@@ -75,12 +75,12 @@ export const TeamLibraryView: React.FC<TeamLibraryViewProps> = ({
     <div className="flex items-center gap-2 text-sm text-ink-400 mb-4 px-6 pt-4">
       <button
         onClick={onBackToFolders}
-        className="hover:text-white transition-colors"
+        className="hover:text-ink-50 transition-colors"
       >
         Team Library
       </button>
       <ChevronRight size={14} />
-      <span className="text-white">{currentCollection?.name || 'Collection'}</span>
+      <span className="text-ink-50">{currentCollection?.name || 'Collection'}</span>
       {currentCollection && (
         <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-ink-800 rounded text-ink-400">
           <span>{currentCollection.video_count || 0}</span>

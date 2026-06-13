@@ -91,13 +91,13 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Video size={20} className="text-indigo-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('mediatrack.selectVideo')}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -112,7 +112,7 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('mediatrack.searchVideos')}
-              className="w-full pl-10 pr-4 py-2.5 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm"
+              className="w-full pl-10 pr-4 py-2.5 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm"
             />
           </div>
         </div>
@@ -159,7 +159,7 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
 
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-white truncate font-medium">
+                <p className="text-sm text-ink-50 truncate font-medium">
                   {video.title || video.platform_id}
                 </p>
                 {video.author && (

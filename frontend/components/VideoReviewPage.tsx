@@ -212,11 +212,11 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onBack}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-xl transition-colors flex-shrink-0"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-xl transition-colors flex-shrink-0"
           >
             <ArrowLeft size={20} />
           </button>
-          <h1 className="text-lg font-semibold text-white truncate">
+          <h1 className="text-lg font-semibold text-ink-50 truncate">
             {file.filename}
           </h1>
 
@@ -259,7 +259,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                       setIsVersionDropdownOpen(false);
                       setIsVersionModalOpen(true);
                     }}
-                    className="w-full text-left px-3 py-2 text-sm text-ink-400 hover:text-white hover:bg-ink-700 transition-colors"
+                    className="w-full text-left px-3 py-2 text-sm text-ink-400 hover:text-ink-50 hover:bg-ink-700 transition-colors"
                   >
                     {t('mediatrack.review.manageVersions')}...
                   </button>
@@ -315,7 +315,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
             onStatusChange={handleStatusChange}
           />
           <button
-            className="flex items-center gap-2 px-3 py-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-xl transition-colors text-sm"
+            className="flex items-center gap-2 px-3 py-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-xl transition-colors text-sm"
           >
             <Share2 size={16} />
             {t('mediatrack.review.share')}
@@ -395,7 +395,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                       />
                       <button
                         onClick={handleCloseViewAnnotation}
-                        className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-ink-900/90 backdrop-blur border border-ink-700 rounded-lg text-xs text-ink-300 hover:text-white hover:bg-ink-800 transition-colors"
+                        className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-ink-900/90 backdrop-blur border border-ink-700 rounded-lg text-xs text-ink-300 hover:text-ink-50 hover:bg-ink-800 transition-colors"
                       >
                         {t('annotations.done')}
                       </button>
@@ -406,7 +406,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                   {!isAnnotating && !viewingDrawingData && (
                     <button
                       onClick={handleAnnotateToggle}
-                      className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-3 py-1.5 bg-ink-900/80 backdrop-blur border border-ink-700 rounded-lg text-xs font-medium text-ink-300 hover:text-white hover:bg-ink-800 transition-colors"
+                      className="absolute top-3 left-3 z-10 flex items-center gap-1.5 px-3 py-1.5 bg-ink-900/80 backdrop-blur border border-ink-700 rounded-lg text-xs font-medium text-ink-300 hover:text-ink-50 hover:bg-ink-800 transition-colors"
                       title={t('annotations.annotate')}
                     >
                       <PenTool size={14} />
@@ -429,7 +429,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
               onClick={() => setActiveTab('comments')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'comments'
-                  ? 'text-white border-b-2 border-indigo-500'
+                  ? 'text-ink-50 border-b-2 border-indigo-500'
                   : 'text-ink-400 hover:text-ink-200'
               }`}
             >
@@ -440,7 +440,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
               onClick={() => setActiveTab('info')}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'info'
-                  ? 'text-white border-b-2 border-indigo-500'
+                  ? 'text-ink-50 border-b-2 border-indigo-500'
                   : 'text-ink-400 hover:text-ink-200'
               }`}
             >

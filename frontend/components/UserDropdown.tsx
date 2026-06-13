@@ -93,7 +93,7 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-white truncate">{user.name}</p>
+              <p className="font-semibold text-ink-50 truncate">{user.name}</p>
               <p className="text-sm text-ink-500 truncate">{user.email}</p>
             </div>
           </div>
@@ -123,7 +123,7 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
                   {team.isOwner && (
                     <button
                       onClick={() => onTeamSettings(team.id)}
-                      className="p-1 rounded text-ink-500 hover:text-white hover:bg-ink-700 opacity-0 group-hover:opacity-100 transition-all"
+                      className="p-1 rounded text-ink-500 hover:text-ink-50 hover:bg-ink-700 opacity-0 group-hover:opacity-100 transition-all"
                     >
                       <Settings size={14} />
                     </button>

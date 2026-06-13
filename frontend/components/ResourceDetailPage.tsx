@@ -1598,7 +1598,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   if (e.key === 'Enter') commitName();
                   if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
                 }}
-                className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold text-white focus:outline-none"
+                className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold text-ink-50 focus:outline-none"
                 autoFocus
               />
             ) : (

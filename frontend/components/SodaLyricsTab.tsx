@@ -199,7 +199,7 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
           className={theme ? '' : 'text-ink-300'}
           style={theme ? { color: theme.accent } : undefined}
         />
-        <span className="text-sm font-medium text-white">Lyrics</span>
+        <span className="text-sm font-medium text-ink-50">Lyrics</span>
         <button
           type="button"
           onClick={handleCopyLyrics}

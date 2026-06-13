@@ -173,7 +173,7 @@ const FloatingCollapseTab: React.FC<{ collapsed?: boolean; onToggleCollapse?: ()
   return (
     <button
       onClick={onToggleCollapse}
-      className="absolute -right-10 bottom-8 w-10 h-12 bg-ink-900 border-r border-y border-ink-800 rounded-r-xl flex items-center justify-center text-ink-400 hover:text-white cursor-pointer hover:bg-ink-800 transition-colors z-10"
+      className="absolute -right-10 bottom-8 w-10 h-12 bg-ink-900 border-r border-y border-ink-800 rounded-r-xl flex items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-colors z-10"
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
     >

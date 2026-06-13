@@ -19,7 +19,7 @@ interface IssueBoardViewProps {
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 18 }) => (
   <span
-    className={`inline-flex items-center justify-center rounded-full text-[9px] font-semibold text-white ${color}`}
+    className={`inline-flex items-center justify-center rounded-full text-[9px] font-semibold text-ink-50 ${color}`}
     style={{ width: size, height: size }}
   >
     {initials}

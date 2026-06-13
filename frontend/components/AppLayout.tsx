@@ -236,9 +236,9 @@ function AppLayoutInner() {
   const downloadsPopup = isDownloadsMenuOpen ? (
     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-ink-900/98 backdrop-blur-xl border border-ink-700/60 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-bottom-2 fade-in duration-200 overflow-hidden">
       <div className="flex p-1.5 gap-1">
-        <button onClick={() => { setLibraryViewMode('grid'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-ink-800 text-white' : 'text-ink-500 hover:text-ink-300'}`}><LayoutGrid size={18} /></button>
-        <button onClick={() => { setLibraryViewMode('list'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-ink-800 text-white' : 'text-ink-500 hover:text-ink-300'}`}><LayoutList size={18} /></button>
-        <button onClick={() => { setLibraryViewMode('feed'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-ink-800 text-white' : 'text-ink-500 hover:text-ink-300'}`}><Smartphone size={18} /></button>
+        <button onClick={() => { setLibraryViewMode('grid'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-ink-800 text-ink-50' : 'text-ink-500 hover:text-ink-300'}`}><LayoutGrid size={18} /></button>
+        <button onClick={() => { setLibraryViewMode('list'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-ink-800 text-ink-50' : 'text-ink-500 hover:text-ink-300'}`}><LayoutList size={18} /></button>
+        <button onClick={() => { setLibraryViewMode('feed'); setIsDownloadsMenuOpen(false); }} className={`p-2 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-ink-800 text-ink-50' : 'text-ink-500 hover:text-ink-300'}`}><Smartphone size={18} /></button>
       </div>
     </div>
   ) : null;
@@ -364,7 +364,7 @@ function AppLayoutInner() {
         scroll container — `overflow-x:hidden` silently turns the y-axis into a
         scroll container, which breaks `position: sticky` for everything inside
         (the mobile filter chip bar wouldn't pin). */}
-    <div className="flex min-h-[100dvh] bg-black text-ink-100 font-sans selection:bg-indigo-500/30 overflow-x-clip">
+    <div className="flex min-h-[100dvh] bg-ink-950 text-ink-100 font-sans selection:bg-indigo-500/30 overflow-x-clip">
 
       {/* Device clock-drift warning (breaks token refresh — May-20-clock incident) */}
       <ClockDriftBanner />

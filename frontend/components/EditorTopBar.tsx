@@ -291,7 +291,7 @@ function MenuItem({
       className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors text-sm ${
         disabled
           ? 'text-ink-600 cursor-not-allowed'
-          : 'text-ink-300 hover:bg-ink-700 hover:text-white'
+          : 'text-ink-300 hover:bg-ink-700 hover:text-ink-50'
       }`}
     >
       <span className="text-ink-500 flex-shrink-0">{icon}</span>
@@ -325,7 +325,7 @@ function PlainMenuItem({
       className={`w-full flex items-center justify-between px-3 py-1.5 text-sm cursor-pointer transition-colors ${
         danger
           ? 'text-red-400 hover:text-red-300 hover:bg-red-900/20'
-          : 'text-ink-300 hover:bg-ink-700 hover:text-white'
+          : 'text-ink-300 hover:bg-ink-700 hover:text-ink-50'
       }`}
     >
       <span className="flex items-center gap-2">

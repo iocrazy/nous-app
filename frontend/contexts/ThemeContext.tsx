@@ -6,11 +6,11 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 
 const STORAGE_KEY = 'mediahub.theme';
 
-// Default preference. 'dark' until the light-theme contrast polish lands
-// (~817 hardcoded text-white/bg-black sites + scrollbars are not yet
-// theme-aware) — switch to 'system' (spec D11) in the light-polish PR so
-// light-OS users aren't dropped into a half-polished theme.
-const DEFAULT_PREFERENCE: ThemePreference = 'dark';
+// Default preference follows the OS (spec D11). The light-theme contrast
+// polish has landed (hardcoded white/black sites themed, scrollbars
+// theme-aware, first-paint anti-flash in index.html), so light-OS users
+// get a fully-polished light theme out of the box.
+const DEFAULT_PREFERENCE: ThemePreference = 'system';
 
 interface ThemeContextValue {
   preference: ThemePreference;

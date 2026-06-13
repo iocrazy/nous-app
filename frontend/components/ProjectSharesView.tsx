@@ -96,7 +96,7 @@ export const ProjectSharesView: React.FC<ProjectSharesViewProps> = ({ projectId,
           {shares.map(share => (
             <tr key={share.id} className="hover:bg-ink-700/20 transition-colors">
               <td className="px-4 py-3">
-                <span className="text-sm text-white font-mono">{share.share_code}</span>
+                <span className="text-sm text-ink-50 font-mono">{share.share_code}</span>
                 {share.password && (
                   <span className="ml-2 text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
                     {t('projects.shares.protected', 'Protected')}

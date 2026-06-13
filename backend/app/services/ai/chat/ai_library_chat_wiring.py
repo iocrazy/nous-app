@@ -483,18 +483,36 @@ async def _safe_recall_honcho_context(
     """
     try:
         from app.services.ai.memory.honcho_memory import get_honcho_memory_service
+        from app.services.ai.memory.memory_prefs import get_memory_prefs
 
         service = get_honcho_memory_service()
         if not service.config.operative():
+            return None
+        prefs = await get_memory_prefs(user_id)
+        if not prefs.inject:
             return None
         workspace = None
         if session_id:
             from app.workflows.write_memory import _resolve_team_workspace
 
             workspace = await _resolve_team_workspace(str(session_id))
-        return await service.get_user_representation(
+        representation = await service.get_user_representation(
             user_id=user_id, workspace_id=workspace
         )
+        # User-curated "About me" card outranks derived observations —
+        # it's the user's own words about themselves.
+        card: Optional[list[str]] = None
+        get_card = getattr(service, "get_peer_card", None)
+        if get_card is not None:
+            card = await get_card(user_id=user_id, workspace_id=workspace)
+        if not card:
+            return representation
+        card_block = "## About (user-provided)\n" + "\n".join(
+            f"- {line}" for line in card
+        )
+        if not representation:
+            return card_block
+        return f"{card_block}\n\n{representation}"
     except Exception:  # noqa: BLE001
         logger.exception("[l2] honcho context recall failed; degrading to none")
         return None

@@ -72,7 +72,7 @@ export function DashboardPage() {
       {dashboardSubView === 'overview' && (
         <div className="space-y-8">
           <header className="mb-8">
-            <h1 className="text-2xl font-bold text-white">{t('dashboard.title')}</h1>
+            <h1 className="text-2xl font-bold text-ink-50">{t('dashboard.title')}</h1>
             <p className="text-ink-400 text-sm">{t('dashboard.subtitle')}</p>
           </header>
 
@@ -95,7 +95,7 @@ export function DashboardPage() {
               <div key={i} className="bg-ink-900 border border-ink-800 p-6 rounded-xl shadow-sm">
                 <p className="text-ink-500 text-sm font-medium mb-2">{stat.label}</p>
                 <div className="flex items-end justify-between">
-                  <span className="text-2xl font-bold text-white">{stat.val}</span>
+                  <span className="text-2xl font-bold text-ink-50">{stat.val}</span>
                   <span className={`text-xs ${stat.color} bg-ink-950 px-1.5 py-0.5 rounded`}>{stat.change}</span>
                 </div>
               </div>

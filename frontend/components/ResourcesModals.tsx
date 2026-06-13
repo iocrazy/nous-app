@@ -148,7 +148,7 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
               <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
                 <AlertTriangle className="text-red-500" size={24} />
               </div>
-              <h3 className="text-lg font-semibold text-white mb-2">{t('resources.confirmPermanentDelete')}</h3>
+              <h3 className="text-lg font-semibold text-ink-50 mb-2">{t('resources.confirmPermanentDelete')}</h3>
               <p className="text-sm text-ink-400">{t('resources.permanentDeleteWarning')}</p>
             </div>
             <div className="flex gap-3 p-4 border-t border-ink-800">

@@ -29,11 +29,11 @@ export function DeleteDialog({ video, isDeleting, onClose, onConfirm }: DeleteDi
             <div className="p-2 bg-amber-500/10 rounded-lg">
               <Trash2 className="w-5 h-5 text-amber-500" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Move to Trash</h3>
+            <h3 className="text-lg font-semibold text-ink-50">Move to Trash</h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-ink-500 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-1.5 text-ink-500 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={18} />
           </button>
@@ -55,7 +55,7 @@ export function DeleteDialog({ video, isDeleting, onClose, onConfirm }: DeleteDi
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-white font-medium truncate">
+              <p className="text-sm text-ink-50 font-medium truncate">
                 {video.title || 'Untitled'}
               </p>
               <p className="text-xs text-ink-500">@{video.author}</p>

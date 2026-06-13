@@ -247,7 +247,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       {/* Team Consumption Stats (owner and admin only) */}
       {canViewStats && (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-ink-50 flex items-center gap-2">
             <BarChart3 size={18} />
             Team Consumption
           </h3>
@@ -262,7 +262,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 <div className="flex items-center gap-6">
                   <div>
                     <p className="text-xs text-ink-500 uppercase font-medium">Points Used This Month</p>
-                    <p className="text-2xl font-bold text-white">
+                    <p className="text-2xl font-bold text-ink-50">
                       {usageStats?.total_consumed_this_month?.toLocaleString() ?? '0'}
                     </p>
                   </div>
@@ -307,7 +307,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       {/* Members Section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-white">Members</h3>
+          <h3 className="text-lg font-semibold text-ink-50">Members</h3>
           {isOwner && (
             <button
               onClick={onOpenInviteModal}
@@ -467,7 +467,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
             {showDeleteConfirm && (
               <div className="mt-4 p-4 bg-ink-900 border border-ink-800 rounded-lg">
                 <p className="text-sm text-ink-300 mb-3">
-                  Type <strong className="text-white">{teamName}</strong> to confirm:
+                  Type <strong className="text-ink-50">{teamName}</strong> to confirm:
                 </p>
                 <input
                   type="text"
@@ -489,7 +489,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                       setShowDeleteConfirm(false);
                       setDeleteConfirmText('');
                     }}
-                    className="px-4 py-2 text-ink-400 hover:text-white transition-colors"
+                    className="px-4 py-2 text-ink-400 hover:text-ink-50 transition-colors"
                   >
                     Cancel
                   </button>
@@ -532,7 +532,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                   </button>
                   <button
                     onClick={() => setShowLeaveConfirm(false)}
-                    className="px-4 py-2 text-ink-400 hover:text-white transition-colors"
+                    className="px-4 py-2 text-ink-400 hover:text-ink-50 transition-colors"
                   >
                     Cancel
                   </button>

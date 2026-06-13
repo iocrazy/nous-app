@@ -58,7 +58,7 @@ export function CollapsibleSection({
         aria-expanded={open}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-white">{title}</span>
+          <span className="text-sm font-medium text-ink-50">{title}</span>
           {summary ? (
             <span className="max-w-[140px] truncate px-1.5 h-[18px] rounded-full bg-indigo-500/90 text-white text-[10px] font-semibold inline-flex items-center">
               {summary}

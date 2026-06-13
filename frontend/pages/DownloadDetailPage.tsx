@@ -314,7 +314,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               <button
                 onClick={() => setShowDownloadMenu(!showDownloadMenu)}
                 disabled={isDownloading || isFetching}
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-white hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-70"
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-70"
               >
                 {(isDownloading || isFetching) ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                 <span className="hidden sm:inline">Download</span>
@@ -573,7 +573,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
                                 href={video.original_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors"
+                                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
                                 onClick={() => setShowMoreMenu(false)}
                               >
                                 <ExternalLink size={13} /> Open Original

@@ -55,7 +55,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onTo
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
-          <h3 className="text-white font-medium text-base truncate group-hover:text-indigo-300 transition-colors">
+          <h3 className="text-ink-50 font-medium text-base truncate group-hover:text-indigo-300 transition-colors">
             {project.name}
           </h3>
           {project.description && (

@@ -184,9 +184,15 @@ async def _write_honcho_turn(
     window would duplicate every turn N times.
     """
     from app.services.ai.memory.honcho_memory import get_honcho_memory_service
+    from app.services.ai.memory.memory_prefs import get_memory_prefs
 
     service = get_honcho_memory_service()
     if not service.config.enabled:
+        return False
+    # Per-user toggle (Claude-style "learn from my chats"). Checked after
+    # the global flag so disabled deployments never pay the settings read.
+    prefs = await get_memory_prefs(user_id)
+    if not prefs.learn:
         return False
     user_message = user_msgs[-1] if user_msgs else ""
     assistant_message = asst_msgs[-1] if asst_msgs else ""

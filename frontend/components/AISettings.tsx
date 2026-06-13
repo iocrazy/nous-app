@@ -38,6 +38,7 @@ import { MCPServersPanel } from './MCPServersPanel';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { TokenBillingDashboard } from './TokenBillingDashboard';
 import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
+import { MemoryPanel } from './MemoryPanel';
 import { useSettingsStore } from '../stores/settingsStore';
 
 interface AISettingsProps {
@@ -310,7 +311,7 @@ const EnabledModelsField: React.FC<{
               setPicking(true);
               setFilter('');
             }}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-ink-700 px-3 py-1 text-xs text-ink-400 hover:text-white hover:border-ink-500 transition-colors"
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-ink-700 px-3 py-1 text-xs text-ink-400 hover:text-ink-50 hover:border-ink-500 transition-colors"
           >
             <Plus size={12} />
             Add Model
@@ -356,7 +357,7 @@ const EnabledModelsField: React.FC<{
                     onAdd(m);
                     setFilter('');
                   }}
-                  className="w-full text-left rounded px-2 py-1 text-xs font-mono text-ink-300 hover:bg-ink-800 hover:text-white transition-colors"
+                  className="w-full text-left rounded px-2 py-1 text-xs font-mono text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
                 >
                   {m}
                 </button>
@@ -1305,6 +1306,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
         <ApprovalsPanel hideWhenEmpty />
       </section>
+
+      {/* Phase 4: user-facing AI memory management (Claude-style) */}
+      <MemoryPanel />
 
       {/* Phase 3: Token usage dashboard */}
       <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">

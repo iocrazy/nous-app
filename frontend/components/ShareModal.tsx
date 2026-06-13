@@ -142,13 +142,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Link2 size={20} className="text-indigo-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('shares.title', 'Share')}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -175,7 +175,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     type="text"
                     readOnly
                     value={shareLink}
-                    className="flex-1 bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
+                    className="flex-1 bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-ink-50 focus:outline-none"
                   />
                   <button
                     onClick={handleCopyLink}
@@ -236,7 +236,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                   value={shareName}
                   onChange={(e) => setShareName(e.target.value)}
                   placeholder={t('shares.shareNamePlaceholder', 'Enter a name for this share')}
-                  className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                  className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-ink-50 placeholder-ink-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
                 />
               </div>
 
@@ -269,7 +269,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder={t('shares.passwordPlaceholder', 'Set a password')}
-                    className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                    className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-ink-50 placeholder-ink-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
                   />
                 )}
 
@@ -363,7 +363,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             <button
               type="button"
               onClick={handleClose}
-              className="flex-1 px-4 py-3 text-white bg-ink-800 hover:bg-ink-700 rounded-xl font-medium transition-colors"
+              className="flex-1 px-4 py-3 text-ink-50 bg-ink-800 hover:bg-ink-700 rounded-xl font-medium transition-colors"
             >
               {t('common.cancel', 'Close')}
             </button>
