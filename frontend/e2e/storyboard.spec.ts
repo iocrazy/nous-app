@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { EDITOR_URL, setupStubbedSession } from './helpers/stubs';
+import {
+  EDITOR_URL,
+  GEN_FLOW_NODES,
+  setupGenerationStubs,
+  setupStubbedSession,
+} from './helpers/stubs';
 
 test.describe('Storyboard Workbench (stubbed backend)', () => {
   test('login page renders', async ({ page }) => {
@@ -52,6 +57,34 @@ test.describe('Storyboard Workbench (stubbed backend)', () => {
       await expect(page.getByTestId('sb-script-dialog')).toBeVisible({ timeout: 3_000 });
       await page.keyboard.press('Escape');
       await expect(page.getByTestId('sb-script-dialog')).toBeHidden({ timeout: 3_000 });
+    });
+  });
+
+  // ── Creative path: seed a graph (upload + storyboard_gen) via the stubbed
+  //    project, then drive the generate job (submit + DBOS poll both stubbed).
+  //    Split is driven through a hover→toolbar→dialog→client-processor chain
+  //    that isn't reliably pinnable from outside; it's left to the real-stack
+  //    suite (see spec). Export open/close is covered above.
+  test.describe('creative flow (seeded canvas)', () => {
+    test.beforeEach(async ({ page }) => {
+      await setupStubbedSession(page, { nodes: GEN_FLOW_NODES });
+      await setupGenerationStubs(page);
+      await page.goto(EDITOR_URL);
+      await expect(page.getByTestId('sb-toggle-export')).toBeVisible({ timeout: 15_000 });
+    });
+
+    test('seeded backend nodes map and render on the canvas', async ({ page }) => {
+      // storyboard_gen → storyboardGenNode with its Generate button, proving the
+      // node-type map + data_json passthrough; upload + gen = two canvas nodes.
+      await expect(page.getByTestId('sb-generate')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('.react-flow__node')).toHaveCount(2);
+    });
+
+    test('generate yields a result image via stubbed job + poll', async ({ page }) => {
+      await page.getByTestId('sb-generate').click();
+      // submit → a new export-result node (isGenerating) → poll SUCCESS →
+      // the fixture image renders in that node.
+      await expect(page.getByTestId('sb-result-image')).toBeVisible({ timeout: 20_000 });
     });
   });
 });

@@ -217,11 +217,61 @@ export async function setupGenerationStubs(page: Page): Promise<void> {
     }),
   );
 
-  // Safety net for any async generation poll.
+  // Generation submits a job and polls the DBOS workflow status endpoint
+  // (httpAiGateway.getGenerateImageJob). Status must be a DBOS string ('SUCCESS')
+  // and the image URL lives under output.result.
   await page.route('**/api/v1/workflows/*/status', (route) =>
-    fulfillJson(route, { status: 'completed', image_url: FIXTURE_IMAGE_URL }),
+    fulfillJson(route, {
+      workflow_id: 'e2e-gen-task',
+      status: 'SUCCESS',
+      output: { result: FIXTURE_IMAGE_URL },
+      error: null,
+    }),
   );
 }
+
+/** Backend nodes for the generate flow: one upload (with image) + one
+ *  storyboard_gen with frame descriptions (so the Generate button is enabled). */
+export const GEN_FLOW_NODES: unknown[] = [
+  {
+    id: 'upload-1',
+    node_type: 'upload',
+    position_x: -160,
+    position_y: 140,
+    width: 280,
+    height: 320,
+    data_json: {
+      displayName: 'Source',
+      imageUrl: FIXTURE_IMAGE_URL,
+      previewImageUrl: FIXTURE_IMAGE_URL,
+      aspectRatio: '1:1',
+      sourceFileName: 'frame.png',
+    },
+  },
+  {
+    id: 'gen-1',
+    node_type: 'storyboard_gen',
+    position_x: 220,
+    position_y: 140,
+    width: 340,
+    height: 420,
+    data_json: {
+      displayName: 'Generator',
+      gridRows: 1,
+      gridCols: 2,
+      frames: [
+        { id: 'f1', description: 'A red sunrise over mountains', referenceIndex: null },
+        { id: 'f2', description: 'A blue ocean at night', referenceIndex: null },
+      ],
+      model: 'fal/nano-banana-2',
+      size: '2K',
+      requestAspectRatio: '1:1',
+      imageUrl: null,
+      aspectRatio: '1:1',
+      isGenerating: false,
+    },
+  },
+];
 
 function frame(index: number, row: number, col: number) {
   return {
