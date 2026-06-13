@@ -81,13 +81,13 @@ export const AspectFilterDropdown: React.FC<AspectFilterDropdownProps> = ({
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
               active
                 ? 'bg-indigo-500/10 text-indigo-300'
-                : 'text-zinc-300 hover:bg-zinc-800'
+                : 'text-ink-300 hover:bg-ink-800'
             }`}
           >
             <span className="flex items-center gap-2">
               <Icon
                 size={12}
-                className={active ? 'text-indigo-300' : 'text-zinc-500'}
+                className={active ? 'text-indigo-300' : 'text-ink-500'}
                 aria-hidden="true"
               />
               <span>{labels[bucket]}</span>
@@ -98,11 +98,11 @@ export const AspectFilterDropdown: React.FC<AspectFilterDropdownProps> = ({
       })}
       {selectedBuckets.length > 0 && (
         <>
-          <div className="mx-2.5 my-1 border-t border-zinc-700/60" />
+          <div className="mx-2.5 my-1 border-t border-ink-700/60" />
           <button
             type="button"
             onClick={onClearAll}
-            className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="w-full text-left px-3 py-2 text-xs text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors"
           >
             {t('resources.filter.clearSelection', 'Clear selection')}
           </button>

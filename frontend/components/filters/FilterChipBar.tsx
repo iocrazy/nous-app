@@ -72,7 +72,7 @@ export function FilterChipBar({
 
       {createPortal(
         <div
-          className="md:hidden fixed left-0 right-0 z-30 bg-zinc-950/95 backdrop-blur-sm border-b border-zinc-800/60"
+          className="md:hidden fixed left-0 right-0 z-30 bg-ink-950/95 backdrop-blur-sm border-b border-ink-800/60"
           style={{ top: BAR_TOP }}
         >
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-4 py-2">
@@ -81,7 +81,7 @@ export function FilterChipBar({
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
               aria-label={t('resources.filter.title', 'Filters')}
-              className="shrink-0 flex items-center gap-1.5 px-2.5 py-2 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 active:bg-zinc-700"
+              className="shrink-0 flex items-center gap-1.5 px-2.5 py-2 rounded-full bg-ink-800 border border-ink-700 text-ink-300 active:bg-ink-700"
             >
               <SlidersHorizontal size={14} />
               {activeFilterCount > 0 && (
@@ -127,11 +127,11 @@ export function FilterChipBar({
                   key={f.id}
                   type="button"
                   onClick={(e) => openFacet(f.id, e)}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm active:bg-zinc-700 whitespace-nowrap"
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ink-800 border border-ink-700 text-ink-300 text-sm active:bg-ink-700 whitespace-nowrap"
                 >
-                  <Icon size={13} className="text-zinc-400" />
+                  <Icon size={13} className="text-ink-400" />
                   {f.label}
-                  <ChevronDown size={13} className="text-zinc-500" />
+                  <ChevronDown size={13} className="text-ink-500" />
                 </button>
               );
             })}
@@ -144,8 +144,8 @@ export function FilterChipBar({
                 className="fixed inset-0 z-40"
                 onClick={() => setMenuOpen(false)}
               />
-              <div className="absolute left-4 top-12 z-50 w-60 rounded-2xl bg-zinc-800/95 backdrop-blur border border-zinc-700 shadow-2xl overflow-hidden">
-                <div className="px-4 py-3 text-sm text-zinc-300 border-b border-zinc-700/60">
+              <div className="absolute left-4 top-12 z-50 w-60 rounded-2xl bg-ink-800/95 backdrop-blur border border-ink-700 shadow-2xl overflow-hidden">
+                <div className="px-4 py-3 text-sm text-ink-300 border-b border-ink-700/60">
                   {activeFilterCount > 0
                     ? t('resources.filter.nApplied', '{{n}} filters applied.', {
                         n: activeFilterCount,
@@ -159,7 +159,7 @@ export function FilterChipBar({
                     clearAll();
                     setMenuOpen(false);
                   }}
-                  className="w-full text-left px-4 py-3 text-sm font-semibold text-red-400 active:bg-zinc-700 disabled:opacity-40"
+                  className="w-full text-left px-4 py-3 text-sm font-semibold text-red-400 active:bg-ink-700 disabled:opacity-40"
                 >
                   {t('resources.filter.clearAll', 'Clear all filters')}
                 </button>

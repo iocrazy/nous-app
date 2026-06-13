@@ -97,7 +97,7 @@ export function TagFilterSection({
           <button
             type="button"
             onClick={onClear}
-            className="text-[11px] text-zinc-400 active:text-white px-1"
+            className="text-[11px] text-ink-400 active:text-white px-1"
           >
             {t('resources.filter.clear', 'Clear')}
           </button>
@@ -105,20 +105,20 @@ export function TagFilterSection({
       )}
 
       {/* Search box */}
-      <div className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2">
-        <Search size={15} className="text-zinc-500 shrink-0" />
+      <div className="flex items-center gap-2 bg-ink-800 border border-ink-700 rounded-lg px-3 py-2">
+        <Search size={15} className="text-ink-500 shrink-0" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('resources.filter.searchTags', 'Search tags…')}
-          className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-zinc-500"
+          className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-ink-500"
         />
         {query && (
           <button
             type="button"
             onClick={() => setQuery('')}
             aria-label={t('common.clear', 'Clear')}
-            className="text-zinc-500 active:text-white"
+            className="text-ink-500 active:text-white"
           >
             <X size={14} />
           </button>
@@ -135,7 +135,7 @@ export function TagFilterSection({
           ))}
         </div>
       ) : (
-        <div className="text-xs text-zinc-500 py-1">
+        <div className="text-xs text-ink-500 py-1">
           {t('resources.filter.noTags', 'No matching tags')}
         </div>
       )}

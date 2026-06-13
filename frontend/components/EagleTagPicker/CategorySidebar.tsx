@@ -25,11 +25,11 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
     `flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${
       active
         ? 'bg-indigo-500/20 text-indigo-300'
-        : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+        : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
     }`;
 
   return (
-    <div className="w-[120px] shrink-0 border-r border-zinc-800 overflow-y-auto py-2 px-1.5">
+    <div className="w-[120px] shrink-0 border-r border-ink-800 overflow-y-auto py-2 px-1.5">
       {/* All */}
       <button
         className={itemClass(selectedGroup === null)}
@@ -39,7 +39,7 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
           <LayoutGrid size={12} />
           <span>All</span>
         </span>
-        <span className="text-zinc-600">{totalCount}</span>
+        <span className="text-ink-600">{totalCount}</span>
       </button>
 
       {/* Uncategorized */}
@@ -51,13 +51,13 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
           <Circle size={12} />
           <span>Uncategorized</span>
         </span>
-        <span className="text-zinc-600">{uncategorizedCount}</span>
+        <span className="text-ink-600">{uncategorizedCount}</span>
       </button>
 
       {/* Groups header */}
       {groups.length > 0 && (
         <div className="mt-3 mb-1 px-2">
-          <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">
+          <span className="text-[10px] font-semibold text-ink-600 uppercase tracking-wider">
             Groups ({groups.length})
           </span>
         </div>
@@ -74,7 +74,7 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
             <FolderOpen size={12} className="shrink-0" />
             <span className="truncate">{group.name}</span>
           </span>
-          <span className="text-zinc-600 shrink-0">{group.count}</span>
+          <span className="text-ink-600 shrink-0">{group.count}</span>
         </button>
       ))}
     </div>

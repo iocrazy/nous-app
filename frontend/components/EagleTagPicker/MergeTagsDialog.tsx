@@ -48,20 +48,20 @@ export const MergeTagsDialog: React.FC<MergeTagsDialogProps> = ({ tags, onConfir
       onClick={onClose}
     >
       <div
-        className="w-[360px] max-w-[90vw] bg-zinc-900 border border-zinc-700 rounded-xl p-4 space-y-3"
+        className="w-[360px] max-w-[90vw] bg-ink-900 border border-ink-700 rounded-xl p-4 space-y-3"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-sm font-semibold text-zinc-100">
+        <h3 className="text-sm font-semibold text-ink-100">
           {t('settings.tags.mergeTitle', 'Merge Tags')}
         </h3>
-        <p className="text-xs text-zinc-400">
+        <p className="text-xs text-ink-400">
           {t('settings.tags.mergePickTarget', 'Pick the tag to keep:')}
         </p>
         <div className="space-y-1 max-h-48 overflow-y-auto">
           {tags.map((tag) => (
             <label
               key={tag.id}
-              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-800 cursor-pointer"
+              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-ink-800 cursor-pointer"
             >
               <input
                 type="radio"
@@ -73,12 +73,12 @@ export const MergeTagsDialog: React.FC<MergeTagsDialogProps> = ({ tags, onConfir
                 className="w-2.5 h-2.5 rounded-full shrink-0"
                 style={{ backgroundColor: tag.color || '#6366f1' }}
               />
-              <span className="text-xs text-zinc-200 flex-1 truncate">{label(tag)}</span>
-              <span className="text-[10px] text-zinc-500">({tag.media_count ?? 0})</span>
+              <span className="text-xs text-ink-200 flex-1 truncate">{label(tag)}</span>
+              <span className="text-[10px] text-ink-500">({tag.media_count ?? 0})</span>
             </label>
           ))}
         </div>
-        <p className="text-[11px] text-zinc-500">
+        <p className="text-[11px] text-ink-500">
           {t('settings.tags.mergePreview', {
             defaultValue:
               'Up to {{count}} resources move to «{{name}}». {{n}} tags will be deleted.',
@@ -92,7 +92,7 @@ export const MergeTagsDialog: React.FC<MergeTagsDialogProps> = ({ tags, onConfir
           <button
             onClick={onClose}
             disabled={busy}
-            className="px-3 py-1.5 text-xs rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            className="px-3 py-1.5 text-xs rounded bg-ink-800 text-ink-300 hover:bg-ink-700"
           >
             {t('common.cancel', 'Cancel')}
           </button>

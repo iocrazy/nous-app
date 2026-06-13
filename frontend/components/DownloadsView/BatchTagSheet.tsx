@@ -74,16 +74,16 @@ export function BatchTagSheet({
   };
 
   return createPortal(
-    <div className="md:hidden fixed inset-0 z-[75] flex flex-col bg-zinc-950">
+    <div className="md:hidden fixed inset-0 z-[75] flex flex-col bg-ink-950">
       <div
-        className="px-4 py-3 flex items-center justify-between border-b border-zinc-800 shrink-0"
+        className="px-4 py-3 flex items-center justify-between border-b border-ink-800 shrink-0"
         style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
       >
         <button
           type="button"
           onClick={onClose}
           aria-label={t('common.close', 'Close')}
-          className="w-9 h-9 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 active:bg-zinc-700"
+          className="w-9 h-9 rounded-full bg-ink-800 flex items-center justify-center text-ink-300 active:bg-ink-700"
         >
           <X size={18} />
         </button>
@@ -103,7 +103,7 @@ export function BatchTagSheet({
 
       <div className="flex-1 overflow-y-auto">
         {rows.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-zinc-500">
+          <div className="px-4 py-6 text-sm text-ink-500">
             {t('resources.filter.noTags', 'No matching tags')}
           </div>
         ) : (
@@ -114,13 +114,13 @@ export function BatchTagSheet({
                 key={tag.id}
                 type="button"
                 onClick={() => toggle(tag.id)}
-                className={`w-full px-4 py-3 flex items-center gap-3 text-left border-b border-zinc-800/50 ${
-                  on ? 'bg-indigo-500/10' : 'active:bg-zinc-800/50'
+                className={`w-full px-4 py-3 flex items-center gap-3 text-left border-b border-ink-800/50 ${
+                  on ? 'bg-indigo-500/10' : 'active:bg-ink-800/50'
                 }`}
               >
                 <span
                   className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
-                    on ? 'bg-indigo-500 text-white' : 'border border-zinc-600'
+                    on ? 'bg-indigo-500 text-white' : 'border border-ink-600'
                   }`}
                 >
                   {on && <Check size={13} />}
@@ -135,16 +135,16 @@ export function BatchTagSheet({
       </div>
 
       <div
-        className="px-4 py-3 border-t border-zinc-800 shrink-0"
+        className="px-4 py-3 border-t border-ink-800 shrink-0"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
       >
-        <div className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-full px-4 py-2.5">
-          <Search size={16} className="text-zinc-500 shrink-0" />
+        <div className="flex items-center gap-2 bg-ink-800 border border-ink-700 rounded-full px-4 py-2.5">
+          <Search size={16} className="text-ink-500 shrink-0" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('resources.filter.searchTags', 'Search tags…')}
-            className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-zinc-500"
+            className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-ink-500"
           />
         </div>
       </div>

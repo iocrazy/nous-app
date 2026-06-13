@@ -22,7 +22,7 @@ export function Pill({
       className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
         active
           ? 'bg-indigo-500 border-indigo-400 text-white'
-          : 'bg-zinc-800 border-zinc-700 text-zinc-300 active:bg-zinc-700'
+          : 'bg-ink-800 border-ink-700 text-ink-300 active:bg-ink-700'
       }`}
     >
       {children}
@@ -50,7 +50,7 @@ export function CollapsibleSection({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-zinc-800/70 last:border-b-0">
+    <div className="border-b border-ink-800/70 last:border-b-0">
       <button
         type="button"
         onClick={onToggle}
@@ -67,7 +67,7 @@ export function CollapsibleSection({
         </div>
         <ChevronDown
           size={16}
-          className={`shrink-0 text-zinc-500 transition-transform ${
+          className={`shrink-0 text-ink-500 transition-transform ${
             open ? 'rotate-180' : ''
           }`}
         />

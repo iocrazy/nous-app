@@ -157,19 +157,19 @@ export function FacetPickerSheet({
             tag_ids: toggleIn(chipValues.tags.tag_ids, tag.id),
           })
         }
-        className={`w-full px-4 py-3 flex items-center gap-3 text-left border-b border-zinc-800/50 ${
-          checked ? 'bg-indigo-500/10' : 'active:bg-zinc-800/50'
+        className={`w-full px-4 py-3 flex items-center gap-3 text-left border-b border-ink-800/50 ${
+          checked ? 'bg-indigo-500/10' : 'active:bg-ink-800/50'
         }`}
       >
         <span
           className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
-            checked ? 'bg-indigo-500 text-white' : 'border border-zinc-600'
+            checked ? 'bg-indigo-500 text-white' : 'border border-ink-600'
           }`}
         >
           {checked && <Check size={13} />}
         </span>
         <span className="text-sm text-white flex-1 truncate">{tag.name}</span>
-        <span className="text-[11px] text-zinc-500 shrink-0">{tagCount(tag)}</span>
+        <span className="text-[11px] text-ink-500 shrink-0">{tagCount(tag)}</span>
       </button>
     );
   };
@@ -191,7 +191,7 @@ export function FacetPickerSheet({
 
   return createPortal(
     <div
-      className="md:hidden fixed inset-0 z-[70] bg-zinc-950 flex flex-col animate-in slide-in-from-bottom duration-300"
+      className="md:hidden fixed inset-0 z-[70] bg-ink-950 flex flex-col animate-in slide-in-from-bottom duration-300"
       style={{
         transform: dragY ? `translateY(${dragY}px)` : undefined,
         transition: dragging ? 'none' : 'transform 0.2s ease',
@@ -206,14 +206,14 @@ export function FacetPickerSheet({
         style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)' }}
       >
         <div className="flex justify-center pb-1.5">
-          <div className="h-1 w-10 rounded-full bg-zinc-600" />
+          <div className="h-1 w-10 rounded-full bg-ink-600" />
         </div>
-        <div className="px-4 py-2.5 flex items-center justify-between border-b border-zinc-800">
+        <div className="px-4 py-2.5 flex items-center justify-between border-b border-ink-800">
         <button
           type="button"
           onClick={onClose}
           aria-label={t('common.close', 'Close')}
-          className="w-9 h-9 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 active:bg-zinc-700"
+          className="w-9 h-9 rounded-full bg-ink-800 flex items-center justify-center text-ink-300 active:bg-ink-700"
         >
           <X size={18} />
         </button>
@@ -252,7 +252,7 @@ export function FacetPickerSheet({
                 type="button"
                 onClick={handleCreate}
                 disabled={creating}
-                className="w-full px-4 py-3 flex items-center gap-3 text-left border-b border-zinc-800/50 active:bg-zinc-800/50 disabled:opacity-50"
+                className="w-full px-4 py-3 flex items-center gap-3 text-left border-b border-ink-800/50 active:bg-ink-800/50 disabled:opacity-50"
               >
                 <span className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 bg-indigo-500 text-white">
                   <Plus size={13} />
@@ -266,13 +266,13 @@ export function FacetPickerSheet({
             )}
 
             {tagRows.length === 0 && !showCreate ? (
-              <div className="px-4 py-6 text-sm text-zinc-500">
+              <div className="px-4 py-6 text-sm text-ink-500">
                 {t('resources.filter.noTags', 'No matching tags')}
               </div>
             ) : (
               groupedTags.map(([group, tags]) => (
                 <div key={group || '__ungrouped__'}>
-                  <div className="px-4 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                  <div className="px-4 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-500">
                     {group || t('resources.filter.ungrouped', 'Ungrouped')}
                   </div>
                   {tags.map(renderTagRow)}
@@ -471,12 +471,12 @@ export function FacetPickerSheet({
                         className={`w-24 px-3 py-1.5 rounded-lg text-xs font-medium border text-left transition-colors ${
                           entry.enabled
                             ? 'bg-indigo-500 border-indigo-400 text-white'
-                            : 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                            : 'bg-ink-800 border-ink-700 text-ink-300'
                         }`}
                       >
                         {SOCIAL_LABELS[m]}
                       </button>
-                      <span className="text-xs text-zinc-500">≥</span>
+                      <span className="text-xs text-ink-500">≥</span>
                       <input
                         type="number"
                         inputMode="numeric"
@@ -490,7 +490,7 @@ export function FacetPickerSheet({
                           );
                           setSocialMetric(m, { threshold: n });
                         }}
-                        className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-400 disabled:opacity-40"
+                        className="flex-1 min-w-0 bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-400 disabled:opacity-40"
                       />
                     </div>
                   );
@@ -504,23 +504,23 @@ export function FacetPickerSheet({
       {/* Bottom search — Tags only */}
       {isTags && (
         <div
-          className="px-4 py-3 border-t border-zinc-800 shrink-0"
+          className="px-4 py-3 border-t border-ink-800 shrink-0"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
         >
-          <div className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-full px-4 py-2.5">
-            <Search size={16} className="text-zinc-500 shrink-0" />
+          <div className="flex items-center gap-2 bg-ink-800 border border-ink-700 rounded-full px-4 py-2.5">
+            <Search size={16} className="text-ink-500 shrink-0" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('resources.filter.searchTags', 'Search tags…')}
-              className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-zinc-500"
+              className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-ink-500"
             />
             {query && (
               <button
                 type="button"
                 onClick={() => setQuery('')}
                 aria-label={t('common.clear', 'Clear')}
-                className="text-zinc-500 active:text-white"
+                className="text-ink-500 active:text-white"
               >
                 <X size={14} />
               </button>
