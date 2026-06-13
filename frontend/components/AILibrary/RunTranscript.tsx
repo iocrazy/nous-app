@@ -17,7 +17,7 @@ const typeIcon = (t: AgentRunEvent['event_type']) => {
     case 'assistant': return <Bot size={12} className="text-emerald-400" />;
     case 'tool_call': return <Wrench size={12} className="text-amber-400" />;
     case 'error': return <AlertCircle size={12} className="text-red-400" />;
-    default: return <Terminal size={12} className="text-zinc-500" />;
+    default: return <Terminal size={12} className="text-ink-500" />;
   }
 };
 
@@ -33,27 +33,27 @@ const NiceEvent: React.FC<{ ev: AgentRunEvent }> = ({ ev }) => {
           ? ''
           : '';
     return (
-      <details className="group rounded-md border border-zinc-800 bg-zinc-950/60">
-        <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-zinc-300">
-          <ChevronRight size={12} className="text-zinc-600 transition-transform group-open:rotate-90" />
+      <details className="group rounded-md border border-ink-800 bg-ink-950/60">
+        <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-ink-300">
+          <ChevronRight size={12} className="text-ink-600 transition-transform group-open:rotate-90" />
           {typeIcon(ev.event_type)}
           <span className="font-mono font-medium">{tool}</span>
-          {skillHint && <span className="font-mono text-zinc-500">({skillHint})</span>}
-          <span className="ml-auto text-[10px] text-zinc-600">#{ev.seq}</span>
+          {skillHint && <span className="font-mono text-ink-500">({skillHint})</span>}
+          <span className="ml-auto text-[10px] text-ink-600">#{ev.seq}</span>
         </summary>
-        <div className="space-y-2 border-t border-zinc-800/70 px-3 py-2">
+        <div className="space-y-2 border-t border-ink-800/70 px-3 py-2">
           {p.args != null && (
             <div>
-              <div className="mb-0.5 text-[10px] uppercase tracking-wide text-zinc-600">args</div>
-              <pre className="whitespace-pre-wrap break-words rounded bg-zinc-900/80 p-2 text-[11px] text-zinc-300">
+              <div className="mb-0.5 text-[10px] uppercase tracking-wide text-ink-600">args</div>
+              <pre className="whitespace-pre-wrap break-words rounded bg-ink-900/80 p-2 text-[11px] text-ink-300">
                 {typeof p.args === 'string' ? p.args : JSON.stringify(p.args, null, 2)}
               </pre>
             </div>
           )}
           {p.result != null && (
             <div>
-              <div className="mb-0.5 text-[10px] uppercase tracking-wide text-zinc-600">result</div>
-              <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded bg-zinc-900/80 p-2 text-[11px] text-zinc-300 custom-scrollbar">
+              <div className="mb-0.5 text-[10px] uppercase tracking-wide text-ink-600">result</div>
+              <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded bg-ink-900/80 p-2 text-[11px] text-ink-300 custom-scrollbar">
                 {typeof p.result === 'string' ? p.result : JSON.stringify(p.result, null, 2)}
               </pre>
             </div>
@@ -68,14 +68,14 @@ const NiceEvent: React.FC<{ ev: AgentRunEvent }> = ({ ev }) => {
     ev.event_type === 'error'
       ? 'border-red-500/30 bg-red-500/5 text-red-200'
       : ev.event_type === 'user'
-        ? 'border-zinc-800 bg-zinc-900/60 text-zinc-300'
-        : 'border-zinc-800 bg-zinc-950/60 text-zinc-200';
+        ? 'border-ink-800 bg-ink-900/60 text-ink-300'
+        : 'border-ink-800 bg-ink-950/60 text-ink-200';
   return (
     <div className={`rounded-md border px-3 py-2 ${tint}`}>
-      <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-500">
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-ink-500">
         {typeIcon(ev.event_type)}
         {ev.event_type}
-        <span className="ml-auto text-zinc-600">#{ev.seq}</span>
+        <span className="ml-auto text-ink-600">#{ev.seq}</span>
       </div>
       <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed">{content}</pre>
     </div>
@@ -123,12 +123,12 @@ export const RunTranscript: React.FC<{ runId: string; isRunning: boolean }> = ({
   if (loaded && events.length === 0) return null; // pre-mig-285 runs have no events
 
   return (
-    <section className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+    <section className="rounded-lg border border-ink-800 bg-ink-900/60 p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
           {t('aiLibrary.agents.runs.transcript', 'Transcript')} ({events.length})
         </h4>
-        <div className="inline-flex overflow-hidden rounded-md border border-zinc-700">
+        <div className="inline-flex overflow-hidden rounded-md border border-ink-700">
           {(['nice', 'raw'] as const).map((m) => (
             <button
               key={m}
@@ -136,8 +136,8 @@ export const RunTranscript: React.FC<{ runId: string; isRunning: boolean }> = ({
               onClick={() => setMode(m)}
               className={`px-2.5 py-1 text-[10px] font-medium capitalize transition-colors ${
                 mode === m
-                  ? 'bg-zinc-700 text-zinc-100'
-                  : 'bg-zinc-800/60 text-zinc-400 hover:text-zinc-200'
+                  ? 'bg-ink-700 text-ink-100'
+                  : 'bg-ink-800/60 text-ink-400 hover:text-ink-200'
               }`}
             >
               {m === 'nice'
@@ -155,16 +155,16 @@ export const RunTranscript: React.FC<{ runId: string; isRunning: boolean }> = ({
           ))}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-md border border-zinc-800">
+        <div className="overflow-hidden rounded-md border border-ink-800">
           {events.map((ev) => (
             <div
               key={ev.seq}
-              className="grid grid-cols-[90px_1fr] gap-2 border-b border-zinc-800/60 px-2 py-1.5 font-mono text-[11px] last:border-b-0"
+              className="grid grid-cols-[90px_1fr] gap-2 border-b border-ink-800/60 px-2 py-1.5 font-mono text-[11px] last:border-b-0"
             >
-              <span className="text-zinc-500">
+              <span className="text-ink-500">
                 #{ev.seq} {ev.event_type}
               </span>
-              <span className="break-all text-zinc-300">
+              <span className="break-all text-ink-300">
                 {JSON.stringify(ev.payload)}
               </span>
             </div>

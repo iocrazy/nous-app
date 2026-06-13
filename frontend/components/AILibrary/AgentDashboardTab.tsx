@@ -85,13 +85,13 @@ function statusBadgeClass(status: string): string {
     case 'assigned':
       return 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30';
     case 'cancelled':
-      return 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30';
+      return 'bg-ink-500/15 text-ink-300 border-ink-500/30';
     case 'queued':
     case 'waiting_for_other':
     case 'blocked':
       return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
     default:
-      return 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30';
+      return 'bg-ink-500/15 text-ink-300 border-ink-500/30';
   }
 }
 
@@ -193,7 +193,7 @@ export function AgentDashboardTab({
 
   if (loading && !data) {
     return (
-      <div className="text-sm text-zinc-500 px-1 py-4">
+      <div className="text-sm text-ink-500 px-1 py-4">
         {t('aiLibrary.agents.dashboard.loading', 'Loading dashboard…')}
       </div>
     );
@@ -217,7 +217,7 @@ export function AgentDashboardTab({
       {/* Latest Run banner */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-medium text-zinc-200">
+          <h3 className="text-sm font-medium text-ink-200">
             {t('aiLibrary.agents.dashboard.latestRun', 'Latest Run')}
           </h3>
           {latest_run && onOpenRuns && (
@@ -232,23 +232,23 @@ export function AgentDashboardTab({
           )}
         </div>
         {latest_run ? (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-1">
+          <div className="rounded-lg border border-ink-800 bg-ink-900/40 p-3 space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
               <StatusBadge status={latest_run.status} />
-              <code className="text-[11px] text-zinc-400 font-mono">
+              <code className="text-[11px] text-ink-400 font-mono">
                 {String(latest_run.id).slice(0, 8)}
               </code>
               {latest_run.trigger && (
-                <span className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-400">
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-ink-800 text-ink-400">
                   {latest_run.trigger}
                 </span>
               )}
-              <span className="text-[11px] text-zinc-500 ml-auto">
+              <span className="text-[11px] text-ink-500 ml-auto">
                 {formatRelative(latest_run.started_at)}
               </span>
             </div>
             {latest_run.output_summary && (
-              <p className="text-xs text-zinc-300 leading-relaxed line-clamp-3">
+              <p className="text-xs text-ink-300 leading-relaxed line-clamp-3">
                 {latest_run.output_summary}
               </p>
             )}
@@ -260,7 +260,7 @@ export function AgentDashboardTab({
             )}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/20 p-3 text-xs text-zinc-500 inline-flex items-center gap-2">
+          <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/20 p-3 text-xs text-ink-500 inline-flex items-center gap-2">
             <ActivitySquare size={14} />
             {t(
               'aiLibrary.agents.dashboard.noRunsYet',
@@ -376,9 +376,9 @@ export function AgentDashboardTab({
 
       {/* Costs summary */}
       <section>
-        <h3 className="text-sm font-medium text-zinc-200 mb-2">
+        <h3 className="text-sm font-medium text-ink-200 mb-2">
           {t('aiLibrary.agents.dashboard.costs', 'Costs')}{' '}
-          <span className="text-[11px] text-zinc-500 font-normal">
+          <span className="text-[11px] text-ink-500 font-normal">
             {t('aiLibrary.agents.dashboard.last14d', 'Last 14 days')}
           </span>
         </h3>
@@ -405,24 +405,24 @@ export function AgentDashboardTab({
       {/* Recent tasks */}
       {recent_tasks.length > 0 && (
         <section>
-          <h3 className="text-sm font-medium text-zinc-200 mb-2">
+          <h3 className="text-sm font-medium text-ink-200 mb-2">
             {t('aiLibrary.agents.dashboard.recentTasks', 'Recent Tasks')}
           </h3>
-          <div className="rounded-lg border border-zinc-800 overflow-hidden">
+          <div className="rounded-lg border border-ink-800 overflow-hidden">
             {recent_tasks.map((task) => (
               <div
                 key={task.id}
-                className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 last:border-b-0 text-xs"
+                className="flex items-center gap-2 px-3 py-2 border-b border-ink-800 last:border-b-0 text-xs"
               >
                 <StatusBadge status={task.lifecycle_status} />
-                <span className="flex-1 truncate text-zinc-300" title={task.title ?? ''}>
+                <span className="flex-1 truncate text-ink-300" title={task.title ?? ''}>
                   {task.title || (
-                    <span className="italic text-zinc-500">
+                    <span className="italic text-ink-500">
                       {t('aiLibrary.agents.untitledTask')}
                     </span>
                   )}
                 </span>
-                <span className="text-[11px] text-zinc-500">
+                <span className="text-[11px] text-ink-500">
                   {formatRelative(task.created_at)}
                 </span>
               </div>
@@ -434,7 +434,7 @@ export function AgentDashboardTab({
       {/* Recent runs table */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-medium text-zinc-200">
+          <h3 className="text-sm font-medium text-ink-200">
             {t('aiLibrary.agents.dashboard.recentRuns', 'Recent Runs')}
           </h3>
           {onOpenRuns && (
@@ -448,13 +448,13 @@ export function AgentDashboardTab({
           )}
         </div>
         {recent_runs.length === 0 ? (
-          <div className="text-xs text-zinc-500 italic">
+          <div className="text-xs text-ink-500 italic">
             {t('aiLibrary.agents.dashboard.noRuns', 'No runs yet.')}
           </div>
         ) : (
-          <div className="rounded-lg border border-zinc-800 overflow-hidden">
+          <div className="rounded-lg border border-ink-800 overflow-hidden">
             <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-900/60 text-zinc-500">
+              <thead className="bg-ink-900/60 text-ink-500">
                 <tr>
                   <th className="px-3 py-2 font-normal">
                     {t('aiLibrary.agents.dashboard.date', 'Date')}
@@ -475,20 +475,20 @@ export function AgentDashboardTab({
               </thead>
               <tbody>
                 {recent_runs.map((run) => (
-                  <tr key={run.id} className="border-t border-zinc-800">
-                    <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                  <tr key={run.id} className="border-t border-ink-800">
+                    <td className="px-3 py-2 text-ink-400 whitespace-nowrap">
                       {new Date(run.started_at).toLocaleDateString()}
                     </td>
-                    <td className="px-3 py-2 font-mono text-zinc-300">
+                    <td className="px-3 py-2 font-mono text-ink-300">
                       {String(run.id).slice(0, 8)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                    <td className="px-3 py-2 text-right tabular-nums text-ink-300">
                       {formatTokens(run.prompt_tokens)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                    <td className="px-3 py-2 text-right tabular-nums text-ink-300">
                       {formatTokens(run.completion_tokens)}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                    <td className="px-3 py-2 text-right tabular-nums text-ink-300">
                       {run.cost_cents != null ? formatCost(run.cost_cents) : '—'}
                     </td>
                   </tr>
@@ -510,10 +510,10 @@ interface ChartCardProps {
 
 function ChartCard({ title, subtitle, children }: ChartCardProps): React.ReactElement {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 min-w-0">
+    <div className="rounded-lg border border-ink-800 bg-ink-900/40 p-3 min-w-0">
       <div className="mb-2">
-        <h4 className="text-xs font-medium text-zinc-300">{title}</h4>
-        {subtitle && <p className="text-[10px] text-zinc-500">{subtitle}</p>}
+        <h4 className="text-xs font-medium text-ink-300">{title}</h4>
+        {subtitle && <p className="text-[10px] text-ink-500">{subtitle}</p>}
       </div>
       {children}
     </div>
@@ -522,7 +522,7 @@ function ChartCard({ title, subtitle, children }: ChartCardProps): React.ReactEl
 
 function EmptyChartHint({ text }: { text: string }): React.ReactElement {
   return (
-    <div className="h-[120px] flex items-center justify-center text-[11px] text-zinc-500 italic">
+    <div className="h-[120px] flex items-center justify-center text-[11px] text-ink-500 italic">
       {text}
     </div>
   );
@@ -530,9 +530,9 @@ function EmptyChartHint({ text }: { text: string }): React.ReactElement {
 
 function CostStat({ label, value }: { label: string; value: string }): React.ReactElement {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="text-base font-medium text-zinc-100 tabular-nums mt-0.5">{value}</div>
+    <div className="rounded-lg border border-ink-800 bg-ink-900/40 p-3">
+      <div className="text-[10px] uppercase tracking-wide text-ink-500">{label}</div>
+      <div className="text-base font-medium text-ink-100 tabular-nums mt-0.5">{value}</div>
     </div>
   );
 }

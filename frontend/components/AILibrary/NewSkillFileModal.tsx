@@ -152,11 +152,11 @@ export const NewSkillFileModal: React.FC<NewSkillFileModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-zinc-100">
+      <div className="w-full max-w-md rounded-lg border border-ink-800 bg-ink-900 p-6 shadow-xl">
+        <h2 className="text-lg font-semibold text-ink-100">
           {t('aiLibrary.skills.newFileTitle', 'New file or folder')}
         </h2>
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="mt-1 text-xs text-ink-500">
           {t(
             'aiLibrary.skills.newFileHint',
             'Add files under references/, scripts/, or assets/. Folders are path-derived.',
@@ -182,7 +182,7 @@ export const NewSkillFileModal: React.FC<NewSkillFileModalProps> = ({
 
           {/* Path */}
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {mode === 'file'
                 ? t('aiLibrary.skills.newFilePathLabel', 'File path')
                 : t('aiLibrary.skills.newFolderPathLabel', 'Folder path')}
@@ -196,7 +196,7 @@ export const NewSkillFileModal: React.FC<NewSkillFileModalProps> = ({
                   ? 'references/notes.md'
                   : 'references/research'
               }
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 font-mono text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
               disabled={submitting}
               autoFocus
               required
@@ -213,7 +213,7 @@ export const NewSkillFileModal: React.FC<NewSkillFileModalProps> = ({
               </p>
             )}
             {mode === 'file' && normalizedPath && !pathError && !clash && (
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-ink-500">
                 {t('aiLibrary.skills.newFileTypeHint', 'Type: {{t}}', {
                   t: inferFileType(normalizedPath),
                 })}
@@ -224,9 +224,9 @@ export const NewSkillFileModal: React.FC<NewSkillFileModalProps> = ({
           {/* Initial content (file only) */}
           {mode === 'file' && (
             <div>
-              <label className="block text-xs font-medium text-zinc-400">
+              <label className="block text-xs font-medium text-ink-400">
                 {t('aiLibrary.skills.newFileContentLabel', 'Initial content')}
-                <span className="ml-1 text-zinc-600">
+                <span className="ml-1 text-ink-600">
                   ({t('common.optional', 'optional')})
                 </span>
               </label>
@@ -239,7 +239,7 @@ export const NewSkillFileModal: React.FC<NewSkillFileModalProps> = ({
                     ? '# Notes\n\nYour content here…'
                     : '// leave empty to start blank'
                 }
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 font-mono text-xs text-ink-100 focus:border-indigo-500 focus:outline-none"
                 disabled={submitting}
               />
             </div>
@@ -256,7 +256,7 @@ export const NewSkillFileModal: React.FC<NewSkillFileModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+              className="rounded-md border border-ink-700 px-4 py-2 text-sm text-ink-300 hover:bg-ink-800"
             >
               {t('common.cancel', 'Cancel')}
             </button>
@@ -296,7 +296,7 @@ const ModeButton: React.FC<ModeButtonProps> = ({
     className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
       active
         ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
-        : 'border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-750'
+        : 'border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-750'
     } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
   >
     {label}

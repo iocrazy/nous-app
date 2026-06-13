@@ -19,7 +19,7 @@ type ChipStatus = 'idle' | 'running' | 'paused';
 const StatusChip: React.FC<{ status: ChipStatus }> = ({ status }) => {
   const { t } = useTranslation();
   const styles: Record<ChipStatus, string> = {
-    idle: 'border-zinc-700 bg-zinc-800/80 text-zinc-400',
+    idle: 'border-ink-700 bg-ink-800/80 text-ink-400',
     running: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
     paused: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
   };
@@ -124,7 +124,7 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
       <button
         type="button"
         onClick={() => setAssignOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition-colors whitespace-nowrap"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 transition-colors whitespace-nowrap"
       >
         <Plus size={14} />
         {t('aiLibrary.agents.assignTask', 'Assign Task')}
@@ -135,7 +135,7 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
           type="button"
           onClick={() => void togglePause()}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50 transition-colors whitespace-nowrap"
         >
           {paused ? <Play size={14} /> : <Pause size={14} />}
           {paused
@@ -151,13 +151,13 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
         <button
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
-          className="rounded-lg border border-zinc-700 bg-zinc-800 p-2 text-zinc-300 hover:bg-zinc-700 transition-colors"
+          className="rounded-lg border border-ink-700 bg-ink-800 p-2 text-ink-300 hover:bg-ink-700 transition-colors"
           aria-label={t('common.more', 'More')}
         >
           <MoreHorizontal size={14} />
         </button>
         {menuOpen && (
-          <div className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl">
+          <div className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 shadow-xl">
             <button
               type="button"
               onClick={() => {
@@ -165,7 +165,7 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
                 addToast(t('aiLibrary.agents.idCopied', 'Agent ID copied'), 'success');
                 setMenuOpen(false);
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-ink-300 hover:bg-ink-800"
             >
               <Copy size={12} />
               {t('aiLibrary.agents.copyId', 'Copy agent ID')}
@@ -177,7 +177,7 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
                   setMenuOpen(false);
                   onDuplicate();
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-ink-300 hover:bg-ink-800"
               >
                 <GitFork size={12} />
                 {t('aiLibrary.agents.duplicate', 'Duplicate')}

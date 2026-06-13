@@ -27,7 +27,7 @@ interface AILibrarySidebarProps {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <span className="px-2 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
+    <span className="px-2 text-[11px] font-medium uppercase tracking-wider text-ink-600">
       {children}
     </span>
   );
@@ -45,7 +45,7 @@ interface NavItemProps {
 function NavItem({ icon: Icon, label, active, onClick, trailing, title }: NavItemProps) {
   const style = active
     ? 'bg-indigo-500/8 text-indigo-300'
-    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40';
+    : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/40';
   return (
     <button
       type="button"
@@ -55,7 +55,7 @@ function NavItem({ icon: Icon, label, active, onClick, trailing, title }: NavIte
     >
       <Icon
         size={16}
-        className={`shrink-0 ${active ? 'text-indigo-300' : 'text-zinc-500'}`}
+        className={`shrink-0 ${active ? 'text-indigo-300' : 'text-ink-500'}`}
       />
       <span className="flex-1 truncate text-left">{label}</span>
       {trailing}
@@ -118,7 +118,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+          className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors"
           title={t('aiLibrary.expandSidebar', 'Expand sidebar')}
         >
           <ChevronRight size={12} />
@@ -129,10 +129,10 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
 
   return (
     <>
-      <div className="group relative flex w-52 flex-col border-r border-zinc-800/40 pt-16">
+      <div className="group relative flex w-52 flex-col border-r border-ink-800/40 pt-16">
         {/* Header */}
         <div className="px-4 pt-4 pb-3">
-          <span className="text-sm font-semibold text-zinc-200">
+          <span className="text-sm font-semibold text-ink-200">
             {t('sidebar.aiLibrary', 'AI Library')}
           </span>
         </div>
@@ -144,7 +144,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
             <button
               type="button"
               onClick={() => setShowNewAgentModal(true)}
-              className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+              className="flex h-5 w-5 items-center justify-center rounded text-ink-500 hover:text-ink-200 hover:bg-ink-800/60 transition-colors"
               aria-label={t('sidebar.newAgent', 'New agent')}
               title={t('sidebar.newAgent', 'New agent')}
             >
@@ -153,7 +153,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
           </div>
           <div className="mt-1 flex flex-col gap-0.5">
             {!loaded ? (
-              <div className="px-3 py-1 text-[11px] text-zinc-600">
+              <div className="px-3 py-1 text-[11px] text-ink-600">
                 {t('aiLibrary.loadingAgents', 'Loading...')}
               </div>
             ) : loadError ? (
@@ -170,7 +170,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                 </button>
               </div>
             ) : agents.length === 0 ? (
-              <div className="px-3 py-1 text-[11px] text-zinc-600">
+              <div className="px-3 py-1 text-[11px] text-ink-600">
                 {t('aiLibrary.noAgents', 'No agents yet')}
               </div>
             ) : (
@@ -207,7 +207,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                 ) : isPausedManual ? (
                   <AlertTriangle
                     size={12}
-                    className="flex-shrink-0 text-zinc-500"
+                    className="flex-shrink-0 text-ink-500"
                     aria-label={pausedTitle ?? undefined}
                   />
                 ) : null;
@@ -237,7 +237,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
         </div>
 
         {/* Divider */}
-        <div className="mx-3 my-2 border-t border-zinc-800/80" />
+        <div className="mx-3 my-2 border-t border-ink-800/80" />
 
         {/* Skills */}
         <div className="px-2">
@@ -253,7 +253,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
         </div>
 
         {/* Divider */}
-        <div className="mx-3 my-2 border-t border-zinc-800/80" />
+        <div className="mx-3 my-2 border-t border-ink-800/80" />
 
         {/* Runtime */}
         <div className="px-2">
@@ -269,7 +269,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
         </div>
 
         {/* Divider */}
-        <div className="mx-3 my-2 border-t border-zinc-800/80" />
+        <div className="mx-3 my-2 border-t border-ink-800/80" />
 
         {/* Usage + Memory */}
         <div className="px-2 pb-3">
@@ -294,7 +294,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-zinc-800/80 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors opacity-0 group-hover:opacity-100"
+          className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors opacity-0 group-hover:opacity-100"
           title={t('aiLibrary.collapseSidebar', 'Collapse sidebar')}
         >
           <ChevronLeft size={12} />

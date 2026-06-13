@@ -54,9 +54,9 @@ const RoutineForm: React.FC<{
   const isPreset = CRON_PRESETS.some((p) => p.expr === form.cron_expr);
 
   return (
-    <div className="space-y-3 rounded-lg border border-zinc-700 bg-zinc-900/60 p-4">
+    <div className="space-y-3 rounded-lg border border-ink-700 bg-ink-900/60 p-4">
       <label className="block text-xs">
-        <span className="font-medium text-zinc-400">
+        <span className="font-medium text-ink-400">
           {t('aiLibrary.agents.routines.nameLabel', 'Name')}
         </span>
         <input
@@ -65,13 +65,13 @@ const RoutineForm: React.FC<{
           maxLength={200}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           placeholder={t('aiLibrary.agents.routines.namePlaceholder', 'Daily digest')}
-          className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+          className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
         />
       </label>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block text-xs">
-          <span className="font-medium text-zinc-400">
+          <span className="font-medium text-ink-400">
             {t('aiLibrary.agents.routines.scheduleLabel', 'Schedule')}
           </span>
           <select
@@ -80,7 +80,7 @@ const RoutineForm: React.FC<{
               const v = e.target.value;
               if (v !== '__custom__') setForm((f) => ({ ...f, cron_expr: v }));
             }}
-            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
           >
             {CRON_PRESETS.map((p) => (
               <option key={p.expr} value={p.expr}>{p.label}</option>
@@ -93,9 +93,9 @@ const RoutineForm: React.FC<{
             type="text"
             value={form.cron_expr}
             onChange={(e) => setForm((f) => ({ ...f, cron_expr: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-xs text-zinc-300 focus:border-indigo-500 focus:outline-none"
+            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 font-mono text-xs text-ink-300 focus:border-indigo-500 focus:outline-none"
           />
-          <p className="mt-1 text-[10px] text-zinc-500">
+          <p className="mt-1 text-[10px] text-ink-500">
             {t(
               'aiLibrary.agents.routines.cronUtcHint',
               'Cron hours are UTC — your timezone is UTC{{offset}}.',
@@ -105,7 +105,7 @@ const RoutineForm: React.FC<{
         </label>
 
         <label className="block text-xs">
-          <span className="font-medium text-zinc-400">
+          <span className="font-medium text-ink-400">
             {t('aiLibrary.agents.routines.policyLabel', 'If previous run still open')}
           </span>
           <select
@@ -116,7 +116,7 @@ const RoutineForm: React.FC<{
                 delivery_policy: e.target.value as RoutineFormState['delivery_policy'],
               }))
             }
-            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
           >
             <option value="skip_if_active">
               {t('aiLibrary.agents.routines.policySkip', 'Skip this fire (recommended)')}
@@ -129,7 +129,7 @@ const RoutineForm: React.FC<{
       </div>
 
       <label className="block text-xs">
-        <span className="font-medium text-zinc-400">
+        <span className="font-medium text-ink-400">
           {t('aiLibrary.agents.routines.promptLabel', 'Instructions (sent to the agent on each fire)')}
         </span>
         <textarea
@@ -140,7 +140,7 @@ const RoutineForm: React.FC<{
             'aiLibrary.agents.routines.promptPlaceholder',
             'Summarize the resources downloaded in the last 24 hours…',
           )}
-          className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+          className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
         />
       </label>
 
@@ -148,7 +148,7 @@ const RoutineForm: React.FC<{
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700"
+          className="rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs font-medium text-ink-300 hover:bg-ink-700"
         >
           {t('common.cancel', 'Cancel')}
         </button>
@@ -266,7 +266,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
   return (
     <section className="space-y-4">
       <header className="flex items-center justify-between gap-3">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-ink-500">
           {t(
             'aiLibrary.agents.routines.intro',
             'Each fire creates an issue assigned to this agent and runs it automatically — results land as issue replies.',
@@ -314,9 +314,9 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
       )}
 
       {routines === null ? (
-        <p className="text-sm text-zinc-500">{t('common.loading', 'Loading…')}</p>
+        <p className="text-sm text-ink-500">{t('common.loading', 'Loading…')}</p>
       ) : routines.length === 0 && !formOpen ? (
-        <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-3 py-8 text-center text-sm text-zinc-500">
+        <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-8 text-center text-sm text-ink-500">
           {t(
             'aiLibrary.agents.routines.empty',
             'No routines yet. Create one to have this agent work on a schedule.',
@@ -329,7 +329,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
             return (
               <div
                 key={r.id}
-                className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3"
+                className="rounded-lg border border-ink-800 bg-ink-900/60 px-4 py-3"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -338,11 +338,11 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                       setEditing(r);
                       setFormOpen(true);
                     }}
-                    className="truncate text-left text-sm font-medium text-zinc-100 hover:text-indigo-300"
+                    className="truncate text-left text-sm font-medium text-ink-100 hover:text-indigo-300"
                   >
                     {r.name}
                   </button>
-                  <span className="inline-flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-px font-mono text-[10px] text-zinc-400">
+                  <span className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-800 px-1.5 py-px font-mono text-[10px] text-ink-400">
                     <Clock size={10} />
                     {r.cron_expr}
                   </span>
@@ -356,7 +356,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                       type="button"
                       onClick={() => void fireNow(r)}
                       title={t('aiLibrary.agents.routines.fireNow', 'Run now')}
-                      className="rounded-md border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-300 hover:bg-zinc-700"
+                      className="rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-300 hover:bg-ink-700"
                     >
                       <Play size={12} />
                     </button>
@@ -378,7 +378,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                     </button>
                   </span>
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-zinc-500">
+                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-500">
                   <span>
                     {t('aiLibrary.agents.routines.nextFire', 'Next')}:{' '}
                     {r.next_fire_at ? new Date(r.next_fire_at).toLocaleString() : '—'}

@@ -21,7 +21,7 @@ const PREFIXES = [
   'fill', 'stroke',
 ];
 const RE = new RegExp(
-  `(\\b(?:${PREFIXES.map(p => p.replace(/-/g, '\\-')).join('|')})-)zinc(-(?:50|100|200|300|400|500|600|700|800|900|950)\\b)`,
+  `(\\b(?:${PREFIXES.map(p => p.replace(/-/g, '\\-')).join('|')})-)zinc(-(?:50|100|200|300|400|500|600|700|750|800|900|950)\\b)`,
   'g',
 );
 

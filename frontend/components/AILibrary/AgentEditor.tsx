@@ -172,7 +172,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
   }
 
   if (!agent) {
-    return <div className="text-sm text-zinc-500">{t('common.loading')}</div>;
+    return <div className="text-sm text-ink-500">{t('common.loading')}</div>;
   }
 
   const isPreset = agent.is_system_preset;
@@ -353,8 +353,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
     <div>
       <header className="mb-4 flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-zinc-100 truncate">{agent.name}</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          <h2 className="text-lg font-semibold text-ink-100 truncate">{agent.name}</h2>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-500">
             <span className="font-mono">{agent.slug}</span>
             <span>·</span>
             <span>{agent.model}</span>
@@ -374,7 +374,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
           {isPreset && (
             <button
               onClick={openForkModal}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 transition-colors whitespace-nowrap"
               title={t('aiLibrary.agents.forkAgent', 'Fork to My Agents')}
             >
               <GitFork size={14} />
@@ -424,15 +424,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
         </div>
       )}
 
-      <nav className="mb-4 flex gap-1 border-b border-zinc-800">
+      <nav className="mb-4 flex gap-1 border-b border-ink-800">
         {subTabs.map((k) => (
           <button
             key={k}
             onClick={() => setSub(k)}
             className={`px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2 ${
               sub === k
-                ? 'border-indigo-500 text-zinc-100'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                ? 'border-indigo-500 text-ink-100'
+                : 'border-transparent text-ink-500 hover:text-ink-300'
             }`}
           >
             {t(`aiLibrary.agents.tab.${k}`)}
@@ -467,7 +467,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
               disabled={readOnly}
               size={24}
             />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-ink-500">
               {t(
                 'aiLibrary.agents.iconHint',
                 'Icon shown in the sidebar and throughout the app.',
@@ -477,7 +477,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-zinc-400">
+              <label className="block text-xs font-medium text-ink-400">
                 {t('aiLibrary.agents.nameLabel', 'Name')}
               </label>
               <input
@@ -485,24 +485,24 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                 value={draft.name ?? ''}
                 onChange={(e) => updateDraft('name', e.target.value)}
                 disabled={readOnly}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-400">
+              <label className="block text-xs font-medium text-ink-400">
                 {t('aiLibrary.agents.slugLabel', 'Slug')}
               </label>
               <input
                 type="text"
                 value={agent.slug}
                 disabled
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-400 font-mono cursor-not-allowed"
+                className="mt-1 w-full rounded-md border border-ink-800 bg-ink-950 px-3 py-2 text-sm text-ink-400 font-mono cursor-not-allowed"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.agents.descriptionLabel', 'Description')}
             </label>
             <textarea
@@ -510,12 +510,12 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
               onChange={(e) => updateDraft('description', e.target.value)}
               disabled={readOnly}
               rows={2}
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-zinc-400">
+            <label className="block text-xs font-medium text-ink-400">
               {t('aiLibrary.agents.modelLabel', 'Model')}
             </label>
             {renderModelSelect({
@@ -533,7 +533,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-medium text-zinc-400">
+              <label className="block text-xs font-medium text-ink-400">
                 {t('aiLibrary.agents.temperatureLabel', 'Temperature')}
               </label>
               <input
@@ -552,11 +552,11 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                   updateDraft('temperature', tidy);
                 }}
                 disabled={readOnly}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-400">
+              <label className="block text-xs font-medium text-ink-400">
                 {t('aiLibrary.agents.maxTokensLabel', 'Max tokens')}
               </label>
               <input
@@ -566,14 +566,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
                 value={draft.max_tokens ?? 0}
                 onChange={(e) => updateDraft('max_tokens', Number(e.target.value))}
                 disabled={readOnly}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-400">
+              <label className="block text-xs font-medium text-ink-400">
                 {t('aiLibrary.agents.enabledLabel', 'Enabled')}
               </label>
-              <label className="mt-1 flex items-center gap-2 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100">
+              <label className="mt-1 flex items-center gap-2 rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100">
                 <input
                   type="checkbox"
                   checked={draft.enabled ?? false}
@@ -602,8 +602,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             onConcurrencyChange={(v) => updateDraft('max_concurrent_runs', v)}
           />
 
-          <div className="pt-1 text-xs text-zinc-500">
-            {t('aiLibrary.agents.boundSkills')}: <span className="text-zinc-200 font-medium">{agent.skill_ids.length}</span>
+          <div className="pt-1 text-xs text-ink-500">
+            {t('aiLibrary.agents.boundSkills')}: <span className="text-ink-200 font-medium">{agent.skill_ids.length}</span>
           </div>
         </section>
       )}
@@ -616,8 +616,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             </div>
           )}
           <div>
-            <h3 className="mb-2 text-sm font-semibold text-zinc-200">
-              {t('aiLibrary.agents.identityTitle')} <span className="text-zinc-500 font-normal">(IDENTITY.md)</span>
+            <h3 className="mb-2 text-sm font-semibold text-ink-200">
+              {t('aiLibrary.agents.identityTitle')} <span className="text-ink-500 font-normal">(IDENTITY.md)</span>
             </h3>
             <MarkdownEditor
               value={draft.identity_md ?? ''}
@@ -626,8 +626,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             />
           </div>
           <div>
-            <h3 className="mb-2 text-sm font-semibold text-zinc-200">
-              {t('aiLibrary.agents.soulTitle')} <span className="text-zinc-500 font-normal">(SOUL.md)</span>
+            <h3 className="mb-2 text-sm font-semibold text-ink-200">
+              {t('aiLibrary.agents.soulTitle')} <span className="text-ink-500 font-normal">(SOUL.md)</span>
             </h3>
             <MarkdownEditor
               value={draft.soul_md ?? ''}
@@ -636,8 +636,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked })
             />
           </div>
           <div>
-            <h3 className="mb-2 text-sm font-semibold text-zinc-200">
-              {t('aiLibrary.agents.instructionsTitle')} <span className="text-zinc-500 font-normal">(AGENT.md)</span>
+            <h3 className="mb-2 text-sm font-semibold text-ink-200">
+              {t('aiLibrary.agents.instructionsTitle')} <span className="text-ink-500 font-normal">(AGENT.md)</span>
             </h3>
             <MarkdownEditor
               value={draft.agent_md ?? ''}
@@ -704,7 +704,7 @@ const ScopeBadge: React.FC<{ agent: AILibraryAgent }> = ({ agent }) => {
 
   if (agent.is_system_preset) {
     return (
-      <span className={`${base} border-zinc-700 bg-zinc-800 text-zinc-300`}>
+      <span className={`${base} border-ink-700 bg-ink-800 text-ink-300`}>
         {t('aiLibrary.agents.systemPreset', 'System Preset')}
       </span>
     );
@@ -728,7 +728,7 @@ const ScopeBadge: React.FC<{ agent: AILibraryAgent }> = ({ agent }) => {
     );
   }
   return (
-    <span className={`${base} border-zinc-700 bg-zinc-900 text-zinc-400`}>
+    <span className={`${base} border-ink-700 bg-ink-900 text-ink-400`}>
       {t('aiLibrary.agents.scopeBadgePrivate', 'Private')}
     </span>
   );
@@ -813,7 +813,7 @@ function renderModelSelect(params: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="w-full appearance-none rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 pr-8 text-sm font-mono text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+        className="w-full appearance-none rounded-md border border-ink-700 bg-ink-800 px-3 py-2 pr-8 text-sm font-mono text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
       >
         {showOrphan && (
           <option value={value}>
@@ -835,7 +835,7 @@ function renderModelSelect(params: {
       </select>
       <ChevronDown
         size={14}
-        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
+        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500"
       />
     </div>
   );
@@ -889,7 +889,7 @@ const SkillsSection: React.FC<{
   }, [allSkills, localSkillIds]);
 
   if (skillsLoading && allSkills === null) {
-    return <p className="text-sm text-zinc-500">{t('aiLibrary.agents.loadingSkills')}</p>;
+    return <p className="text-sm text-ink-500">{t('aiLibrary.agents.loadingSkills')}</p>;
   }
 
   return (
@@ -901,14 +901,14 @@ const SkillsSection: React.FC<{
       )}
 
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-200">
+        <h3 className="mb-2 text-sm font-semibold text-ink-200">
           {t('aiLibrary.agents.currentSkills', 'Bound Skills')}
-          <span className="ml-2 text-xs font-normal text-zinc-500">
+          <span className="ml-2 text-xs font-normal text-ink-500">
             ({boundSkills.length})
           </span>
         </h3>
         {boundSkills.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-3 py-4 text-sm text-zinc-500">
+          <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-4 text-sm text-ink-500">
             {t(
               'aiLibrary.agents.noSkillsBound',
               'No skills bound yet. Add one below.',
@@ -919,17 +919,17 @@ const SkillsSection: React.FC<{
             {boundSkills.map(({ id, skill }, idx) => (
               <li
                 key={id}
-                className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2"
+                className="flex items-center gap-3 rounded-lg border border-ink-800 bg-ink-900/60 px-3 py-2"
               >
                 <span className="text-xl leading-none" aria-hidden>
                   {skill?.icon ?? ''}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-zinc-100">
+                  <div className="truncate text-sm font-medium text-ink-100">
                     {skill?.name ?? `Skill #${id}`}
                   </div>
                   {skill?.slug && (
-                    <div className="truncate font-mono text-xs text-zinc-500">
+                    <div className="truncate font-mono text-xs text-ink-500">
                       {skill.slug}
                     </div>
                   )}
@@ -941,7 +941,7 @@ const SkillsSection: React.FC<{
                       type="button"
                       onClick={() => onMove(id, -1)}
                       disabled={idx === 0}
-                      className="rounded-md border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
                       title={t('aiLibrary.agents.moveUp', 'Move up')}
                       aria-label={t('aiLibrary.agents.moveUp', 'Move up')}
                     >
@@ -951,7 +951,7 @@ const SkillsSection: React.FC<{
                       type="button"
                       onClick={() => onMove(id, 1)}
                       disabled={idx === boundSkills.length - 1}
-                      className="rounded-md border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
                       title={t('aiLibrary.agents.moveDown', 'Move down')}
                       aria-label={t('aiLibrary.agents.moveDown', 'Move down')}
                     >
@@ -976,14 +976,14 @@ const SkillsSection: React.FC<{
 
       {!readOnly && (
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-zinc-200">
+          <h3 className="mb-2 text-sm font-semibold text-ink-200">
             {t('aiLibrary.agents.availableSkills', 'Available Skills')}
-            <span className="ml-2 text-xs font-normal text-zinc-500">
+            <span className="ml-2 text-xs font-normal text-ink-500">
               ({availableSkills.length})
             </span>
           </h3>
           {availableSkills.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-3 py-4 text-sm text-zinc-500">
+            <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-4 text-sm text-ink-500">
               {t(
                 'aiLibrary.agents.noAvailableSkills',
                 'No available skills. Create one in the Skills tab.',
@@ -994,17 +994,17 @@ const SkillsSection: React.FC<{
               {availableSkills.map((skill) => (
                 <li
                   key={skill.id}
-                  className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2"
+                  className="flex items-center gap-3 rounded-lg border border-ink-800 bg-ink-900/40 px-3 py-2"
                 >
                   <span className="text-xl leading-none" aria-hidden>
                     {skill.icon ?? ''}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-zinc-100">
+                    <div className="truncate text-sm font-medium text-ink-100">
                       {skill.name}
                     </div>
                     {skill.slug && (
-                      <div className="truncate font-mono text-xs text-zinc-500">
+                      <div className="truncate font-mono text-xs text-ink-500">
                         {skill.slug}
                       </div>
                     )}
@@ -1040,7 +1040,7 @@ const SkillScopeBadge: React.FC<{ skill: AILibrarySkill }> = ({ skill }) => {
 
   if (isPreset) {
     return (
-      <span className={`${base} border-zinc-700 bg-zinc-800 text-zinc-300`}>
+      <span className={`${base} border-ink-700 bg-ink-800 text-ink-300`}>
         {t('aiLibrary.agents.systemPreset', 'System Preset')}
       </span>
     );
@@ -1064,7 +1064,7 @@ const SkillScopeBadge: React.FC<{ skill: AILibrarySkill }> = ({ skill }) => {
     );
   }
   return (
-    <span className={`${base} border-zinc-700 bg-zinc-900 text-zinc-400`}>
+    <span className={`${base} border-ink-700 bg-ink-900 text-ink-400`}>
       {t('aiLibrary.skills.scopeBadgePrivate', 'Private')}
     </span>
   );
@@ -1122,8 +1122,8 @@ const PausedBanner: React.FC<{
   const isBudget = reason === 'budget';
   const wrap = isBudget
     ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-    : 'border-zinc-700 bg-zinc-800 text-zinc-200';
-  const icon = isBudget ? 'text-amber-400' : 'text-zinc-400';
+    : 'border-ink-700 bg-ink-800 text-ink-200';
+  const icon = isBudget ? 'text-amber-400' : 'text-ink-400';
   const title = isBudget
     ? t('aiLibrary.agents.budget.pausedTitleBudget', 'Paused — monthly budget exceeded')
     : t('aiLibrary.agents.budget.pausedTitleManual', 'Paused manually');
@@ -1188,12 +1188,12 @@ const RunLimitFields: React.FC<{
   };
   return (
     <div className="space-y-1.5">
-      <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+      <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
         {t('aiLibrary.agents.limits.sectionLabel', 'Run limits')}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-xs font-medium text-zinc-400">
+          <label className="block text-xs font-medium text-ink-400">
             {t('aiLibrary.agents.limits.timeoutLabel', 'Timeout (sec)')}
           </label>
           <input
@@ -1204,9 +1204,9 @@ const RunLimitFields: React.FC<{
             placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
             onChange={(e) => onTimeoutChange(parseIntOr(e.target.value, 0))}
             disabled={disabled}
-            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
+            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
           />
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-ink-500">
             {t(
               'aiLibrary.agents.limits.timeoutHint',
               "Max wall-clock per run, checked between LLM iterations. Blank or 0 = no cap.",
@@ -1214,7 +1214,7 @@ const RunLimitFields: React.FC<{
           </p>
         </div>
         <div>
-          <label className="block text-xs font-medium text-zinc-400">
+          <label className="block text-xs font-medium text-ink-400">
             {t('aiLibrary.agents.limits.concurrencyLabel', 'Max concurrent runs')}
           </label>
           <input
@@ -1225,9 +1225,9 @@ const RunLimitFields: React.FC<{
             placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
             onChange={(e) => onConcurrencyChange(parseIntOr(e.target.value, 1))}
             disabled={disabled}
-            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
+            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
           />
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-ink-500">
             {t(
               'aiLibrary.agents.limits.concurrencyHint',
               "New runs are rejected while this many are already running. Blank = unlimited.",
@@ -1252,12 +1252,12 @@ const BudgetFields: React.FC<{
   const dollarsStr = costCentsBudget != null ? (costCentsBudget / 100).toFixed(2) : '';
   return (
     <div className="space-y-1.5">
-      <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+      <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
         {t('aiLibrary.agents.budget.sectionLabel', 'Monthly budget')}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-xs font-medium text-zinc-400">
+          <label className="block text-xs font-medium text-ink-400">
             {t('aiLibrary.agents.budget.tokenBudgetLabel', 'Token budget')}
           </label>
           <input
@@ -1276,9 +1276,9 @@ const BudgetFields: React.FC<{
               onTokenChange(Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null);
             }}
             disabled={disabled}
-            className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
+            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
           />
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-ink-500">
             {t(
               'aiLibrary.agents.budget.tokenBudgetHint',
               'Cap on total prompt+completion tokens this calendar month. Blank or 0 = unlimited.',
@@ -1286,11 +1286,11 @@ const BudgetFields: React.FC<{
           </p>
         </div>
         <div>
-          <label className="block text-xs font-medium text-zinc-400">
+          <label className="block text-xs font-medium text-ink-400">
             {t('aiLibrary.agents.budget.costBudgetLabel', 'Cost budget (USD)')}
           </label>
           <div className="mt-1 flex items-center gap-2">
-            <span className="text-zinc-500 text-sm">$</span>
+            <span className="text-ink-500 text-sm">$</span>
             <input
               type="number"
               min={0}
@@ -1312,10 +1312,10 @@ const BudgetFields: React.FC<{
                 onCostChange(Math.max(0, Math.round(dollars * 100)));
               }}
               disabled={disabled}
-              className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
+              className="flex-1 rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
             />
           </div>
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-ink-500">
             {t(
               'aiLibrary.agents.budget.costBudgetHint',
               "Hard cap on this month's spend. The sweeper pauses the agent within ~60s of crossing the cap.",
