@@ -1162,7 +1162,10 @@ class AILibraryChatService:
                     max_tokens=2048,
                     system_message=(
                         "You summarise chat history. Capture decisions made, "
-                        "facts established, and the current task state. "
+                        "rejected options (and why), "
+                        "facts established, "
+                        "user style preferences expressed, "
+                        "and the current task state. "
                         "Be terse. No preamble."
                     ),
                     tools=[],
