@@ -125,7 +125,7 @@ class CanvasService:
             refs = extract_asset_refs(nodes_json)
             await self.refs_repo.replace_for_canvas(canvas_id, refs)
         except Exception as e:  # noqa: BLE001 — deliberately swallow
-            logger.warning("canvas %s refs sync failed (non-fatal): %s", canvas_id, e)
+            logger.warning(f"canvas {canvas_id} refs sync failed (non-fatal): {e}")
 
     async def delete(self, canvas_id: str) -> bool:
         return await self.repo.delete(canvas_id)
