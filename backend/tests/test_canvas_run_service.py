@@ -178,6 +178,57 @@ class TestNousProviderRouting:
         assert adapter.calls == []
 
     @pytest.mark.asyncio
+    async def test_nous_path_raises_deadline_for_slow_workflows(self, monkeypatch):
+        # Everything routed to nous is a workflow node (comfy/image/video) that
+        # can run minutes — the nous path must lift the poll ceiling well above
+        # the default chat deadline (Phase 5a Lane C).
+        captured = {}
+
+        async def fake_run_nous_workflow(
+            *,
+            settings,
+            workflow_slug,
+            prompt,
+            agent_id=None,
+            max_wait_s_override=None,
+            **_,
+        ):
+            captured["max_wait_s_override"] = max_wait_s_override
+            from app.schemas.canvas_run import CanvasPromptRunResult
+
+            return CanvasPromptRunResult(ok=True, text="ok", error=None)
+
+        monkeypatch.setattr(
+            "app.services.canvas.nous_center_runner.run_nous_workflow",
+            fake_run_nous_workflow,
+        )
+        svc = make_service(FakeAdapter())
+        await svc.run_prompt(body="x", provider_slug="nous/comfy-render")
+        assert captured["max_wait_s_override"] is not None
+        assert captured["max_wait_s_override"] >= 300.0
+
+    @pytest.mark.asyncio
+    async def test_nous_workflow_ceiling_setting_overrides_default(self, monkeypatch):
+        captured = {}
+
+        async def fake_run_nous_workflow(*, max_wait_s_override=None, **_):
+            captured["override"] = max_wait_s_override
+            from app.schemas.canvas_run import CanvasPromptRunResult
+
+            return CanvasPromptRunResult(ok=True, text="ok", error=None)
+
+        monkeypatch.setattr(
+            "app.services.canvas.nous_center_runner.run_nous_workflow",
+            fake_run_nous_workflow,
+        )
+        svc = CanvasRunService(
+            settings=SimpleNamespace(NOUS_CENTER_MAX_WAIT_S_WORKFLOW=900.0)
+        )
+        svc._get_adapter = AsyncMock(return_value=FakeAdapter())  # type: ignore[assignment]
+        await svc.run_prompt(body="x", provider_slug="nous/comfy-render")
+        assert captured["override"] == 900.0
+
+    @pytest.mark.asyncio
     async def test_nous_slash_missing_workflow_returns_error(self):
         adapter = FakeAdapter()
         svc = make_service(adapter)
