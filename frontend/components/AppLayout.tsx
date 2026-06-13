@@ -30,6 +30,8 @@ import { SettingsModal } from './SettingsModal';
 import { CreateCollectionModal } from './CreateCollectionModal';
 import { CreateProjectModal } from './CreateProjectModal';
 import { PaymentModal } from './PaymentModal';
+import { IslandShell } from './IslandShell';
+import { islandUI } from '../utils/featureFlags';
 
 // ---------------------------------------------------------------------------
 // AppLayout
@@ -355,6 +357,66 @@ function AppLayoutInner() {
     },
   ];
 
+  // Island shell (spec D1–D12) — flag-gated. Hoist the Sidebar/TopBar props so
+  // the classic frame and the IslandShell frame share IDENTICAL wiring (D12).
+  const island = islandUI();
+
+  // Typed via ComponentProps so the arrow params get the SAME contextual types
+  // the original inline JSX inferred (e.g. SmartCollection.id) — D12 no-op.
+  const sidebarProps: React.ComponentProps<typeof Sidebar> = {
+    mode: sidebarMode,
+    view,
+    settingsTab,
+    collapsed: sidebarCollapsed,
+    onToggleCollapse: handleToggleSidebar,
+    teams,
+    activeTeamId: selectedTeamId,
+    personalTeamId,
+    currentTeam,
+    permissions: userPermissions,
+    isViewEnabled,
+    userName: userProfile?.name,
+    userRole: userProfile?.role,
+    activeProject: selectedProject,
+    isLibraryOpen,
+    isSettingsOpen,
+    activeSmartCollectionId,
+    onViewChange: (v) => {
+      if (v === 'mediatrack') { setSelectedProject(null); setReviewFile(null); }
+    },
+    onSettingsTabChange: (tab) => setSettingsTab(tab as any),
+    onToggleLibrary: toggleLibraryMenu,
+    onToggleSettings: toggleSettingsMenu,
+    onTeamChange: () => {
+      setActiveCollectionId(null);
+      setSelectedProject(null);
+      setReviewFile(null);
+    },
+    onCreateTeam: handleCreateTeam,
+    onProjectBack: () => { setSelectedProject(null); setReviewFile(null); },
+    onSmartCollectionSelect: (collection) => {
+      setIsSearchActive(false);
+      setSearchResults([]);
+      setSearchQueryText('');
+      setActiveSmartCollectionId(collection?.id || null);
+      navigate(teamPath('/resources/downloads'));
+      setActiveCollectionId(null);
+      setActiveLibraryTab('my-library');
+    },
+    onProjectSelect: setSelectedProject,
+  };
+
+  const topBarProps: React.ComponentProps<typeof TopBar> = {
+    user: userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null,
+    unreadCount: notifications.filter(n => !n.read).length,
+    onSignOut: handleAuthLogout,
+    onOpenSettings: (tab) => {
+      setSettingsModalInitialTab(tab || 'personal');
+      setIsSettingsModalOpen(true);
+    },
+    sidebarCollapsed,
+  };
+
   return (
     <ToastProvider>
     <ConfirmProvider>
@@ -456,63 +518,17 @@ function AppLayoutInner() {
         hidden={isDetailPage}
       />
 
-      {/* Sidebar */}
-      <Sidebar
-        mode={sidebarMode}
-        view={view}
-        settingsTab={settingsTab}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={handleToggleSidebar}
-        teams={teams}
-        activeTeamId={selectedTeamId}
-        personalTeamId={personalTeamId}
-        currentTeam={currentTeam}
-        permissions={userPermissions}
-        isViewEnabled={isViewEnabled}
-        userName={userProfile?.name}
-        userRole={userProfile?.role}
-        activeProject={selectedProject}
-        isLibraryOpen={isLibraryOpen}
-        isSettingsOpen={isSettingsOpen}
-        activeSmartCollectionId={activeSmartCollectionId}
-        onViewChange={(v) => {
-          // Side effects only — Sidebar handles navigation directly via useNavigate
-          if (v === 'mediatrack') { setSelectedProject(null); setReviewFile(null); }
-        }}
-        onSettingsTabChange={(tab) => setSettingsTab(tab as any)}
-        onToggleLibrary={toggleLibraryMenu}
-        onToggleSettings={toggleSettingsMenu}
-        onTeamChange={(teamId) => {
-          // WorkspaceSwitcher navigates via URL; just reset local state
-          setActiveCollectionId(null);
-          setSelectedProject(null);
-          setReviewFile(null);
-        }}
-        onCreateTeam={handleCreateTeam}
-        onProjectBack={() => { setSelectedProject(null); setReviewFile(null); }}
-        onSmartCollectionSelect={(collection) => {
-          setIsSearchActive(false);
-          setSearchResults([]);
-          setSearchQueryText('');
-          setActiveSmartCollectionId(collection?.id || null);
-          navigate(teamPath('/resources/downloads'));
-          setActiveCollectionId(null);
-          setActiveLibraryTab('my-library');
-        }}
-        onProjectSelect={setSelectedProject}
-      />
-
-      {/* TopBar — fixed, sibling to Sidebar for clean positioning */}
-      <TopBar
-        user={userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null}
-        unreadCount={notifications.filter(n => !n.read).length}
-        onSignOut={handleAuthLogout}
-        onOpenSettings={(tab) => {
-          setSettingsModalInitialTab(tab || 'personal');
-          setIsSettingsModalOpen(true);
-        }}
-        sidebarCollapsed={sidebarCollapsed}
-      />
+      {/* Desktop frame — classic fixed Sidebar+TopBar (flag OFF). Island frame
+          (flag ON) is rendered below in place of <main>. Both are `sm:flex`
+          / `hidden`-gated so mobile chrome below is unaffected. */}
+      {!island && (
+        <>
+          {/* Sidebar */}
+          <Sidebar {...sidebarProps} />
+          {/* TopBar — fixed, sibling to Sidebar for clean positioning */}
+          <TopBar {...topBarProps} />
+        </>
+      )}
 
       {/* Mobile workspace avatar — hidden on detail pages */}
       <button
@@ -530,11 +546,18 @@ function AppLayoutInner() {
         </div>
       </button>
 
-      {/* Main Content */}
-      <main className={mainContentClass}>
-        {/* Routed content */}
-        <Outlet />
-      </main>
+      {/* Main Content — island shell (flag ON) draws the full desktop frame
+          (topbar + nav island + workspace island); otherwise the classic main. */}
+      {island ? (
+        <IslandShell isDetailPage={isDetailPage} topBarProps={topBarProps} sidebarProps={sidebarProps}>
+          <Outlet />
+        </IslandShell>
+      ) : (
+        <main className={mainContentClass}>
+          {/* Routed content */}
+          <Outlet />
+        </main>
+      )}
 
       {/* Payment Modal */}
       {selectedPaymentPackage && selectedTeamId && (

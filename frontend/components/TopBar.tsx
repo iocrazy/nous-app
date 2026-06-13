@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ShieldAlert,
   Upload as UploadIcon,
+  Sparkles,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -41,6 +42,8 @@ interface TopBarProps {
   onSignOut: () => void;
   onOpenSettings?: (tab?: string) => void;
   sidebarCollapsed?: boolean;
+  /** Render inside the island shell: static full-width strip with brand on the left. */
+  island?: boolean;
 }
 
 type PanelType = 'taskCenter' | 'notifications' | 'approvals' | 'avatar' | null;
@@ -422,7 +425,7 @@ const UserAvatar: React.FC<{
 // TopBar
 // ---------------------------------------------------------------------------
 
-export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigate, onSignOut, onOpenSettings, sidebarCollapsed = false }) => {
+export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigate, onSignOut, onOpenSettings, sidebarCollapsed = false, island = false }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
   const upload = useUpload();
@@ -482,7 +485,26 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   useCloseOnOutsideOrEscape(avatarRef, openPanel === 'avatar', closeAll);
 
   return (
-    <header className={`fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-ink-800 bg-ink-950/80 backdrop-blur-sm z-50 hidden sm:flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`}>
+    <header
+      className={
+        island
+          ? 'relative h-12 z-50 hidden sm:flex items-center gap-1.5 sm:gap-2 px-1'
+          : `fixed top-0 right-0 left-0 ${sidebarCollapsed ? 'sm:left-20' : 'sm:left-64'} h-14 border-b border-ink-800 bg-ink-950/80 backdrop-blur-sm z-50 hidden sm:flex items-center justify-end px-3 sm:px-6 gap-1.5 sm:gap-2 transition-[left] duration-300`
+      }
+    >
+      {/* Island mode: brand on the left (spec §2 "global zone"); spacer pushes
+          controls to the right. Classic mode keeps justify-end with no brand. */}
+      {island && (
+        <>
+          <div className="flex items-center gap-2 font-bold text-sm text-ink-100 pl-1 pr-2 select-none">
+            <span className="w-6 h-6 rounded-[7px] grid place-items-center bg-gradient-to-br from-indigo-400 to-indigo-500 shadow-[0_0_16px_rgba(99,102,241,0.4)]">
+              <Sparkles size={13} className="text-white" />
+            </span>
+            <span>MediaHub</span>
+          </div>
+          <div className="flex-1" />
+        </>
+      )}
       {/* Language Switcher — desktop only (mobile: accessible via Settings) */}
       <div className="hidden sm:block">
         <LanguageSwitcher />

@@ -110,6 +110,12 @@ interface SidebarProps {
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 
+  // Island shell (spec D1–D12)
+  /** Render inside the island shell card: static fill, no fixed/own chrome. */
+  island?: boolean;
+  /** Force the 54px icon rail (detail routes, spec D5) — overrides `collapsed`. */
+  iconRail?: boolean;
+
   // Team context
   teams: Team[];
   activeTeamId: string | null;
@@ -165,15 +171,16 @@ const Logo: React.FC<{ collapsed?: boolean }> = ({ collapsed = false }) => (
 //   -right-10 bottom-8 w-10 h-12 rounded-r-xl border-r border-y
 // ---------------------------------------------------------------------------
 
-const FloatingCollapseTab: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void }> = ({
+const FloatingCollapseTab: React.FC<{ collapsed?: boolean; onToggleCollapse?: () => void; island?: boolean }> = ({
   collapsed = false,
   onToggleCollapse,
+  island = false,
 }) => {
   if (!onToggleCollapse) return null;
   return (
     <button
       onClick={onToggleCollapse}
-      className="absolute -right-10 bottom-8 w-10 h-12 bg-ink-900 border-r border-y border-ink-800 rounded-r-xl flex items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-colors z-10"
+      className={`absolute ${island ? '-right-3' : '-right-10'} bottom-8 w-10 h-12 bg-ink-900 border-r border-y border-ink-800 rounded-r-xl flex items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-colors z-10`}
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
     >
@@ -197,8 +204,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   view: _view,
   // Props kept for App.tsx compatibility (unused in render after refactor)
   settingsTab: _settingsTab,
-  collapsed = false,
+  collapsed: collapsedProp = false,
   onToggleCollapse,
+  island = false,
+  iconRail = false,
   teams,
   activeTeamId,
   personalTeamId,
@@ -226,6 +235,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navigate = useNavigate();
   const currentView = pathnameToView(location.pathname);
 
+  // iconRail (detail routes, D5) pins the narrow rail → render icon-only.
+  const collapsed = iconRail || collapsedProp;
+
+  // In the island shell the card chrome (bg/border/radius/shadow) is drawn by
+  // the shell wrapper, so the aside is a plain fill (relative, full height). The
+  // classic (flag-OFF) string is byte-identical to the original — D12 no-op.
+  const railW = iconRail ? 'w-[54px]' : collapsed ? 'w-20' : 'w-64';
+  const railPad = iconRail ? 'px-1.5 py-3' : collapsed ? 'p-3' : 'p-6';
+  const asideClass = island
+    ? `group hidden sm:flex flex-col ${railW} ${railPad} relative h-full transition-all duration-300`
+    : `group hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-ink-800 bg-ink-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`;
+
   // Navigate via URL and notify parent for side effects
   const handleNav = (viewKey: string) => {
     const basePath = VIEW_PATH_MAP[viewKey] || '/parser';
@@ -241,7 +262,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // ===================================================================
   if (mode === 'project') {
     return (
-      <aside className={`group hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-ink-800 bg-ink-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`}>
+      <aside className={asideClass}>
         {/* Back to projects + team name */}
         {collapsed ? (
           <div className="mb-6 flex justify-center">
@@ -304,7 +325,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </nav>
 
-        <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+        {!iconRail && <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} island={island} />}
       </aside>
     );
   }
@@ -314,7 +335,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // ===================================================================
   if (mode === 'team') {
     return (
-      <aside className={`group hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-ink-800 bg-ink-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`}>
+      <aside className={asideClass}>
         <Logo collapsed={collapsed} />
 
         <div className="mb-2">
@@ -370,7 +391,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </nav>
 
-        <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
+        {!iconRail && <FloatingCollapseTab collapsed={collapsed} onToggleCollapse={onToggleCollapse} island={island} />}
       </aside>
     );
   }
