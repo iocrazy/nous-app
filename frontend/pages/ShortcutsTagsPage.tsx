@@ -297,7 +297,7 @@ export const ShortcutsTagsPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-ink-950 text-white pb-28">
+    <div className="min-h-screen bg-ink-950 text-ink-50 pb-28">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-ink-950/95 backdrop-blur-sm border-b border-ink-800 px-4 py-3">
         <div className="flex items-center justify-between">
@@ -307,7 +307,7 @@ export const ShortcutsTagsPage: React.FC = () => {
           </h1>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="w-8 h-8 flex items-center justify-center rounded-full bg-ink-800 text-ink-400 hover:text-white transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-ink-800 text-ink-400 hover:text-ink-50 transition-colors"
           >
             {showCreateForm ? <X size={16} /> : <Plus size={16} />}
           </button>
@@ -322,7 +322,7 @@ export const ShortcutsTagsPage: React.FC = () => {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={lang === 'zh' ? '搜索标签...' : 'Search tags...'}
-          className="mt-2 w-full px-3 py-1.5 rounded-lg bg-ink-800 border border-ink-700 text-sm text-white placeholder-ink-500 outline-none focus:border-indigo-500"
+          className="mt-2 w-full px-3 py-1.5 rounded-lg bg-ink-800 border border-ink-700 text-sm text-ink-50 placeholder-ink-500 outline-none focus:border-indigo-500"
         />
       </div>
 
@@ -334,7 +334,7 @@ export const ShortcutsTagsPage: React.FC = () => {
             value={newTagInput}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder={lang === 'zh' ? '输入标签名（中文或英文）' : 'Enter tag name (Chinese or English)'}
-            className="w-full px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 text-sm text-white placeholder-ink-500 outline-none focus:border-indigo-500"
+            className="w-full px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 text-sm text-ink-50 placeholder-ink-500 outline-none focus:border-indigo-500"
             autoFocus
           />
           {translatedName && (
@@ -346,7 +346,7 @@ export const ShortcutsTagsPage: React.FC = () => {
           <select
             value={newTagGroupId}
             onChange={(e) => setNewTagGroupId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 text-sm text-white outline-none focus:border-indigo-500"
+            className="w-full px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 text-sm text-ink-50 outline-none focus:border-indigo-500"
           >
             <option value="">{lang === 'zh' ? '选择分组 (可选)' : 'Select group (optional)'}</option>
             {tagGroups.map((g) => (

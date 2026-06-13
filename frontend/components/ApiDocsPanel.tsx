@@ -371,7 +371,7 @@ export const ApiDocsPanel: React.FC = () => {
           <BookOpen size={24} className="text-indigo-400" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-white">API Documentation</h1>
+          <h1 className="text-2xl font-bold text-ink-50">API Documentation</h1>
           <p className="text-ink-400 text-sm">Integrate with MediaHub programmatically</p>
         </div>
       </div>

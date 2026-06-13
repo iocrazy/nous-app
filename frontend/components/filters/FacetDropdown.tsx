@@ -172,7 +172,7 @@ export function FacetDropdown({
             type="button"
             onClick={r.onToggle}
             className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors ${
-              r.selected ? 'text-white bg-indigo-500/10' : 'text-ink-300'
+              r.selected ? 'text-ink-50 bg-indigo-500/10' : 'text-ink-300'
             } active:bg-ink-700`}
           >
             <span className="w-4 shrink-0 text-indigo-400">

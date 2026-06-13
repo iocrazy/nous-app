@@ -119,12 +119,12 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div>
-            <h2 className="text-lg font-semibold text-white">Invite Members</h2>
+            <h2 className="text-lg font-semibold text-ink-50">Invite Members</h2>
             <p className="text-sm text-ink-500">{teamName}</p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -229,7 +229,7 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
                     className={`p-2 rounded-lg transition-colors ${
                       copiedId === invite.id
                         ? 'bg-green-500/10 text-green-400'
-                        : 'hover:bg-ink-700 text-ink-400 hover:text-white'
+                        : 'hover:bg-ink-700 text-ink-400 hover:text-ink-50'
                     }`}
                   >
                     {copiedId === invite.id ? <Check size={16} /> : <Copy size={16} />}

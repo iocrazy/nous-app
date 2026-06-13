@@ -140,7 +140,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-white">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
+        <h1 className="text-2xl font-bold text-ink-50">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
         <div className="flex items-center gap-2">
           {/* Search */}
           <div className="relative">
@@ -172,7 +172,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           <button key={tab.key} onClick={() => setFilter(tab.key)}
             className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
               filter === tab.key
-                ? 'border-indigo-500 text-white'
+                ? 'border-indigo-500 text-ink-50'
                 : 'border-transparent text-ink-500 hover:text-ink-300'
             }`}
           >
@@ -208,7 +208,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
             <button
               onClick={() => setViewMode('grid')}
               className={`p-1.5 rounded-md transition-colors ${
-                viewMode === 'grid' ? 'bg-ink-700 text-white' : 'text-ink-400 hover:text-ink-200'
+                viewMode === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
               }`}
             >
               <LayoutGrid size={14} />
@@ -216,7 +216,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
             <button
               onClick={() => setViewMode('table')}
               className={`p-1.5 rounded-md transition-colors ${
-                viewMode === 'table' ? 'bg-ink-700 text-white' : 'text-ink-400 hover:text-ink-200'
+                viewMode === 'table' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
               }`}
             >
               <LayoutList size={14} />
@@ -291,7 +291,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                       {project.color_label && colorLabelDots[project.color_label] && (
                         <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colorLabelDots[project.color_label]}`} />
                       )}
-                      <span className="text-sm text-white font-medium">{project.name}</span>
+                      <span className="text-sm text-ink-50 font-medium">{project.name}</span>
                       {project.display_code && (
                         <span className="text-[11px] font-mono text-ink-500">{project.display_code}</span>
                       )}

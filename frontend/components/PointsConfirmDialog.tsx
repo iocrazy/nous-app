@@ -65,13 +65,13 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Coins size={20} className="text-indigo-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('points.confirmAction', 'Confirm Action')}
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -100,7 +100,7 @@ export const PointsConfirmDialog: React.FC<PointsConfirmDialogProps> = ({
                   <span className="text-ink-400">
                     {t('points.actionWillCost', 'This will cost {{cost}} points', { cost })}
                   </span>
-                  <span className="text-white font-semibold">{cost} pts</span>
+                  <span className="text-ink-50 font-semibold">{cost} pts</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-ink-400">

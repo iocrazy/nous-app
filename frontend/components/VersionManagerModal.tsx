@@ -152,13 +152,13 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Layers size={20} className="text-indigo-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('resources.manageVersions', 'Manage Versions')}
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -208,7 +208,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                       {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-white truncate">
+                          <span className="text-sm text-ink-50 truncate">
                             {version.filename || 'Untitled'}
                           </span>
                           {isCurrent && (
@@ -311,7 +311,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
                 <div className="p-2 bg-red-500/20 rounded-lg">
                   <AlertTriangle size={20} className="text-red-400" />
                 </div>
-                <h3 className="text-base font-semibold text-white">
+                <h3 className="text-base font-semibold text-ink-50">
                   {t('resources.confirmDeleteVersion', 'Delete Version')}
                 </h3>
               </div>

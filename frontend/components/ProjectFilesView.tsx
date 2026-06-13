@@ -338,7 +338,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'grid' ? 'bg-ink-700 text-white' : 'text-ink-400 hover:text-ink-200'
+                  viewMode === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
                 }`}
               >
                 <LayoutGrid size={14} />
@@ -346,7 +346,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <button
                 onClick={() => setViewMode('list')}
                 className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'list' ? 'bg-ink-700 text-white' : 'text-ink-400 hover:text-ink-200'
+                  viewMode === 'list' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
                 }`}
               >
                 <LayoutList size={14} />
@@ -402,7 +402,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
           <nav className="flex items-center gap-1 text-sm mb-3">
             <button
               onClick={() => navigateToFolder(null)}
-              className="text-ink-400 hover:text-white transition-colors"
+              className="text-ink-400 hover:text-ink-50 transition-colors"
             >
               {project.name}
             </button>
@@ -412,7 +412,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
                 <button
                   onClick={() => navigateToFolder(f.id, f)}
                   className={`transition-colors ${
-                    f.id === currentFolderId ? 'text-white' : 'text-ink-400 hover:text-white'
+                    f.id === currentFolderId ? 'text-ink-50' : 'text-ink-400 hover:text-ink-50'
                   }`}
                 >
                   {f.name}

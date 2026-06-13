@@ -204,7 +204,7 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
           onKeyDown={handleKeyDown}
           onFocus={() => setShowSuggestions(true)}
           placeholder={placeholder}
-          className="w-full pl-20 pr-24 py-3 bg-ink-900 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-all"
+          className="w-full pl-20 pr-24 py-3 bg-ink-900 border border-ink-700 rounded-xl text-ink-50 placeholder-ink-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-all"
         />
 
         {/* Right Actions */}
@@ -212,7 +212,7 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
           {query && (
             <button
               onClick={handleClear}
-              className="p-1.5 text-ink-500 hover:text-white transition-colors"
+              className="p-1.5 text-ink-500 hover:text-ink-50 transition-colors"
             >
               <X size={16} />
             </button>
@@ -274,7 +274,7 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
                   setQuery(search);
                   handleSearch(search);
                 }}
-                className="w-full flex items-center gap-3 px-3 py-2 text-sm text-ink-400 hover:bg-ink-800 hover:text-white rounded-lg transition-colors"
+                className="w-full flex items-center gap-3 px-3 py-2 text-sm text-ink-400 hover:bg-ink-800 hover:text-ink-50 rounded-lg transition-colors"
               >
                 <Clock size={14} />
                 {search}
@@ -288,7 +288,7 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
       {showSuggestions && !recentSearches.length && !query && (
         <div className="absolute top-full left-0 right-0 mt-2 bg-ink-900 border border-ink-700 rounded-xl shadow-xl z-40 overflow-hidden">
           <div className="p-4 space-y-3">
-            <div className="text-sm font-medium text-white">Search Tips</div>
+            <div className="text-sm font-medium text-ink-50">Search Tips</div>
             <div className="space-y-2 text-xs text-ink-400">
               <div className="flex items-center gap-2">
                 <Sparkles size={12} className="text-indigo-400" />

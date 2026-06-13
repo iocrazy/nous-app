@@ -1245,7 +1245,7 @@ export const DownloadsView: React.FC = () => {
           <div className="w-px h-5 bg-ink-700" />
           <button
             onClick={() => { setSelectedIds(new Set()); setMultiSelectMode(false); }}
-            className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={14} />
           </button>
@@ -1388,18 +1388,18 @@ export const DownloadsView: React.FC = () => {
             className="bg-ink-900 border border-ink-700 rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold text-white mb-3">Rename</h3>
+            <h3 className="text-sm font-semibold text-ink-50 mb-3">Rename</h3>
             <input
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') setRenameTarget(null); }}
-              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-ink-500 transition-colors"
+              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-50 focus:outline-none focus:border-ink-500 transition-colors"
             />
             <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => setRenameTarget(null)}
-                className="px-3 py-1.5 text-xs text-ink-400 hover:text-white bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
+                className="px-3 py-1.5 text-xs text-ink-400 hover:text-ink-50 bg-ink-800 hover:bg-ink-700 rounded-lg transition-colors"
               >
                 Cancel
               </button>

@@ -89,7 +89,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
           <IconComponent size={18} className={color} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors">
+          <p className="text-sm text-ink-50 truncate group-hover:text-indigo-300 transition-colors">
             {file.filename}
           </p>
         </div>
@@ -135,7 +135,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
       </div>
       {/* Info */}
       <div className="p-3">
-        <p className="text-sm text-white truncate group-hover:text-indigo-300 transition-colors font-medium">
+        <p className="text-sm text-ink-50 truncate group-hover:text-indigo-300 transition-colors font-medium">
           {file.filename}
         </p>
         <div className="flex items-center justify-between mt-2 text-xs text-ink-500">

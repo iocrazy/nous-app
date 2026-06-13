@@ -52,7 +52,7 @@ export function DownloadMenuDropdown({
   const coverStatus = isCompleted(video.cover_download_status) && !hasCoverFile ? undefined : video.cover_download_status;
   const audioStatus = isCompleted(video.music_download_status) && !hasAudioFile ? undefined : video.music_download_status;
 
-  const btnClass = "w-full px-3 py-1.5 text-left text-xs text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2 transition-colors";
+  const btnClass = "w-full px-3 py-1.5 text-left text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2 transition-colors";
   const disabledClass = "w-full px-3 py-1.5 text-left text-xs text-ink-500 flex items-center gap-2 cursor-default";
 
   return (
@@ -187,7 +187,7 @@ export function MobileDownloadMenu({
   const hasVideoFile = !!(video.download_path || video.hls_path);
   const hasCoverFile = !!video.cover_download_path;
   const hasAudioFile = !!(video.extract_audio_path || video.music_download_path);
-  const btnClass = "flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors";
+  const btnClass = "flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors";
 
   return (
     <>

@@ -37,7 +37,7 @@ export interface ResourcesSidebarProps {
 
 const sidebarItemClass = (active: boolean) =>
   `w-full flex items-center gap-3 px-3 py-2 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
-    active ? 'bg-ink-800/80 text-white font-medium' : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200'
+    active ? 'bg-ink-800/80 text-ink-50 font-medium' : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200'
   }`;
 
 // Section label (island redesign D3) — visual grouping only, no behavior.

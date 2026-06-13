@@ -197,7 +197,7 @@ export function AdminNousModelsPage() {
               <Brain size={20} className="text-indigo-400" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white">Nous Models</h1>
+              <h1 className="text-xl font-bold text-ink-50">Nous Models</h1>
               <p className="text-xs text-ink-500">Manage AI model configurations</p>
             </div>
           </div>

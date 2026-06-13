@@ -187,8 +187,14 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
 
-      {/* Main Modal Container */}
-      <div className="bg-white rounded-[20px] shadow-2xl flex flex-col md:flex-row w-full max-w-[800px] overflow-hidden relative animate-in zoom-in-95 duration-300">
+      {/* Main Modal Container.
+          This is an intentionally always-light branded auth card (white panel +
+          gradient brand rail). Its inner text uses theme-aware ink tokens, so we
+          pin the subtree to the dark palette (data-theme="dark") — in that palette
+          ink-900 is dark, ink-50 near-white, etc., which is exactly the dark-text-
+          on-white look we want in BOTH app themes. Without this, a light-OS user
+          would get ink-900 resolving near-white = invisible on the white card. */}
+      <div data-theme="dark" className="bg-white rounded-[20px] shadow-2xl flex flex-col md:flex-row w-full max-w-[800px] overflow-hidden relative animate-in zoom-in-95 duration-300">
 
         {/* Close Button */}
         <button

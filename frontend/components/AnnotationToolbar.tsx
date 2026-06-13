@@ -62,7 +62,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           className={`p-2 rounded-lg transition-colors ${
             activeTool === toolItem.key
               ? 'bg-indigo-500/30 text-indigo-300'
-              : 'text-ink-400 hover:text-white hover:bg-ink-700'
+              : 'text-ink-400 hover:text-ink-50 hover:bg-ink-700'
           }`}
           title={t(toolItem.labelKey)}
         >
@@ -101,7 +101,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-medium transition-colors ${
               strokeWidth === sw.value
                 ? 'bg-indigo-500/30 text-indigo-300'
-                : 'text-ink-400 hover:text-white hover:bg-ink-700'
+                : 'text-ink-400 hover:text-ink-50 hover:bg-ink-700'
             }`}
           >
             {sw.label}
@@ -115,7 +115,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       {/* Undo */}
       <button
         onClick={onUndo}
-        className="p-2 rounded-lg text-ink-400 hover:text-white hover:bg-ink-700 transition-colors"
+        className="p-2 rounded-lg text-ink-400 hover:text-ink-50 hover:bg-ink-700 transition-colors"
         title={t('annotations.undo')}
       >
         <Undo2 size={16} />

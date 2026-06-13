@@ -97,7 +97,7 @@ export function TagFilterSection({
           <button
             type="button"
             onClick={onClear}
-            className="text-[11px] text-ink-400 active:text-white px-1"
+            className="text-[11px] text-ink-400 active:text-ink-50 px-1"
           >
             {t('resources.filter.clear', 'Clear')}
           </button>
@@ -111,14 +111,14 @@ export function TagFilterSection({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('resources.filter.searchTags', 'Search tags…')}
-          className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-ink-500"
+          className="flex-1 min-w-0 bg-transparent outline-none text-sm text-ink-50 placeholder-ink-500"
         />
         {query && (
           <button
             type="button"
             onClick={() => setQuery('')}
             aria-label={t('common.clear', 'Clear')}
-            className="text-ink-500 active:text-white"
+            className="text-ink-500 active:text-ink-50"
           >
             <X size={14} />
           </button>

@@ -301,7 +301,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
             {selectedAgent ? (
               <>
                 <span
-                  className={`inline-flex items-center justify-center rounded-full w-3.5 h-3.5 text-[10px] font-semibold text-white ${selectedAgent.avatar_color ?? 'bg-ink-600'}`}
+                  className={`inline-flex items-center justify-center rounded-full w-3.5 h-3.5 text-[10px] font-semibold text-ink-50 ${selectedAgent.avatar_color ?? 'bg-ink-600'}`}
                 >
                   {selectedAgent.name.slice(0, 1).toUpperCase()}
                 </span>
@@ -330,7 +330,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
                   onClick={() => { setAgentId(a.id); setPickerOpen(false); }}
                   className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-ink-300 hover:bg-ink-800 text-left"
                 >
-                  <span className={`inline-flex items-center justify-center rounded-full w-4 h-4 text-[10px] text-white ${a.avatar_color ?? 'bg-ink-600'}`}>
+                  <span className={`inline-flex items-center justify-center rounded-full w-4 h-4 text-[10px] text-ink-50 ${a.avatar_color ?? 'bg-ink-600'}`}>
                     {a.name.slice(0, 1).toUpperCase()}
                   </span>
                   {a.name}

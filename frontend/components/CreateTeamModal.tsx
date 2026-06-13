@@ -69,13 +69,13 @@ export const CreateTeamModal: React.FC<CreateTeamModalProps> = ({
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Users size={20} className="text-indigo-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('user.createTeam') || 'Create Team'}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -92,7 +92,7 @@ export const CreateTeamModal: React.FC<CreateTeamModalProps> = ({
               value={teamName}
               onChange={(e) => setTeamName(e.target.value)}
               placeholder={t('user.teamNamePlaceholder') || 'Enter team name'}
-              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-ink-50 placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
               autoFocus
             />
           </div>

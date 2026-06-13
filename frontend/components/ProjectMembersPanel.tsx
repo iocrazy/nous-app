@@ -113,12 +113,12 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
-          <h2 className="text-lg font-semibold text-white">
+          <h2 className="text-lg font-semibold text-ink-50">
             {t('projects.members.title', 'Members')}
           </h2>
           <button
             onClick={onClose}
-            className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={18} />
           </button>

@@ -168,7 +168,7 @@ export function FacetPickerSheet({
         >
           {checked && <Check size={13} />}
         </span>
-        <span className="text-sm text-white flex-1 truncate">{tag.name}</span>
+        <span className="text-sm text-ink-50 flex-1 truncate">{tag.name}</span>
         <span className="text-[11px] text-ink-500 shrink-0">{tagCount(tag)}</span>
       </button>
     );
@@ -218,7 +218,7 @@ export function FacetPickerSheet({
           <X size={18} />
         </button>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-white">
+          <span className="text-sm font-semibold text-ink-50">
             {t('resources.filter.select', 'Select')} {facet?.label ?? ''}
           </span>
           {isChipActive(facetId) && (
@@ -490,7 +490,7 @@ export function FacetPickerSheet({
                           );
                           setSocialMetric(m, { threshold: n });
                         }}
-                        className="flex-1 min-w-0 bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-400 disabled:opacity-40"
+                        className="flex-1 min-w-0 bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-ink-50 outline-none focus:border-indigo-400 disabled:opacity-40"
                       />
                     </div>
                   );
@@ -513,14 +513,14 @@ export function FacetPickerSheet({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('resources.filter.searchTags', 'Search tags…')}
-              className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-ink-500"
+              className="flex-1 min-w-0 bg-transparent outline-none text-sm text-ink-50 placeholder-ink-500"
             />
             {query && (
               <button
                 type="button"
                 onClick={() => setQuery('')}
                 aria-label={t('common.clear', 'Clear')}
-                className="text-ink-500 active:text-white"
+                className="text-ink-500 active:text-ink-50"
               >
                 <X size={14} />
               </button>

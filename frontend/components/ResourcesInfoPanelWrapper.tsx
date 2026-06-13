@@ -97,7 +97,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
         {/* Collapse tab — attached to left edge of panel */}
         <button
           onClick={() => setShowInfoPanel(false)}
-          className="absolute -left-10 bottom-8 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl flex items-center justify-center text-ink-400 hover:text-white cursor-pointer hover:bg-ink-800 transition-colors z-10"
+          className="absolute -left-10 bottom-8 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl flex items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-colors z-10"
           title={t('resources.toggleInfoPanel')}
         >
           <ChevronRight size={20} />
@@ -144,7 +144,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
       {!showInfoPanel && (
         <button
           onClick={() => setShowInfoPanel(true)}
-          className="fixed bottom-8 right-0 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl flex items-center justify-center text-ink-400 hover:text-white cursor-pointer hover:bg-ink-800 transition-all z-50"
+          className="fixed bottom-8 right-0 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl flex items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-all z-50"
           title={t('resources.toggleInfoPanel')}
         >
           <ChevronLeft size={20} />

@@ -44,8 +44,10 @@ export class ErrorBoundary extends Component<Props, State> {
       return this.props.fallback(error, this.reset);
     }
 
+    // Always-dark crash fallback (literal bg-black) — pin to the dark palette
+    // so ink tokens stay light-on-black even for a light-OS user.
     return (
-      <div className="min-h-screen bg-black text-ink-200 flex items-center justify-center p-8">
+      <div data-theme="dark" className="min-h-screen bg-black text-ink-200 flex items-center justify-center p-8">
         <div className="max-w-lg w-full">
           <h1 className="text-xl font-semibold mb-2">Something went wrong</h1>
           <p className="text-sm text-ink-400 mb-4">

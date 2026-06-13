@@ -76,7 +76,7 @@ interface IssueListViewProps {
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 20 }) => (
   <span
-    className={`inline-flex items-center justify-center rounded-full text-[10px] font-semibold text-white ${color}`}
+    className={`inline-flex items-center justify-center rounded-full text-[10px] font-semibold text-ink-50 ${color}`}
     style={{ width: size, height: size }}
   >
     {initials}
@@ -107,7 +107,7 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
           {issue.identifier}
         </span>
       )}
-      <span className="flex-1 truncate text-[14px] text-ink-200 group-hover:text-white">{issue.title}</span>
+      <span className="flex-1 truncate text-[14px] text-ink-200 group-hover:text-ink-50">{issue.title}</span>
       {visibleCols.has('parent') && parent && (
         <Link
           to={`/team/${teamId}/todolist/${parent.identifier}`}
