@@ -87,7 +87,11 @@ const HealthRow: React.FC<{ row: CapabilityHealth; t: (k: string, o?: object) =>
   t,
 }) => {
   const ok = row.status === 'ok';
-  const isError = row.status === 'error';
+  // runtime_failing means the config resolves but live calls are being
+  // rejected — that's broken now, so it reads as an error, not a warning.
+  const isError = row.status === 'error' || row.status === 'runtime_failing';
+  const runs = row.recent_runs ?? 0;
+  const failures = row.recent_failures ?? 0;
   return (
     <li className="flex items-start gap-3 px-2 py-2 rounded-lg hover:bg-ink-800/40 transition-colors">
       <span className="mt-0.5 shrink-0">
@@ -114,8 +118,19 @@ const HealthRow: React.FC<{ row: CapabilityHealth; t: (k: string, o?: object) =>
               {t('aiHealth.default')}
             </span>
           )}
+          {failures > 0 ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30">
+              {t('aiHealth.recentFailures', { failures, runs })}
+            </span>
+          ) : ok && runs > 0 ? (
+            <span className="text-[10px] text-ink-600">{t('aiHealth.recentOk', { runs })}</span>
+          ) : null}
         </div>
-        {!ok && row.hint && <p className="text-xs text-amber-400/80 mt-0.5">{row.hint}</p>}
+        {!ok && row.hint && (
+          <p className={`text-xs mt-0.5 ${isError ? 'text-red-400/80' : 'text-amber-400/80'}`}>
+            {row.hint}
+          </p>
+        )}
       </div>
     </li>
   );

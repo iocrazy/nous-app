@@ -322,8 +322,22 @@ export interface CapabilityHealth {
   model: string;
   provider: string;
   needs_vision: boolean;
-  status: 'ok' | 'no_key' | 'no_model' | 'not_vision' | 'unknown_provider' | 'error';
+  status:
+    | 'ok'
+    | 'no_key'
+    | 'no_model'
+    | 'not_vision'
+    | 'unknown_provider'
+    | 'runtime_failing'
+    | 'error';
   hint: string;
+  // Runtime layer — present only for capabilities backed by a tracked
+  // workflow (e.g. visual_analysis → ai_extract). Recent terminal-run stats
+  // surface a capability that resolves fine but is failing at call time.
+  task_type?: string;
+  recent_runs?: number;
+  recent_failures?: number;
+  last_error?: string;
 }
 
 export const getAIHealth = async (): Promise<CapabilityHealth[]> => {

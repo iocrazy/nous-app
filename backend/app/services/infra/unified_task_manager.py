@@ -784,6 +784,35 @@ class UnifiedTaskManager:
                 by_type[t] = by_type.get(t, 0) + 1
         return {"total": sum(by_type.values()), "by_type": by_type}
 
+    async def get_recent_terminal_runs(
+        self,
+        user_id: str,
+        task_types: list[str],
+        *,
+        since_iso: str,
+        cap: int = 50,
+    ) -> list[dict]:
+        """Recent terminal (completed/failed) runs for the given task_types,
+        newest first — the raw input for AI capability runtime health
+        (:mod:`app.services.ai.ai_health_runtime`). Bounded by ``cap`` and the
+        ``since_iso`` lower bound so it can't pull an unbounded history.
+        """
+        if not task_types:
+            return []
+        client = await self._get_client()
+        result = await (
+            client.table("task_tracking")
+            .select("task_type, status, error_msg, created_at")
+            .eq("user_id", user_id)
+            .in_("task_type", task_types)
+            .in_("status", ["completed", "failed"])
+            .gte("created_at", since_iso)
+            .order("created_at", desc=True)
+            .limit(cap)
+            .execute()
+        )
+        return result.data or []
+
     async def get_matching_task_ids(
         self,
         user_id: str,

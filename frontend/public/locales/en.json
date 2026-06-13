@@ -1953,6 +1953,8 @@
     "warningsBadge": "{{count}} need attention",
     "refresh": "Refresh",
     "unset": "Not configured",
-    "default": "default"
+    "default": "default",
+    "recentFailures": "{{failures}} of {{runs}} recent runs failed",
+    "recentOk": "{{runs}} recent runs OK"
   }
 }
