@@ -736,7 +736,7 @@ export const StoryboardGenNode = memo(({ id, data, selected, width, height }: St
               {selectedFrameIndices.size}/{totalFrames}
             </UiButton>
           )}
-          <UiButton onClick={(e: ReactMouseEvent<HTMLButtonElement>) => { e.stopPropagation(); void handleGenerate(); }}
+          <UiButton data-testid="sb-generate" onClick={(e: ReactMouseEvent<HTMLButtonElement>) => { e.stopPropagation(); void handleGenerate(); }}
             variant="primary" size="sm" className={`!min-w-0 ${NODE_CONTROL_PRIMARY_BUTTON_CLASS}`}>
             <Sparkles className={NODE_CONTROL_ICON_CLASS} strokeWidth={2.8} />
             {selectedFrameIndices.size > 0 ? t('canvas.generateAll', 'All') : t('canvas.generate', 'Generate')}

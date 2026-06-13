@@ -90,7 +90,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center" data-testid="create-project-modal">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -131,6 +131,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </div>
             <input
               type="text"
+              data-testid="project-name-input"
               value={name}
               onChange={(e) => setName(e.target.value.slice(0, 30))}
               placeholder={t('projects.create.namePlaceholder', 'Enter project name')}
