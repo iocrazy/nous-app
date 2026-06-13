@@ -64,6 +64,7 @@ import {
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
+import { fetchResourceCanvasRefs, type CanvasBackRef } from '../services/projectAssetsService';
 import { EagleTagPicker } from './EagleTagPicker';
 import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
@@ -412,6 +413,17 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [pendingAnnotations, setPendingAnnotations] = useState<NormalizedAnnotation[]>([]);
   const [viewAnnotations, setViewAnnotations] = useState<NormalizedAnnotation[] | undefined>();
   const [commentMarkers, setCommentMarkers] = useState<Array<{ time: number }>>([]);
+
+  // Canvas back-references — "appears in N canvases" block
+  const [canvasRefs, setCanvasRefs] = useState<CanvasBackRef[]>([]);
+  useEffect(() => {
+    if (!resourceId) return;
+    let cancelled = false;
+    fetchResourceCanvasRefs(resourceId)
+      .then((refs) => { if (!cancelled) setCanvasRefs(refs); })
+      .catch((err) => console.error('[ResourceDetail] canvas refs load failed:', err));
+    return () => { cancelled = true; };
+  }, [resourceId]);
 
   // Load sibling files for file list panel
   useEffect(() => {
@@ -1832,6 +1844,27 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 <ExternalLink size={12} />
                 {t('resources.viewOriginal')}
               </a>
+            </div>
+          )}
+
+          {/* Appears in N canvases — back-reference into Project Assets */}
+          {canvasRefs.length > 0 && (
+            <div className="px-4 mt-3 border-t border-ink-800/60 pt-3">
+              <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
+                {t('projectAssets.appearsInCanvases', { count: canvasRefs.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {canvasRefs.map((ref) => (
+                  <button
+                    key={`${ref.canvas_id}:${ref.role}`}
+                    onClick={() => navigate(`${teamId ? `/team/${teamId}` : ''}/canvas/${ref.canvas_id}`)}
+                    className="flex items-center gap-2 text-sm text-ink-300 hover:text-ink-100 text-left"
+                  >
+                    <span className="flex-1 truncate">{ref.canvas_name}</span>
+                    <span className="text-xs text-ink-600">{t(`projectAssets.role.${ref.role}`)}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
