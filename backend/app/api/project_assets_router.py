@@ -41,3 +41,13 @@ async def canvas_assets(canvas_id: str, auth: AuthDep):
     repo = CanvasRefsRepository()
     items = await repo.list_assets_for_canvas(canvas_id)
     return {"success": True, "data": items}
+
+
+@router.get("/resources/{resource_id}/canvas-refs")
+async def resource_canvas_refs(resource_id: str, auth: AuthDep):
+    # Resource ownership/membership gate (same helper the asset-AI batch uses).
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=404, detail="resource not found")
+    repo = CanvasRefsRepository()
+    items = await repo.list_canvases_for_resource(resource_id)
+    return {"success": True, "data": items, "count": len(items)}

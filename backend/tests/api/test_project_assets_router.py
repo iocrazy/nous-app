@@ -68,3 +68,39 @@ async def test_canvas_assets_403_when_not_member(app, monkeypatch):
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         resp = await c.get("/api/v1/canvases/5001/assets")
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_resource_canvas_refs_returns_canvases(app, monkeypatch):
+    async def allow(resource_id, user_id, team_id):
+        return True
+
+    async def fake_list(self, resource_id):
+        return [
+            {"canvas_id": "5001", "canvas_name": "Board A", "kind": "smart",
+             "project_id": "9000", "role": "reference"},
+        ]
+
+    monkeypatch.setattr(par, "check_media_access", allow)
+    monkeypatch.setattr(par.CanvasRefsRepository, "list_canvases_for_resource", fake_list)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        resp = await c.get("/api/v1/resources/111/canvas-refs")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"][0]["canvas_id"] == "5001"
+    assert body["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_resource_canvas_refs_404_when_no_access(app, monkeypatch):
+    async def deny(resource_id, user_id, team_id):
+        return False
+
+    monkeypatch.setattr(par, "check_media_access", deny)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        resp = await c.get("/api/v1/resources/111/canvas-refs")
+    assert resp.status_code == 404
