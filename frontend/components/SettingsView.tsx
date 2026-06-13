@@ -539,8 +539,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </p>
            </div>
 
-           {/* Chat Attachment TTL */}
-           {currentUserId && (
+           {/* Chat attachment TTL retired (IC-port P4) — files no longer auto-expire.
+               Hidden behind `false` so the control can be restored if the policy changes. */}
+           {false && currentUserId && (
              <div className="px-6 pb-2 border-t border-ink-800">
                <div className="pt-4">
                  <h3 className="text-base font-semibold text-ink-200 mb-2">Chat attachment TTL</h3>
