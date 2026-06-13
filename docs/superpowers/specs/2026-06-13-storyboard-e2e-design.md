@@ -2,6 +2,10 @@
 
 日期：2026-06-13 ｜ 状态：已批准 ｜ 分支：`feature/storyboard-e2e`
 
+## ⚠️ 路线图对齐声明（知情决策）
+
+`features/storyboard/`（本 spec 的 E2E 目标）是**旧**分镜工作台，与新 `features/canvas-core/`（SmartMode，mig 280，IC/Project Assets 引用）并存。Canvas+AI 升级 plan 计划让 SmartMode **取代** storyboard（plan 第 8 周替换、第 17 周删旧代码，切流约 2026-08~10）。**用户在知情下（2026-06-13）选择照原计划给旧 storyboard 写 E2E**：它现在 live、有用户在用，回归价值当下成立；切流后本套件随旧代码一并删除是预期内的。不为此提前对齐/合并两套画布。
+
 ## 背景与目标
 
 Storyboard 分镜工作台 Phase 0–4.3（节点系统/图片管道/AI 生成/工具编辑器/全部面板）+ Phase 5.2（性能优化）均已 ship 到 master。Phase 5 唯一遗留 = **5.1 E2E 测试**。
