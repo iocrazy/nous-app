@@ -38,6 +38,7 @@ import { MCPServersPanel } from './MCPServersPanel';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { TokenBillingDashboard } from './TokenBillingDashboard';
 import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
+import { MemoryPanel } from './MemoryPanel';
 import { useSettingsStore } from '../stores/settingsStore';
 
 interface AISettingsProps {
@@ -1305,6 +1306,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
         <ApprovalsPanel hideWhenEmpty />
       </section>
+
+      {/* Phase 4: user-facing AI memory management (Claude-style) */}
+      <MemoryPanel />
 
       {/* Phase 3: Token usage dashboard */}
       <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">

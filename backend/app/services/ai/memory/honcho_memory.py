@@ -210,6 +210,164 @@ class HonchoMemoryService:
             logger.exception("[honcho] representation fetch failed (user=%s)", user_id)
             return None
 
+    # ------------------------------------------------------------------
+    # Memory management (user-facing panel) — conclusions = the deriver's
+    # individual observations, addressable by stable id.
+    # ------------------------------------------------------------------
+
+    async def list_conclusions(
+        self,
+        *,
+        user_id: str,
+        workspace_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        """Observations ABOUT ``user_id``. Empty list on any failure.
+
+        Results are re-filtered client-side on ``observed_id`` so a drift
+        in Honcho's server-side filter semantics can never leak another
+        peer's observations into the management panel.
+        """
+        client = self._get_client()
+        if client is None:
+            return []
+        workspace = workspace_id or self.config.workspace_id
+        peer = f"user-{user_id}"
+        try:
+            response = await client.post(
+                f"/v3/workspaces/{workspace}/conclusions/list",
+                json={"filter": {"observed": peer}},
+            )
+            if response.status_code != 200:
+                logger.warning(
+                    "[honcho] conclusions list -> %s: %s",
+                    response.status_code,
+                    response.text[:200],
+                )
+                return []
+            items = (response.json() or {}).get("items") or []
+            scoped = [i for i in items if i.get("observed_id") == peer]
+            return [
+                {
+                    "id": i.get("id"),
+                    "content": i.get("content"),
+                    "created_at": i.get("created_at"),
+                    "session_id": i.get("session_id"),
+                }
+                for i in scoped[:limit]
+            ]
+        except Exception:  # noqa: BLE001
+            logger.exception("[honcho] conclusions list failed (user=%s)", user_id)
+            return []
+
+    async def get_conclusion(
+        self, *, conclusion_id: str, workspace_id: Optional[str] = None
+    ) -> Optional[dict]:
+        """Single observation by id; None when missing or on failure."""
+        client = self._get_client()
+        if client is None:
+            return None
+        workspace = workspace_id or self.config.workspace_id
+        try:
+            response = await client.get(
+                f"/v3/workspaces/{workspace}/conclusions/{conclusion_id}"
+            )
+            if response.status_code != 200:
+                return None
+            payload = response.json()
+            return payload if isinstance(payload, dict) else None
+        except Exception:  # noqa: BLE001
+            logger.exception("[honcho] conclusion fetch failed (%s)", conclusion_id)
+            return None
+
+    async def delete_conclusion(
+        self, *, conclusion_id: str, workspace_id: Optional[str] = None
+    ) -> bool:
+        """Delete one observation. Caller is responsible for the
+        ownership check (router verifies observed_id == the requesting
+        user's peer before calling)."""
+        client = self._get_client()
+        if client is None:
+            return False
+        workspace = workspace_id or self.config.workspace_id
+        try:
+            response = await client.delete(
+                f"/v3/workspaces/{workspace}/conclusions/{conclusion_id}"
+            )
+            if response.status_code not in (200, 204):
+                logger.warning(
+                    "[honcho] conclusion delete -> %s: %s",
+                    response.status_code,
+                    response.text[:200],
+                )
+                return False
+            return True
+        except Exception:  # noqa: BLE001
+            logger.exception("[honcho] conclusion delete failed (%s)", conclusion_id)
+            return False
+
+    async def get_peer_card(
+        self, *, user_id: str, workspace_id: Optional[str] = None
+    ) -> Optional[list[str]]:
+        """User-curated "About me" card lines; None when unset/failed."""
+        client = self._get_client()
+        if client is None:
+            return None
+        workspace = workspace_id or self.config.workspace_id
+        try:
+            response = await client.get(
+                f"/v3/workspaces/{workspace}/peers/user-{user_id}/card"
+            )
+            if response.status_code != 200:
+                return None
+            card = (response.json() or {}).get("peer_card")
+            return list(card) if card else None
+        except Exception:  # noqa: BLE001
+            logger.exception("[honcho] card fetch failed (user=%s)", user_id)
+            return None
+
+    async def set_peer_card(
+        self,
+        *,
+        user_id: str,
+        lines: list[str],
+        workspace_id: Optional[str] = None,
+    ) -> bool:
+        """Replace the "About me" card. Empty list clears it."""
+        client = self._get_client()
+        if client is None:
+            return False
+        workspace = workspace_id or self.config.workspace_id
+        try:
+            response = await client.put(
+                f"/v3/workspaces/{workspace}/peers/user-{user_id}/card",
+                json={"peer_card": lines},
+            )
+            return response.status_code in _OK_STATUSES
+        except Exception:  # noqa: BLE001
+            logger.exception("[honcho] card set failed (user=%s)", user_id)
+            return False
+
+    async def forget_user(
+        self, *, user_id: str, workspace_id: Optional[str] = None
+    ) -> int:
+        """Forget everything derived about the user: delete all their
+        observations + clear the card. Raw chat messages are retained
+        (deleting memory ≠ deleting chat history). Returns the number
+        of observations deleted."""
+        conclusions = await self.list_conclusions(
+            user_id=user_id, workspace_id=workspace_id, limit=1000
+        )
+        deleted = 0
+        for item in conclusions:
+            cid = item.get("id")
+            if cid and await self.delete_conclusion(
+                conclusion_id=cid, workspace_id=workspace_id
+            ):
+                deleted += 1
+        await self.set_peer_card(user_id=user_id, lines=[], workspace_id=workspace_id)
+        return deleted
+
     async def get_user_context(
         self, *, user_id: str, query: str, timeout_s: float = 30.0
     ) -> Optional[str]:
