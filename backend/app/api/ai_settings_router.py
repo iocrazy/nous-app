@@ -163,6 +163,18 @@ async def test_ai_connection(body: TestConnectionRequest, auth: AuthDep):
     return TestConnectionResponse(**result)
 
 
+@router.get("/health")
+async def get_ai_health(auth: AuthDep):
+    """Capability health board: what model+provider+key each AI feature
+    actually resolves to, with an actionable status per capability.
+
+    Surfaces silent misconfigurations (missing key, text model on a
+    vision task) that otherwise only show up as a failed task."""
+    from app.services.ai.ai_health import get_capability_health
+
+    return {"capabilities": await get_capability_health(str(auth.user_id))}
+
+
 @router.get("/providers")
 async def list_providers():
     """List available AI provider keys."""

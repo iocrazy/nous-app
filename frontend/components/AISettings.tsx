@@ -39,6 +39,7 @@ import { ApprovalsPanel } from './ApprovalsPanel';
 import { TokenBillingDashboard } from './TokenBillingDashboard';
 import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
 import { MemoryPanel } from './MemoryPanel';
+import { AIHealthBoard } from './AIHealthBoard';
 import { useSettingsStore } from '../stores/settingsStore';
 
 interface AISettingsProps {
@@ -975,6 +976,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         </div>
         )}
       </section>
+
+      {/* Capability health board — what each feature actually uses */}
+      <AIHealthBoard />
 
       {/* Provider Cards Section */}
       <section className={`bg-ink-900 border border-ink-800 rounded-xl overflow-hidden transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>

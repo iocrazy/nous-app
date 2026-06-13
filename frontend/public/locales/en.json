@@ -1935,5 +1935,13 @@
     "forgetAll": "Forget everything",
     "forgetConfirm": "Delete all learned memory? Your chat history is kept.",
     "forgetYes": "Yes, forget"
+  },
+  "aiHealth": {
+    "title": "Capability Health",
+    "subtitle": "What model and key each AI feature actually uses.",
+    "warningsBadge": "{{count}} need attention",
+    "refresh": "Refresh",
+    "unset": "Not configured",
+    "default": "default"
   }
 }
