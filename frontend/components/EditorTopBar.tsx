@@ -136,14 +136,14 @@ export function EditorTopBar({
   }
 
   return (
-    <div className="h-11 flex items-center px-3 gap-1 bg-zinc-900 border-b border-zinc-800 flex-shrink-0 select-none">
+    <div className="h-11 flex items-center px-3 gap-1 bg-ink-900 border-b border-ink-800 flex-shrink-0 select-none">
       {/* Logo + dropdown trigger */}
       <div className="relative">
         <button
           ref={logoButtonRef}
           type="button"
           onClick={() => setLogoMenuOpen((v) => !v)}
-          className={`flex items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-800 ${logoMenuOpen ? 'bg-zinc-800' : ''}`}
+          className={`flex items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-ink-800 ${logoMenuOpen ? 'bg-ink-800' : ''}`}
         >
           {/* MediaHub logo mark — simple spark shape */}
           <svg
@@ -160,7 +160,7 @@ export function EditorTopBar({
           </svg>
           <ChevronDown
             size={12}
-            className={`text-zinc-600 ml-0.5 transition-transform ${logoMenuOpen ? 'rotate-180' : ''}`}
+            className={`text-ink-600 ml-0.5 transition-transform ${logoMenuOpen ? 'rotate-180' : ''}`}
           />
         </button>
 
@@ -168,7 +168,7 @@ export function EditorTopBar({
         {logoMenuOpen && (
           <div
             ref={logoMenuRef}
-            className="absolute top-full left-0 mt-1 w-52 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 text-sm"
+            className="absolute top-full left-0 mt-1 w-52 bg-ink-800 border border-ink-700 rounded-lg shadow-xl z-50 py-1 text-sm"
           >
             <MenuItem
               icon={<ArrowLeft size={14} />}
@@ -176,7 +176,7 @@ export function EditorTopBar({
               onClick={() => handleLogoMenuAction(onBack)}
             />
 
-            <div className="my-1 border-t border-zinc-700" />
+            <div className="my-1 border-t border-ink-700" />
 
             <MenuItem
               icon={<Settings size={14} />}
@@ -188,7 +188,7 @@ export function EditorTopBar({
       </div>
 
       {/* Divider between logo and project name */}
-      <div className="w-px h-5 bg-zinc-700 mx-2" />
+      <div className="w-px h-5 bg-ink-700 mx-2" />
 
       {/* Project name + dropdown trigger */}
       <div className="relative">
@@ -200,18 +200,18 @@ export function EditorTopBar({
             onChange={(e) => setRenameValue(e.target.value)}
             onBlur={handleRenameCommit}
             onKeyDown={handleRenameKeyDown}
-            className="px-2 py-1 text-sm text-zinc-100 bg-zinc-800 border border-indigo-500 rounded outline-none w-48 max-w-xs"
+            className="px-2 py-1 text-sm text-ink-100 bg-ink-800 border border-indigo-500 rounded outline-none w-48 max-w-xs"
           />
         ) : (
           <div
             ref={projectTriggerRef}
             onClick={() => setProjectMenuOpen((v) => !v)}
-            className={`flex items-center gap-1 px-2 py-1 rounded hover:bg-zinc-800 cursor-pointer transition-colors ${projectMenuOpen ? 'bg-zinc-800' : ''}`}
+            className={`flex items-center gap-1 px-2 py-1 rounded hover:bg-ink-800 cursor-pointer transition-colors ${projectMenuOpen ? 'bg-ink-800' : ''}`}
           >
-            <span className="text-sm font-medium text-zinc-200 truncate max-w-xs">{projectName}</span>
+            <span className="text-sm font-medium text-ink-200 truncate max-w-xs">{projectName}</span>
             <ChevronDown
               size={14}
-              className={`text-zinc-500 flex-shrink-0 transition-transform ${projectMenuOpen ? 'rotate-180' : ''}`}
+              className={`text-ink-500 flex-shrink-0 transition-transform ${projectMenuOpen ? 'rotate-180' : ''}`}
             />
           </div>
         )}
@@ -220,7 +220,7 @@ export function EditorTopBar({
         {projectMenuOpen && !isRenaming && (
           <div
             ref={projectMenuRef}
-            className="absolute top-full left-0 mt-1 w-56 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl py-1 z-50"
+            className="absolute top-full left-0 mt-1 w-56 bg-ink-800 border border-ink-700 rounded-lg shadow-xl py-1 z-50"
           >
             <PlainMenuItem
               label="Rename"
@@ -233,7 +233,7 @@ export function EditorTopBar({
               onClick={() => handleProjectMenuAction(() => onDuplicate?.())}
             />
 
-            <div className="border-t border-zinc-700 my-1" />
+            <div className="border-t border-ink-700 my-1" />
 
             <PlainMenuItem
               label="Export..."
@@ -247,7 +247,7 @@ export function EditorTopBar({
               onClick={() => handleProjectMenuAction(() => onImport?.())}
             />
 
-            <div className="border-t border-zinc-700 my-1" />
+            <div className="border-t border-ink-700 my-1" />
 
             <PlainMenuItem
               label="Move to trash"
@@ -290,14 +290,14 @@ function MenuItem({
       disabled={disabled}
       className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors text-sm ${
         disabled
-          ? 'text-zinc-600 cursor-not-allowed'
-          : 'text-zinc-300 hover:bg-zinc-700 hover:text-white'
+          ? 'text-ink-600 cursor-not-allowed'
+          : 'text-ink-300 hover:bg-ink-700 hover:text-white'
       }`}
     >
-      <span className="text-zinc-500 flex-shrink-0">{icon}</span>
+      <span className="text-ink-500 flex-shrink-0">{icon}</span>
       <span className="flex-1">{label}</span>
       {shortcut && (
-        <span className="text-xs text-zinc-600 ml-auto">{shortcut}</span>
+        <span className="text-xs text-ink-600 ml-auto">{shortcut}</span>
       )}
     </button>
   );
@@ -325,17 +325,17 @@ function PlainMenuItem({
       className={`w-full flex items-center justify-between px-3 py-1.5 text-sm cursor-pointer transition-colors ${
         danger
           ? 'text-red-400 hover:text-red-300 hover:bg-red-900/20'
-          : 'text-zinc-300 hover:bg-zinc-700 hover:text-white'
+          : 'text-ink-300 hover:bg-ink-700 hover:text-white'
       }`}
     >
       <span className="flex items-center gap-2">
         {icon && (
-          <span className={danger ? 'text-red-400' : 'text-zinc-500'}>{icon}</span>
+          <span className={danger ? 'text-red-400' : 'text-ink-500'}>{icon}</span>
         )}
         {label}
       </span>
       {shortcut && (
-        <span className="text-xs text-zinc-500">{shortcut}</span>
+        <span className="text-xs text-ink-500">{shortcut}</span>
       )}
     </button>
   );

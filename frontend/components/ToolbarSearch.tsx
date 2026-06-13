@@ -148,7 +148,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
         {/* Mode selector button */}
         <button
           onClick={() => setShowDropdown(!showDropdown)}
-          className="absolute left-2 z-10 flex items-center gap-0.5 px-1 py-0.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors"
+          className="absolute left-2 z-10 flex items-center gap-0.5 px-1 py-0.5 rounded text-ink-500 hover:text-ink-300 hover:bg-ink-700/50 transition-colors"
         >
           <currentMode.Icon
             size={13}
@@ -165,10 +165,10 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder || (isAI ? t('search.aiPlaceholder', 'AI search... ↵') : t('search.placeholder', 'Search...'))}
-          className={`w-full pl-[42px] pr-7 py-1.5 text-xs bg-zinc-800/60 border rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none transition-colors ${
+          className={`w-full pl-[42px] pr-7 py-1.5 text-xs bg-ink-800/60 border rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none transition-colors ${
             isAI
               ? 'border-indigo-500/30 focus:border-indigo-500/60 focus:ring-1 focus:ring-indigo-500/20'
-              : 'border-zinc-700/50 focus:border-indigo-500'
+              : 'border-ink-700/50 focus:border-indigo-500'
           }`}
         />
 
@@ -180,7 +180,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
           {query && !isSearching && (
             <button
               onClick={handleClear}
-              className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="text-ink-500 hover:text-ink-300 transition-colors"
             >
               <X size={12} />
             </button>
@@ -191,7 +191,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
       {/* Mode dropdown — also embeds the search-scope checkbox section
           when the host passes ``searchScope`` + ``onSearchScopeChange``. */}
       {showDropdown && (
-        <div className="absolute top-full left-0 mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden py-1">
+        <div className="absolute top-full left-0 mt-1 w-56 bg-ink-900 border border-ink-700 rounded-lg shadow-xl z-50 overflow-hidden py-1">
           {MODES.map((m) => (
             <button
               key={m.id}
@@ -199,20 +199,20 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
               className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
                 mode === m.id
                   ? 'bg-indigo-600/10 text-indigo-400'
-                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                  : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
               }`}
             >
               <m.Icon size={14} className={m.id !== 'keyword' ? 'text-indigo-400' : ''} />
               <div>
                 <div className="text-xs font-medium">{m.label}</div>
-                <div className="text-[10px] text-zinc-500">{m.desc}</div>
+                <div className="text-[10px] text-ink-500">{m.desc}</div>
               </div>
             </button>
           ))}
           {searchScope && onSearchScopeChange && (
             <>
-              <div className="my-1 border-t border-zinc-800" />
-              <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+              <div className="my-1 border-t border-ink-800" />
+              <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-ink-500">
                 {t('search.scopeHeader', 'Search Scope')}
               </div>
               {effectiveScopeOptions.map((opt) => {
@@ -230,7 +230,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
                       if (next.length === 0) return;
                       onSearchScopeChange(next);
                     }}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/60"
+                    className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] text-ink-300 hover:bg-ink-800/60"
                   >
                     <span>{opt.i18nKey ? t(opt.i18nKey, opt.label) : opt.label}</span>
                     {checked && <Check size={13} className="shrink-0 text-indigo-400" />}

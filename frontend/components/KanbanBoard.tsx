@@ -44,8 +44,8 @@ const COLUMNS: ColumnDef[] = [
   {
     id: 'todo',
     statuses: ['todo', 'on_hold'],
-    colorClass: 'text-zinc-400',
-    dotColor: 'bg-zinc-500',
+    colorClass: 'text-ink-400',
+    dotColor: 'bg-ink-500',
   },
   {
     id: 'in_progress',
@@ -62,7 +62,7 @@ const COLUMNS: ColumnDef[] = [
 ];
 
 const TASK_TYPE_COLORS: Record<ProjectTask['task_type'], string> = {
-  general: 'bg-zinc-700 text-zinc-300',
+  general: 'bg-ink-700 text-ink-300',
   storyboard: 'bg-purple-900/60 text-purple-300',
   script: 'bg-blue-900/60 text-blue-300',
   filming: 'bg-orange-900/60 text-orange-300',
@@ -180,20 +180,20 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
 
   if (isEditing) {
     return (
-      <div className="bg-zinc-900 border border-indigo-500/50 rounded-lg p-3 space-y-2">
+      <div className="bg-ink-900 border border-indigo-500/50 rounded-lg p-3 space-y-2">
         <input
           ref={titleInputRef}
           value={editTitle}
           onChange={(e) => setEditTitle(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+          className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500"
           placeholder="Task title"
         />
         <textarea
           value={editDescription}
           onChange={(e) => setEditDescription(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 resize-none"
+          className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500 resize-none"
           placeholder="Description (optional)"
           rows={2}
         />
@@ -201,7 +201,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
           <select
             value={editTaskType}
             onChange={(e) => setEditTaskType(e.target.value as ProjectTask['task_type'])}
-            className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
+            className="bg-ink-800 border border-ink-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
           >
             {(['general', 'storyboard', 'script', 'filming', 'editing', 'review'] as const).map(
               (type) => (
@@ -215,7 +215,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
             type="date"
             value={editDueDate}
             onChange={(e) => setEditDueDate(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
+            className="bg-ink-800 border border-ink-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
           />
         </div>
         <div className="flex items-center justify-between pt-1">
@@ -235,7 +235,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
                 setEditTaskType(task.task_type);
                 setIsEditing(false);
               }}
-              className="px-3 py-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+              className="px-3 py-1 text-xs text-ink-400 hover:text-ink-200 transition-colors"
             >
               {t('common.cancel')}
             </button>
@@ -256,14 +256,14 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
       draggable
       onDragStart={(e) => onDragStart(e, task.id)}
       onClick={() => setIsEditing(true)}
-      className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3 cursor-pointer group transition-all duration-150"
+      className="bg-ink-900 border border-ink-800 hover:border-ink-700 rounded-lg p-3 cursor-pointer group transition-all duration-150"
     >
       <div className="flex items-start gap-2">
-        <div className="mt-0.5 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab">
+        <div className="mt-0.5 text-ink-600 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab">
           <GripVertical size={14} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-zinc-200 leading-snug mb-2">{task.title}</p>
+          <p className="text-sm text-ink-200 leading-snug mb-2">{task.title}</p>
 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Task type badge */}
@@ -279,7 +279,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
             {task.due_date && (
               <span
                 className={`inline-flex items-center gap-1 text-[10px] ${
-                  overdue ? 'text-red-400' : 'text-zinc-500'
+                  overdue ? 'text-red-400' : 'text-ink-500'
                 }`}
               >
                 <Calendar size={10} />
@@ -294,7 +294,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
 
             {/* Assignee */}
             {(task.assignee_id || task.assignee_email) && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500">
+              <span className="inline-flex items-center gap-1 text-[10px] text-ink-500">
                 <User size={10} />
                 {task.assignee_email
                   ? task.assignee_email.split('@')[0]
@@ -376,24 +376,24 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
 
   return (
     <div
-      className={`flex flex-col min-w-[280px] max-w-[360px] flex-1 bg-zinc-900/50 border rounded-xl transition-colors duration-150 ${
-        isDragOver ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-zinc-800'
+      className={`flex flex-col min-w-[280px] max-w-[360px] flex-1 bg-ink-900/50 border rounded-xl transition-colors duration-150 ${
+        isDragOver ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-ink-800'
       }`}
       onDragOver={onDragOver}
       onDrop={(e) => onDrop(e, column.id)}
     >
       {/* Column header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-ink-800">
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${column.dotColor}`} />
           <span className={`text-sm font-semibold ${column.colorClass}`}>{columnLabel}</span>
-          <span className="ml-1 text-xs text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded-full">
+          <span className="ml-1 text-xs text-ink-600 bg-ink-800 px-1.5 py-0.5 rounded-full">
             {tasks.length}
           </span>
         </div>
         <button
           onClick={() => setIsAdding(true)}
-          className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors"
+          className="p-1 text-ink-500 hover:text-ink-300 hover:bg-ink-800 rounded transition-colors"
         >
           <Plus size={16} />
         </button>
@@ -402,7 +402,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
       {/* Task cards */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2 min-h-[120px]">
         {tasks.length === 0 && !isAdding && (
-          <p className="text-center text-xs text-zinc-600 py-6">{t('kanban.noTasks')}</p>
+          <p className="text-center text-xs text-ink-600 py-6">{t('kanban.noTasks')}</p>
         )}
 
         {tasks.map((task) => (
@@ -425,7 +425,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t('kanban.addTask')}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500"
             />
             <div className="flex items-center gap-2 mt-2">
               <button
@@ -440,7 +440,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
                   setNewTitle('');
                   setIsAdding(false);
                 }}
-                className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="p-1 text-ink-500 hover:text-ink-300 transition-colors"
               >
                 <X size={14} />
               </button>
@@ -453,7 +453,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
       {!isAdding && (
         <button
           onClick={() => setIsAdding(true)}
-          className="flex items-center gap-2 mx-3 mb-3 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/60 rounded-lg transition-colors"
+          className="flex items-center gap-2 mx-3 mb-3 px-3 py-2 text-xs text-ink-500 hover:text-ink-300 hover:bg-ink-800/60 rounded-lg transition-colors"
         >
           <Plus size={14} />
           {t('kanban.addTask')}

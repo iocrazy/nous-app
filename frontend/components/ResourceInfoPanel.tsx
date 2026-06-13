@@ -45,13 +45,13 @@ function formatDuration(seconds: number | null | undefined): string {
 }
 
 function getFileIcon(mimeType: string | null | undefined) {
-  if (!mimeType) return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  if (!mimeType) return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
   if (mimeType.startsWith('video/')) return { icon: Film, color: 'text-purple-400', bg: 'bg-purple-500/20' };
   if (mimeType.startsWith('image/')) return { icon: Image, color: 'text-green-400', bg: 'bg-green-500/20' };
   if (mimeType.startsWith('audio/')) return { icon: Music, color: 'text-amber-400', bg: 'bg-amber-500/20' };
   if (mimeType.startsWith('text/') || mimeType.includes('pdf') || mimeType.includes('document'))
     return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
-  return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
 }
 
 // ─── AI Status Badge ────────────────────────────────────
@@ -78,7 +78,7 @@ const AIStatusBadge: React.FC<{ status?: string }> = ({ status }) => {
       );
     case 'pending':
       return (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-500">
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-ink-500/10 text-ink-500">
           Pending
         </span>
       );
@@ -106,7 +106,7 @@ const StarRating: React.FC<{ value: number; onChange: (v: number) => void }> = (
             className={
               (hover || value) >= star
                 ? 'text-amber-400 fill-amber-400'
-                : 'text-zinc-600'
+                : 'text-ink-600'
             }
           />
         </button>
@@ -121,8 +121,8 @@ const InfoRow = ({ label, value, children }: { label: string; value?: string | n
   if (!value && !children) return null;
   return (
     <div className="flex justify-between items-center py-1.5 pr-0.5">
-      <span className="text-xs text-zinc-500">{label}</span>
-      {children || <span className="text-xs text-zinc-300 text-right tabular-nums">{value}</span>}
+      <span className="text-xs text-ink-500">{label}</span>
+      {children || <span className="text-xs text-ink-300 text-right tabular-nums">{value}</span>}
     </div>
   );
 };
@@ -234,13 +234,13 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   ]);
 
   return (
-    <div className="flex-1 min-w-0 h-full bg-zinc-900 overflow-y-auto">
+    <div className="flex-1 min-w-0 h-full bg-ink-900 overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
+      <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
         <h3 className="text-sm font-semibold text-white select-none">{t('resources.infoPanel.title')}</h3>
         <button
           onClick={onClose}
-          className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+          className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
         >
           <X size={16} />
         </button>
@@ -273,7 +273,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               if (e.key === 'Enter') commitName();
               if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
             }}
-            className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
+            className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
             autoFocus
           />
         ) : readOnly ? (
@@ -284,7 +284,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
             onClick={() => setEditingName(true)}
           >
             <h4 className="text-sm font-medium text-white break-words leading-snug flex-1">{resource.filename}</h4>
-            <Pencil size={12} className="text-zinc-600 group-hover:text-zinc-400 mt-0.5 shrink-0 transition-colors" />
+            <Pencil size={12} className="text-ink-600 group-hover:text-ink-400 mt-0.5 shrink-0 transition-colors" />
           </div>
         )}
       </div>
@@ -292,7 +292,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       {/* Notes */}
       {!readOnly && (
         <div className="px-4 mt-3">
-          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
+          <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-1.5">
             {t('resources.infoPanel.notes')}
           </h4>
           {notesValue || editingNotes ? (
@@ -306,12 +306,12 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               autoFocus={editingNotes && !notesValue}
               placeholder={t('resources.infoPanel.notesPlaceholder')}
               rows={3}
-              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+              className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
             />
           ) : (
             <button
               onClick={() => setEditingNotes(true)}
-              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-600 hover:text-zinc-400 border border-dashed border-zinc-700/60 hover:border-zinc-600 rounded-lg transition-colors text-left"
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-ink-600 hover:text-ink-400 border border-dashed border-ink-700/60 hover:border-ink-600 rounded-lg transition-colors text-left"
             >
               <Plus size={12} className="shrink-0" />
               {t('resources.infoPanel.addNote', 'Add note')}
@@ -321,10 +321,10 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       )}
       {readOnly && notesValue && (
         <div className="px-4 mt-3">
-          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">
+          <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-1.5">
             {t('resources.infoPanel.notes')}
           </h4>
-          <p className="text-xs text-zinc-400 whitespace-pre-wrap">{notesValue}</p>
+          <p className="text-xs text-ink-400 whitespace-pre-wrap">{notesValue}</p>
         </div>
       )}
 
@@ -342,12 +342,12 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               autoFocus={editingUrl && !urlValue}
               placeholder={t('resources.infoPanel.urlPlaceholder')}
-              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+              className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-1.5 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50"
             />
           ) : (
             <button
               onClick={() => setEditingUrl(true)}
-              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-600 hover:text-zinc-400 border border-dashed border-zinc-700/60 hover:border-zinc-600 rounded-lg transition-colors text-left"
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-ink-600 hover:text-ink-400 border border-dashed border-ink-700/60 hover:border-ink-600 rounded-lg transition-colors text-left"
             >
               <Plus size={12} className="shrink-0" />
               {t('resources.infoPanel.addUrl', 'Add source link')}
@@ -373,12 +373,12 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
 
       {/* Folders */}
       {folderName && (
-        <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+        <div className="px-4 mt-4 border-t border-ink-800/60 pt-3">
+          <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
             {t('resources.infoPanel.folders')}
           </h4>
-          <div className="flex items-center gap-1.5 text-xs text-zinc-300">
-            <FolderOpen size={13} className="text-zinc-500 shrink-0" />
+          <div className="flex items-center gap-1.5 text-xs text-ink-300">
+            <FolderOpen size={13} className="text-ink-500 shrink-0" />
             <span className="truncate">{folderName}</span>
           </div>
         </div>
@@ -388,8 +388,8 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       {(resource.transcript_status && resource.transcript_status !== 'none') ||
        (resource.summary_status && resource.summary_status !== 'none') ||
        (resource.visual_analysis_status && resource.visual_analysis_status !== 'none') ? (
-        <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+        <div className="px-4 mt-4 border-t border-ink-800/60 pt-3">
+          <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
             {t('resources.infoPanel.aiStatus')}
           </h4>
           <div className="space-y-0">
@@ -397,7 +397,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               <div className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">
                   <Brain size={12} className="text-cyan-400" />
-                  <span className="text-xs text-zinc-400">Transcript</span>
+                  <span className="text-xs text-ink-400">Transcript</span>
                 </div>
                 <AIStatusBadge status={resource.transcript_status} />
               </div>
@@ -406,7 +406,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               <div className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">
                   <Sparkles size={12} className="text-indigo-400" />
-                  <span className="text-xs text-zinc-400">Summary</span>
+                  <span className="text-xs text-ink-400">Summary</span>
                 </div>
                 <AIStatusBadge status={resource.summary_status} />
               </div>
@@ -415,7 +415,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               <div className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">
                   <Eye size={12} className="text-purple-400" />
-                  <span className="text-xs text-zinc-400">Visual Analysis</span>
+                  <span className="text-xs text-ink-400">Visual Analysis</span>
                 </div>
                 <AIStatusBadge status={resource.visual_analysis_status} />
               </div>
@@ -425,8 +425,8 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       ) : null}
 
       {/* Properties */}
-      <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3">
-        <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+      <div className="px-4 mt-4 border-t border-ink-800/60 pt-3">
+        <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
           {t('resources.infoPanel.properties')}
         </h4>
         <div className="space-y-0">

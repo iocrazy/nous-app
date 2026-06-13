@@ -23,11 +23,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, isOpen
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-zinc-900 sm:border sm:border-zinc-800 sm:rounded-2xl w-full sm:max-w-md shadow-2xl relative overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh] rounded-t-2xl sm:rounded-2xl">
+      <div className="bg-ink-900 sm:border sm:border-ink-800 sm:rounded-2xl w-full sm:max-w-md shadow-2xl relative overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh] rounded-t-2xl sm:rounded-2xl">
         {/* Header */}
-        <div className="px-5 pt-[max(env(safe-area-inset-top),16px)] pb-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
-          <h2 className="text-lg font-semibold text-zinc-100">Edit Profile</h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors p-1">
+        <div className="px-5 pt-[max(env(safe-area-inset-top),16px)] pb-4 border-b border-ink-800 flex justify-between items-center bg-ink-900/50">
+          <h2 className="text-lg font-semibold text-ink-100">Edit Profile</h2>
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-300 transition-colors p-1">
             <X size={20} />
           </button>
         </div>
@@ -37,11 +37,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, isOpen
             {/* Avatar Section */}
             <div className="flex flex-col items-center gap-3">
                 <div className="relative group">
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-indigo-500/30 bg-zinc-800">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-indigo-500/30 bg-ink-800">
                     {formData.avatarUrl ? (
                         <img src={formData.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
                     ) : (
-                        <div className="w-full h-full flex items-center justify-center text-zinc-500"><User size={28}/></div>
+                        <div className="w-full h-full flex items-center justify-center text-ink-500"><User size={28}/></div>
                     )}
                     </div>
                     <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
@@ -49,19 +49,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, isOpen
                     </div>
                 </div>
                 <div className="text-center">
-                    <p className="text-sm text-zinc-400">Profile Photo</p>
-                    <p className="text-xs text-zinc-600 mt-0.5">Click the camera icon to upload a new photo</p>
+                    <p className="text-sm text-ink-400">Profile Photo</p>
+                    <p className="text-xs text-ink-600 mt-0.5">Click the camera icon to upload a new photo</p>
                 </div>
             </div>
 
             {/* Avatar URL input */}
             <div>
-                <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-3 focus-within:border-indigo-500 transition-colors">
+                <div className="flex items-center bg-ink-950 border border-ink-800 rounded-xl px-3.5 py-3 focus-within:border-indigo-500 transition-colors">
                 <input
                     type="text"
                     value={formData.avatarUrl}
                     onChange={e => setFormData({...formData, avatarUrl: e.target.value})}
-                    className="bg-transparent border-none outline-none text-sm text-zinc-200 w-full placeholder-zinc-600"
+                    className="bg-transparent border-none outline-none text-sm text-ink-200 w-full placeholder-ink-600"
                     placeholder="Or paste image URL"
                 />
                 </div>
@@ -70,42 +70,42 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, isOpen
             {/* Form fields */}
             <div className="space-y-4">
                 <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400 ml-1">Username</label>
-                    <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-3 focus-within:border-indigo-500 transition-colors">
+                    <label className="text-xs font-medium text-ink-400 ml-1">Username</label>
+                    <div className="flex items-center bg-ink-950 border border-ink-800 rounded-xl px-3.5 py-3 focus-within:border-indigo-500 transition-colors">
                     <input
                         type="text"
                         value={formData.name}
                         onChange={e => setFormData({...formData, name: e.target.value})}
-                        className="bg-transparent border-none outline-none text-[15px] text-zinc-200 w-full placeholder-zinc-600"
+                        className="bg-transparent border-none outline-none text-[15px] text-ink-200 w-full placeholder-ink-600"
                         placeholder="Enter your name"
                     />
                     </div>
                 </div>
 
                 <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400 ml-1">Bio</label>
-                    <div className="bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-3 focus-within:border-indigo-500 transition-colors">
+                    <label className="text-xs font-medium text-ink-400 ml-1">Bio</label>
+                    <div className="bg-ink-950 border border-ink-800 rounded-xl px-3.5 py-3 focus-within:border-indigo-500 transition-colors">
                     <textarea
                         value={formData.bio || ''}
                         onChange={e => setFormData({...formData, bio: e.target.value})}
                         rows={3}
-                        className="bg-transparent border-none outline-none text-[15px] text-zinc-200 w-full placeholder-zinc-600 resize-none"
+                        className="bg-transparent border-none outline-none text-[15px] text-ink-200 w-full placeholder-ink-600 resize-none"
                         placeholder="Tell us about yourself..."
                     />
                     </div>
                 </div>
 
                 <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400 ml-1">Email</label>
-                    <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-3">
+                    <label className="text-xs font-medium text-ink-400 ml-1">Email</label>
+                    <div className="flex items-center bg-ink-950 border border-ink-800 rounded-xl px-3.5 py-3">
                     <input
                         type="email"
                         value={formData.email}
                         disabled
-                        className="bg-transparent border-none outline-none text-[15px] text-zinc-500 w-full"
+                        className="bg-transparent border-none outline-none text-[15px] text-ink-500 w-full"
                     />
                     </div>
-                    <p className="text-xs text-zinc-600 ml-1">Email cannot be changed</p>
+                    <p className="text-xs text-ink-600 ml-1">Email cannot be changed</p>
                 </div>
 
                 <button
@@ -118,10 +118,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, isOpen
 
             {/* Security Section */}
             <div className="space-y-3">
-                <h4 className="text-[15px] font-bold text-zinc-100">Security</h4>
+                <h4 className="text-[15px] font-bold text-ink-100">Security</h4>
                 <button
                     type="button"
-                    className="w-full text-left bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-[15px] text-zinc-300 hover:bg-zinc-800/60 active:bg-zinc-800 transition-colors"
+                    className="w-full text-left bg-ink-950 border border-ink-800 rounded-xl px-4 py-3 text-[15px] text-ink-300 hover:bg-ink-800/60 active:bg-ink-800 transition-colors"
                 >
                     Change Password
                 </button>

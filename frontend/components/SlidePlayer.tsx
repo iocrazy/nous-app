@@ -142,8 +142,8 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
   // Loading state
   if (isLoading) {
     return (
-      <div className="w-full h-full bg-zinc-950 rounded-lg flex items-center justify-center">
-        <Loader2 size={32} className="animate-spin text-zinc-500" />
+      <div className="w-full h-full bg-ink-950 rounded-lg flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-ink-500" />
       </div>
     );
   }
@@ -152,23 +152,23 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
   if (loadError) {
     const isStillDownloading = !downloadStatus || downloadStatus === 'pending' || downloadStatus === 'downloading' || downloadStatus === 'skipped';
     return (
-      <div className="w-full h-full bg-zinc-950 rounded-lg flex flex-col items-center justify-center gap-3">
+      <div className="w-full h-full bg-ink-950 rounded-lg flex flex-col items-center justify-center gap-3">
         {isStillDownloading ? (
           <>
             <Loader2 size={48} className="text-indigo-500 animate-spin" />
-            <p className="text-zinc-300 text-sm font-medium">Downloading...</p>
-            <p className="text-zinc-500 text-xs">Images are being downloaded. Please wait.</p>
+            <p className="text-ink-300 text-sm font-medium">Downloading...</p>
+            <p className="text-ink-500 text-xs">Images are being downloaded. Please wait.</p>
           </>
         ) : downloadStatus === 'failed' ? (
           <>
             <ImageOff size={48} className="text-red-500/60" />
-            <p className="text-zinc-300 text-sm font-medium">Download Failed</p>
-            <p className="text-zinc-500 text-xs">Try re-downloading from the action menu.</p>
+            <p className="text-ink-300 text-sm font-medium">Download Failed</p>
+            <p className="text-ink-500 text-xs">Try re-downloading from the action menu.</p>
           </>
         ) : (
           <>
-            <ImageOff size={48} className="text-zinc-600" />
-            <p className="text-zinc-400 text-sm">{loadError}</p>
+            <ImageOff size={48} className="text-ink-600" />
+            <p className="text-ink-400 text-sm">{loadError}</p>
           </>
         )}
       </div>
@@ -178,9 +178,9 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
   // Empty state
   if (slides.length === 0) {
     return (
-      <div className="w-full h-full bg-zinc-950 rounded-lg flex flex-col items-center justify-center gap-3">
-        <ImageOff size={48} className="text-zinc-600" />
-        <p className="text-zinc-400 text-sm">No slides available</p>
+      <div className="w-full h-full bg-ink-950 rounded-lg flex flex-col items-center justify-center gap-3">
+        <ImageOff size={48} className="text-ink-600" />
+        <p className="text-ink-400 text-sm">No slides available</p>
       </div>
     );
   }
@@ -189,9 +189,9 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
 
   if (!currentSlide) {
     return (
-      <div className="w-full h-full bg-zinc-950 rounded-lg flex flex-col items-center justify-center gap-3">
-        <ImageOff size={48} className="text-zinc-600" />
-        <p className="text-zinc-400 text-sm">Slide not found</p>
+      <div className="w-full h-full bg-ink-950 rounded-lg flex flex-col items-center justify-center gap-3">
+        <ImageOff size={48} className="text-ink-600" />
+        <p className="text-ink-400 text-sm">Slide not found</p>
       </div>
     );
   }
@@ -199,7 +199,7 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-zinc-950 rounded-lg overflow-hidden select-none"
+      className="relative w-full h-full bg-ink-950 rounded-lg overflow-hidden select-none"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}

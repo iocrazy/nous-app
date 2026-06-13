@@ -18,7 +18,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = ({
   <div>
     {!hideLabel && (
       <div className="flex items-center justify-between px-3 py-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-500">
           {label}
         </span>
         {action}

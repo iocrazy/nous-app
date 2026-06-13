@@ -98,9 +98,9 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       />
 
       {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <FolderPlus size={20} className="text-indigo-400" />
@@ -111,7 +111,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -122,10 +122,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           {/* Name */}
           <div>
             <div className="flex justify-between mb-2">
-              <label className="text-sm font-medium text-zinc-300">
+              <label className="text-sm font-medium text-ink-300">
                 {t('projects.create.name', 'Project Name')}
               </label>
-              <span className={`text-xs ${name.length >= 30 ? 'text-red-400' : 'text-zinc-600'}`}>
+              <span className={`text-xs ${name.length >= 30 ? 'text-red-400' : 'text-ink-600'}`}>
                 {name.length}/30
               </span>
             </div>
@@ -134,14 +134,14 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value.slice(0, 30))}
               placeholder={t('projects.create.namePlaceholder', 'Enter project name')}
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
               autoFocus
             />
           </div>
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
+            <label className="block text-sm font-medium text-ink-300 mb-2">
               {t('mediatrack.projectDescription', 'Description')}
             </label>
             <textarea
@@ -149,17 +149,17 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t('projects.create.descriptionPlaceholder', 'Optional description')}
               rows={2}
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
             />
           </div>
 
           {/* Announcement */}
           <div>
             <div className="flex justify-between mb-2">
-              <label className="text-sm font-medium text-zinc-300">
+              <label className="text-sm font-medium text-ink-300">
                 {t('projects.create.announcement', 'Announcement')}
               </label>
-              <span className={`text-xs ${announcement.length >= 100 ? 'text-red-400' : 'text-zinc-600'}`}>
+              <span className={`text-xs ${announcement.length >= 100 ? 'text-red-400' : 'text-ink-600'}`}>
                 {announcement.length}/100
               </span>
             </div>
@@ -168,20 +168,20 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               onChange={(e) => setAnnouncement(e.target.value.slice(0, 100))}
               placeholder={t('projects.create.announcementPlaceholder', 'Help new members understand this project')}
               rows={2}
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
             />
           </div>
 
           {/* Project Type + Group (side by side) */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">
+              <label className="block text-sm font-medium text-ink-300 mb-2">
                 {t('mediatrack.projectType', 'Type')}
               </label>
               <select
                 value={projectType}
                 onChange={(e) => setProjectType(e.target.value as 'personal' | 'internal' | 'external')}
-                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+                className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
               >
                 <option value="personal">{t('mediatrack.personal')}</option>
                 <option value="internal">{t('mediatrack.internal')}</option>
@@ -189,7 +189,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">
+              <label className="block text-sm font-medium text-ink-300 mb-2">
                 {t('projects.create.group', 'Group')}
               </label>
               <input
@@ -197,20 +197,20 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 value={projectGroup}
                 onChange={(e) => setProjectGroup(e.target.value)}
                 placeholder={t('projects.create.noGroup', 'No group')}
-                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white placeholder-ink-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
               />
             </div>
           </div>
 
           {/* Team */}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
+            <label className="block text-sm font-medium text-ink-300 mb-2">
               {t('mediatrack.selectTeam')}
             </label>
             <select
               value={teamId}
               onChange={(e) => setTeamId(e.target.value)}
-              className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
+              className="w-full px-4 py-3 bg-ink-800 border border-ink-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none cursor-pointer"
             >
               <option value="">{t('mediatrack.personal')}</option>
               {teams.map(team => (
@@ -229,7 +229,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             <button
               type="button"
               onClick={handleClose}
-              className="flex-1 px-4 py-3 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-xl font-medium transition-colors"
+              className="flex-1 px-4 py-3 text-ink-300 bg-ink-800 hover:bg-ink-700 rounded-xl font-medium transition-colors"
             >
               {t('common.cancel')}
             </button>

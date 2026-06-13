@@ -45,13 +45,13 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     return (
-      <div className="min-h-screen bg-black text-zinc-200 flex items-center justify-center p-8">
+      <div className="min-h-screen bg-black text-ink-200 flex items-center justify-center p-8">
         <div className="max-w-lg w-full">
           <h1 className="text-xl font-semibold mb-2">Something went wrong</h1>
-          <p className="text-sm text-zinc-400 mb-4">
+          <p className="text-sm text-ink-400 mb-4">
             An unexpected error occurred. The error has been reported.
           </p>
-          <pre className="text-xs bg-zinc-900 text-red-300 p-3 rounded overflow-auto max-h-48 mb-4">
+          <pre className="text-xs bg-ink-900 text-red-300 p-3 rounded overflow-auto max-h-48 mb-4">
             {error.message}
           </pre>
           <button

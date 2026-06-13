@@ -106,10 +106,10 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
 
   if (isCollapsed) {
     return (
-      <div className="px-2 py-4 border-t border-zinc-800">
+      <div className="px-2 py-4 border-t border-ink-800">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="w-full p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors"
+          className="w-full p-2 rounded-lg hover:bg-ink-800 text-ink-400 transition-colors"
           title="Smart Collections"
         >
           <Sparkles size={20} />
@@ -132,7 +132,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
               className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
                 activeCollectionId === null
                   ? 'text-indigo-400 bg-indigo-500/5'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  : 'text-ink-500 hover:text-ink-300'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -151,7 +151,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
                   className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
                     activeCollectionId === collection.id
                       ? 'text-indigo-400 bg-indigo-500/5'
-                      : 'text-zinc-500 hover:text-zinc-300'
+                      : 'text-ink-500 hover:text-ink-300'
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -160,7 +160,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
                       <span>{collection.name}</span>
                     </div>
                     {collection.video_count !== null && (
-                      <span className="text-xs text-zinc-600">{collection.video_count}</span>
+                      <span className="text-xs text-ink-600">{collection.video_count}</span>
                     )}
                   </div>
                 </button>
@@ -173,11 +173,11 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
   }
 
   return (
-    <div className="border-t border-zinc-800">
+    <div className="border-t border-ink-800">
       {/* Section Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-zinc-400 uppercase tracking-wider hover:bg-zinc-800/50 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-ink-400 uppercase tracking-wider hover:bg-ink-800/50 transition-colors"
       >
         <div className="flex items-center gap-2">
           <Sparkles size={14} className="text-indigo-400" />
@@ -229,7 +229,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
               {customCollections.length > 0 && (
                 <>
                   <div className="px-4 pt-2 pb-1">
-                    <span className="text-[10px] text-zinc-600 uppercase tracking-wider">
+                    <span className="text-[10px] text-ink-600 uppercase tracking-wider">
                       Custom
                     </span>
                   </div>
@@ -254,7 +254,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
               {onCreateCollection && (
                 <button
                   onClick={onCreateCollection}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-ink-500 hover:text-ink-300 hover:bg-ink-800/50 transition-colors"
                 >
                   <Plus size={16} />
                   New Collection
@@ -296,7 +296,7 @@ const CollectionItem: React.FC<CollectionItemProps> = ({
       className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-all group ${
         isActive
           ? 'bg-indigo-600/10 text-indigo-400 border-l-2 border-indigo-500'
-          : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 border-l-2 border-transparent'
+          : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200 border-l-2 border-transparent'
       }`}
     >
       <div className="flex items-center gap-3">
@@ -310,7 +310,7 @@ const CollectionItem: React.FC<CollectionItemProps> = ({
       {videoCount !== null && (
         <span
           className={`text-xs ${
-            isActive ? 'text-indigo-400/70' : 'text-zinc-600 group-hover:text-zinc-500'
+            isActive ? 'text-indigo-400/70' : 'text-ink-600 group-hover:text-ink-500'
           }`}
         >
           {videoCount}

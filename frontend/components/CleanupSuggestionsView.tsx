@@ -242,14 +242,14 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
 
       {/* Batch Actions */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between p-4 bg-zinc-800/50 rounded-xl border border-zinc-700">
+        <div className="flex items-center justify-between p-4 bg-ink-800/50 rounded-xl border border-ink-700">
           <div className="flex items-center gap-4">
-            <span className="text-sm text-zinc-300">
+            <span className="text-sm text-ink-300">
               {selectedIds.size} selected ({formatBytes(selectedReclaimable)})
             </span>
             <button
               onClick={deselectAll}
-              className="text-xs text-zinc-500 hover:text-white transition-colors"
+              className="text-xs text-ink-500 hover:text-white transition-colors"
             >
               Clear selection
             </button>
@@ -264,7 +264,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
             </button>
             <button
               onClick={() => handleBatchAction('dismiss')}
-              className="flex items-center gap-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg text-sm transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 bg-ink-700 hover:bg-ink-600 text-ink-300 rounded-lg text-sm transition-colors"
             >
               <XCircle size={14} />
               Dismiss All
@@ -285,18 +285,18 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
         <div className="flex items-center gap-4">
           <button
             onClick={selectAll}
-            className="text-sm text-zinc-400 hover:text-white transition-colors"
+            className="text-sm text-ink-400 hover:text-white transition-colors"
           >
             Select All ({filteredSuggestions.length})
           </button>
-          <span className="text-zinc-600">|</span>
-          <span className="text-sm text-zinc-500">
+          <span className="text-ink-600">|</span>
+          <span className="text-sm text-ink-500">
             Potential savings: {formatBytes(totalReclaimable)}
           </span>
         </div>
         <button
           onClick={loadData}
-          className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors"
+          className="flex items-center gap-2 text-sm text-ink-400 hover:text-white transition-colors"
         >
           <RefreshCw size={14} />
           Refresh
@@ -307,7 +307,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
       {error ? (
         <div className="p-8 text-center text-red-400">{error}</div>
       ) : filteredSuggestions.length === 0 ? (
-        <div className="p-8 text-center text-zinc-500">
+        <div className="p-8 text-center text-ink-500">
           <CheckCircle size={48} className="mx-auto mb-4 text-emerald-500" />
           <p className="text-lg font-medium text-white">All Clean!</p>
           <p className="text-sm mt-1">No cleanup suggestions at this time.</p>
@@ -339,13 +339,13 @@ interface StatCardProps {
 }
 
 const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, value, color }) => (
-  <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800">
+  <div className="p-4 bg-ink-900 rounded-xl border border-ink-800">
     <div className="flex items-center gap-3">
-      <div className={`p-2 rounded-lg bg-zinc-800 ${color}`}>
+      <div className={`p-2 rounded-lg bg-ink-800 ${color}`}>
         <Icon size={18} />
       </div>
       <div>
-        <p className="text-xs text-zinc-500 uppercase tracking-wider">{label}</p>
+        <p className="text-xs text-ink-500 uppercase tracking-wider">{label}</p>
         <p className="text-lg font-semibold text-white">{value}</p>
       </div>
     </div>
@@ -366,7 +366,7 @@ const FilterTab: React.FC<FilterTabProps> = ({ label, count, isActive, onClick, 
     className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors ${
       isActive
         ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
-        : 'bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-700'
+        : 'bg-ink-800 text-ink-400 hover:text-white border border-ink-700'
     }`}
   >
     <span className={color}>{label}</span>
@@ -395,8 +395,8 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
 
   return (
     <div
-      className={`bg-zinc-900 rounded-xl border transition-all ${
-        isSelected ? 'border-indigo-500/50 bg-indigo-600/5' : 'border-zinc-800'
+      className={`bg-ink-900 rounded-xl border transition-all ${
+        isSelected ? 'border-indigo-500/50 bg-indigo-600/5' : 'border-ink-800'
       }`}
     >
       <div className="p-4 flex items-center gap-4">
@@ -406,11 +406,11 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
           checked={isSelected}
           onChange={onToggleSelect}
           disabled={isProcessing}
-          className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0"
+          className="w-4 h-4 rounded border-ink-600 bg-ink-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0"
         />
 
         {/* Thumbnail */}
-        <div className="w-16 h-16 rounded-lg overflow-hidden bg-zinc-800 flex-shrink-0">
+        <div className="w-16 h-16 rounded-lg overflow-hidden bg-ink-800 flex-shrink-0">
           {suggestion.cover_url ? (
             <img
               src={suggestion.cover_url}
@@ -418,7 +418,7 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
               className="w-full h-full object-cover"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-zinc-600">
+            <div className="w-full h-full flex items-center justify-center text-ink-600">
               <AlertTriangle size={24} />
             </div>
           )}
@@ -427,7 +427,7 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
         {/* Info */}
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-medium text-white truncate">{suggestion.title || 'Untitled'}</h4>
-          <p className="text-xs text-zinc-500 mt-0.5">
+          <p className="text-xs text-ink-500 mt-0.5">
             @{suggestion.author || 'Unknown'} • {suggestion.view_count} views
           </p>
           <div className="flex items-center gap-2 mt-2">
@@ -435,8 +435,8 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
               <Icon size={12} />
               {getReasonLabel(suggestion.reason)}
             </span>
-            <span className="text-xs text-zinc-600">•</span>
-            <span className="text-xs text-zinc-500">{suggestion.reason_detail}</span>
+            <span className="text-xs text-ink-600">•</span>
+            <span className="text-xs text-ink-500">{suggestion.reason_detail}</span>
           </div>
         </div>
 
@@ -445,7 +445,7 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
           <p className="text-sm font-medium text-white">
             {formatBytes(suggestion.storage_size || 0)}
           </p>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-ink-500">
             {new Date(suggestion.created_at).toLocaleDateString()}
           </p>
         </div>
@@ -453,26 +453,26 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
         {/* Actions */}
         <div className="flex items-center gap-2">
           {isProcessing ? (
-            <Loader2 size={20} className="text-zinc-500 animate-spin" />
+            <Loader2 size={20} className="text-ink-500 animate-spin" />
           ) : (
             <>
               <button
                 onClick={() => onAction('keep_forever')}
-                className="p-2 rounded-lg bg-zinc-800 hover:bg-emerald-600/20 text-zinc-400 hover:text-emerald-400 transition-colors"
+                className="p-2 rounded-lg bg-ink-800 hover:bg-emerald-600/20 text-ink-400 hover:text-emerald-400 transition-colors"
                 title="Keep Forever"
               >
                 <Shield size={16} />
               </button>
               <button
                 onClick={() => onAction('dismiss')}
-                className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors"
+                className="p-2 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-white transition-colors"
                 title="Dismiss"
               >
                 <XCircle size={16} />
               </button>
               <button
                 onClick={() => onAction('delete')}
-                className="p-2 rounded-lg bg-zinc-800 hover:bg-red-600/20 text-zinc-400 hover:text-red-400 transition-colors"
+                className="p-2 rounded-lg bg-ink-800 hover:bg-red-600/20 text-ink-400 hover:text-red-400 transition-colors"
                 title="Delete"
               >
                 <Trash2 size={16} />
@@ -484,7 +484,7 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
         {/* Expand Toggle */}
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="p-1 text-zinc-600 hover:text-zinc-400 transition-colors"
+          className="p-1 text-ink-600 hover:text-ink-400 transition-colors"
         >
           {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
@@ -492,17 +492,17 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
 
       {/* Expanded Details */}
       {isExpanded && (
-        <div className="px-4 pb-4 pt-2 border-t border-zinc-800 ml-8">
+        <div className="px-4 pb-4 pt-2 border-t border-ink-800 ml-8">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-zinc-500">Created:</span>{' '}
-              <span className="text-zinc-300">
+              <span className="text-ink-500">Created:</span>{' '}
+              <span className="text-ink-300">
                 {new Date(suggestion.created_at).toLocaleString()}
               </span>
             </div>
             <div>
-              <span className="text-zinc-500">Last Viewed:</span>{' '}
-              <span className="text-zinc-300">
+              <span className="text-ink-500">Last Viewed:</span>{' '}
+              <span className="text-ink-300">
                 {suggestion.last_viewed_at
                   ? new Date(suggestion.last_viewed_at).toLocaleString()
                   : 'Never'}
@@ -510,8 +510,8 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
             </div>
             {suggestion.similarity_to && (
               <div className="col-span-2">
-                <span className="text-zinc-500">Similar to video ID:</span>{' '}
-                <span className="text-zinc-300">#{suggestion.similarity_to}</span>
+                <span className="text-ink-500">Similar to video ID:</span>{' '}
+                <span className="text-ink-300">#{suggestion.similarity_to}</span>
                 <span className="ml-2 text-purple-400">
                   ({Math.round((suggestion.similarity_score || 0) * 100)}% match)
                 </span>

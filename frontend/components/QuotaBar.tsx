@@ -37,16 +37,16 @@ export const QuotaBar: React.FC = () => {
 
   return (
     <div className="flex items-center gap-2" title={`${formatBytes(quota.storage_used_bytes)} / ${formatBytes(quota.storage_limit_bytes)}`}>
-      <span className="text-[10px] text-zinc-500 hidden lg:inline">
+      <span className="text-[10px] text-ink-500 hidden lg:inline">
         {t('points.storage', 'Storage')}
       </span>
-      <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+      <div className="w-24 h-1.5 bg-ink-800 rounded-full overflow-hidden">
         <div
           className={`h-full bg-gradient-to-r ${barColor} rounded-full transition-all duration-300`}
           style={{ width: `${percent}%` }}
         />
       </div>
-      <span className="text-[10px] text-zinc-400 font-medium">
+      <span className="text-[10px] text-ink-400 font-medium">
         {percent}%
       </span>
     </div>

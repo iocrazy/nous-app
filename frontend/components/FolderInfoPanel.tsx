@@ -34,8 +34,8 @@ const InfoRow = ({ label, value }: { label: string; value?: string | null }) => 
   if (!value) return null;
   return (
     <div className="flex justify-between items-center py-1.5">
-      <span className="text-xs text-zinc-500">{label}</span>
-      <span className="text-xs text-zinc-300 text-right">{value}</span>
+      <span className="text-xs text-ink-500">{label}</span>
+      <span className="text-xs text-ink-300 text-right">{value}</span>
     </div>
   );
 };
@@ -78,25 +78,25 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   const previewSlots = previewItems ? previewItems.slice(0, 4) : [];
 
   return (
-    <div className="flex-1 min-w-0 h-full bg-zinc-900 overflow-y-auto">
+    <div className="flex-1 min-w-0 h-full bg-ink-900 overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
+      <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
         <h3 className="text-sm font-semibold text-white">{t('resources.folderInfoPanel.title')}</h3>
         <button
           onClick={onClose}
-          className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+          className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
         >
           <X size={16} />
         </button>
       </div>
 
       {/* Preview — 4-grid thumbnails or folder icon fallback */}
-      <div className={`mx-4 mt-4 h-44 rounded-xl overflow-hidden bg-zinc-800/50 ${hasPreview ? '' : 'flex items-center justify-center'}`}>
+      <div className={`mx-4 mt-4 h-44 rounded-xl overflow-hidden bg-ink-800/50 ${hasPreview ? '' : 'flex items-center justify-center'}`}>
         {hasPreview ? (
           <div className="w-full h-full grid grid-cols-2 grid-rows-2 gap-px">
             {[0, 1, 2, 3].map((idx) => {
               const item = previewSlots[idx];
-              if (!item) return <div key={idx} className="bg-zinc-800" />;
+              if (!item) return <div key={idx} className="bg-ink-800" />;
               const src = (item.thumbnail_path || item.cover_image_path) && item.resource_id
                 ? getResourceCoverUrl(String(item.resource_id))
                 : null;
@@ -110,8 +110,8 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
               ) : (
-                <div key={idx} className="bg-zinc-800 flex items-center justify-center">
-                  <FolderOpen size={16} className="text-zinc-600" />
+                <div key={idx} className="bg-ink-800 flex items-center justify-center">
+                  <FolderOpen size={16} className="text-ink-600" />
                 </div>
               );
             })}
@@ -138,7 +138,7 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
               if (e.key === 'Enter') commitName();
               if (e.key === 'Escape') { setNameValue(folder.name); setEditingName(false); }
             }}
-            className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
+            className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
             autoFocus
           />
         ) : readOnly ? (
@@ -149,14 +149,14 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
             onClick={() => setEditingName(true)}
           >
             <h4 className="text-sm font-medium text-white break-words leading-snug flex-1">{folder.name}</h4>
-            <Pencil size={12} className="text-zinc-600 group-hover:text-zinc-400 mt-0.5 shrink-0 transition-colors" />
+            <Pencil size={12} className="text-ink-600 group-hover:text-ink-400 mt-0.5 shrink-0 transition-colors" />
           </div>
         )}
       </div>
 
       {/* Properties */}
-      <div className="px-4 mt-6 border-t border-zinc-800/60 pt-3">
-        <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+      <div className="px-4 mt-6 border-t border-ink-800/60 pt-3">
+        <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">
           {t('resources.infoPanel.properties')}
         </h4>
         <div className="space-y-0">

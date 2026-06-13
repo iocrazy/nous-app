@@ -193,7 +193,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 transition-colors z-20"
+          className="absolute top-4 right-4 text-ink-400 hover:text-ink-600 transition-colors z-20"
         >
           <X size={24} />
         </button>
@@ -245,11 +245,11 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
         <div className="flex-1 p-8 md:p-12 bg-white flex flex-col justify-center">
 
            {/* Header: Login/Register Toggle (shared for both phone and email) */}
-           <div className="flex items-center justify-center gap-8 mb-8 border-b border-zinc-100 min-h-[40px]">
+           <div className="flex items-center justify-center gap-8 mb-8 border-b border-ink-100 min-h-[40px]">
               <button
                 onClick={() => { setAuthMode('login'); setError(null); }}
                 className={`pb-3 text-sm font-bold transition-all relative ${
-                  authMode === 'login' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
+                  authMode === 'login' ? 'text-ink-900' : 'text-ink-400 hover:text-ink-600'
                 }`}
               >
                 {t('auth.login')}
@@ -260,7 +260,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
               <button
                 onClick={() => { setAuthMode('register'); setError(null); }}
                 className={`pb-3 text-sm font-bold transition-all relative ${
-                  authMode === 'register' ? 'text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'
+                  authMode === 'register' ? 'text-ink-900' : 'text-ink-400 hover:text-ink-600'
                 }`}
               >
                 {t('auth.register')}
@@ -283,8 +283,8 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
               {/* --- PHONE MODE INPUTS --- */}
               {loginMode === 'phone' && (
                 <>
-                  <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11">
-                    <div className="px-3 bg-zinc-50 border-r border-zinc-200 flex items-center text-sm text-zinc-500 font-medium w-16 justify-center">
+                  <div className="flex bg-white border border-ink-200 rounded-md overflow-hidden focus-within:border-ink-400 transition-colors h-11">
+                    <div className="px-3 bg-ink-50 border-r border-ink-200 flex items-center text-sm text-ink-500 font-medium w-16 justify-center">
                         +86
                     </div>
                     <input
@@ -292,23 +292,23 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
                       placeholder="Mobile Number"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                      className="flex-1 px-3 outline-none text-ink-900 bg-white text-sm placeholder-ink-400"
                       style={inputStyle}
                     />
                   </div>
 
-                  <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11 relative">
+                  <div className="flex bg-white border border-ink-200 rounded-md overflow-hidden focus-within:border-ink-400 transition-colors h-11 relative">
                     <input
                       type={showPassword ? "text" : "password"}
                       placeholder="Password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                      className="flex-1 px-3 outline-none text-ink-900 bg-white text-sm placeholder-ink-400"
                       style={inputStyle}
                     />
                     <button
                       onClick={() => setShowPassword(!showPassword)}
-                      className="px-3 text-zinc-400 hover:text-zinc-600"
+                      className="px-3 text-ink-400 hover:text-ink-600"
                     >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -316,13 +316,13 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
 
                   {/* Confirm Password - only shown in register mode */}
                   {authMode === 'register' && (
-                    <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11 relative">
+                    <div className="flex bg-white border border-ink-200 rounded-md overflow-hidden focus-within:border-ink-400 transition-colors h-11 relative">
                       <input
                         type={showPassword ? "text" : "password"}
                         placeholder="Confirm Password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
-                        className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                        className="flex-1 px-3 outline-none text-ink-900 bg-white text-sm placeholder-ink-400"
                         style={inputStyle}
                       />
                     </div>
@@ -334,28 +334,28 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
               {loginMode === 'email' && (
                 <>
 
-                   <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11">
+                   <div className="flex bg-white border border-ink-200 rounded-md overflow-hidden focus-within:border-ink-400 transition-colors h-11">
                      <input
                        type="email"
                        placeholder={t('auth.email')}
                        value={email}
                        onChange={(e) => setEmail(e.target.value)}
-                       className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                       className="flex-1 px-3 outline-none text-ink-900 bg-white text-sm placeholder-ink-400"
                        style={inputStyle}
                      />
                    </div>
-                   <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11 relative">
+                   <div className="flex bg-white border border-ink-200 rounded-md overflow-hidden focus-within:border-ink-400 transition-colors h-11 relative">
                      <input
                        type={showPassword ? "text" : "password"}
                        placeholder={t('auth.password')}
                        value={password}
                        onChange={(e) => setPassword(e.target.value)}
-                       className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                       className="flex-1 px-3 outline-none text-ink-900 bg-white text-sm placeholder-ink-400"
                        style={inputStyle}
                      />
                      <button
                         onClick={() => setShowPassword(!showPassword)}
-                        className="px-3 text-zinc-400 hover:text-zinc-600"
+                        className="px-3 text-ink-400 hover:text-ink-600"
                       >
                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                      </button>
@@ -363,13 +363,13 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
 
                    {/* Confirm Password - only shown in register mode */}
                    {authMode === 'register' && (
-                     <div className="flex bg-white border border-zinc-200 rounded-md overflow-hidden focus-within:border-zinc-400 transition-colors h-11 relative">
+                     <div className="flex bg-white border border-ink-200 rounded-md overflow-hidden focus-within:border-ink-400 transition-colors h-11 relative">
                        <input
                          type={showPassword ? "text" : "password"}
                          placeholder={t('auth.confirmPassword')}
                          value={confirmPassword}
                          onChange={(e) => setConfirmPassword(e.target.value)}
-                         className="flex-1 px-3 outline-none text-zinc-900 bg-white text-sm placeholder-zinc-400"
+                         className="flex-1 px-3 outline-none text-ink-900 bg-white text-sm placeholder-ink-400"
                          style={inputStyle}
                        />
                      </div>
@@ -387,7 +387,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
               </button>
 
               {/* Toggle between Login and Register */}
-              <p className="text-center text-sm text-zinc-500 mt-2">
+              <p className="text-center text-sm text-ink-500 mt-2">
                   {authMode === 'login' ? (
                     <button
                       onClick={() => { setAuthMode('register'); setError(null); }}
@@ -406,26 +406,26 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
               </p>
 
               {/* Social Login */}
-              <div className="flex justify-center gap-6 mt-8 pt-6 border-t border-zinc-100">
+              <div className="flex justify-center gap-6 mt-8 pt-6 border-t border-ink-100">
                  {/* 1. Google */}
-                 <button className="p-2 rounded-full bg-zinc-50 hover:bg-zinc-100 transition-colors border border-zinc-100" title="Google Quick Login">
+                 <button className="p-2 rounded-full bg-ink-50 hover:bg-ink-100 transition-colors border border-ink-100" title="Google Quick Login">
                     <GoogleIcon />
                  </button>
 
                  {/* 2. Douyin (was QQ) */}
-                 <button className="p-2 rounded-full bg-zinc-50 text-zinc-400 hover:bg-zinc-100 hover:text-black transition-colors border border-zinc-100" title="Douyin Login">
+                 <button className="p-2 rounded-full bg-ink-50 text-ink-400 hover:bg-ink-100 hover:text-black transition-colors border border-ink-100" title="Douyin Login">
                     <DouyinIcon />
                  </button>
 
                  {/* 3. WeChat */}
-                 <button className="p-2 rounded-full bg-zinc-50 hover:bg-zinc-100 transition-colors border border-zinc-100" title="WeChat Login">
+                 <button className="p-2 rounded-full bg-ink-50 hover:bg-ink-100 transition-colors border border-ink-100" title="WeChat Login">
                     <WeChatIcon />
                  </button>
 
                  {/* 4. Switcher: Phone <-> Email */}
                  <button
                     onClick={() => setLoginMode(loginMode === 'phone' ? 'email' : 'phone')}
-                    className="p-2 rounded-full bg-zinc-50 text-zinc-400 hover:bg-zinc-100 hover:text-[#E53E3E] transition-colors border border-zinc-100"
+                    className="p-2 rounded-full bg-ink-50 text-ink-400 hover:bg-ink-100 hover:text-[#E53E3E] transition-colors border border-ink-100"
                     title={loginMode === 'phone' ? "Switch to Email Login" : "Switch to Mobile Login"}
                  >
                     {loginMode === 'phone' ? <Mail size={20} /> : <Smartphone size={20} />}
@@ -433,7 +433,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
               </div>
 
               {/* Terms */}
-              <p className="text-center text-xs text-zinc-400 mt-4">
+              <p className="text-center text-xs text-ink-400 mt-4">
                  By logging in, you agree to our <a href="#" className="text-indigo-500 hover:underline">Terms of Service</a>.
               </p>
            </div>

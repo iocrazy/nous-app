@@ -72,7 +72,7 @@ export const ProjectFileContextMenu: React.FC<ProjectFileContextMenuProps> = ({
       className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg transition-colors ${
         danger
           ? 'text-red-400 hover:bg-red-500/10'
-          : 'text-zinc-300 hover:bg-zinc-700/50'
+          : 'text-ink-300 hover:bg-ink-700/50'
       }`}
     >
       {icon}
@@ -82,7 +82,7 @@ export const ProjectFileContextMenu: React.FC<ProjectFileContextMenuProps> = ({
 
   return (
     <div ref={menuRef} style={style}
-      className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl py-1.5 w-52 overflow-hidden"
+      className="bg-ink-900 border border-ink-700 rounded-xl shadow-2xl py-1.5 w-52 overflow-hidden"
     >
       <MenuItem
         icon={<Download size={14} />}
@@ -103,20 +103,20 @@ export const ProjectFileContextMenu: React.FC<ProjectFileContextMenuProps> = ({
         onMouseEnter={() => setShowStatusSub(false)}
       />
 
-      <div className="border-t border-zinc-800 my-1" />
+      <div className="border-t border-ink-800 my-1" />
 
       {/* Status submenu */}
       <div className="relative"
         onMouseEnter={() => setShowStatusSub(true)}
         onMouseLeave={() => setShowStatusSub(false)}
       >
-        <div className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/50 rounded-lg cursor-default">
+        <div className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-ink-300 hover:bg-ink-700/50 rounded-lg cursor-default">
           <ClipboardCheck size={14} />
           <span className="flex-1">{t('projects.fileMenu.setStatus', 'Set Status')}</span>
-          <span className="text-zinc-600 text-xs">›</span>
+          <span className="text-ink-600 text-xs">›</span>
         </div>
         {showStatusSub && (
-          <div className="absolute left-full top-0 ml-1 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl py-1.5 w-44">
+          <div className="absolute left-full top-0 ml-1 bg-ink-900 border border-ink-700 rounded-xl shadow-2xl py-1.5 w-44">
             {STATUSES.map((s) => (
               <button
                 key={s.value ?? 'none'}
@@ -124,7 +124,7 @@ export const ProjectFileContextMenu: React.FC<ProjectFileContextMenuProps> = ({
                 className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
                   file.review_status === s.value
                     ? 'text-indigo-300 bg-indigo-500/10'
-                    : 'text-zinc-300 hover:bg-zinc-700/50'
+                    : 'text-ink-300 hover:bg-ink-700/50'
                 }`}
               >
                 {t(s.labelKey)}
@@ -153,7 +153,7 @@ export const ProjectFileContextMenu: React.FC<ProjectFileContextMenuProps> = ({
         onMouseEnter={() => setShowStatusSub(false)}
       />
 
-      <div className="border-t border-zinc-800 my-1" />
+      <div className="border-t border-ink-800 my-1" />
 
       <MenuItem
         icon={<Trash2 size={14} />}

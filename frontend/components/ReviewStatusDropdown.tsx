@@ -47,21 +47,21 @@ export const ReviewStatusDropdown: React.FC<ReviewStatusDropdownProps> = ({ curr
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-sm transition-colors"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-ink-800 hover:bg-ink-700 border border-ink-700 text-sm transition-colors"
       >
         {currentStatus ? (
           <>
             <span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[currentStatus].color}`} />
-            <span className="text-zinc-200">{t(STATUS_CONFIG[currentStatus].label)}</span>
+            <span className="text-ink-200">{t(STATUS_CONFIG[currentStatus].label)}</span>
           </>
         ) : (
-          <span className="text-zinc-400">{t('mediatrack.review.setStatus')}</span>
+          <span className="text-ink-400">{t('mediatrack.review.setStatus')}</span>
         )}
-        <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-3.5 h-3.5 text-ink-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-56 rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl z-50 py-1">
+        <div className="absolute top-full left-0 mt-1 w-56 rounded-lg bg-ink-900 border border-ink-700 shadow-xl z-50 py-1">
           {STATUS_ORDER.map((status) => {
             const config = STATUS_CONFIG[status];
             const isActive = currentStatus === status;
@@ -70,23 +70,23 @@ export const ReviewStatusDropdown: React.FC<ReviewStatusDropdownProps> = ({ curr
               <button
                 key={status}
                 onClick={() => handleSelect(status)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-zinc-800 transition-colors text-left"
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-ink-800 transition-colors text-left"
               >
                 <span className={`w-2 h-2 rounded-full flex-shrink-0 ${config.color}`} />
-                <span className="text-zinc-200 flex-1">{t(config.label)}</span>
-                {isActive && <Check className="w-4 h-4 text-zinc-400 flex-shrink-0" />}
+                <span className="text-ink-200 flex-1">{t(config.label)}</span>
+                {isActive && <Check className="w-4 h-4 text-ink-400 flex-shrink-0" />}
               </button>
             );
           })}
 
-          <div className="border-t border-zinc-700 my-1" />
+          <div className="border-t border-ink-700 my-1" />
 
           <button
             onClick={() => handleSelect(null)}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-zinc-800 transition-colors text-left"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-ink-800 transition-colors text-left"
           >
-            <X className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
-            <span className="text-zinc-400 flex-1">{t('mediatrack.review.removeStatus')}</span>
+            <X className="w-3.5 h-3.5 text-ink-500 flex-shrink-0" />
+            <span className="text-ink-400 flex-1">{t('mediatrack.review.removeStatus')}</span>
           </button>
         </div>
       )}

@@ -21,8 +21,8 @@ export const StatsChart: React.FC<StatsChartProps> = ({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
       {/* Activity Chart */}
-      <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 shadow-xl">
-        <h3 className="text-lg font-semibold mb-4 text-zinc-100">Weekly Activity</h3>
+      <div className="bg-ink-900 p-6 rounded-2xl border border-ink-800 shadow-xl">
+        <h3 className="text-lg font-semibold mb-4 text-ink-100">Weekly Activity</h3>
         <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={weeklyActivity}>
@@ -54,8 +54,8 @@ export const StatsChart: React.FC<StatsChartProps> = ({
       </div>
 
       {/* Media Type Distribution */}
-      <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 shadow-xl">
-        <h3 className="text-lg font-semibold mb-4 text-zinc-100">Media Distribution</h3>
+      <div className="bg-ink-900 p-6 rounded-2xl border border-ink-800 shadow-xl">
+        <h3 className="text-lg font-semibold mb-4 text-ink-100">Media Distribution</h3>
         <div className="h-64 w-full flex justify-center items-center">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
@@ -84,8 +84,8 @@ export const StatsChart: React.FC<StatsChartProps> = ({
       </div>
 
       {/* Tags Distribution Chart */}
-      <div className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 shadow-xl lg:col-span-2">
-        <h3 className="text-lg font-semibold mb-4 text-zinc-100">Top Tags Overview</h3>
+      <div className="bg-ink-900 p-6 rounded-2xl border border-ink-800 shadow-xl lg:col-span-2">
+        <h3 className="text-lg font-semibold mb-4 text-ink-100">Top Tags Overview</h3>
         <div className="h-72 w-full">
           {topTags.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -117,7 +117,7 @@ export const StatsChart: React.FC<StatsChartProps> = ({
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-full flex items-center justify-center text-zinc-500">
+            <div className="h-full flex items-center justify-center text-ink-500">
               No tags data available
             </div>
           )}

@@ -14,7 +14,7 @@ const MethodBadge: React.FC<{ method: string }> = ({ method }) => {
     DELETE: 'bg-red-500/20 text-red-400',
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-mono font-semibold ${colors[method] || 'bg-zinc-700 text-zinc-300'}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-mono font-semibold ${colors[method] || 'bg-ink-700 text-ink-300'}`}>
       {method}
     </span>
   );
@@ -30,7 +30,7 @@ const CopyButton: React.FC<{ text: string }> = ({ text }) => {
   return (
     <button
       onClick={handleCopy}
-      className="p-1.5 rounded-md hover:bg-zinc-700/50 text-zinc-500 hover:text-zinc-300 transition-colors"
+      className="p-1.5 rounded-md hover:bg-ink-700/50 text-ink-500 hover:text-ink-300 transition-colors"
       title="Copy"
     >
       {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
@@ -43,7 +43,7 @@ const CodeBlock: React.FC<{ code: string; language?: string }> = ({ code, langua
     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
       <CopyButton text={code} />
     </div>
-    <pre className="p-4 bg-zinc-950 rounded-lg border border-zinc-800/50 text-xs font-mono text-zinc-300 overflow-x-auto whitespace-pre">
+    <pre className="p-4 bg-ink-950 rounded-lg border border-ink-800/50 text-xs font-mono text-ink-300 overflow-x-auto whitespace-pre">
       <code>{code}</code>
     </pre>
   </div>
@@ -61,26 +61,26 @@ const ParamsTable: React.FC<{ params: Param[] }> = ({ params }) => (
   <div className="overflow-x-auto">
     <table className="w-full text-xs">
       <thead>
-        <tr className="border-b border-zinc-800">
-          <th className="text-left py-2 px-3 text-zinc-500 font-medium">Name</th>
-          <th className="text-left py-2 px-3 text-zinc-500 font-medium">Type</th>
-          <th className="text-left py-2 px-3 text-zinc-500 font-medium">Required</th>
-          <th className="text-left py-2 px-3 text-zinc-500 font-medium">Default</th>
-          <th className="text-left py-2 px-3 text-zinc-500 font-medium">Description</th>
+        <tr className="border-b border-ink-800">
+          <th className="text-left py-2 px-3 text-ink-500 font-medium">Name</th>
+          <th className="text-left py-2 px-3 text-ink-500 font-medium">Type</th>
+          <th className="text-left py-2 px-3 text-ink-500 font-medium">Required</th>
+          <th className="text-left py-2 px-3 text-ink-500 font-medium">Default</th>
+          <th className="text-left py-2 px-3 text-ink-500 font-medium">Description</th>
         </tr>
       </thead>
       <tbody>
         {params.map((p) => (
-          <tr key={p.name} className="border-b border-zinc-800/50">
+          <tr key={p.name} className="border-b border-ink-800/50">
             <td className="py-2 px-3 font-mono text-indigo-300">{p.name}</td>
-            <td className="py-2 px-3 text-zinc-400">{p.type}</td>
+            <td className="py-2 px-3 text-ink-400">{p.type}</td>
             <td className="py-2 px-3">
               {p.required
                 ? <span className="text-amber-400">Yes</span>
-                : <span className="text-zinc-600">No</span>}
+                : <span className="text-ink-600">No</span>}
             </td>
-            <td className="py-2 px-3 text-zinc-500 font-mono">{p.default ?? '—'}</td>
-            <td className="py-2 px-3 text-zinc-400">{p.description}</td>
+            <td className="py-2 px-3 text-ink-500 font-mono">{p.default ?? '—'}</td>
+            <td className="py-2 px-3 text-ink-400">{p.description}</td>
           </tr>
         ))}
       </tbody>
@@ -285,42 +285,42 @@ const EndpointSection: React.FC<{ ep: EndpointDef }> = ({ ep }) => {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="border border-zinc-800 rounded-lg overflow-hidden">
+    <div className="border border-ink-800 rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors text-left"
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-ink-800/30 transition-colors text-left"
       >
-        {open ? <ChevronDown size={16} className="text-zinc-500 flex-shrink-0" /> : <ChevronRight size={16} className="text-zinc-500 flex-shrink-0" />}
+        {open ? <ChevronDown size={16} className="text-ink-500 flex-shrink-0" /> : <ChevronRight size={16} className="text-ink-500 flex-shrink-0" />}
         <MethodBadge method={ep.method} />
-        <code className="text-sm font-mono text-zinc-300 flex-1">{ep.path}</code>
-        <span className="text-xs text-zinc-500 hidden sm:inline">{ep.description.split('.')[0]}</span>
+        <code className="text-sm font-mono text-ink-300 flex-1">{ep.path}</code>
+        <span className="text-xs text-ink-500 hidden sm:inline">{ep.description.split('.')[0]}</span>
       </button>
 
       {open && (
-        <div className="border-t border-zinc-800 p-4 space-y-4 bg-zinc-900/30 animate-in fade-in duration-200">
-          <p className="text-sm text-zinc-400">{ep.description}</p>
+        <div className="border-t border-ink-800 p-4 space-y-4 bg-ink-900/30 animate-in fade-in duration-200">
+          <p className="text-sm text-ink-400">{ep.description}</p>
 
           {ep.params && ep.params.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Request Body (JSON)</h4>
+              <h4 className="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">Request Body (JSON)</h4>
               <ParamsTable params={ep.params} />
             </div>
           )}
 
           {ep.queryParams && ep.queryParams.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Query Parameters</h4>
+              <h4 className="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">Query Parameters</h4>
               <ParamsTable params={ep.queryParams} />
             </div>
           )}
 
           <div>
-            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Example Request</h4>
+            <h4 className="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">Example Request</h4>
             <CodeBlock code={ep.curl} />
           </div>
 
           <div>
-            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Example Response</h4>
+            <h4 className="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">Example Response</h4>
             <CodeBlock code={ep.response} language="json" />
           </div>
         </div>
@@ -372,37 +372,37 @@ export const ApiDocsPanel: React.FC = () => {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-white">API Documentation</h1>
-          <p className="text-zinc-400 text-sm">Integrate with MediaHub programmatically</p>
+          <p className="text-ink-400 text-sm">Integrate with MediaHub programmatically</p>
         </div>
       </div>
 
       {/* Section 1: Quick Start */}
-      <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
-          <h2 className="font-semibold text-zinc-200 flex items-center gap-2">
+      <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50">
+          <h2 className="font-semibold text-ink-200 flex items-center gap-2">
             <Server size={18} className="text-indigo-400" />
             Quick Start
           </h2>
         </div>
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-              <div className="text-xs text-zinc-500 mb-1">Base URL</div>
+            <div className="p-4 bg-ink-950/50 rounded-lg border border-ink-800/50">
+              <div className="text-xs text-ink-500 mb-1">Base URL</div>
               <code className="text-sm text-indigo-300 font-mono break-all">{BASE_URL}</code>
             </div>
-            <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-              <div className="text-xs text-zinc-500 mb-1">Authentication</div>
+            <div className="p-4 bg-ink-950/50 rounded-lg border border-ink-800/50">
+              <div className="text-xs text-ink-500 mb-1">Authentication</div>
               <code className="text-sm text-indigo-300 font-mono">X-API-Key</code>
-              <span className="text-zinc-500 text-xs ml-1">header</span>
+              <span className="text-ink-500 text-xs ml-1">header</span>
             </div>
-            <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800/50">
-              <div className="text-xs text-zinc-500 mb-1">Content Type</div>
+            <div className="p-4 bg-ink-950/50 rounded-lg border border-ink-800/50">
+              <div className="text-xs text-ink-500 mb-1">Content Type</div>
               <code className="text-sm text-indigo-300 font-mono">application/json</code>
             </div>
           </div>
 
           <div>
-            <h3 className="text-sm font-medium text-zinc-300 mb-2">Try it now</h3>
+            <h3 className="text-sm font-medium text-ink-300 mb-2">Try it now</h3>
             <CodeBlock code={`curl -X POST "${BASE_URL}/api/v1/media/fetch" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: your_api_key_here" \\
@@ -412,28 +412,28 @@ export const ApiDocsPanel: React.FC = () => {
       </section>
 
       {/* Section 2: Authentication */}
-      <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
-          <h2 className="font-semibold text-zinc-200 flex items-center gap-2">
+      <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50">
+          <h2 className="font-semibold text-ink-200 flex items-center gap-2">
             <Shield size={18} className="text-indigo-400" />
             Authentication
           </h2>
         </div>
         <div className="p-6 space-y-5">
-          <p className="text-sm text-zinc-400">
-            Two authentication methods are supported. Use <strong className="text-zinc-200">API Key</strong> for server-to-server integrations, or <strong className="text-zinc-200">Bearer Token</strong> for user sessions.
+          <p className="text-sm text-ink-400">
+            Two authentication methods are supported. Use <strong className="text-ink-200">API Key</strong> for server-to-server integrations, or <strong className="text-ink-200">Bearer Token</strong> for user sessions.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-zinc-300">Method 1: API Key (Recommended)</h3>
-              <p className="text-xs text-zinc-500">Generate keys in Settings &gt; API Management</p>
+              <h3 className="text-sm font-semibold text-ink-300">Method 1: API Key (Recommended)</h3>
+              <p className="text-xs text-ink-500">Generate keys in Settings &gt; API Management</p>
               <CodeBlock code={`# Include in request header
 X-API-Key: mhk_xxxxxxxxxxxxxxxx`} />
             </div>
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-zinc-300">Method 2: Bearer Token</h3>
-              <p className="text-xs text-zinc-500">Obtained from /auth/signin response</p>
+              <h3 className="text-sm font-semibold text-ink-300">Method 2: Bearer Token</h3>
+              <p className="text-xs text-ink-500">Obtained from /auth/signin response</p>
               <CodeBlock code={`# Include in request header
 Authorization: Bearer eyJhbGciOi...`} />
             </div>
@@ -456,20 +456,20 @@ Authorization: Bearer eyJhbGciOi...`} />
 
           {/* Scopes */}
           <div>
-            <h3 className="text-sm font-semibold text-zinc-300 mb-3">Available Scopes</h3>
+            <h3 className="text-sm font-semibold text-ink-300 mb-3">Available Scopes</h3>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-zinc-800">
-                    <th className="text-left py-2 px-3 text-zinc-500 font-medium">Scope</th>
-                    <th className="text-left py-2 px-3 text-zinc-500 font-medium">Description</th>
+                  <tr className="border-b border-ink-800">
+                    <th className="text-left py-2 px-3 text-ink-500 font-medium">Scope</th>
+                    <th className="text-left py-2 px-3 text-ink-500 font-medium">Description</th>
                   </tr>
                 </thead>
                 <tbody>
                   {scopesData.map((s) => (
-                    <tr key={s.scope} className="border-b border-zinc-800/50">
+                    <tr key={s.scope} className="border-b border-ink-800/50">
                       <td className="py-2 px-3 font-mono text-indigo-300">{s.scope}</td>
-                      <td className="py-2 px-3 text-zinc-400">{s.description}</td>
+                      <td className="py-2 px-3 text-ink-400">{s.description}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -480,10 +480,10 @@ Authorization: Bearer eyJhbGciOi...`} />
       </section>
 
       {/* Section 3: Endpoints */}
-      <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
-          <h2 className="font-semibold text-zinc-200">Endpoints</h2>
-          <p className="text-xs text-zinc-500 mt-0.5">Click an endpoint to expand details, parameters, and examples</p>
+      <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50">
+          <h2 className="font-semibold text-ink-200">Endpoints</h2>
+          <p className="text-xs text-ink-500 mt-0.5">Click an endpoint to expand details, parameters, and examples</p>
         </div>
         <div className="p-4 space-y-2">
           {endpoints.map((ep) => (
@@ -493,9 +493,9 @@ Authorization: Bearer eyJhbGciOi...`} />
       </section>
 
       {/* Section 4: Error Codes */}
-      <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
-          <h2 className="font-semibold text-zinc-200 flex items-center gap-2">
+      <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50">
+          <h2 className="font-semibold text-ink-200 flex items-center gap-2">
             <AlertTriangle size={18} className="text-amber-400" />
             Error Codes
           </h2>
@@ -504,18 +504,18 @@ Authorization: Bearer eyJhbGciOi...`} />
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-zinc-800">
-                  <th className="text-left py-2 px-3 text-zinc-500 font-medium text-xs">Code</th>
-                  <th className="text-left py-2 px-3 text-zinc-500 font-medium text-xs">Status</th>
-                  <th className="text-left py-2 px-3 text-zinc-500 font-medium text-xs">Description</th>
+                <tr className="border-b border-ink-800">
+                  <th className="text-left py-2 px-3 text-ink-500 font-medium text-xs">Code</th>
+                  <th className="text-left py-2 px-3 text-ink-500 font-medium text-xs">Status</th>
+                  <th className="text-left py-2 px-3 text-ink-500 font-medium text-xs">Description</th>
                 </tr>
               </thead>
               <tbody>
                 {errorCodes.map((e) => (
-                  <tr key={e.code} className="border-b border-zinc-800/50">
+                  <tr key={e.code} className="border-b border-ink-800/50">
                     <td className="py-2 px-3 font-mono text-amber-400 text-xs">{e.code}</td>
-                    <td className="py-2 px-3 text-zinc-300 text-xs">{e.status}</td>
-                    <td className="py-2 px-3 text-zinc-400 text-xs">{e.description}</td>
+                    <td className="py-2 px-3 text-ink-300 text-xs">{e.status}</td>
+                    <td className="py-2 px-3 text-ink-400 text-xs">{e.description}</td>
                   </tr>
                 ))}
               </tbody>
@@ -523,7 +523,7 @@ Authorization: Bearer eyJhbGciOi...`} />
           </div>
 
           <div className="mt-4">
-            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Error Response Format</h3>
+            <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">Error Response Format</h3>
             <CodeBlock code={`{
   "detail": "Error message describing what went wrong"
 }`} language="json" />

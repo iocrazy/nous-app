@@ -99,16 +99,16 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
       {/* Panel */}
       <div
         ref={panelRef}
-        className="relative w-96 bg-zinc-900 border-l border-zinc-800 h-full overflow-y-auto animate-in slide-in-from-right duration-200"
+        className="relative w-96 bg-ink-900 border-l border-ink-800 h-full overflow-y-auto animate-in slide-in-from-right duration-200"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">
           <h2 className="text-lg font-semibold text-white">
             {t('projects.settings.title', 'Project Settings')}
           </h2>
           <button
             onClick={onClose}
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={18} />
           </button>
@@ -118,44 +118,44 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
           {/* Project Name */}
           <div>
             <div className="flex justify-between mb-2">
-              <label className="text-sm font-medium text-zinc-300">
+              <label className="text-sm font-medium text-ink-300">
                 {t('projects.settings.name', 'Project Name')}
               </label>
-              <span className="text-xs text-zinc-600">{name.length}/30</span>
+              <span className="text-xs text-ink-600">{name.length}/30</span>
             </div>
             <input
               value={name}
               onChange={(e) => setName(e.target.value.slice(0, 30))}
-              className="w-full px-3 py-2.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full px-3 py-2.5 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
 
           {/* Announcement */}
           <div>
             <div className="flex justify-between mb-2">
-              <label className="text-sm font-medium text-zinc-300">
+              <label className="text-sm font-medium text-ink-300">
                 {t('projects.settings.announcement', 'Announcement')}
               </label>
-              <span className="text-xs text-zinc-600">{announcement.length}/100</span>
+              <span className="text-xs text-ink-600">{announcement.length}/100</span>
             </div>
             <textarea
               value={announcement}
               onChange={(e) => setAnnouncement(e.target.value.slice(0, 100))}
               placeholder={t('projects.settings.announcementPlaceholder', 'Help new members understand this project')}
               rows={3}
-              className="w-full px-3 py-2.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              className="w-full px-3 py-2.5 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
             />
           </div>
 
           {/* Project Type */}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
+            <label className="block text-sm font-medium text-ink-300 mb-2">
               {t('projects.settings.type', 'Project Type')}
             </label>
             <select
               value={projectType}
               onChange={(e) => setProjectType(e.target.value as any)}
-              className="w-full px-3 py-2.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full px-3 py-2.5 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="internal">{t('projects.settings.typeInternal', 'Internal')}</option>
               <option value="external">{t('projects.settings.typeExternal', 'External')}</option>
@@ -165,14 +165,14 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
 
           {/* Project Group */}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
+            <label className="block text-sm font-medium text-ink-300 mb-2">
               {t('projects.settings.group', 'Project Group')}
             </label>
             <input
               value={projectGroup}
               onChange={(e) => setProjectGroup(e.target.value)}
               placeholder={t('projects.settings.noGroup', 'No group')}
-              className="w-full px-3 py-2.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full px-3 py-2.5 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
 
@@ -180,14 +180,14 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
           <button
             onClick={handleSave}
             disabled={!hasChanges || isSaving || !name.trim()}
-            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-ink-700 disabled:text-ink-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
           >
             {isSaving && <Loader2 size={14} className="animate-spin" />}
             {t('projects.settings.save', 'Save Changes')}
           </button>
 
           {/* Danger Zone */}
-          <div className="border-t border-zinc-800 pt-6">
+          <div className="border-t border-ink-800 pt-6">
             <h3 className="text-sm font-medium text-red-400 mb-3">
               {t('projects.settings.dangerZone', 'Danger Zone')}
             </h3>
@@ -215,7 +215,7 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(false)}
-                    className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors"
+                    className="flex-1 py-2 bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg text-sm font-medium transition-colors"
                   >
                     {t('projects.deleteConfirm.cancel', 'Cancel')}
                   </button>

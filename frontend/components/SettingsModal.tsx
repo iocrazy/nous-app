@@ -168,12 +168,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal — wider, fixed height */}
-      <div className="relative bg-zinc-900 border border-zinc-800 md:rounded-2xl shadow-2xl w-full md:max-w-6xl md:mx-4 h-dvh md:h-[82vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 md:rounded-2xl shadow-2xl w-full md:max-w-6xl md:mx-4 h-dvh md:h-[82vh] flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
         {/* Mobile Header — pt respects iOS safe-area so the avatar/name + tab
             bar below clear the status bar / Dynamic Island (full-screen modal
             starts at y=0). */}
-        <div className="md:hidden flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-zinc-800 bg-zinc-950/50">
+        <div className="md:hidden flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 border-b border-ink-800 bg-ink-950/50">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
               {user.avatarUrl ? (
@@ -188,14 +188,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
         </div>
 
         {/* Mobile Tab Bar (scrollable) */}
-        <div className="md:hidden flex overflow-x-auto border-b border-zinc-800 bg-zinc-950/30">
+        <div className="md:hidden flex overflow-x-auto border-b border-ink-800 bg-ink-950/30">
           {navSections.flatMap(s => s.items).map((item) => (
             <button
               key={item.id}
@@ -203,7 +203,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
                 activeTab === item.id
                   ? 'text-white'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  : 'text-ink-500 hover:text-ink-300'
               }`}
             >
               <span className="relative">
@@ -221,9 +221,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Desktop Sidebar */}
-        <div className="hidden md:flex w-56 bg-zinc-950/50 border-r border-zinc-800 flex-col flex-shrink-0">
+        <div className="hidden md:flex w-56 bg-ink-950/50 border-r border-ink-800 flex-col flex-shrink-0">
           {/* User header */}
-          <div className="p-4 border-b border-zinc-800">
+          <div className="p-4 border-b border-ink-800">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden flex-shrink-0">
                 {user.avatarUrl ? (
@@ -236,7 +236,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-white truncate">{user.name}</p>
-                <p className="text-xs text-zinc-500 truncate">{user.email}</p>
+                <p className="text-xs text-ink-500 truncate">{user.email}</p>
               </div>
             </div>
           </div>
@@ -245,7 +245,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
             {navSections.map((section) => (
               <div key={section.label}>
-                <p className="px-3 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">
+                <p className="px-3 text-[10px] font-semibold text-ink-600 uppercase tracking-wider mb-2">
                   {section.label}
                 </p>
                 <div className="space-y-0.5">
@@ -255,8 +255,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onClick={() => setActiveTab(item.id)}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer select-none ${
                         activeTab === item.id
-                          ? 'bg-zinc-800 text-white'
-                          : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
+                          ? 'bg-ink-800 text-white'
+                          : 'text-ink-400 hover:text-white hover:bg-ink-800/50'
                       }`}
                     >
                       <span className="relative flex-shrink-0">
@@ -274,7 +274,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </nav>
 
           {/* Version — bottom of settings sidebar, no divider */}
-          <div className="px-5 py-3 text-[11px] text-zinc-600">
+          <div className="px-5 py-3 text-[11px] text-ink-600">
             <VersionBadge />
           </div>
         </div>
@@ -282,13 +282,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
           {/* Desktop Header */}
-          <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+          <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-ink-800">
             <h2 className="text-lg font-semibold text-white">
               {TAB_LABELS[activeTab]}
             </h2>
             <button
               onClick={onClose}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
             >
               <X size={20} />
             </button>

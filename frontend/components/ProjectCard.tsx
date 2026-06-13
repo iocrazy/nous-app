@@ -51,7 +51,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onTo
   return (
     <div
       onClick={onClick}
-      className={`bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/50 hover:border-zinc-600 rounded-xl p-5 cursor-pointer transition-all duration-200 group border-l-4 ${borderColor}`}
+      className={`bg-ink-800/80 hover:bg-ink-800 border border-ink-700/50 hover:border-ink-600 rounded-xl p-5 cursor-pointer transition-all duration-200 group border-l-4 ${borderColor}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
@@ -59,23 +59,23 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onTo
             {project.name}
           </h3>
           {project.description && (
-            <p className="text-zinc-400 text-sm mt-1 line-clamp-2">{project.description}</p>
+            <p className="text-ink-400 text-sm mt-1 line-clamp-2">{project.description}</p>
           )}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
           <button
             onClick={onToggleStar}
-            className="p-1.5 rounded-lg hover:bg-zinc-700 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-ink-700 transition-colors"
           >
             <Star
               size={16}
-              className={project.is_starred ? 'text-yellow-400 fill-yellow-400' : 'text-zinc-500 hover:text-yellow-400'}
+              className={project.is_starred ? 'text-yellow-400 fill-yellow-400' : 'text-ink-500 hover:text-yellow-400'}
             />
           </button>
           {onContextMenu && (
             <button
               onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
-              className="p-1.5 rounded-lg hover:bg-zinc-700 text-zinc-500 hover:text-zinc-200
+              className="p-1.5 rounded-lg hover:bg-ink-700 text-ink-500 hover:text-ink-200
                          transition-colors opacity-0 group-hover:opacity-100"
             >
               <MoreVertical size={16} />
@@ -89,13 +89,13 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onTo
           {t(`mediatrack.${project.project_type}`) || colors.text}
         </span>
         {project.project_group && (
-          <span className="text-xs text-zinc-500 bg-zinc-700/50 px-2 py-0.5 rounded-full">
+          <span className="text-xs text-ink-500 bg-ink-700/50 px-2 py-0.5 rounded-full">
             {project.project_group}
           </span>
         )}
       </div>
 
-      <div className="flex items-center justify-between mt-4 text-xs text-zinc-500">
+      <div className="flex items-center justify-between mt-4 text-xs text-ink-500">
         <div className="flex items-center gap-1">
           <FileText size={12} />
           <span>{project.file_count} {t('mediatrack.files')}</span>

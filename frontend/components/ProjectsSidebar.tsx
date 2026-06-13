@@ -23,14 +23,14 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-400
-                   hover:text-zinc-200 hover:bg-zinc-800/50 rounded-md transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-ink-400
+                   hover:text-ink-200 hover:bg-ink-800/50 rounded-md transition-colors"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         {icon}
         <span className="flex-1 text-left truncate">{title}</span>
         {count != null && (
-          <span className="text-[10px] text-zinc-600">({count})</span>
+          <span className="text-[10px] text-ink-600">({count})</span>
         )}
       </button>
       {open && <div className="ml-4 mt-0.5 space-y-0.5">{children}</div>}
@@ -50,7 +50,7 @@ const SidebarProjectItem: React.FC<{
                 transition-colors truncate
                 ${active
                   ? 'bg-indigo-500/20 text-indigo-300'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
+                  : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/50'}`}
   >
     <span className="truncate">{project.name}</span>
   </button>
@@ -90,8 +90,8 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
 
   if (collapsed) {
     return (
-      <div className="w-10 border-r border-zinc-800 flex flex-col items-center py-3 shrink-0">
-        <button onClick={onToggleCollapse} className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors">
+      <div className="w-10 border-r border-ink-800 flex flex-col items-center py-3 shrink-0">
+        <button onClick={onToggleCollapse} className="p-1.5 text-ink-500 hover:text-ink-300 transition-colors">
           <PanelLeftOpen size={16} />
         </button>
       </div>
@@ -99,20 +99,20 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
   }
 
   return (
-    <aside className="w-52 border-r border-zinc-800/80 flex flex-col h-full shrink-0">
+    <aside className="w-52 border-r border-ink-800/80 flex flex-col h-full shrink-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-zinc-800/50">
-        <span className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+      <div className="flex items-center justify-between px-3 py-3 border-b border-ink-800/50">
+        <span className="flex items-center gap-2 text-sm font-medium text-ink-200">
           <LayoutGrid size={14} />
           {t('projects.sidebar.projectList', 'Projects')}
         </span>
         <div className="flex items-center gap-1">
           <button onClick={onCreateProject}
-            className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors">
+            className="p-1 text-ink-500 hover:text-ink-300 hover:bg-ink-800 rounded transition-colors">
             <Plus size={14} />
           </button>
           <button onClick={onToggleCollapse}
-            className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors">
+            className="p-1 text-ink-500 hover:text-ink-300 hover:bg-ink-800 rounded transition-colors">
             <PanelLeftClose size={14} />
           </button>
         </div>
@@ -127,7 +127,7 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
           defaultOpen={starredProjects.length > 0}
         >
           {starredProjects.length === 0 ? (
-            <p className="text-[10px] text-zinc-600 px-2 py-1">
+            <p className="text-[10px] text-ink-600 px-2 py-1">
               {t('projects.sidebar.noStarred', 'No starred projects')}
             </p>
           ) : (
@@ -163,7 +163,7 @@ export const ProjectsSidebar: React.FC<ProjectsSidebarProps> = ({
           </>
         )}
 
-        <div className="border-t border-zinc-800/50 my-2" />
+        <div className="border-t border-ink-800/50 my-2" />
 
         {/* Internal */}
         <CollapsibleSection

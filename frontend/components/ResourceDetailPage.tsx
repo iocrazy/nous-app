@@ -119,13 +119,13 @@ function formatDuration(seconds: number | null | undefined): string {
 }
 
 function getFileIcon(mimeType: string | null | undefined) {
-  if (!mimeType) return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  if (!mimeType) return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
   if (mimeType.startsWith('video/')) return { icon: Film, color: 'text-purple-400', bg: 'bg-purple-500/20' };
   if (mimeType.startsWith('image/')) return { icon: Image, color: 'text-green-400', bg: 'bg-green-500/20' };
   if (mimeType.startsWith('audio/')) return { icon: Music, color: 'text-orange-400', bg: 'bg-orange-500/20' };
   if (mimeType.startsWith('text/') || mimeType.includes('pdf') || mimeType.includes('document'))
     return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
-  return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
 }
 
 function getFileExtension(filename: string | null | undefined): string {
@@ -209,8 +209,8 @@ const FilePreview: React.FC<{
     return (
       <div className="flex flex-col items-center gap-4 text-center">
         <IconComponent size={64} className={`${color} opacity-60`} />
-        <p className="text-zinc-400 text-sm">{resource.filename}</p>
-        <p className="text-zinc-500 text-xs">{t('resources.noPreview')}</p>
+        <p className="text-ink-400 text-sm">{resource.filename}</p>
+        <p className="text-ink-500 text-xs">{t('resources.noPreview')}</p>
       </div>
     );
   }
@@ -308,8 +308,8 @@ const FilePreview: React.FC<{
   return (
     <div className="flex flex-col items-center gap-4 text-center">
       <IconComponent size={64} className={`${color} opacity-60`} />
-      <p className="text-zinc-300 font-medium">{resource.filename}</p>
-      <p className="text-zinc-500 text-sm">{t('resources.noPreview')}</p>
+      <p className="text-ink-300 font-medium">{resource.filename}</p>
+      <p className="text-ink-500 text-sm">{t('resources.noPreview')}</p>
       <a
         href={fileUrl}
         download
@@ -1010,8 +1010,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-        <Loader2 size={32} className="animate-spin text-zinc-500 mb-3" />
-        <p className="text-zinc-500 text-sm">{t('common.loading')}</p>
+        <Loader2 size={32} className="animate-spin text-ink-500 mb-3" />
+        <p className="text-ink-500 text-sm">{t('common.loading')}</p>
       </div>
     );
   }
@@ -1020,11 +1020,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   if (error || !resource) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center">
-        <FileQuestion size={48} className="text-zinc-600 mb-4" />
-        <p className="text-zinc-400 text-lg font-medium mb-2">{error || 'Resource not found'}</p>
+        <FileQuestion size={48} className="text-ink-600 mb-4" />
+        <p className="text-ink-400 text-lg font-medium mb-2">{error || 'Resource not found'}</p>
         <button
           onClick={handleBack}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors mt-4"
+          className="flex items-center gap-2 px-4 py-2 bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors mt-4"
         >
           <ArrowLeft size={16} />
           {t('common.back')}
@@ -1100,7 +1100,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           <button
             onClick={() => setShowFileList(!showFileList)}
             className={`hidden md:block p-1.5 rounded-lg transition-colors ${
-              showFileList ? 'bg-zinc-800 text-indigo-400' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+              showFileList ? 'bg-ink-800 text-indigo-400' : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
             }`}
             title={t('resources.fileListPanel')}
           >
@@ -1114,7 +1114,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             onClick={() => navigateToSibling('prev')}
             disabled={!hasPrev}
             className={`p-1 rounded transition-colors ${
-              hasPrev ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800' : 'text-zinc-700 cursor-not-allowed'
+              hasPrev ? 'text-ink-400 hover:text-ink-200 hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'
             }`}
             title={t('resources.prevFile')}
           >
@@ -1122,7 +1122,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </button>
           <div className="flex items-center gap-2 px-2">
             <FileIcon size={14} className={iconColor} />
-            <span className="text-sm text-zinc-200 font-medium max-w-[140px] md:max-w-[300px] truncate">
+            <span className="text-sm text-ink-200 font-medium max-w-[140px] md:max-w-[300px] truncate">
               {resource.filename}
             </span>
             {/* Version dropdown */}
@@ -1133,7 +1133,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md transition-colors ${
                     selectedVersionId
                       ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
-                      : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+                      : 'bg-ink-800 text-ink-400 hover:text-ink-200 hover:bg-ink-700'
                   }`}
                 >
                   <Layers size={12} />
@@ -1145,9 +1145,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   <ChevronDown size={12} />
                 </button>
                 {showVersionDropdown && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-56 py-1">
-                    <div className="px-3 py-1.5 border-b border-zinc-800">
-                      <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 bg-ink-900 border border-ink-700 rounded-lg shadow-xl w-56 py-1">
+                    <div className="px-3 py-1.5 border-b border-ink-800">
+                      <p className="text-[10px] font-semibold text-ink-500 uppercase tracking-widest">
                         {t('resources.versions', 'Versions')}
                       </p>
                     </div>
@@ -1164,7 +1164,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                               className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
                                 isSelected
                                   ? 'bg-indigo-500/10 text-indigo-300'
-                                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                                  : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
                               }`}
                             >
                               <span className={`font-semibold ${isCurrentVer ? 'text-indigo-400' : ''}`}>
@@ -1188,7 +1188,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                           );
                         })}
                     </div>
-                    <div className="border-t border-zinc-800 px-2 py-1.5">
+                    <div className="border-t border-ink-800 px-2 py-1.5">
                       <button
                         onClick={() => { setShowVersionDropdown(false); setShowVersionManager(true); }}
                         className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-indigo-400 hover:bg-indigo-500/10 rounded-md transition-colors"
@@ -1245,7 +1245,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               </span>
             )}
             {currentIndex >= 0 && siblingFiles.length > 0 && (
-              <span className="text-xs text-zinc-500">
+              <span className="text-xs text-ink-500">
                 ({currentIndex + 1}/{siblingFiles.length})
               </span>
             )}
@@ -1254,7 +1254,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             onClick={() => navigateToSibling('next')}
             disabled={!hasNext}
             className={`p-1 rounded transition-colors ${
-              hasNext ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800' : 'text-zinc-700 cursor-not-allowed'
+              hasNext ? 'text-ink-400 hover:text-ink-200 hover:bg-ink-800' : 'text-ink-700 cursor-not-allowed'
             }`}
             title={t('resources.nextFile')}
           >
@@ -1275,7 +1275,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <a
               href={fileUrl}
               download
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
             >
               <Download size={14} />
               <span>{t('resources.download')}</span>
@@ -1284,17 +1284,17 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           <div className="relative">
             <button
               onClick={() => setShowMoreMenu(!showMoreMenu)}
-              className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
             >
               <MoreHorizontal size={16} />
             </button>
             {showMoreMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-44">
+                <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-44">
                   {fileUrl && (
                     <button
-                      className="block w-full text-left px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                      className="block w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
                       onClick={() => {
                         setShowMoreMenu(false);
                         downloadFile(fileUrl, resource.filename || 'download', {
@@ -1317,18 +1317,18 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden">
         {/* File list panel — desktop only */}
         {showFileList && (
-          <div className="hidden md:flex w-64 border-r border-zinc-800/80 flex-col shrink-0">
+          <div className="hidden md:flex w-64 border-r border-ink-800/80 flex-col shrink-0">
             {/* Header + search */}
-            <div className="px-3 py-2.5 border-b border-zinc-800/60">
-              <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">{t('resources.fileListPanel')}</p>
+            <div className="px-3 py-2.5 border-b border-ink-800/60">
+              <p className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-2">{t('resources.fileListPanel')}</p>
               <div className="relative">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-600" />
                 <input
                   type="text"
                   value={fileListSearch}
                   onChange={(e) => setFileListSearch(e.target.value)}
                   placeholder={t('resources.searchFiles')}
-                  className="w-full bg-zinc-800/60 border border-zinc-700/30 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                  className="w-full bg-ink-800/60 border border-ink-700/30 rounded-lg pl-8 pr-3 py-1.5 text-xs text-ink-200 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
                 />
               </div>
             </div>
@@ -1350,7 +1350,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all ${
                       isActive
                         ? 'bg-indigo-500/10 border-l-2 border-indigo-400'
-                        : 'hover:bg-zinc-800/60 border-l-2 border-transparent'
+                        : 'hover:bg-ink-800/60 border-l-2 border-transparent'
                     }`}
                   >
                     {thumb ? (
@@ -1365,14 +1365,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         <SibIcon size={14} className={sibColor} />
                       </div>
                     )}
-                    <span className={`text-xs truncate ${isActive ? 'text-indigo-300 font-medium' : 'text-zinc-400'}`}>
+                    <span className={`text-xs truncate ${isActive ? 'text-indigo-300 font-medium' : 'text-ink-400'}`}>
                       {item.resource?.filename ?? 'Untitled'}
                     </span>
                   </button>
                 );
               })}
               {filteredSiblings.length === 0 && (
-                <p className="text-xs text-zinc-600 text-center py-6">{t('resources.noResources')}</p>
+                <p className="text-xs text-ink-600 text-center py-6">{t('resources.noResources')}</p>
               )}
             </div>
           </div>
@@ -1380,7 +1380,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
         {/* Preview area — audio gets a tall hero (matches the download detail
             view); other media keep the compact mobile preview. */}
-        <div className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col bg-zinc-950 min-w-0 overflow-hidden shrink-0 md:shrink`}>
+        <div className={`w-full ${isAudio ? 'min-h-[78vh] sm:h-[50vh]' : 'h-64 sm:h-80'} md:h-auto md:flex-1 flex flex-col bg-ink-950 min-w-0 overflow-hidden shrink-0 md:shrink`}>
           {/* Version preview banner */}
           {selectedVersionId && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 shrink-0">
@@ -1437,17 +1437,17 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
         {/* Right: Inspector panel — full-width on mobile, resizable on desktop (no border-l divider) */}
         <div
-          className="w-full md:w-auto border-t md:border-t-0 border-zinc-800 flex flex-col shrink-0"
+          className="w-full md:w-auto border-t md:border-t-0 border-ink-800 flex flex-col shrink-0"
           style={isDesktop ? { width: panelWidth } : undefined}
         >
           {/* Tab bar */}
-          <div className="flex border-b border-zinc-800 shrink-0">
+          <div className="flex border-b border-ink-800 shrink-0">
             <button
               onClick={() => setRightTab('info')}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 rightTab === 'info'
                   ? 'border-indigo-500 text-indigo-400'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                  : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
               }`}
             >
               <Eye size={16} />
@@ -1459,7 +1459,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                   rightTab === 'review'
                     ? 'border-indigo-500 text-indigo-400'
-                    : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                    : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
                 }`}
               >
                 <Pencil size={16} />
@@ -1471,7 +1471,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 onClick={() => setRightTab('lyrics')}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                   rightTab === 'lyrics' ? 'border-indigo-500 text-indigo-400'
-                    : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'}`}
+                    : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'}`}
               >
                 <Music size={16} />
                 {t('resources.detail.lyrics', 'Lyrics')}
@@ -1484,7 +1484,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                     rightTab === 'transcript'
                       ? 'border-indigo-500 text-indigo-400'
-                      : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                      : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
                   }`}
                 >
                   <FileText size={16} />
@@ -1496,7 +1496,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                     rightTab === 'analysis'
                       ? 'border-indigo-500 text-indigo-400'
-                      : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                      : 'border-transparent text-ink-400 hover:text-ink-200 hover:border-ink-700'
                   }`}
                 >
                   <Sparkles size={16} />
@@ -1508,11 +1508,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           </div>
 
           {rightTab === 'info' ? (
-          <div className="overflow-y-auto flex-1 bg-zinc-950 md:bg-transparent p-3">
+          <div className="overflow-y-auto flex-1 bg-ink-950 md:bg-transparent p-3">
           <div className={detailCardClass}>
           {/* Mobile: ID row with share + more (like Downloads) */}
           <div className="flex md:hidden items-center justify-between px-4 pt-3 pb-1">
-            <span className="text-xs text-zinc-600 font-mono">ID: {String(resource.id)}</span>
+            <span className="text-xs text-ink-600 font-mono">ID: {String(resource.id)}</span>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowShareModal(true)}
@@ -1523,19 +1523,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <div className="relative">
                 <button
                   onClick={() => setShowMoreMenu(!showMoreMenu)}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors"
+                  className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
                 >
                   <MoreHorizontal size={16} />
                 </button>
                 {showMoreMenu && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1 w-48">
+                    <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-48">
                       {fileUrl && (
                         <a
                           href={fileUrl}
                           download
-                          className="flex items-center gap-2 w-full px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                          className="flex items-center gap-2 w-full px-3 py-2 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
                           onClick={() => setShowMoreMenu(false)}
                         >
                           <Download size={14} />
@@ -1544,7 +1544,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       )}
                       {fileUrl && (
                         <button
-                          className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+                          className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
                           onClick={() => {
                             setShowMoreMenu(false);
                             downloadFile(fileUrl, resource.filename || 'download', {
@@ -1571,7 +1571,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 ? (resource.audio_bitrate_kbps ? <DetailBadge variant="accent">{resource.audio_bitrate_kbps}kbps</DetailBadge> : null)
                 : (resource.resolution && <DetailBadge variant="accent">{resource.resolution.replace(/:/g, 'x')}</DetailBadge>)}
             </div>
-            <span className="text-xs text-zinc-500 font-mono truncate min-w-0">ID: {String(resource.id)}</span>
+            <span className="text-xs text-ink-500 font-mono truncate min-w-0">ID: {String(resource.id)}</span>
           </div>
 
           {/* Editable Filename — big title */}
@@ -1586,7 +1586,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   if (e.key === 'Enter') commitName();
                   if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
                 }}
-                className="w-full bg-zinc-800 border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold text-white focus:outline-none"
+                className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold text-white focus:outline-none"
                 autoFocus
               />
             ) : (
@@ -1594,8 +1594,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 className="group flex items-start gap-1.5 cursor-pointer"
                 onClick={() => setEditingName(true)}
               >
-                <h2 className="text-lg md:text-xl font-bold text-zinc-100 break-words leading-tight flex-1">{resource.filename}</h2>
-                <Pencil size={14} className="text-zinc-600 group-hover:text-zinc-400 mt-1 shrink-0 transition-colors" />
+                <h2 className="text-lg md:text-xl font-bold text-ink-100 break-words leading-tight flex-1">{resource.filename}</h2>
+                <Pencil size={14} className="text-ink-600 group-hover:text-ink-400 mt-1 shrink-0 transition-colors" />
               </div>
             )}
           </div>
@@ -1615,7 +1615,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
           {/* Rating — above notes (download-detail style) */}
           <div className="px-4 mt-3 flex items-center gap-4">
-            <span className="text-xs text-zinc-500 uppercase tracking-wider">{t('resources.infoPanel.rating')}</span>
+            <span className="text-xs text-ink-500 uppercase tracking-wider">{t('resources.infoPanel.rating')}</span>
             <RatingStars value={resource.rating ?? 0} onChange={handleRating} />
           </div>
 
@@ -1627,7 +1627,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onBlur={commitNotes}
               placeholder={t('resources.infoPanel.notesPlaceholder')}
               rows={3}
-              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+              className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
             />
           </div>
 
@@ -1637,10 +1637,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <div className="px-4 mt-2">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  <span className="text-[10px] text-ink-500 uppercase tracking-wider">
                     {t('resources.infoPanel.prompt', 'Prompt')}
                   </span>
-                  <div className="flex rounded overflow-hidden border border-zinc-700/60">
+                  <div className="flex rounded overflow-hidden border border-ink-700/60">
                     {(['en', 'zh'] as const).map((lang) => (
                       <button
                         key={lang}
@@ -1648,7 +1648,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         className={`px-1.5 py-0.5 text-[9px] transition-colors ${
                           promptLang === lang
                             ? 'bg-indigo-500/30 text-indigo-200'
-                            : 'text-zinc-500 hover:text-zinc-300'
+                            : 'text-ink-500 hover:text-ink-300'
                         }`}
                       >
                         {lang === 'en' ? 'EN' : '中'}
@@ -1665,7 +1665,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         'resources.infoPanel.generatePromptHint',
                         'Reverse-engineer the prompt from this image',
                       )}
-                      className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                      className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
                     >
                       {promptGenerating ? (
                         <Loader2 size={11} className="animate-spin" />
@@ -1685,7 +1685,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         'resources.infoPanel.translatePromptHint',
                         'Translate from the other language',
                       )}
-                      className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                      className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
                     >
                       {promptTranslating ? (
                         <Loader2 size={11} className="animate-spin" />
@@ -1700,7 +1700,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   ) && (
                     <button
                       onClick={copyPrompt}
-                      className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors"
+                      className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-indigo-300 transition-colors"
                     >
                       <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
                     </button>
@@ -1713,14 +1713,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 onBlur={commitPrompt}
                 placeholder={t('resources.infoPanel.promptPlaceholder', 'Paste the AI generation prompt...')}
                 rows={4}
-                className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-2 text-xs font-mono text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+                className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
               />
             </div>
           ) : (
             <div className="px-4 mt-1 flex items-center gap-3">
               <button
                 onClick={() => setPromptOpen(true)}
-                className="text-[11px] text-zinc-600 hover:text-indigo-300 transition-colors"
+                className="text-[11px] text-ink-600 hover:text-indigo-300 transition-colors"
               >
                 + {t('resources.infoPanel.addPrompt', 'Add Prompt')}
               </button>
@@ -1728,7 +1728,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 <button
                   onClick={handleGeneratePrompt}
                   disabled={promptGenerating}
-                  className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1 text-[11px] text-ink-600 hover:text-indigo-300 transition-colors disabled:opacity-50"
                 >
                   {promptGenerating ? (
                     <Loader2 size={11} className="animate-spin" />
@@ -1749,7 +1749,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onBlur={commitUrl}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               placeholder={t('resources.infoPanel.urlPlaceholder')}
-              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50"
+              className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-1.5 text-xs text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50"
             />
           </div>
 
@@ -1763,7 +1763,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   'resources.infoPanel.autoTagHint',
                   'Classify this image into bilingual tags across 12 dimensions',
                 )}
-                className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
               >
                 {autoTagging ? (
                   <Loader2 size={11} className="animate-spin" />
@@ -1789,40 +1789,40 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           />
 
           {/* Properties — simple rows (Type omitted: already shown as badge above the title) */}
-          <div className="px-4 mt-4 border-t border-zinc-800/60 pt-3 flex flex-col gap-1.5">
+          <div className="px-4 mt-4 border-t border-ink-800/60 pt-3 flex flex-col gap-1.5">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-zinc-500">{t('resources.infoPanel.size')}</span>
-              <span className="text-zinc-300">{formatFileSize(resource.file_size_bytes)}</span>
+              <span className="text-ink-500">{t('resources.infoPanel.size')}</span>
+              <span className="text-ink-300">{formatFileSize(resource.file_size_bytes)}</span>
             </div>
             {(isVideo || isAudio) && resource.duration_seconds != null && (
               <div className="flex items-center justify-between text-xs">
-                <span className="text-zinc-500">{t('resources.infoPanel.duration')}</span>
-                <span className="text-zinc-300">{formatDuration(resource.duration_seconds)}</span>
+                <span className="text-ink-500">{t('resources.infoPanel.duration')}</span>
+                <span className="text-ink-300">{formatDuration(resource.duration_seconds)}</span>
               </div>
             )}
             {resource.current_version > 1 && (
               <div className="flex items-center justify-between text-xs">
-                <span className="text-zinc-500">{t('resources.infoPanel.version')}</span>
-                <span className="text-zinc-300">v{resource.current_version}</span>
+                <span className="text-ink-500">{t('resources.infoPanel.version')}</span>
+                <span className="text-ink-300">v{resource.current_version}</span>
               </div>
             )}
             <div className="flex items-center justify-between text-xs">
-              <span className="text-zinc-500">{t('resources.infoPanel.source')}</span>
-              <span className="text-zinc-300">{resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}</span>
+              <span className="text-ink-500">{t('resources.infoPanel.source')}</span>
+              <span className="text-ink-300">{resource.source_type === 'web' ? t('resources.infoPanel.sourceWeb') : t('resources.infoPanel.sourceUpload')}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-zinc-500">{t('resources.infoPanel.created')}</span>
-              <span className="text-zinc-300">{formatDate(resource.created_at)}</span>
+              <span className="text-ink-500">{t('resources.infoPanel.created')}</span>
+              <span className="text-ink-300">{formatDate(resource.created_at)}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-zinc-500">{t('resources.infoPanel.modified')}</span>
-              <span className="text-zinc-300">{formatDate(resource.updated_at)}</span>
+              <span className="text-ink-500">{t('resources.infoPanel.modified')}</span>
+              <span className="text-ink-300">{formatDate(resource.updated_at)}</span>
             </div>
           </div>
 
           {/* Source link */}
           {resource.media_id && (
-            <div className="px-4 mt-3 border-t border-zinc-800/60 pt-3">
+            <div className="px-4 mt-3 border-t border-ink-800/60 pt-3">
               <a
                 href={`/resources/media/${resource.media_id}`}
                 className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
@@ -1837,9 +1837,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
           {/* Versions */}
           {versions.length > 0 && (
-            <div className="px-4 mt-3 border-t border-zinc-800/60 pt-3">
+            <div className="px-4 mt-3 border-t border-ink-800/60 pt-3">
               <div className="flex items-center justify-between mb-2">
-                <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">
+                <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest">
                   {t('resources.versions')}
                 </h4>
                 <button
@@ -1859,7 +1859,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       <button
                         key={ver.id}
                         onClick={() => handleSelectVersion(ver)}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-zinc-800/70 ${
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-ink-800/70 ${
                           isViewing
                             ? 'bg-indigo-500/10 border border-indigo-500/20'
                             : 'bg-transparent'
@@ -1867,7 +1867,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       >
                         <div className="flex items-center gap-1.5">
                           <span className={`font-medium ${
-                            isViewing ? 'text-indigo-400' : 'text-zinc-300'
+                            isViewing ? 'text-indigo-400' : 'text-ink-300'
                           }`}>
                             v{ver.version_number}
                           </span>
@@ -1878,7 +1878,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                             <span className="text-amber-400/60 text-[10px]">viewing</span>
                           )}
                         </div>
-                        <span className="text-zinc-500 text-[10px]">
+                        <span className="text-ink-500 text-[10px]">
                           {formatDate(ver.created_at)}
                         </span>
                       </button>
@@ -1914,19 +1914,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {(resource.transcript_status === 'processing' || transcribeStatus === 'processing') && !transcript && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Loader2 size={32} className="animate-spin text-indigo-400 mb-4" />
-                  <h3 className="text-sm font-medium text-zinc-200">Transcribing...</h3>
-                  <p className="text-xs text-zinc-500 mt-1">This may take a few minutes.</p>
+                  <h3 className="text-sm font-medium text-ink-200">Transcribing...</h3>
+                  <p className="text-xs text-ink-500 mt-1">This may take a few minutes.</p>
                 </div>
               )}
 
               {/* Not started — no transcript loaded and not processing */}
               {!transcript && !transcriptLoading && transcribeStatus !== 'processing' && resource.transcript_status !== 'processing' && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <div className="p-4 bg-zinc-800/50 rounded-full mb-4">
-                    <FileText size={28} className="text-zinc-500" />
+                  <div className="p-4 bg-ink-800/50 rounded-full mb-4">
+                    <FileText size={28} className="text-ink-500" />
                   </div>
-                  <h3 className="text-sm font-medium text-zinc-200">No Transcript Available</h3>
-                  <p className="text-xs text-zinc-500 mt-1 mb-4 max-w-[220px]">
+                  <h3 className="text-sm font-medium text-ink-200">No Transcript Available</h3>
+                  <p className="text-xs text-ink-500 mt-1 mb-4 max-w-[220px]">
                     Generate a transcript to see timestamped text from this media.
                   </p>
                   <button
@@ -1956,7 +1956,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {/* Transcript content */}
               {transcript && (
                 <div className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-ink-500">
                     <span className="flex items-center gap-1">
                       <Clock size={10} />
                       {formatTimestamp(transcript.duration)} total
@@ -1968,14 +1968,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <span>{transcript.segments.length} segments</span>
                   </div>
 
-                  <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+                  <div className="bg-ink-900 border border-ink-800 rounded-lg overflow-hidden">
                     <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
                       {transcriptView === 'segments' ? (
-                        <div className="divide-y divide-zinc-800/50">
+                        <div className="divide-y divide-ink-800/50">
                           {transcript.segments.map((seg, i) => (
                             <div
                               key={i}
-                              className="flex gap-2 px-3 py-2 hover:bg-zinc-800/30 transition-colors group"
+                              className="flex gap-2 px-3 py-2 hover:bg-ink-800/30 transition-colors group"
                             >
                               <button
                                 className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
@@ -1983,13 +1983,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                               >
                                 [{formatTimestamp(seg.start)}]
                               </button>
-                              <p className="text-xs text-zinc-300 leading-relaxed">{seg.text}</p>
+                              <p className="text-xs text-ink-300 leading-relaxed">{seg.text}</p>
                             </div>
                           ))}
                         </div>
                       ) : (
                         <div className="p-3">
-                          <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                          <p className="text-xs text-ink-300 leading-relaxed whitespace-pre-wrap">
                             {transcript.text}
                           </p>
                         </div>
@@ -2000,13 +2000,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   {/* Toolbar */}
                   <div className="flex items-center gap-1.5">
                     {/* View toggle */}
-                    <div className="flex bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden">
+                    <div className="flex bg-ink-800 border border-ink-700 rounded-lg overflow-hidden">
                       <button
                         onClick={() => setTranscriptView('segments')}
                         className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
                           transcriptView === 'segments'
                             ? 'bg-indigo-600 text-white'
-                            : 'text-zinc-400 hover:text-zinc-200'
+                            : 'text-ink-400 hover:text-ink-200'
                         }`}
                       >
                         <List size={10} />
@@ -2017,7 +2017,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         className={`px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
                           transcriptView === 'fulltext'
                             ? 'bg-indigo-600 text-white'
-                            : 'text-zinc-400 hover:text-zinc-200'
+                            : 'text-ink-400 hover:text-ink-200'
                         }`}
                       >
                         <AlignLeft size={10} />
@@ -2028,7 +2028,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     {/* Copy */}
                     <button
                       onClick={handleCopyTranscript}
-                      className="px-2.5 py-1 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1 border border-zinc-700"
+                      className="px-2.5 py-1 text-[10px] bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors flex items-center gap-1 border border-ink-700"
                     >
                       {copied ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                       {copied ? 'Copied!' : 'Copy'}
@@ -2038,23 +2038,23 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <div className="relative">
                       <button
                         onClick={() => setExportOpen(!exportOpen)}
-                        className="px-2.5 py-1 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors flex items-center gap-1 border border-zinc-700"
+                        className="px-2.5 py-1 text-[10px] bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-lg transition-colors flex items-center gap-1 border border-ink-700"
                       >
                         <Download size={10} />
                         Export
                         <ChevronDown size={8} />
                       </button>
                       {exportOpen && (
-                        <div className="absolute bottom-full mb-1 left-0 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]">
+                        <div className="absolute bottom-full mb-1 left-0 bg-ink-800 border border-ink-700 rounded-lg shadow-xl overflow-hidden z-10 min-w-[100px]">
                           <button
                             onClick={() => { handleExportSRT(); setExportOpen(false); }}
-                            className="w-full px-3 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                            className="w-full px-3 py-1.5 text-[10px] text-ink-300 hover:bg-ink-700 text-left transition-colors"
                           >
                             Export SRT
                           </button>
                           <button
                             onClick={() => { handleExportTXT(); setExportOpen(false); }}
-                            className="w-full px-3 py-1.5 text-[10px] text-zinc-300 hover:bg-zinc-700 text-left transition-colors"
+                            className="w-full px-3 py-1.5 text-[10px] text-ink-300 hover:bg-ink-700 text-left transition-colors"
                           >
                             Export TXT
                           </button>
@@ -2073,20 +2073,20 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   <div className="p-1 bg-indigo-500/10 rounded text-indigo-400">
                     <Sparkles size={14} />
                   </div>
-                  <h3 className="text-xs font-medium text-zinc-200">Summary</h3>
+                  <h3 className="text-xs font-medium text-ink-200">Summary</h3>
                   {getAIStatusIndicator(resource.summary_status)}
                 </div>
 
                 {resource.summary_status === 'processing' && (
-                  <div className="flex items-center gap-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                  <div className="flex items-center gap-2 p-3 bg-ink-900 border border-ink-800 rounded-lg">
                     <Loader2 size={14} className="animate-spin text-indigo-400" />
-                    <span className="text-xs text-zinc-400">Generating summary...</span>
+                    <span className="text-xs text-ink-400">Generating summary...</span>
                   </div>
                 )}
 
                 {(!resource.summary_status || resource.summary_status === 'pending' || resource.summary_status === 'none') && !summary && !summaryLoading && (
-                  <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
-                    <p className="text-xs text-zinc-500 mb-2">Generate an AI summary with key points and topics.</p>
+                  <div className="p-3 bg-ink-900 border border-ink-800 rounded-lg">
+                    <p className="text-xs text-ink-500 mb-2">Generate an AI summary with key points and topics.</p>
                     <button
                       onClick={handleSummarize}
                       disabled={summaryLoading}
@@ -2126,15 +2126,15 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
                 {summary && (
                   <div className="space-y-3">
-                    <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
-                      <p className="text-xs text-zinc-300 leading-relaxed">{summary.summary}</p>
+                    <div className="p-3 bg-ink-900 border border-ink-800 rounded-lg">
+                      <p className="text-xs text-ink-300 leading-relaxed">{summary.summary}</p>
                     </div>
                     {summary.key_points.length > 0 && (
                       <div>
-                        <h4 className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider mb-1.5">Key Points</h4>
+                        <h4 className="text-[10px] font-medium text-ink-400 uppercase tracking-wider mb-1.5">Key Points</h4>
                         <ul className="space-y-1">
                           {summary.key_points.map((point, i) => (
-                            <li key={i} className="flex items-start gap-1.5 text-xs text-zinc-300">
+                            <li key={i} className="flex items-start gap-1.5 text-xs text-ink-300">
                               <ChevronRight size={12} className="text-indigo-400 mt-0.5 shrink-0" />
                               {point}
                             </li>
@@ -2144,7 +2144,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     )}
                     {summary.topics.length > 0 && (
                       <div>
-                        <h4 className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider mb-1.5">Topics</h4>
+                        <h4 className="text-[10px] font-medium text-ink-400 uppercase tracking-wider mb-1.5">Topics</h4>
                         <div className="flex flex-wrap gap-1.5">
                           {summary.topics.map((topic, i) => {
                             const colors = [
@@ -2175,20 +2175,20 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     <div className="p-1 bg-purple-500/10 rounded text-purple-400">
                       <Eye size={14} />
                     </div>
-                    <h3 className="text-xs font-medium text-zinc-200">Visual Analysis</h3>
+                    <h3 className="text-xs font-medium text-ink-200">Visual Analysis</h3>
                     {getAIStatusIndicator(resource.visual_analysis_status)}
                   </div>
 
                   {resource.visual_analysis_status === 'processing' && (
-                    <div className="flex items-center gap-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                    <div className="flex items-center gap-2 p-3 bg-ink-900 border border-ink-800 rounded-lg">
                       <Loader2 size={14} className="animate-spin text-purple-400" />
-                      <span className="text-xs text-zinc-400">Analyzing visual content...</span>
+                      <span className="text-xs text-ink-400">Analyzing visual content...</span>
                     </div>
                   )}
 
                   {(!resource.visual_analysis_status || resource.visual_analysis_status === 'pending' || resource.visual_analysis_status === 'none') && (
-                    <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
-                      <p className="text-xs text-zinc-500 mb-2">Analyze video frames to detect objects, scenes, and visual content.</p>
+                    <div className="p-3 bg-ink-900 border border-ink-800 rounded-lg">
+                      <p className="text-xs text-ink-500 mb-2">Analyze video frames to detect objects, scenes, and visual content.</p>
                       <button
                         onClick={handleVisualAnalysis}
                         disabled={visualAnalysisLoading}
@@ -2221,8 +2221,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   )}
 
                   {resource.visual_analysis_status === 'completed' && (resource as any).ai_analyze_text && (
-                    <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
-                      <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                    <div className="p-3 bg-ink-900 border border-ink-800 rounded-lg">
+                      <p className="text-xs text-ink-300 leading-relaxed whitespace-pre-wrap">
                         {(resource as any).ai_analyze_text}
                       </p>
                     </div>
@@ -2235,7 +2235,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {lyrics?.lines?.length ? (
                 <LyricsView lines={lyrics.lines} />
               ) : (
-                <div className="text-center text-zinc-500 text-sm py-8 space-y-3">
+                <div className="text-center text-ink-500 text-sm py-8 space-y-3">
                   <p>{t('resources.detail.noLyrics', 'No lyrics yet')}</p>
                   <label className="inline-block px-3 py-1.5 rounded bg-indigo-600 text-white text-xs cursor-pointer hover:bg-indigo-500">
                     {t('resources.detail.uploadLrc', 'Upload .lrc')}

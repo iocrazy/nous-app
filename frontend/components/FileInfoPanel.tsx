@@ -36,12 +36,12 @@ const formatSampleRate = (rate: number | null): string => {
 };
 
 const getFileIcon = (fileType: string | null) => {
-  if (!fileType) return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  if (!fileType) return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
   const ft = fileType.toLowerCase();
   if (ft === 'video' || ft.startsWith('video')) return { icon: Video, color: 'text-purple-400', bg: 'bg-purple-500/20' };
   if (ft === 'image' || ft.startsWith('image')) return { icon: Image, color: 'text-green-400', bg: 'bg-green-500/20' };
   if (ft === 'document' || ft === 'pdf' || ft === 'text') return { icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/20' };
-  return { icon: File, color: 'text-zinc-400', bg: 'bg-zinc-500/20' };
+  return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
 };
 
 const formatDate = (dateStr: string): string => {
@@ -57,9 +57,9 @@ const formatDate = (dateStr: string): string => {
 const InfoRow = ({ label, value }: { label: string; value: string | null | undefined }) => {
   if (!value) return null;
   return (
-    <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
-      <span className="text-xs text-zinc-500">{label}</span>
-      <span className="text-sm text-zinc-300">{value}</span>
+    <div className="flex justify-between items-center py-2 border-b border-ink-800/50">
+      <span className="text-xs text-ink-500">{label}</span>
+      <span className="text-sm text-ink-300">{value}</span>
     </div>
   );
 };
@@ -76,13 +76,13 @@ export const FileInfoPanel: React.FC<FileInfoPanelProps> = ({ file, onClose }) =
   const showVideoInfo = isVideoFile(file.file_type);
 
   return (
-    <div className="w-80 bg-zinc-900 border-l border-zinc-800 h-full overflow-y-auto animate-in slide-in-from-right-4 duration-300">
+    <div className="w-80 bg-ink-900 border-l border-ink-800 h-full overflow-y-auto animate-in slide-in-from-right-4 duration-300">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
+      <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
         <h3 className="text-sm font-semibold text-white">{t('mediatrack.fileInfo')}</h3>
         <button
           onClick={onClose}
-          className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+          className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
         >
           <X size={16} />
         </button>
@@ -107,7 +107,7 @@ export const FileInfoPanel: React.FC<FileInfoPanelProps> = ({ file, onClose }) =
       {/* Video Stream */}
       {showVideoInfo && (file.resolution || file.fps || file.video_codec || file.video_bitrate_kbps || file.duration_seconds) && (
         <div className="px-4 mt-5">
-          <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+          <h4 className="text-xs font-semibold text-ink-400 uppercase tracking-wider mb-2">
             {t('mediatrack.videoStream')}
           </h4>
           <div className="space-y-0">
@@ -123,7 +123,7 @@ export const FileInfoPanel: React.FC<FileInfoPanelProps> = ({ file, onClose }) =
       {/* Audio Stream */}
       {showVideoInfo && (file.audio_codec || file.audio_channels || file.audio_sample_rate || file.audio_bitrate_kbps) && (
         <div className="px-4 mt-5">
-          <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+          <h4 className="text-xs font-semibold text-ink-400 uppercase tracking-wider mb-2">
             {t('mediatrack.audioStream')}
           </h4>
           <div className="space-y-0">
@@ -138,10 +138,10 @@ export const FileInfoPanel: React.FC<FileInfoPanelProps> = ({ file, onClose }) =
       {/* Notes */}
       {file.notes && (
         <div className="px-4 mt-5 mb-4">
-          <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+          <h4 className="text-xs font-semibold text-ink-400 uppercase tracking-wider mb-2">
             {t('mediatrack.notes')}
           </h4>
-          <p className="text-sm text-zinc-300 whitespace-pre-wrap">{file.notes}</p>
+          <p className="text-sm text-ink-300 whitespace-pre-wrap">{file.notes}</p>
         </div>
       )}
 

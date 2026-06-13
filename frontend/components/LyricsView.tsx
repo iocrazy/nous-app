@@ -99,7 +99,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ lines, currentTime, them
             style={themedStyle}
             className={`leading-relaxed transition-all duration-200 ${
               isActive ? 'text-base font-semibold' : 'text-sm font-medium'
-            } ${theme ? '' : isActive ? 'text-white' : synced ? 'text-zinc-500' : 'text-zinc-300'}`}
+            } ${theme ? '' : isActive ? 'text-white' : synced ? 'text-ink-500' : 'text-ink-300'}`}
           >
             {line.text || ' '}
           </p>

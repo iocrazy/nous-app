@@ -55,7 +55,7 @@ const getAIStatusClass = (status?: string): string => {
     case 'failed':
       return 'text-red-400';
     default:
-      return 'text-zinc-600';
+      return 'text-ink-600';
   }
 };
 
@@ -208,7 +208,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
   };
 
   const getSortIcon = (key: SortKey) => {
-    if (sortConfig?.key !== key) return <ArrowUpDown size={12} className="text-zinc-600 opacity-50" />;
+    if (sortConfig?.key !== key) return <ArrowUpDown size={12} className="text-ink-600 opacity-50" />;
     return sortConfig.direction === 'asc' 
       ? <ArrowUp size={12} className="text-indigo-400" /> 
       : <ArrowDown size={12} className="text-indigo-400" />;
@@ -216,7 +216,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
   if (data.length === 0) {
     return (
-       <div className="text-center py-20 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800 text-zinc-500">
+       <div className="text-center py-20 bg-ink-900/30 rounded-2xl border border-dashed border-ink-800 text-ink-500">
           No items found matching your search.
        </div>
     );
@@ -225,14 +225,14 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
   // Mobile Card Component
   const MobileCard = ({ item }: { item: Video }) => (
     <div
-      className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 space-y-3 cursor-pointer active:scale-[0.98] transition-all hover:border-zinc-600"
+      className="bg-ink-900/50 border border-ink-800 rounded-xl p-3 space-y-3 cursor-pointer active:scale-[0.98] transition-all hover:border-ink-600"
       onClick={() => onItemClick?.(item)}
     >
       <div className="flex gap-3">
         {/* Thumbnail */}
         <div
           onClick={(e) => { e.stopPropagation(); handleMediaClick(item); }}
-          className="w-20 h-20 bg-zinc-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-zinc-700"
+          className="w-20 h-20 bg-ink-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-ink-700"
         >
           {(() => {
             const src = getCoverUrl(item, mediaToken ?? undefined);
@@ -245,11 +245,11 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
                   target.style.display = 'none';
-                  target.parentElement?.classList.add('bg-zinc-700');
+                  target.parentElement?.classList.add('bg-ink-700');
                 }}
               />
             ) : (
-              <div className="w-full h-full bg-zinc-700" />
+              <div className="w-full h-full bg-ink-700" />
             );
           })()}
           <div className="absolute inset-0 flex items-center justify-center">
@@ -265,19 +265,19 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
         {/* Info */}
         <div className="flex-1 min-w-0 space-y-1">
-          <h3 className="font-medium text-zinc-200 text-sm line-clamp-2 leading-tight">
+          <h3 className="font-medium text-ink-200 text-sm line-clamp-2 leading-tight">
             {item.title || 'Untitled'}
           </h3>
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <div className="flex items-center gap-2 text-xs text-ink-500">
             <span>@{item.author}</span>
             <span>•</span>
             <span>{formatDate(item.published_at)}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-400 uppercase">
+            <span className="text-[10px] px-1.5 py-0.5 bg-ink-800 border border-ink-700 rounded text-ink-400 uppercase">
               {getAwemeTypeLabel(item.media_type)}
             </span>
-            <a href={item.original_url} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-indigo-400">
+            <a href={item.original_url} target="_blank" rel="noreferrer" className="text-ink-600 hover:text-indigo-400">
               <ExternalLink size={12} />
             </a>
           </div>
@@ -287,20 +287,20 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
       {/* Stats Row */}
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-4 text-xs">
-          <span className="flex items-center gap-1 text-zinc-400">
+          <span className="flex items-center gap-1 text-ink-400">
             <Heart size={12} className="text-rose-500" />
             {formatNumber(item.like_count)}
           </span>
-          <span className="flex items-center gap-1 text-zinc-400">
+          <span className="flex items-center gap-1 text-ink-400">
             <MessageCircle size={12} className="text-sky-500" />
             {formatNumber(item.comment_count)}
           </span>
-          <span className="flex items-center gap-1 text-zinc-400">
+          <span className="flex items-center gap-1 text-ink-400">
             <Share2 size={12} className="text-emerald-500" />
             {formatNumber(item.share_count)}
           </span>
         </div>
-        <span className="text-[10px] text-zinc-600">
+        <span className="text-[10px] text-ink-600">
           {formatDate(item.created_at)}
         </span>
       </div>
@@ -327,7 +327,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
             </span>
           ))}
           {item.tags.length > 4 && (
-            <span className="text-[10px] text-zinc-500">+{item.tags.length - 4}</span>
+            <span className="text-[10px] text-ink-500">+{item.tags.length - 4}</span>
           )}
         </div>
       )}
@@ -344,9 +344,9 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
       </div>
 
       {/* Desktop View - Table */}
-      <div className="hidden md:block w-full overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/50">
-        <table className="w-full text-left text-sm text-zinc-400">
-          <thead className="bg-zinc-900 text-zinc-200 uppercase text-xs font-semibold tracking-wider">
+      <div className="hidden md:block w-full overflow-x-auto rounded-xl border border-ink-800 bg-ink-900/50">
+        <table className="w-full text-left text-sm text-ink-400">
+          <thead className="bg-ink-900 text-ink-200 uppercase text-xs font-semibold tracking-wider">
             <tr>
               <th className="px-4 py-4 w-20">Media</th>
               
@@ -358,7 +358,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
               {/* Date Added Sortable */}
               <th
-                className="px-4 py-4 cursor-pointer hover:bg-zinc-800/50 transition-colors w-28"
+                className="px-4 py-4 cursor-pointer hover:bg-ink-800/50 transition-colors w-28"
                 onClick={() => handleSort('created_at')}
                 title="Sort by date added"
               >
@@ -376,31 +376,31 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
               {/* Split Stats Columns */}
               <th 
-                className="px-4 py-4 text-center cursor-pointer hover:bg-zinc-800/50 transition-colors w-24"
+                className="px-4 py-4 text-center cursor-pointer hover:bg-ink-800/50 transition-colors w-24"
                 onClick={() => handleSort('like_count')}
                 title="Sort by Likes"
               >
-                <div className="flex items-center justify-center gap-1.5 text-zinc-400 hover:text-rose-400 transition-colors">
+                <div className="flex items-center justify-center gap-1.5 text-ink-400 hover:text-rose-400 transition-colors">
                    <Heart size={14} className="text-rose-500" /> 
                    {getSortIcon('like_count')}
                 </div>
               </th>
               <th 
-                className="px-4 py-4 text-center cursor-pointer hover:bg-zinc-800/50 transition-colors w-24"
+                className="px-4 py-4 text-center cursor-pointer hover:bg-ink-800/50 transition-colors w-24"
                 onClick={() => handleSort('comment_count')}
                 title="Sort by Comments"
               >
-                 <div className="flex items-center justify-center gap-1.5 text-zinc-400 hover:text-sky-400 transition-colors">
+                 <div className="flex items-center justify-center gap-1.5 text-ink-400 hover:text-sky-400 transition-colors">
                    <MessageCircle size={14} className="text-sky-500" /> 
                    {getSortIcon('comment_count')}
                  </div>
               </th>
               <th 
-                className="px-4 py-4 text-center cursor-pointer hover:bg-zinc-800/50 transition-colors w-24"
+                className="px-4 py-4 text-center cursor-pointer hover:bg-ink-800/50 transition-colors w-24"
                 onClick={() => handleSort('share_count')}
                 title="Sort by Shares"
               >
-                 <div className="flex items-center justify-center gap-1.5 text-zinc-400 hover:text-emerald-400 transition-colors">
+                 <div className="flex items-center justify-center gap-1.5 text-ink-400 hover:text-emerald-400 transition-colors">
                    <Share2 size={14} className="text-emerald-500" /> 
                    {getSortIcon('share_count')}
                  </div>
@@ -409,17 +409,17 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
               <th className="px-4 py-4 w-1/6">Tags</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800">
+          <tbody className="divide-y divide-ink-800">
             {sortedData.map((item) => (
-              <tr key={item.platform_id} className="hover:bg-zinc-900/80 transition-colors">
+              <tr key={item.platform_id} className="hover:bg-ink-900/80 transition-colors">
                 <td className="px-4 py-4">
                   <div 
                     onClick={() => handleMediaClick(item)}
-                    className="w-16 h-16 bg-zinc-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-zinc-700 hover:border-zinc-500 transition-colors"
+                    className="w-16 h-16 bg-ink-800 rounded-lg overflow-hidden relative flex-shrink-0 group cursor-pointer border border-ink-700 hover:border-ink-500 transition-colors"
                   >
                      {(() => {
                       const src = getCoverUrl(item, mediaToken ?? undefined);
-                      if (!src) return <div className="w-full h-full bg-zinc-700" />;
+                      if (!src) return <div className="w-full h-full bg-ink-700" />;
                       return (
                         <img
                           src={src}
@@ -429,7 +429,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
                             target.style.display = 'none';
-                            target.parentElement?.classList.add('bg-zinc-700');
+                            target.parentElement?.classList.add('bg-ink-700');
                           }}
                         />
                       );
@@ -447,19 +447,19 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                 </td>
                 <td className="px-4 py-4">
                    <div className="flex flex-col gap-1 max-w-xs">
-                      <span className="font-medium text-zinc-200 line-clamp-1" title={item.title}>{item.title || 'Untitled'}</span>
+                      <span className="font-medium text-ink-200 line-clamp-1" title={item.title}>{item.title || 'Untitled'}</span>
 
                       <div className="flex flex-col gap-0.5">
-                         <span className="text-xs text-zinc-400">@{item.author}</span>
-                         <span className="text-[10px] text-zinc-500 flex items-center gap-1.5">
+                         <span className="text-xs text-ink-400">@{item.author}</span>
+                         <span className="text-[10px] text-ink-500 flex items-center gap-1.5">
                             <Clock size={10} />
                             {formatDate(item.published_at)}
                          </span>
                       </div>
 
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-zinc-400 uppercase">{getAwemeTypeLabel(item.media_type)}</span>
-                        <a href={item.original_url} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-indigo-400">
+                        <span className="text-[10px] px-1.5 py-0.5 bg-ink-800 border border-ink-700 rounded text-ink-400 uppercase">{getAwemeTypeLabel(item.media_type)}</span>
+                        <a href={item.original_url} target="_blank" rel="noreferrer" className="text-ink-600 hover:text-indigo-400">
                           <ExternalLink size={12} />
                         </a>
                       </div>
@@ -468,14 +468,14 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
                 {/* Source */}
                 <td className="px-4 py-4">
-                  <span className="text-xs text-zinc-400 capitalize">
+                  <span className="text-xs text-ink-400 capitalize">
                     {item.source_platform || 'douyin'}
                   </span>
                 </td>
 
                 {/* Date Added */}
                 <td className="px-4 py-4">
-                   <span className="text-xs text-zinc-400 whitespace-nowrap">
+                   <span className="text-xs text-ink-400 whitespace-nowrap">
                      {formatDate(item.created_at)}
                    </span>
                 </td>
@@ -491,7 +491,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
                 {/* Content Column with Copy Interaction */}
                 <td className="px-4 py-4" onClick={() => handleCopy(item.platform_id, item.description)}>
-                    <div className="group/text cursor-pointer hover:bg-zinc-800/80 p-2 rounded-lg -ml-2 transition-colors relative h-full">
+                    <div className="group/text cursor-pointer hover:bg-ink-800/80 p-2 rounded-lg -ml-2 transition-colors relative h-full">
                       {copiedId === item.platform_id ? (
                         <div className="flex items-center gap-2 text-green-400 text-xs animate-in fade-in duration-200 h-8">
                           <Check size={14} />
@@ -499,11 +499,11 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                         </div>
                       ) : (
                         <>
-                          <p className="text-xs text-zinc-400 group-hover/text:text-zinc-200 line-clamp-2 leading-relaxed" title="Click to copy">
+                          <p className="text-xs text-ink-400 group-hover/text:text-ink-200 line-clamp-2 leading-relaxed" title="Click to copy">
                             {item.description || <span className="italic opacity-40">No description</span>}
                           </p>
-                          <div className="absolute top-2 right-2 opacity-0 group-hover/text:opacity-100 transition-opacity pointer-events-none bg-zinc-900/80 p-1 rounded backdrop-blur-sm">
-                             <Copy size={12} className="text-zinc-400" />
+                          <div className="absolute top-2 right-2 opacity-0 group-hover/text:opacity-100 transition-opacity pointer-events-none bg-ink-900/80 p-1 rounded backdrop-blur-sm">
+                             <Copy size={12} className="text-ink-400" />
                           </div>
                         </>
                       )}
@@ -512,10 +512,10 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                 
                 {/* Stats Columns */}
                 <td className="px-4 py-4 text-center">
-                   <span className="font-mono text-zinc-300 text-xs">{formatNumber(item.like_count)}</span>
+                   <span className="font-mono text-ink-300 text-xs">{formatNumber(item.like_count)}</span>
                 </td>
                 <td className="px-4 py-4 text-center">
-                   <span className="font-mono text-zinc-300 text-xs">{formatNumber(item.comment_count)}</span>
+                   <span className="font-mono text-ink-300 text-xs">{formatNumber(item.comment_count)}</span>
                 </td>
                 <td
                   className="px-4 py-4 text-center cursor-pointer hover:bg-emerald-500/5 transition-colors group/share"
@@ -528,7 +528,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                       <span className="text-xs font-medium">Copied!</span>
                     </div>
                   ) : (
-                    <span className="font-mono text-zinc-300 text-xs group-hover/share:text-emerald-400 transition-colors">{formatNumber(item.share_count)}</span>
+                    <span className="font-mono text-ink-300 text-xs group-hover/share:text-emerald-400 transition-colors">{formatNumber(item.share_count)}</span>
                   )}
                 </td>
 
@@ -547,12 +547,12 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
                               </span>
                             ))}
                             {displayTags.length > 3 && (
-                              <span className="text-[10px] text-zinc-500">+{displayTags.length - 3}</span>
+                              <span className="text-[10px] text-ink-500">+{displayTags.length - 3}</span>
                             )}
                           </>
                         )
                         : (
-                          <span className="text-zinc-600 italic text-xs">No tags</span>
+                          <span className="text-ink-600 italic text-xs">No tags</span>
                         );
                     })()}
                   </div>

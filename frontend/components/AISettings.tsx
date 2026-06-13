@@ -285,7 +285,7 @@ const EnabledModelsField: React.FC<{
 
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-zinc-400">Enabled Models</label>
+      <label className="text-xs font-medium text-ink-400">Enabled Models</label>
       <div className="flex flex-wrap items-center gap-2">
         {enabledModels.map((m) => (
           <span
@@ -310,7 +310,7 @@ const EnabledModelsField: React.FC<{
               setPicking(true);
               setFilter('');
             }}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-zinc-700 px-3 py-1 text-xs text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors"
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-ink-700 px-3 py-1 text-xs text-ink-400 hover:text-white hover:border-ink-500 transition-colors"
           >
             <Plus size={12} />
             Add Model
@@ -319,7 +319,7 @@ const EnabledModelsField: React.FC<{
       </div>
 
       {picking && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 space-y-1.5">
+        <div className="rounded-lg border border-ink-800 bg-ink-950 p-2 space-y-1.5">
           <div className="flex items-center gap-2">
             <input
               autoFocus
@@ -327,23 +327,23 @@ const EnabledModelsField: React.FC<{
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter models..."
-              className="flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
+              className="flex-1 bg-transparent text-xs text-ink-200 placeholder:text-ink-600 focus:outline-none"
             />
             <button
               type="button"
               onClick={() => setPicking(false)}
-              className="text-zinc-500 hover:text-zinc-200 transition-colors"
+              className="text-ink-500 hover:text-ink-200 transition-colors"
               aria-label="Close picker"
             >
               <X size={14} />
             </button>
           </div>
           {catalog.length === 0 ? (
-            <div className="text-xs text-zinc-500 px-1 py-2">
+            <div className="text-xs text-ink-500 px-1 py-2">
               Catalog empty — run Test Connection first.
             </div>
           ) : remaining.length === 0 ? (
-            <div className="text-xs text-zinc-500 px-1 py-2">
+            <div className="text-xs text-ink-500 px-1 py-2">
               {filter ? 'No matches' : 'All models already enabled'}
             </div>
           ) : (
@@ -356,7 +356,7 @@ const EnabledModelsField: React.FC<{
                     onAdd(m);
                     setFilter('');
                   }}
-                  className="w-full text-left rounded px-2 py-1 text-xs font-mono text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                  className="w-full text-left rounded px-2 py-1 text-xs font-mono text-ink-300 hover:bg-ink-800 hover:text-white transition-colors"
                 >
                   {m}
                 </button>
@@ -366,7 +366,7 @@ const EnabledModelsField: React.FC<{
         </div>
       )}
 
-      <p className="text-[11px] text-zinc-500">
+      <p className="text-[11px] text-ink-500">
         Only enabled models are shown to agents in the AI Library — provider:{' '}
         <span className="font-mono">{providerKey}</span>
       </p>
@@ -695,7 +695,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         <select
           value={currentValue}
           onChange={(e) => updateTaskAssignment(taskKey, e.target.value)}
-          className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
+          className="appearance-none bg-ink-800 border border-ink-700 rounded-lg px-4 py-2 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
         >
           {options.length === 0 && (
             <option value="">No Agents Available</option>
@@ -718,7 +718,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </optgroup>
           )}
         </select>
-        <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+        <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
       </div>
     );
   };
@@ -730,7 +730,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       disabled={disabled}
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
         disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-      } ${enabled ? 'bg-indigo-600' : 'bg-zinc-700'}`}
+      } ${enabled ? 'bg-indigo-600' : 'bg-ink-700'}`}
     >
       <span
         className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
@@ -743,14 +743,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Master AI Toggle Section */}
-      <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+      <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center gap-3">
           <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
             <Brain size={20} />
           </div>
           <div className="flex-1">
-            <h2 className="font-semibold text-zinc-200">AI Intelligence</h2>
-            <p className="text-xs text-zinc-500">Configure AI providers for transcription, summarization, and analysis</p>
+            <h2 className="font-semibold text-ink-200">AI Intelligence</h2>
+            <p className="text-xs text-ink-500">Configure AI providers for transcription, summarization, and analysis</p>
           </div>
         </div>
 
@@ -758,8 +758,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           {/* AI Enabled Toggle */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className={`w-2.5 h-2.5 rounded-full ${localSettings.ai_enabled ? 'bg-green-400 shadow-lg shadow-green-400/30' : 'bg-zinc-600'}`} />
-              <span className="font-medium text-zinc-200">AI Enabled</span>
+              <div className={`w-2.5 h-2.5 rounded-full ${localSettings.ai_enabled ? 'bg-green-400 shadow-lg shadow-green-400/30' : 'bg-ink-600'}`} />
+              <span className="font-medium text-ink-200">AI Enabled</span>
             </div>
             <button
               onClick={toggleAIEnabled}
@@ -788,13 +788,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               Replaces the old global Auto-Transcribe / Auto-Summarize toggles. */}
           <div className={`space-y-4 transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
             <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-zinc-300">Preferred Language</span>
+              <span className="text-sm text-ink-300">Preferred Language</span>
               <div className="relative">
                 <select
                   value={localSettings.preferred_language}
                   onChange={(e) => setPreferredLanguage(e.target.value)}
                   disabled={!localSettings.ai_enabled}
-                  className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                  className="appearance-none bg-ink-800 border border-ink-700 rounded-lg px-4 py-2 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                 >
                   {LANGUAGE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -802,7 +802,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                     </option>
                   ))}
                 </select>
-                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
               </div>
             </div>
           </div>
@@ -810,29 +810,29 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       </section>
 
       {/* Task Assignment Section */}
-      <section className={`bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden transition-opacity ${
+      <section className={`bg-ink-900 border border-ink-800 rounded-xl overflow-hidden transition-opacity ${
         localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'
       }`}>
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+        <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center gap-3">
           <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
             <Zap size={20} />
           </div>
           <div>
-            <h2 className="font-semibold text-zinc-200">Task Assignment</h2>
-            <p className="text-xs text-zinc-500">Choose which provider handles each AI task</p>
+            <h2 className="font-semibold text-ink-200">Task Assignment</h2>
+            <p className="text-xs text-ink-500">Choose which provider handles each AI task</p>
           </div>
         </div>
 
         {/* Task Tab Switcher */}
         <div className="px-6 pt-4 pb-2">
-          <div className="flex gap-1 p-1 bg-zinc-950 rounded-lg">
+          <div className="flex gap-1 p-1 bg-ink-950 rounded-lg">
             <button
               type="button"
               onClick={() => setTaskTab('media')}
               className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                 taskTab === 'media'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'bg-ink-800 text-ink-100 shadow-sm'
+                  : 'text-ink-500 hover:text-ink-300'
               }`}
             >
               Media
@@ -842,8 +842,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               onClick={() => setTaskTab('storyboard')}
               className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                 taskTab === 'storyboard'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'bg-ink-800 text-ink-100 shadow-sm'
+                  : 'text-ink-500 hover:text-ink-300'
               }`}
             >
               Storyboard
@@ -856,59 +856,59 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         <div className="px-6 pb-6 pt-2 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <FileText size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Transcription</span>
+              <FileText size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-300">Transcription</span>
             </div>
             <div className="relative">
               <select
                 value={localSettings.task_assignment.transcription}
                 onChange={(e) => updateTaskAssignment('transcription', e.target.value)}
-                className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
+                className="appearance-none bg-ink-800 border border-ink-700 rounded-lg px-4 py-2 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer min-w-[220px]"
               >
                 {getTranscriptionOptions().map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Summarization</span>
+              <Sparkles size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-300">Summarization</span>
             </div>
             {renderAgentSelect('summarization', localSettings.task_assignment.summarization)}
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Search size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Visual Analysis</span>
+              <Search size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-300">Visual Analysis</span>
             </div>
             {renderAgentSelect('visual_analysis', localSettings.task_assignment.visual_analysis)}
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Languages size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Translation</span>
+              <Languages size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-300">Translation</span>
             </div>
             {renderAgentSelect('translation', localSettings.task_assignment.translation ?? '')}
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <ImageIcon size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Caption (Image → Prompt)</span>
+              <ImageIcon size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-300">Caption (Image → Prompt)</span>
             </div>
             {renderAgentSelect('caption', localSettings.task_assignment.caption ?? '')}
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Search size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Classification (Auto Tag)</span>
+              <Search size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-300">Classification (Auto Tag)</span>
             </div>
             {renderAgentSelect('classification', localSettings.task_assignment.classification ?? '')}
           </div>
@@ -921,15 +921,15 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           {/* Image Generation — multi-select, only shows enabled providers */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <ImageIcon size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Image Generation</span>
-              <span className="text-[11px] text-zinc-600">(select per node in canvas)</span>
+              <ImageIcon size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-300">Image Generation</span>
+              <span className="text-[11px] text-ink-600">(select per node in canvas)</span>
             </div>
             {(() => {
               const enabledImageProviders = IMAGE_PROVIDERS.filter(({ id }) => enabledSbProviders[id]);
               if (enabledImageProviders.length === 0) {
                 return (
-                  <p className="text-xs text-zinc-600 py-2">
+                  <p className="text-xs text-ink-600 py-2">
                     No image providers enabled. Enable them in AI Providers → Image Generation below.
                   </p>
                 );
@@ -950,7 +950,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                         className={`px-3 py-2 rounded-lg text-xs font-medium transition-all border flex items-center gap-2 ${
                           selected
                             ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
-                            : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:border-zinc-700 hover:text-zinc-300'
+                            : 'bg-ink-950 text-ink-500 border-ink-800 hover:border-ink-700 hover:text-ink-300'
                         }`}
                       >
                         {selected && <Check size={12} />}
@@ -966,8 +966,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           {/* Script / Prompt — agent picker (script_generation routes to storyboard agent) */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <FileText size={16} className="text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Script / Prompt</span>
+              <FileText size={16} className="text-ink-400" />
+              <span className="text-sm font-medium text-ink-300">Script / Prompt</span>
             </div>
             {renderAgentSelect('script_generation', localSettings.task_assignment.script_generation ?? '')}
           </div>
@@ -976,27 +976,27 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       </section>
 
       {/* Provider Cards Section */}
-      <section className={`bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-        <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-3">
+      <section className={`bg-ink-900 border border-ink-800 rounded-xl overflow-hidden transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+        <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center gap-3">
           <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
             <Settings size={20} />
           </div>
           <div className="flex-1">
-            <h2 className="font-semibold text-zinc-200">AI Providers</h2>
-            <p className="text-xs text-zinc-500">Configure API keys and connections for each provider</p>
+            <h2 className="font-semibold text-ink-200">AI Providers</h2>
+            <p className="text-xs text-ink-500">Configure API keys and connections for each provider</p>
           </div>
         </div>
 
         {/* Provider Type Tabs */}
         <div className="px-6 pt-4 pb-2">
-          <div className="flex gap-1 p-1 bg-zinc-950 rounded-lg">
+          <div className="flex gap-1 p-1 bg-ink-950 rounded-lg">
             <button
               type="button"
               onClick={() => setProviderTab('text')}
               className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                 providerTab === 'text'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'bg-ink-800 text-ink-100 shadow-sm'
+                  : 'text-ink-500 hover:text-ink-300'
               }`}
             >
               Text / LLM
@@ -1006,8 +1006,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               onClick={() => setProviderTab('image')}
               className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                 providerTab === 'image'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'bg-ink-800 text-ink-100 shadow-sm'
+                  : 'text-ink-500 hover:text-ink-300'
               }`}
             >
               Image Generation
@@ -1027,8 +1027,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             return (
               <div
                 key={providerKey}
-                className={`bg-zinc-950 border rounded-xl overflow-hidden transition-all ${
-                  config.enabled ? colors.border : 'border-zinc-800'
+                className={`bg-ink-950 border rounded-xl overflow-hidden transition-all ${
+                  config.enabled ? colors.border : 'border-ink-800'
                 }`}
               >
                 {/* Provider Header */}
@@ -1038,7 +1038,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <h4 className="font-semibold text-zinc-200">{meta.name}</h4>
+                      <h4 className="font-semibold text-ink-200">{meta.name}</h4>
                       {meta.website && (
                         <a
                           href={meta.website}
@@ -1046,7 +1046,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                           rel="noopener noreferrer"
                           title={`Open ${meta.name} console`}
                           aria-label={`Open ${meta.name} console`}
-                          className="text-zinc-500 hover:text-zinc-200 transition-colors"
+                          className="text-ink-500 hover:text-ink-200 transition-colors"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <ExternalLink size={13} />
@@ -1070,18 +1070,18 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-zinc-500 mt-0.5">{meta.description}</p>
+                    <p className="text-xs text-ink-500 mt-0.5">{meta.description}</p>
                   </div>
                   {renderToggle(config.enabled, () => toggleProvider(providerKey))}
                 </div>
 
                 {/* Provider Config (expanded when enabled) */}
                 {config.enabled && (
-                  <div className="px-6 pb-5 pt-2 border-t border-zinc-800/50 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="px-6 pb-5 pt-2 border-t border-ink-800/50 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                     {/* API Key (for cloud providers) */}
                     {!isLocal && (
                       <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                        <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                           <Key size={12} />
                           API Key
                         </label>
@@ -1091,12 +1091,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                             value={config.api_key || ''}
                             onChange={(e) => updateProviderField(providerKey, 'api_key', e.target.value)}
                             placeholder={`Enter your ${meta.name} API key`}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 pr-10 text-sm text-zinc-200 placeholder-zinc-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                            className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-10 text-sm text-ink-200 placeholder-ink-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                           />
                           <button
                             type="button"
                             onClick={() => toggleShowApiKey(providerKey)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 hover:text-ink-300 transition-colors"
                           >
                             {showApiKeys[providerKey] ? <EyeOff size={16} /> : <Eye size={16} />}
                           </button>
@@ -1107,7 +1107,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                     {/* App ID (for volcengine) */}
                     {(meta as Record<string, unknown>).appIdField && (
                       <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                        <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                           <Key size={12} />
                           App ID
                         </label>
@@ -1116,7 +1116,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                           value={config.app_id || ''}
                           onChange={(e) => updateProviderField(providerKey, 'app_id' as keyof AIProviderConfig, e.target.value)}
                           placeholder="Enter App ID"
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 text-sm text-ink-200 placeholder-ink-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                         />
                       </div>
                     )}
@@ -1124,7 +1124,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                     {/* Server URL (for local providers) */}
                     {isLocal && (
                       <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                        <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                           <Server size={12} />
                           Server URL
                         </label>
@@ -1133,7 +1133,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                           value={config.base_url || meta.defaultBaseUrl || ''}
                           onChange={(e) => updateProviderField(providerKey, 'base_url', e.target.value)}
                           placeholder={meta.defaultBaseUrl}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 text-sm text-ink-200 placeholder-ink-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                         />
                       </div>
                     )}
@@ -1142,50 +1142,50 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                     {providerKey === 'openai' && (
                       <>
                         <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-zinc-400">Whisper Model</label>
+                          <label className="text-xs font-medium text-ink-400">Whisper Model</label>
                           <div className="relative">
                             <select
                               value={config.selected_model?.startsWith('whisper') ? config.selected_model : 'whisper-1'}
                               onChange={(e) => updateProviderField(providerKey, 'selected_model', e.target.value)}
-                              className="w-full appearance-none bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                              className="w-full appearance-none bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                             >
                               {(meta.whisperModels || []).map((m) => (
                                 <option key={m} value={m}>{m}</option>
                               ))}
                             </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
                           </div>
                         </div>
 
                         <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-zinc-400">Summary Model</label>
+                          <label className="text-xs font-medium text-ink-400">Summary Model</label>
                           <div className="relative">
                             <select
                               value={config.summary_model || 'gpt-4o-mini'}
                               onChange={(e) => updateProviderField(providerKey, 'summary_model' as keyof AIProviderConfig, e.target.value)}
-                              className="w-full appearance-none bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                              className="w-full appearance-none bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                             >
                               {(meta.summaryModels || []).map((m) => (
                                 <option key={m} value={m}>{m}</option>
                               ))}
                             </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
                           </div>
                         </div>
 
                         <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-zinc-400">Analysis Model</label>
+                          <label className="text-xs font-medium text-ink-400">Analysis Model</label>
                           <div className="relative">
                             <select
                               value={config.analysis_model || 'gpt-4o'}
                               onChange={(e) => updateProviderField(providerKey, 'analysis_model' as keyof AIProviderConfig, e.target.value)}
-                              className="w-full appearance-none bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                              className="w-full appearance-none bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-8 text-sm text-ink-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                             >
                               {(meta.analysisModels || []).map((m) => (
                                 <option key={m} value={m}>{m}</option>
                               ))}
                             </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
                           </div>
                         </div>
                       </>
@@ -1217,7 +1217,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                               ? 'bg-green-500/10 text-green-400 border-green-500/30'
                               : connStatus === 'error'
                               ? 'bg-red-500/10 text-red-400 border-red-500/30'
-                              : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'
+                              : 'bg-ink-800 text-ink-300 border-ink-700 hover:bg-ink-700'
                           }`}
                         >
                           {connStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
@@ -1241,7 +1241,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                           </p>
                         )}
                         {connStatus === 'success' && quotaInfo[providerKey] && (
-                          <p className="mt-1 text-xs text-zinc-400">
+                          <p className="mt-1 text-xs text-ink-400">
                             Daily quota
                             {quotaInfo[providerKey]?.requests_remaining != null && (
                               <> — account: {quotaInfo[providerKey]?.requests_remaining}
@@ -1297,17 +1297,17 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
       {/* A: MCP Servers section — independent of LLM provider settings,
           but shown here since both are agent-runtime configs. */}
-      <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
+      <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
         <MCPServersPanel />
       </section>
 
       {/* G1-UI: Pending approvals — auto-hides when empty */}
-      <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
+      <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
         <ApprovalsPanel hideWhenEmpty />
       </section>
 
       {/* Phase 3: Token usage dashboard */}
-      <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
+      <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
         <TokenBillingDashboard />
       </section>
 

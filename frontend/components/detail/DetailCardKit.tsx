@@ -64,7 +64,7 @@ export function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEven
 // ── Card shell ───────────────────────────────────────────────────────────────
 /** The big rounded card that wraps detail content. */
 export const detailCardClass =
-  'bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all duration-300 shadow-lg flex flex-col max-w-full';
+  'bg-ink-900 border border-ink-800 rounded-2xl overflow-hidden hover:border-ink-700 transition-all duration-300 shadow-lg flex flex-col max-w-full';
 
 export function DetailCard({ className = '', children }: { className?: string; children: React.ReactNode }) {
   return <div className={`${detailCardClass} ${className}`}>{children}</div>;
@@ -86,7 +86,7 @@ export function DetailBadge({
     );
   }
   return (
-    <span className="px-2 py-1 text-xs font-semibold bg-zinc-800 text-zinc-300 rounded-md border border-zinc-700 uppercase tracking-wider">
+    <span className="px-2 py-1 text-xs font-semibold bg-ink-800 text-ink-300 rounded-md border border-ink-700 uppercase tracking-wider">
       {children}
     </span>
   );
@@ -111,17 +111,17 @@ export function MetaTimeRow({
 }) {
   if (!releaseTime && !duration) return null;
   return (
-    <div className={`flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 text-sm text-zinc-400 ${className}`}>
+    <div className={`flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 text-sm text-ink-400 ${className}`}>
       {releaseTime && (
         <div className="flex items-center gap-2">
-          <Clock size={14} className="text-zinc-500" />
-          <span>Release Time: <span className="text-zinc-300 font-medium">{releaseTime}</span></span>
+          <Clock size={14} className="text-ink-500" />
+          <span>Release Time: <span className="text-ink-300 font-medium">{releaseTime}</span></span>
         </div>
       )}
       {duration && (
         <div className="flex items-center gap-2">
-          <Timer size={14} className="text-zinc-500" />
-          <span>Duration: <span className="text-zinc-300 font-medium">{duration}</span></span>
+          <Timer size={14} className="text-ink-500" />
+          <span>Duration: <span className="text-ink-300 font-medium">{duration}</span></span>
           {durationSuffix}
         </div>
       )}
@@ -139,7 +139,7 @@ export function StatGrid({ cols, className = '', children }: { cols: 3 | 4; clas
 }
 
 const STAT_CARD_BASE =
-  'flex flex-col items-center justify-center p-2 sm:p-3 bg-zinc-950 rounded-xl border border-zinc-800';
+  'flex flex-col items-center justify-center p-2 sm:p-3 bg-ink-950 rounded-xl border border-ink-800';
 
 export function StatCard({
   icon,
@@ -158,7 +158,7 @@ export function StatCard({
     <>
       {icon}
       <span className="text-xs sm:text-sm font-bold text-white">{value}</span>
-      <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{label}</span>
+      <span className="text-[9px] sm:text-[10px] text-ink-500 uppercase tracking-wider mt-0.5">{label}</span>
     </>
   );
   if (onClick) {
@@ -178,7 +178,7 @@ export function StatCard({
 // ── Section label ────────────────────────────────────────────────────────────
 export function SectionLabel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <h4 className={`text-[11px] font-semibold text-zinc-500 uppercase tracking-widest ${className}`}>
+    <h4 className={`text-[11px] font-semibold text-ink-500 uppercase tracking-widest ${className}`}>
       {children}
     </h4>
   );
@@ -197,7 +197,7 @@ export function aiIntentPillClass(status?: string): string {
     case 'failed':
       return 'bg-red-500/15 text-red-300 border-red-500/40';
     default:
-      return 'bg-zinc-800/40 text-zinc-500 border-zinc-700/50';
+      return 'bg-ink-800/40 text-ink-500 border-ink-700/50';
   }
 }
 
@@ -272,7 +272,7 @@ export function RatingStars({
     <div className="flex items-center gap-0.5">
       {[1, 2, 3, 4, 5].map((star) => (
         <button key={star} className="p-0 transition-colors" onClick={() => onChange(star === value ? 0 : star)}>
-          <Star size={size} className={(value || 0) >= star ? 'text-amber-400 fill-amber-400' : 'text-zinc-600'} />
+          <Star size={size} className={(value || 0) >= star ? 'text-amber-400 fill-amber-400' : 'text-ink-600'} />
         </button>
       ))}
     </div>

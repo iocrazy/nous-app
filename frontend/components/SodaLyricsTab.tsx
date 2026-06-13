@@ -103,8 +103,8 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
       );
     }
     return (
-      <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800">
-        <div className="flex items-center justify-center gap-2 text-zinc-500">
+      <div className="p-4 bg-ink-900 rounded-xl border border-ink-800">
+        <div className="flex items-center justify-center gap-2 text-ink-500">
           <Loader2 size={16} className="animate-spin" />
           <span className="text-sm">Loading lyrics...</span>
         </div>
@@ -122,7 +122,7 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
       );
     }
     return (
-      <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800">
+      <div className="p-4 bg-ink-900 rounded-xl border border-ink-800">
         <div className="flex items-center justify-center gap-2 text-red-400">
           <AlertCircle size={16} />
           <span className="text-sm">{error}</span>
@@ -143,7 +143,7 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
         className={
           isBare
             ? 'mt-1 flex items-center gap-1.5 px-4 py-2 rounded-full bg-white/15 hover:bg-white/25 text-sm font-medium text-white transition-colors disabled:opacity-60'
-            : 'mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors disabled:opacity-60'
+            : 'mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-ink-800 hover:bg-ink-700 text-xs font-medium text-ink-200 transition-colors disabled:opacity-60'
         }
       >
         {fetching ? <Loader2 size={14} className="animate-spin" /> : <CloudDownload size={14} />}
@@ -160,8 +160,8 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
       );
     }
     return (
-      <div className="p-6 bg-zinc-900 rounded-xl border border-zinc-800">
-        <div className="flex flex-col items-center justify-center gap-2 text-zinc-500">
+      <div className="p-6 bg-ink-900 rounded-xl border border-ink-800">
+        <div className="flex flex-col items-center justify-center gap-2 text-ink-500">
           <Music size={20} />
           <span className="text-sm">{label}</span>
           {fetchBtn}
@@ -192,18 +192,18 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
   }
 
   return (
-    <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-      <div className="flex items-center gap-2 p-3 border-b border-zinc-800">
+    <div className="bg-ink-900 rounded-xl border border-ink-800 overflow-hidden">
+      <div className="flex items-center gap-2 p-3 border-b border-ink-800">
         <Music
           size={16}
-          className={theme ? '' : 'text-zinc-300'}
+          className={theme ? '' : 'text-ink-300'}
           style={theme ? { color: theme.accent } : undefined}
         />
         <span className="text-sm font-medium text-white">Lyrics</span>
         <button
           type="button"
           onClick={handleCopyLyrics}
-          className="ml-auto flex items-center gap-1 px-2 py-1 rounded text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+          className="ml-auto flex items-center gap-1 px-2 py-1 rounded text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
           title="Copy lyrics"
         >
           {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}

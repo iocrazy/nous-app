@@ -108,7 +108,7 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({
     <div className="flex justify-center w-full bg-black" style={{ height: 'calc(100dvh - 136px)' }}>
       <div 
         ref={containerRef}
-        className="w-full max-w-[500px] h-full bg-black md:rounded-2xl overflow-y-scroll snap-y snap-mandatory relative scrollbar-hide md:border border-zinc-800 shadow-2xl"
+        className="w-full max-w-[500px] h-full bg-black md:rounded-2xl overflow-y-scroll snap-y snap-mandatory relative scrollbar-hide md:border border-ink-800 shadow-2xl"
         style={{ scrollBehavior: 'smooth' }}
       >
         {data.map((item, idx) => {
@@ -128,7 +128,7 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({
           );
         })}
         {data.length === 0 && (
-           <div className="h-full flex flex-col items-center justify-center text-zinc-500 gap-4">
+           <div className="h-full flex flex-col items-center justify-center text-ink-500 gap-4">
              <p>No videos found in this feed.</p>
            </div>
         )}
@@ -140,19 +140,19 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({
         {data.length > 0 && hasMore && (
           <div
             ref={sentinelRef}
-            className="w-full flex items-center justify-center py-6 text-zinc-400"
+            className="w-full flex items-center justify-center py-6 text-ink-400"
             aria-hidden={!isLoadingMore}
           >
             {isLoadingMore ? (
               <Loader2 size={20} className="animate-spin" />
             ) : (
-              <span className="text-xs text-zinc-600">Loading more…</span>
+              <span className="text-xs text-ink-600">Loading more…</span>
             )}
           </div>
         )}
         {data.length > 0 && !hasMore && (
           <div className="w-full py-6 flex justify-center">
-            <span className="text-xs text-zinc-700">
+            <span className="text-xs text-ink-700">
               All {data.length} videos loaded
             </span>
           </div>
@@ -306,7 +306,7 @@ const FeedItem = ({
           {coverUrl ? (
             <img src={coverUrl} alt="" className="w-full h-full object-contain" loading="lazy" />
           ) : (
-            <Loader2 className="w-8 h-8 text-zinc-600 animate-spin" />
+            <Loader2 className="w-8 h-8 text-ink-600 animate-spin" />
           )}
         </div>
       ) : (
@@ -315,7 +315,7 @@ const FeedItem = ({
               <img src={imageUrl} alt={item.title} className="w-full h-full object-contain" loading="lazy" />
             ) : (
               <div className="flex items-center justify-center">
-                <ImageIcon size={48} className="text-zinc-700" />
+                <ImageIcon size={48} className="text-ink-700" />
               </div>
             )}
             <div className="absolute top-4 right-4 bg-black/50 px-3 py-1 rounded-full text-xs flex items-center gap-1 backdrop-blur-md">
@@ -337,8 +337,8 @@ const FeedItem = ({
       {/* Right Sidebar Actions — Douyin style */}
       <div className="absolute bottom-20 sm:bottom-20 right-2 flex flex-col items-center gap-4 z-20">
         <div className="relative">
-          <div className="w-10 h-10 rounded-full border border-white bg-zinc-800 overflow-hidden">
-             <div className="w-full h-full flex items-center justify-center text-zinc-500">
+          <div className="w-10 h-10 rounded-full border border-white bg-ink-800 overflow-hidden">
+             <div className="w-full h-full flex items-center justify-center text-ink-500">
                 <User size={20} />
              </div>
           </div>
@@ -401,14 +401,14 @@ const FeedItem = ({
           <div className="relative">
             <p
               ref={descRef}
-              className={`text-zinc-100 text-sm drop-shadow-md leading-relaxed ${descExpanded ? '' : 'line-clamp-1'}`}
+              className={`text-ink-100 text-sm drop-shadow-md leading-relaxed ${descExpanded ? '' : 'line-clamp-1'}`}
             >
               {item.description}
             </p>
             {(descClamped || descExpanded) && (
               <button
                 onClick={toggleDesc}
-                className="text-zinc-300 text-xs font-medium mt-0.5 flex items-center gap-0.5 hover:text-white transition-colors"
+                className="text-ink-300 text-xs font-medium mt-0.5 flex items-center gap-0.5 hover:text-white transition-colors"
               >
                 {descExpanded ? (
                   <><ChevronUp size={12} /> less</>

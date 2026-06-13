@@ -4,7 +4,7 @@ import { Settings, Users, Palette, Star, Trash2 } from 'lucide-react';
 import { Project } from '../types';
 
 const COLOR_OPTIONS = [
-  { value: null, label: 'None', color: 'bg-zinc-600' },
+  { value: null, label: 'None', color: 'bg-ink-600' },
   { value: 'red', label: 'Red', color: 'bg-red-500' },
   { value: 'orange', label: 'Orange', color: 'bg-orange-500' },
   { value: 'yellow', label: 'Yellow', color: 'bg-yellow-500' },
@@ -69,7 +69,7 @@ export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
       onClick={() => { onClick(); onClose(); }}
       onMouseEnter={() => setShowColorSub(false)}
       className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer
-        ${danger ? 'text-red-400 hover:bg-red-500/10' : 'text-zinc-300 hover:bg-zinc-700/50'}`}
+        ${danger ? 'text-red-400 hover:bg-red-500/10' : 'text-ink-300 hover:bg-ink-700/50'}`}
     >
       {icon}
       {label}
@@ -78,14 +78,14 @@ export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
 
   return (
     <div ref={ref} style={style}
-      className="w-52 bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl py-1.5">
+      className="w-52 bg-ink-900 border border-ink-700/60 rounded-xl shadow-2xl py-1.5">
       {/* Header */}
-      <div className="px-3 py-2 flex items-center gap-2 border-b border-zinc-800/50 mb-1">
+      <div className="px-3 py-2 flex items-center gap-2 border-b border-ink-800/50 mb-1">
         <span className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px]
                          font-bold text-white ${typeColors[project.project_type] || 'bg-purple-500'}`}>
           {project.name.charAt(0).toUpperCase()}
         </span>
-        <span className="text-sm text-zinc-200 font-medium truncate">{project.name}</span>
+        <span className="text-sm text-ink-200 font-medium truncate">{project.name}</span>
       </div>
 
       <MenuItem icon={<Settings size={14} />}
@@ -95,23 +95,23 @@ export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
         label={t('projects.contextMenu.members', 'Members')}
         onClick={onMembers} />
 
-      <div className="border-t border-zinc-800/50 my-1" />
+      <div className="border-t border-ink-800/50 my-1" />
 
       {/* Color Label with submenu */}
       <div className="relative"
         onMouseEnter={() => setShowColorSub(true)}
         onMouseLeave={() => setShowColorSub(false)}
       >
-        <div className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/50 rounded-md cursor-default">
+        <div className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-ink-300 hover:bg-ink-700/50 rounded-md cursor-default">
           <Palette size={14} />
           <span className="flex-1">{t('projects.contextMenu.colorLabel', 'Color Label')}</span>
           {project.color_label && (
             <span className={`w-3 h-3 rounded-full ${COLOR_OPTIONS.find(c => c.value === project.color_label)?.color || ''}`} />
           )}
-          <span className="text-zinc-600 text-xs">›</span>
+          <span className="text-ink-600 text-xs">›</span>
         </div>
         {showColorSub && (
-          <div className="absolute left-full top-0 ml-1 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl py-2 px-2 w-36">
+          <div className="absolute left-full top-0 ml-1 bg-ink-900 border border-ink-700 rounded-xl shadow-2xl py-2 px-2 w-36">
             <div className="grid grid-cols-4 gap-1.5">
               {COLOR_OPTIONS.map((opt) => (
                 <button
@@ -120,7 +120,7 @@ export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
                   title={opt.label}
                   className={`w-7 h-7 rounded-lg ${opt.color} transition-all hover:scale-110 ${
                     project.color_label === opt.value
-                      ? 'ring-2 ring-white ring-offset-1 ring-offset-zinc-900'
+                      ? 'ring-2 ring-white ring-offset-1 ring-offset-ink-900'
                       : ''
                   }`}
                 />
@@ -138,7 +138,7 @@ export const ProjectContextMenu: React.FC<ProjectContextMenuProps> = ({
         onClick={onToggleStar}
       />
 
-      <div className="border-t border-zinc-800/50 my-1" />
+      <div className="border-t border-ink-800/50 my-1" />
 
       <MenuItem icon={<Trash2 size={14} />}
         label={t('projects.contextMenu.delete', 'Delete Project')}

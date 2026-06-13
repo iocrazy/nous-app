@@ -53,18 +53,18 @@ const rightColumn: ShortcutSection[] = [
 ];
 
 const KeyBadge: React.FC<{ label: string }> = ({ label }) => (
-  <span className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-xs font-mono text-zinc-300">
+  <span className="bg-ink-800 border border-ink-700 rounded px-2 py-0.5 text-xs font-mono text-ink-300">
     {label}
   </span>
 );
 
 const ShortcutRow: React.FC<{ entry: ShortcutEntry; t: (key: string, fallback: string) => string }> = ({ entry, t }) => (
   <div className="flex items-center justify-between py-1.5">
-    <span className="text-sm text-zinc-300">{t(entry.labelKey, entry.fallback)}</span>
+    <span className="text-sm text-ink-300">{t(entry.labelKey, entry.fallback)}</span>
     <div className="flex items-center gap-1">
       {entry.keys.map((key, i) => (
         <React.Fragment key={i}>
-          {i > 0 && <span className="text-[10px] text-zinc-500">+</span>}
+          {i > 0 && <span className="text-[10px] text-ink-500">+</span>}
           <KeyBadge label={key} />
         </React.Fragment>
       ))}
@@ -74,7 +74,7 @@ const ShortcutRow: React.FC<{ entry: ShortcutEntry; t: (key: string, fallback: s
 
 const ShortcutSectionBlock: React.FC<{ section: ShortcutSection; t: (key: string, fallback: string) => string }> = ({ section, t }) => (
   <div className="mb-5 last:mb-0">
-    <h3 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">
+    <h3 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-3">
       {t(section.titleKey, section.titleFallback)}
     </h3>
     <div className="space-y-0.5">
@@ -117,15 +117,15 @@ export const KeyboardShortcutsDialog: React.FC<KeyboardShortcutsDialogProps> = (
       />
 
       {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-5 border-b border-ink-800">
           <h2 className="text-lg font-semibold text-white">
             {t('shortcuts.title', 'Keyboard Shortcuts')}
           </h2>
           <button
             onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>

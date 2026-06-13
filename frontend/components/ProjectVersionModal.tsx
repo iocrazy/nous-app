@@ -107,9 +107,9 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
         onClick={onClose}
       />
 
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-500/20 rounded-lg">
               <Layers size={20} className="text-indigo-400" />
@@ -120,7 +120,7 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -136,10 +136,10 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
 
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 size={24} className="text-zinc-400 animate-spin" />
+              <Loader2 size={24} className="text-ink-400 animate-spin" />
             </div>
           ) : versions.length === 0 ? (
-            <div className="text-center py-8 text-zinc-500 text-sm">
+            <div className="text-center py-8 text-ink-500 text-sm">
               {t('projects.versions.empty', 'No versions found')}
             </div>
           ) : (
@@ -153,7 +153,7 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
                     className={`w-full text-left p-3 rounded-xl border transition-colors ${
                       isCurrent
                         ? 'border-indigo-500/30 bg-indigo-500/5'
-                        : 'border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50'
+                        : 'border-ink-800 hover:border-ink-700 hover:bg-ink-800/50'
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -161,7 +161,7 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
                         className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
                           isCurrent
                             ? 'bg-indigo-500/20 text-indigo-300'
-                            : 'bg-zinc-700 text-zinc-300'
+                            : 'bg-ink-700 text-ink-300'
                         }`}
                       >
                         V{version.version_number}
@@ -178,19 +178,19 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500">
+                        <div className="flex items-center gap-2 mt-1 text-xs text-ink-500">
                           {version.created_at && (
                             <span>{formatDate(version.created_at)}</span>
                           )}
                           {version.file_size_bytes !== null && (
                             <>
-                              <span className="text-zinc-700">|</span>
+                              <span className="text-ink-700">|</span>
                               <span>{formatFileSize(version.file_size_bytes)}</span>
                             </>
                           )}
                           {version.resolution && (
                             <>
-                              <span className="text-zinc-700">|</span>
+                              <span className="text-ink-700">|</span>
                               <span>{version.resolution?.replace(/:/g, 'x')}</span>
                             </>
                           )}
@@ -205,7 +205,7 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
         </div>
 
         {/* Upload Button */}
-        <div className="p-6 border-t border-zinc-800">
+        <div className="p-6 border-t border-ink-800">
           <input
             ref={fileInputRef}
             type="file"
