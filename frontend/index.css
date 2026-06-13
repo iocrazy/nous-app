@@ -119,6 +119,34 @@
   .btn-tint-red:hover:not(:disabled) { background: rgba(248,113,113,.18); border-color: rgba(248,113,113,.5); }
 }
 
+/* ── Island app shell — island redesign v2 P1b (docs/design/island-redesign-spec.md §2).
+   Frame = background micro-glow + flex column (topbar row + content row). The
+   `.island-card` chrome reuses the semantic tokens that already flip per theme,
+   so the shell is dual-theme for free. Desktop-only; mobile keeps the flat frame. */
+.island-frame {
+  height: 100dvh;
+  overflow: hidden;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  background:
+    radial-gradient(900px 500px at 75% -10%, rgba(99, 102, 241, .07), transparent 60%),
+    radial-gradient(700px 400px at -10% 110%, rgba(99, 102, 241, .05), transparent 60%),
+    var(--app-bg);
+}
+.island-frame__row {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+.island-card {
+  background: var(--island);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg, 18px);
+  box-shadow: var(--shadow-island, 0 10px 40px rgba(0, 0, 0, .45));
+}
+
 /* Global styles */
 html, body {
   overflow-x: hidden;
