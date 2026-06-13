@@ -73,6 +73,33 @@
   --color-content-4: var(--content-4);
 }
 
+/* Light theme — ladder inverted + tuned (spec §5.4). Semantic colors
+   (indigo/green/amber/red/violet) intentionally unchanged. */
+[data-theme="light"] {
+  --ink-50:  #18181b;
+  --ink-100: #27272a;
+  --ink-200: #3f3f46;
+  --ink-300: #52525b;
+  --ink-400: #71717a;
+  --ink-500: #a1a1aa;
+  --ink-600: #d4d4d8;
+  --ink-700: #e4e4e7;
+  --ink-800: #f0f0f2;
+  --ink-900: #f7f7f8;
+  --ink-950: #fcfcfd;
+
+  --app-bg: #f4f4f6;
+  --island: #ffffff;
+  --island-2: #f4f4f5;
+  --card: #fafafa;
+  --line: rgba(0,0,0,.08);
+  --line-strong: rgba(0,0,0,.16);
+  --content: #1c1c21;
+  --content-2: #52525b;
+  --content-3: #8b8b94;
+  --content-4: #b0b0b8;
+}
+
 /* ── Tinted button system — island redesign D6
    (docs/design/island-redesign-spec.md §3). Layout/size stay Tailwind
    utilities at the call site; these classes own color only:
@@ -132,8 +159,8 @@ label {
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--color-background);
-  color: var(--color-foreground);
+  background-color: var(--ink-950);
+  color: var(--ink-100);
 }
 
 /* Custom scrollbar for dark theme */
