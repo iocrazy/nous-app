@@ -103,14 +103,14 @@ export const MemoryPanel: React.FC = () => {
   };
 
   return (
-    <section className="mt-8 bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
-      <div className="px-6 py-4 flex items-center gap-3 border-b border-zinc-800">
+    <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
+      <div className="px-6 py-4 flex items-center gap-3 border-b border-ink-800">
         <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400">
           <Brain size={18} />
         </div>
         <div className="flex-1">
-          <h3 className="font-semibold text-zinc-200">{t('memory.title')}</h3>
-          <p className="text-xs text-zinc-500 mt-0.5">{t('memory.subtitle')}</p>
+          <h3 className="font-semibold text-ink-200">{t('memory.title')}</h3>
+          <p className="text-xs text-ink-500 mt-0.5">{t('memory.subtitle')}</p>
         </div>
       </div>
 
@@ -123,7 +123,7 @@ export const MemoryPanel: React.FC = () => {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-zinc-500">
+          <div className="flex items-center gap-2 text-sm text-ink-500">
             <Loader2 size={16} className="animate-spin" />
             {t('common.loading')}
           </div>
@@ -151,21 +151,21 @@ export const MemoryPanel: React.FC = () => {
 
             {/* About me card */}
             <div className="space-y-2">
-              <label className="text-xs font-medium text-zinc-400">
+              <label className="text-xs font-medium text-ink-400">
                 {t('memory.aboutLabel')}
               </label>
-              <p className="text-xs text-zinc-500">{t('memory.aboutHint')}</p>
+              <p className="text-xs text-ink-500">{t('memory.aboutHint')}</p>
               <textarea
                 value={cardDraft}
                 onChange={(e) => setCardDraft(e.target.value)}
                 rows={4}
                 placeholder={t('memory.aboutPlaceholder')}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-purple-500 transition-colors"
+                className="w-full bg-ink-950 border border-ink-800 rounded-lg px-3 py-2 text-sm text-ink-200 placeholder-ink-600 focus:outline-none focus:border-purple-500 transition-colors"
               />
               <button
                 onClick={saveCard}
                 disabled={savingCard}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-200 border border-zinc-700 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-ink-800 text-ink-200 border border-ink-700 hover:bg-ink-700 disabled:opacity-50 transition-colors"
               >
                 {savingCard ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
                 {t('memory.saveAbout')}
@@ -174,25 +174,25 @@ export const MemoryPanel: React.FC = () => {
 
             {/* Observations */}
             <div className="space-y-2">
-              <label className="text-xs font-medium text-zinc-400">
+              <label className="text-xs font-medium text-ink-400">
                 {t('memory.observationsLabel')} ({profile.observations.length})
               </label>
               {profile.observations.length === 0 ? (
-                <p className="text-xs text-zinc-500">{t('memory.noObservations')}</p>
+                <p className="text-xs text-ink-500">{t('memory.noObservations')}</p>
               ) : (
                 <ul className="space-y-1.5">
                   {profile.observations.map((o) => (
                     <li
                       key={o.id}
-                      className="group flex items-start gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2"
+                      className="group flex items-start gap-2 bg-ink-950 border border-ink-800 rounded-lg px-3 py-2"
                     >
-                      <span className="flex-1 text-xs text-zinc-300 leading-relaxed">
+                      <span className="flex-1 text-xs text-ink-300 leading-relaxed">
                         {o.content}
                       </span>
                       <button
                         onClick={() => removeObservation(o.id)}
                         title={t('memory.deleteObservation')}
-                        className="text-zinc-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                        className="text-ink-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <Trash2 size={13} />
                       </button>
@@ -203,7 +203,7 @@ export const MemoryPanel: React.FC = () => {
             </div>
 
             {/* Forget everything */}
-            <div className="pt-2 border-t border-zinc-800/50">
+            <div className="pt-2 border-t border-ink-800/50">
               {!confirmForget ? (
                 <button
                   onClick={() => setConfirmForget(true)}
@@ -214,7 +214,7 @@ export const MemoryPanel: React.FC = () => {
                 </button>
               ) : (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-400">{t('memory.forgetConfirm')}</span>
+                  <span className="text-xs text-ink-400">{t('memory.forgetConfirm')}</span>
                   <button
                     onClick={forgetAll}
                     disabled={busy}
@@ -225,7 +225,7 @@ export const MemoryPanel: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setConfirmForget(false)}
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs text-ink-400 hover:text-ink-200 transition-colors"
                   >
                     <X size={13} />
                     {t('common.cancel')}
@@ -248,15 +248,15 @@ const ToggleRow: React.FC<{
 }> = ({ label, hint, enabled, onToggle }) => (
   <div className="flex items-center justify-between gap-4">
     <div className="min-w-0">
-      <div className="text-sm text-zinc-200">{label}</div>
-      <div className="text-xs text-zinc-500 mt-0.5">{hint}</div>
+      <div className="text-sm text-ink-200">{label}</div>
+      <div className="text-xs text-ink-500 mt-0.5">{hint}</div>
     </div>
     <button
       onClick={onToggle}
       role="switch"
       aria-checked={enabled}
       className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${
-        enabled ? 'bg-purple-600' : 'bg-zinc-700'
+        enabled ? 'bg-purple-600' : 'bg-ink-700'
       }`}
     >
       <span
