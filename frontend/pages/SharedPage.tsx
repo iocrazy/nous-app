@@ -39,7 +39,7 @@ const SHARE_TYPE_ICONS: Record<ShareType, React.ReactNode> = {
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  inactive: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  inactive: 'bg-ink-500/10 text-ink-400 border-ink-500/20',
   expired: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   cancelled: 'bg-red-500/10 text-red-400 border-red-500/20',
 };
@@ -111,11 +111,11 @@ export const SharedPage: React.FC = () => {
     <div className="flex-1 overflow-auto p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-zinc-100">{t('shared.title')}</h1>
+        <h1 className="text-xl font-bold text-ink-100">{t('shared.title')}</h1>
 
         {/* Filter */}
         <div className="flex items-center gap-2">
-          <Filter size={14} className="text-zinc-500" />
+          <Filter size={14} className="text-ink-500" />
           {(['all', 'active', 'inactive', 'expired'] as const).map((status) => (
             <button
               key={status}
@@ -123,7 +123,7 @@ export const SharedPage: React.FC = () => {
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                 filter === status
                   ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30'
-                  : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+                  : 'text-ink-500 hover:text-ink-300 border border-transparent'
               }`}
             >
               {status === 'all' ? t('common.all') : t(`shared.status.${status}`)}
@@ -135,30 +135,30 @@ export const SharedPage: React.FC = () => {
       {/* Content */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 size={24} className="animate-spin text-zinc-500" />
+          <Loader2 size={24} className="animate-spin text-ink-500" />
         </div>
       ) : filteredShares.length === 0 ? (
         <div className="text-center py-20">
-          <Link2 size={48} className="text-zinc-700 mx-auto mb-4" />
-          <p className="text-zinc-400 font-medium">{t('shared.empty')}</p>
-          <p className="text-sm text-zinc-600 mt-1">{t('shared.emptyHint')}</p>
+          <Link2 size={48} className="text-ink-700 mx-auto mb-4" />
+          <p className="text-ink-400 font-medium">{t('shared.empty')}</p>
+          <p className="text-sm text-ink-600 mt-1">{t('shared.emptyHint')}</p>
         </div>
       ) : (
         <div className="space-y-2">
           {filteredShares.map((share) => (
             <div
               key={share.id}
-              className="flex items-center gap-4 px-4 py-3 bg-zinc-900/50 border border-zinc-800/50 rounded-xl hover:bg-zinc-800/30 transition-colors group"
+              className="flex items-center gap-4 px-4 py-3 bg-ink-900/50 border border-ink-800/50 rounded-xl hover:bg-ink-800/30 transition-colors group"
             >
               {/* Icon */}
-              <div className="w-9 h-9 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400">
+              <div className="w-9 h-9 rounded-lg bg-ink-800 flex items-center justify-center text-ink-400">
                 {SHARE_TYPE_ICONS[share.share_type as ShareType] || <Link2 size={16} />}
               </div>
 
               {/* Name + type */}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-zinc-200 truncate">{share.share_name}</p>
-                <p className="text-xs text-zinc-500">{t(`shared.type.${share.share_type}`)}</p>
+                <p className="text-sm font-medium text-ink-200 truncate">{share.share_name}</p>
+                <p className="text-xs text-ink-500">{t(`shared.type.${share.share_type}`)}</p>
               </div>
 
               {/* Status + Views + Date — fixed width for alignment */}
@@ -174,7 +174,7 @@ export const SharedPage: React.FC = () => {
                       className={`px-2.5 py-0.5 text-xs font-medium rounded-md border w-16 text-center transition-colors cursor-pointer ${
                         isActive
                           ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
-                          : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20 hover:bg-zinc-500/20'
+                          : 'bg-ink-500/10 text-ink-400 border-ink-500/20 hover:bg-ink-500/20'
                       }`}
                       title={isActive ? 'Click to deactivate' : 'Click to reactivate'}
                     >
@@ -191,11 +191,11 @@ export const SharedPage: React.FC = () => {
                   );
                 })()}
 
-                <span className="text-xs text-zinc-500 w-16 text-right tabular-nums">
+                <span className="text-xs text-ink-500 w-16 text-right tabular-nums">
                   {share.view_count || 0} {t('share.views')}
                 </span>
 
-                <span className="text-xs text-zinc-600 w-20 text-right tabular-nums">
+                <span className="text-xs text-ink-600 w-20 text-right tabular-nums">
                   {new Date(share.created_at).toLocaleDateString()}
                 </span>
               </div>
@@ -204,7 +204,7 @@ export const SharedPage: React.FC = () => {
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 w-20 justify-end">
                 <button
                   onClick={() => handleCopyLink(share)}
-                  className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="p-1.5 text-ink-500 hover:text-ink-300 transition-colors"
                   title={t('shared.copyLink')}
                 >
                   {copiedId === share.id ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
@@ -213,13 +213,13 @@ export const SharedPage: React.FC = () => {
                   href={`/share/${share.share_code}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="p-1.5 text-ink-500 hover:text-ink-300 transition-colors"
                 >
                   <ExternalLink size={14} />
                 </a>
                 <button
                   onClick={() => handleDeleteShare(share.id)}
-                  className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
+                  className="p-1.5 text-ink-500 hover:text-red-400 transition-colors"
                   title="Delete"
                 >
                   <Trash2 size={14} />

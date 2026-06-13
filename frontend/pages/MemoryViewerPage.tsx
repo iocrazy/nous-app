@@ -29,12 +29,12 @@ const KIND_COLORS: Record<string, string> = {
   declarative: 'bg-blue-500/15 text-blue-300 border-blue-700/40',
   procedural: 'bg-amber-500/15 text-amber-300 border-amber-700/40',
   episodic: 'bg-purple-500/15 text-purple-300 border-purple-700/40',
-  unknown: 'bg-zinc-700 text-zinc-400 border-zinc-700',
+  unknown: 'bg-ink-700 text-ink-400 border-ink-700',
 };
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'text-green-400',
-  archived: 'text-zinc-500',
+  archived: 'text-ink-500',
   superseded: 'text-orange-400',
 };
 
@@ -105,20 +105,20 @@ export const MemoryViewerPage: React.FC = () => {
   }, [items, filterStatus]);
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-200 overflow-hidden">
+    <div className="flex flex-col h-full bg-ink-950 text-ink-200 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-zinc-800 flex-shrink-0">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-ink-800 flex-shrink-0">
         <Brain className="w-5 h-5 text-blue-400" />
         <div className="flex-1">
           <h1 className="text-lg font-semibold">{t('memoryViewer.title')}</h1>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-ink-500">
             {t('memoryViewer.subtitle')}
           </p>
         </div>
         <button
           type="button"
           onClick={reload}
-          className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400"
+          className="p-1.5 rounded hover:bg-ink-800 text-ink-400"
           title={t('memoryViewer.refresh')}
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -128,30 +128,30 @@ export const MemoryViewerPage: React.FC = () => {
       {/* Stat tiles */}
       {stats && (
         <div className="grid grid-cols-4 gap-3 px-6 py-4 flex-shrink-0">
-          <div className="bg-zinc-900 rounded-lg p-3 border border-zinc-800">
-            <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="bg-ink-900 rounded-lg p-3 border border-ink-800">
+            <div className="text-[10px] uppercase tracking-wide text-ink-500">
               {t('memoryViewer.stat_total')}
             </div>
             <div className="text-2xl font-bold mt-1">{totalCount}</div>
           </div>
-          <div className="bg-zinc-900 rounded-lg p-3 border border-zinc-800">
-            <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="bg-ink-900 rounded-lg p-3 border border-ink-800">
+            <div className="text-[10px] uppercase tracking-wide text-ink-500">
               {t('memoryViewer.stat_declarative')}
             </div>
             <div className="text-2xl font-bold mt-1 text-blue-300">
               {stats.by_kind.declarative ?? 0}
             </div>
           </div>
-          <div className="bg-zinc-900 rounded-lg p-3 border border-zinc-800">
-            <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="bg-ink-900 rounded-lg p-3 border border-ink-800">
+            <div className="text-[10px] uppercase tracking-wide text-ink-500">
               {t('memoryViewer.stat_procedural')}
             </div>
             <div className="text-2xl font-bold mt-1 text-amber-300">
               {stats.by_kind.procedural ?? 0}
             </div>
           </div>
-          <div className="bg-zinc-900 rounded-lg p-3 border border-zinc-800">
-            <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="bg-ink-900 rounded-lg p-3 border border-ink-800">
+            <div className="text-[10px] uppercase tracking-wide text-ink-500">
               {t('memoryViewer.stat_episodic')}
             </div>
             <div className="text-2xl font-bold mt-1 text-purple-300">
@@ -162,12 +162,12 @@ export const MemoryViewerPage: React.FC = () => {
       )}
 
       {/* Filter bar */}
-      <div className="flex items-center gap-3 px-6 py-2 border-y border-zinc-800 bg-zinc-900/50 flex-shrink-0">
-        <Filter className="w-3.5 h-3.5 text-zinc-500" />
-        <span className="text-xs text-zinc-500">{t('memoryViewer.filter')}</span>
+      <div className="flex items-center gap-3 px-6 py-2 border-y border-ink-800 bg-ink-900/50 flex-shrink-0">
+        <Filter className="w-3.5 h-3.5 text-ink-500" />
+        <span className="text-xs text-ink-500">{t('memoryViewer.filter')}</span>
 
         <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-600">{t('memoryViewer.filter_kind')}</span>
+          <span className="text-xs text-ink-600">{t('memoryViewer.filter_kind')}</span>
           {(['all', 'declarative', 'procedural', 'episodic'] as const).map((k) => (
             <button
               key={k}
@@ -176,7 +176,7 @@ export const MemoryViewerPage: React.FC = () => {
               className={`px-2 py-0.5 rounded text-xs transition-colors ${
                 filterKind === k
                   ? 'bg-blue-600 text-white'
-                  : 'text-zinc-500 hover:bg-zinc-800'
+                  : 'text-ink-500 hover:bg-ink-800'
               }`}
             >
               {k}
@@ -185,7 +185,7 @@ export const MemoryViewerPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1 ml-3">
-          <span className="text-xs text-zinc-600">{t('memoryViewer.filter_status')}</span>
+          <span className="text-xs text-ink-600">{t('memoryViewer.filter_status')}</span>
           {(['all', 'active', 'archived', 'superseded'] as const).map((s) => (
             <button
               key={s}
@@ -194,7 +194,7 @@ export const MemoryViewerPage: React.FC = () => {
               className={`px-2 py-0.5 rounded text-xs transition-colors ${
                 filterStatus === s
                   ? 'bg-blue-600 text-white'
-                  : 'text-zinc-500 hover:bg-zinc-800'
+                  : 'text-ink-500 hover:bg-ink-800'
               }`}
             >
               {s}
@@ -206,9 +206,9 @@ export const MemoryViewerPage: React.FC = () => {
       {/* Memory list */}
       <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
         {loading && items.length === 0 ? (
-          <div className="text-center py-12 text-zinc-500 text-sm">{t('memoryViewer.loading')}</div>
+          <div className="text-center py-12 text-ink-500 text-sm">{t('memoryViewer.loading')}</div>
         ) : visibleItems.length === 0 ? (
-          <div className="text-center py-12 text-zinc-500 text-sm">
+          <div className="text-center py-12 text-ink-500 text-sm">
             {t('memoryViewer.noMatch')}
           </div>
         ) : (
@@ -219,7 +219,7 @@ export const MemoryViewerPage: React.FC = () => {
               return (
                 <li
                   key={m.id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 hover:border-zinc-700 transition-colors"
+                  className="bg-ink-900 border border-ink-800 rounded-lg p-3 hover:border-ink-700 transition-colors"
                 >
                   <div className="flex items-start gap-3">
                     <span
@@ -233,46 +233,46 @@ export const MemoryViewerPage: React.FC = () => {
                         onClick={() => setExpandedId(isExpanded ? null : m.id)}
                         className="text-left w-full"
                       >
-                        <div className="text-sm text-zinc-200 leading-relaxed">
+                        <div className="text-sm text-ink-200 leading-relaxed">
                           {m.summary}
                         </div>
                       </button>
                       {isExpanded && (
-                        <div className="mt-2 pt-2 border-t border-zinc-800 space-y-1 text-xs text-zinc-400">
+                        <div className="mt-2 pt-2 border-t border-ink-800 space-y-1 text-xs text-ink-400">
                           {m.when_to_use && (
                             <div>
-                              <span className="text-zinc-500">{t('memoryViewer.whenToUse')}</span>{' '}
+                              <span className="text-ink-500">{t('memoryViewer.whenToUse')}</span>{' '}
                               {m.when_to_use}
                             </div>
                           )}
                           <div className="flex flex-wrap gap-3">
                             <span>
-                              <span className="text-zinc-500">{t('memoryViewer.scope')}</span> {m.scope}
+                              <span className="text-ink-500">{t('memoryViewer.scope')}</span> {m.scope}
                             </span>
                             <span>
-                              <span className="text-zinc-500">{t('memoryViewer.reinforced')}</span>{' '}
+                              <span className="text-ink-500">{t('memoryViewer.reinforced')}</span>{' '}
                               {m.reinforce_count}×
                             </span>
                             {m.decay_score !== null && (
                               <span>
-                                <span className="text-zinc-500">{t('memoryViewer.decay')}</span>{' '}
+                                <span className="text-ink-500">{t('memoryViewer.decay')}</span>{' '}
                                 {m.decay_score.toFixed(2)}
                               </span>
                             )}
                             {m.extracted_from && (
                               <span>
-                                <span className="text-zinc-500">{t('memoryViewer.from')}</span>{' '}
+                                <span className="text-ink-500">{t('memoryViewer.from')}</span>{' '}
                                 {m.extracted_from}
                               </span>
                             )}
                           </div>
-                          <div className="text-zinc-600 text-[10px]">
+                          <div className="text-ink-600 text-[10px]">
                             id: {m.id} · created{' '}
                             {m.created_at ? new Date(m.created_at).toLocaleString() : '?'}
                           </div>
                         </div>
                       )}
-                      <div className="flex items-center gap-3 mt-1.5 text-[10px] text-zinc-500">
+                      <div className="flex items-center gap-3 mt-1.5 text-[10px] text-ink-500">
                         <span className={STATUS_COLORS[m.status]}>
                           <Activity className="w-2.5 h-2.5 inline mr-0.5" />
                           {m.status}
@@ -296,7 +296,7 @@ export const MemoryViewerPage: React.FC = () => {
                         type="button"
                         disabled={archiving === m.id}
                         onClick={() => handleArchive(m.id)}
-                        className="text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 p-1.5 rounded transition-colors disabled:opacity-40"
+                        className="text-ink-500 hover:text-ink-300 hover:bg-ink-800 p-1.5 rounded transition-colors disabled:opacity-40"
                         title={t('memoryViewer.archive')}
                       >
                         <Archive className="w-3.5 h-3.5" />

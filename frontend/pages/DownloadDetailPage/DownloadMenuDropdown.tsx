@@ -52,13 +52,13 @@ export function DownloadMenuDropdown({
   const coverStatus = isCompleted(video.cover_download_status) && !hasCoverFile ? undefined : video.cover_download_status;
   const audioStatus = isCompleted(video.music_download_status) && !hasAudioFile ? undefined : video.music_download_status;
 
-  const btnClass = "w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition-colors";
-  const disabledClass = "w-full px-3 py-1.5 text-left text-xs text-zinc-500 flex items-center gap-2 cursor-default";
+  const btnClass = "w-full px-3 py-1.5 text-left text-xs text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2 transition-colors";
+  const disabledClass = "w-full px-3 py-1.5 text-left text-xs text-ink-500 flex items-center gap-2 cursor-default";
 
   return (
     <>
       <div className="fixed inset-0 z-10" onClick={onClose} />
-      <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden min-w-[180px]">
+      <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl overflow-hidden min-w-[180px]">
         <div className="py-1">
           {/* Video */}
           {isVideoType(video.media_type) && (
@@ -187,7 +187,7 @@ export function MobileDownloadMenu({
   const hasVideoFile = !!(video.download_path || video.hls_path);
   const hasCoverFile = !!video.cover_download_path;
   const hasAudioFile = !!(video.extract_audio_path || video.music_download_path);
-  const btnClass = "flex items-center gap-2 w-full px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors";
+  const btnClass = "flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors";
 
   return (
     <>

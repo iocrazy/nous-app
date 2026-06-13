@@ -114,10 +114,10 @@ export const UsagePage: React.FC = () => {
     <div className="max-w-6xl mx-auto space-y-6 p-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-zinc-100">
+          <h1 className="text-2xl font-bold text-ink-100">
             {t('aiUsage.title', 'AI Usage')}
           </h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-ink-400">
             {t(
               'aiUsage.subtitle',
               'Monthly rollup of token spend and cost across your agents. Data is aggregated server-side from agent_runs.',
@@ -135,7 +135,7 @@ export const UsagePage: React.FC = () => {
             type="button"
             onClick={fetchUsage}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50"
             title={t('aiUsage.refresh', 'Refresh')}
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -165,7 +165,7 @@ export const UsagePage: React.FC = () => {
       )}
 
       {loading && !data && (
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-ink-500">
           {t('aiUsage.loading', 'Loading usage...')}
         </p>
       )}
@@ -175,7 +175,7 @@ export const UsagePage: React.FC = () => {
           <SummaryCards data={data} />
 
           {perAgent.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-4 py-10 text-center text-sm text-zinc-500">
+            <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-4 py-10 text-center text-sm text-ink-500">
               {t(
                 'aiUsage.empty',
                 'No agent activity this month. Invocation history will show up here as runs land.',
@@ -201,23 +201,23 @@ const MonthPicker: React.FC<{
 }> = ({ month, onPrev, onNext, isCurrentMonth }) => {
   const { t } = useTranslation();
   return (
-    <div className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-1 py-1">
+    <div className="inline-flex items-center gap-1 rounded-md border border-ink-700 bg-ink-800 px-1 py-1">
       <button
         type="button"
         onClick={onPrev}
-        className="rounded p-1.5 text-zinc-300 hover:bg-zinc-700"
+        className="rounded p-1.5 text-ink-300 hover:bg-ink-700"
         aria-label={t('aiUsage.prevMonth', 'Previous month')}
       >
         <ChevronLeft size={14} />
       </button>
-      <span className="px-2 text-sm font-medium tabular-nums text-zinc-100">
+      <span className="px-2 text-sm font-medium tabular-nums text-ink-100">
         {month}
       </span>
       <button
         type="button"
         onClick={onNext}
         disabled={isCurrentMonth}
-        className="rounded p-1.5 text-zinc-300 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded p-1.5 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
         aria-label={t('aiUsage.nextMonth', 'Next month')}
       >
         <ChevronRight size={14} />
@@ -233,7 +233,7 @@ const ScopeSwitcher: React.FC<{
 }> = ({ scope, onChange, hasTeam }) => {
   const { t } = useTranslation();
   return (
-    <div className="inline-flex items-center rounded-md border border-zinc-700 bg-zinc-800 p-1">
+    <div className="inline-flex items-center rounded-md border border-ink-700 bg-ink-800 p-1">
       <ScopeButton
         label={t('aiUsage.scopeUser', 'My usage')}
         active={scope === 'user'}
@@ -261,7 +261,7 @@ const ScopeButton: React.FC<{
     className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
       active
         ? 'bg-indigo-500/15 text-indigo-300'
-        : 'text-zinc-400 hover:text-zinc-200'
+        : 'text-ink-400 hover:text-ink-200'
     }`}
   >
     {label}
@@ -300,14 +300,14 @@ const SummaryCard: React.FC<{
   label: string;
   value: string;
 }> = ({ icon, tint, label, value }) => (
-  <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+  <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-4">
     <div className="flex items-center gap-3">
       <div className={`rounded-lg p-2 ${tint}`}>{icon}</div>
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
           {label}
         </div>
-        <div className="mt-0.5 text-xl font-semibold text-zinc-100 tabular-nums">
+        <div className="mt-0.5 text-xl font-semibold text-ink-100 tabular-nums">
           {value}
         </div>
       </div>
@@ -333,8 +333,8 @@ const PerAgentChart: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) =>
   );
 
   return (
-    <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
-      <h3 className="mb-3 text-sm font-semibold text-zinc-200">
+    <section className="rounded-xl border border-ink-800 bg-ink-900/60 p-5">
+      <h3 className="mb-3 text-sm font-semibold text-ink-200">
         {t('aiUsage.chartTitle', 'Spend by agent (top 10)')}
       </h3>
       <div className="h-64 w-full">
@@ -393,15 +393,15 @@ const PerAgentTable: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) =>
     [perAgent],
   );
   return (
-    <section className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60">
-      <div className="border-b border-zinc-800 px-5 py-3">
-        <h3 className="text-sm font-semibold text-zinc-200">
+    <section className="overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60">
+      <div className="border-b border-ink-800 px-5 py-3">
+        <h3 className="text-sm font-semibold text-ink-200">
           {t('aiUsage.tableTitle', 'Per-agent breakdown')}
         </h3>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
-          <thead className="bg-zinc-900/80 text-xs font-medium uppercase tracking-wide text-zinc-500">
+          <thead className="bg-ink-900/80 text-xs font-medium uppercase tracking-wide text-ink-500">
             <tr>
               <th className="px-5 py-2">
                 {t('aiUsage.colAgent', 'Agent')}
@@ -426,40 +426,40 @@ const PerAgentTable: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) =>
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800">
+          <tbody className="divide-y divide-ink-800">
             {sorted.map((row) => (
               <tr
                 key={row.agent_id}
-                className="transition-colors hover:bg-zinc-900"
+                className="transition-colors hover:bg-ink-900"
               >
                 <td className="px-5 py-2">
-                  <div className="font-medium text-zinc-100 truncate">
+                  <div className="font-medium text-ink-100 truncate">
                     {row.agent_name ?? row.agent_slug ?? row.agent_id.slice(0, 8)}
                   </div>
                   {row.agent_slug && (
-                    <div className="font-mono text-xs text-zinc-500 truncate">
+                    <div className="font-mono text-xs text-ink-500 truncate">
                       {row.agent_slug}
                     </div>
                   )}
                 </td>
-                <td className="px-5 py-2 text-right tabular-nums text-zinc-300">
+                <td className="px-5 py-2 text-right tabular-nums text-ink-300">
                   {row.run_count.toLocaleString()}
                 </td>
-                <td className="px-5 py-2 text-right tabular-nums text-zinc-300">
+                <td className="px-5 py-2 text-right tabular-nums text-ink-300">
                   {formatTokens(row.prompt_tokens)}
                 </td>
-                <td className="px-5 py-2 text-right tabular-nums text-zinc-300">
+                <td className="px-5 py-2 text-right tabular-nums text-ink-300">
                   {formatTokens(row.completion_tokens)}
                 </td>
-                <td className="px-5 py-2 text-right tabular-nums text-zinc-100 font-medium">
+                <td className="px-5 py-2 text-right tabular-nums text-ink-100 font-medium">
                   {formatTokens(row.total_tokens)}
                 </td>
-                <td className="px-5 py-2 text-right tabular-nums text-zinc-100 font-medium">
+                <td className="px-5 py-2 text-right tabular-nums text-ink-100 font-medium">
                   {formatCost(row.cost_cents)}
                 </td>
                 <td className="px-5 py-2 text-right tabular-nums">
                   {row.failed_count === 0 ? (
-                    <span className="text-zinc-500">0</span>
+                    <span className="text-ink-500">0</span>
                   ) : (
                     <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-xs font-medium text-red-300">
                       {row.failed_count}

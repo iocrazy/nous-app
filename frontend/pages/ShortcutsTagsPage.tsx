@@ -279,7 +279,7 @@ export const ShortcutsTagsPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+      <div className="min-h-screen bg-ink-950 flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -287,19 +287,19 @@ export const ShortcutsTagsPage: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-ink-950 flex items-center justify-center p-6">
         <div className="text-center">
           <p className="text-red-400 text-lg mb-2">Error</p>
-          <p className="text-zinc-400 text-sm">{error}</p>
+          <p className="text-ink-400 text-sm">{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white pb-28">
+    <div className="min-h-screen bg-ink-950 text-white pb-28">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur-sm border-b border-zinc-800 px-4 py-3">
+      <div className="sticky top-0 z-10 bg-ink-950/95 backdrop-blur-sm border-b border-ink-800 px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="w-8" />
           <h1 className="text-lg font-semibold text-center">
@@ -307,13 +307,13 @@ export const ShortcutsTagsPage: React.FC = () => {
           </h1>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-ink-800 text-ink-400 hover:text-white transition-colors"
           >
             {showCreateForm ? <X size={16} /> : <Plus size={16} />}
           </button>
         </div>
         {selected.size > 0 && !showCreateForm && (
-          <p className="text-xs text-zinc-400 text-center mt-1">
+          <p className="text-xs text-ink-400 text-center mt-1">
             {lang === 'zh' ? `已选 ${selected.size} 个` : `${selected.size} selected`}
           </p>
         )}
@@ -322,31 +322,31 @@ export const ShortcutsTagsPage: React.FC = () => {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={lang === 'zh' ? '搜索标签...' : 'Search tags...'}
-          className="mt-2 w-full px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
+          className="mt-2 w-full px-3 py-1.5 rounded-lg bg-ink-800 border border-ink-700 text-sm text-white placeholder-ink-500 outline-none focus:border-indigo-500"
         />
       </div>
 
       {/* Create tag form */}
       {showCreateForm && (
-        <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/50 space-y-3">
+        <div className="px-4 py-3 border-b border-ink-800 bg-ink-900/50 space-y-3">
           <input
             type="text"
             value={newTagInput}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder={lang === 'zh' ? '输入标签名（中文或英文）' : 'Enter tag name (Chinese or English)'}
-            className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
+            className="w-full px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 text-sm text-white placeholder-ink-500 outline-none focus:border-indigo-500"
             autoFocus
           />
           {translatedName && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800/50 text-xs">
-              <span className="text-zinc-500">{isChinese(newTagInput) ? 'EN:' : 'ZH:'}</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-ink-800/50 text-xs">
+              <span className="text-ink-500">{isChinese(newTagInput) ? 'EN:' : 'ZH:'}</span>
               <span className="text-indigo-400">{translatedName}</span>
             </div>
           )}
           <select
             value={newTagGroupId}
             onChange={(e) => setNewTagGroupId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white outline-none focus:border-indigo-500"
+            className="w-full px-3 py-2 rounded-lg bg-ink-800 border border-ink-700 text-sm text-white outline-none focus:border-indigo-500"
           >
             <option value="">{lang === 'zh' ? '选择分组 (可选)' : 'Select group (optional)'}</option>
             {tagGroups.map((g) => (
@@ -371,7 +371,7 @@ export const ShortcutsTagsPage: React.FC = () => {
       {/* Tag groups */}
       <div className="px-4 py-3 space-y-5">
         {filteredTags.length === 0 && (
-          <p className="text-center text-sm text-zinc-500 py-8">
+          <p className="text-center text-sm text-ink-500 py-8">
             {query
               ? (lang === 'zh' ? '没有匹配的标签' : 'No tags match your search')
               : (lang === 'zh' ? '暂无标签' : 'No tags yet')}
@@ -419,11 +419,11 @@ export const ShortcutsTagsPage: React.FC = () => {
           <div key={groupName}>
             {/* Group header matching TagsSettings style */}
             <div className="flex items-center gap-2 mb-2.5">
-              <FolderOpen size={14} className="text-zinc-500" />
-              <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+              <FolderOpen size={14} className="text-ink-500" />
+              <span className="text-xs font-semibold text-ink-400 uppercase tracking-wider">
                 {groupName}
               </span>
-              <span className="text-[10px] text-zinc-600">({groupTags.length})</span>
+              <span className="text-[10px] text-ink-600">({groupTags.length})</span>
             </div>
 
             {/* Tags — flex wrap for compact layout */}
@@ -459,15 +459,15 @@ export const ShortcutsTagsPage: React.FC = () => {
       </div>
 
       {/* Fixed bottom bar — status only, auto-saved on every toggle */}
-      <div className="fixed bottom-0 left-0 right-0 p-3 bg-zinc-950/95 backdrop-blur-sm border-t border-zinc-800 safe-area-pb">
+      <div className="fixed bottom-0 left-0 right-0 p-3 bg-ink-950/95 backdrop-blur-sm border-t border-ink-800 safe-area-pb">
         <p className="text-center text-sm">
           {selected.size === 0 && (
-            <span className="text-zinc-500">
+            <span className="text-ink-500">
               {lang === 'zh' ? '点击标签选择，选完关闭即可' : 'Tap tags to select, close when done'}
             </span>
           )}
           {selected.size > 0 && saveStatus === 'saving' && (
-            <span className="text-zinc-400">
+            <span className="text-ink-400">
               {lang === 'zh' ? `保存中... (${selected.size})` : `Saving... (${selected.size})`}
             </span>
           )}
@@ -477,7 +477,7 @@ export const ShortcutsTagsPage: React.FC = () => {
             </span>
           )}
           {selected.size > 0 && saveStatus === 'idle' && (
-            <span className="text-zinc-400">
+            <span className="text-ink-400">
               {lang === 'zh' ? `已选 ${selected.size} 个` : `${selected.size} selected`}
             </span>
           )}

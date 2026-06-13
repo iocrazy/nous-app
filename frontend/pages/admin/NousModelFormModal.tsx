@@ -81,18 +81,18 @@ const Field: React.FC<{
   hint?: string;
 }> = ({ label, children, hint }) => (
   <div>
-    <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}</label>
+    <label className="block text-xs font-medium text-ink-400 mb-1.5">{label}</label>
     {children}
-    {hint && <p className="text-[11px] text-zinc-600 mt-1">{hint}</p>}
+    {hint && <p className="text-[11px] text-ink-600 mt-1">{hint}</p>}
   </div>
 );
 
 const inputClass =
-  'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 ' +
-  'placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500';
+  'w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 ' +
+  'placeholder-ink-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500';
 
 const selectClass =
-  'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 ' +
+  'w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 ' +
   'focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500';
 
 // ---------------------------------------------------------------------------
@@ -112,13 +112,13 @@ export const NousModelFormModal: React.FC<NousModelFormModalProps> = ({
   editing, form, saving, onFormChange, onSave, onClose,
 }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+    <div className="bg-ink-900 border border-ink-700 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h2 className="text-lg font-semibold text-zinc-100">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-ink-800">
+        <h2 className="text-lg font-semibold text-ink-100">
           {editing ? 'Edit Model' : 'Add Model'}
         </h2>
-        <button onClick={onClose} className="p-1 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
+        <button onClick={onClose} className="p-1 rounded-lg text-ink-500 hover:text-ink-300 hover:bg-ink-800 transition-colors">
           <X size={18} />
         </button>
       </div>
@@ -198,20 +198,20 @@ export const NousModelFormModal: React.FC<NousModelFormModalProps> = ({
           <button
             type="button"
             onClick={() => onFormChange({ is_enabled: !form.is_enabled })}
-            className="flex items-center gap-2 text-sm text-zinc-300"
+            className="flex items-center gap-2 text-sm text-ink-300"
           >
             {form.is_enabled
               ? <ToggleRight size={24} className="text-indigo-400" />
-              : <ToggleLeft size={24} className="text-zinc-500" />}
+              : <ToggleLeft size={24} className="text-ink-500" />}
             <span>{form.is_enabled ? 'Enabled' : 'Disabled'}</span>
           </button>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
+      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-800">
         <button onClick={onClose}
-          className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-zinc-800 transition-colors">
+          className="px-4 py-2 text-sm font-medium text-ink-400 hover:text-ink-200 rounded-lg hover:bg-ink-800 transition-colors">
           Cancel
         </button>
         <button onClick={onSave} disabled={saving}
