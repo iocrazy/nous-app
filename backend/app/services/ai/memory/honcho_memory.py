@@ -169,6 +169,47 @@ class HonchoMemoryService:
             )
             return False
 
+    async def get_user_representation(
+        self,
+        *,
+        user_id: str,
+        workspace_id: Optional[str] = None,
+        max_chars: int = 2000,
+    ) -> Optional[str]:
+        """Working representation of ``user_id`` (deriver observations).
+
+        Unlike the dialectic ``get_user_context`` this is a pure DB read
+        on the Honcho side — no LLM call — so it's cheap enough to run
+        on every chat turn for prompt injection (Phase 4 L2). None on
+        any failure, when disabled, or when the peer has no
+        observations yet.
+        """
+        client = self._get_client()
+        if client is None:
+            return None
+        workspace = workspace_id or self.config.workspace_id
+        try:
+            response = await client.post(
+                f"/v3/workspaces/{workspace}/peers/user-{user_id}/representation",
+                json={},
+            )
+            if response.status_code != 200:
+                logger.warning(
+                    "[honcho] representation -> %s: %s",
+                    response.status_code,
+                    response.text[:200],
+                )
+                return None
+            payload: Any = response.json()
+            rep = payload.get("representation") if isinstance(payload, dict) else None
+            rep = str(rep).strip() if rep else ""
+            if not rep:
+                return None
+            return rep[:max_chars]
+        except Exception:  # noqa: BLE001
+            logger.exception("[honcho] representation fetch failed (user=%s)", user_id)
+            return None
+
     async def get_user_context(
         self, *, user_id: str, query: str, timeout_s: float = 30.0
     ) -> Optional[str]:
