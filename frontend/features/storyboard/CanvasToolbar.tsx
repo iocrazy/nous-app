@@ -39,6 +39,7 @@ export const CanvasToolbar = memo(({ isLocked, onToggleLock, snapToGrid, onToggl
       <button
         onClick={handleAddNode}
         disabled={isLocked}
+        data-testid="sb-add-node"
         className={`
           flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors duration-200
           ${

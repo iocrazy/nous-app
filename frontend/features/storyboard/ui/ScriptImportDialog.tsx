@@ -109,6 +109,7 @@ export function ScriptImportDialog({
 
   return (
     <div
+      data-testid="sb-script-dialog"
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
