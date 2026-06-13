@@ -74,7 +74,7 @@ interface IssueListViewProps {
   currentUserId?: string;
 }
 
-const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-zinc-600', size = 20 }) => (
+const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 20 }) => (
   <span
     className={`inline-flex items-center justify-center rounded-full text-[10px] font-semibold text-white ${color}`}
     style={{ width: size, height: size }}
@@ -96,51 +96,51 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
-      className="flex items-center gap-3 px-4 py-1.5 hover:bg-zinc-800/30 transition group"
+      className="flex items-center gap-3 px-4 py-1.5 hover:bg-ink-800/30 transition group"
     >
       {visibleCols.has('status') && <IssueStatusIcon status={issue.status} size={15} />}
       <span className="w-4 flex justify-center" title={issue.priority}>
         <PriorityIcon priority={issue.priority} />
       </span>
       {visibleCols.has('id') && (
-        <span className="font-mono text-[12px] text-zinc-500 w-16 shrink-0 uppercase tracking-wider">
+        <span className="font-mono text-[12px] text-ink-500 w-16 shrink-0 uppercase tracking-wider">
           {issue.identifier}
         </span>
       )}
-      <span className="flex-1 truncate text-[14px] text-zinc-200 group-hover:text-white">{issue.title}</span>
+      <span className="flex-1 truncate text-[14px] text-ink-200 group-hover:text-white">{issue.title}</span>
       {visibleCols.has('parent') && parent && (
         <Link
           to={`/team/${teamId}/todolist/${parent.identifier}`}
           onClick={(e) => e.stopPropagation()}
-          className="hidden lg:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800/70 text-zinc-400 text-[12px] hover:bg-zinc-700"
+          className="hidden lg:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-ink-800/70 text-ink-400 text-[12px] hover:bg-ink-700"
           title={`Parent: ${parent.title}`}
         >
           ↳ {parent.identifier}
         </Link>
       )}
       {visibleCols.has('tags') && (
-        <span className="hidden lg:inline-flex items-center gap-1 text-[12px] text-zinc-600 italic">
+        <span className="hidden lg:inline-flex items-center gap-1 text-[12px] text-ink-600 italic">
           {/* tags schema not in place yet */}
           —
         </span>
       )}
       {visibleCols.has('project') && issue.project && (
         <span
-          className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[12px]"
+          className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-ink-800 text-ink-400 text-[12px]"
           title={`Project: ${issue.project.name}`}
         >
-          <span className={`w-1.5 h-1.5 rounded-full ${issue.project.color ?? 'bg-zinc-500'}`} />
+          <span className={`w-1.5 h-1.5 rounded-full ${issue.project.color ?? 'bg-ink-500'}`} />
           {issue.project.name}
         </span>
       )}
       {visibleCols.has('assignee') && (issue.assignee || issue.assignee_user_label) && (
         <AgentAvatar
           initials={initials}
-          color={issue.assignee?.avatar_color ?? 'bg-zinc-600'}
+          color={issue.assignee?.avatar_color ?? 'bg-ink-600'}
         />
       )}
       {visibleCols.has('updated') && (
-        <span className="text-[12px] text-zinc-500 w-16 text-right shrink-0">
+        <span className="text-[12px] text-ink-500 w-16 text-right shrink-0">
           {relativeTime(issue.last_activity_at)}
         </span>
       )}
@@ -279,8 +279,8 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const filterCount = activeFilterCount(filters);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-zinc-950">
-      <div className="flex items-center gap-2 px-4 py-3 sticky top-0 z-10 bg-zinc-950">
+    <div className="flex flex-col h-[calc(100vh-5rem)] -mx-4 sm:-mx-8 -mb-28 sm:-mb-8 bg-ink-950">
+      <div className="flex items-center gap-2 px-4 py-3 sticky top-0 z-10 bg-ink-950">
         <button
           type="button"
           onClick={onNewIssue}
@@ -289,24 +289,24 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           <Plus size={13} /> New Issue
         </button>
         <div className="relative flex-1 max-w-md">
-          <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-500" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search issues…"
-            className="w-full pl-7 pr-2 py-1.5 text-[13px] bg-zinc-900/80 border border-zinc-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-zinc-200 placeholder-zinc-600"
+            className="w-full pl-7 pr-2 py-1.5 text-[13px] bg-ink-900/80 border border-ink-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-ink-200 placeholder-ink-600"
           />
         </div>
         <div className="ml-auto flex items-center gap-1">
-          <div className="inline-flex rounded border border-zinc-800 bg-zinc-900/80 overflow-hidden">
+          <div className="inline-flex rounded border border-ink-800 bg-ink-900/80 overflow-hidden">
             <button
               type="button"
               onClick={() => onViewModeChange('list')}
               className={`p-1.5 transition ${
                 viewMode === 'list'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                  ? 'bg-ink-800 text-ink-100'
+                  : 'text-ink-400 hover:text-ink-200'
               }`}
               title="List view"
             >
@@ -315,10 +315,10 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             <button
               type="button"
               onClick={() => onViewModeChange('board')}
-              className={`p-1.5 transition border-l border-zinc-800 ${
+              className={`p-1.5 transition border-l border-ink-800 ${
                 viewMode === 'board'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                  ? 'bg-ink-800 text-ink-100'
+                  : 'text-ink-400 hover:text-ink-200'
               }`}
               title="Board view"
             >
@@ -332,7 +332,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
                 filterOpen || filterCount > 0
                   ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-200'
-                  : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  : 'bg-ink-900/80 border-ink-800 text-ink-400 hover:text-ink-200'
               }`}
               title="Filters"
             >
@@ -355,8 +355,8 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setColumnPickerOpen(false); }}
               className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
                 sortOpen
-                  ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
-                  : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  ? 'bg-ink-800 border-ink-700 text-ink-100'
+                  : 'bg-ink-900/80 border-ink-800 text-ink-400 hover:text-ink-200'
               }`}
               title={`Sort: ${SORT_LABEL_BY_KEY[sort.key]} ${sort.dir === 'asc' ? '↑' : '↓'}`}
             >
@@ -376,8 +376,8 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => { setColumnPickerOpen((v) => !v); setFilterOpen(false); setSortOpen(false); }}
               className={`p-1.5 rounded border transition ${
                 columnPickerOpen
-                  ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
-                  : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  ? 'bg-ink-800 border-ink-700 text-ink-100'
+                  : 'bg-ink-900/80 border-ink-800 text-ink-400 hover:text-ink-200'
               }`}
               title="Column visibility"
             >
@@ -395,19 +395,19 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             type="button"
             onClick={onRefresh}
             disabled={loading}
-            className="p-1.5 rounded border border-zinc-800 bg-zinc-900/80 text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
+            className="p-1.5 rounded border border-ink-800 bg-ink-900/80 text-ink-400 hover:text-ink-200 disabled:opacity-50"
             title="Refresh"
           >
             <RotateCw size={13} className={loading ? 'animate-spin' : ''} />
           </button>
-          <span className="text-[12px] text-zinc-500 pl-2 pr-1">
+          <span className="text-[12px] text-ink-500 pl-2 pr-1">
             {filtered.length} issue{filtered.length === 1 ? '' : 's'}
           </span>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 px-4 py-1.5 text-[12px]">
-        <span className="text-zinc-600 mr-1">Quick:</span>
+        <span className="text-ink-600 mr-1">Quick:</span>
         {(['all', 'active', 'backlog', 'done'] as QuickFilter[]).map((q) => {
           const matches = (() => {
             if (q === 'all') return filters.statuses.size === 0;
@@ -423,7 +423,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded transition ${
                 matches
                   ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-500/40'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                  : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
               }`}
             >
               {q === 'all' ? 'All' : q === 'active' ? 'Active' : q === 'backlog' ? 'Backlog' : 'Done'}
@@ -431,7 +431,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           );
         })}
         {filters.statuses.size > 0 && (
-          <span className="text-zinc-600 ml-3">
+          <span className="text-ink-600 ml-3">
             ·  {Array.from(filters.statuses).map((s) => STATUS_LABEL[s]).join(', ')}
           </span>
         )}
@@ -439,7 +439,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           <button
             type="button"
             onClick={() => setFilters(EMPTY_FILTERS)}
-            className="ml-auto text-[12px] text-zinc-500 hover:text-zinc-200"
+            className="ml-auto text-[12px] text-ink-500 hover:text-ink-200"
           >
             Reset filters ({filterCount})
           </button>
@@ -453,13 +453,13 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           </div>
         )}
         {loading && issues.length === 0 ? (
-          <div className="flex items-center justify-center py-24 text-sm text-zinc-500">
+          <div className="flex items-center justify-center py-24 text-sm text-ink-500">
             Loading issues…
           </div>
         ) : viewMode === 'board' ? (
           <IssueBoardView issues={flatSorted} />
         ) : grouped.length === 0 ? (
-          <div className="flex items-center justify-center py-24 text-sm text-zinc-500 italic">
+          <div className="flex items-center justify-center py-24 text-sm text-ink-500 italic">
             No issues match the current filters.
           </div>
         ) : (
@@ -467,10 +467,10 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             <div key={g.status}>
               <div className="flex items-center gap-2 px-4 pt-3 pb-1">
                 <IssueStatusIcon status={g.status} size={12} />
-                <span className="text-[12px] font-semibold text-zinc-300 uppercase tracking-wider">
+                <span className="text-[12px] font-semibold text-ink-300 uppercase tracking-wider">
                   {STATUS_LABEL[g.status]}
                 </span>
-                <span className="text-[12px] text-zinc-500 ml-auto">{g.items.length}</span>
+                <span className="text-[12px] text-ink-500 ml-auto">{g.items.length}</span>
               </div>
               {g.items.map((issue) => (
                 <IssueRow

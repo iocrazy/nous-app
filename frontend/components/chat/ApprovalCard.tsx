@@ -66,7 +66,7 @@ export function ApprovalCard({
         {t('chat.approvalNeeded')}
       </div>
       {approval.reason && (
-        <p className="mt-1 text-xs text-zinc-300 break-words">{approval.reason}</p>
+        <p className="mt-1 text-xs text-ink-300 break-words">{approval.reason}</p>
       )}
 
       {resolution === 'pending' && approval.approvalId && (
@@ -104,10 +104,10 @@ export function ApprovalCard({
         <p className="mt-2 text-xs text-green-400">{t('chat.approvedContinue')}</p>
       )}
       {resolution === 'rejected' && (
-        <p className="mt-2 text-xs text-zinc-400">{t('chat.rejectedNote')}</p>
+        <p className="mt-2 text-xs text-ink-400">{t('chat.rejectedNote')}</p>
       )}
       {resolution === 'stale' && (
-        <p className="mt-2 text-xs text-zinc-500">{t('chat.approvalResolved')}</p>
+        <p className="mt-2 text-xs text-ink-500">{t('chat.approvalResolved')}</p>
       )}
       {error && <p className="mt-2 text-xs text-red-400 break-words">{error}</p>}
     </div>

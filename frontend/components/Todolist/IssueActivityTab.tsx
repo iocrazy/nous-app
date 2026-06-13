@@ -22,7 +22,7 @@ export const IssueActivityTab: React.FC<IssueActivityTabProps> = ({ messages, se
   const events = messages.filter((m) => m.kind === 'system_status');
   if (events.length === 0) {
     return (
-      <div className="text-[14px] text-zinc-500 italic px-4 py-12 text-center">
+      <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">
         No status changes yet. Updating the issue's status will show a row here.
       </div>
     );
@@ -35,8 +35,8 @@ export const IssueActivityTab: React.FC<IssueActivityTabProps> = ({ messages, se
         const isSelf = m.author_user_id && m.author_user_id === selfUserId;
         const author = isSelf ? 'You' : m.author_user_id ? `User ${m.author_user_id.slice(0, 6)}` : 'System';
         return (
-          <div key={m.id} className="flex items-center gap-2 px-2 py-1.5 text-[13px] text-zinc-400 border-l-2 border-zinc-800/80">
-            <span className="font-medium text-zinc-300">{author}</span>
+          <div key={m.id} className="flex items-center gap-2 px-2 py-1.5 text-[13px] text-ink-400 border-l-2 border-ink-800/80">
+            <span className="font-medium text-ink-300">{author}</span>
             <span>updated status</span>
             <span className="ml-2 inline-flex items-center gap-1.5">
               {from && (
@@ -45,7 +45,7 @@ export const IssueActivityTab: React.FC<IssueActivityTabProps> = ({ messages, se
                   {STATUS_LABEL[from].toLowerCase()}
                 </span>
               )}
-              <span className="text-zinc-600">→</span>
+              <span className="text-ink-600">→</span>
               {to && (
                 <span className={`${STATUS_COLOR[to]} inline-flex items-center gap-1`}>
                   <IssueStatusIcon status={to} size={11} />
@@ -53,7 +53,7 @@ export const IssueActivityTab: React.FC<IssueActivityTabProps> = ({ messages, se
                 </span>
               )}
             </span>
-            <span className="ml-auto text-[12px] text-zinc-500">{relativeTime(m.created_at)}</span>
+            <span className="ml-auto text-[12px] text-ink-500">{relativeTime(m.created_at)}</span>
           </div>
         );
       })}

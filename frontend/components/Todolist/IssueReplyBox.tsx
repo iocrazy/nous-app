@@ -156,8 +156,8 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     editorProps: {
       attributes: {
         class: [
-          'w-full bg-transparent px-3 py-2 text-[14px] text-zinc-200',
-          'placeholder-zinc-600 focus:outline-none',
+          'w-full bg-transparent px-3 py-2 text-[14px] text-ink-200',
+          'placeholder-ink-600 focus:outline-none',
           'min-h-[72px] max-h-[200px] overflow-y-auto leading-6',
           'tiptap-composer',
         ].join(' '),
@@ -261,7 +261,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   return (
     <div
       {...rootProps}
-      className="relative border border-zinc-800 rounded-lg bg-zinc-900/50 mx-4 mb-4"
+      className="relative border border-ink-800 rounded-lg bg-ink-900/50 mx-4 mb-4"
     >
       {/* @-mention resource picker — absolutely-positioned overlay above the composer */}
       {mentionOpen && (
@@ -290,18 +290,18 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
 
       <EditorContent editor={editor} />
 
-      <div className="flex items-center gap-2 px-2 pb-2 border-t border-zinc-800/80 pt-2">
-        <span className="text-[12px] text-zinc-600 ml-1">⌘↩ to send</span>
+      <div className="flex items-center gap-2 px-2 pb-2 border-t border-ink-800/80 pt-2">
+        <span className="text-[12px] text-ink-600 ml-1">⌘↩ to send</span>
         <div className="relative ml-auto">
           <button
             type="button"
             onClick={() => setPickerOpen((v) => !v)}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[12px] rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            className="inline-flex items-center gap-1 px-2 py-1 text-[12px] rounded bg-ink-800 text-ink-300 hover:bg-ink-700"
           >
             {selectedAgent ? (
               <>
                 <span
-                  className={`inline-flex items-center justify-center rounded-full w-3.5 h-3.5 text-[10px] font-semibold text-white ${selectedAgent.avatar_color ?? 'bg-zinc-600'}`}
+                  className={`inline-flex items-center justify-center rounded-full w-3.5 h-3.5 text-[10px] font-semibold text-white ${selectedAgent.avatar_color ?? 'bg-ink-600'}`}
                 >
                   {selectedAgent.name.slice(0, 1).toUpperCase()}
                 </span>
@@ -313,24 +313,24 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
             <ChevronDown size={11} />
           </button>
           {pickerOpen && (
-            <div className="absolute right-0 bottom-full mb-1 w-56 max-h-72 overflow-y-auto bg-zinc-900 border border-zinc-800 rounded shadow-lg z-10">
+            <div className="absolute right-0 bottom-full mb-1 w-56 max-h-72 overflow-y-auto bg-ink-900 border border-ink-800 rounded shadow-lg z-10">
               <button
                 onClick={() => { setAgentId(null); setPickerOpen(false); }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-zinc-400 hover:bg-zinc-800 text-left"
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-ink-400 hover:bg-ink-800 text-left"
               >
                 No agent (just comment)
               </button>
-              <div className="border-t border-zinc-800/60" />
+              <div className="border-t border-ink-800/60" />
               {agents.length === 0 && (
-                <div className="px-2 py-2 text-[12px] text-zinc-500 italic">No agents available</div>
+                <div className="px-2 py-2 text-[12px] text-ink-500 italic">No agents available</div>
               )}
               {agents.map((a) => (
                 <button
                   key={a.id}
                   onClick={() => { setAgentId(a.id); setPickerOpen(false); }}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-800 text-left"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-ink-300 hover:bg-ink-800 text-left"
                 >
-                  <span className={`inline-flex items-center justify-center rounded-full w-4 h-4 text-[10px] text-white ${a.avatar_color ?? 'bg-zinc-600'}`}>
+                  <span className={`inline-flex items-center justify-center rounded-full w-4 h-4 text-[10px] text-white ${a.avatar_color ?? 'bg-ink-600'}`}>
                     {a.name.slice(0, 1).toUpperCase()}
                   </span>
                   {a.name}

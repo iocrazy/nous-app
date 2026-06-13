@@ -47,7 +47,7 @@ export function ProjectStoryboardTab({ projectId }: Props) {
     return (
       <div className="flex flex-wrap gap-4">
         {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="w-[280px] h-[140px] rounded-xl bg-zinc-900 animate-pulse" />
+          <div key={i} className="w-[280px] h-[140px] rounded-xl bg-ink-900 animate-pulse" />
         ))}
       </div>
     );
@@ -57,8 +57,8 @@ export function ProjectStoryboardTab({ projectId }: Props) {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-semibold text-zinc-100">Storyboards</h2>
-          <p className="text-xs text-zinc-500 mt-0.5">{items.length} item{items.length !== 1 ? 's' : ''}</p>
+          <h2 className="text-lg font-semibold text-ink-100">Storyboards</h2>
+          <p className="text-xs text-ink-500 mt-0.5">{items.length} item{items.length !== 1 ? 's' : ''}</p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -71,12 +71,12 @@ export function ProjectStoryboardTab({ projectId }: Props) {
 
       {items.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 flex items-center justify-center">
-            <Clapperboard size={28} className="text-zinc-600" />
+          <div className="w-16 h-16 rounded-2xl bg-ink-800/50 flex items-center justify-center">
+            <Clapperboard size={28} className="text-ink-600" />
           </div>
           <div>
-            <p className="text-sm font-medium text-zinc-400">No storyboards yet</p>
-            <p className="text-xs text-zinc-600 mt-1">Create a storyboard to start visual storytelling</p>
+            <p className="text-sm font-medium text-ink-400">No storyboards yet</p>
+            <p className="text-xs text-ink-600 mt-1">Create a storyboard to start visual storytelling</p>
           </div>
           <button
             onClick={() => setShowCreateModal(true)}
@@ -95,23 +95,23 @@ export function ProjectStoryboardTab({ projectId }: Props) {
               <button
                 key={sb.id}
                 onClick={() => handleOpen(sb.id)}
-                className="w-[280px] text-left group flex flex-col rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-5 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800/40 hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
+                className="w-[280px] text-left group flex flex-col rounded-xl border border-ink-800/60 bg-ink-900/50 p-5 transition-all duration-200 hover:border-ink-600 hover:bg-ink-800/40 hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
               >
                 <div className="flex items-start gap-3">
                   <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-500/15">
                     <Layers size={18} className="text-indigo-400" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h4 className="truncate text-sm font-semibold text-zinc-100">{sb.name}</h4>
+                    <h4 className="truncate text-sm font-semibold text-ink-100">{sb.name}</h4>
                   </div>
                 </div>
                 <div className="mt-3">
                   <span className="rounded-full border border-indigo-800/50 bg-indigo-900/30 px-2 py-0.5 text-[10px] text-indigo-400 font-medium">
                     Storyboard
                   </span>
-                  <span className="ml-2 text-[10px] text-zinc-600">{sb.frame_count ?? 0} frames</span>
+                  <span className="ml-2 text-[10px] text-ink-600">{sb.frame_count ?? 0} frames</span>
                 </div>
-                <div className="mt-3 space-y-0.5 text-[11px] text-zinc-500">
+                <div className="mt-3 space-y-0.5 text-[11px] text-ink-500">
                   {modified && <div>Modified: {modified}</div>}
                   {created && <div>Created: {created}</div>}
                 </div>
@@ -184,15 +184,15 @@ function CreateStoryboardModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-sm rounded-xl bg-zinc-900 border border-zinc-700 shadow-2xl p-5">
+      <div className="w-full max-w-sm rounded-xl bg-ink-900 border border-ink-700 shadow-2xl p-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-zinc-100">New Storyboard</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+          <h3 className="text-sm font-semibold text-ink-100">New Storyboard</h3>
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-300 transition-colors">
             <X size={16} />
           </button>
         </div>
 
-        <label className="block text-xs text-zinc-400 mb-1.5">Name</label>
+        <label className="block text-xs text-ink-400 mb-1.5">Name</label>
         <input
           ref={inputRef}
           type="text"
@@ -200,7 +200,7 @@ function CreateStoryboardModal({
           onChange={(e) => setName(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Enter storyboard name..."
-          className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+          className="w-full rounded-lg bg-ink-800 border border-ink-700 px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:outline-none focus:border-indigo-500 transition-colors"
         />
 
         {error && (
@@ -210,7 +210,7 @@ function CreateStoryboardModal({
         <div className="flex justify-end gap-2 mt-4">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-zinc-800 transition-colors"
+            className="px-3 py-1.5 text-xs font-medium text-ink-400 hover:text-ink-200 rounded-lg hover:bg-ink-800 transition-colors"
           >
             Cancel
           </button>

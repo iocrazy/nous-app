@@ -28,8 +28,8 @@ export function EmptyState({ onSuggest }: EmptyStateProps): React.ReactElement {
       <Sparkles size={32} className="text-indigo-400" />
 
       <div>
-        <h3 className="text-base font-medium text-zinc-200">{t('chat.emptyTitle')}</h3>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h3 className="text-base font-medium text-ink-200">{t('chat.emptyTitle')}</h3>
+        <p className="mt-1 text-sm text-ink-500">
           {t('chat.emptySubtitle')}
         </p>
       </div>
@@ -43,9 +43,9 @@ export function EmptyState({ onSuggest }: EmptyStateProps): React.ReactElement {
               type="button"
               onClick={() => handleClick(label)}
               className="
-                border border-zinc-700 hover:bg-zinc-800
+                border border-ink-700 hover:bg-ink-800
                 rounded-lg px-3 py-2
-                text-sm text-zinc-400 hover:text-zinc-200
+                text-sm text-ink-400 hover:text-ink-200
                 transition-colors text-left
               "
             >
