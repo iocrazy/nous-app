@@ -12,7 +12,6 @@ RLS-locked refs table never leaks cross-tenant rows.
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from loguru import logger
 
 from app.api.media_permissions import check_media_access
 from app.core.deps import AuthDep
@@ -41,6 +40,38 @@ async def canvas_assets(canvas_id: str, auth: AuthDep):
     repo = CanvasRefsRepository()
     items = await repo.list_assets_for_canvas(canvas_id)
     return {"success": True, "data": items}
+
+
+@router.get("/resources/project-assets/tree")
+async def project_assets_tree(auth: AuthDep):
+    """Project → Canvas tree (with per-canvas asset counts) for every
+    project the caller can see. Projects with no canvases are included
+    with an empty ``canvases`` list so the UI can show them as empty
+    groups."""
+    projects = await ProjectsRepository().get_user_projects(auth.user_id)
+    project_ids = [str(p["id"]) for p in projects]
+    rows = await CanvasRefsRepository().tree_for_projects(project_ids)
+
+    by_project: dict[str, list] = {}
+    for row in rows:
+        by_project.setdefault(row["project_id"], []).append(
+            {
+                "canvas_id": row["canvas_id"],
+                "canvas_name": row["canvas_name"],
+                "kind": row["kind"],
+                "asset_count": int(row.get("asset_count") or 0),
+            }
+        )
+
+    data = [
+        {
+            "project_id": str(p["id"]),
+            "name": p["name"],
+            "canvases": by_project.get(str(p["id"]), []),
+        }
+        for p in projects
+    ]
+    return {"success": True, "data": data}
 
 
 @router.get("/resources/{resource_id}/canvas-refs")

@@ -39,9 +39,17 @@ async def test_canvas_assets_returns_items(app, monkeypatch):
 
     async def fake_list(self, canvas_id):
         return [
-            {"id": "111", "filename": "a.png", "role": "reference", "node_id": "s1",
-             "file_type": "image", "mime_type": "image/png", "thumbnail_path": None,
-             "cover_image_path": None, "created_at": "2026-06-13T00:00:00Z"},
+            {
+                "id": "111",
+                "filename": "a.png",
+                "role": "reference",
+                "node_id": "s1",
+                "file_type": "image",
+                "mime_type": "image/png",
+                "thumbnail_path": None,
+                "cover_image_path": None,
+                "created_at": "2026-06-13T00:00:00Z",
+            },
         ]
 
     monkeypatch.setattr(par, "_gate_canvas_read", fake_gate)
@@ -77,12 +85,19 @@ async def test_resource_canvas_refs_returns_canvases(app, monkeypatch):
 
     async def fake_list(self, resource_id):
         return [
-            {"canvas_id": "5001", "canvas_name": "Board A", "kind": "smart",
-             "project_id": "9000", "role": "reference"},
+            {
+                "canvas_id": "5001",
+                "canvas_name": "Board A",
+                "kind": "smart",
+                "project_id": "9000",
+                "role": "reference",
+            },
         ]
 
     monkeypatch.setattr(par, "check_media_access", allow)
-    monkeypatch.setattr(par.CanvasRefsRepository, "list_canvases_for_resource", fake_list)
+    monkeypatch.setattr(
+        par.CanvasRefsRepository, "list_canvases_for_resource", fake_list
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
@@ -104,3 +119,46 @@ async def test_resource_canvas_refs_404_when_no_access(app, monkeypatch):
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         resp = await c.get("/api/v1/resources/111/canvas-refs")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_project_assets_tree_groups_by_project(app, monkeypatch):
+    async def fake_projects(self, user_id, team_id=None):
+        return [
+            {"id": "9000", "name": "Proj One", "team_id": None},
+            {"id": "9001", "name": "Proj Two", "team_id": None},
+        ]
+
+    async def fake_tree(self, project_ids):
+        assert set(project_ids) == {"9000", "9001"}
+        return [
+            {
+                "project_id": "9000",
+                "canvas_id": "5001",
+                "canvas_name": "A",
+                "kind": "smart",
+                "asset_count": 3,
+            },
+            {
+                "project_id": "9000",
+                "canvas_id": "5002",
+                "canvas_name": "B",
+                "kind": "classic",
+                "asset_count": 0,
+            },
+        ]
+
+    monkeypatch.setattr(par.ProjectsRepository, "get_user_projects", fake_projects)
+    monkeypatch.setattr(par.CanvasRefsRepository, "tree_for_projects", fake_tree)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        resp = await c.get("/api/v1/resources/project-assets/tree")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    proj_one = next(p for p in data if p["project_id"] == "9000")
+    assert proj_one["name"] == "Proj One"
+    assert len(proj_one["canvases"]) == 2
+    assert {c["canvas_id"] for c in proj_one["canvases"]} == {"5001", "5002"}
+    proj_two = next(p for p in data if p["project_id"] == "9001")
+    assert proj_two["canvases"] == []
