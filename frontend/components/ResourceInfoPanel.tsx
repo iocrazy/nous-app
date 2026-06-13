@@ -237,10 +237,10 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
     <div className="flex-1 min-w-0 h-full bg-ink-900 overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
-        <h3 className="text-sm font-semibold text-white select-none">{t('resources.infoPanel.title')}</h3>
+        <h3 className="text-sm font-semibold text-ink-50 select-none">{t('resources.infoPanel.title')}</h3>
         <button
           onClick={onClose}
-          className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+          className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
         >
           <X size={16} />
         </button>
@@ -273,17 +273,17 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               if (e.key === 'Enter') commitName();
               if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
             }}
-            className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-white focus:outline-none"
+            className="w-full bg-ink-800 border border-indigo-500/50 rounded px-2 py-1 text-sm text-ink-50 focus:outline-none"
             autoFocus
           />
         ) : readOnly ? (
-          <h4 className="text-sm font-medium text-white break-words leading-snug">{resource.filename}</h4>
+          <h4 className="text-sm font-medium text-ink-50 break-words leading-snug">{resource.filename}</h4>
         ) : (
           <div
             className="group flex items-start gap-1.5 cursor-pointer"
             onClick={() => setEditingName(true)}
           >
-            <h4 className="text-sm font-medium text-white break-words leading-snug flex-1">{resource.filename}</h4>
+            <h4 className="text-sm font-medium text-ink-50 break-words leading-snug flex-1">{resource.filename}</h4>
             <Pencil size={12} className="text-ink-600 group-hover:text-ink-400 mt-0.5 shrink-0 transition-colors" />
           </div>
         )}

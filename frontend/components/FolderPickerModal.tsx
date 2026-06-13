@@ -245,12 +245,12 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
         {/* ── Header ── */}
         <div className="px-5 py-4 border-b border-ink-800/80">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[15px] font-semibold text-white select-none">
+            <h2 className="text-[15px] font-semibold text-ink-50 select-none">
               {actionVerb} {itemCount > 0 ? `${itemCount} item${itemCount > 1 ? 's' : ''} to...` : ''}
             </h2>
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-ink-800 rounded-lg text-ink-500 hover:text-white transition-colors"
+              className="p-1.5 hover:bg-ink-800 rounded-lg text-ink-500 hover:text-ink-50 transition-colors"
             >
               <X size={16} />
             </button>
@@ -433,7 +433,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm text-ink-400 hover:text-white bg-ink-800/60 hover:bg-ink-700 border border-ink-700/50 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm text-ink-400 hover:text-ink-50 bg-ink-800/60 hover:bg-ink-700 border border-ink-700/50 rounded-lg transition-colors"
             >
               Cancel
             </button>

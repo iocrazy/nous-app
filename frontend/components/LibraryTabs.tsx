@@ -22,7 +22,7 @@ export const LibraryTabs: React.FC<LibraryTabsProps> = ({
       <button
         className={`px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-[1px] ${
           activeTab === 'my-library'
-            ? 'text-white border-indigo-500'
+            ? 'text-ink-50 border-indigo-500'
             : 'text-ink-400 border-transparent hover:text-ink-200 hover:border-ink-600'
         }`}
         onClick={() => onTabChange('my-library')}
@@ -33,7 +33,7 @@ export const LibraryTabs: React.FC<LibraryTabsProps> = ({
       <button
         className={`px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-[1px] flex items-center gap-2 ${
           activeTab === 'team-library'
-            ? 'text-white border-indigo-500'
+            ? 'text-ink-50 border-indigo-500'
             : 'text-ink-400 border-transparent hover:text-ink-200 hover:border-ink-600'
         }`}
         onClick={() => onTabChange('team-library')}

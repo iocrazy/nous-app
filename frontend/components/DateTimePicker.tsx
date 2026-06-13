@@ -149,7 +149,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({ value, onChange 
         onClick={() => setOpen(!open)}
         className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-left transition-colors hover:border-ink-600 focus:outline-none focus:border-indigo-500/50"
       >
-        <span className={displayValue ? 'text-white' : 'text-ink-500'}>
+        <span className={displayValue ? 'text-ink-50' : 'text-ink-500'}>
           {displayValue || 'Select date & time...'}
         </span>
       </button>
@@ -176,13 +176,13 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({ value, onChange 
             <div className="flex-1 p-3">
               {/* Month nav */}
               <div className="flex items-center justify-between mb-3">
-                <button type="button" onClick={prevMonth} className="p-1 text-ink-400 hover:text-white transition-colors">
+                <button type="button" onClick={prevMonth} className="p-1 text-ink-400 hover:text-ink-50 transition-colors">
                   <ChevronLeft size={16} />
                 </button>
                 <span className="text-sm font-medium text-ink-200">
                   {MONTHS[viewMonth]} {viewYear}
                 </span>
-                <button type="button" onClick={nextMonth} className="p-1 text-ink-400 hover:text-white transition-colors">
+                <button type="button" onClick={nextMonth} className="p-1 text-ink-400 hover:text-ink-50 transition-colors">
                   <ChevronRight size={16} />
                 </button>
               </div>

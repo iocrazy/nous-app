@@ -101,7 +101,7 @@ export function ParserPage() {
             onClick={() => setParserMode('single')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               parserMode === 'single'
-              ? 'bg-ink-800 text-white shadow-sm'
+              ? 'bg-ink-800 text-ink-50 shadow-sm'
               : 'text-ink-500 hover:text-ink-300'
             }`}
           >
@@ -114,7 +114,7 @@ export function ParserPage() {
             onClick={() => setParserMode('batch')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               parserMode === 'batch'
-              ? 'bg-ink-800 text-white shadow-sm'
+              ? 'bg-ink-800 text-ink-50 shadow-sm'
               : 'text-ink-500 hover:text-ink-300'
             }`}
           >
@@ -127,7 +127,7 @@ export function ParserPage() {
             onClick={() => setParserMode('playlist')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               parserMode === 'playlist'
-              ? 'bg-ink-800 text-white shadow-sm'
+              ? 'bg-ink-800 text-ink-50 shadow-sm'
               : 'text-ink-500 hover:text-ink-300'
             }`}
           >
@@ -305,7 +305,7 @@ export function ParserPage() {
                 </div>
                 <button
                   onClick={handleBatchSave}
-                  className="bg-ink-100 hover:bg-white text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-lg"
+                  className="bg-ink-100 hover:bg-ink-50 text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-lg"
                 >
                    <Download size={16} />
                    Save All ({batchResults.length})

@@ -249,7 +249,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
             </span>
             <button
               onClick={deselectAll}
-              className="text-xs text-ink-500 hover:text-white transition-colors"
+              className="text-xs text-ink-500 hover:text-ink-50 transition-colors"
             >
               Clear selection
             </button>
@@ -285,7 +285,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
         <div className="flex items-center gap-4">
           <button
             onClick={selectAll}
-            className="text-sm text-ink-400 hover:text-white transition-colors"
+            className="text-sm text-ink-400 hover:text-ink-50 transition-colors"
           >
             Select All ({filteredSuggestions.length})
           </button>
@@ -296,7 +296,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
         </div>
         <button
           onClick={loadData}
-          className="flex items-center gap-2 text-sm text-ink-400 hover:text-white transition-colors"
+          className="flex items-center gap-2 text-sm text-ink-400 hover:text-ink-50 transition-colors"
         >
           <RefreshCw size={14} />
           Refresh
@@ -309,7 +309,7 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
       ) : filteredSuggestions.length === 0 ? (
         <div className="p-8 text-center text-ink-500">
           <CheckCircle size={48} className="mx-auto mb-4 text-emerald-500" />
-          <p className="text-lg font-medium text-white">All Clean!</p>
+          <p className="text-lg font-medium text-ink-50">All Clean!</p>
           <p className="text-sm mt-1">No cleanup suggestions at this time.</p>
         </div>
       ) : (
@@ -346,7 +346,7 @@ const StatCard: React.FC<StatCardProps> = ({ icon: Icon, label, value, color }) 
       </div>
       <div>
         <p className="text-xs text-ink-500 uppercase tracking-wider">{label}</p>
-        <p className="text-lg font-semibold text-white">{value}</p>
+        <p className="text-lg font-semibold text-ink-50">{value}</p>
       </div>
     </div>
   </div>
@@ -366,7 +366,7 @@ const FilterTab: React.FC<FilterTabProps> = ({ label, count, isActive, onClick, 
     className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors ${
       isActive
         ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
-        : 'bg-ink-800 text-ink-400 hover:text-white border border-ink-700'
+        : 'bg-ink-800 text-ink-400 hover:text-ink-50 border border-ink-700'
     }`}
   >
     <span className={color}>{label}</span>
@@ -426,7 +426,7 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-medium text-white truncate">{suggestion.title || 'Untitled'}</h4>
+          <h4 className="text-sm font-medium text-ink-50 truncate">{suggestion.title || 'Untitled'}</h4>
           <p className="text-xs text-ink-500 mt-0.5">
             @{suggestion.author || 'Unknown'} • {suggestion.view_count} views
           </p>
@@ -442,7 +442,7 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
 
         {/* Size */}
         <div className="text-right">
-          <p className="text-sm font-medium text-white">
+          <p className="text-sm font-medium text-ink-50">
             {formatBytes(suggestion.storage_size || 0)}
           </p>
           <p className="text-xs text-ink-500">
@@ -465,7 +465,7 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
               </button>
               <button
                 onClick={() => onAction('dismiss')}
-                className="p-2 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-white transition-colors"
+                className="p-2 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-ink-50 transition-colors"
                 title="Dismiss"
               >
                 <XCircle size={16} />

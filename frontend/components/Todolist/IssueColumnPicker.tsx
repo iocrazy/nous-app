@@ -141,7 +141,7 @@ export const IssueColumnPicker: React.FC<IssueColumnPickerProps> = ({ visible, o
         <button
           type="button"
           onClick={reset}
-          className="text-ink-300 hover:text-white"
+          className="text-ink-300 hover:text-ink-50"
         >
           Reset defaults
         </button>

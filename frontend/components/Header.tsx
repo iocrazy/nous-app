@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Notification Bell */}
       <button
         onClick={onNotificationClick}
-        className="relative p-2 rounded-lg text-ink-400 hover:text-white hover:bg-ink-800/50 transition-colors"
+        className="relative p-2 rounded-lg text-ink-400 hover:text-ink-50 hover:bg-ink-800/50 transition-colors"
       >
         <Bell size={20} />
         {unreadCount > 0 && (

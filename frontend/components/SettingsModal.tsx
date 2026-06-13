@@ -184,11 +184,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </span>
               )}
             </div>
-            <span className="text-sm font-medium text-white">{user.name}</span>
+            <span className="text-sm font-medium text-ink-50">{user.name}</span>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -202,7 +202,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onClick={() => setActiveTab(item.id)}
               className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
                 activeTab === item.id
-                  ? 'text-white'
+                  ? 'text-ink-50'
                   : 'text-ink-500 hover:text-ink-300'
               }`}
             >
@@ -235,7 +235,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">{user.name}</p>
+                <p className="text-sm font-medium text-ink-50 truncate">{user.name}</p>
                 <p className="text-xs text-ink-500 truncate">{user.email}</p>
               </div>
             </div>
@@ -255,8 +255,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onClick={() => setActiveTab(item.id)}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer select-none ${
                         activeTab === item.id
-                          ? 'bg-ink-800 text-white'
-                          : 'text-ink-400 hover:text-white hover:bg-ink-800/50'
+                          ? 'bg-ink-800 text-ink-50'
+                          : 'text-ink-400 hover:text-ink-50 hover:bg-ink-800/50'
                       }`}
                     >
                       <span className="relative flex-shrink-0">
@@ -283,12 +283,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
           {/* Desktop Header */}
           <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-ink-800">
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {TAB_LABELS[activeTab]}
             </h2>
             <button
               onClick={onClose}
-              className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+              className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
             >
               <X size={20} />
             </button>

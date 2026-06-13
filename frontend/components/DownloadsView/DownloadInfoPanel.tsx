@@ -86,7 +86,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
       >
         <button
           onClick={() => onTogglePanel(false)}
-          className="absolute -left-10 bottom-8 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl flex items-center justify-center text-ink-400 hover:text-white cursor-pointer hover:bg-ink-800 transition-colors z-10"
+          className="absolute -left-10 bottom-8 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl flex items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-colors z-10"
         >
           <ChevronRight size={20} />
         </button>
@@ -99,10 +99,10 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
         <div className="flex-1 overflow-y-auto">
           {/* Header */}
           <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2 border-b border-ink-800/80 bg-ink-900">
-            <h3 className="text-sm font-semibold text-white truncate">{t('resources.details', 'Details')}</h3>
+            <h3 className="text-sm font-semibold text-ink-50 truncate">{t('resources.details', 'Details')}</h3>
             <button
               onClick={onClose}
-              className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+              className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
             >
               <X size={16} />
             </button>
@@ -126,7 +126,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
 
           {/* Title */}
           <div className="px-4 mt-4">
-            <h4 className="text-sm font-medium text-white break-words leading-snug">
+            <h4 className="text-sm font-medium text-ink-50 break-words leading-snug">
               {selectedVideo.title || 'Untitled'}
             </h4>
             {selectedVideo.description && (
@@ -297,7 +297,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
       {!showInfoPanel && (
         <button
           onClick={() => onTogglePanel(true)}
-          className="hidden md:flex fixed bottom-8 right-0 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl items-center justify-center text-ink-400 hover:text-white cursor-pointer hover:bg-ink-800 transition-all z-50"
+          className="hidden md:flex fixed bottom-8 right-0 w-10 h-12 bg-ink-900 border-l border-y border-ink-800 rounded-l-xl items-center justify-center text-ink-400 hover:text-ink-50 cursor-pointer hover:bg-ink-800 transition-all z-50"
         >
           <ChevronLeft size={20} />
         </button>

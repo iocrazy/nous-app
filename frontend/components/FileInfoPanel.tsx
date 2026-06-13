@@ -79,10 +79,10 @@ export const FileInfoPanel: React.FC<FileInfoPanelProps> = ({ file, onClose }) =
     <div className="w-80 bg-ink-900 border-l border-ink-800 h-full overflow-y-auto animate-in slide-in-from-right-4 duration-300">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-ink-800 sticky top-0 bg-ink-900 z-10">
-        <h3 className="text-sm font-semibold text-white">{t('mediatrack.fileInfo')}</h3>
+        <h3 className="text-sm font-semibold text-ink-50">{t('mediatrack.fileInfo')}</h3>
         <button
           onClick={onClose}
-          className="p-1.5 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+          className="p-1.5 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
         >
           <X size={16} />
         </button>
@@ -95,7 +95,7 @@ export const FileInfoPanel: React.FC<FileInfoPanelProps> = ({ file, onClose }) =
 
       {/* Basic Info */}
       <div className="px-4 mt-4">
-        <h4 className="text-sm font-medium text-white mb-1 break-words">{file.filename}</h4>
+        <h4 className="text-sm font-medium text-ink-50 mb-1 break-words">{file.filename}</h4>
         <div className="space-y-0">
           <InfoRow label={t('mediatrack.fileType')} value={file.file_type || file.mime_type} />
           <InfoRow label={t('mediatrack.size')} value={formatFileSize(file.file_size_bytes)} />

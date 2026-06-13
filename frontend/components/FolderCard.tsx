@@ -65,7 +65,7 @@ const RenameInput: React.FC<{
     }}
     onBlur={() => onCancel?.()}
     onClick={(e) => e.stopPropagation()}
-    className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+    className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
   />
 );
 
@@ -142,7 +142,7 @@ export const FolderCard: React.FC<FolderCardProps> = ({
   const moreButton = onContextMenu ? (
     <button
       onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
-      className="absolute top-2 right-2 z-10 p-1.5 bg-ink-900/80 hover:bg-ink-700 rounded-lg text-ink-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+      className="absolute top-2 right-2 z-10 p-1.5 bg-ink-900/80 hover:bg-ink-700 rounded-lg text-ink-400 hover:text-ink-50 transition-colors opacity-0 group-hover:opacity-100"
     >
       <MoreVertical size={14} />
     </button>
@@ -176,7 +176,7 @@ export const FolderCard: React.FC<FolderCardProps> = ({
             <RenameInput value={renameValue} onChange={onRenameChange} onConfirm={onRenameConfirm} onCancel={onRenameCancel} />
           ) : (
             <p
-              className="text-sm text-ink-200 truncate group-hover:text-white transition-colors font-medium"
+              className="text-sm text-ink-200 truncate group-hover:text-ink-50 transition-colors font-medium"
               onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
             >
               {folder.name}
@@ -195,7 +195,7 @@ export const FolderCard: React.FC<FolderCardProps> = ({
           {onContextMenu && (
             <button
               onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
-              className="p-1.5 hover:bg-ink-700 rounded-lg text-ink-400 hover:text-white transition-colors"
+              className="p-1.5 hover:bg-ink-700 rounded-lg text-ink-400 hover:text-ink-50 transition-colors"
             >
               <MoreVertical size={14} />
             </button>
@@ -275,7 +275,7 @@ export const FolderCard: React.FC<FolderCardProps> = ({
             <RenameInput value={renameValue} onChange={onRenameChange} onConfirm={onRenameConfirm} onCancel={onRenameCancel} />
           ) : (
             <p
-              className="text-[13px] text-ink-200 truncate group-hover:text-white transition-colors font-medium"
+              className="text-[13px] text-ink-200 truncate group-hover:text-ink-50 transition-colors font-medium"
               onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
             >
               {folder.name}

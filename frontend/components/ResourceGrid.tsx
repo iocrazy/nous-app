@@ -694,21 +694,21 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                       {/* Group 1 -- Containers */}
                       <button
                         onClick={() => { onStartCreateFolder(); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <FolderPlus size={14} className="text-amber-400" />
                         {t('resources.newFolder')}
                       </button>
                       <button
                         onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <LayoutGrid size={14} className="text-blue-400" />
                         {t('resources.newProject')}
                       </button>
                       <button
                         onClick={() => { onShowSmartFolderEditor(); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <FolderSearch size={14} className="text-purple-400" />
                         {t('resources.newSmartFolder')}
@@ -718,21 +718,21 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                       {/* Group 2 -- Documents */}
                       <button
                         onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <FileText size={14} className="text-emerald-400" />
                         {t('resources.newDocument')}
                       </button>
                       <button
                         onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <Table2 size={14} className="text-cyan-400" />
                         {t('resources.newSpreadsheet')}
                       </button>
                       <button
                         onClick={() => { addToast(t('resources.comingSoon'), 'info'); setShowNewDropdown(false); }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <Presentation size={14} className="text-orange-400" />
                         {t('resources.newPresentation')}
@@ -745,7 +745,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           setShowFetchUrlModal(true);
                           setShowNewDropdown(false);
                         }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
                         <Globe size={14} className="text-indigo-400" />
                         {t('resources.newWebUrl')}

@@ -618,7 +618,7 @@ export const TagsSettings: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowCreateForm(true)}
-            className="bg-ink-100 hover:bg-white text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+            className="bg-ink-100 hover:bg-ink-50 text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
           >
             <Plus size={16} />
             {t('settings.tags.createNew')}
@@ -1008,7 +1008,7 @@ export const TagsSettings: React.FC = () => {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-ink-800 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-white">
+              <h3 className="text-lg font-bold text-ink-50">
                 {t('settings.tags.createNew')}
               </h3>
               <button
@@ -1131,7 +1131,7 @@ export const TagsSettings: React.FC = () => {
                       onClick={() => setNewTagColor(color.value)}
                       className={`w-8 h-8 rounded-full border-2 transition-all ${
                         newTagColor === color.value
-                          ? 'border-white scale-110'
+                          ? 'border-ink-50 scale-110'
                           : 'border-transparent hover:scale-105'
                       }`}
                       style={{ backgroundColor: color.value }}
@@ -1197,7 +1197,7 @@ export const TagsSettings: React.FC = () => {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-ink-800 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-white">
+              <h3 className="text-lg font-bold text-ink-50">
                 {t('settings.tags.editTag')}
               </h3>
               <button
@@ -1298,7 +1298,7 @@ export const TagsSettings: React.FC = () => {
                       onClick={() => setEditTagColor(color.value)}
                       className={`w-8 h-8 rounded-full border-2 transition-all ${
                         editTagColor === color.value
-                          ? 'border-white scale-110'
+                          ? 'border-ink-50 scale-110'
                           : 'border-transparent hover:scale-105'
                       }`}
                       style={{ backgroundColor: color.value }}

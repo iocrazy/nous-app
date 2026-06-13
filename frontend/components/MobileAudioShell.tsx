@@ -386,7 +386,7 @@ export function MobileAudioShell({
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={() => setShowMenu(false)}
-                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors"
+                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
                           >
                             <Icon size={13} className={item.color} /> {item.label}
                           </a>
@@ -396,7 +396,7 @@ export function MobileAudioShell({
                             className={
                               item.danger
                                 ? 'flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors'
-                                : 'flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-white transition-colors'
+                                : 'flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors'
                             }
                           >
                             <Icon size={13} className={item.color} /> {item.label}

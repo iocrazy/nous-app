@@ -186,14 +186,14 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
           value={editTitle}
           onChange={(e) => setEditTitle(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500"
+          className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-ink-50 placeholder-ink-500 focus:outline-none focus:border-indigo-500"
           placeholder="Task title"
         />
         <textarea
           value={editDescription}
           onChange={(e) => setEditDescription(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500 resize-none"
+          className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-ink-50 placeholder-ink-500 focus:outline-none focus:border-indigo-500 resize-none"
           placeholder="Description (optional)"
           rows={2}
         />
@@ -201,7 +201,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
           <select
             value={editTaskType}
             onChange={(e) => setEditTaskType(e.target.value as ProjectTask['task_type'])}
-            className="bg-ink-800 border border-ink-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
+            className="bg-ink-800 border border-ink-700 rounded-lg px-2 py-1 text-xs text-ink-50 focus:outline-none focus:border-indigo-500"
           >
             {(['general', 'storyboard', 'script', 'filming', 'editing', 'review'] as const).map(
               (type) => (
@@ -215,7 +215,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onUpdate, onDelete, onDragSta
             type="date"
             value={editDueDate}
             onChange={(e) => setEditDueDate(e.target.value)}
-            className="bg-ink-800 border border-ink-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
+            className="bg-ink-800 border border-ink-700 rounded-lg px-2 py-1 text-xs text-ink-50 focus:outline-none focus:border-indigo-500"
           />
         </div>
         <div className="flex items-center justify-between pt-1">
@@ -425,7 +425,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t('kanban.addTask')}
-              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-50 placeholder-ink-500 focus:outline-none focus:border-indigo-500"
             />
             <div className="flex items-center gap-2 mt-2">
               <button

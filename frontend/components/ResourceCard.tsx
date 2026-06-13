@@ -277,7 +277,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   const moreButton = onContextMenu ? (
     <button
       onClick={(e) => { e.stopPropagation(); onContextMenu(e); }}
-      className="p-1.5 bg-ink-900/80 hover:bg-ink-700 rounded-lg text-ink-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+      className="p-1.5 bg-ink-900/80 hover:bg-ink-700 rounded-lg text-ink-400 hover:text-ink-50 transition-colors opacity-0 group-hover:opacity-100"
       title={t('resources.moreActions')}
     >
       <MoreVertical size={14} />
@@ -315,11 +315,11 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
               }}
               onBlur={() => onRenameCancel?.()}
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+              className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
             />
           ) : (
             <p
-              className="text-sm text-ink-200 truncate group-hover:text-white transition-colors font-medium select-none cursor-default"
+              className="text-sm text-ink-200 truncate group-hover:text-ink-50 transition-colors font-medium select-none cursor-default"
               onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
             >
               {filename}
@@ -483,11 +483,11 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             }}
             onBlur={() => onRenameCancel?.()}
             onClick={(e) => e.stopPropagation()}
-            className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+            className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
           />
         ) : (
           <p
-            className="text-[13px] text-ink-200 truncate group-hover:text-white transition-colors font-medium select-none cursor-default"
+            className="text-[13px] text-ink-200 truncate group-hover:text-ink-50 transition-colors font-medium select-none cursor-default"
             onDoubleClick={(e) => { e.stopPropagation(); onStartRename?.(); }}
           >
             {filename}

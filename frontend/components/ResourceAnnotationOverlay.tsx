@@ -101,7 +101,7 @@ const InlineToolbar: React.FC<{
     <div className="flex items-center gap-0.5">
       {[2, 4].map((w) => (
         <button key={w} onClick={() => onStrokeWidthChange(w)}
-          className={`px-1.5 py-1 rounded transition-colors ${strokeWidth === w ? 'bg-ink-700 text-white' : 'text-ink-500 hover:text-ink-300'}`}
+          className={`px-1.5 py-1 rounded transition-colors ${strokeWidth === w ? 'bg-ink-700 text-ink-50' : 'text-ink-500 hover:text-ink-300'}`}
         ><div className="rounded-full bg-current" style={{ width: 14, height: w }} /></button>
       ))}
     </div>

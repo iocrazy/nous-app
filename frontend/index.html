@@ -2,6 +2,26 @@
 <html lang="en" translate="no">
   <head>
     <meta charset="UTF-8" />
+    <!-- First-paint theme (island redesign D11): resolve the saved preference
+         before any CSS applies so light-OS / light-preference users never see
+         a dark flash. Mirrors contexts/ThemeContext.tsx exactly (storage key,
+         'system' default, prefers-color-scheme resolution). -->
+    <script>
+      (function () {
+        var pref = 'system';
+        try {
+          var saved = localStorage.getItem('mediahub.theme');
+          if (saved === 'light' || saved === 'dark' || saved === 'system') pref = saved;
+        } catch (e) { /* Safari private mode — fall back to system */ }
+        var resolved = pref;
+        if (pref === 'system') {
+          try {
+            resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          } catch (e) { resolved = 'dark'; }
+        }
+        document.documentElement.setAttribute('data-theme', resolved);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>MediaHub</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

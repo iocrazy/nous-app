@@ -24,6 +24,7 @@
    use ink-* (or the semantic tokens below) — new `*-zinc-*` usages
    are forbidden after the migration. */
 :root, [data-theme="dark"] {
+  color-scheme: dark;
   --ink-50:  #fafafa;
   --ink-100: #f4f4f5;
   --ink-200: #e4e4e7;
@@ -76,6 +77,7 @@
 /* Light theme — ladder inverted + tuned (spec §5.4). Semantic colors
    (indigo/green/amber/red/violet) intentionally unchanged. */
 [data-theme="light"] {
+  color-scheme: light;
   --ink-50:  #18181b;
   --ink-100: #27272a;
   --ink-200: #3f3f46;
@@ -163,22 +165,24 @@ body {
   color: var(--ink-100);
 }
 
-/* Custom scrollbar for dark theme */
+/* Theme-aware scrollbars (island redesign D11). Values track the ink ladder
+   so the bar flips with [data-theme]; dark resolves to the original
+   #18181b/#3f3f46/#52525b (byte-identical no-op). */
 ::-webkit-scrollbar {
   width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #18181b;
+  background: var(--ink-900);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--ink-700);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--ink-600);
 }
 
 /* Custom scrollbar class */
@@ -191,7 +195,7 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--ink-700);
   border-radius: 3px;
 }
 

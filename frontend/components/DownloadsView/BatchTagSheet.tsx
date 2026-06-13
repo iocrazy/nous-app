@@ -87,7 +87,7 @@ export function BatchTagSheet({
         >
           <X size={18} />
         </button>
-        <span className="text-sm font-semibold text-white">
+        <span className="text-sm font-semibold text-ink-50">
           {t('resources.batchAddTags', 'Add tags to {{count}}', { count })}
         </span>
         <button
@@ -125,7 +125,7 @@ export function BatchTagSheet({
                 >
                   {on && <Check size={13} />}
                 </span>
-                <span className="text-sm text-white flex-1 truncate">
+                <span className="text-sm text-ink-50 flex-1 truncate">
                   {tag.name}
                 </span>
               </button>
@@ -144,7 +144,7 @@ export function BatchTagSheet({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('resources.filter.searchTags', 'Search tags…')}
-            className="flex-1 min-w-0 bg-transparent outline-none text-sm text-white placeholder-ink-500"
+            className="flex-1 min-w-0 bg-transparent outline-none text-sm text-ink-50 placeholder-ink-500"
           />
         </div>
       </div>

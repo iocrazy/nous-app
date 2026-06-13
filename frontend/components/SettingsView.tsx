@@ -309,7 +309,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* Header - hidden in embedded mode */}
       {!embedded && (
       <div>
-         <h1 className="text-2xl font-bold text-white mb-2">Settings</h1>
+         <h1 className="text-2xl font-bold text-ink-50 mb-2">Settings</h1>
          <p className="text-ink-400">Manage your application preferences and API access credentials.</p>
       </div>
       )}
@@ -383,7 +383,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                                 </linearGradient>
                              </defs>
                           </svg>
-                          <span className="text-2xl font-bold text-white z-10">
+                          <span className="text-2xl font-bold text-ink-50 z-10">
                              {(localSettings.progressStyle === 'neon' || !localSettings.progressStyle) ? `${animatedProgress}%` : '50%'}
                           </span>
                        </div>
@@ -467,7 +467,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                                 <path d="M0,15 C80,40 160,0 240,20 C320,45 400,0 480,20 C560,45 640,0 720,20 C800,45 880,0 960,20 C1040,45 1120,0 1200,15 L1200,200 L0,200 Z" fill="url(#waveGrad3)" />
                              </svg>
                           </div>
-                          <span className="text-2xl font-bold text-white z-10 drop-shadow-lg">
+                          <span className="text-2xl font-bold text-ink-50 z-10 drop-shadow-lg">
                              {localSettings.progressStyle === 'wave' ? `${animatedProgress}%` : '50%'}
                           </span>
                        </div>
@@ -578,7 +578,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </div>
               <button
                  onClick={openCreateModal}
-                 className="bg-ink-100 hover:bg-white text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+                 className="bg-ink-100 hover:bg-ink-50 text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
               >
                  <Plus size={16} />
                  Create API Key
@@ -768,7 +768,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-20 flex items-start justify-center pt-12 p-4 overflow-y-auto">
             <div className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
                <div className="px-6 py-5 border-b border-ink-800 flex justify-between items-center bg-ink-950/50">
-                  <h3 className="text-lg font-bold text-white">
+                  <h3 className="text-lg font-bold text-ink-50">
                      {newKeySecret ? 'API Key Created!' : editingKeyId ? 'Edit API Key' : 'Create New API Key'}
                   </h3>
                   <button onClick={closeKeyModal} className="text-ink-500 hover:text-ink-300">

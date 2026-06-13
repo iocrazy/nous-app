@@ -56,13 +56,13 @@ export const DuplicateFileAlert: React.FC<DuplicateFileAlertProps> = ({
             <div className="p-2 bg-amber-500/20 rounded-lg">
               <AlertTriangle size={20} className="text-amber-400" />
             </div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-ink-50">
               {t('resources.duplicateDetected')}
             </h2>
           </div>
           <button
             onClick={onCancel}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -91,7 +91,7 @@ export const DuplicateFileAlert: React.FC<DuplicateFileAlertProps> = ({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-white truncate">
+              <p className="text-sm font-medium text-ink-50 truncate">
                 {existing.filename}
               </p>
               <p className="text-xs text-ink-400 mt-1">

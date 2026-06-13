@@ -65,14 +65,14 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
     >
       <button
         onClick={onViewDetails}
-        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2.5 transition-colors"
+        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Eye size={14} className="text-ink-500" />
         View Details
       </button>
       <button
         onClick={onOpenNewTab}
-        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2.5 transition-colors"
+        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <ExternalLink size={14} className="text-ink-500" />
         Open in New Tab
@@ -80,7 +80,7 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
       <div className="border-t border-ink-800 my-1" />
       <button
         onClick={onDownloadVideo}
-        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2.5 transition-colors"
+        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Download size={14} className="text-ink-500" />
         Download Original
@@ -88,7 +88,7 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
       {contextMenu.video.music_download_path && (
         <button
           onClick={onDownloadAudio}
-          className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2.5 transition-colors"
+          className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
         >
           <Music size={14} className="text-ink-500" />
           Download Audio
@@ -97,21 +97,21 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
       <div className="border-t border-ink-800 my-1" />
       <button
         onClick={onRename}
-        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2.5 transition-colors"
+        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Pencil size={14} className="text-ink-500" />
         Rename
       </button>
       <button
         onClick={onShare}
-        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2.5 transition-colors"
+        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Share2 size={14} className="text-ink-500" />
         Share
       </button>
       <button
         onClick={onCopyLink}
-        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-2.5 transition-colors"
+        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Link size={14} className="text-ink-500" />
         Copy Link

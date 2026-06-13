@@ -55,13 +55,13 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
         <div className="flex gap-1">
           <button
             onClick={() => onUpdate({ layout: 'list' })}
-            className={`p-1 rounded ${settings.layout === 'list' ? 'bg-ink-700 text-white' : 'text-ink-500'}`}
+            className={`p-1 rounded ${settings.layout === 'list' ? 'bg-ink-700 text-ink-50' : 'text-ink-500'}`}
           >
             <List size={14} />
           </button>
           <button
             onClick={() => onUpdate({ layout: 'grid' })}
-            className={`p-1 rounded ${settings.layout === 'grid' ? 'bg-ink-700 text-white' : 'text-ink-500'}`}
+            className={`p-1 rounded ${settings.layout === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-500'}`}
           >
             <LayoutGrid size={14} />
           </button>

@@ -197,7 +197,7 @@ export const CookiesSettings: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Header */}
       <div>
-        <h2 className="text-base font-semibold text-white flex items-center gap-2">
+        <h2 className="text-base font-semibold text-ink-50 flex items-center gap-2">
           <Cookie size={18} className="text-indigo-400" />
           Cookie Management
         </h2>
@@ -248,7 +248,7 @@ export const CookiesSettings: React.FC = () => {
                   <div className="flex items-center gap-3 min-w-0">
                     <img src={platform.icon} alt={platform.name} className="w-6 h-6 flex-shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-white">{platform.name}</p>
+                      <p className="text-sm font-semibold text-ink-50">{platform.name}</p>
                       <div className="mt-1.5">
                         <StatusBadge status={status} />
                       </div>
@@ -284,7 +284,7 @@ export const CookiesSettings: React.FC = () => {
                           onClick={() => updateCard(platform.id, { activeTab: tab })}
                           className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors capitalize ${
                             card.activeTab === tab
-                              ? 'bg-ink-700 text-white'
+                              ? 'bg-ink-700 text-ink-50'
                               : 'text-ink-500 hover:text-ink-300'
                           }`}
                         >
@@ -430,7 +430,7 @@ const HeadersSection: React.FC = () => {
   return (
     <div className="space-y-4 pt-2">
       <div>
-        <h2 className="text-base font-semibold text-white flex items-center gap-2">
+        <h2 className="text-base font-semibold text-ink-50 flex items-center gap-2">
           <FileCode2 size={18} className="text-cyan-400" />
           Custom Headers
         </h2>
@@ -456,7 +456,7 @@ const HeadersSection: React.FC = () => {
                 <div className="flex items-center gap-3">
                   <img src={platform.icon} alt={platform.name} className="w-6 h-6 flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold text-white">{platform.name}</p>
+                    <p className="text-sm font-semibold text-ink-50">{platform.name}</p>
                     <span className={`inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
                       hasCustom
                         ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'

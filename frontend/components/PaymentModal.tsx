@@ -138,7 +138,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-white">{pkg.name}</h2>
+            <h2 className="text-lg font-semibold text-ink-50">{pkg.name}</h2>
             <div className="flex items-center gap-3 mt-1">
               <span className="text-amber-400 font-medium">
                 {pkg.points_amount.toLocaleString()} Points
@@ -151,7 +151,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-ink-400 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+            className="p-2 text-ink-400 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
           >
             <X size={20} />
           </button>
@@ -204,7 +204,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 <div className="border-t border-ink-700 my-2" />
                 <div className="flex justify-between text-sm font-medium">
                   <span className="text-ink-300">Total</span>
-                  <span className="text-white text-lg">{formatPrice(pkg.price_cents)}</span>
+                  <span className="text-ink-50 text-lg">{formatPrice(pkg.price_cents)}</span>
                 </div>
               </div>
 
@@ -236,7 +236,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </div>
 
               <div>
-                <h3 className="text-lg font-semibold text-white mb-2">
+                <h3 className="text-lg font-semibold text-ink-50 mb-2">
                   Waiting for Payment
                 </h3>
                 <p className="text-sm text-ink-400">
@@ -293,7 +293,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
               </div>
               <div>
-                <h3 className="text-xl font-semibold text-white mb-2">
+                <h3 className="text-xl font-semibold text-ink-50 mb-2">
                   Payment Successful!
                 </h3>
                 <p className="text-sm text-ink-400">
@@ -315,7 +315,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-white mb-2">
+                <h3 className="text-lg font-semibold text-ink-50 mb-2">
                   Payment Failed
                 </h3>
                 {errorMessage && (

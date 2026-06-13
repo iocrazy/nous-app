@@ -102,7 +102,7 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${config.iconBg}`}>
                 {state.icon || config.icon}
               </div>
-              <h3 className="text-base font-semibold text-white">{state.title}</h3>
+              <h3 className="text-base font-semibold text-ink-50">{state.title}</h3>
             </div>
 
             {/* Body */}

@@ -230,7 +230,7 @@ export function MobileFilterSheet({
         <div className="px-4 py-3 flex items-center justify-between border-b border-ink-800 shrink-0">
           <div className="flex items-center gap-2">
             <Filter size={16} className="text-indigo-400" />
-            <span className="text-sm font-semibold text-white">
+            <span className="text-sm font-semibold text-ink-50">
               {t('resources.filter.title', 'Filters')}
             </span>
             {activeFilterCount > 0 && (
@@ -244,7 +244,7 @@ export function MobileFilterSheet({
               type="button"
               onClick={clearAll}
               disabled={!hasActiveFilters}
-              className="text-xs font-medium text-ink-400 disabled:opacity-40 active:text-white"
+              className="text-xs font-medium text-ink-400 disabled:opacity-40 active:text-ink-50"
             >
               {t('resources.filter.reset', 'Reset')}
             </button>
@@ -252,7 +252,7 @@ export function MobileFilterSheet({
               type="button"
               onClick={onClose}
               aria-label={t('common.close', 'Close')}
-              className="text-ink-400 active:text-white"
+              className="text-ink-400 active:text-ink-50"
             >
               <X size={18} />
             </button>
@@ -429,7 +429,7 @@ export function MobileFilterSheet({
                         const n = Math.max(0, Math.floor(Number(e.target.value) || 0));
                         setSocialMetric(m, { threshold: n });
                       }}
-                      className="flex-1 min-w-0 bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-400 disabled:opacity-40"
+                      className="flex-1 min-w-0 bg-ink-800 border border-ink-700 rounded-lg px-3 py-1.5 text-sm text-ink-50 outline-none focus:border-indigo-400 disabled:opacity-40"
                     />
                   </div>
                 );

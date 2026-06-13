@@ -60,10 +60,10 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
       <div className="relative bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md mx-4 shadow-2xl animate-in zoom-in-95 fade-in duration-200">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-ink-800">
-          <h2 className="text-lg font-semibold text-white">{t('collections.create')}</h2>
+          <h2 className="text-lg font-semibold text-ink-50">{t('collections.create')}</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-ink-400 hover:text-white hover:bg-ink-800 transition-colors"
+            className="p-2 rounded-lg text-ink-400 hover:text-ink-50 hover:bg-ink-800 transition-colors"
           >
             <X size={20} />
           </button>
@@ -85,7 +85,7 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('collections.namePlaceholder') || 'Enter collection name'}
-              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-4 py-2.5 text-white focus:border-indigo-500 outline-none transition-colors"
+              className="w-full bg-ink-800 border border-ink-700 rounded-lg px-4 py-2.5 text-ink-50 focus:border-indigo-500 outline-none transition-colors"
               autoFocus
             />
           </div>

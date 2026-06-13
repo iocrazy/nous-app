@@ -210,7 +210,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
           <div className="flex items-center gap-8 mb-6">
             <div>
               <p className="text-xs text-ink-500 uppercase font-medium">{t('billing.pointsUsedThisMonth')}</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-2xl font-bold text-ink-50">
                 {usageStats?.total_consumed_this_month?.toLocaleString() ?? '0'}
               </p>
             </div>

@@ -25,10 +25,10 @@ describe('ThemeContext', () => {
     }));
   });
 
-  it('defaults to dark (until light polish lands) and writes data-theme', () => {
+  it('defaults to system (D11) and writes resolved data-theme', () => {
     render(<ThemeProvider><Probe /></ThemeProvider>);
-    expect(screen.getByTestId('pref').textContent).toBe('dark');
-    expect(screen.getByTestId('resolved').textContent).toBe('dark');
+    expect(screen.getByTestId('pref').textContent).toBe('system');
+    expect(screen.getByTestId('resolved').textContent).toBe('dark'); // mocked matchMedia = dark
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 

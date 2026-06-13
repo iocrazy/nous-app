@@ -201,7 +201,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
                 onClick={() => toggleSetItem<string>('assigneeAgents', a.id)}
                 label={
                   <>
-                    <span className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white ${a.avatar_color ?? 'bg-ink-600'}`}>
+                    <span className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-ink-50 ${a.avatar_color ?? 'bg-ink-600'}`}>
                       {a.name.slice(0, 1).toUpperCase()}
                     </span>
                     {a.name}
@@ -250,7 +250,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
                 onClick={() => toggleSetItem<string>('creatorsAgents', a.id)}
                 label={
                   <>
-                    <span className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white ${a.avatar_color ?? 'bg-ink-600'}`}>
+                    <span className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-ink-50 ${a.avatar_color ?? 'bg-ink-600'}`}>
                       {a.name.slice(0, 1).toUpperCase()}
                     </span>
                     {a.name}
@@ -308,7 +308,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
         <button
           type="button"
           onClick={() => onChange(EMPTY_FILTERS)}
-          className="text-ink-300 hover:text-white"
+          className="text-ink-300 hover:text-ink-50"
         >
           Reset
         </button>

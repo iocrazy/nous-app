@@ -730,14 +730,14 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         {/* Download section */}
                         <button
                           onClick={() => { setShowMoreMenu(false); onDownloadVideo(); }}
-                          className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-3 transition-colors"
+                          className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-3 transition-colors"
                         >
                           <VideoIcon size={16} className="text-amber-400" />
                           Video
                         </button>
                         <button
                           onClick={() => { setShowMoreMenu(false); onDownloadCoverFile(); }}
-                          className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-3 transition-colors"
+                          className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-3 transition-colors"
                         >
                           <ImageIcon size={16} className="text-emerald-400" />
                           Cover
@@ -745,7 +745,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         {data.music_download_path && (
                           <button
                             onClick={() => { setShowMoreMenu(false); onDownloadAudio(); }}
-                            className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-white flex items-center gap-3 transition-colors"
+                            className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-3 transition-colors"
                           >
                             <Music size={16} className="text-indigo-400" />
                             Audio
@@ -911,7 +911,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-5">
              <button
                onClick={(e) => handleAction(e, 'copy')}
-               className="flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-white transition-colors border border-ink-700 hover:border-ink-600"
+               className="flex items-center justify-center gap-1 sm:gap-2 p-2 sm:p-2.5 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-ink-50 transition-colors border border-ink-700 hover:border-ink-600"
              >
                {copied ? <Check size={16} className="text-green-500 shrink-0" /> : <Copy size={16} className="shrink-0" />}
                <span className="text-[10px] sm:text-xs font-medium truncate">{copied ? 'Copied' : 'Copy'}</span>
@@ -1032,7 +1032,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                       className={`w-11 h-11 flex items-center justify-center rounded-lg transition-colors border ${
                         videoCollectionIds.length > 0
                           ? 'bg-indigo-600/20 text-indigo-400 border-indigo-600/50 hover:bg-indigo-600/30'
-                          : 'bg-ink-800 text-ink-300 border-ink-700 hover:bg-ink-700 hover:text-white'
+                          : 'bg-ink-800 text-ink-300 border-ink-700 hover:bg-ink-700 hover:text-ink-50'
                       }`}
                       title="Add to Collection"
                     >
@@ -1084,11 +1084,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 <div className="p-2 bg-amber-500/10 rounded-lg">
                   <Trash2 className="w-5 h-5 text-amber-500" />
                 </div>
-                <h3 className="text-lg font-semibold text-white">Move to Trash</h3>
+                <h3 className="text-lg font-semibold text-ink-50">Move to Trash</h3>
               </div>
               <button
                 onClick={() => setShowDeleteDialog(false)}
-                className="p-1.5 text-ink-500 hover:text-white hover:bg-ink-800 rounded-lg transition-colors"
+                className="p-1.5 text-ink-500 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors"
               >
                 <X size={18} />
               </button>
@@ -1116,7 +1116,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white font-medium truncate">
+                  <p className="text-sm text-ink-50 font-medium truncate">
                     {data.title || 'Untitled'}
                   </p>
                   <p className="text-xs text-ink-500">@{data.author}</p>
