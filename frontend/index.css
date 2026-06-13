@@ -37,9 +37,12 @@
   --ink-900: #18181b;
   --ink-950: #09090b;
 
-  /* island semantic tokens (spec §1) — for shell + new code */
-  --app-bg: #08080a;
-  --island: #111114;
+  /* island semantic tokens (spec §1) — for shell + new code.
+     app-bg (the gap behind islands) is kept clearly darker than --island so the
+     island cards read as raised/floating in dark theme; bg-app-bg/bg-island
+     utilities are unused elsewhere, so these only affect the island shell. */
+  --app-bg: #050507;
+  --island: #15151a;
   --island-2: #17171b;
   --card: #1d1d22;
   --line: rgba(255,255,255,.065);
@@ -125,6 +128,12 @@
    so the shell is dual-theme for free. Desktop-only; mobile keeps the flat frame. */
 .island-frame {
   height: 100dvh;
+  /* Fill the viewport width: the frame is a flex item in AppLayout's flex-row
+     parent, so without an explicit width it would size to its content (narrow
+     when sparse, wide when full). Pin it to 100% so the islands always span the
+     viewport regardless of content. */
+  width: 100%;
+  flex: 1;
   overflow: hidden;
   flex-direction: column;
   gap: 10px;
@@ -142,9 +151,11 @@
 }
 .island-card {
   background: var(--island);
-  border: 1px solid var(--line);
+  /* line-strong (12% white dark / 16% black light) gives each island a crisp,
+     visible edge so the panels read as distinct floating cards in both themes. */
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-lg, 18px);
-  box-shadow: var(--shadow-island, 0 10px 40px rgba(0, 0, 0, .45));
+  box-shadow: var(--shadow-island, 0 12px 40px rgba(0, 0, 0, .55));
 }
 
 /* Collapsed-info reopen tab — a fixed right-edge vertical handle styled like an
@@ -167,7 +178,7 @@
   box-shadow: -4px 0 16px rgba(0, 0, 0, .25);
   transition: color .15s ease;
 }
-.island-reopen:hover { color: #6366f1; }
+.island-reopen:hover { color: var(--accent); }
 
 /* Global styles */
 html, body {

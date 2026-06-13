@@ -20,6 +20,8 @@ interface ResourcesInfoPanelWrapperProps {
   trashedFolderPreviews: Record<string, FolderPreviewItem[]>;
   /** Callback fired when user renames a folder from within the panel */
   onRenameFolder: (folderId: string | number, name: string) => Promise<void>;
+  /** Island mode — render bare panel for the shell's info island (no fixed overlay). */
+  island?: boolean;
 }
 
 // ─── Component ───────────────────────────────────────────
@@ -27,6 +29,7 @@ interface ResourcesInfoPanelWrapperProps {
 export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps> = ({
   trashedFolderPreviews,
   onRenameFolder,
+  island = false,
 }) => {
   const { t } = useTranslation();
   const {
@@ -83,6 +86,55 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
   // Nothing to render when downloads view or no selection
   if (isDownloadsView || (!selectedResource?.resource && !selectedFolder)) {
     return null;
+  }
+
+  // ── Island mode: bare panel for the shell's info island. The shell owns the
+  // width + reopen handle, so this renders only a collapse control + the inner
+  // panel content (no fixed overlay, no own resize handle, no expand tab).
+  if (island) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex justify-end px-2 py-1.5 shrink-0">
+          <button
+            onClick={() => setShowInfoPanel(false)}
+            title={t('resources.toggleInfoPanel')}
+            className="w-8 h-8 grid place-items-center rounded-lg text-ink-400 hover:text-ink-50 hover:bg-ink-800 transition-colors"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-auto">
+          {selectedFolder ? (
+            <FolderInfoPanel
+              folder={selectedFolder}
+              previewItems={
+                isRecycleView
+                  ? trashedFolderPreviews[String(selectedFolder.id)]
+                  : folderPreviews[selectedFolder.id]
+              }
+              readOnly={isRecycleView}
+              onClose={() => setSelectedFolder(null)}
+              onRename={async (name) => {
+                await onRenameFolder(selectedFolder.id, name);
+              }}
+            />
+          ) : selectedResource?.resource ? (
+            <ResourceInfoPanel
+              resource={selectedResource.resource}
+              allTags={allTags}
+              assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
+              folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
+              readOnly={isRecycleView}
+              onClose={() => setSelectedResource(null)}
+              onAddTag={handleAddTag}
+              onRemoveTag={handleRemoveTag}
+              onCreate={handleCreateTag}
+              onUpdate={handleResourceUpdate}
+            />
+          ) : null}
+        </div>
+      </div>
+    );
   }
 
   return (

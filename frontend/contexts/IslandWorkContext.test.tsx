@@ -4,16 +4,18 @@ import React from 'react';
 import { IslandWorkProvider, useIslandWork } from './IslandWorkContext';
 
 function Probe() {
-  const { infoVisible, setInfoVisible, infoWidth, setInfoWidth, infoAvailable, setInfoAvailable } = useIslandWork();
+  const { infoVisible, setInfoVisible, infoWidth, setInfoWidth, infoAvailable, setInfoAvailable, infoIslandEl, setInfoIslandEl } = useIslandWork();
   return (
     <div>
       <span data-testid="vis">{String(infoVisible)}</span>
       <span data-testid="w">{infoWidth}</span>
       <span data-testid="avail">{String(infoAvailable)}</span>
+      <span data-testid="el">{infoIslandEl ? infoIslandEl.id : 'null'}</span>
       <button onClick={() => setInfoVisible(true)}>show</button>
       <button onClick={() => setInfoWidth(100)}>narrow</button>
       <button onClick={() => setInfoWidth(999)}>wide</button>
       <button onClick={() => setInfoAvailable(true)}>avail</button>
+      <button onClick={() => setInfoIslandEl(Object.assign(document.createElement('div'), { id: 'portal' }))}>attach</button>
     </div>
   );
 }
@@ -45,5 +47,11 @@ describe('IslandWorkContext', () => {
     expect(screen.getByTestId('w').textContent).toBe('250');
     fireEvent.click(screen.getByText('wide'));
     expect(screen.getByTestId('w').textContent).toBe('480');
+  });
+  it('setInfoIslandEl updates infoIslandEl (callback-ref re-renders consumers)', () => {
+    render(<IslandWorkProvider><Probe /></IslandWorkProvider>);
+    expect(screen.getByTestId('el').textContent).toBe('null');
+    fireEvent.click(screen.getByText('attach'));
+    expect(screen.getByTestId('el').textContent).toBe('portal');
   });
 });

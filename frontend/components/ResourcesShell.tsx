@@ -1,6 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ResourcesSidebar, type ResourcesSidebarProps } from './ResourcesSidebar';
 import { ResourcesInfoPanelWrapper } from './ResourcesInfoPanelWrapper';
+import { islandUI } from '../utils/featureFlags';
+import { useIslandWork } from '../contexts/IslandWorkContext';
+import { useResourcesContext } from '../contexts/ResourcesContext';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -35,11 +39,15 @@ export interface ResourcesShellProps {
  * All business logic (handlers, state, modals) stays in ResourcesView.
  * This component is purely structural.
  */
-export const ResourcesShell: React.FC<ResourcesShellProps> = ({
-  sidebarProps,
-  infoPanelProps,
-  children,
-}) => {
+export const ResourcesShell: React.FC<ResourcesShellProps> = (props) => {
+  // Island mode is a stable build-time constant for the session, so this early
+  // return cannot violate the Rules of Hooks: the classic branch below calls no
+  // hooks, and the island child encapsulates its own hooks.
+  if (islandUI()) {
+    return <ResourcesShellIsland {...props} />;
+  }
+
+  const { sidebarProps, infoPanelProps, children } = props;
   // Mobile uses min-h-screen so content can grow past the viewport (viewport
   // scrolls naturally + infinite scroll observer fires). Desktop keeps
   // sm:h-full to stay inside the sm:h-screen + sm:overflow-hidden frame set
@@ -59,6 +67,44 @@ export const ResourcesShell: React.FC<ResourcesShellProps> = ({
 
       {/* Right panel: Info panel (collapsible) */}
       <ResourcesInfoPanelWrapper {...infoPanelProps} />
+    </div>
+  );
+};
+
+/**
+ * ResourcesShellIsland — island-shell variant of the resources layout.
+ *
+ * The rail + content render inside the shell's work island (no AppLayout
+ * padding to escape, no global topbar offset). The info panel is portaled into
+ * the shell's info island; the shell owns its width + reopen handle. The page's
+ * ResourcesContext stays the source of truth for selection + panel visibility,
+ * which we mirror into the shell's island-work context via effects.
+ */
+const ResourcesShellIsland: React.FC<ResourcesShellProps> = ({ sidebarProps, infoPanelProps, children }) => {
+  const { showInfoPanel, setShowInfoPanel, selectedResource, selectedFolder, isDownloadsView } = useResourcesContext();
+  const { infoIslandEl, infoVisible, setInfoVisible, setInfoAvailable } = useIslandWork();
+
+  const hasSelection = !isDownloadsView && (!!selectedResource?.resource || !!selectedFolder);
+
+  // Page tells the shell whether there's an info panel to (re)open.
+  useEffect(() => { setInfoAvailable(hasSelection); }, [hasSelection, setInfoAvailable]);
+  // Island visibility = user intent (showInfoPanel) AND a selection exists.
+  useEffect(() => { setInfoVisible(showInfoPanel && hasSelection); }, [showInfoPanel, hasSelection, setInfoVisible]);
+  // Only the reopen direction is mirrored back here: the shell flips infoVisible→true via its
+  // reopen handle, so we reflect that into showInfoPanel (ResourcesContext stays the source of
+  // truth). The collapse/hide direction flows the OTHER way (showInfoPanel→false drives effect 2),
+  // never via setInfoVisible(false) from the shell — that asymmetry is what keeps this loop-free.
+  // Guarded so it can't loop.
+  useEffect(() => { if (infoVisible && !showInfoPanel) setShowInfoPanel(true); }, [infoVisible, showInfoPanel, setShowInfoPanel]);
+
+  return (
+    <div className="flex h-full min-h-0">
+      <ResourcesSidebar {...sidebarProps} island />
+      <div className="flex-1 min-w-0 flex flex-col">{children}</div>
+      {infoIslandEl && createPortal(
+        <ResourcesInfoPanelWrapper island {...infoPanelProps} />,
+        infoIslandEl,
+      )}
     </div>
   );
 };

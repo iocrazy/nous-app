@@ -31,6 +31,8 @@ export interface ResourcesSidebarProps {
   onSmartFolderContextMenu: (e: React.MouseEvent, sf: SmartCollection) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  /** Rendered inside the island work-island (no fixed global TopBar to clear). */
+  island?: boolean;
 }
 
 // ─── Helper ────────────────────────────────────────────
@@ -60,6 +62,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
   onSmartFolderContextMenu,
   collapsed = false,
   onToggleCollapse,
+  island = false,
 }) => {
   const { t } = useTranslation();
   const {
@@ -128,7 +131,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
     ) : (
-    <div className="group hidden md:flex md:static w-52 shrink-0 border-r border-ink-800/40 flex-col pt-16" style={{ position: 'relative' }}>
+    <div className={`group hidden md:flex md:static w-52 shrink-0 border-r border-ink-800/40 flex-col ${island ? 'pt-4' : 'pt-16'}`} style={{ position: 'relative' }}>
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <span className="text-sm font-semibold text-ink-200">{t('sidebar.resources', 'Resources')}</span>
