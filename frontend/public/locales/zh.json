@@ -1916,5 +1916,24 @@
     "warning": "设备时间与服务器相差 {{amount}}（{{direction}}）——这会导致登录异常。请在系统设置中开启自动设置日期与时间。",
     "behind": "偏慢",
     "ahead": "偏快"
+  },
+  "memory": {
+    "title": "记忆",
+    "subtitle": "AI 在多次对话中记住的关于你的信息。",
+    "learnLabel": "从对话中学习",
+    "learnHint": "让助手从对话中建立你的偏好模型。",
+    "injectLabel": "在对话中使用记忆",
+    "injectHint": "让助手回复时参考已学到的内容。",
+    "serviceOff": "本部署尚未启用记忆服务——开关已保存,启用后即生效。",
+    "aboutLabel": "关于我",
+    "aboutHint": "告诉助手需要长期记住的事(每行一条)。优先级高于它自动推断的内容。",
+    "aboutPlaceholder": "例如:我制作中式街头美食的短视频\n回复时中英双语",
+    "saveAbout": "保存",
+    "observationsLabel": "已了解到的信息",
+    "noObservations": "暂无学习内容——多聊几句,这里会出现观察。",
+    "deleteObservation": "删除此项",
+    "forgetAll": "清除全部记忆",
+    "forgetConfirm": "删除所有已学记忆?你的聊天记录会保留。",
+    "forgetYes": "确认清除"
   }
 }

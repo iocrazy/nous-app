@@ -1916,5 +1916,24 @@
     "warning": "Your device clock is {{amount}} {{direction}} server time — this breaks sign-in. Enable automatic date & time in system settings.",
     "behind": "behind",
     "ahead": "ahead"
+  },
+  "memory": {
+    "title": "Memory",
+    "subtitle": "What the AI remembers about you across conversations.",
+    "learnLabel": "Learn from my chats",
+    "learnHint": "Let the assistant build a model of your preferences from conversations.",
+    "injectLabel": "Use memory in chats",
+    "injectHint": "Let the assistant draw on what it has learned when replying.",
+    "serviceOff": "Memory service is not enabled on this deployment yet — toggles are saved and will take effect once it's on.",
+    "aboutLabel": "About me",
+    "aboutHint": "Tell the assistant things to always remember (one per line). These take priority over what it infers.",
+    "aboutPlaceholder": "e.g. I make short-form videos about Chinese street food\nAlways reply in English and Chinese",
+    "saveAbout": "Save",
+    "observationsLabel": "Learned about you",
+    "noObservations": "Nothing learned yet — chat more and observations will appear here.",
+    "deleteObservation": "Delete this",
+    "forgetAll": "Forget everything",
+    "forgetConfirm": "Delete all learned memory? Your chat history is kept.",
+    "forgetYes": "Yes, forget"
   }
 }
