@@ -12,15 +12,19 @@ import pytest
 from app.services.ai import ai_health
 
 
-def _patch(monkeypatch, *, settings, resolver):
+def _patch(monkeypatch, *, settings, resolver, runtime=None):
     async def _get_ai_settings(uid):
         return settings
 
     async def _resolve(uid, task_key, default_slug):
         return resolver(task_key, default_slug)
 
+    async def _runtime(uid, task_types):
+        return runtime or {}
+
     monkeypatch.setattr(ai_health, "get_ai_settings", _get_ai_settings)
     monkeypatch.setattr(ai_health, "resolve_task_provider_config", _resolve)
+    monkeypatch.setattr(ai_health, "fetch_runtime_summary", _runtime)
 
 
 @pytest.mark.asyncio
@@ -147,6 +151,115 @@ async def test_all_capabilities_present(monkeypatch):
         "classify",
         "translation",
     }
+
+
+@pytest.mark.asyncio
+async def test_visual_analysis_has_task_type_and_runtime_fields(monkeypatch):
+    # visual_analysis is the one capability with a task_tracking task_type
+    # (ai_extract); it gains runtime fields even when healthy.
+    _patch(
+        monkeypatch,
+        settings={"ai_providers": {"doubao": {"api_key": "k"}}, "task_assignment": {}},
+        resolver=lambda tk, ds: (
+            "doubao",
+            {"model": "doubao-seed-vl"},
+            "doubao-seed-vl",
+            ds,
+        ),
+        runtime={
+            "ai_extract": {
+                "recent_runs": 3,
+                "recent_failures": 0,
+                "last_error": "",
+                "latest_failed": False,
+            }
+        },
+    )
+    rows = await ai_health.get_capability_health("u1")
+    va = next(r for r in rows if r["capability"] == "visual_analysis")
+    assert va["task_type"] == "ai_extract"
+    assert va["recent_runs"] == 3
+    assert va["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_runtime_failing_when_config_ok_but_latest_run_failed(monkeypatch):
+    # The ark-key case: vision model + key resolve fine, but the most recent
+    # call failed (e.g. AccessDenied). Config is "ok" yet the capability is
+    # currently broken — surfaced as runtime_failing with the real error.
+    _patch(
+        monkeypatch,
+        settings={"ai_providers": {"doubao": {"api_key": "k"}}, "task_assignment": {}},
+        resolver=lambda tk, ds: (
+            "doubao",
+            {"model": "doubao-seed-vl"},
+            "doubao-seed-vl",
+            ds,
+        ),
+        runtime={
+            "ai_extract": {
+                "recent_runs": 4,
+                "recent_failures": 2,
+                "last_error": "AccessDenied: model not granted for this key",
+                "latest_failed": True,
+            }
+        },
+    )
+    rows = await ai_health.get_capability_health("u1")
+    va = next(r for r in rows if r["capability"] == "visual_analysis")
+    assert va["status"] == "runtime_failing"
+    assert "AccessDenied" in va["hint"]
+    assert va["recent_failures"] == 2
+
+
+@pytest.mark.asyncio
+async def test_config_problem_takes_priority_over_runtime(monkeypatch):
+    # No key is the actionable root cause; a runtime failure must not mask it.
+    _patch(
+        monkeypatch,
+        settings={"ai_providers": {}, "task_assignment": {}},
+        resolver=lambda tk, ds: (
+            "doubao",
+            {"model": "doubao-seed-vl"},
+            "doubao-seed-vl",
+            ds,
+        ),
+        runtime={
+            "ai_extract": {
+                "recent_runs": 1,
+                "recent_failures": 1,
+                "last_error": "boom",
+                "latest_failed": True,
+            }
+        },
+    )
+    rows = await ai_health.get_capability_health("u1")
+    va = next(r for r in rows if r["capability"] == "visual_analysis")
+    assert va["status"] == "no_key"
+
+
+@pytest.mark.asyncio
+async def test_inline_capability_has_no_runtime_fields(monkeypatch):
+    # summarization runs inline (no task_tracking task_type) — no runtime
+    # enrichment, and stray runtime data for other types never leaks onto it.
+    _patch(
+        monkeypatch,
+        settings={"ai_providers": {"qwen": {"api_key": "sk"}}, "task_assignment": {}},
+        resolver=lambda tk, ds: ("qwen", {"model": "qwen-max"}, "qwen-max", ds),
+        runtime={
+            "ai_extract": {
+                "recent_runs": 9,
+                "recent_failures": 9,
+                "last_error": "x",
+                "latest_failed": True,
+            }
+        },
+    )
+    rows = await ai_health.get_capability_health("u1")
+    summ = next(r for r in rows if r["capability"] == "summarization")
+    assert summ["status"] == "ok"
+    assert summ.get("task_type") is None
+    assert "recent_runs" not in summ
 
 
 @pytest.mark.asyncio

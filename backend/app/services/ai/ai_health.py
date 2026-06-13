@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.services.ai.ai_health_runtime import fetch_runtime_summary
 from app.services.ai.providers.ai_provider_helpers import (
     get_ai_settings,
     resolve_task_provider_config,
@@ -21,13 +22,20 @@ from app.services.ai.providers.ai_provider_helpers import (
 
 logger = logging.getLogger(__name__)
 
-# (task_assignment key, default agent slug, human label, needs a vision model?)
-_CAPABILITIES: list[tuple[str, str, str, bool]] = [
-    ("summarization", "summarize", "Rewrite (summary)", False),
-    ("visual_analysis", "analyze", "Analyze (visual)", True),
-    ("caption", "caption", "Image → Prompt", True),
-    ("classify", "classify", "Auto Tag", True),
-    ("translation", "translate", "Translation", False),
+# (task_assignment key, default agent slug, human label, needs a vision model?,
+#  task_tracking task_type or None). The task_type links a capability to its
+# workflow runs so the runtime layer can flag a *currently failing* feature
+# even when its static config looks healthy. Capabilities that run inline
+# (no DBOS workflow → no task_tracking row) carry None and get config-only
+# health, as before. visual_analysis (ai_extract) is the capability that
+# motivated this — the ark-key AccessDenied outage left a healthy-looking
+# board while every call failed.
+_CAPABILITIES: list[tuple[str, str, str, bool, str | None]] = [
+    ("summarization", "summarize", "Rewrite (summary)", False, None),
+    ("visual_analysis", "analyze", "Analyze (visual)", True, "ai_extract"),
+    ("caption", "caption", "Image → Prompt", True, None),
+    ("classify", "classify", "Auto Tag", True, None),
+    ("translation", "translate", "Translation", False, None),
 ]
 
 # Substrings that mark a model as vision-capable. Conservative: the
@@ -85,6 +93,27 @@ def _evaluate(
     return "ok", ""
 
 
+def _apply_runtime(
+    status: str, hint: str, *, model: str, provider: str, rt: dict[str, Any]
+) -> tuple[str, str]:
+    """Overlay runtime reality on a config-healthy capability.
+
+    When the static config is ``ok`` but the most recent tracked run failed,
+    the capability is *currently* broken (the model+key resolve, yet the call
+    is rejected — e.g. AccessDenied). Surface it as ``runtime_failing`` with
+    the real error. Config problems keep priority: they are the actionable
+    root cause, so a runtime blip never masks a missing key.
+    """
+    if status != "ok" or not rt.get("latest_failed"):
+        return status, hint
+    err = (rt.get("last_error") or "").strip() or "see Task Center for details"
+    return (
+        "runtime_failing",
+        f"Latest run failed: {err}. '{model}' and the {provider} key resolve, "
+        "but the call is being rejected — verify the key has access to this model.",
+    )
+
+
 async def get_capability_health(user_id: str) -> list[dict[str, Any]]:
     """One status row per AI capability. Never raises — a capability whose
     resolution crashes becomes an ``error`` row, its siblings unaffected."""
@@ -92,8 +121,12 @@ async def get_capability_health(user_id: str) -> list[dict[str, Any]]:
     providers = ai_settings.get("ai_providers") or {}
     assignments = ai_settings.get("task_assignment") or {}
 
+    task_types = [tt for *_rest, tt in _CAPABILITIES if tt]
+    runtime = await fetch_runtime_summary(user_id, task_types) if user_id else {}
+
     rows: list[dict[str, Any]] = []
-    for task_key, default_slug, label, needs_vision in _CAPABILITIES:
+    for task_key, default_slug, label, needs_vision, task_type in _CAPABILITIES:
+        assigned = bool((assignments.get(task_key) or "").strip())
         try:
             provider_key, _config, model, slug = await resolve_task_provider_config(
                 user_id, task_key, default_slug
@@ -104,19 +137,33 @@ async def get_capability_health(user_id: str) -> list[dict[str, Any]]:
                 needs_vision=needs_vision,
                 providers=providers,
             )
-            rows.append(
-                {
-                    "capability": task_key,
-                    "label": label,
-                    "agent_slug": slug,
-                    "assigned": bool((assignments.get(task_key) or "").strip()),
-                    "model": model,
-                    "provider": provider_key,
-                    "needs_vision": needs_vision,
-                    "status": status,
-                    "hint": hint,
-                }
-            )
+            row = {
+                "capability": task_key,
+                "label": label,
+                "agent_slug": slug,
+                "assigned": assigned,
+                "model": model,
+                "provider": provider_key,
+                "needs_vision": needs_vision,
+                "status": status,
+                "hint": hint,
+            }
+            if task_type:
+                rt = runtime.get(task_type) or {}
+                status, hint = _apply_runtime(
+                    status, hint, model=model, provider=provider_key, rt=rt
+                )
+                row.update(
+                    {
+                        "status": status,
+                        "hint": hint,
+                        "task_type": task_type,
+                        "recent_runs": rt.get("recent_runs", 0),
+                        "recent_failures": rt.get("recent_failures", 0),
+                        "last_error": rt.get("last_error", ""),
+                    }
+                )
+            rows.append(row)
         except Exception:  # noqa: BLE001 — one bad capability must not sink the board
             logger.exception("[ai_health] capability %s resolution failed", task_key)
             rows.append(
@@ -124,7 +171,7 @@ async def get_capability_health(user_id: str) -> list[dict[str, Any]]:
                     "capability": task_key,
                     "label": label,
                     "agent_slug": "",
-                    "assigned": bool((assignments.get(task_key) or "").strip()),
+                    "assigned": assigned,
                     "model": "",
                     "provider": "",
                     "needs_vision": needs_vision,

@@ -74,6 +74,32 @@ describe('AIHealthBoard', () => {
     expect(screen.getByText('aiHealth.default')).toBeTruthy();
   });
 
+  it('shows a runtime_failing capability with its recent failure count', async () => {
+    mockService.getAIHealth.mockResolvedValue([
+      {
+        capability: 'visual_analysis',
+        label: 'Analyze (visual)',
+        agent_slug: 'analyze',
+        assigned: true,
+        model: 'doubao-seed-vl',
+        provider: 'doubao',
+        needs_vision: true,
+        status: 'runtime_failing',
+        hint: 'Latest run failed: AccessDenied. Verify the key has access to this model.',
+        task_type: 'ai_extract',
+        recent_runs: 4,
+        recent_failures: 2,
+        last_error: 'AccessDenied',
+      },
+    ]);
+    render(<AIHealthBoard />);
+    expect(await screen.findByText(/Latest run failed: AccessDenied/)).toBeTruthy();
+    // recentFailures chip with both interpolations rendered (no count fallback).
+    expect(screen.getByText('aiHealth.recentFailures')).toBeTruthy();
+    // runtime_failing counts toward the attention badge.
+    expect(screen.getByText('aiHealth.warningsBadge:1')).toBeTruthy();
+  });
+
   it('surfaces a load error', async () => {
     mockService.getAIHealth.mockRejectedValue(new Error('boom'));
     render(<AIHealthBoard />);

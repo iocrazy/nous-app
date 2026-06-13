@@ -1953,6 +1953,8 @@
     "warningsBadge": "{{count}} 项需处理",
     "refresh": "刷新",
     "unset": "未配置",
-    "default": "默认"
+    "default": "默认",
+    "recentFailures": "近期 {{runs}} 次运行中 {{failures}} 次失败",
+    "recentOk": "近期 {{runs}} 次运行正常"
   }
 }
