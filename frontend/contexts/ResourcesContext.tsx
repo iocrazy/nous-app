@@ -42,7 +42,7 @@ import type { Resource } from '../types';
 
 // ─── Types ─────────────────────────────────────────────
 
-export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'temp';
+export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'temp' | 'project-assets';
 export type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 /** Subset of fetchResources params that the filter bar contributes.
@@ -73,6 +73,7 @@ export interface ResourcesContextType {
   isSharedView: boolean;
   isDownloadsView: boolean;
   isTempView: boolean;
+  isProjectAssetsView: boolean;
   canUpload: boolean;
 
   // ── Temp view state ──
@@ -224,7 +225,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // ── URL-driven state ──
   const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
     ? 'resources'
-    : (['shared', 'recycle', 'downloads', 'temp'].includes(section || '') ? section as SidebarView : 'resources');
+    : (['shared', 'recycle', 'downloads', 'temp', 'project-assets'].includes(section || '') ? section as SidebarView : 'resources');
   const selectedFolderId = urlFolderId ?? null;
   const selectedSmartFolderId = urlSmartFolderId ?? null;
   const selectedLibraryId = urlLibraryId ?? null;
@@ -392,6 +393,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const isSharedView = sidebarView === 'shared';
   const isDownloadsView = sidebarView === 'downloads';
   const isTempView = sidebarView === 'temp';
+  const isProjectAssetsView = sidebarView === 'project-assets';
 
   // ── Temp view state ──
   const [tempFolderId, setTempFolderId] = useState<string | null>(null);
@@ -811,9 +813,12 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     }
   }, [sidebarView, loadDownloadedResources]);
 
-  // Load temp folder resources
+  // Load temp folder resources.
+  // Also fires for the Project Assets view: its "Chat Uploads" group reuses
+  // this same temp-folder fetch (a later task renders that group from
+  // tempResources), so the effect must run for both views.
   useEffect(() => {
-    if (!isTempView) return;
+    if (!isTempView && !isProjectAssetsView) return;
     let cancelled = false;
     setSelectedIds(new Set());
     setLoading(true);
@@ -843,7 +848,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     };
     loadTemp();
     return () => { cancelled = true; };
-  }, [isTempView, isPersonal, scopeId, selectedLibraryId, tempRefreshTick]);
+  }, [isTempView, isProjectAssetsView, isPersonal, scopeId, selectedLibraryId, tempRefreshTick]);
 
   // Load tags when selected resource changes
   useEffect(() => {
@@ -1042,6 +1047,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     isSharedView,
     isDownloadsView,
     isTempView,
+    isProjectAssetsView,
     canUpload,
 
     tempFolderId,
@@ -1137,7 +1143,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     transcodingResourceIds,
   }), [
     isPersonal, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, canUpload,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, isProjectAssetsView, canUpload,
     tempFolderId, tempResources, reloadTemp,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
     libraries, smartFolders, allTags, refreshTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
