@@ -180,6 +180,24 @@
 }
 .island-reopen:hover { color: var(--accent); }
 
+/* D10 comet back button — circular violet ring + a 2px light trail that sweeps
+   under the title on stage-head hover. Place <CometBack/> as the first child of
+   a `.stage-head` and a <span class="comet-trail"/> after the title. */
+.comet-back {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  border: 1px solid rgba(139,92,246,.35);
+  background: radial-gradient(circle at 35% 30%, #2a2438, #1a1722);
+  display: grid; place-items: center; color: #c4b5fd; cursor: pointer;
+  transition: .2s;
+}
+.comet-back:hover { border-color: rgba(139,92,246,.7); box-shadow: 0 0 18px rgba(139,92,246,.35); transform: translateX(-1px); }
+.comet-trail {
+  position: absolute; left: 52px; bottom: 8px; height: 2px; width: 0; border-radius: 2px; pointer-events: none;
+  background: linear-gradient(90deg,#8b5cf6,rgba(139,92,246,.45) 35%,rgba(139,92,246,.12) 70%,transparent);
+  transition: width .35s ease;
+}
+.stage-head:hover .comet-trail { width: 340px; }
+
 /* Global styles */
 html, body {
   overflow-x: hidden;
