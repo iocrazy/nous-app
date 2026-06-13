@@ -11,7 +11,8 @@ import { IslandWorkProvider, useIslandWork } from '../contexts/IslandWorkContext
 // AppLayout outside this shell and is unaffected (this frame is `hidden sm:flex`).
 //
 // v2 P2 Task 2 — adds a right-side info island (portal target a page can render
-// into via `infoIslandRef`), a draggable splitter, and a collapse/reopen tab.
+// into via `infoIslandEl`/`setInfoIslandEl`), a draggable splitter, and a
+// collapse/reopen tab.
 // The provider wraps BOTH the shell markup and `children` so the page's portal
 // and the shell's island share one context instance.
 interface IslandShellProps {
@@ -30,7 +31,7 @@ export function IslandShell(props: IslandShellProps) {
 }
 
 function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }: IslandShellProps) {
-  const { infoIslandRef, infoVisible, setInfoVisible, infoWidth, setInfoWidth, infoAvailable } =
+  const { setInfoIslandEl, infoVisible, setInfoVisible, infoWidth, setInfoWidth, infoAvailable } =
     useIslandWork();
 
   // Drag the divider to resize the right info island. The island is on the RIGHT
@@ -48,6 +49,7 @@ function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }:
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
+    // Window-level listeners are removed on pointerup; the island-frame shell does not unmount mid-drag, so no separate effect cleanup is needed.
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   };
@@ -64,7 +66,7 @@ function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }:
         <main className="island-card flex-1 min-w-0 overflow-auto">
           {children}
         </main>
-        {/* Right info island — a page portals into infoIslandRef (spec §2) */}
+        {/* Right info island — a page portals into infoIslandEl (spec §2) */}
         {infoVisible && (
           <>
             <div
@@ -76,7 +78,7 @@ function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }:
               <span className="w-1 h-11 rounded bg-line-strong group-hover:bg-accent transition-colors" />
             </div>
             <aside className="island-card shrink-0 overflow-auto" style={{ width: infoWidth }}>
-              <div ref={infoIslandRef} className="h-full" />
+              <div ref={setInfoIslandEl} className="h-full" />
             </aside>
           </>
         )}

@@ -1,8 +1,10 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 export interface IslandWorkValue {
-  /** Portal target for a page-provided right info island (null in classic mode). */
-  infoIslandRef: React.RefObject<HTMLDivElement | null>;
+  /** The attached info-island portal target (null until mounted). Pages portal into this. */
+  infoIslandEl: HTMLDivElement | null;
+  /** Callback ref — attach to the shell's info-island portal target div. */
+  setInfoIslandEl: (el: HTMLDivElement | null) => void;
   infoVisible: boolean;
   setInfoVisible: (v: boolean) => void;
   infoWidth: number;            // clamped 250–480 (spec §2)
@@ -15,7 +17,8 @@ export interface IslandWorkValue {
 }
 
 const INERT: IslandWorkValue = {
-  infoIslandRef: { current: null },
+  infoIslandEl: null,
+  setInfoIslandEl: () => {},
   infoVisible: false,
   setInfoVisible: () => {},
   infoWidth: 360,
@@ -28,10 +31,11 @@ const INERT: IslandWorkValue = {
 const Ctx = createContext<IslandWorkValue>(INERT);
 
 export const IslandWorkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const infoIslandRef = useRef<HTMLDivElement | null>(null);
+  const [infoIslandEl, setInfoIslandElState] = useState<HTMLDivElement | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
   const [infoWidth, setInfoWidthState] = useState(360);
   const [infoAvailable, setInfoAvailableState] = useState(false);
+  const setInfoIslandEl = useCallback((el: HTMLDivElement | null) => setInfoIslandElState(el), []);
   const setInfoWidth = useCallback(
     (w: number) => setInfoWidthState(Math.min(480, Math.max(250, w))),
     [],
@@ -39,7 +43,8 @@ export const IslandWorkProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const setInfoAvailable = useCallback((v: boolean) => setInfoAvailableState(v), []);
   const value = useMemo(
     () => ({
-      infoIslandRef,
+      infoIslandEl,
+      setInfoIslandEl,
       infoVisible,
       setInfoVisible,
       infoWidth,
@@ -48,7 +53,7 @@ export const IslandWorkProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setInfoAvailable,
       active: true,
     }),
-    [infoVisible, infoWidth, setInfoWidth, infoAvailable, setInfoAvailable],
+    [infoIslandEl, setInfoIslandEl, infoVisible, infoWidth, setInfoWidth, infoAvailable, setInfoAvailable],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 };

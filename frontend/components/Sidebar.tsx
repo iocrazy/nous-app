@@ -241,8 +241,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // In the island shell the card chrome (bg/border/radius/shadow) is drawn by
   // the shell wrapper, so the aside is a plain fill (relative, full height). The
   // classic (flag-OFF) string is byte-identical to the original — D12 no-op.
-  const railW = iconRail ? 'w-[54px]' : collapsed ? 'w-20' : 'w-64';
-  const railPad = iconRail ? 'px-1.5 py-3' : collapsed ? 'p-3' : 'p-6';
+  // Nav-island width follows spec §2: list pages = 200px, detail rail = 54px.
+  const railW = iconRail ? 'w-[54px]' : collapsed ? 'w-20' : 'w-[200px]';
+  const railPad = iconRail ? 'px-1.5 py-3' : collapsed ? 'p-3' : 'p-4';
   const asideClass = island
     ? `group hidden sm:flex flex-col ${railW} ${railPad} relative h-full transition-all duration-300`
     : `group hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-ink-800 bg-ink-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`;
@@ -400,7 +401,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // PERSONAL MODE (default)
   // ===================================================================
   return (
-    <aside className={`group hidden sm:flex flex-col ${collapsed ? 'w-20' : 'w-64'} border-r border-ink-800 bg-ink-950 ${collapsed ? 'p-3' : 'p-6'} fixed top-0 left-0 h-full z-10 transition-all duration-300`}>
+    <aside className={asideClass}>
       <Logo collapsed={collapsed} />
 
       <div className="mb-2">
