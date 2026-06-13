@@ -142,6 +142,17 @@ git commit -m "test(e2e): fixture image + auth helper"
 
 ---
 
+> **⚠️ A3 CORRECTION (during execution):** the components this task originally named —
+> `NewProjectDialog.tsx` and `pages/StoryboardWorkbench/ProjectListPage.tsx` — are **ORPHANED
+> dead code** (not in the router; `ProjectListPage` even navigates to a non-existent route).
+> The REAL storyboard-create flow is TWO levels: `ProjectsPage`→`ProjectsListView` "New Project"
+> → `CreateProjectModal` (create a project) → project page `?tab=storyboard` →
+> `ProjectStoryboardTab` "New Storyboard" → inline `CreateStoryboardModal` → editor. The shipped
+> A3 (commit d14dbac8) targets these REAL components; `createStoryboardProject` returns
+> `{projectName}` and `deleteProject(page, projectName)` cleans up via the project card's
+> MoreVertical menu → "Delete Project" → native `window.confirm` (handled with
+> `page.once('dialog', d=>d.accept())`). Steps below are superseded by that shipped version.
+
 ### Task A3: `data-testid` on project-create + the `project.ts` helper
 
 **Files:** Modify `frontend/components/storyboard/project/NewProjectDialog.tsx`; create `frontend/e2e/helpers/project.ts`
