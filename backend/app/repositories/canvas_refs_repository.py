@@ -21,9 +21,13 @@ class CanvasRefsRepository:
     async def replace_for_canvas(
         self, canvas_id: str, refs: List[Dict[str, str]]
     ) -> None:
-        """Replace ALL refs for a canvas with ``refs`` in one transaction.
+        """Replace ALL refs for a canvas with ``refs``.
 
-        Replace-all (not diff) keeps the logic trivially correct: the
+        Two statements (DELETE then a single multi-row INSERT) — NOT wrapped
+        in one explicit transaction. That's acceptable here: refs are derived
+        and rebuildable (the backfill script reconstructs them from
+        nodes_json), so a partial failure is self-healing rather than
+        corrupting. Replace-all keeps the logic trivially correct: the
         extracted set IS the desired state. Idempotent.
         """
         cid = int(str(canvas_id))
@@ -31,32 +35,45 @@ class CanvasRefsRepository:
             "DELETE FROM canvas_resource_refs WHERE canvas_id = :cid",
             {"cid": cid},
         )
-        for r in refs:
-            await db_engine.execute_as_service_role(
-                "INSERT INTO canvas_resource_refs "
-                "  (canvas_id, resource_id, role, node_id) "
-                "VALUES (:cid, :rid, :role, :node_id) "
-                "ON CONFLICT (canvas_id, resource_id, node_id) DO NOTHING",
-                {
-                    "cid": cid,
-                    "rid": int(str(r["resource_id"])),
-                    "role": r["role"],
-                    "node_id": r["node_id"],
-                },
-            )
+        if not refs:
+            return
+        await db_engine.execute_as_service_role(
+            "INSERT INTO canvas_resource_refs "
+            "  (canvas_id, resource_id, role, node_id) "
+            "SELECT :cid, rid, role, node_id "
+            "FROM unnest("
+            "  :rids::bigint[], :roles::text[], :node_ids::text[]"
+            ") AS t(rid, role, node_id) "
+            "ON CONFLICT (canvas_id, resource_id, node_id) DO NOTHING",
+            {
+                "cid": cid,
+                "rids": [int(str(r["resource_id"])) for r in refs],
+                "roles": [r["role"] for r in refs],
+                "node_ids": [r["node_id"] for r in refs],
+            },
+        )
 
     # -- reads --------------------------------------------------------
 
     async def list_assets_for_canvas(self, canvas_id: str) -> List[Dict[str, Any]]:
-        """Resources referenced by a canvas, with role. Newest first."""
+        """Unique resources referenced by a canvas, newest first.
+
+        A resource referenced by multiple nodes has multiple refs; we
+        collapse to one row per resource (DISTINCT ON r.id) so the grid
+        shows each file once. ``role``/``node_id`` reflect the most
+        recent ref for that resource.
+        """
         rows = await db_engine.fetch_all(
-            "SELECT r.id::text AS id, r.filename, r.file_type, r.mime_type, "
-            "       r.thumbnail_path, r.cover_image_path, r.created_at, "
-            "       crr.role, crr.node_id "
-            "FROM canvas_resource_refs crr "
-            "JOIN resources r ON r.id = crr.resource_id "
-            "WHERE crr.canvas_id = :cid AND r.is_trashed = false "
-            "ORDER BY r.created_at DESC",
+            "SELECT * FROM ("
+            "  SELECT DISTINCT ON (r.id) "
+            "    r.id::text AS id, r.filename, r.file_type, r.mime_type, "
+            "    r.thumbnail_path, r.cover_image_path, r.created_at, "
+            "    crr.role, crr.node_id "
+            "  FROM canvas_resource_refs crr "
+            "  JOIN resources r ON r.id = crr.resource_id "
+            "  WHERE crr.canvas_id = :cid AND r.is_trashed = false "
+            "  ORDER BY r.id, r.created_at DESC "
+            ") sub ORDER BY created_at DESC",
             {"cid": int(str(canvas_id))},
         )
         return rows or []
@@ -77,17 +94,18 @@ class CanvasRefsRepository:
         return rows or []
 
     async def tree_for_projects(self, project_ids: List[str]) -> List[Dict[str, Any]]:
-        """Per-canvas asset counts for the given projects (tree payload)."""
+        """Per-canvas count of unique non-trashed referenced resources."""
         if not project_ids:
             return []
         ids = [int(str(p)) for p in project_ids]
         rows = await db_engine.fetch_all(
             "SELECT c.project_id::text AS project_id, c.id::text AS canvas_id, "
             "       c.name AS canvas_name, c.kind, "
-            "       COUNT(DISTINCT (crr.resource_id, crr.node_id))"
-            "         FILTER (WHERE crr.resource_id IS NOT NULL) AS asset_count "
+            "       COUNT(DISTINCT crr.resource_id) "
+            "         FILTER (WHERE r.id IS NOT NULL) AS asset_count "
             "FROM canvases c "
             "LEFT JOIN canvas_resource_refs crr ON crr.canvas_id = c.id "
+            "LEFT JOIN resources r ON r.id = crr.resource_id AND r.is_trashed = false "
             "WHERE c.project_id = ANY(:ids) "
             "GROUP BY c.project_id, c.id, c.name, c.kind "
             "ORDER BY c.name",
