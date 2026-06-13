@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
   Clock, Tag, ChevronRight, Brain, AlertCircle, List, AlignLeft, ChevronDown, Music,
+  PanelRightClose,
 } from 'lucide-react';
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
 import { MediaCard } from './MediaCard';
@@ -50,6 +51,15 @@ interface VideoDetailPanelProps {
    * Defaults to false so desktop / mobile-video render identically.
    */
   compact?: boolean;
+  /**
+   * Island mode — when true, the panel renders content-only (tabs + body)
+   * without its own outer width/positioning chrome. The island shell's
+   * <aside className="island-card"> owns the width and scrolling. Adds a
+   * collapse control to the tabs row. Defaults to false (classic split-pane).
+   */
+  island?: boolean;
+  /** Called by the in-island collapse button (island mode only). */
+  onCollapse?: () => void;
 }
 
 type TabKey = 'overview' | 'transcript' | 'analysis' | 'lyrics';
@@ -108,6 +118,8 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   playerCurrentTime,
   sodaTheme,
   compact = false,
+  island = false,
+  onCollapse,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
@@ -427,7 +439,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={island ? 'h-full flex flex-col min-h-0' : 'flex flex-col h-full'}>
       {/* Tab Navigation */}
       <div className="flex border-b border-ink-800 mb-4 shrink-0">
         {visibleTabs.map((tab) => {
@@ -453,6 +465,16 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             </button>
           );
         })}
+        {island && (
+          <button
+            onClick={onCollapse}
+            aria-label="Collapse panel"
+            title="Collapse panel"
+            className="ml-auto px-3 py-3 text-ink-400 hover:text-ink-200 transition-colors"
+          >
+            <PanelRightClose size={16} />
+          </button>
+        )}
       </div>
 
       {/* Tab Content */}

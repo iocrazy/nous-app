@@ -20,6 +20,10 @@ import { sodaTrackId } from './DownloadDetailPage/sodaTrackId';
 import { useDownloadDetail } from './DownloadDetailPage/useDownloadDetail';
 import { DownloadMenuDropdown, MobileDownloadMenu } from './DownloadDetailPage/DownloadMenuDropdown';
 import { DeleteDialog } from './DownloadDetailPage/DeleteDialog';
+import { createPortal } from 'react-dom';
+import { islandUI } from '../utils/featureFlags';
+import { useIslandWork } from '../contexts/IslandWorkContext';
+import { CometBack } from '../components/CometBack';
 
 export { useDownloadDetail } from './DownloadDetailPage/useDownloadDetail';
 export { DownloadMenuDropdown, MobileDownloadMenu } from './DownloadDetailPage/DownloadMenuDropdown';
@@ -46,6 +50,16 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     handleRatingChange, handleNotesChange, handleNotesBlur,
     handleUpdate, handleDelete, handleBack, addToast,
   } = detail;
+
+  // Island app-shell integration (no-op in classic — useIslandWork returns an
+  // inert shape outside a shell, and `island` gates every island-only branch).
+  const island = islandUI();
+  const { infoIslandEl, setInfoVisible, setInfoAvailable } = useIslandWork();
+  // Island desktop layout: stage in the work island + panel portaled to the info
+  // island. Single source for both gates so they can't diverge (IslandShell is
+  // `hidden sm:flex` at 640px while `isMobile` is the md breakpoint at 767px — a
+  // mismatch in the 640–767px band would double-mount VideoDetailPanel).
+  const islandDesktop = island && !isMobile;
 
   // iOS WebKit (standalone PWA): safe-area insets / viewport can stay unsettled
   // until the first scroll, leaving the header tucked under the status bar until
@@ -76,6 +90,16 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       window.clearTimeout(t2);
     };
   }, []);
+
+  // Island mode: this page owns an info island (the detail panel). Mark it
+  // available + visible on mount so the shell mounts the info aside (giving us a
+  // portal target), and tear it down on unmount. No-op in classic.
+  useEffect(() => {
+    if (!island) return;
+    setInfoAvailable(true);
+    setInfoVisible(true);
+    return () => { setInfoAvailable(false); setInfoVisible(false); };
+  }, [island, setInfoAvailable, setInfoVisible]);
 
   // Toolbar download handler — only downloads from backend server (no CDN fallback)
   const handleToolbarDownload = async (type: 'video' | 'cover' | 'audio' | 'images') => {
@@ -213,6 +237,260 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     : undefined;
   const audioCoverUrl = isAudio ? getCoverUrl(video, mediaToken ?? undefined) : undefined;
 
+  // Desktop action buttons (Share / Download / More) — extracted verbatim so the
+  // classic header and the island stage-head render the EXACT same buttons,
+  // handlers, and dropdowns (single source, no drift). Wrapper differs per host.
+  const actionButtons = (
+    <>
+      {resourceId && (
+        <button
+          onClick={() => setIsShareModalOpen(true)}
+          className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
+        >
+          <Share2 size={14} />
+          <span className="hidden sm:inline">Share</span>
+        </button>
+      )}
+
+      {/* Download dropdown */}
+      <div className="relative">
+        <button
+          onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+          disabled={isDownloading || isFetching}
+          className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-70"
+        >
+          {(isDownloading || isFetching) ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          <span className="hidden sm:inline">Download</span>
+        </button>
+        {showDownloadMenu && (
+          <DownloadMenuDropdown
+            video={video}
+            isDownloading={isDownloading}
+            isFetching={isFetching}
+            onClose={() => setShowDownloadMenu(false)}
+            onDownload={handleToolbarDownload}
+            onFetchMedia={handleFetchMedia}
+            onExtractAudio={handleExtractAudio}
+            onFetchSodaAudio={handleFetchSodaAudio}
+          />
+        )}
+      </div>
+
+      {/* More menu */}
+      <div className="relative">
+        <button
+          onClick={() => setShowMoreMenu(!showMoreMenu)}
+          className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
+        >
+          <MoreHorizontal size={16} />
+        </button>
+        {showMoreMenu && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+            <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-44">
+              {video.original_url && (
+                <a
+                  href={video.original_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
+                  onClick={() => setShowMoreMenu(false)}
+                >
+                  <ExternalLink size={13} /> Open Original Link
+                </a>
+              )}
+              {video.original_url && (
+                <button
+                  className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    navigator.clipboard.writeText(video.original_url);
+                    addToast('Link copied to clipboard', 'success');
+                  }}
+                >
+                  <Copy size={13} /> Copy Link
+                </button>
+              )}
+              <div className="border-t border-ink-700 my-1" />
+              <button
+                className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  setShowDeleteDialog(true);
+                }}
+              >
+                <Trash2 size={13} /> Delete
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+
+  // Player switch (audio / album / video / fallback) — extracted so the classic
+  // split-pane stage and the island work-island viewport mount the EXACT same
+  // component + props. Players are never portaled (HLS/auth/keyboard unaffected).
+  const playerSwitch = isAudio ? (
+    (video.music_download_path || video.extract_audio_path) ? (
+      <AudioHero
+        src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
+        title={video.music_name || video.title || 'Audio'}
+        subtitle={video.author || undefined}
+        coverUrl={audioCoverUrl}
+        duration={Number(video.duration) || undefined}
+        onTimeUpdate={handleTimeUpdate}
+        mediaId={String(video.id)}
+        currentTime={currentTime}
+        chorusStartSec={
+          typeof video.metadata?.chorus?.start === 'number'
+            ? video.metadata.chorus.start / 1000
+            : undefined
+        }
+        theme={sodaTheme}
+        sourcePlatform={video.source_platform}
+      />
+    ) : (
+      <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
+        <Music size={48} className="text-ink-600" />
+        <p className="text-ink-400 text-sm font-medium">Audio not available</p>
+        <p className="text-ink-500 text-xs max-w-[300px] text-center">
+          This audio hasn't been downloaded yet. Use the Download button to fetch the audio file.
+        </p>
+      </div>
+    )
+  ) : video.media_type && isAlbumType(video.media_type) ? (
+    <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} />
+  ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
+    <VideoPlayer
+      src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
+      originalSrc={hlsUrl ? getVideoUrl(video, mediaToken ?? undefined) || undefined : undefined}
+      authToken={authToken || undefined}
+      playerRef={playerRef}
+      onTimeUpdate={handleTimeUpdate}
+      onDurationChange={handleDurationChange}
+    />
+  ) : (
+    <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
+      {video.video_download_status === 'downloading' || video.video_download_status === 'pending' ? (
+        <>
+          <Loader2 size={48} className="text-indigo-500 animate-spin" />
+          <p className="text-ink-300 text-sm font-medium">Downloading...</p>
+          <p className="text-ink-500 text-xs">The media file is being downloaded. Please wait.</p>
+        </>
+      ) : (
+        <>
+          <VideoIcon size={48} className="text-ink-600" />
+          <p className="text-ink-400 text-sm font-medium">Video not available for streaming</p>
+        </>
+      )}
+      <p className="text-ink-500 text-xs max-w-[300px] text-center">
+        This video hasn't been downloaded yet. Use the Download button to fetch the media file.
+      </p>
+      {video.original_url && (
+        <a
+          href={video.original_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors"
+        >
+          <ExternalLink size={13} />
+          Open Original Link
+        </a>
+      )}
+    </div>
+  );
+
+  // Author overlay badge (classic stage only — island shows the author in the
+  // stage-head instead, so the badge isn't rendered in the island viewport).
+  const authorBadge = video.author && (
+    <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 text-white/90 text-sm pointer-events-none">
+      {video.source_platform && ['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(video.source_platform) ? (
+        <img src={`/icons/${video.source_platform}.svg`} alt="" className="w-4 h-4" />
+      ) : (
+        <UserRound size={16} className="opacity-70" />
+      )}
+      <span>@{video.author}</span>
+    </div>
+  );
+
+  // Title + author line used by both the classic header (title only) and the
+  // island stage-head. Island adds an author sub-line with the platform icon.
+  const titleText = video.title || video.description || 'Media Player';
+
+  // VideoDetailPanel props — shared verbatim between the classic split-pane
+  // column and the island portal so the panel behaves identically in both.
+  const detailPanel = (
+    <VideoDetailPanel
+      video={video}
+      resourceId={resourceId || undefined}
+      playerCurrentTime={currentTime}
+      sodaTheme={sodaTheme}
+      compact={isMobile && isAudio}
+      onClose={handleBack}
+      onUpdate={handleUpdate}
+      onDelete={handleDelete}
+      hidePreview
+      resourceRating={resourceRating}
+      resourceNotes={resourceNotes}
+      onRatingChange={resourceId ? handleRatingChange : undefined}
+      onNotesChange={resourceId ? handleNotesChange : undefined}
+      onNotesBlur={resourceId ? handleNotesBlur : undefined}
+      mobileActions={
+        <>
+          {resourceId && (
+            <button
+              onClick={() => setIsShareModalOpen(true)}
+              className="p-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/30 rounded-lg transition-colors"
+            >
+              <Share2 size={16} />
+            </button>
+          )}
+          <div className="relative">
+            <button
+              onClick={() => setShowMoreMenu(!showMoreMenu)}
+              className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
+            >
+              <MoreHorizontal size={16} />
+            </button>
+            {showMoreMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-48">
+                  <MobileDownloadMenu
+                    video={video}
+                    onClose={() => setShowMoreMenu(false)}
+                    onDownload={handleToolbarDownload}
+                    onFetchMedia={handleFetchMedia}
+                    onFetchSodaAudio={handleFetchSodaAudio}
+                  />
+                  {video.original_url && (
+                    <a
+                      href={video.original_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
+                      onClick={() => setShowMoreMenu(false)}
+                    >
+                      <ExternalLink size={13} /> Open Original
+                    </a>
+                  )}
+                  <div className="border-t border-ink-700 my-1" />
+                  <button
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setTimeout(() => setShowDeleteDialog(true), 50); }}
+                  >
+                    <Trash2 size={13} /> Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      }
+    />
+  );
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col relative">
       {/* Mobile: floating back button overlaying content. Positioned `absolute`
@@ -251,7 +529,8 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       )}
 
       <div className="flex flex-col h-full p-0 sm:p-4 md:p-0">
-        {/* Desktop header only */}
+        {/* Desktop header — classic split-pane layout only; island uses the stage-head */}
+        {!island && (
         <div className="detail-header-glow hidden sm:flex items-center justify-between px-4 py-2.5 mb-2 shrink-0">
           {/* Glowing accent line that dips to cradle the round Back button */}
           <svg
@@ -293,97 +572,47 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
               <ArrowLeft size={18} />
             </button>
             <span className="text-xs sm:text-sm text-ink-200 font-medium truncate">
-              {video.title || video.description || 'Media Player'}
+              {titleText}
             </span>
           </div>
 
           {/* Right: share + download + more — hidden on mobile, shown in metadata area instead */}
           <div className="hidden sm:flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {resourceId && (
-              <button
-                onClick={() => setIsShareModalOpen(true)}
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium rounded-lg btn-tint-indigo transition-colors"
-              >
-                <Share2 size={14} />
-                <span className="hidden sm:inline">Share</span>
-              </button>
-            )}
-
-            {/* Download dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setShowDownloadMenu(!showDownloadMenu)}
-                disabled={isDownloading || isFetching}
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium text-ink-300 hover:text-ink-50 hover:bg-ink-800 rounded-lg transition-colors disabled:opacity-70"
-              >
-                {(isDownloading || isFetching) ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                <span className="hidden sm:inline">Download</span>
-              </button>
-              {showDownloadMenu && (
-                <DownloadMenuDropdown
-                  video={video}
-                  isDownloading={isDownloading}
-                  isFetching={isFetching}
-                  onClose={() => setShowDownloadMenu(false)}
-                  onDownload={handleToolbarDownload}
-                  onFetchMedia={handleFetchMedia}
-                  onExtractAudio={handleExtractAudio}
-                  onFetchSodaAudio={handleFetchSodaAudio}
-                />
-              )}
-            </div>
-
-            {/* More menu */}
-            <div className="relative">
-              <button
-                onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
-              >
-                <MoreHorizontal size={16} />
-              </button>
-              {showMoreMenu && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-44">
-                    {video.original_url && (
-                      <a
-                        href={video.original_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
-                        onClick={() => setShowMoreMenu(false)}
-                      >
-                        <ExternalLink size={13} /> Open Original Link
-                      </a>
-                    )}
-                    {video.original_url && (
-                      <button
-                        className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-ink-400 hover:bg-ink-800 hover:text-ink-200 transition-colors"
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          navigator.clipboard.writeText(video.original_url);
-                          addToast('Link copied to clipboard', 'success');
-                        }}
-                      >
-                        <Copy size={13} /> Copy Link
-                      </button>
-                    )}
-                    <div className="border-t border-ink-700 my-1" />
-                    <button
-                      className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
-                      onClick={() => {
-                        setShowMoreMenu(false);
-                        setShowDeleteDialog(true);
-                      }}
-                    >
-                      <Trash2 size={13} /> Delete
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            {actionButtons}
           </div>
         </div>
+        )}
+
+        {/* Island desktop: the stage fills the work island; the detail panel is
+            portaled to the shell's info island (rendered below). Mobile + classic
+            share the split-pane content row in the else branch (unchanged). */}
+        {islandDesktop ? (
+          <div className="hidden sm:flex flex-col h-full min-h-0">
+            <div className="stage-head flex items-center gap-3 px-4 py-3 border-b border-line relative">
+              <CometBack onClick={handleBack} title="Back" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-ink-200 font-medium truncate">{titleText}</div>
+                {video.author && (
+                  <div className="flex items-center gap-1.5 text-xs text-ink-400 mt-0.5 truncate">
+                    {video.source_platform && ['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(video.source_platform) ? (
+                      <img src={`/icons/${video.source_platform}.svg`} alt="" className="w-3.5 h-3.5" />
+                    ) : (
+                      <UserRound size={14} className="opacity-70" />
+                    )}
+                    <span className="truncate">@{video.author}</span>
+                  </div>
+                )}
+              </div>
+              <span className="comet-trail" />
+              <div className="ml-auto flex items-center gap-2">
+                {actionButtons}
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 grid place-items-center bg-[#050507] overflow-hidden">
+              {playerSwitch}
+            </div>
+          </div>
+        ) : (
         <div ref={scrollRef} className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-y-hidden">
           {isMobile && isAudio ? (
             /* LOCKED mobile-audio layout — ONE continuous gradient surface.
@@ -429,85 +658,8 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           <div
             className={`w-full ${isAudio ? 'min-h-[78vh]' : 'aspect-video'} sm:h-[50vh] sm:aspect-auto md:h-auto md:flex-1 md:min-w-0 relative shrink-0 md:shrink ${isAudio ? '' : 'bg-black'}`}
           >
-            {isAudio ? (
-              (video.music_download_path || video.extract_audio_path) ? (
-                <AudioHero
-                  src={`${getApiUrl()}/api/v1/media/${video.id}/audio${mediaToken ? `?token=${encodeURIComponent(mediaToken)}` : ''}`}
-                  title={video.music_name || video.title || 'Audio'}
-                  subtitle={video.author || undefined}
-                  coverUrl={audioCoverUrl}
-                  duration={Number(video.duration) || undefined}
-                  onTimeUpdate={handleTimeUpdate}
-                  mediaId={String(video.id)}
-                  currentTime={currentTime}
-                  chorusStartSec={
-                    typeof video.metadata?.chorus?.start === 'number'
-                      ? video.metadata.chorus.start / 1000
-                      : undefined
-                  }
-                  theme={sodaTheme}
-                  sourcePlatform={video.source_platform}
-                />
-              ) : (
-                <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
-                  <Music size={48} className="text-ink-600" />
-                  <p className="text-ink-400 text-sm font-medium">Audio not available</p>
-                  <p className="text-ink-500 text-xs max-w-[300px] text-center">
-                    This audio hasn't been downloaded yet. Use the Download button to fetch the audio file.
-                  </p>
-                </div>
-              )
-            ) : video.media_type && isAlbumType(video.media_type) ? (
-              <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} />
-            ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
-              <VideoPlayer
-                src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
-                originalSrc={hlsUrl ? getVideoUrl(video, mediaToken ?? undefined) || undefined : undefined}
-                authToken={authToken || undefined}
-                playerRef={playerRef}
-                onTimeUpdate={handleTimeUpdate}
-                onDurationChange={handleDurationChange}
-              />
-            ) : (
-              <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
-                {video.video_download_status === 'downloading' || video.video_download_status === 'pending' ? (
-                  <>
-                    <Loader2 size={48} className="text-indigo-500 animate-spin" />
-                    <p className="text-ink-300 text-sm font-medium">Downloading...</p>
-                    <p className="text-ink-500 text-xs">The media file is being downloaded. Please wait.</p>
-                  </>
-                ) : (
-                  <>
-                    <VideoIcon size={48} className="text-ink-600" />
-                    <p className="text-ink-400 text-sm font-medium">Video not available for streaming</p>
-                  </>
-                )}
-                <p className="text-ink-500 text-xs max-w-[300px] text-center">
-                  This video hasn't been downloaded yet. Use the Download button to fetch the media file.
-                </p>
-                {video.original_url && (
-                  <a
-                    href={video.original_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors"
-                  >
-                    <ExternalLink size={13} />
-                    Open Original Link
-                  </a>
-                )}
-              </div>
-            )}
-            {video.author && (
-              <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 text-white/90 text-sm pointer-events-none">
-                {video.source_platform && ['douyin', 'bilibili', 'youtube', 'tiktok', 'xiaohongshu', 'twitter'].includes(video.source_platform) ? (
-                  <img src={`/icons/${video.source_platform}.svg`} alt="" className="w-4 h-4" />
-                ) : (
-                  <UserRound size={16} className="opacity-70" />
-                )}
-                <span>@{video.author}</span>
-              </div>
-            )}
+            {playerSwitch}
+            {authorBadge}
           </div>
           {/* Resize handle — desktop only */}
           <div
@@ -524,81 +676,22 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
             {/* Mobile-audio is handled by the MobileAudioScreen short-circuit
                 above, so this column only ever renders for desktop or
                 mobile-video. */}
-            {(
-              <VideoDetailPanel
-                video={video}
-                resourceId={resourceId || undefined}
-                playerCurrentTime={currentTime}
-                sodaTheme={sodaTheme}
-                compact={isMobile && isAudio}
-                onClose={handleBack}
-                onUpdate={handleUpdate}
-                onDelete={handleDelete}
-                hidePreview
-                resourceRating={resourceRating}
-                resourceNotes={resourceNotes}
-                onRatingChange={resourceId ? handleRatingChange : undefined}
-                onNotesChange={resourceId ? handleNotesChange : undefined}
-                onNotesBlur={resourceId ? handleNotesBlur : undefined}
-                mobileActions={
-                  <>
-                    {resourceId && (
-                      <button
-                        onClick={() => setIsShareModalOpen(true)}
-                        className="p-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/30 rounded-lg transition-colors"
-                      >
-                        <Share2 size={16} />
-                      </button>
-                    )}
-                    <div className="relative">
-                      <button
-                        onClick={() => setShowMoreMenu(!showMoreMenu)}
-                        className="p-1.5 text-ink-400 hover:text-ink-200 hover:bg-ink-800 rounded-lg transition-colors"
-                      >
-                        <MoreHorizontal size={16} />
-                      </button>
-                      {showMoreMenu && (
-                        <>
-                          <div className="fixed inset-0 z-10" onClick={() => setShowMoreMenu(false)} />
-                          <div className="absolute right-0 top-full mt-1 z-20 bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-48">
-                            <MobileDownloadMenu
-                              video={video}
-                              onClose={() => setShowMoreMenu(false)}
-                              onDownload={handleToolbarDownload}
-                              onFetchMedia={handleFetchMedia}
-                              onFetchSodaAudio={handleFetchSodaAudio}
-                            />
-                            {video.original_url && (
-                              <a
-                                href={video.original_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
-                                onClick={() => setShowMoreMenu(false)}
-                              >
-                                <ExternalLink size={13} /> Open Original
-                              </a>
-                            )}
-                            <div className="border-t border-ink-700 my-1" />
-                            <button
-                              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors"
-                              onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setTimeout(() => setShowDeleteDialog(true), 50); }}
-                            >
-                              <Trash2 size={13} /> Delete
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </>
-                }
-              />
-            )}
+            {detailPanel}
           </div>
           </>
           )}
         </div>
+        )}
       </div>
+
+      {/* Island: portal the detail panel into the shell's info island. The
+          players stay in the work-island stage (never portaled). The panel is
+          the SAME element as the classic column (detailPanel), cloned with the
+          island flag + an in-island collapse handler. */}
+      {islandDesktop && infoIslandEl && createPortal(
+        React.cloneElement(detailPanel, { island: true, onCollapse: () => setInfoVisible(false) }),
+        infoIslandEl,
+      )}
 
       {/* Move to Trash Dialog */}
       {showDeleteDialog && (
