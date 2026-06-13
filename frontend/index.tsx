@@ -29,6 +29,7 @@ if (typeof Node !== 'undefined') {
 import { router } from './router';
 import { AuthProvider } from './contexts/AuthContext';
 import { TeamProvider } from './contexts/TeamContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { installErrorReporter } from './services/errorReporter';
@@ -58,7 +59,9 @@ root.render(
       <Suspense fallback={<LoadingFallback />}>
         <AuthProvider>
           <TeamProvider>
-            <RouterProvider router={router} />
+            <ThemeProvider>
+              <RouterProvider router={router} />
+            </ThemeProvider>
           </TeamProvider>
         </AuthProvider>
         <PWAUpdatePrompt />

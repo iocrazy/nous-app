@@ -4,8 +4,10 @@ import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
 import AISettings from './AISettings';
 import {
   Save, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
-  CheckCircle, Power, Zap, Check, Loader2, AlertCircle
+  CheckCircle, Power, Zap, Check, Loader2, AlertCircle, SunMoon
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { useTheme } from '../contexts/ThemeContext';
 import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
 import { TaskCenter } from './TaskCenter/TaskCenter';
@@ -51,6 +53,8 @@ const DEFAULT_SCOPES = [
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings, embedded = false, currentUserId, userTeams = [] }) => {
   const confirmDialog = useConfirm();
+  const { t } = useTranslation();
+  const { preference, setPreference } = useTheme();
   const [localSettings, setLocalSettings] = useState<UserSettings>(settings);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
@@ -313,7 +317,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* General Settings Tab */}
       {activeTab === 'general' && (
         <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
-           
+
+           {/* Section 0: Appearance — Theme (island redesign D11) */}
+           <div className="px-6 py-4 border-y border-ink-800 bg-ink-900/50 flex items-center gap-3">
+              <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+                 <SunMoon size={20} />
+              </div>
+              <h2 className="font-semibold text-ink-200">Appearance</h2>
+           </div>
+           <div className="px-6 py-1">
+              {/* Theme (island redesign D11) */}
+              <div className="flex items-center justify-between py-3">
+                <span className="text-sm text-ink-300">{t('settings.theme.label', 'Theme')}</span>
+                <div className="flex gap-1 bg-ink-900 border border-ink-800 rounded-lg p-0.5">
+                  {(['system', 'light', 'dark'] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setPreference(p)}
+                      className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                        preference === p ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'
+                      }`}
+                    >
+                      {t(`settings.theme.${p}`, p === 'system' ? 'System' : p === 'light' ? 'Light' : 'Dark')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+           </div>
+
            {/* Section 1: Download Progress Style */}
            <div className="px-6 py-4 border-y border-ink-800 bg-ink-900/50 flex items-center gap-3">
               <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">

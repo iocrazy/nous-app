@@ -249,6 +249,12 @@
       "mergePreview": "Up to {{count}} resources move to «{{name}}». {{n}} tags will be deleted.",
       "merge": "Merge",
       "merging": "Merging…"
+    },
+    "theme": {
+      "label": "Theme",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
     }
   },
   "points": {

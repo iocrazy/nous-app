@@ -249,6 +249,12 @@
       "mergePreview": "最多 {{count}} 个素材将归到「{{name}}」，{{n}} 个标签将被删除。",
       "merge": "合并",
       "merging": "合并中…"
+    },
+    "theme": {
+      "label": "主题",
+      "system": "跟随系统",
+      "light": "浅色",
+      "dark": "深色"
     }
   },
   "points": {
