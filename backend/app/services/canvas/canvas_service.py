@@ -14,8 +14,10 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from app.repositories.canvas_refs_repository import CanvasRefsRepository
 from app.repositories.canvas_repository import CanvasRepository
 from app.schemas.canvas import CanvasCreate, CanvasUpdate
+from app.services.canvas.asset_refs import extract_asset_refs
 
 
 class CanvasConflict(Exception):
@@ -30,8 +32,13 @@ class CanvasConflict(Exception):
 
 
 class CanvasService:
-    def __init__(self, repository: Optional[CanvasRepository] = None) -> None:
+    def __init__(
+        self,
+        repository: Optional[CanvasRepository] = None,
+        refs_repository: Optional[CanvasRefsRepository] = None,
+    ) -> None:
         self.repo = repository or CanvasRepository()
+        self.refs_repo = refs_repository or CanvasRefsRepository()
 
     # ------------------------------------------------------------------
     # Reads
@@ -104,7 +111,21 @@ class CanvasService:
             # Race: someone else updated between our read and write.
             fresh = await self.repo.get_by_id(canvas_id)
             raise CanvasConflict(fresh or current)
+
+        # Only recompute refs when nodes_json was part of this save.
+        if "nodes_json" in fields:
+            await self._sync_refs(canvas_id, fields["nodes_json"])
         return updated
+
+    async def _sync_refs(self, canvas_id: str, nodes_json: Any) -> None:
+        """Recompute canvas_resource_refs from nodes_json. Non-fatal:
+        the refs table is rebuildable, so a failure here must never break
+        the canvas save the user just performed."""
+        try:
+            refs = extract_asset_refs(nodes_json)
+            await self.refs_repo.replace_for_canvas(canvas_id, refs)
+        except Exception as e:  # noqa: BLE001 — deliberately swallow
+            logger.warning("canvas %s refs sync failed (non-fatal): %s", canvas_id, e)
 
     async def delete(self, canvas_id: str) -> bool:
         return await self.repo.delete(canvas_id)
