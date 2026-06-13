@@ -146,6 +146,9 @@ export const router = createBrowserRouter([
           { path: 'dashboard/:subview', element: <SuspenseWrap><ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/file/:resourceId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><FileDetailDispatcher /></ModuleGuard></SuspenseWrap> },
+          // Legacy redirect: the "Temp" view was repurposed into "Project Assets".
+          // Static `temp` ranks above the dynamic `:section` below.
+          { path: 'resources/temp', element: <Navigate to="../project-assets" replace /> },
           { path: 'resources/:section', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/folder/:folderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/smart/:smartFolderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },

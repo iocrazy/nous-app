@@ -734,6 +734,7 @@
     "trashFolderFailed": "移动文件夹到回收站失败",
     "trashFolderConfirm": "此文件夹包含 {{contents}}，所有内容将移至回收站。是否继续？",
     "temp": "临时",
+    "projectAssets": "工程资产",
     "tempEmpty": "暂无聊天上传 — 在聊天框粘贴/拖入的文件会先落到这里，24h 内未处理会被自动清理",
     "sectionLocations": "位置"
   },
@@ -1916,6 +1917,16 @@
     "warning": "设备时间与服务器相差 {{amount}}（{{direction}}）——这会导致登录异常。请在系统设置中开启自动设置日期与时间。",
     "behind": "偏慢",
     "ahead": "偏快"
+  },
+  "projectAssets": {
+    "chatUploads": "Chat Uploads",
+    "noCanvases": "暂无画布",
+    "appearsInCanvases_one": "出现在 {{count}} 个画布",
+    "appearsInCanvases_other": "出现在 {{count}} 个画布",
+    "role": {
+      "reference": "参考图",
+      "output": "生成结果"
+    }
   },
   "memory": {
     "title": "记忆",

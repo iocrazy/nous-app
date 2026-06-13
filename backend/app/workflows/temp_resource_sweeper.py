@@ -161,7 +161,10 @@ async def _sweep_all_scopes_step() -> dict:
     return await sweep_temp_resources()
 
 
-@DBOS.scheduled("0 4 * * *")  # Daily 04:00 UTC
+# IC-port P4 (2026-06-13): chat-temp TTL retired — files no longer expire;
+# users decide deletion. Schedule disabled, function kept so it can be
+# re-armed by restoring this decorator if the policy is reversed.
+# @DBOS.scheduled("0 4 * * *")  # Daily 04:00 UTC — DISABLED
 @DBOS.workflow()
 async def temp_resource_sweeper_scheduled(
     scheduled_time: datetime, actual_time: datetime

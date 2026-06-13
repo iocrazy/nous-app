@@ -27,6 +27,9 @@ import { useResourcesDisplay } from '../hooks/useResourcesDisplay';
 import { useResourceTouch } from '../hooks/useResourceTouch';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
+import { ProjectAssetsTree, type ProjectAssetsSelection } from './resources/ProjectAssetsTree';
+import { fetchCanvasAssets, type CanvasAssetItem } from '../services/projectAssetsService';
+import type { Resource } from '../types';
 import {
   moveResourceItem,
   moveFolder,
@@ -45,7 +48,7 @@ export const ResourcesViewInner: React.FC = () => {
   const {
     isPersonal, scopeId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId,
     resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, canUpload,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, isProjectAssetsView, canUpload,
     resources, setResources, folders, childFolders, folderPreviews,
     trashedResources, trashedFolders, downloadedResources,
     tempResources,
@@ -457,6 +460,49 @@ export const ResourcesViewInner: React.FC = () => {
     [t, resPath],
   );
 
+  // ─── Project Assets view: tree selection + canvas-assets fetch ────────
+  const [paSelection, setPaSelection] = useState<ProjectAssetsSelection>({ kind: 'chat-uploads' });
+  const [canvasAssets, setCanvasAssets] = useState<CanvasAssetItem[]>([]);
+  const [canvasAssetsLoading, setCanvasAssetsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isProjectAssetsView || paSelection.kind !== 'canvas') return;
+    let cancelled = false;
+    setCanvasAssetsLoading(true);
+    fetchCanvasAssets(paSelection.canvasId)
+      .then((items) => { if (!cancelled) setCanvasAssets(items); })
+      .catch((err) => { console.error('[ProjectAssets] canvas assets load failed:', err); if (!cancelled) setCanvasAssets([]); })
+      .finally(() => { if (!cancelled) setCanvasAssetsLoading(false); });
+    return () => { cancelled = true; };
+  }, [isProjectAssetsView, paSelection]);
+
+  // Adapter: Chat Uploads reuses tempSortedItems; a canvas selection adapts
+  // CanvasAssetItem → ResourceItem so ResourceGrid can render it unchanged.
+  const projectAssetsItems = useMemo<typeof tempSortedItems>(() => {
+    if (paSelection.kind === 'chat-uploads') return tempSortedItems;
+    return canvasAssets.map((a) => ({
+      id: a.id,
+      resource_id: a.id,
+      scope_id: scopeId,
+      folder_id: null,
+      library_id: null,
+      added_by: null,
+      created_at: a.created_at,
+      // Only the fields ResourceGrid/ResourceCard actually read are filled.
+      // Resource has ~20 required columns the grid ignores, so cast the
+      // nested object rather than fabricate meaningless defaults.
+      resource: {
+        id: a.id,
+        filename: a.filename,
+        file_type: a.file_type,
+        mime_type: a.mime_type,
+        thumbnail_path: a.thumbnail_path,
+        cover_image_path: a.cover_image_path,
+        created_at: a.created_at,
+      } as Resource,
+    }));
+  }, [paSelection, canvasAssets, tempSortedItems, scopeId]);
+
   // ─── ResourceGrid props ───────────────────────────────
   const gridProps = useMemo(() => ({
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
@@ -544,6 +590,32 @@ export const ResourcesViewInner: React.FC = () => {
       <ResourcesShell sidebarProps={sidebarProps} infoPanelProps={infoPanelProps}>
         {isDownloadsView ? (
           <DownloadsView />
+        ) : isProjectAssetsView ? (
+          <div className="flex flex-1 min-h-0">
+            <ProjectAssetsTree
+              selection={paSelection}
+              onSelect={(sel) => {
+                if (sel.kind === 'canvas') {
+                  setCanvasAssets([]);
+                  setCanvasAssetsLoading(true);
+                }
+                setPaSelection(sel);
+              }}
+              chatUploadsCount={tempSortedItems.length}
+            />
+            <div className="flex-1 min-w-0">
+              {canvasAssetsLoading && paSelection.kind === 'canvas' ? (
+                <div className="p-6 text-ink-500">{t('common.loading')}</div>
+              ) : (
+                <ResourceGrid
+                  {...tempGridProps}
+                  breadcrumbSegments={[{ label: t('resources.projectAssets') }]}
+                  sortedItems={projectAssetsItems}
+                  allSelectableIds={projectAssetsItems.map((i) => `item:${i.id}`)}
+                />
+              )}
+            </div>
+          </div>
         ) : isTempView ? (
           <ResourceGrid {...tempGridProps} />
         ) : (
