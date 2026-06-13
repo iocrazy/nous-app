@@ -83,8 +83,9 @@ test.describe('Storyboard Workbench (stubbed backend)', () => {
     test('generate yields a result image via stubbed job + poll', async ({ page }) => {
       await page.getByTestId('sb-generate').click();
       // submit → a new export-result node (isGenerating) → poll SUCCESS →
-      // the fixture image renders in that node.
-      await expect(page.getByTestId('sb-result-image')).toBeVisible({ timeout: 20_000 });
+      // the fixture image renders in that node. .first() guards against a
+      // future multi-result generate triggering a strict-mode violation.
+      await expect(page.getByTestId('sb-result-image').first()).toBeVisible({ timeout: 20_000 });
     });
   });
 });

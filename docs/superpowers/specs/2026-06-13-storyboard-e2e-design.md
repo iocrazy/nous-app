@@ -16,7 +16,7 @@
 - **Teams**：来自 Supabase REST（`/rest/v1/team_members`、`/rest/v1/teams`），不是 `/api/v1`。stub 返回单个 personal team（`enabled_modules:null`→ModuleGuard 放行）。
 - **编辑器数据**：直接导航到编辑器 URL（绕过两级创建 UI），`fetchProject` 由 stub 返回 `{project,nodes,edges,characters}` envelope。
 - **AI Library 端点形状各异**：`agents`/`sessions` 返回**裸数组**，`commitments` 返回 `{items,count}`，否则 chat 面板渲染崩（`.length`/`.map` of undefined）。
-- helper：`frontend/e2e/helpers/stubs.ts`（`setupStubbedSession` + `setupGenerationStubs`）。`auth.ts`/`project.ts`（真后端流）保留作未来真栈套件参考，当前 spec 不用。
+- helper：`frontend/e2e/helpers/stubs.ts`（`setupStubbedSession` + `setupGenerationStubs`）唯一 helper。早期真后端流的 `auth.ts`/`project.ts` 已删（全 stub 不用，留着会随 UI 漂移腐烂；真栈套件若要做可从 git history 取回）。
 
 下文「真 dev 后端」相关段落（前置条件、live-stack gate）作废，由全 stub 取代。
 

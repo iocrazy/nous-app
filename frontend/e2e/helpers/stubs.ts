@@ -147,6 +147,12 @@ export async function setupStubbedSession(page: Page, opts: StubOptions = {}): P
     [STORAGE_KEY, session, TEAM_ID] as const,
   );
 
+  // Fail-closed backstop (registered first → lowest priority): abort any
+  // Supabase host call not matched by a more-specific route below, so storage/
+  // functions/etc. can never silently escape to a real network. (Realtime is a
+  // websocket — page.route can't touch it — but the app tolerates its absence.)
+  await page.route('**/*.supabase.co/**', (route) => route.abort());
+
   // ── Catch-alls (registered first → lowest priority; later routes win) ──────
   await page.route('**/auth/v1/**', (route) => fulfillJson(route, session));
   await page.route('**/rest/v1/**', (route) => fulfillJson(route, []));
