@@ -12,8 +12,13 @@ export default defineConfig({
   },
   // Auto-build + serve the production bundle. If BASE_URL already points at a
   // running env, Playwright reuses it (reuseExistingServer) and skips this.
+  //
+  // VITE_SUPABASE_URL is pinned so the app derives a deterministic auth storage
+  // key (`sb-e2e-auth-token`) that the stub harness seeds the session under.
+  // The backend never runs: page.route intercepts /rest/v1 and /api/v1.
   webServer: {
-    command: 'npm run build && npm run preview -- --port 4173 --strictPort',
+    command:
+      'VITE_SUPABASE_URL=https://e2e.supabase.co VITE_SUPABASE_ANON_KEY=sb_e2e_anon_key npm run build && npm run preview -- --port 4173 --strictPort',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

@@ -6,6 +6,20 @@
 
 `features/storyboard/`（本 spec 的 E2E 目标）是**旧**分镜工作台，与新 `features/canvas-core/`（SmartMode，mig 280，IC/Project Assets 引用）并存。Canvas+AI 升级 plan 计划让 SmartMode **取代** storyboard（plan 第 8 周替换、第 17 周删旧代码，切流约 2026-08~10）。**用户在知情下（2026-06-13）选择照原计划给旧 storyboard 写 E2E**：它现在 live、有用户在用，回归价值当下成立；切流后本套件随旧代码一并删除是预期内的。不为此提前对齐/合并两套画布。
 
+## ⚠️ 执行期决策（2026-06-14）：改为「全 stub」，删除真后端依赖
+
+原设计（下文「已拍板决策」第 2 条）是 **真 dev 后端 + 测试账号**，只 stub AI 生成/拆分两个端点。执行时确认 MediaHub **没有可跑的 dev 后端**（FastAPI 仅 prod），真后端方案需现搭 uvicorn + 连 dev Supabase + 建测试账号，环境太重且不可进 CI。
+
+**改为全 stub**：用 `page.route` 在网络层拦截整个后端（`/rest/v1/*` + `/api/v1/*` + `/auth/v1/*`），并用 `page.addInitScript` 把一个已认证的 Supabase session 直接种进 `localStorage`。零后端、零账号、亚秒、可进 CI。
+
+- **Auth**：种 session 到 `sb-e2e-auth-token`（playwright webServer 在 build 时 pin `VITE_SUPABASE_URL=https://e2e.supabase.co`，app 据此派生确定的 storage key）。`getClaims()` 对 HS256 token 回退到 `getUser()`→`GET /auth/v1/user`，故须返回裸 user 对象。
+- **Teams**：来自 Supabase REST（`/rest/v1/team_members`、`/rest/v1/teams`），不是 `/api/v1`。stub 返回单个 personal team（`enabled_modules:null`→ModuleGuard 放行）。
+- **编辑器数据**：直接导航到编辑器 URL（绕过两级创建 UI），`fetchProject` 由 stub 返回 `{project,nodes,edges,characters}` envelope。
+- **AI Library 端点形状各异**：`agents`/`sessions` 返回**裸数组**，`commitments` 返回 `{items,count}`，否则 chat 面板渲染崩（`.length`/`.map` of undefined）。
+- helper：`frontend/e2e/helpers/stubs.ts`（`setupStubbedSession` + `setupGenerationStubs`）。`auth.ts`/`project.ts`（真后端流）保留作未来真栈套件参考，当前 spec 不用。
+
+下文「真 dev 后端」相关段落（前置条件、live-stack gate）作废，由全 stub 取代。
+
 ## 背景与目标
 
 Storyboard 分镜工作台 Phase 0–4.3（节点系统/图片管道/AI 生成/工具编辑器/全部面板）+ Phase 5.2（性能优化）均已 ship 到 master。Phase 5 唯一遗留 = **5.1 E2E 测试**。

@@ -1,24 +1,18 @@
 import { test, expect } from '@playwright/test';
-import { hasAuth, loginViaUI } from './helpers/auth';
-import { createStoryboardProject, deleteProject } from './helpers/project';
+import { EDITOR_URL, setupStubbedSession } from './helpers/stubs';
 
-test.describe('Storyboard Workbench', () => {
+test.describe('Storyboard Workbench (stubbed backend)', () => {
   test('login page renders', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.getByRole('button', { name: /log in|get started/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible();
   });
 
-  test.describe('editor (self-created project)', () => {
-    test.skip(!hasAuth, 'Set E2E_EMAIL + E2E_PASSWORD to run authed E2E');
-
-    let projectName = '';
-    test.beforeEach(async ({ page }, testInfo) => {
-      await loginViaUI(page);
-      const created = await createStoryboardProject(page, testInfo.workerIndex * 1_000_000 + (Date.now() % 1_000_000));
-      projectName = created.projectName;
-    });
-    test.afterEach(async ({ page }) => {
-      await deleteProject(page, projectName);
+  test.describe('editor', () => {
+    test.beforeEach(async ({ page }) => {
+      await setupStubbedSession(page);
+      await page.goto(EDITOR_URL);
+      // Editor mounted once the toolbar renders (project load resolved, no error).
+      await expect(page.getByTestId('sb-toggle-export')).toBeVisible({ timeout: 15_000 });
     });
 
     test('toolbar exposes all panel toggles', async ({ page }) => {
