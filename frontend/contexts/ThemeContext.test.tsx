@@ -25,11 +25,18 @@ describe('ThemeContext', () => {
     }));
   });
 
-  it('defaults to system and resolves dark, writing data-theme', () => {
+  it('defaults to dark (until light polish lands) and writes data-theme', () => {
     render(<ThemeProvider><Probe /></ThemeProvider>);
-    expect(screen.getByTestId('pref').textContent).toBe('system');
+    expect(screen.getByTestId('pref').textContent).toBe('dark');
     expect(screen.getByTestId('resolved').textContent).toBe('dark');
     expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+
+  it("saved 'system' preference resolves via prefers-color-scheme", () => {
+    localStorage.setItem('mediahub.theme', 'system');
+    render(<ThemeProvider><Probe /></ThemeProvider>);
+    expect(screen.getByTestId('pref').textContent).toBe('system');
+    expect(screen.getByTestId('resolved').textContent).toBe('dark'); // mocked matchMedia = dark
   });
 
   it('setPreference(light) persists and flips data-theme', () => {
