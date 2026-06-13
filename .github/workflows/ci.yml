@@ -37,6 +37,9 @@ jobs:
         run: npm run typecheck
         continue-on-error: true
 
+      - name: No zinc utilities (ink migration guard)
+        run: bash scripts/check-no-zinc.sh
+
       - name: Build (includes TypeScript check)
         run: npm run build
 
